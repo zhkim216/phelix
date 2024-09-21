@@ -1,0 +1,130 @@
+ad_ckpt:
+
+cuda: true
+num_workers: 10
+out_dir: null  # null to save in the model run directory
+exp_name: baseline  # sampling experiment name
+overwrite_out_dir: true  # if true, delete existing output directory
+seed: 0
+batch_size: 64
+
+# Evaluation mode
+run_mpnn_sc: true  # run MPNN self-consistency eval
+run_codes_sc: false  # run co-design self-consistency eval
+
+# Sampling run parameters
+# length_range: [63,63]
+length_range: [64,128]
+length_step_size: 4
+n_samples_per_length: 2
+n_traj_per_length: 1  # number of trajectories to save per length
+limit_traj_steps: 0  # limit the number of steps we save in a trajectory (evenly spaced)
+limit_diff_traj_steps: 0  # limit the number of steps we save in each diffusion trajectory
+traj_conect: false
+align_traj_to_last_step: false  # whether to align trajectories to the last step
+res_decoding_order_mode: "random"
+
+timestep_schedule:
+  num_steps: 10
+  bb:
+    mode: "linear"
+    num_steps: ${timestep_schedule.num_steps}
+    t_start: 0.0
+    t_end: 1.0
+  scn:
+    mode: "linear"
+    num_steps: ${timestep_schedule.num_steps}
+    t_start: 1.0
+    t_end: 1.0
+  # for ca nco backbone diffusion
+  ca:
+    mode: "linear"
+    num_steps: ${timestep_schedule.num_steps}
+    t_start: 0.0
+    t_end: 1.0
+  nco:
+    mode: "linear"
+    num_steps: ${timestep_schedule.num_steps}
+    t_start: 0.0
+    t_end: 1.0
+
+# Sampling hyperparameters
+# noise_schedule:
+#   bb_schedule:
+#     name: "linear"
+#   scn_schedule:
+#     name: "linear"
+#   scn_diff_schedule:
+#     name: "linear"
+
+
+# cond_labels: {"designability": "DESIGNABLE"}  # null for unconditional sampling
+cond_labels: null
+
+
+bb_diffusion:
+  # Backbone diffusion parameters
+  num_steps: 50
+  noise_schedule:
+    name: "linear"
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${bb_diffusion.num_steps}
+
+scn_diffusion:
+  # Sidechain diffusion parameters
+  num_steps: 50
+  noise_schedule:
+    name: "step_scale"
+    c: 1.4
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${scn_diffusion.num_steps}
+
+
+ca_diffusion:
+  # CA backbone diffusion parameters
+  noise_schedule:
+    name: "linear"
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${timestep_schedule.num_steps}
+
+nco_diffusion:
+  # NCO backbone diffusion parameters
+  noise_schedule:
+    name: "linear"
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${timestep_schedule.num_steps}
+
+
+# MPNN args
+mpnn:
+  mpnn_cfg: allatom_design/configs/mpnn/proteinmpnn.yaml
+  mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
+  overrides:
+    # num seqs per structure will be batch_size * number_of_batches
+    batch_size: 8
+    number_of_batches: 1
+    verbose: false
+
+# Dataset for nnTM calculation, path to directory containing PDBs
+nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered
+
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

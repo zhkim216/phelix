@@ -1,0 +1,6 @@
+sweep_dir: /media/scratch/huang_lab/allatom_design/allatom_design/if7_a29/sidechain_pack/ld-epoch209
+sweep_prefix: "sp0_"
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

@@ -1,0 +1,35 @@
+name: allatom_design
+channels:
+  - conda-forge
+  - defaults
+  - bioconda
+  - pytorch
+  - nvidia
+  - dglteam/label/cu117
+dependencies:
+  - python=3.9
+  - pytorch
+  - torchvision
+  - torchaudio
+  - ca-certificates
+  - openssl
+  - conda-forge::einops
+  - certifi
+  - biopython
+  - wandb
+  - tqdm
+  - natsort
+  - omegaconf
+  - scipy
+  - pandas
+  - scikit-learn
+  - matplotlib
+  - conda-forge::pot
+  - seaborn
+  - conda-forge::prody
+  - conda-forge::transformers
+  - salilab::dssp
+  - libboost
+  - foldseek
+  - conda-forge::rdkit
+  - conda-forge::polars

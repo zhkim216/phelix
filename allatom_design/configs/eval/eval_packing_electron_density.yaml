@@ -1,0 +1,19 @@
+# Run settings
+seed: 0
+
+# Eval options
+packing_results_dir: /media/scratch/huang_lab/allatom_design/allatom_design/if7_a29/sidechain_pack/ld-epoch409/qfit_S50_ss1.4_n20  # path to output directory of a sidechain packing run
+qfit_pdbs_dir: /media/scratch/datasets/qfit-test-set/qfit-result/eval_cath
+out_dir: ${packing_results_dir}/electron_density
+# out_dir: /home/rshuai/research/huang_lab/allatom_design/out_dir/electron_density
+
+max_conformers: 20  # maximum number of conformers to evaluate
+
+density:
+  box_size: 10
+  grid_size: 40
+  sigma: 0.65
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

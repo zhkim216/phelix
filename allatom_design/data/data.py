@@ -1,0 +1,285 @@
+from collections import defaultdict
+from typing import Dict, Optional
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+from einops import rearrange
+from torchtyping import TensorType
+
+import openfold.data.data_transforms as data_transforms
+from openfold.utils.feats import atom14_to_atom37
+from openfold.utils.rigid_utils import Rigid
+from allatom_design.data import protein
+from allatom_design.data import residue_constants as rc
+
+
+def load_feats_from_pdb(pdb, chain_residx_gap: int, max_conformers: int = 1):
+    """
+    Load model input features from a PDB file or mmcif file.
+    - chain_residx_gap: Gap to add between residue indices in different chains.
+    - max_conformers: Handle disordered atoms, max number of altlocs to store. If > 1, returns coords with shape [seqlen, num_atoms, max_conformers, 3]
+    """
+    feats = {}
+    protein_obj = protein.read_pdb(pdb, max_conformers=max_conformers)
+    for k, v in vars(protein_obj).items():
+        feats[k] = torch.Tensor(v)
+
+    feats["all_atom_positions"] = feats.pop("atom_positions")
+    feats["all_atom_mask"] = feats.pop("atom_mask")
+
+    feats["aatype"] = feats["aatype"].long()
+
+    # Renumber residue indices; add gap for PDBs with multiple chains
+    if chain_residx_gap is not None:
+        raise NotImplementedError("Currently not supporting multiple chains, since this may require renumbering residues across chains with a scheme to handle missing residues within chains.")
+        # feats["residue_index"] = renumber_and_add_chain_gap(feats["residue_index"], feats["chain_index"], chain_residx_gap=chain_residx_gap)
+
+    # Add one-hot encoding of amino acid types
+    feats["target_feat"] = F.one_hot(feats["aatype"], num_classes=len(rc.restypes_with_x)).float()
+
+    # Add AF2 features, uncomment if needed
+    feats = data_transforms.make_seq_mask(feats)
+    # feats = data_transforms.make_atom14_masks(feats)
+    # feats = data_transforms.make_atom14_positions(feats)
+    # feats = data_transforms.atom37_to_frames(feats)
+    # feats = data_transforms.atom37_to_torsion_angles("")(feats)
+    # feats = data_transforms.make_pseudo_beta("")(feats)
+    # feats = data_transforms.get_backbone_frames(feats)
+    # feats = data_transforms.get_chi_angles(feats)
+
+    # Handle the distinction between missing atoms and ghost atoms in the atom mask
+    ghost_atom_mask = 1 - torch.tensor(rc.restype_atom37_mask)[feats["aatype"]]  # 1 for atoms that are not in the residue type; ghost atoms
+    if max_conformers > 1:
+        ghost_atom_mask = rearrange(ghost_atom_mask, "n a -> n 1 a").expand(-1, max_conformers, -1)  # [n, c, a]
+
+    missing_atom_mask = (1 - feats["all_atom_mask"]) * (1 - ghost_atom_mask)  # 1 for atoms that are missing in the PDB file; missing if not in atom_mask but not a ghost atom
+
+    feats["ghost_atom_mask"] = ghost_atom_mask  # [n, a] or [n, c, a]
+    feats["missing_atom_mask"] = missing_atom_mask  # [n, a] or [n, c, a]
+
+    return feats
+
+
+def aa_to_bb_feats(feats: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """
+    Convert features loaded from a PDB file to backbone-only features.
+    """
+    bb_feats = {}
+    gly_aatype = rc.restype_order["G"]
+
+    # Replace aatype with GLY and get only backbone atoms
+    bb_feats["aatype"] = torch.full_like(feats["aatype"], fill_value=gly_aatype)
+    bb_feats["all_atom_positions"] = feats["all_atom_positions"][:, rc.bb_idxs]
+    bb_feats["all_atom_mask"] = feats["all_atom_mask"][:, rc.bb_idxs]
+    bb_feats["seq_mask"] = feats["seq_mask"]
+    bb_feats["residue_index"] = feats["residue_index"]
+    bb_feats["chain_index"] = feats["chain_index"]
+
+    bb_feats["ghost_atom_mask"] = feats["ghost_atom_mask"][:, rc.bb_idxs]
+    bb_feats["missing_atom_mask"] = feats["missing_atom_mask"][:, rc.bb_idxs]
+
+    bb_feats["target_feat"] = F.one_hot(bb_feats["aatype"], num_classes=len(rc.restypes_with_x)).float()
+    return bb_feats
+
+
+def renumber_and_add_chain_gap(residue_index: TensorType["n"],
+                               chain_index: TensorType["n"],
+                               chain_residx_gap: int = 200) -> TensorType["n"]:
+    """
+    Renumber residue indices to start from 1 and add a residue index gap between chains.
+    e.g. if chain A has 5 residues and chain B has 3 residues,
+    with chain_residx_gap=200, the residue indices for chain B will be 206, 207, 208.
+    """
+    # First, make residue indices are linearly ordered across chains
+    residue_index = torch.arange(1, residue_index.shape[0] + 1)
+
+    # Now add a gap to the residue index for each chain break
+    residue_index = residue_index + chain_residx_gap * chain_index
+
+    return residue_index
+
+
+def make_fixed_size_1d(data: TensorType["n ..."], fixed_size: int, start_idx: int):
+    data_len = data.shape[0]
+    if data_len > fixed_size:
+        new_data = data[start_idx : (start_idx + fixed_size)]
+    if data_len <= fixed_size:
+        pad_size = fixed_size - data_len
+        extra_shape = data.shape[1:]
+        new_data = torch.cat([data, torch.zeros(pad_size, *extra_shape)], 0)
+    return new_data
+
+
+def dgram_from_positions(
+    pos: torch.Tensor,
+    min_bin: float = 3.25,
+    max_bin: float = 50.75,
+    no_bins: float = 39,
+    inf: float = 1e8,
+):
+    dgram = torch.sum(
+        (pos[..., None, :] - pos[..., None, :, :]) ** 2, dim=-1, keepdim=True
+    )
+    lower = torch.linspace(min_bin, max_bin, no_bins, device=pos.device) ** 2
+    upper = torch.cat([lower[1:], lower.new_tensor([inf])], dim=-1)
+    dgram = ((dgram > lower) * (dgram < upper)).type(dgram.dtype)
+
+    return dgram
+
+
+def build_struct_pair_feat(
+    batch, min_bin, max_bin, no_bins, inf=1e8
+):
+    """
+    Adapted from https://github.com/aqlaboratory/openfold/blob/main/openfold/utils/feats.py#L110
+    """
+    mask = batch["pseudo_beta_mask"]
+    mask_2d = mask[..., None] * mask[..., None, :]
+
+    # Compute distogram (this seems to differ slightly from Alg. 5)
+    pb = batch["pseudo_beta"]
+    dgram = dgram_from_positions(pb, min_bin, max_bin, no_bins, inf)
+
+    to_concat = [dgram, mask_2d[..., None]]
+
+    act = torch.cat(to_concat, dim=-1)
+    act = act * mask_2d[..., None]
+
+    return act
+
+
+def atom14_aatype_to_atom37(atom14_pos: TensorType["b n 14 3", float],
+                            aatype: TensorType["b n", int]
+                            ) -> TensorType["b n 37 3", float]:
+    feats = {}
+    feats["aatype"] = aatype
+    feats = data_transforms.make_atom14_masks(feats)
+    return atom14_to_atom37(atom14_pos, feats)
+
+
+def torch_kabsch(a: TensorType["b n x"],
+                 b: TensorType["b n x"]
+                 ) -> TensorType["b x x"]:
+    """
+    get alignment matrix for two sets of coordinates using PyTorch
+
+    adapted from: https://github.com/sokrypton/ColabDesign/blob/ed4b01354928b60cd1347f570e9b248f78f11c6d/colabdesign/shared/protein.py#L128
+    """
+    with torch.autocast(device_type=a.device.type, enabled=False):
+        ab = a.transpose(-1, -2) @ b
+        u, s, vh = torch.linalg.svd(ab, full_matrices=False)
+        flip = torch.det(u @ vh) < 0
+        u_ = torch.where(flip, -u[..., -1].T, u[..., -1].T).T
+    u = torch.cat([u[..., :-1], u_[..., None]], dim=-1)
+    return u @ vh
+
+
+def torch_rmsd_weighted(a: TensorType["b n x", float],
+                        b: TensorType["b n x", float],
+                        weights: Optional[TensorType["b n", float]],
+                        return_aligned: bool = False
+                        ) -> TensorType["b", float]:
+    """
+    Compute weighted RMSD of coordinates after weighted alignment. Batched.
+
+    For masked RMSD, set weights to 0 for masked atoms.
+
+    Aligns a to b using Kabsch algorithm, then computes RMSD.
+    If return_aligned is True, returns the aligned structures as well.
+
+    Adapted from: https://github.com/sokrypton/ColabDesign/blob/main/colabdesign/af/loss.py#L445
+    """
+    if weights is None:
+        weights = torch.ones(a.shape[:-1], device=a.device, dtype=a.dtype)
+    weights = weights / weights.sum(dim=-1, keepdim=True)  # normalize weights
+
+    # Align
+    W = weights[..., None]
+    a_mu = (a * W).sum(dim=-2, keepdim=True)
+    b_mu = (b * W).sum(dim=-2, keepdim=True)
+
+    R = torch_kabsch((a - a_mu) * W, b - b_mu)
+    aligned_a = (a - a_mu) @ R + b_mu
+
+    weighted_msd = (W * ((aligned_a - b) ** 2)).sum(dim=(-1, -2))
+    weighted_rmsd = torch.sqrt(weighted_msd + 1e-8)
+
+    if return_aligned:
+        return weighted_rmsd, (aligned_a, b)
+    return weighted_rmsd
+
+
+def tm_score(a: TensorType["b n a 3"],
+             b: TensorType["b n a 3"],
+             mask: TensorType["b n a"]
+             ) -> TensorType["b", float]:
+    """
+    Computes the TM-score between two sets of coordinates. Batched.
+    a and b must be aligned.
+    """
+    length = b.shape[1]
+    dists = (a - b).pow(2).sum(-1)
+    d0 = 1.24 * ((length - 15) ** (1 / 3)) - 1.8
+    term = 1 / (1 + ((dists) / (d0**2)))
+
+    term = term * mask
+    return term.sum(dim=(-1, -2)) / mask.sum(dim=(-1, -2)).clamp(min=1)
+
+
+def uniform_rand_rotation(batch_size):
+    # Creates a shape (batch_size, 3, 3) rotation matrix uniformly at random in SO(3)
+    # Uses quaternionic multiplication to generate independent rotation matrices for each batch
+    q = torch.randn(batch_size, 4)
+    q /= torch.norm(q, dim=1, keepdim=True)
+    rotation = torch.zeros(batch_size,3,3).to(q)
+    a, b, c, d = q[:,0], q[:,1], q[:,2], q[:,3]
+    rotation[:,0,:] = torch.stack([2*a**2 -1 + 2*b**2,   2*b*c - 2*a*d,        2*b*d + 2*a*c]).T
+    rotation[:,1,:] = torch.stack([2*b*c + 2*a*d,        2*a**2 -1 + 2*c**2,   2*c*d - 2*a*b]).T
+    rotation[:,2,:] = torch.stack([2*b*d - 2*a*c,        2*c*d + 2*a*b,        2*a**2 -1 + 2*d**2]).T
+    return rotation
+
+
+def apply_random_se3(coords_in: TensorType["n a 3", float],
+                     missing_atom_mask: TensorType["n a", float] = None,
+                     translation_scale=1.0):
+    """
+    Unbatched. Mean center on CA atoms, then apply random rotation and translation.
+
+    missing_atom_mask: 1 if atom is missing, 0 if present
+    """
+    X = coords_in[:, 1:2]
+    M = (1 - missing_atom_mask[:, 1:2])
+    coords_mean = (X * M[..., None]).sum(dim=0, keepdim=True) / M.sum()
+    coords_in -= coords_mean
+    random_rot = uniform_rand_rotation(1).squeeze(0)
+    coords_in = coords_in @ random_rot
+    random_trans = torch.randn_like(coords_mean) * translation_scale
+    coords_in += random_trans
+    if missing_atom_mask is not None:
+        coords_in = coords_in * (1 - missing_atom_mask[..., None])
+    return coords_in
+
+
+def cat_bb_scn(x_bb: TensorType["... a1 3", float],
+               x_scn: TensorType["... a2 3", float]) -> TensorType["... a 3", float]:
+    """
+    Concatenate the bb and scn atoms to their corresponding indices.
+    """
+    A = x_bb.shape[-2] + x_scn.shape[-2]
+    x = torch.zeros(x_bb.shape[:-2] + (A, 3), device=x_bb.device, dtype=x_bb.dtype)
+    x[..., rc.bb_idxs, :] = x_bb
+    x[..., rc.non_bb_idxs, :] = x_scn
+    return x
+
+
+def cat_ca_nco(x_ca: TensorType["... 1 3", float],
+               x_nco: TensorType["... 3 3", float]
+               ) -> TensorType["... 4 3", float]:
+    """
+    Concatenate the ca and nco atoms to their corresponding indices.
+    """
+    x = torch.zeros(x_ca.shape[:-2] + (4, 3), device=x_ca.device, dtype=x_ca.dtype)
+    x[..., 1:2, :] = x_ca
+    x[..., rc.nco_idxs, :] = x_nco
+    return x

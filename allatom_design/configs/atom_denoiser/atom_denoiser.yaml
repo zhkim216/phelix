@@ -1,0 +1,94 @@
+# Wandb configuration
+project: "allatom_design"  # Wandb project name
+wandb_id: "richardshuai"  # Wandb username
+exp_name: null # Wandb exp name
+group: "debug" # Wandb group name
+
+# Run settings
+no_wandb: false # Disable wandb logging
+overfit: -1 # Number of examples to overfit to, -1 to disable
+cuda: True
+num_workers: 10 # Dataloader num workers
+out_dir: "out_dir/train_atom_denoiser"  # Output path for trained models
+
+train:
+  seed: 0
+  batch_size: 8
+  compile_model: false  # Compile the model before running, speeds up training a lot
+
+# Some trainer options
+trainer:
+  strategy: ddp  # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
+  max_epochs: 100000
+  accumulate_grad_batches: 1
+  detect_anomaly: false  # Slower; enable for debugging nans in gradients
+  gradient_clip_val: 0.0
+  precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
+  check_val_every_n_epoch: 50  # How often to run validation
+
+# Resuming training options
+resume:
+  ckpt_path: null  # Path to checkpoint to resume from, null to disable
+  # use_current_cfg: false  # whether to override the config in the checkpoint with the current config
+  # overrides: {}  # add any specific overrides to apply to the config
+
+# Data options
+data:
+    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
+    designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+    fixed_size: 128
+    overfit: ${overfit}
+    short_epoch: false
+    n_random_subset: null
+    se3_augment: true  # randomly rotate and translate data
+    translation_scale: 1.0  # scale of the translation augmentation
+    overwrite_cache: false  # overwrite the cached dataset
+
+# Model options
+defaults:
+  - _self_
+  - denoiser: dit_denoiser
+
+model:
+  task: "backbone"  # "backbone"
+  scale_factor_mode: null  # filled in based on the denoiser and its interpolant
+  eps: 1.0e-8
+  inf: 1.0e9
+  denoiser: ${denoiser}
+
+eval:
+  eval_timesteps: [0.0, 0.2, 0.4, 0.6, 0.8]  # Timesteps to evaluate at
+
+loss:
+  task: ${model.task}
+  loss_weights:
+    bb_ca:
+      mse_loss: 1.0
+    bb_nco:
+      mse_loss: 1.0
+
+optim:
+  optimizer: "adamw"
+  adamw:
+    lr: 1.0e-4
+    warmup_steps: 1000
+  noam:
+    factor: 2
+    warmup_steps: 4000
+  adam_inv_sqrt:
+    ref_lr: 1.0e-2
+    ref_steps: 70000
+    warmup_steps: 1000
+
+logging:
+  log_dir: ${out_dir}
+  log_every_n_steps: 500
+  wandb_watch_freq: 5000  # Log gradients every n steps
+
+checkpointing:
+  save_latest_every_n_epochs: 50  # Save the latest model every n epochs (if validation set is being checked)
+  save_top_k: 1
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
