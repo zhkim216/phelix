@@ -1,0 +1,46 @@
+# ad_ckpt: /home/rshuai/research/huang_lab/allatom_design/out_dir/train_latent_denoiser/allatom_design/floral-frog-2113/checkpoints/ld-epoch03.ckpt
+ad_ckpt:
+
+num_workers: 10
+out_dir: null  # null to save in the model run directory
+exp_name: S50_ss1.4  # sampling experiment name
+overwrite_out_dir: true  # if true, delete existing output directory
+seed: 0
+batch_size: 16
+
+# Data options for overriding denoiser config (null values default to denoiser config)
+data:
+    # pdb_path: /media/scratch/datasets/qfit-test-set/rcsb-pdb
+    # pdb_path: /media/scratch/datasets/rcsb_test_cases
+    # designability_csv: ""
+    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
+    designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+    n_random_subset: null
+
+# Sidechain packing run parameters
+num_pdbs: null  # number of structures to pack sidechains for, null for all
+num_trajs_per_pdb: 1  # number of trajectories to run per structure
+subset_length_range: [32, 256]
+n_traj: 0  # number of trajectories to randomly save
+limit_traj_steps: 1  # limit the number of steps we save in a trajectory (evenly spaced)
+traj_conect: false
+num_steps: 1  # number of denoiser steps
+t_bb_start: 1.0  # time to start t_bb for sidechain packing, goes to 1.0 at end of denoising
+
+scn_diffusion:
+  # Sidechain diffusion parameters
+  num_steps: 50
+  noise_schedule:
+    name: "step_scale"
+    c: 1.4
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${scn_diffusion.num_steps}
+
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
