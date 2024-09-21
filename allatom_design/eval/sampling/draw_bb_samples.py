@@ -96,12 +96,11 @@ def main(cfg: DictConfig):
 
         cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, lit_ad_model.device)
         x_bb_denoised, aux = lit_ad_model.model.sample(lengths,
-                                                    residue_index=residue_index,
-                                                    timesteps=timesteps,
-                                                    cond_labels=cond_labels_in,
-                                                    noise_schedule=noise_schedule,
-                                                    churn_cfg=churn_cfg,
-                                                    )
+                                                       residue_index=residue_index,
+                                                       timesteps=timesteps,
+                                                       cond_labels=cond_labels_in,
+                                                       noise_schedule=noise_schedule,
+                                                       churn_cfg=churn_cfg)
 
         samples = {"x_bb_denoised": x_bb_denoised,
                    "seq_mask": aux["seq_mask"],

@@ -33,16 +33,6 @@ cond_labels: null
 num_steps_list: [1, 20, 100]  # number of MLM steps for backbone generation
 timestep_schedule:
   num_steps: 10
-  bb:
-    mode: "linear"
-    num_steps: ${timestep_schedule.num_steps}
-    t_start: 0.0
-    t_end: 1.0
-  scn:
-    mode: "linear"
-    num_steps: ${timestep_schedule.num_steps}
-    t_start: 1.0
-    t_end: 1.0
   # for ca nco backbone diffusion
   ca:
     mode: "linear"
@@ -54,9 +44,6 @@ timestep_schedule:
     num_steps: ${timestep_schedule.num_steps}
     t_start: 0.0
     t_end: 1.0
-
-
-res_decoding_order_mode: "random"
 
 bb_diffusion:
   # Backbone diffusion parameters

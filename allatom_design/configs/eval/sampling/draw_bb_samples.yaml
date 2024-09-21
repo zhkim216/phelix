@@ -75,7 +75,6 @@ mpnn:
 # Dataset for nnTM calculation, path to directory containing PDBs
 nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered
 
-
 hydra:
   run:
     dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

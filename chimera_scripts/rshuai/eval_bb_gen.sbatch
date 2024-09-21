@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a4_cbb0_eval_bb_gen
+#SBATCH --job-name=b5_cbb14_eval_bb_gen
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -14,8 +14,8 @@ scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/
 
 ## Load modules and set environment variables:
 source ~/.rshuai_bash_profile
-conda activate rshuai_protein_ldm
-BASE_DIR=/home/talal/rshuai/protein-ldm
+conda activate rshuai_allatom_design
+BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
 MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
 WANDB_ID=richardshuai
@@ -28,19 +28,19 @@ DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmf
 NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
 
 # Model name to evaluate
-MODEL_NAME=a4_cbb0
+MODEL_NAME=b5_cbb14
 
 EXP_NAME=${MODEL_NAME}_eval_bb_gen
-GROUP=chimera_a4
+GROUP=chimera_b5
 
 # Set HF transformers cache
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 
 # Directory where denoiser was trained to
-DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/protein_ldm/allatom_design/${MODEL_NAME}
+DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Run eval script
-WANDB__SERVICE_WAIT=300 python3 protein_ldm/eval/eval_bb_gen.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
