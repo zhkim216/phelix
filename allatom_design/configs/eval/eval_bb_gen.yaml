@@ -30,7 +30,7 @@ n_samples_per_length: 2
 # Backbone generation options
 cond_labels: null
 
-num_steps_list: [1, 20, 100]  # number of MLM steps for backbone generation
+num_steps_list: [1, 20, 100]  # number of diffusion steps for backbone generation
 timestep_schedule:
   num_steps: 10
   # for ca nco backbone diffusion
