@@ -115,14 +115,14 @@ def main(cfg: DictConfig):
                                                  monitor="epoch",
                                                  mode="max",
                                                  every_n_epochs=cfg.checkpointing.save_latest_every_n_epochs,
-                                                 filename="ld-epoch{epoch:02d}",
+                                                 filename="ad-epoch{epoch:02d}",
                                                  auto_insert_metric_name=False
                                                  )
     val_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                               save_top_k=cfg.checkpointing.save_top_k,
                                               monitor="val/total_loss",
                                               mode="min",
-                                              filename="ld-epoch{epoch:02d}-val_loss{val/total_loss:.4f}",
+                                              filename="ad-epoch{epoch:02d}-val_loss{val/total_loss:.4f}",
                                               auto_insert_metric_name=False  # needed since metric has / in name
                                               )
     callbacks += [latest_checkpoint_callback, val_checkpoint_callback]
@@ -131,7 +131,7 @@ def main(cfg: DictConfig):
                                                 save_top_k=cfg.checkpointing.save_top_k,
                                                 monitor="train/total_loss_epoch",
                                                 mode="min",
-                                                filename="ld-epoch{epoch:02d}-train_loss{train/total_loss:.4f}",
+                                                filename="ad-epoch{epoch:02d}-train_loss{train/total_loss:.4f}",
                                                 auto_insert_metric_name=False  # needed since metric has / in name
                                                 )
     callbacks.append(train_checkpoint_callback)
