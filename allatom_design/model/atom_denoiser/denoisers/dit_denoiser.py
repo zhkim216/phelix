@@ -37,6 +37,7 @@ from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
     TimestepEmbedder
 from openfold.model.primitives import Linear
 from collections import defaultdict
+from tqdm import tqdm
 
 
 class DiTDenoiser(Denoiser):
@@ -149,7 +150,7 @@ class DiTDenoiser(Denoiser):
                 cond_labels_in: Dict[str, TensorType["b", int]] = {},
                 aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
                 is_sampling: bool = False,
-                ) -> Tuple[TensorType["b n a 3", float],  # x1 pred
+                ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred
                            Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
@@ -178,6 +179,8 @@ class DiTDenoiser(Denoiser):
         diffusion_aux = defaultdict(lambda: None)
 
         if not is_sampling:
+            ### TRAINING ###
+
             # Get ground truth backbone coordinates
             x_bb_gt = aux_inputs["x"][..., rc.bb_idxs, :]
 
@@ -228,39 +231,50 @@ class DiTDenoiser(Denoiser):
             diffusion_aux["bb_target"] = x_bb_gt_batched
 
         else:
+            ### SAMPLING ###
+
             # Sample backbone from prior
             A = len(rc.bb_idxs)
-            x0_bb = self.interpolant.sample_prior((B, N, A, 3), z.device)
+            x0_bb = self.interpolant.sample_prior((B, N, A, 3), seq_mask.device)
 
             # Store trajectory
             xt_bb_traj, x1_bb_traj = [], []
 
             # Extract sampling parameters
             S = aux_inputs["num_steps"]
-            churn_cfg = aux_inputs.get("churn_cfg", None)
-            noise_schedule = aux_inputs.get("noise_schedule", None)
+            timesteps = aux_inputs["timesteps"]
+            churn_cfg = aux_inputs["churn_cfg"]
+            noise_schedule = aux_inputs["noise_schedule"]
+            ## extract overrides
+            xt_bb_override = aux_inputs["xt_override"][..., rc.bb_idxs, :]
+            xt_bb_override_mask = aux_inputs["xt_override_mask"][..., rc.bb_idxs, :]
+            aatype_override = aux_inputs["aatype_override"]  # currently unused
+            aatype_override_mask = aux_inputs["aatype_override_mask"]  # currently unused
 
             # Run integration steps
-            denoiser_fn = partial(self.forward, z=z, seq_mask=seq_mask, residue_index=residue_index)
-            timesteps = torch.linspace(0, 1, S + 1, device=x0_bb.device)[None, ...].expand(B, -1)
+            denoiser_fn = partial(self.dit, aatype_noised=None,
+                                  residue_index=residue_index, seq_mask=seq_mask,
+                                  cond_labels_in=cond_labels_in)
 
             xt_bb = x0_bb
-            for i in range(S):
-                t = timesteps[:, i]
-                t_next = timesteps[:, i + 1]
+            for i in tqdm(range(S), leave=False, desc="Sampling..."):
+                t = tuple(ts[:, i] for ts in timesteps) if len(timesteps) > 1 else timesteps[0][:, i]
+                t_next = tuple(ts[:, i + 1] for ts in timesteps) if len(timesteps) > 1 else timesteps[0][:, i + 1]
 
                 xt_bb, t = self.interpolant.churn(xt_bb, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
 
-                xt_bb, _, aux_preds = self.interpolant.euler_step(denoiser_fn,
-                                                                  xt_bb,
-                                                                  aatype_t=None,
-                                                                  t=t, t_next=t_next,
-                                                                  noise_schedule=noise_schedule,
-                                                                  cfg_cfg=None)
+                xt_bb = xt_bb * (1 - xt_bb_override_mask[i]) + xt_bb_override[i] * xt_bb_override_mask[i]  # override xt for inputs
+                xt_bb, aux_preds = self.interpolant.euler_step(denoiser_fn,
+                                                               xt_bb,
+                                                               t=t, t_next=t_next,
+                                                               noise_schedule=noise_schedule,
+                                                               cfg_cfg=None,
+                                                               aux_inputs=aux_inputs)
+                xt_bb = xt_bb * (1 - xt_bb_override_mask[i + 1]) + xt_bb_override[i + 1] * xt_bb_override_mask[i + 1]  # override xt for outputs  # TODO: should we override self-cond input too?
 
                 if self.use_self_conditioning:
                     # Apply self-conditioning
-                    denoiser_fn = partial(denoiser_fn, x_bb_self_cond=aux_preds["x1_pred"])
+                    denoiser_fn = partial(denoiser_fn, x_self_cond=aux_preds["x1_pred"])
 
                 # Save current state
                 xt_bb_traj.append(xt_bb.cpu())
@@ -275,9 +289,9 @@ class DiTDenoiser(Denoiser):
 
             if self.cfg.interpolant.name == "edm_ca":
                 # Undo centering of N, C, and O on CA
-                x1_bb[..., rc.nco_idxs, :] = x1_bb_batched[..., rc.nco_idxs, :] + x1_bb_batched[..., 1:2, :]
-                diffusion_aux["xt_bb_traj"][..., rc.nco_idxs, :] = x_bb_gt_batched[..., rc.nco_idxs, :] + x_bb_gt_batched[..., 1:2, :]
-                diffusion_aux["x1_bb_traj"][..., rc.nco_idxs, :] = x_bb_gt_batched[..., rc.nco_idxs, :] + x_bb_gt_batched[..., 1:2, :]
+                x1_bb[..., rc.nco_idxs, :] = x1_bb[..., rc.nco_idxs, :] + x1_bb[..., 1:2, :]
+                diffusion_aux["xt_bb_traj"][..., rc.nco_idxs, :] = diffusion_aux["xt_bb_traj"][..., rc.nco_idxs, :] + diffusion_aux["xt_bb_traj"][..., 1:2, :]
+                diffusion_aux["x1_bb_traj"][..., rc.nco_idxs, :] = diffusion_aux["x1_bb_traj"][..., rc.nco_idxs, :] + diffusion_aux["x1_bb_traj"][..., 1:2, :]
 
         return x1_bb, diffusion_aux
 

@@ -114,12 +114,12 @@ class EDM_CA(ADInterpolant):
     def churn(self,
               xt: TensorType["b n a 3", float],
               t: Tuple[TensorType["b", float]],  # t_ca, t_nco
-              churn_cfg: Optional[DictConfig]) -> Tuple[TensorType["b n a 3", float], TensorType["b", float]]:
+              churn_cfg: Tuple[Optional[Dict[str, float]]]  # ca, nco
+              ) -> Tuple[TensorType["b n a 3", float], TensorType["b", float]]:
         """
         Add churn to current time step based on EDM stochatic sampler.
         """
-        churn_cfg_ca = churn_cfg.ca
-        churn_cfg_nco = churn_cfg.nco
+        churn_cfg_ca, churn_cfg_nco = churn_cfg
 
         xt_ca, xt_nco = xt[..., 1:2, :], xt[..., rc.nco_idxs, :]
         t_ca, t_nco = t
@@ -178,7 +178,7 @@ class EDM_CA(ADInterpolant):
         f is the forward function of the denoiser trained with this interpolant.
         - It should take in the current state and the current time.
         """
-        x1_pred, aatype_pred, aux_preds = f(xt, t=t)
+        x1_pred, aux_preds = f(xt, t=t)
 
         sigma_ca, sigma_nco = self.sigma(t)
         score_ca = (xt[..., 1:2, :] - x1_pred[..., 1:2, :]) / rearrange(sigma_ca, "b -> b 1 1 1")
@@ -190,13 +190,12 @@ class EDM_CA(ADInterpolant):
         # Handle noise schedules
         noise_schedule_ca, noise_schedule_nco = noise_schedule
         if noise_schedule_ca is not None:
-            score_ca = aux_inputs["noise_schedule_ca"].scale_vf(score_ca, t)
+            score_ca = noise_schedule_ca.scale_vf(score_ca, t)
         if noise_schedule_nco is not None:
-            score_nco = aux_inputs["noise_schedule_nco"].scale_vf(score_nco, t)
+            score_nco = noise_schedule_nco.scale_vf(score_nco, t)
 
         # Add to auxiliary outputs
         aux_preds["x1_pred"] = x1_pred
-        aux_preds["aatype_pred"] = aatype_pred
 
         # take the step
         sigma_next_ca, sigma_next_nco = self.sigma(t_next)

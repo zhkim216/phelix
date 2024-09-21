@@ -19,6 +19,8 @@ from allatom_design.interpolants.ad_interpolants.edm_ca_interpolant import \
 from allatom_design.model.atom_denoiser.denoisers.denoiser import Denoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     DiTDenoiser
+from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
+    NoiseSchedule
 
 
 class AtomDenoiser(nn.Module):
@@ -105,18 +107,15 @@ class AtomDenoiser(nn.Module):
     def sample(self,
                lengths: TensorType["b", int],
                residue_index: TensorType["b n", int],
-            #    timesteps: TensorType["b s+1", float],  # can also be 2-tuple [b s] for multimodal, in order of (t_bb, t_scn)
-            # CHANGE TO override_timesteps?
-               res_decoding_order_mode: str,
+               timesteps: Tuple[TensorType["b s+1", float]],  # tuple of timesteps for (t_ca, t_nco)
                xt_override: Optional[TensorType["s+1 b n a 3", float]] = None,
                xt_override_mask: Optional[TensorType["s+1 b n a 3", float]] = None,
-               aatype_override: Optional[TensorType["s+1 b n", int]] = None,  # for fixed-sequence sampling, e.g. in sidechain packing
+               aatype_override: Optional[TensorType["s+1 b n", int]] = None,
                aatype_override_mask: Optional[TensorType["s+1 b n", int]] = None,
                cond_labels: Dict[str, TensorType["b", int]] = {},
-               churn_cfg: Optional[Dict[str, float]] = None,
-               scn_diff_aux_inputs: Dict[str, Any] = {},  # sampling config for scn diffusion head (num_steps)
-               bb_diff_aux_inputs: Dict[str, Any] = {}  # sampling config for bb diffusion head (num_steps)
-               ) -> Tuple[TensorType["b n a 3", float],
+               noise_schedule: Tuple[Optional[NoiseSchedule]] = None,  # noise schedule for (t_ca, t_nco)
+               churn_cfg: Tuple[Optional[Dict[str, float]]] = None, # churn config for (t_ca, t_nco)
+               ) -> Tuple[TensorType["b n 4 3", float],
                           Dict[str, torch.Tensor]]:
         """
         Sample from the model.
@@ -127,9 +126,6 @@ class AtomDenoiser(nn.Module):
         - seq_mask: TensorType["b n", float]
         - x1_traj: TensorType["s b n a 3", float], s=num_steps
         - xt_traj: TensorType["s b n a 3", float], s=num_steps
-        - seq_logits_traj: TensorType["s b n a", float], s=num_steps
-        - pred_aatype_traj: TensorType["s b n", int], s=num_steps
-
 
         Sampling parameters:
         - xt_override: override coords at each step with this tensor where xt_override_mask is 1.
@@ -138,33 +134,14 @@ class AtomDenoiser(nn.Module):
             - s_noise: std of noise to add with churn
         - cond_labels: dictionary mapping from conditioning label to token ID for each batch element
         """
-        B, N, A = *residue_index.shape, self.cfg.num_atoms_in
+        B, N = residue_index.shape
 
-        aux_inputs = {}  # construct auxiliary inputs for steps
         aux = {}  # keep track of auxiliary outputs
 
-        # Create sequence mask
+        # Create seq mask
         ranges = torch.arange(N, device=residue_index.device).expand(B, N)
         seq_mask = (ranges < lengths[:, None]).float()
         aux["seq_mask"] = seq_mask.cpu()
-
-        # Sample priors
-        x0 = self.interpolant.sample_prior((B, N, A, 3), device=residue_index.device) * rearrange(seq_mask, "b n -> b n 1 1")
-        aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()  # TODO: make seq prior use MASK rather than UNK
-
-        # Get residue decoding order
-        res_decoding_order = sampling_utils.get_res_decoding_order(mode=res_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps)
-        aux_inputs["res_decoding_order"] = res_decoding_order
-
-        aux_inputs["lengths"] = lengths
-        mlm_mask = torch.zeros_like(seq_mask).float()  # start with all masked tokens
-        aux_inputs["mlm_mask"] = (mlm_mask.clone(), mlm_mask.clone())  # multimodal MLM mask
-
-        # Initialize trajectories
-        xt_traj, aatype_t_traj = [], []  # keep track of denoised coords and aatype trajectory
-        x1_traj, aatype_pred_traj = [], []  # keep track of x1 and aatype prediction trajectory
-        seq_logits_traj = []  # keep track of sequence logits trajectory
-        bb_diffusion_aux_all, scn_diffusion_aux_all = [], []  # keep track of all diffusion trajectories if "return_traj" is True in diff_aux_inputs
 
         # Make unimodal timesteps into a tuple for consistency
         if not isinstance(timesteps, (tuple, list)):
@@ -175,82 +152,125 @@ class AtomDenoiser(nn.Module):
         # Handle xt overrides
         if xt_override is None:
             # dummy values
-            xt_override = torch.zeros((num_steps + 1, B, N, A, 3), device=residue_index.device)
-            xt_override_mask = torch.zeros((num_steps + 1, B, N, A, 3), device=residue_index.device)  # don't override anything
+            A = rc.atom_type_num
+            xt_override = torch.zeros(1, device=residue_index.device).expand(num_steps + 1, B, N, rc.atom_type_num, 3)
+            xt_override_mask = torch.zeros(1, device=residue_index.device).expand(num_steps + 1, B, N, rc.atom_type_num, 3)
 
         # Handle aatype overrides
         if aatype_override is None:
             # dummy values
-            aatype_override = torch.full((num_steps + 1, B, N), fill_value=rc.restype_order_with_x["X"], device=residue_index.device)
-            aatype_override_mask = torch.zeros((num_steps + 1, B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
+            aatype_override = torch.full((), fill_value=rc.restype_order_with_x["X"], device=residue_index.device).expand(num_steps + 1, B, N)
+            aatype_override_mask = torch.zeros(1, device=residue_index.device, dtype=torch.long).expand(num_steps + 1, B, N)
 
-        # Provide sidechain diffusion and backbone diffusion config
-        aux_inputs.update(scn_diff_aux_inputs)
-        aux_inputs.update(bb_diff_aux_inputs)
+        # Construct denoiser inputs
+        aux_inputs = {
+            "num_steps": num_steps,
+            "timesteps": timesteps,
+            "churn_cfg": churn_cfg,
+            "noise_schedule": noise_schedule,
+            # overrides
+            "xt_override": xt_override,
+            "xt_override_mask": xt_override_mask,
+            "aatype_override": aatype_override,
+            "aatype_override_mask": aatype_override_mask,
+        }
+        x1_bb, aux_preds = self.denoiser(x_noised=None, aatype_noised=None, t=None, residue_index=residue_index,
+                                         seq_mask=seq_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs, is_sampling=True)
 
-        # Run integration steps
-        denoiser_fn = partial(self.denoiser,
-                              residue_index=residue_index,
-                              seq_mask=seq_mask,
-                              cond_labels_in=cond_labels,
-                              aux_inputs=aux_inputs,
-                              is_sampling=True)
+        aux.update(aux_preds["bb_diffusion_aux"])
+        return x1_bb, aux
 
-        xt = x0
-        aatype_t = aatype_noised
-        aux_preds = None
-        for i in tqdm(range(num_steps), leave=False, desc="Sampling..."):
-            # get current and next timesteps, squeezing if unimodal
-            t = tuple(ts[:, i] for ts in timesteps) if len(timesteps) > 1 else timesteps[0][:, i]
-            t_next = tuple(ts[:, i + 1] for ts in timesteps) if len(timesteps) > 1 else timesteps[0][:, i + 1]
 
-            xt, t = self.interpolant.churn(xt, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
+    @staticmethod
+    def save_samples_to_pdb(samples: Dict[str, TensorType["b ..."]],
+                            filenames: List[str]
+                            ) -> None:
+        """
+        Save samples from the denoiser to PDB files.
 
-            xt = xt * (1 - xt_override_mask[i]) + xt_override[i] * xt_override_mask[i]  # override xt for inputs  # TODO: can we move this into denoiser or wrap this somewhere?
-            aatype_t = aatype_t * (1 - aatype_override_mask[i]) + aatype_override[i] * aatype_override_mask[i]  # override aatype for inputs
-            xt, aatype_t, aux_preds = self.interpolant.euler_step(denoiser_fn,
-                                                                  xt, aatype_t,
-                                                                  t=t, t_next=t_next,
-                                                                  cfg_cfg=None,
-                                                                  noise_schedule=None,
-                                                                  aux_inputs=aux_inputs
-                                                                  )
+        Samples should contain the following keys:
+        - x_bb_denoised: Tensor["b n 4 3", float]
+        - seq_mask: Tensor["b n", float]
+        - residue_index: Tensor["b n", int]
+        """
+        B, N, _, _= samples["x_bb_denoised"].shape
+        residue_index = samples["residue_index"]
+        seq_mask = samples["seq_mask"]
 
-            xt = xt * (1 - xt_override_mask[i + 1]) + xt_override[i + 1] * xt_override_mask[i + 1]  # override xt for outputs  # TODO: should we override self-cond input too?
-            aatype_t = aatype_t * (1 - aatype_override_mask[i + 1]) + aatype_override[i + 1] * aatype_override_mask[i + 1]  # override aatype for outputs
+        x_denoised = samples["x_bb_denoised"]
 
-            # Save current denoised coords and aatype
-            xt_traj.append(xt.cpu())
-            aatype_t_traj.append(aatype_t.cpu())
+        aatype = torch.full_like(residue_index, fill_value=rc.restype_order["G"], dtype=torch.long)  # force aatype to glycine
+        final_atom37_positions = torch.zeros((B, N, 37, 3), device=aatype.device)
+        final_atom37_positions[:, :, rc.bb_idxs, :] = x_denoised
+        atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=aatype.device)[aatype] * seq_mask[..., None]
 
-            # Save current auxiliary outputs
-            seq_logits_traj.append(aux_preds["seq_logits"].cpu())
+        feats = {
+            "aatype": aatype,
+            "atom_positions": final_atom37_positions,
+            "atom_mask": atom_mask,
+            "residue_index": residue_index,
+            "chain_index": torch.zeros_like(residue_index),  # TODO: support multiple chains
+            "b_factors": torch.ones_like(atom_mask, dtype=torch.float32),
+        }
 
-            # Save current x1 prediction
-            x1_traj.append(aux_preds["x1_pred"].cpu())
-            aatype_pred_traj.append(aux_preds["aatype_pred"].cpu())
+        feats = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in feats.items()}  # move to cpu
+        write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
 
-            # Save backbone and sidechain diffusion outputs
-            if bb_diff_aux_inputs.get("return_traj", False):
-                bb_diffusion_aux_all.append(aux_preds["bb_diffusion_aux"])
 
-            if scn_diff_aux_inputs.get("return_traj", False):
-                scn_diffusion_aux_all.append(aux_preds["scn_diffusion_aux"])
+    @staticmethod
+    def save_trajs_to_pdb(traj_aux: Dict[str, Any],
+                          residue_index: TensorType["b n", int],
+                          chain_index: TensorType["b n", int],
+                          save_traj_mask: List[bool],
+                          save_traj_steps: List[int],
+                          x_traj_key: str,
+                          filenames: List[str],
+                          traj_conect: bool,
+                          align_models_to_idx: Optional[int] = None):
+        """
+        Save trajectories from the denoiser to PDB files.
 
-        aux["x1_traj"] = torch.stack(x1_traj, dim=0)
-        aux["aatype_pred_traj"] = torch.stack(aatype_pred_traj, dim=0)
-        aux["xt_traj"] = torch.stack(xt_traj, dim=0)
-        aux["aatype_t_traj"] = torch.stack(aatype_t_traj, dim=0)
-        aux["seq_logits_traj"] = torch.stack(seq_logits_traj, dim=0)
-        aux["pred_aatype"] = aatype_t_traj[-1]
+        Args:
+        - traj_aux: auxiliary output from sampling trajectory
+        - residue_index
+        - chain_index
+        - save_traj_mask: list of bools indicating which main trajectories to save
+        - save_traj_steps: list of indices indicating which steps along the main trajectory to save
+        - x_traj_key: key in traj_aux for the denoised atom positions
+            - "x1_bb_traj" gives the x1 prediction along the backbone diffusion trajectory
+            - "xt_bb_traj" gives the current state along the backbone diffusion trajectory
+        - filenames: list of filenames to save the trajectories to
+        - traj_conect: whether to include CONECT records in the PDB files
+        - align_models_to_idx: if not None, align all models to the model at this index
+        """
+        B = traj_aux["seq_mask"].shape[0]
+        device = traj_aux["seq_mask"].device
+        for i in range(B):
+            if save_traj_mask[i]:
+                if x_traj_key in ["x1_bb_traj", "xt_bb_traj"]:
+                    # Save x1 or xt traj
+                    aatype_i = torch.full_like(traj_aux["seq_mask"][i], fill_value=rc.restype_order["G"], dtype=torch.long)  # force aatype to glycine
+                    aatype_traj = aatype_i.unsqueeze(0).expand(len(save_traj_steps), -1)
+                    atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * traj_aux["seq_mask"][i, :, None]  # [S, N, A]
+                    x_bb_traj = traj_aux[x_traj_key][save_traj_steps, i]
+                else:
+                    assert False, f"Unknown x_traj_key: {x_traj_key}"
 
-        aux["bb_diffusion_aux"], aux["scn_di∏ffusion_aux"] = None, None
-        if bb_diff_aux_inputs.get("return_traj", False):
-            aux["bb_diffusion_aux"] = {k: torch.stack([d[k] for d in bb_diffusion_aux_all], dim=0) for k in bb_diffusion_aux_all[0]}
-        if scn_diff_aux_inputs.get("return_traj", False):
-            aux["scn_diffusion_aux"] = {k: torch.stack([d[k] for d in scn_diffusion_aux_all], dim=0) for k in scn_diffusion_aux_all[0]}
+                # Put backbone positions into atom37 format
+                S, N, _, X = x_bb_traj.shape
+                x_traj = torch.zeros((S, N, rc.atom_type_num, 3), device=device)
+                x_traj[:, :, rc.bb_idxs, :] = x_bb_traj
 
-        return xt, aux
+                traj_feats = {
+                    "aatype": aatype_traj,
+                    "atom_positions": x_traj,
+                    "atom_mask": atom_mask,
+                    "residue_index": residue_index[i].unsqueeze(0).expand(aatype_traj.shape[0], -1),
+                    "chain_index": chain_index[i].unsqueeze(0).expand(aatype_traj.shape[0], -1),
+                    "b_factors": None
+                }
+                traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
+                write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
 
 
 def get_denoiser(cfg: DictConfig,
