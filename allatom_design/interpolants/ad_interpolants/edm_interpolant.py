@@ -8,7 +8,7 @@ from scipy import stats
 from torchtyping import TensorType
 
 from allatom_design.data.conditioning_labels import create_cond_labels_input
-from allatom_design.model.atom_denoiser.denoisers.denoiser import Denoiser
+from allatom_design.model.atom_denoiser.denoisers.denoiser import BaseAtomDenoiser
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \

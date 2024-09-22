@@ -16,7 +16,7 @@ from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_ca_interpolant import \
     EDM_CA
-from allatom_design.model.atom_denoiser.denoisers.denoiser import Denoiser
+from allatom_design.model.atom_denoiser.denoisers.denoiser import BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     DiTDenoiser
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
@@ -78,12 +78,10 @@ class AtomDenoiser(nn.Module):
         }
 
         # Denoise coords
-        x1_pred, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"], None,
+        _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"], None,
                                            batch["residue_index"], batch["seq_mask"],
                                            cond_labels_in=batch["cond_labels_in"],
                                            aux_inputs=aux_inputs)
-
-        outputs["x1_pred"] = x1_pred
 
         # Additional outputs for computing loss
         outputs.update(aux_preds)
@@ -275,7 +273,7 @@ class AtomDenoiser(nn.Module):
 
 def get_denoiser(cfg: DictConfig,
                  sigma_data: TensorType[(), float]  # can also be a tuple of sigmas for ca, nco
-                 ) -> Denoiser:
+                 ) -> BaseAtomDenoiser:
     """
     Get the denoiser specified in the config.
     """

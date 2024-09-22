@@ -1,5 +1,4 @@
 name: edm_ca
-training_batch_size_mult: 1
 
 ca:
   # Noise schedule

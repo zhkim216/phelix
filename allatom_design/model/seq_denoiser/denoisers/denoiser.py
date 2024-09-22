@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -8,9 +8,9 @@ from torchtyping import TensorType
 from allatom_design.checkpoint_utils import repair_state_dict
 
 
-class BaseAtomDenoiser(nn.Module, ABC):
+class BaseSeqDenoiser(nn.Module, ABC):
     """
-    Generic atom denoiser.
+    Generic sequence denoiser.
     """
     def __init__(self):
         super().__init__()
@@ -19,15 +19,17 @@ class BaseAtomDenoiser(nn.Module, ABC):
     def forward(self,
                 x_noised: TensorType["b n a 3", float],
                 aatype_noised: Optional[TensorType["b n", int]],
-                t: TensorType["b", float],
+                t: TensorType["b", float],  # possibly a tuple (t_seq, t_scn)
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
-                x_self_cond: Optional[TensorType["b n a 3", float]] = None,
+                seq_self_cond: Optional[TensorType["b n k", float]] = None,  # k = n_aatype, logits
                 cond_labels_in: Dict[str, TensorType["b", int]] = {},
                 aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
                 is_sampling: bool = False,
                 ) -> Tuple[TensorType["b n a 3", float],  # x1 pred
-                           Dict[str, TensorType["b ..."]]]:
+                           TensorType["b n", int],  # aatype pred
+                           Dict[str, TensorType["b ..."]]  # aux_preds
+                           ]:
         pass
 
 

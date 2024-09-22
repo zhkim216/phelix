@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional, Tuple, Union, Dict
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -7,23 +7,19 @@ import torch
 from einops import rearrange
 from torch.utils import data
 from torch.utils.data import DataLoader
-from torch.utils.data.dataloader import default_collate
-from torchtyping import TensorType
 from tqdm import tqdm
 
 import allatom_design.data.conditioning_labels as cl
-from openfold.utils.rigid_utils import Rigid
-from allatom_design.data import protein
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (aa_to_bb_feats, apply_random_se3,
-                                   load_feats_from_pdb, make_fixed_size_1d)
+from allatom_design.data.data import (apply_random_se3, load_feats_from_pdb,
+                                      make_fixed_size_1d)
 
 FEATURES_LONG = ("residue_index", "chain_index", "aatype")
 
 
 class ADDataset(data.Dataset):
     """
-    Dataset used for the atom denoiser.
+    Dataset used for the atom denoiser and sequence denoiser.
     """
 
     def __init__(
@@ -305,8 +301,18 @@ def compute_scale_factors(train_dataloader: DataLoader,
             x_bb = x[..., rc.bb_idxs, :]
             x_bb = x_bb[mask[..., rc.bb_idxs, :].bool()]
 
+            # Subset to sidechain-only atoms
             x_scn = x[..., rc.non_bb_idxs, :]
-            x_scn = x_scn[mask[..., rc.non_bb_idxs, :].bool()]
+            scn_mask = mask[..., rc.non_bb_idxs, :]
+
+            ### Center sidechain on CA
+            x_scn = x_scn - x[..., 1:2, :]
+            scn_missing_atom_mask = batch["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
+            x_scn = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn)  # fill missing atoms with zeroes
+            scn_ghost_atom_mask = batch["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
+            x_scn = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn)  # fill ghost atoms with zeroes
+
+            x_scn = x_scn[scn_mask.bool()]
 
             xs_scn.append(x_scn)
             xs_bb.append(x_bb)

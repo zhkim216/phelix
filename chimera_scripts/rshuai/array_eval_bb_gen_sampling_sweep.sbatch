@@ -16,7 +16,7 @@ scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/
 
 ## Load modules and set environment variables:
 source ~/.rshuai_bash_profile
-conda activate rshuai_protein_ldm
+conda activate rshuai_allatom_design
 
 # Define directories
 BASE_DIR=/home/talal/rshuai/protein-ldm
@@ -40,7 +40,7 @@ GROUP=chimera_a5_s0
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 
 # Directory where denoiser was trained
-DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/protein_ldm/allatom_design/${MODEL_NAME}
+DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Define parameter grids
 ca_modes=("linear" "square" "cubic" "sqrt")
@@ -68,7 +68,7 @@ nco_c=${noise_cs[$nco_c_index]}
 EXP_NAME=${MODEL_NAME}_eval_sweep_ca${ca_mode}C${ca_c}_nco${nco_mode}C${nco_c}
 
 # Run evaluation script with the selected parameters
-WANDB__SERVICE_WAIT=300 python3 protein_ldm/eval/eval_bb_gen.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \

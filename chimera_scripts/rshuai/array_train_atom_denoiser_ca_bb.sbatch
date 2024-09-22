@@ -16,10 +16,10 @@ scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/
 
 ## Load modules and set environment variables:
 source ~/.rshuai_bash_profile
-conda activate rshuai_protein_ldm
+conda activate rshuai_allatom_design
 BASE_DIR=/home/talal/rshuai/protein-ldm
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
-OUT_DIR=/scratch/hielab/rshuai/protein_ldm
+OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
@@ -47,7 +47,7 @@ NCO_PSIGMA_MEAN=${PSIGMA_MEANS[$NCO_INDEX]}
 NCO_PSIGMA_STD=${PSIGMA_STDS[$NCO_INDEX]}
 
 # Run training script with the selected parameters
-WANDB__SERVICE_WAIT=300 python3 protein_ldm/train_atom_denoiser.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
