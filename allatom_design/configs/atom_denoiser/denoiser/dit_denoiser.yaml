@@ -33,3 +33,6 @@ hidden_size: 384
 num_heads: 6
 mlp_dropout: 0.1
 mlp_ratio: 4.0
+
+# Batch size multiplier for diffusion module
+training_batch_size_mult: 1

@@ -1,0 +1,49 @@
+name: minimpnn
+
+task: ${model.task}
+
+pos_encoding: rotary_residx  # one of ["absolute", "absolute_residx", "rotary", "rotary_residx"]
+use_self_conditioning_seq: false
+
+defaults:
+  - _self_
+  - interpolant: edm_interpolant
+
+minimpnn:
+  autoregressive: false
+  no_aatype_pred: false
+  n_aatype: ${model.n_aatype}
+  use_self_conditioning_seq: ${model.denoiser.use_self_conditioning_seq}
+  use_time_cond: false
+
+  n_channel: 128
+  n_layers: 3
+  k_neighbors: 48
+  noise_cond_mult: 4
+
+  model_type: "protein_mpnn"
+  augment_eps: 0.0
+  dropout_p: 0.1
+
+scn_diffusion_module:
+  num_atoms_in: ${model.num_atoms_in}
+  n_aatype: ${model.n_aatype}
+  pos_encoding: ${model.denoiser.pos_encoding}
+  use_self_conditioning: true
+  self_cond_p: 0.5
+
+  # QK normalization
+  qk_rmsnorm: true
+
+  # Blocks
+  depth: 4
+  hidden_size: 256
+  num_heads: 8
+  mlp_dropout: 0.0
+  mlp_ratio: 4.0
+  inf: ${model.inf}
+
+  interpolant: ${model.denoiser.interpolant}
+
+  # Batch size multiplier for diffusion module
+  training_batch_size_mult: 4

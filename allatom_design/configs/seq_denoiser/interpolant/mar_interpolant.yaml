@@ -1,0 +1,14 @@
+name: mar
+
+# Training noise distribution
+training_noise_schedule: "uniform_t"
+
+training_noise_cfg:
+  uniform_t:
+    t_min: 0.0
+    t_max: 1.0
+  constant_t:
+    t: 1.0
+  uniform_squared_t:
+    t_min: 0.0
+    t_max: 1.0

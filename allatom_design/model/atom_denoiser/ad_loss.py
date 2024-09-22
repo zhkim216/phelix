@@ -2,6 +2,7 @@ import logging
 
 import torch
 import torch.nn as nn
+from einops import repeat
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
@@ -35,7 +36,6 @@ class ADLoss(nn.Module):
         Expects outputs to contain a "bb_diffusion_aux" key with the following structure:
         - x1_pred: (m*b, n, a, 3) x1 prediction
         - x_target: (m*b, n, a, 3) target
-        - x_mask: (m*b, n, a, 3) mask for the prediction
         - loss_weight_t: (m*b) or Tuple[(m*b), (m*b)] loss weight for each time step. If tuple: (loss_weight_ca, loss_weight_nco)
 
         m denotes batch size multiplier, b denotes batch size.
@@ -49,7 +49,8 @@ class ADLoss(nn.Module):
 
         bb_pred = bb_diff_outputs["bb_pred"]
         bb_target = bb_diff_outputs["bb_target"]
-        bb_mask = batch["x_mask"][..., rc.bb_idxs, :]
+        M = bb_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
+        bb_mask = repeat(batch["x_mask"][..., rc.bb_idxs, :], "b n a x -> (m b) n a x", m=M)
 
         # CA
         aux["bb_ca/mse_loss"] = masked_mse(bb_pred[..., 1:2, :],

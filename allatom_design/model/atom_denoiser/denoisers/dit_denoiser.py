@@ -30,7 +30,7 @@ import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_t
 from allatom_design.data import residue_constants as rc
 from allatom_design.interpolants.ad_interpolants.edm_ca_interpolant import \
     EDM_CA
-from allatom_design.model.atom_denoiser.denoisers.denoiser import Denoiser
+from allatom_design.model.atom_denoiser.denoisers.denoiser import BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
 from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
@@ -40,7 +40,7 @@ from collections import defaultdict
 from tqdm import tqdm
 
 
-class DiTDenoiser(Denoiser):
+class DiTDenoiser(BaseAtomDenoiser):
     def __init__(self,
                  cfg: DictConfig,
                  sigma_data: Tuple[TensorType[(), float]]):
@@ -189,7 +189,7 @@ class DiTDenoiser(Denoiser):
                 x_bb_gt[..., rc.nco_idxs, :] = x_bb_gt[..., rc.nco_idxs, :] - x_bb_gt[..., 1:2, :]
 
             # Repeat inputs for batch multiplier  # TODO: randomly augment these too
-            M = self.interpolant.cfg.training_batch_size_mult
+            M = self.cfg.training_batch_size_mult
             x_bb_gt_batched = repeat(x_bb_gt, "b n a x -> (m b) n a x", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
             residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
@@ -205,7 +205,7 @@ class DiTDenoiser(Denoiser):
             interpolant_out = self.interpolant({"x": x_bb_gt_batched, "aatype": None}, t=t_bb)
             xt_bb_batched = interpolant_out["x_noised"]
             t_batched = interpolant_out["t"]
-            diffusion_aux["loss_weight_t"] = [rearrange(lw, "(m b) -> m b", m=M, b=B) for lw in interpolant_out["loss_weight_t"]]
+            diffusion_aux["loss_weight_t"] = interpolant_out["loss_weight_t"]
 
             # Run denoising DiT
             denoiser_fn = self.dit

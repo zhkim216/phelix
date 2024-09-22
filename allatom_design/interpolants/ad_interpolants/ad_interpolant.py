@@ -12,7 +12,7 @@ from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
 
 class ADInterpolant(nn.Module, ABC):
     """
-    Generic interpolant on coordinates / aatype.
+    Generic interpolant on atoms / coordinates.
     """
     def __init__(self):
         super().__init__()
