@@ -11,7 +11,7 @@ defaults:
 
 minimpnn:
   autoregressive: false
-  no_aatype_pred: false
+  no_aatype_pred: true
   n_aatype: ${model.n_aatype}
   use_self_conditioning_seq: ${model.denoiser.use_self_conditioning_seq}
   use_time_cond: false
@@ -24,6 +24,10 @@ minimpnn:
   model_type: "protein_mpnn"
   augment_eps: 0.0
   dropout_p: 0.1
+
+seq_head:
+  in_channels: ${model.denoiser.minimpnn.n_channel}
+  n_aatype: ${model.n_aatype}
 
 scn_diffusion_module:
   num_atoms_in: ${model.num_atoms_in}

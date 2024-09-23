@@ -27,6 +27,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
         # Sequence design model: MiniMPNN
         self.seq_design_module = MiniMPNN(cfg.minimpnn)
+        self.seq_head = Linear(cfg.seq_head.in_channels, cfg.seq_head.n_aatype, init="final")
 
         # Sidechain diffusion head: DiT
         if self.use_scn_diffusion:
@@ -51,12 +52,13 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         aux_preds = {}
 
         # 1. MiniMPNN for sequence design
-        seq_logits, node_embs = self.seq_design_module(x_noised, aatype_noised, seq_self_cond, None, seq_mask, residue_index)
+        _, h_V = self.seq_design_module(x_noised, aatype_noised, seq_self_cond, None, seq_mask, residue_index)
+        seq_logits = self.seq_head(h_V)
         aatype_pred = seq_logits.argmax(dim=-1)  # TODO: need different handling for sampling
 
         # 2. Sidechain diffusion
         if self.use_scn_diffusion:
-            z = self.proj_z(node_embs)
+            z = self.proj_z(h_V)
             x_bb = x_noised[..., rc.bb_idxs, :]  # TODO: make sure this matches MPNN augment_eps
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
                 z,
