@@ -25,7 +25,7 @@ from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
 
 
-@hydra.main(config_path="../configs/eval", config_name="eval_bb_gen", version_base="1.3.2")
+@hydra.main(config_path="../configs/eval", config_name="eval_bb_gen_training", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Script for evaluating backbone generation.

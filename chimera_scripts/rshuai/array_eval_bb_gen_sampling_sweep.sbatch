@@ -68,7 +68,7 @@ nco_c=${noise_cs[$nco_c_index]}
 EXP_NAME=${MODEL_NAME}_eval_sweep_ca${ca_mode}C${ca_c}_nco${nco_mode}C${nco_c}
 
 # Run evaluation script with the selected parameters
-WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \

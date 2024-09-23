@@ -40,7 +40,7 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Run eval script
-WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
