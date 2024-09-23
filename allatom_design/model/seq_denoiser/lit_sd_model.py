@@ -70,16 +70,17 @@ class LitSeqDenoiser(L.LightningModule):
 
 
         # eval sidechain packing: no noise for backbone or sequence
-        B = batch["seq_mask"].shape[0]
-        t = torch.full((B, ), fill_value=1.0).to(self.device)
+        if self.model.task in ["allatom_seq_des"]:
+            B = batch["seq_mask"].shape[0]
+            t = torch.full((B, ), fill_value=1.0).to(self.device)
 
-        for t_scn_diff in self.cfg.eval.eval_timesteps:
-            batch["t_scn_diff"] = t_scn_diff
-            outputs = self(batch, t=t)
-            _, aux = self.loss(outputs, batch, return_aux=True)
-            aux = {k: v for k, v in aux.items() if "scn/" in k}  # trim aux to sidechain diffusion metrics
-            self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix="/scn_diff",
-                        key_suffix=f"ts1.0_tsd{t_scn_diff}")
+            for t_scn_diff in self.cfg.eval.eval_timesteps:
+                batch["t_scn_diff"] = t_scn_diff
+                outputs = self(batch, t=t)
+                _, aux = self.loss(outputs, batch, return_aux=True)
+                aux = {k: v for k, v in aux.items() if "scn/" in k}  # trim aux to sidechain diffusion metrics
+                self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix="/scn_diff",
+                            key_suffix=f"_ts1.0_tsd{t_scn_diff}")
 
 
     def _log(self,
