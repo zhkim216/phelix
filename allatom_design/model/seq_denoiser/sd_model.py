@@ -313,17 +313,17 @@ class SeqDenoiser(nn.Module):
                     x_traj = traj_aux[x_traj_key][i, save_traj_steps]
 
                 elif x_traj_key in ["x1_scn_traj", "xt_scn_traj"]:
-                    B, S, S_diff, N, A, _ = traj_aux["scn_diffusion_aux_traj"][x_traj_key].shape
+                    B, S, S_sd, N, A, _ = traj_aux["scn_diffusion_aux_traj"][x_traj_key].shape
 
                     # Save sidechain diffusion traj
                     # get aatype and atom mask
-                    aatype_traj = traj_aux["aatype_t_traj"].unsqueeze(2).expand(-1, -1, S_diff, -1)  # expand along diffusion steps dim, [B, S, S_diff, N, A]
-                    aatype_traj = aatype_traj[i, save_traj_steps, save_diff_traj_steps]  # [S_diff, N]
-                    atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * traj_aux["seq_mask"][i, :, None]  # [S_diff, N, A]
+                    aatype_traj = traj_aux["aatype_t_traj"].unsqueeze(2).expand(-1, -1, S_sd, -1)  # expand along diffusion steps dim, [B, S, S_sd, N, A]
+                    aatype_traj = aatype_traj[i, save_traj_steps, save_diff_traj_steps]  # [S_sd, N]
+                    atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * traj_aux["seq_mask"][i, :, None]  # [S_sd, N, A]
 
                     # construct full atom positions from sidechain diffusion aux
-                    x_scn_traj = traj_aux["scn_diffusion_aux_traj"][x_traj_key][i, save_traj_steps, save_diff_traj_steps]  # [S_diff, N, A, X]
-                    x_bb_traj = traj_aux["xt_traj"][i, -1][..., rc.bb_idxs, :].unsqueeze(0).expand(x_scn_traj.shape[0], -1, -1, -1)  # [S_diff, N, A, X]
+                    x_scn_traj = traj_aux["scn_diffusion_aux_traj"][x_traj_key][i, save_traj_steps, save_diff_traj_steps]  # [S_sd, N, A, X]
+                    x_bb_traj = traj_aux["xt_traj"][i, -1][..., rc.bb_idxs, :].unsqueeze(0).expand(x_scn_traj.shape[0], -1, -1, -1)  # [S_sd, N, A, X]
                     x_traj = cat_bb_scn(x_bb_traj, x_scn_traj)  # [S, N, A, X]
 
 
