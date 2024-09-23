@@ -6,9 +6,9 @@ from torchtyping import TensorType
 from omegaconf import DictConfig
 
 
-def get_res_decoding_order(mode: str,
-                           seq_mask: TensorType["b n", float],
-                            **kwargs) -> TensorType["b n", int]:
+def get_decoding_order(mode: str,
+                       seq_mask: TensorType["b n", float],
+                       **kwargs) -> TensorType["b n", int]:
     """
     Get the order in which residues should be decoded, from 0 to N-1.
     Padding tokens are decoded last.

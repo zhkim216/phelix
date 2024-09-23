@@ -250,7 +250,7 @@ class AtomDenoiser(nn.Module):
                     aatype_i = torch.full_like(traj_aux["seq_mask"][i], fill_value=rc.restype_order["G"], dtype=torch.long)  # force aatype to glycine
                     aatype_traj = aatype_i.unsqueeze(0).expand(len(save_traj_steps), -1)
                     atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * traj_aux["seq_mask"][i, :, None]  # [S, N, A]
-                    x_bb_traj = traj_aux[x_traj_key][save_traj_steps, i]
+                    x_bb_traj = traj_aux[x_traj_key][i, save_traj_steps]
                 else:
                     assert False, f"Unknown x_traj_key: {x_traj_key}"
 
