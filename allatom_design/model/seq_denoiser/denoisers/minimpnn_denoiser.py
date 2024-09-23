@@ -57,6 +57,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         aatype_pred = seq_logits.argmax(dim=-1)  # TODO: need different handling for sampling
 
         # 2. Sidechain diffusion
+        x1_pred = None
         if self.use_scn_diffusion:
             z = self.proj_z(h_V)
             x_bb = x_noised[..., rc.bb_idxs, :]  # TODO: make sure this matches MPNN augment_eps
@@ -74,9 +75,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
             if is_sampling:
                 # store the predicted sidechain coordinates with known backbone
                 x1_pred = cat_bb_scn(x_bb, x1_scn_pred)
-            else:
-                # during training, the batched x1_scn_pred is in scn_diffusion_aux
-                x1_pred = None
+
 
         # Outputs
         aux_preds["seq_logits"] = seq_logits
