@@ -19,7 +19,7 @@ source ~/.rshuai_bash_profile
 conda activate rshuai_allatom_design
 
 # Define directories
-BASE_DIR=/home/talal/rshuai/protein-ldm
+BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
 MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
 WANDB_ID=richardshuai
