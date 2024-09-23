@@ -14,7 +14,7 @@ num_workers: 10
 
 # Denoiser options
 denoiser_train_dir:
-out_dir: ${denoiser_train_dir}/eval_bb_gen
+out_dir: ${denoiser_train_dir}/eval_bb_gen_training
 
 # Data options for overriding denoiser config (null values default to denoiser config)
 data:
