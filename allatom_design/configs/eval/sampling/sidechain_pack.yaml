@@ -1,0 +1,48 @@
+sd_ckpt:
+
+num_workers: 10
+out_dir: null  # null to save in the model run directory
+exp_name: test  # sampling experiment name
+overwrite_out_dir: true  # if true, delete existing output directory
+seed: 0
+batch_size: 16
+
+# Data options for overriding denoiser config (null values default to denoiser config)
+data:
+    # pdb_path: /media/scratch/datasets/qfit-test-set/rcsb-pdb
+    # pdb_path: /media/scratch/datasets/rcsb_test_cases
+    # designability_csv: ""
+    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
+    designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+    n_random_subset: null
+
+# Sidechain packing run parameters
+num_pdbs: null  # number of structures to pack sidechains for, null for all
+num_samples_per_pdb: 1  # number of trajectories to run per structure
+subset_length_range: [32, 256]
+n_traj: 1  # number of trajectories to randomly save
+limit_diff_traj_steps: 10  # limit the number of steps we save in the sidechain diffusion trajectory (evenly spaced)
+traj_conect: false
+
+# Sidechain diffusion parameters
+scn_diffusion:
+  num_steps: 50
+  timestep_schedule:
+    num_steps: ${scn_diffusion.num_steps}
+    mode: "linear"
+    t_start: 0.0
+    t_end: 1.0
+  noise_schedule:
+    name: "step_scale"
+    c: 1.4
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${scn_diffusion.num_steps}
+
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/protein_ldm/hydra_outputs

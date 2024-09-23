@@ -169,7 +169,6 @@ class EDM_CA(ADInterpolant):
                    cfg_cfg: Optional[DictConfig],  # classifier-free guidance config
                    aux_inputs: Optional[Dict[str, Any]] = None
                    ) -> Tuple[TensorType["b n a 3", float],  # xt_next
-                              TensorType["b n", int],  # aatype_t_next
                               Dict[str, TensorType["b ..."]]  # aux preds
                               ]:
         """
@@ -185,7 +184,7 @@ class EDM_CA(ADInterpolant):
         score_nco = (xt[..., rc.nco_idxs, :] - x1_pred[..., rc.nco_idxs, :]) / rearrange(sigma_nco, "b -> b 1 1 1")
 
         if cfg_cfg is not None:
-            raise NotImplementedError
+            raise NotImplementedError("Classifier-free guidance is not implemented yet.")
 
         # Handle noise schedules
         noise_schedule_ca, noise_schedule_nco = noise_schedule

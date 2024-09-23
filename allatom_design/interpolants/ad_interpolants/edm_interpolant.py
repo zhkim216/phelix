@@ -161,14 +161,12 @@ class EDM(ADInterpolant):
     def euler_step(self,
                    f: Callable,
                    xt: TensorType["b n a 3", float],
-                   aatype_t: TensorType["b n", int],  # aatype at time t
                    t: TensorType["b", float],
                    t_next: TensorType["b", float],
                    noise_schedule: Optional[NoiseSchedule],
                    cfg_cfg: Optional[DictConfig],  # classifier-free guidance config
                    aux_inputs: Optional[Dict[str, Any]] = None
                    ) -> Tuple[TensorType["b n a 3", float],  # xt_next
-                              TensorType["b n", int],  # aatype_t_next
                               Dict[str, TensorType["b ..."]]  # aux preds
                               ]:
         """
@@ -177,31 +175,24 @@ class EDM(ADInterpolant):
         f is the forward function of the denoiser trained with this interpolant.
         - It should take in the current state and the current time.
         """
-        dsigma = rearrange(self.sigma(t_next) - self.sigma(t), "b -> b 1 1 1")
-        x1_pred, aatype_pred, aux_preds = f(xt, aatype_t, t=t)
-
+        x1_pred, aatype_pred, aux_preds = f(xt, t=t)
         score = (xt - x1_pred) / rearrange(self.sigma(t), "b -> b 1 1 1")
 
         if cfg_cfg is not None:
-            # apply classifier-free guidance
-            w = cfg_cfg.w
-            cond_labels_guidance = create_cond_labels_input(t.shape[0], cfg_cfg.cfg_cond_labels, t.device)
-            x1_pred_cond = f(xt, t=t, cond_labels_in=cond_labels_guidance)
-            cond_score = (xt - x1_pred_cond) / rearrange(self.sigma(t), "b -> b 1 1 1")
-            score = (1 + w) * cond_score - w * score
+            raise NotImplementedError("Classifier-free guidance is not implemented yet.")
 
         if noise_schedule is not None:
             # TODO: make sure this is accurate since we are operating on score not vf
             score = noise_schedule.scale_vf(score, t)
 
+        dsigma = rearrange(self.sigma(t_next) - self.sigma(t), "b -> b 1 1 1")
         xt_next = xt + dsigma * score
-        aatype_t_next = aatype_pred  # dummy; EDM does not take steps on aatype
 
         # Add to auxiliary outputs
         aux_preds["x1_pred"] = x1_pred
         aux_preds["aatype_pred"] = aatype_pred
 
-        return xt_next, aatype_t_next, aux_preds
+        return xt_next, aux_preds
 
 
     def get_loss_weight(self, t: TensorType["b"]) -> TensorType["b"]:

@@ -99,3 +99,36 @@ class MAR(SDInterpolant):
         x_noised[..., rc.non_bb_idxs, :] = x[..., rc.non_bb_idxs, :] * rearrange(mlm_mask, "b n -> b n 1 1").float()
         aatype_noised = torch.where(mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
         return x_noised, aatype_noised, mlm_mask
+
+
+    def denoising_step(self,
+                   f: Callable,
+                   xt: TensorType["b n a 3", float],
+                   aatype_t: TensorType["b n", int],
+                   t: TensorType["b", float],
+                   t_next: TensorType["b", float],
+                   aatype_decoding_order: TensorType["b n", int],
+                   aux_inputs: Optional[Dict[str, Any]] = None
+                   ) -> Tuple[TensorType["b n a 3", float],  # xt_next
+                              TensorType["b n", int],  # aatype_t_next
+                              Dict[str, TensorType["b ..."]]  # aux preds
+                              ]:
+        x1_pred, aatype_pred, aux_preds = f(xt, aatype_t, t=t)
+
+        # "euler" step for discrete space
+        ## Unmask a certain number of residues in the sequence
+        K_prev = torch.ceil(t * aux_inputs["lengths"]).long()[..., None]  # number of residues to be unmasked at the current time step
+        K = torch.ceil(t_next * aux_inputs["lengths"]).long()[..., None]  # number of residues to be unmasked at the next time step
+        residues_to_unmask = (K_prev <= aatype_decoding_order) & (aatype_decoding_order < K)
+        aatype_t_next = torch.where(residues_to_unmask, aatype_pred, aatype_t)
+
+        ## Unmask residues with x1_pred
+        unmasked_residues = (aatype_decoding_order < K)
+        xt_next = torch.where(unmasked_residues[..., None, None], x1_pred, xt)
+        aux_inputs["mlm_mask"] = torch.where(unmasked_residues, torch.ones_like(aatype_t_next), torch.zeros_like(aatype_t_next))
+
+        # Add to auxiliary outputs
+        aux_preds["x1_pred"] = x1_pred
+        aux_preds["aatype_pred"] = aatype_pred
+
+        return xt_next, aatype_t_next, aux_preds

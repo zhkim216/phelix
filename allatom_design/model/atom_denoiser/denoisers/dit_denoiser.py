@@ -284,8 +284,8 @@ class DiTDenoiser(BaseAtomDenoiser):
 
             # Finalize outputs
             x1_bb = xt_bb
-            diffusion_aux["xt_bb_traj"] = torch.stack(xt_bb_traj, dim=0)
-            diffusion_aux["x1_bb_traj"] = torch.stack(x1_bb_traj, dim=0)
+            diffusion_aux["xt_bb_traj"] = torch.stack(xt_bb_traj, dim=1)  # [B S N A 3]
+            diffusion_aux["x1_bb_traj"] = torch.stack(x1_bb_traj, dim=1)  # [B S N A 3]
 
             if self.cfg.interpolant.name == "edm_ca":
                 # Undo centering of N, C, and O on CA

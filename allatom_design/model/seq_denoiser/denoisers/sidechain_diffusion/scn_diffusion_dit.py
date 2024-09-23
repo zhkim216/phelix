@@ -235,30 +235,30 @@ class SidechainDiffusionModule(nn.Module):
             A = len(rc.non_bb_idxs)
             x0_scn = self.scn_interpolant.sample_prior((B, N, A, 3), z.device)
 
+            # Extract sampling parameters
+            S_sd = aux_inputs["sd"]["num_steps"]
+            timesteps = aux_inputs["sd"]["timesteps"]
+            churn_cfg = aux_inputs["sd"]["churn_cfg"]
+            noise_schedule = aux_inputs["sd"]["noise_schedule"]
+
             # Store trajectory
             xt_scn_traj, x1_scn_traj = [], []
 
-            # Extract sampling parameters
-            S = aux_inputs["scn_diff_num_steps"]
-            churn_cfg = aux_inputs.get("scn_diff_churn_cfg", None)
-            noise_schedule = aux_inputs.get("scn_diff_noise_schedule", None)
-
             # Run integration steps
-            denoiser_fn = partial(self.forward, x_bb=x_bb, z=z, seq_mask=seq_mask, residue_index=residue_index)
-            timesteps = torch.linspace(0, 1, S + 1, device=x0_scn.device)[None, ...].expand(B, -1)
+            denoiser_fn = partial(self.forward, aatype=aatype, x_bb=x_bb, z=z, seq_mask=seq_mask, residue_index=residue_index)
 
             xt_scn = x0_scn
-            for i in range(S):
+            for i in range(S_sd):
                 t = timesteps[:, i]
                 t_next = timesteps[:, i + 1]
 
                 xt_scn, t = self.scn_interpolant.churn(xt_scn, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
 
-                xt_scn, _, aux_preds = self.scn_interpolant.euler_step(denoiser_fn,
-                                                                       xt_scn, aatype,
-                                                                       t=t, t_next=t_next,
-                                                                       noise_schedule=noise_schedule,
-                                                                       cfg_cfg=None)
+                xt_scn, aux_preds = self.scn_interpolant.euler_step(denoiser_fn,
+                                                                    xt_scn,
+                                                                    t=t, t_next=t_next,
+                                                                    noise_schedule=noise_schedule,
+                                                                    cfg_cfg=None)
 
                 if self.use_self_conditioning:
                     # Apply self-conditioning
@@ -272,9 +272,14 @@ class SidechainDiffusionModule(nn.Module):
 
             # Finalize outputs
             x1_scn = xt_scn
-            diffusion_aux["xt_scn_traj"] = torch.stack(xt_scn_traj, dim=0)
-            diffusion_aux["x1_scn_traj"] = torch.stack(x1_scn_traj, dim=0)
+            diffusion_aux["xt_scn_traj"] = torch.stack(xt_scn_traj, dim=1)  # (B, S_sd, N, A, 3)
+            diffusion_aux["x1_scn_traj"] = torch.stack(x1_scn_traj, dim=1)  # (B, S_sd, N, A, 3)
             diffusion_aux["scn_pred"] = x1_scn
+
+            # Undo centering of sidechain coordinates on CA
+            x1_scn = x1_scn + x_bb[..., 1:2, :]
+            diffusion_aux["xt_scn_traj"] = diffusion_aux["xt_scn_traj"] + x_bb[:, None, :, 1:2, :].cpu()
+            diffusion_aux["x1_scn_traj"] = diffusion_aux["x1_scn_traj"] + x_bb[:, None, :, 1:2, :].cpu()
 
         return x1_scn, diffusion_aux
 
