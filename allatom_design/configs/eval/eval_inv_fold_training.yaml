@@ -2,7 +2,7 @@
 project: "allatom_design"  # Wandb project name
 wandb_id: "richardshuai"  # Wandb username
 exp_name: null # Wandb exp name
-group: "eval_ld_debug" # Wandb group name
+group: "debug" # Wandb group name
 
 # Run settings
 no_wandb: false  # Disable wandb logging
@@ -25,7 +25,31 @@ data:
 subset_length_range: [64, 256]  # only evaluate on sequences within this length range
 
 # Inverse folding options
+aatype_decoding_order_mode: "random"
 num_steps_list: [1, 20, 100]  # number of denoising steps for inverse folding
+timestep_schedule:
+  num_steps: null  # will be filled in by num_steps_list
+  mode: "linear"
+  t_start: 0.0
+  t_end: 1.0
+
+scn_diffusion:
+  # Sidechain diffusion parameters
+  num_steps: 50
+  timestep_schedule:
+    num_steps: ${scn_diffusion.num_steps}
+    mode: "linear"
+    t_start: 0.0
+    t_end: 1.0
+  noise_schedule:
+    name: "step_scale"
+    c: 1.4
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${scn_diffusion.num_steps}
 
 # Co-design self-consistency eval options
 run_codes_sc: true

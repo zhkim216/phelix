@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a7_aasd2_scn_pack_eval
+#SBATCH --job-name=a7_aasd2_eval_scn_pack
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -29,7 +29,7 @@ DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmf
 # Model name to evaluate
 MODEL_NAME=a7_aasd2
 
-EXP_NAME=${MODEL_NAME}_eval_bb_gen
+EXP_NAME=${MODEL_NAME}_eval_scn_pack
 GROUP=chimera_a7
 
 # Set HF transformers cache
@@ -51,4 +51,3 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scn_pack_training.py \
     data.designability_csv=${DESIGNABILITY_CSV} \
     subset_length_range=[64,256] \
     hydra.run.dir=${HYDRA_DIR}
-

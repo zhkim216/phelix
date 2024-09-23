@@ -12,14 +12,15 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
+from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf, open_dict
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from transformers import AutoTokenizer, EsmForProteinFolding
 
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.datasets.ad_dataset import ADDataset
-from allatom_design.data.pdb_utils import write_batched_to_pdb
+from allatom_design.data.pdb_utils import write_to_pdb_frames
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
@@ -27,7 +28,7 @@ from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 
 
-@hydra.main(config_path="../../configs/eval/sampling", config_name="sidechain_pack", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/sampling", config_name="inverse_fold", version_base="1.3.2")
 def main(cfg: DictConfig):
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
@@ -39,7 +40,7 @@ def main(cfg: DictConfig):
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
 
-    # Latent denoiser
+    # Load in seq denoiser
     lit_sd_model = LitSeqDenoiser.load_from_checkpoint(cfg.sd_ckpt).eval()
     device = lit_sd_model.device
 
@@ -47,7 +48,7 @@ def main(cfg: DictConfig):
     if cfg.out_dir is None:
         model_run_dir = Path(cfg.sd_ckpt).parent.parent
         model_name = Path(cfg.sd_ckpt).stem
-        cfg.out_dir = f"{model_run_dir}/sidechain_pack/{model_name}/{cfg.exp_name}"
+        cfg.out_dir = f"{model_run_dir}/inverse_fold/{model_name}/{cfg.exp_name}"
 
     if cfg.overwrite_out_dir and Path(cfg.out_dir).exists():
         # Delete existing out_dir
@@ -69,28 +70,30 @@ def main(cfg: DictConfig):
 
     # Load dataset based on model config
     if lit_sd_model.cfg.data.overfit > 0:
-        # For debugging with overfitting models, we sidechain pack on the training set
         dataset = ADDataset(phase="train", **lit_sd_model.cfg.data)
     else:
         dataset = ADDataset(phase="eval", **lit_sd_model.cfg.data)
-
+    val_dataloader = DataLoader(dataset, batch_size=cfg.num_pdbs, num_workers=cfg.num_workers, pin_memory=True, shuffle=True, drop_last=False)
     dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
-    num_pdbs = cfg.num_pdbs if cfg.num_pdbs is not None else len(dataset)
-    val_dataloader = DataLoader(dataset, batch_size=num_pdbs, num_workers=cfg.num_workers, pin_memory=True, shuffle=True, drop_last=False)
 
     # Define some random examples to sample
+    S = cfg.timestep_schedule.num_steps
     examples = next(iter(val_dataloader))
-    example_indices = np.repeat(np.arange(num_pdbs), cfg.num_samples_per_pdb)
+    example_indices = np.repeat(np.arange(cfg.num_pdbs), cfg.num_seqs_per_pdb)
     save_traj_indices = set(np.random.choice(len(example_indices), cfg.n_traj, replace=False))  # get some random indices to save trajectories for
+    save_traj_steps = np.linspace(0, S - 1, cfg.limit_traj_steps, dtype=int)  # get the steps of the trajectories we'll save
     save_sd_traj_steps = np.linspace(0, cfg.scn_diffusion.num_steps - 1, cfg.limit_diff_traj_steps, dtype=int)  # get the steps of the trajectories we'll save for scn diffusion
 
-    # Create sidechain diffusion inputs
+    # Define sequence denoising timesteps
+    t_seq = sampling_utils.get_timestep_schedule(**cfg.timestep_schedule)
+
+    # Set up sidechain diffusion inputs
     t_sd = sampling_utils.get_timestep_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
 
-    # create noise schedule
+    # create sidechain diffusion noise schedule
     noise_schedule = NoiseSchedule(cfg.scn_diffusion.noise_schedule)
 
-    # create churn config
+    # create sidechain diffusion churn config
     churn_cfg = dict(cfg.scn_diffusion.churn_cfg)
     sd_inputs = {"num_steps": cfg.scn_diffusion.num_steps,
                  "timesteps": None,  # filled in based on batch size
@@ -100,26 +103,27 @@ def main(cfg: DictConfig):
                  }
 
     ### SAMPLE ###
-    sample_info = defaultdict(list)
-
+    seq_rec_metrics = defaultdict(list)
     pbar = tqdm(range(0, len(example_indices), cfg.batch_size))
     for bi in pbar:
         idxs = example_indices[bi:bi + cfg.batch_size]
         batch_i = ADDataset.index_into_batch(examples, idxs)
-        x, aatype = batch_i["x"].to(device), batch_i["aatype"].to(device)
+        x, seq_mask, residue_index = batch_i["x"].to(device), batch_i["seq_mask"].to(device), batch_i["residue_index"].to(device)
+        timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
         sd_inputs["timesteps"] = t_sd[None].expand(x.shape[0], -1).to(device)
-        seq_mask, residue_index = batch_i["seq_mask"].to(device), batch_i["residue_index"].to(device)
+
+        # Define conditioning labels when we inverse fold
         cond_labels_in = {"crop_aug": batch_i["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
 
-        x_denoised, aatype_denoised, aux = lit_sd_model.model.sidechain_pack(
+        x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
             x,
-            aatype,
             seq_mask=seq_mask,
             residue_index=residue_index,
+            timesteps=timesteps,
+            aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
             cond_labels=cond_labels_in,
             sd_inputs=sd_inputs,
         )
-
         samples = {"x_denoised": x_denoised,
                    "seq_mask": seq_mask,
                    "residue_index": residue_index,
@@ -128,51 +132,47 @@ def main(cfg: DictConfig):
                    "aatype_t_traj": aux["aatype_t_traj"],
                    }
 
-        # Store sample info
-        seq_mask, aatype = seq_mask.cpu(), aatype.cpu()
-        sample_info["pdb"] += batch_i["pdb_key"]
-        sample_info["seq_mask"].append(seq_mask)
-        sample_info["aatype"].append(aatype)
+        # Update info for sequence recovery eval
+        seq_rec_metrics["pdb"] += batch_i["pdb_key"]
 
-        # Sidechain RMSD per residue
-        atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK)[aatype] * seq_mask[..., None]
-        atom_mask = atom_mask * (1 - batch_i["missing_atom_mask"])  # handle atoms missing from the ground truth PDB
+        seq_mask = seq_mask.cpu()
+        for i in range(batch_i["x"].shape[0]):
+            # Ground truth seqs
+            gt_aatype = batch_i["aatype"][i][seq_mask[i].bool()]
+            gt_seq = "".join([rc.restypes_with_x[i] for i in gt_aatype])
+            seq_rec_metrics["gt_seq"].append(gt_seq)
 
-        scn_info, ca_aligned_coords1 = eval_metrics.compute_structure_metrics(x.cpu(), x_denoised.cpu(), atom_mask, metrics_to_compute=["scn_rmsd_per_pos"])
-        sample_info["scn_rmsd_per_pos"].append(scn_info["scn_rmsd_per_pos"])
+            # Predicted seqs
+            pred_aatype = samples["pred_aatype"][i][seq_mask[i].bool()]
+            pred_seq = "".join([rc.restypes_with_x[i] for i in pred_aatype])
+            seq_rec_metrics["pred_seq"].append(pred_seq)
+
+            # Sequence accuracy
+            seq_rec_metrics["seq_acc"].append(np.mean([np.array(list(pred_seq)) == np.array(list(gt_seq))]))
 
         # Save samples
-        samples = {k: v.detach().cpu() for k, v in samples.items()}
         pdb_keys = batch_i["pdb_key"]
         filenames = [f"{sample_out_dir}/{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)]
         SeqDenoiser.save_samples_to_pdb(samples, filenames)
 
-        # Save CA-aligned ground truth samples
-        ca_aligned_gt_dir = Path(cfg.out_dir, "ca_aligned_gt")
-        ca_aligned_gt_dir.mkdir(parents=True, exist_ok=True)
-        feats = {
-            "aatype": batch_i["aatype"],
-            "atom_positions": ca_aligned_coords1,
-            "atom_mask": atom_mask,
-            "residue_index": batch_i["residue_index"],
-            "chain_index": batch_i["chain_index"],
-            "b_factors": None,
-        }
-        filenames = [f"{ca_aligned_gt_dir}/gt_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)]
-        write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
-
-
         # Write trajectories to file
-        save_traj_mask = [bi + i in save_traj_indices for i in range(batch_i["x"].shape[0])]  # which among the batch to save
-        save_traj_steps = [True]   # only 1 seq design step in inverse folding to save
+        save_traj_mask = [bi + i in save_traj_indices for i in range(batch_i["x"].shape[0])]
 
         save_trajs_fn = partial(SeqDenoiser.save_trajs_to_pdb, aux,
-                                residue_index=batch_i["residue_index"],
+                                residue_index=residue_index,
                                 chain_index=batch_i["chain_index"],
                                 save_traj_mask=save_traj_mask,
                                 save_traj_steps=save_traj_steps,
                                 save_diff_traj_steps=save_sd_traj_steps,
                                 traj_conect=cfg.traj_conect)
+
+        # save aatype pred traj
+        save_trajs_fn(x_traj_key="xt_traj", aatype_traj_key="aatype_pred_traj",
+                      filenames=[f"{traj_out_dir}/aatype_pred_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
+
+        # save aatype t traj
+        save_trajs_fn(x_traj_key="xt_traj", aatype_traj_key="aatype_t_traj",
+                      filenames=[f"{traj_out_dir}/aatype_t_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
 
         # save x1_scn traj
         save_trajs_fn(x_traj_key="x1_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
@@ -185,41 +185,51 @@ def main(cfg: DictConfig):
 
     del lit_sd_model  # free up memory; we don't need denoiser anymore
 
-    sample_info = {k: torch.cat(v, dim=0) if k != "pdb" else v for k, v in sample_info.items()}
+    ### CALCULATE STRUCTURE METRICS ###
+    all_metrics = defaultdict(dict)
+    pdbs = natsorted(glob.glob(f"{sample_out_dir}/*.pdb"))
 
-    ### Compute sidechain metrics ###
-    scn_metrics = {}
-    residue_mask = sample_info["seq_mask"]
-    scn_metrics["scn_rmsd_avg_all"] = (sample_info["scn_rmsd_per_pos"] * residue_mask).sum() / residue_mask.sum()  # average over all residues in the dataset
-    scn_metrics["scn_rmsd_avg_all"] = scn_metrics["scn_rmsd_avg_all"].item()
+    # Run co-design self-consistency evaluation
+    if cfg.run_codes_sc:
+        esmfold = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
+        esmfold.esm = esmfold.esm.half()
+        esmfold = esmfold.to(device)
+        tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
 
-    # Get average RMSD per residue
-    for aa_idx, aa in enumerate(rc.restypes_with_x):
-        aatype_mask = sample_info["aatype"] == aa_idx
-        rmsd_i = sample_info["scn_rmsd_per_pos"][aatype_mask]
-        rmsd_avg_i = (rmsd_i * sample_info["seq_mask"][aatype_mask]).sum() / sample_info["seq_mask"][aatype_mask].sum()
+        codes_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
+                                                               None, None,  # no MPNN model for co-design eval
+                                                               esmfold, tokenizer,
+                                                               device,
+                                                               out_dir=cfg.out_dir,
+                                                               eval_codesign=True)
+        for pdb, v in codes_sc_info.items():
+            all_metrics[pdb]["codes_sc_info"] = v
 
-        print(f"Average RMSD for {aa}: {rmsd_avg_i:.3f} Å")
-        scn_metrics[f"scn_rmsd_avg_{aa}"] = rmsd_avg_i.item()
 
-    print(f"Average RMSD for all residues: {scn_metrics['scn_rmsd_avg_all']:.3f} Å")
+    ### SAVE METRICS ###
+    # Save all metrics to pickle file
+    with open(f"{cfg.out_dir}/all_metrics.pkl", "wb") as f:
+        pickle.dump(all_metrics, f)
 
-    # Plot average sidechain RMSD per residue
-    rmsd_avg_aas = [(aa, scn_metrics[f"scn_rmsd_avg_{aa}"]) for aa in rc.restypes_with_x]
-    rmsd_avg_aas = sorted(rmsd_avg_aas, key=lambda x: x[1])
+    # Save certain metrics to a csv file
+    metrics_df = defaultdict(list)
+    for pdb in pdbs:
+        num_seqs = 1  # TODO: fix this
+        for i in range(num_seqs):
+            metrics_df["pdb"].append(pdb)
+            metrics_df["seq_idx"].append(i)
 
-    plt.figure(figsize=(12, 6))
-    plt.plot([aa for aa, _ in rmsd_avg_aas], [rmsd for _, rmsd in rmsd_avg_aas], marker="o", linestyle="--")
-    plt.xlabel("Residue")
-    plt.ylabel("Average sidechain RMSD (Å)")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(f"{cfg.out_dir}/scn_rmsd_per_res.png")
-    plt.close()
+            # add co-design self-consistency metrics (same for each MPNN sequence since we calculate these on the original sample)
+            if cfg.run_codes_sc:
+                codes_sc_info = all_metrics[pdb]["codes_sc_info"]
+                metrics_df["codes_seq"].append(codes_sc_info["sample_seq"])
+                metrics_df["codes_sc_ca_rmsd"].append(codes_sc_info["sc_metrics"]["sc_ca_rmsd"].squeeze().item())
+                metrics_df["codes_sc_aa_rmsd"].append(codes_sc_info["sc_metrics"]["sc_aa_rmsd"].squeeze().item())
+                metrics_df["codes_sc_ca_tm"].append(codes_sc_info["sc_metrics"]["sc_ca_tm"].squeeze().item())
+                metrics_df["codes_sc_aa_tm"].append(codes_sc_info["sc_metrics"]["sc_aa_tm"].squeeze().item())
+                metrics_df["codes_sc_avg_plddt"].append(codes_sc_info["esm_preds"]["avg_plddt"].squeeze().item())
 
-    # Save metrics as csv with pandas
-    metrics_df = pd.DataFrame(scn_metrics, index=[0])
-    metrics_df.to_csv(f"{cfg.out_dir}/scn_metrics.csv", index=False)
+    metrics_df = pd.DataFrame(metrics_df)
 
 
 if __name__ == "__main__":
