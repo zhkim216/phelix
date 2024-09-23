@@ -79,15 +79,14 @@ class MiniMPNN(nn.Module):
             ]
         )
 
+        # Output layers
+        if not self.no_aatype_pred:
+            self.W_out = nn.Linear(self.hidden_dim, self.n_aatype, bias=True)
 
         # Initialize weights
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
-
-        # Output layers
-        if not self.no_aatype_pred:
-            self.W_out = nn.Linear(self.hidden_dim, self.n_aatype, bias=True)
 
 
     def forward(

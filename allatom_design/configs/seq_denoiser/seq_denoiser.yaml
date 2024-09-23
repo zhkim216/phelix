@@ -78,7 +78,7 @@ loss:
 
 
 optim:
-  optimizer: "adamw"
+  optimizer: "noam"
   adamw:
     lr: 1.0e-4
     warmup_steps: 1000

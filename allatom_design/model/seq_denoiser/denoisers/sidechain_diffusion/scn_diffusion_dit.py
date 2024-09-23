@@ -183,8 +183,8 @@ class SidechainDiffusionModule(nn.Module):
 
             # Center sidechains on CA
             x_scn_gt = x_scn_gt - aux_inputs["x"][..., 1:2, :]
-            scn_missing_atom_mask = aux_inputs["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
-            x_scn_gt = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn_gt)  # fill missing atoms with zeroes
+            # scn_missing_atom_mask = aux_inputs["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
+            # x_scn_gt = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn_gt)  # fill missing atoms with zeroes
             scn_ghost_atom_mask = aux_inputs["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
             x_scn_gt = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn_gt)  # fill ghost atoms with zeroes
 

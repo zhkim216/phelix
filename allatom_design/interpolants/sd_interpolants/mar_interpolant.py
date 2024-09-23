@@ -93,7 +93,7 @@ class MAR(SDInterpolant):
         """
         B, N, _, _ = x.shape
         mlm_mask = torch.rand(B, N, device=x.device) < rearrange(t, "b -> b 1")  # 1 if we keep the residue, 0 if we mask it
-        mlm_mask = (mlm_mask * seq_mask).long()  # mask out residues that are not in the sequence
+        mlm_mask = (mlm_mask * seq_mask).float()  # mask out residues that are not in the sequence
 
         x_noised = x.clone()
         x_noised[..., rc.non_bb_idxs, :] = x[..., rc.non_bb_idxs, :] * rearrange(mlm_mask, "b n -> b n 1 1").float()
