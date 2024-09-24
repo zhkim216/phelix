@@ -10,7 +10,7 @@
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%j.err
 #
 ## Write batch script to logs
-scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
+scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 ## Load modules and set environment variables:
 source ~/.rshuai_bash_profile
