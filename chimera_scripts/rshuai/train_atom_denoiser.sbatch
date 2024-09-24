@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a7_cbb14
+#SBATCH --job-name=a8_bb0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,8 +21,8 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=a7_cbb14
-GROUP=chimera_a7
+EXP_NAME=a8_bb0
+GROUP=chimera_a8
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
@@ -36,11 +36,16 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
     data.pdb_path=${PDB_PATH} \
+    data.designability_csv=${DESIGNABILITY_CSV} \
+    data.fixed_size=512 \
     train.batch_size=64 \
     train.compile_model=true \
+    model.task=backbone \
+    sd_interpolant.full_noise_p=0.3 \
+    sd_interpolant.training_noise_schedule=uniform_t \
     denoiser=dit_denoiser \
-    data.fixed_size=512 \
-    data.designability_csv=${DESIGNABILITY_CSV} \
+    denoiser.condition_on_seq=true \
+    eval.eval_timesteps_seq=[0.25,0.5,0.75,1.0] \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_epochs=20 \
     trainer.check_val_every_n_epoch=20 \

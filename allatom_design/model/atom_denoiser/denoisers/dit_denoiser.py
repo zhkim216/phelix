@@ -143,7 +143,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
     def forward(self,
                 x_noised: TensorType["b n a 3", float],
-                aatype_noised: Optional[TensorType["b n", int]],
+                aatype_noised: TensorType["b n", int],
                 t: TensorType["b", float],  # timestep of inputs
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
@@ -155,6 +155,7 @@ class DiTDenoiser(BaseAtomDenoiser):
         aux_preds = {}
 
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
+            aatype_noised=aatype_noised,
             residue_index=residue_index,
             seq_mask=seq_mask,
             cond_labels_in=cond_labels_in,
@@ -168,6 +169,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
 
     def backbone_diffusion(self,
+                           aatype_noised: TensorType["b n", int],
                            residue_index: TensorType["b n", int],
                            seq_mask: TensorType["b n", float],
                            cond_labels_in: Dict[str, TensorType["b", int]] = {},
@@ -212,13 +214,13 @@ class DiTDenoiser(BaseAtomDenoiser):
             if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                 # Apply self-conditioning
                 with torch.no_grad():
-                    x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, None, t_batched,
+                    x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_noised, t_batched,
                                                            seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                            cond_labels_in=cond_labels_in_batched)
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                 denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched)
 
-            x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, None, t_batched,
+            x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_noised, t_batched,
                                                    seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                    cond_labels_in=cond_labels_in_batched)
 
@@ -252,7 +254,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             aatype_override_mask = aux_inputs["aatype_override_mask"]  # currently unused
 
             # Run integration steps
-            denoiser_fn = partial(self.dit, aatype_noised=None,
+            denoiser_fn = partial(self.dit, aatype_noised=aatype_noised,
                                   residue_index=residue_index, seq_mask=seq_mask,
                                   cond_labels_in=cond_labels_in)
 

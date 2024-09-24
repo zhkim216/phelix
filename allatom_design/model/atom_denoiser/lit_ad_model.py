@@ -59,22 +59,44 @@ class LitAtomDenoiser(L.LightningModule):
         _, aux = self.loss(outputs, batch, return_aux=True)
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
 
-        # Log metrics in a 2D grid of timestepss
         B = batch["seq_mask"].shape[0]
-        ts = list(itertools.product(self.cfg.eval.eval_timesteps, self.cfg.eval.eval_timesteps))
+
+        # Log metrics in a 2D grid of timestepss
+        ts = list(itertools.product(self.cfg.eval.eval_timesteps_ca_nco, self.cfg.eval.eval_timesteps_ca_nco))
 
         for t1, t2 in ts:
+            t_seq = 0.0  # assume no sequence information
+            t = torch.full((B,), fill_value=t_seq, device=batch["seq_mask"].device)
+
             batch["t_ca"] = t1
             batch["t_nco"] = t2
 
-            outputs = self(batch)
+            outputs = self(batch, t=t)
             _, aux = self.loss(outputs, batch, return_aux=True)
             aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
+            aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
             self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix,
-                      key_suffix=f"_tca{t1}_tnco{t2}")
+                      key_suffix=f"_ts{t_seq}_tca{t1}_tnco{t2}")
 
         del batch["t_ca"]
         del batch["t_nco"]
+
+        # Log metrics as a function of sequence time
+        if self.cfg.eval.eval_timesteps_seq:
+            ts = list(itertools.product(self.cfg.eval.eval_timesteps_seq, self.cfg.eval.eval_timesteps_ca_nco))
+            for t_seq, t_bb in ts:
+                t = torch.full((B,), fill_value=t_seq, device=batch["seq_mask"].device)
+                batch["t_ca"] = batch["t_nco"] = t_bb   # assume same t for CA and NCO
+
+                outputs = self(batch, t=t)
+                _, aux = self.loss(outputs, batch, return_aux=True)
+                aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
+                aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
+                self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix,
+                          key_suffix=f"_ts{t_seq}_tca{t_bb}_tnco{t_bb}")
+
+            del batch["t_ca"]
+            del batch["t_nco"]
 
 
     def _log(self,
