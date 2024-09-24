@@ -164,7 +164,7 @@ def main(cfg: DictConfig):
 
         # Write trajectories to file
         save_traj_mask = [bi + i in save_traj_indices for i in range(batch_i["x"].shape[0])]  # which among the batch to save
-        save_traj_steps = [True]   # only 1 seq design step in inverse folding to save
+        save_traj_steps = [0]   # only 1 seq design step in inverse folding to save (the first index)
 
         save_trajs_fn = partial(SeqDenoiser.save_trajs_to_pdb, aux,
                                 residue_index=batch_i["residue_index"],
