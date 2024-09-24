@@ -70,6 +70,13 @@ def main(cfg: DictConfig):
     save_traj_steps = np.linspace(0, cfg.timestep_schedule.num_steps - 1, cfg.limit_traj_steps, dtype=int)  # get the steps of the trajectories we'll save
     print(f"Drawing {cfg.n_samples_per_length} samples each of lengths {start} to {end} with step size {cfg.length_step_size}")
 
+    # Override s_max
+    if cfg.ca_diffusion.s_max_override is not None:
+        lit_ad_model.model.denoiser.interpolant.ca_interpolant.set_s_max(cfg.ca_diffusion.s_max_override)
+
+    if cfg.nco_diffusion.s_max_override is not None:
+        lit_ad_model.model.denoiser.interpolant.nco_interpolant.set_s_max(cfg.nco_diffusion.s_max_override)
+
     ### SAMPLE ###
     pbar = tqdm(total=len(all_lengths))
 

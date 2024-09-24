@@ -22,6 +22,7 @@ limit_traj_steps: 0  # limit the number of steps we save in a trajectory (evenly
 traj_conect: false
 align_traj_to_last_step: false  # whether to align trajectories to the last step
 
+
 timestep_schedule:
   num_steps: 500
   # for ca nco backbone diffusion
@@ -49,6 +50,7 @@ ca_diffusion:
     s_t_min: 0.01
     s_t_max: 50.0
     num_steps: ${timestep_schedule.num_steps}
+  s_max_override: null  # if not null, override s_max in interpolant
 
 nco_diffusion:
   # NCO backbone diffusion parameters
@@ -60,6 +62,7 @@ nco_diffusion:
     s_t_min: 0.01
     s_t_max: 50.0
     num_steps: ${timestep_schedule.num_steps}
+  s_max_override: null  # if not null, override s_max in interpolant
 
 
 # MPNN args

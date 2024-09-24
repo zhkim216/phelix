@@ -102,6 +102,13 @@ def main(cfg: DictConfig):
         with open_dict(lit_ad_model.cfg.data):
             lit_ad_model.cfg.data.update({k: v for k, v in cfg.data.items() if v is not None})  # override data config where specified
 
+        # Override s_max
+        if cfg.ca_diffusion.s_max_override is not None:
+            lit_ad_model.model.denoiser.interpolant.ca_interpolant.set_s_max(cfg.ca_diffusion.s_max_override)
+
+        if cfg.nco_diffusion.s_max_override is not None:
+            lit_ad_model.model.denoiser.interpolant.nco_interpolant.set_s_max(cfg.nco_diffusion.s_max_override)
+
         ### BEGIN EVAL ###
         # Define the range of lengths to sample
         start, end = cfg.length_range

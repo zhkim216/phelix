@@ -277,3 +277,9 @@ class EDM(ADInterpolant):
 
         return precondition_in, precondition_out
 
+
+    def set_s_min(self, s_min: float):
+        self.s_min = s_min
+
+    def set_s_max(self, s_max: float):
+        self.s_max = s_max
