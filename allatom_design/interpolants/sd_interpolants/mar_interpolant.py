@@ -24,6 +24,9 @@ class MAR(SDInterpolant):
 
         self.training_noise_cfg = cfg.training_noise_cfg[self.training_noise_schedule]
 
+        # Additional training tasks
+        self.full_noise_p = getattr(cfg, "full_noise_p", 0.0)  # randomly set full_noise_p timesteps to full noise
+
 
     @torch.compiler.disable
     def forward(self,
@@ -67,6 +70,10 @@ class MAR(SDInterpolant):
             t = torch.rand(n, device=device) * (t_max - t_min) + t_min
             t = t ** 2
 
+        if self.full_noise_p > 0:
+            # randomly set full_noise_p timesteps to full noise
+            t = torch.where(torch.rand(n, device=device) < self.full_noise_p, torch.zeros(n, device=device), t)
+
         return t
 
 
@@ -94,10 +101,16 @@ class MAR(SDInterpolant):
         B, N, _, _ = x.shape
         mlm_mask = torch.rand(B, N, device=x.device) < rearrange(t, "b -> b 1")  # 1 if we keep the residue, 0 if we mask it
         mlm_mask = (mlm_mask * seq_mask).float()  # mask out residues that are not in the sequence
-
         x_noised = x.clone()
+
+        # Mask sidechains
         x_noised[..., rc.non_bb_idxs, :] = x[..., rc.non_bb_idxs, :] * rearrange(mlm_mask, "b n -> b n 1 1").float()
+
+        # Mask sequence
         aatype_noised = torch.where(mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
+        aatype_noised = aatype_noised * seq_mask  # set pad residues back to 0
+        aatype_noised = aatype_noised.long()
+
         return x_noised, aatype_noised, mlm_mask
 
 

@@ -11,11 +11,14 @@ from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.pdb_utils import *
-from allatom_design.model.atom_denoiser.denoisers.denoiser import BaseAtomDenoiser
-from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
-    DiTDenoiser
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
+from allatom_design.interpolants.sd_interpolants.mar_interpolant import MAR
+from allatom_design.interpolants.sd_interpolants.sd_interpolant import SDInterpolant
+from allatom_design.model.atom_denoiser.denoisers.denoiser import \
+    BaseAtomDenoiser
+from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
+    DiTDenoiser
 
 
 class AtomDenoiser(nn.Module):
@@ -39,6 +42,7 @@ class AtomDenoiser(nn.Module):
         self.sigma_data = (self.ca_std, self.nco_std)
 
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
+        self.sd_interpolant = get_interpolant(getattr(cfg, "sd_interpolant", None))
 
 
     def setup(self):
@@ -61,9 +65,15 @@ class AtomDenoiser(nn.Module):
         batch = copy.deepcopy(batch)
         outputs = {}
 
-        # Noised inputs (for now we don't noise)
-        batch["x_noised"] = batch["x"]
-        batch["aatype_noised"] = batch["aatype"]
+        # Mask out sequence and sidechains with sd_interpolant
+        if self.sd_interpolant is None:
+            # don't noise
+            batch["x_noised"] = batch["x"]
+            batch["aatype_noised"] = batch["aatype"]
+        else:
+            interpolant_out = self.sd_interpolant(batch, t)
+            batch["x_noised"] = interpolant_out["x_noised"]
+            batch["aatype_noised"] = interpolant_out["aatype_noised"]
 
         # During training, keep track of certain additional features
         aux_inputs = {
@@ -278,3 +288,13 @@ def get_denoiser(cfg: DictConfig,
         raise ValueError(f"Unknown denoiser: {cfg.name}")
 
 
+def get_interpolant(cfg: Optional[DictConfig]) -> SDInterpolant:
+    """
+    Get the interpolant specified in the config.
+    """
+    if cfg is None:
+        return None
+    elif cfg.name == "mar":
+        return MAR(cfg)
+    else:
+        raise ValueError(f"Unknown interpolant: {cfg.name}")
