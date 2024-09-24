@@ -215,6 +215,7 @@ def main(cfg: DictConfig):
                 # Get global step
                 global_step = torch.load(ad_ckpt, map_location="cpu")["global_step"]
                 metrics["trainer/global_step"] = global_step
+                metrics["trainer/epoch"] = epoch
 
                 wandb.log(metrics, step=global_step)
 
