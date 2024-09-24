@@ -77,7 +77,6 @@ class SDLoss(nn.Module):
                                              mask=mask)
             aux_monitor["scn/unweighted_mse_loss"] = aux["scn/mse_loss"].mean().detach().clone()
             aux["scn/mse_loss"] = aux["scn/mse_loss"] * loss_weight_scn  # apply time step loss weight
-            aux_monitor["scn/weighted_mse_loss"] = aux["scn/mse_loss"].mean().detach().clone()
 
 
         # Aggregate losses

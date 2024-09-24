@@ -52,7 +52,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         aux_preds = {}
 
         # 1. MiniMPNN for sequence design
-        _, h_V = self.seq_design_module(x_noised, aatype_noised, seq_self_cond, None, seq_mask, residue_index)
+        _, h_V, mpnn_feature_dict = self.seq_design_module(x_noised, aatype_noised, seq_self_cond, None, seq_mask, residue_index)
         seq_logits = self.seq_head(h_V)
         aatype_pred = seq_logits.argmax(dim=-1)  # TODO: need different handling for sampling
 
@@ -60,7 +60,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         x1_pred = None
         if self.use_scn_diffusion:
             z = self.proj_z(h_V)
-            x_bb = x_noised[..., rc.bb_idxs, :]  # TODO: make sure this matches MPNN augment_eps
+            x_bb = mpnn_feature_dict["X"]  # use backbone coordinates from MPNN features (which are possibly noised by augment_eps)
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
                 z,
                 aatype_pred,
