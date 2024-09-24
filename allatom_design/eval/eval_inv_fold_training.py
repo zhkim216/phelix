@@ -211,17 +211,17 @@ def main(cfg: DictConfig):
             print(f"Sequence recovery accuracy: {med_seq_rec:.4f}")
             metrics[f"inv_fold/S{S}/median_seq_recovery"] = med_seq_rec
 
-            # Save seq accuracy across trajectory
-            for t in np.linspace(0, 0.9, 10):
-                # Denoised seqs
-                pred_seq_rec_t_med = seq_rec_df_S[f"pred_seq_rec_t{t:.1f}"].median()
-                # print(f"Sequence recovery accuracy at t={t:.1f}: {pred_seq_rec_t_med:.4f}")
-                metrics[f"inv_fold/S{S}/traj/med_seq_rec_t{t:.1f}"] = pred_seq_rec_t_med
+            # # Save seq accuracy across trajectory
+            # for t in np.linspace(0, 0.9, 10):
+            #     # Denoised seqs
+            #     pred_seq_rec_t_med = seq_rec_df_S[f"pred_seq_rec_t{t:.1f}"].median()
+            #     # print(f"Sequence recovery accuracy at t={t:.1f}: {pred_seq_rec_t_med:.4f}")
+            #     metrics[f"inv_fold/S{S}/traj/med_seq_rec_t{t:.1f}"] = pred_seq_rec_t_med
 
-                # Noisy seqs
-                noisy_seq_rec_t_med = seq_rec_df_S[f"noisy_seq_rec_t{t:.1f}"].median()
-                # print(f"Sequence recovery among unmasked tokens at t={t:.1f}: {noisy_seq_rec_t_med:.4f}")
-                metrics[f"inv_fold/S{S}/traj/med_noisy_seq_rec_t{t:.1f}"] = noisy_seq_rec_t_med
+            #     # Noisy seqs
+            #     noisy_seq_rec_t_med = seq_rec_df_S[f"noisy_seq_rec_t{t:.1f}"].median()
+            #     # print(f"Sequence recovery among unmasked tokens at t={t:.1f}: {noisy_seq_rec_t_med:.4f}")
+            #     metrics[f"inv_fold/S{S}/traj/med_noisy_seq_rec_t{t:.1f}"] = noisy_seq_rec_t_med
 
 
         ### Co-design self-consistency eval ###

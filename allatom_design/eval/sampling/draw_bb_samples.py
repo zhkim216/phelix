@@ -136,7 +136,6 @@ def main(cfg: DictConfig):
         pbar.update(B)
     pbar.close()
 
-
     del lit_ad_model  # free up memory; we don't need denoiser anymore
 
     ### CALCULATE STRUCTURE METRICS ###
@@ -182,10 +181,10 @@ def main(cfg: DictConfig):
             all_metrics[pdb]["codes_sc_info"] = v
 
     # Run nnTM evaluation
-    nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=cfg.out_dir)
-
-    for pdb, v in nntm_info.items():
-        all_metrics[pdb]["nntm_info"] = v
+    if cfg.nntm_dataset is not None:
+        nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=cfg.out_dir)
+        for pdb, v in nntm_info.items():
+            all_metrics[pdb]["nntm_info"] = v
 
     ### SAVE METRICS ###
     # Save all metrics to pickle file
@@ -228,7 +227,8 @@ def main(cfg: DictConfig):
                 metrics_df["codes_sc_avg_plddt"].append(codes_sc_info["esm_preds"]["avg_plddt"].squeeze().item())
 
             # add nntm metrics
-            metrics_df["nntm"].append(all_metrics[pdb]["nntm_info"])
+            if cfg.nntm_dataset is not None:
+                metrics_df["nntm"].append(all_metrics[pdb]["nntm_info"])
 
     metrics_df = pd.DataFrame(metrics_df)
 
@@ -246,12 +246,14 @@ def main(cfg: DictConfig):
     if cfg.run_mpnn_sc:
         plot_sc_ca_rmsd_vs_len(metrics_df, plot_out_dir)
         plot_sc_ca_tm_vs_len(metrics_df, plot_out_dir)
-        plot_sc_ca_rmsd_vs_nntm(metrics_df, plot_out_dir)
+        if cfg.nntm_dataset is not None:
+            plot_sc_ca_rmsd_vs_nntm(metrics_df, plot_out_dir)
 
     if cfg.run_codes_sc:
         plot_sc_ca_rmsd_vs_len(metrics_df, plot_out_dir, plot_codesign=True)
         plot_sc_ca_tm_vs_len(metrics_df, plot_out_dir, plot_codesign=True)
-        plot_sc_ca_rmsd_vs_nntm(metrics_df, plot_out_dir, plot_codesign=True)
+        if cfg.nntm_dataset is not None:
+            plot_sc_ca_rmsd_vs_nntm(metrics_df, plot_out_dir, plot_codesign=True)
 
 
 def plot_sc_ca_rmsd_vs_len(metrics_df: pd.DataFrame,
