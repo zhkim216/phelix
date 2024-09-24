@@ -37,7 +37,7 @@ class MiniMPNN(nn.Module):
 
         if self.model_type == "protein_mpnn":
             self.features = ProteinFeatures(
-                self.node_features, self.edge_features, top_k=self.k_neighbors, augment_eps=self.augment_eps
+                self.node_features, self.edge_features, top_k=self.k_neighbors
             )
         else:
             print("Choose --model_type flag from currently available models")
@@ -121,6 +121,10 @@ class MiniMPNN(nn.Module):
             "randn": None,
             }
 
+        # Add noise to the input features during training
+        if self.training and self.augment_eps > 0:
+            feature_dict["X"] = feature_dict["X"] + self.augment_eps * torch.randn_like(feature_dict["X"])
+
         ### Encoder ###
         h_V, h_E, E_idx = self.encode(feature_dict)
 
@@ -166,10 +170,10 @@ class MiniMPNN(nn.Module):
             h_V = layer(h_V, h_ESV, seq_mask, time_cond=time_cond)
 
         if self.no_aatype_pred:
-            return None, h_V
+            return None, h_V, feature_dict
 
         logits = self.W_out(h_V)
-        return logits, h_V
+        return logits, h_V, feature_dict
 
 
     def encode(self, feature_dict):
@@ -239,14 +243,12 @@ class ProteinFeatures(torch.nn.Module):
         num_positional_embeddings=16,
         num_rbf=16,
         top_k=48,
-        augment_eps=0.0,
     ):
         """Extract protein features"""
         super(ProteinFeatures, self).__init__()
         self.edge_features = edge_features
         self.node_features = node_features
         self.top_k = top_k
-        self.augment_eps = augment_eps
         self.num_rbf = num_rbf
         self.num_positional_embeddings = num_positional_embeddings
 
@@ -291,9 +293,6 @@ class ProteinFeatures(torch.nn.Module):
         mask = input_features["mask"]
         R_idx = input_features["R_idx"]
         chain_labels = input_features["chain_labels"]
-
-        if self.augment_eps > 0:
-            X = X + self.augment_eps * torch.randn_like(X)
 
         b = X[:, :, 1, :] - X[:, :, 0, :]
         c = X[:, :, 2, :] - X[:, :, 1, :]

@@ -79,6 +79,8 @@ class LitSeqDenoiser(L.LightningModule):
                 outputs = self(batch, t=t)
                 _, aux = self.loss(outputs, batch, return_aux=True)
                 aux = {k: v for k, v in aux.items() if "scn/" in k}  # trim aux to sidechain diffusion metrics
+                aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
+                aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
                 self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix="/scn_diff",
                             key_suffix=f"_ts1.0_tsd{t_scn_diff}")
 
