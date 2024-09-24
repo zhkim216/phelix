@@ -11,11 +11,6 @@ from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.pdb_utils import *
-from allatom_design.eval import sampling_utils
-from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
-    ADInterpolant
-from allatom_design.interpolants.ad_interpolants.edm_ca_interpolant import \
-    EDM_CA
 from allatom_design.model.atom_denoiser.denoisers.denoiser import BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     DiTDenoiser

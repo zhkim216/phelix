@@ -67,6 +67,7 @@ ca_diffusion:
     s_t_min: 0.01
     s_t_max: 50.0
     num_steps: ${timestep_schedule.num_steps}
+  s_max_override: null  # if not null, override s_max in interpolant
 
 nco_diffusion:
   # NCO backbone diffusion parameters
@@ -78,7 +79,7 @@ nco_diffusion:
     s_t_min: 0.01
     s_t_max: 50.0
     num_steps: ${timestep_schedule.num_steps}
-
+  s_max_override: null  # if not null, override s_max in interpolant
 
 # MPNN args
 mpnn:

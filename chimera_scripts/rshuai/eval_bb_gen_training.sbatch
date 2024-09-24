@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b5_cbb14_eval_bb_gen
+#SBATCH --job-name=a7_cbb14_eval_bb_gen
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -28,10 +28,10 @@ DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmf
 NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
 
 # Model name to evaluate
-MODEL_NAME=b5_cbb14
+MODEL_NAME=a7_cbb14
 
 EXP_NAME=${MODEL_NAME}_eval_bb_gen
-GROUP=chimera_b5
+GROUP=chimera_a7
 
 # Set HF transformers cache
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -53,9 +53,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     data.designability_csv=${DESIGNABILITY_CSV} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     nntm_dataset=${NNTM_DATASET} \
-    length_range=[64,128] \
+    length_range=[400,400] \
     num_steps_list=[500] \
     length_step_size=4 \
-    n_samples_per_length=2 \
+    n_samples_per_length=8 \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}
