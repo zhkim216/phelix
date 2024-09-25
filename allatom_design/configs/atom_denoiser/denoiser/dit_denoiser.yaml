@@ -6,33 +6,49 @@ defaults:
 
 pretrained_ckpt_path: null
 
-# DiT
-num_atoms_in: 4
+# Diffusion settings
 use_self_conditioning: true
-condition_on_seq: false
-n_aatype: 21
 self_cond_p: 0.9
-inf: ${model.inf}
+training_batch_size_mult: 1  # batch size multiplier for diffusion module
 
-# Positional encoding
-pos_encoding: rotary_residx  # one of ["absolute", "absolute_residx", "rotary", "rotary_residx"]
+# DiT
+dit:
+  num_atoms_in: 4
+  use_self_conditioning: ${denoiser.use_self_conditioning}
+  condition_on_seq: false
+  n_aatype: 21
+  inf: ${model.inf}
 
-# Conditioning
-cond_label_to_dropout_p:
-  # map from condition label to label dropout probability (required for unconditional generation / classifier-free guidance)
-  # null to disable conditioning, 0 to disable label dropout
-  crop_aug: 0.0
-  designability: 0.2
+  # Positional encoding
+  pos_encoding: rotary_residx  # one of ["absolute", "absolute_residx", "rotary", "rotary_residx"]
 
-# QK normalization
-qk_rmsnorm: true
+  # Conditioning
+  cond_label_to_dropout_p:
+    # map from condition label to label dropout probability (required for unconditional generation / classifier-free guidance)
+    # null to disable conditioning, 0 to disable label dropout
+    crop_aug: 0.0
+    designability: 0.2
 
-# Blocks
-depth: 12
-hidden_size: 384
-num_heads: 6
-mlp_dropout: 0.1
-mlp_ratio: 4.0
+  # QK normalization
+  qk_rmsnorm: true
 
-# Batch size multiplier for diffusion module
-training_batch_size_mult: 1
+  # Blocks
+  depth: 12
+  hidden_size: 384
+  num_heads: 6
+  mlp_dropout: 0.1
+  mlp_ratio: 4.0
+
+
+autoguidance:
+  enabled: false
+
+  # Config for guiding model
+  depth: 6
+  hidden_size: 256
+  num_heads: 4
+  mlp_dropout: 0.1
+  mlp_ratio: 4.0
+
+  # Config for guiding model training
+  subsample_train_iter_mult: 16  # train with roughly 1/K of the training iterations

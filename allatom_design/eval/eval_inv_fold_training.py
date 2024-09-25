@@ -236,7 +236,7 @@ def main(cfg: DictConfig):
             val_dataloader = DataLoader(dataset, batch_size=B, num_workers=cfg.num_workers, pin_memory=True, shuffle=True, drop_last=False)
             batch = next(iter(val_dataloader))  # get a random batch for inverse folding
             x, seq_mask, residue_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device)
-            cond_labels_in = create_cond_labels_input(B, {"designability": "DESIGNABLE"}, device)  # for now we always use "DESIGNABLE" for multimodal sampling eval
+            cond_labels_in = create_cond_labels_input(B, {"designability": "DESIGNABLE"}, device)  # for now we always use "DESIGNABLE" for eval
             cond_labels_in["crop_aug"] = batch["cond_labels_in"]["crop_aug"].to(device)
 
             for S in cfg.num_steps_list:

@@ -13,7 +13,7 @@ from collections import defaultdict
 from functools import partial
 from typing import Dict, Optional, Tuple, Union
 
-
+import esm
 import numpy as np
 import torch
 import torch.nn as nn
@@ -22,11 +22,12 @@ from einops import rearrange, repeat
 from omegaconf import DictConfig
 from torchtyping import TensorType
 from tqdm import tqdm
-import esm
 
 import allatom_design.data.conditioning_labels as cl
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
 from allatom_design.data import residue_constants as rc
+from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
+    ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_ca_interpolant import \
     EDM_CA
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
@@ -45,103 +46,20 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
                  cfg: DictConfig,
                  sigma_data: Tuple[TensorType[(), float]]):
         """
-        Backbone diffusion with DiT
+        Backbone diffusion with DiT, conditioned on ESM sequence embeddings.
         """
         super().__init__()
 
         self.cfg = cfg
+        self.use_self_conditioning = cfg.use_self_conditioning
+
         self.interpolant = EDM_CA(cfg.interpolant, sigma_data=sigma_data)
 
         # Set up ESM
         self.esm_wrapper = ESMWrapper(cfg.esm)
 
         # Set up DiT model
-        self.num_atoms_in = cfg.num_atoms_in
-        self.use_self_conditioning = cfg.use_self_conditioning
-        self.condition_on_seq = cfg.condition_on_seq
-
-        # Input and output channels
-        self.c = self.num_atoms_in * 3  # 3 xyz coordinates per atom
-        self.in_channels = self.c * 2 if self.use_self_conditioning else self.c  # 2x for self-conditioning
-        if self.condition_on_seq:
-            # +n_aatype for seq conditioning
-            self.in_channels = self.in_channels + cfg.n_aatype
-
-        self.out_channels = self.c
-        self.n_aatype = cfg.n_aatype
-
-        # Model parameters
-        self.num_heads = cfg.num_heads
-        self.pos_encoding = cfg.pos_encoding
-
-        self.x_embedder = Linear(self.in_channels, cfg.hidden_size, bias=True, init="glorot")  # "glorot" should match DiT Patchify init
-
-        # Positional encodings
-        assert self.pos_encoding in ["absolute", "absolute_residx", "rotary", "rotary_residx"]
-        if self.pos_encoding in ["absolute", "absolute_residx"]:
-            self.pos_embed = posemb_sincos_1d
-
-        self.rotary_emb = None
-        if self.pos_encoding in ["rotary", "rotary_residx"]:
-            dim = cfg.hidden_size // cfg.num_heads
-            use_residx = (self.pos_encoding == "rotary_residx")
-            self.rotary_emb = rope.RotaryEmbedding(dim=dim, use_residx=use_residx, cache_if_possible=False)
-
-        # Time embeddings
-        n_time_embedders = 2
-        self.t_embedders = nn.ModuleList([TimestepEmbedder(cfg.hidden_size) for _ in range(n_time_embedders)])
-
-        # Conditioning
-        self.cond_label_to_dropout_p = getattr(cfg, "cond_label_to_dropout_p", {})
-        self.cond_labels = [k for k, v in self.cond_label_to_dropout_p.items() if v is not None]
-        self.cond_embedders = nn.ModuleDict({
-            label: LabelEmbedder(num_classes=cl.COND_NUM_CLASSES[label],
-                                 hidden_size=cfg.hidden_size,
-                                 dropout_prob=self.cond_label_to_dropout_p[label]) for label in self.cond_labels
-        })
-
-        # QK-normalization from SD3
-        self.qk_normlayer = None
-        if cfg.qk_rmsnorm:
-            self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
-
-        # Blocks
-        self.blocks = nn.ModuleList([
-            DiTBlock(cfg.hidden_size, cfg.num_heads,
-                     mlp_dropout=cfg.mlp_dropout, mlp_ratio=cfg.mlp_ratio,
-                     inf=cfg.inf,
-                     rotary_emb=self.rotary_emb,
-                     qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
-                     ) for _ in range(cfg.depth)
-        ])
-        self.final_layer = FinalLayer(cfg.hidden_size, self.out_channels)
-        self.initialize_weights()
-
-
-    def initialize_weights(self):
-        # Initialize transformer layers:
-        def _basic_init(module):
-            if isinstance(module, nn.Linear):
-                torch.nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.constant_(module.bias, 0)
-        self.apply(_basic_init)
-
-        # Initialize timestep embedding MLP:
-        for t_embedder in self.t_embedders:
-            nn.init.normal_(t_embedder.mlp[0].weight, std=0.02)
-            nn.init.normal_(t_embedder.mlp[2].weight, std=0.02)
-
-        # Zero-out adaLN modulation layers in DiT blocks:
-        for block in self.blocks:
-            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
-
-        # Zero-out output layers:
-        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
-        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
-        nn.init.constant_(self.final_layer.linear.weight, 0)
-        nn.init.constant_(self.final_layer.linear.bias, 0)
+        self.dit = ESMConditionedDiT(cfg.dit, self.interpolant)
 
 
     def forward(self,
@@ -310,17 +228,117 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
         return x1_bb, diffusion_aux
 
 
-    def dit(self,
-            x_noised: TensorType["b n 4 3", float],
-            h_S: TensorType["b n h", float],
-            aatype_noised: Optional[TensorType["b n", int]],
-            t: Tuple[TensorType["b", float]],  # can also be tuple [t_ca, t_nco]
-            residue_index: TensorType["b n", int],
-            seq_mask: TensorType["b n", float],
-            x_self_cond: Optional[TensorType["b n 4 3", float]] = None,
-            cond_labels_in: Dict[str, TensorType["b", int]] = {}
-            ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
-                       Dict[str, TensorType["b ..."]]]:
+class ESMConditionedDiT(nn.Module):
+    def __init__(self, cfg: DictConfig, interpolant: ADInterpolant):
+        """
+        DiT for backbone diffusion conditioned on ESM sequence embeddings.
+        """
+        super().__init__()
+
+        self.cfg = cfg
+        self.interpolant = interpolant
+
+        # Set up DiT model
+        self.num_atoms_in = cfg.num_atoms_in
+        self.use_self_conditioning = cfg.use_self_conditioning
+        self.condition_on_seq = cfg.condition_on_seq
+
+        # Input and output channels
+        self.c = self.num_atoms_in * 3  # 3 xyz coordinates per atom
+        self.in_channels = self.c * 2 if self.use_self_conditioning else self.c  # 2x for self-conditioning
+        if self.condition_on_seq:
+            # +n_aatype for seq conditioning
+            self.in_channels = self.in_channels + cfg.n_aatype
+
+        self.out_channels = self.c
+        self.n_aatype = cfg.n_aatype
+
+        # Model parameters
+        self.num_heads = cfg.num_heads
+        self.pos_encoding = cfg.pos_encoding
+
+        self.x_embedder = Linear(self.in_channels, cfg.hidden_size, bias=True, init="glorot")  # "glorot" should match DiT Patchify init
+
+        # Positional encodings
+        assert self.pos_encoding in ["absolute", "absolute_residx", "rotary", "rotary_residx"]
+        if self.pos_encoding in ["absolute", "absolute_residx"]:
+            self.pos_embed = posemb_sincos_1d
+
+        self.rotary_emb = None
+        if self.pos_encoding in ["rotary", "rotary_residx"]:
+            dim = cfg.hidden_size // cfg.num_heads
+            use_residx = (self.pos_encoding == "rotary_residx")
+            self.rotary_emb = rope.RotaryEmbedding(dim=dim, use_residx=use_residx, cache_if_possible=False)
+
+        # Time embeddings
+        n_time_embedders = 2
+        self.t_embedders = nn.ModuleList([TimestepEmbedder(cfg.hidden_size) for _ in range(n_time_embedders)])
+
+        # Conditioning
+        self.cond_label_to_dropout_p = getattr(cfg, "cond_label_to_dropout_p", {})
+        self.cond_labels = [k for k, v in self.cond_label_to_dropout_p.items() if v is not None]
+        self.cond_embedders = nn.ModuleDict({
+            label: LabelEmbedder(num_classes=cl.COND_NUM_CLASSES[label],
+                                 hidden_size=cfg.hidden_size,
+                                 dropout_prob=self.cond_label_to_dropout_p[label]) for label in self.cond_labels
+        })
+
+        # QK-normalization from SD3
+        self.qk_normlayer = None
+        if cfg.qk_rmsnorm:
+            self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
+
+        # Blocks
+        self.blocks = nn.ModuleList([
+            DiTBlock(cfg.hidden_size, cfg.num_heads,
+                     mlp_dropout=cfg.mlp_dropout, mlp_ratio=cfg.mlp_ratio,
+                     inf=cfg.inf,
+                     rotary_emb=self.rotary_emb,
+                     qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
+                     ) for _ in range(cfg.depth)
+        ])
+        self.final_layer = FinalLayer(cfg.hidden_size, self.out_channels)
+        self.initialize_weights()
+
+
+    def initialize_weights(self):
+        # Initialize transformer layers:
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+        self.apply(_basic_init)
+
+        # Initialize timestep embedding MLP:
+        for t_embedder in self.t_embedders:
+            nn.init.normal_(t_embedder.mlp[0].weight, std=0.02)
+            nn.init.normal_(t_embedder.mlp[2].weight, std=0.02)
+
+        # Zero-out adaLN modulation layers in DiT blocks:
+        for block in self.blocks:
+            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+
+        # Zero-out output layers:
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
+        nn.init.constant_(self.final_layer.linear.weight, 0)
+        nn.init.constant_(self.final_layer.linear.bias, 0)
+
+
+
+    def forward(self,
+                x_noised: TensorType["b n 4 3", float],
+                h_S: TensorType["b n h", float],
+                aatype_noised: Optional[TensorType["b n", int]],
+                t: Tuple[TensorType["b", float]],  # can also be tuple [t_ca, t_nco]
+                residue_index: TensorType["b n", int],
+                seq_mask: TensorType["b n", float],
+                x_self_cond: Optional[TensorType["b n 4 3", float]] = None,
+                cond_labels_in: Dict[str, TensorType["b", int]] = {}
+                ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
+                           Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
         # Preconditioning
