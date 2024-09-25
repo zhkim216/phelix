@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a7_aasd2_eval_inv_fold
+#SBATCH --job-name=a7_aasd2_eval_inv_fold_codes32
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -29,7 +29,7 @@ DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmf
 # Model name to evaluate
 MODEL_NAME=a7_aasd2
 
-EXP_NAME=${MODEL_NAME}_eval_inv_fold
+EXP_NAME=${MODEL_NAME}_eval_inv_fold_codes32
 GROUP=chimera_a7
 
 # Set HF transformers cache
@@ -47,8 +47,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     start_epoch=0 \
     eval_every_n_ckpts=1 \
     batch_size=64 \
+    run_seq_recovery=false \
     run_codes_sc=true \
-    num_codes_sc_samples=8 \
+    num_codes_sc_samples=32 \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
     subset_length_range=[64,256] \
