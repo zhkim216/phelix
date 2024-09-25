@@ -12,6 +12,10 @@ eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 batch_size: 64
 num_workers: 10
 
+# Evals to run
+run_seq_recovery: true  # compute sequence recovery
+run_codes_sc: true  # run self-consistency eval with inverse-folded sequences
+
 # Denoiser options
 denoiser_train_dir:
 out_dir: ${denoiser_train_dir}/eval_inv_fold_training
@@ -52,7 +56,6 @@ scn_diffusion:
     num_steps: ${scn_diffusion.num_steps}
 
 # Co-design self-consistency eval options
-run_codes_sc: true
 num_codes_sc_samples: 8
 
 hydra:

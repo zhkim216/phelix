@@ -132,96 +132,97 @@ def main(cfg: DictConfig):
         metrics = {}
 
         ### Sequence recovery eval on validation set ###
-        for S in cfg.num_steps_list:
-            # Evaluate sequence recovery with different numbers of steps
-            print(f"Evaluating with num denoising steps S={S}")
-            cfg.timestep_schedule.num_steps = S
-            t_seq = sampling_utils.get_timestep_schedule(**cfg.timestep_schedule)
+        if cfg.run_seq_recovery:
+            for S in cfg.num_steps_list:
+                # Evaluate sequence recovery with different numbers of steps
+                print(f"Evaluating with num denoising steps S={S}")
+                cfg.timestep_schedule.num_steps = S
+                t_seq = sampling_utils.get_timestep_schedule(**cfg.timestep_schedule)
 
-            # Inverse fold
-            seq_recovery_dir = f"{log_dir}/seq_recovery"
-            Path(seq_recovery_dir).mkdir(parents=True, exist_ok=True)
-            seq_rec_df_S = defaultdict(list)
-            for batch in tqdm(val_dataloader, desc="Evaluating sequence recovery on validation set", leave=False):
-                x, seq_mask, residue_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device)
-                timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
+                # Inverse fold
+                seq_recovery_dir = f"{log_dir}/seq_recovery"
+                Path(seq_recovery_dir).mkdir(parents=True, exist_ok=True)
+                seq_rec_df_S = defaultdict(list)
+                for batch in tqdm(val_dataloader, desc="Evaluating sequence recovery on validation set", leave=False):
+                    x, seq_mask, residue_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device)
+                    timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
 
-                # Define sidechain diffusion timesteps
-                sd_inputs["timesteps"] = t_sd[None].expand(x.shape[0], -1).to(device)
+                    # Define sidechain diffusion timesteps
+                    sd_inputs["timesteps"] = t_sd[None].expand(x.shape[0], -1).to(device)
 
-                # Define conditioning labels when we inverse fold
-                cond_labels_in = {"crop_aug": batch["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
+                    # Define conditioning labels when we inverse fold
+                    cond_labels_in = {"crop_aug": batch["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
 
-                x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
-                    x,
-                    seq_mask=seq_mask,
-                    residue_index=residue_index,
-                    timesteps=timesteps,
-                    aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
-                    cond_labels=cond_labels_in,
-                    sd_inputs=sd_inputs,
-                )
-                samples = {"x_denoised": x_denoised,
-                        "seq_mask": seq_mask,
-                        "residue_index": residue_index,
-                        "pred_aatype": aatype_denoised,
-                        "aatype_pred_traj": aux["aatype_pred_traj"],
-                        "aatype_t_traj": aux["aatype_t_traj"],
-                }
+                    x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
+                        x,
+                        seq_mask=seq_mask,
+                        residue_index=residue_index,
+                        timesteps=timesteps,
+                        aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
+                        cond_labels=cond_labels_in,
+                        sd_inputs=sd_inputs,
+                    )
+                    samples = {"x_denoised": x_denoised,
+                            "seq_mask": seq_mask,
+                            "residue_index": residue_index,
+                            "pred_aatype": aatype_denoised,
+                            "aatype_pred_traj": aux["aatype_pred_traj"],
+                            "aatype_t_traj": aux["aatype_t_traj"],
+                    }
 
-                # Update info for sequence recovery eval
-                seq_rec_df_S["pdb"] += batch["pdb_key"]
+                    # Update info for sequence recovery eval
+                    seq_rec_df_S["pdb"] += batch["pdb_key"]
 
-                seq_mask = seq_mask.cpu()
-                for i in range(batch["x"].shape[0]):
-                    # Ground truth seqs
-                    gt_aatype = batch["aatype"][i][seq_mask[i].bool()]
-                    gt_seq = "".join([rc.restypes_with_x[i] for i in gt_aatype])
-                    seq_rec_df_S["gt_seq"].append(gt_seq)
+                    seq_mask = seq_mask.cpu()
+                    for i in range(batch["x"].shape[0]):
+                        # Ground truth seqs
+                        gt_aatype = batch["aatype"][i][seq_mask[i].bool()]
+                        gt_seq = "".join([rc.restypes_with_x[i] for i in gt_aatype])
+                        seq_rec_df_S["gt_seq"].append(gt_seq)
 
-                    # Predicted seqs
-                    pred_aatype = samples["pred_aatype"][i][seq_mask[i].bool()]
-                    pred_seq = "".join([rc.restypes_with_x[i] for i in pred_aatype])
-                    seq_rec_df_S["pred_seq"].append(pred_seq)
+                        # Predicted seqs
+                        pred_aatype = samples["pred_aatype"][i][seq_mask[i].bool()]
+                        pred_seq = "".join([rc.restypes_with_x[i] for i in pred_aatype])
+                        seq_rec_df_S["pred_seq"].append(pred_seq)
 
-                    for t in np.linspace(0, 0.9, 10):
-                        ti = int(t * S)
+                        for t in np.linspace(0, 0.9, 10):
+                            ti = int(t * S)
 
-                        # Denoised seqs along trajectory
-                        pred_aatype_traj = samples["aatype_pred_traj"][i, ti][seq_mask[i].bool()]
-                        pred_seq_traj = "".join([rc.restypes_with_x[i] for i in pred_aatype_traj])
-                        seq_rec_df_S[f"pred_seq_t{t:.1f}"].append(pred_seq_traj)
+                            # Denoised seqs along trajectory
+                            pred_aatype_traj = samples["aatype_pred_traj"][i, ti][seq_mask[i].bool()]
+                            pred_seq_traj = "".join([rc.restypes_with_x[i] for i in pred_aatype_traj])
+                            seq_rec_df_S[f"pred_seq_t{t:.1f}"].append(pred_seq_traj)
 
-                        # Noisy seqs along trajectory
-                        aatype_traj = samples["aatype_t_traj"][i, ti][seq_mask[i].bool()]
-                        seq_traj = "".join([rc.restypes_with_x[i] for i in aatype_traj])
-                        seq_rec_df_S[f"noisy_seq_t{t:.1f}"].append(seq_traj)
+                            # Noisy seqs along trajectory
+                            aatype_traj = samples["aatype_t_traj"][i, ti][seq_mask[i].bool()]
+                            seq_traj = "".join([rc.restypes_with_x[i] for i in aatype_traj])
+                            seq_rec_df_S[f"noisy_seq_t{t:.1f}"].append(seq_traj)
 
 
-            # Save inverse folding results
-            seq_rec_df_S = pd.DataFrame(seq_rec_df_S)
-            seq_rec_df_S["seq_rec"] = seq_rec_df_S.apply(lambda x: np.mean(np.array(list(x["gt_seq"])) == np.array(list(x["pred_seq"]))), axis=1)
-            for t in np.linspace(0, 0.9, 10):
-                seq_rec_df_S[f"pred_seq_rec_t{t:.1f}"] = seq_rec_df_S.apply(lambda x: np.mean(np.array(list(x["gt_seq"])) == np.array(list(x[f"pred_seq_t{t:.1f}"]))), axis=1)
-                seq_rec_df_S[f"noisy_seq_rec_t{t:.1f}"] = seq_rec_df_S.apply(partial(get_unmasked_rec, t=t), axis=1)  # get accuracy among unmasked residues
+                # Save inverse folding results
+                seq_rec_df_S = pd.DataFrame(seq_rec_df_S)
+                seq_rec_df_S["seq_rec"] = seq_rec_df_S.apply(lambda x: np.mean(np.array(list(x["gt_seq"])) == np.array(list(x["pred_seq"]))), axis=1)
+                for t in np.linspace(0, 0.9, 10):
+                    seq_rec_df_S[f"pred_seq_rec_t{t:.1f}"] = seq_rec_df_S.apply(lambda x: np.mean(np.array(list(x["gt_seq"])) == np.array(list(x[f"pred_seq_t{t:.1f}"]))), axis=1)
+                    seq_rec_df_S[f"noisy_seq_rec_t{t:.1f}"] = seq_rec_df_S.apply(partial(get_unmasked_rec, t=t), axis=1)  # get accuracy among unmasked residues
 
-            seq_rec_df_S.to_csv(f"{seq_recovery_dir}/seq_rec_epoch{epoch}_S{S}.csv", index=False)
+                seq_rec_df_S.to_csv(f"{seq_recovery_dir}/seq_rec_epoch{epoch}_S{S}.csv", index=False)
 
-            med_seq_rec = seq_rec_df_S["seq_rec"].median()
-            print(f"Sequence recovery accuracy: {med_seq_rec:.4f}")
-            metrics[f"inv_fold/S{S}/median_seq_recovery"] = med_seq_rec
+                med_seq_rec = seq_rec_df_S["seq_rec"].median()
+                print(f"Sequence recovery accuracy: {med_seq_rec:.4f}")
+                metrics[f"inv_fold/S{S}/median_seq_recovery"] = med_seq_rec
 
-            # # Save seq accuracy across trajectory
-            # for t in np.linspace(0, 0.9, 10):
-            #     # Denoised seqs
-            #     pred_seq_rec_t_med = seq_rec_df_S[f"pred_seq_rec_t{t:.1f}"].median()
-            #     # print(f"Sequence recovery accuracy at t={t:.1f}: {pred_seq_rec_t_med:.4f}")
-            #     metrics[f"inv_fold/S{S}/traj/med_seq_rec_t{t:.1f}"] = pred_seq_rec_t_med
+                # # Save seq accuracy across trajectory
+                # for t in np.linspace(0, 0.9, 10):
+                #     # Denoised seqs
+                #     pred_seq_rec_t_med = seq_rec_df_S[f"pred_seq_rec_t{t:.1f}"].median()
+                #     # print(f"Sequence recovery accuracy at t={t:.1f}: {pred_seq_rec_t_med:.4f}")
+                #     metrics[f"inv_fold/S{S}/traj/med_seq_rec_t{t:.1f}"] = pred_seq_rec_t_med
 
-            #     # Noisy seqs
-            #     noisy_seq_rec_t_med = seq_rec_df_S[f"noisy_seq_rec_t{t:.1f}"].median()
-            #     # print(f"Sequence recovery among unmasked tokens at t={t:.1f}: {noisy_seq_rec_t_med:.4f}")
-            #     metrics[f"inv_fold/S{S}/traj/med_noisy_seq_rec_t{t:.1f}"] = noisy_seq_rec_t_med
+                #     # Noisy seqs
+                #     noisy_seq_rec_t_med = seq_rec_df_S[f"noisy_seq_rec_t{t:.1f}"].median()
+                #     # print(f"Sequence recovery among unmasked tokens at t={t:.1f}: {noisy_seq_rec_t_med:.4f}")
+                #     metrics[f"inv_fold/S{S}/traj/med_noisy_seq_rec_t{t:.1f}"] = noisy_seq_rec_t_med
 
 
         ### Co-design self-consistency eval ###
