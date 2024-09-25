@@ -242,7 +242,10 @@ def main(cfg: DictConfig):
 
             for S in cfg.num_steps_list:
                 # Define multi-time timesteps
+                cfg.timestep_schedule.num_steps = S
+                t_seq = sampling_utils.get_timestep_schedule(**cfg.timestep_schedule)
                 timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
+
                 sd_inputs["timesteps"] = t_sd[None].expand(x.shape[0], -1).to(device)
 
                 x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
