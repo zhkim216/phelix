@@ -22,6 +22,7 @@ class BaseAtomDenoiser(nn.Module, ABC):
                 t: TensorType["b", float],
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
+                mlm_mask: TensorType["b n", float],  # MLM mask for the input sequence
                 x_self_cond: Optional[TensorType["b n a 3", float]] = None,
                 cond_labels_in: Dict[str, TensorType["b", int]] = {},
                 aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
