@@ -13,6 +13,7 @@ from collections import defaultdict
 from functools import partial
 from typing import Dict, Optional, Tuple, Union
 
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -21,6 +22,7 @@ from einops import rearrange, repeat
 from omegaconf import DictConfig
 from torchtyping import TensorType
 from tqdm import tqdm
+import esm
 
 import allatom_design.data.conditioning_labels as cl
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
@@ -38,7 +40,7 @@ from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
 from openfold.model.primitives import Linear
 
 
-class DiTDenoiser(BaseAtomDenoiser):
+class ESMDiTDenoiser(BaseAtomDenoiser):
     def __init__(self,
                  cfg: DictConfig,
                  sigma_data: Tuple[TensorType[(), float]]):
@@ -49,6 +51,9 @@ class DiTDenoiser(BaseAtomDenoiser):
 
         self.cfg = cfg
         self.interpolant = EDM_CA(cfg.interpolant, sigma_data=sigma_data)
+
+        # Set up ESM
+        self.esm_wrapper = ESMWrapper(cfg.esm)
 
         # Set up DiT model
         self.num_atoms_in = cfg.num_atoms_in
@@ -153,7 +158,11 @@ class DiTDenoiser(BaseAtomDenoiser):
                            Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
+        h_S = self.esm_wrapper(aatype_noised, seq_mask, residue_index, mlm_mask,
+                               aux_inputs=aux_inputs, is_sampling=is_sampling)
+
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
+            h_S=h_S,
             aatype_noised=aatype_noised,
             residue_index=residue_index,
             seq_mask=seq_mask,
@@ -168,6 +177,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
 
     def backbone_diffusion(self,
+                           h_S: TensorType["b n h", float],  # sequence embeddings for diffusion conditioning
                            aatype_noised: TensorType["b n", int],
                            residue_index: TensorType["b n", int],
                            seq_mask: TensorType["b n", float],
@@ -192,6 +202,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             # Repeat inputs for batch multiplier  # TODO: randomly augment these too
             M = self.cfg.training_batch_size_mult
             x_bb_gt_batched = repeat(x_bb_gt, "b n a x -> (m b) n a x", m=M, b=B)
+            h_S_batched = repeat(h_S, "b n h -> (m b) n h", m=M, b=B)
             aatype_noised_batched = repeat(aatype_noised, "b n -> (m b) n", m=M, b=B)
             residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
@@ -214,13 +225,15 @@ class DiTDenoiser(BaseAtomDenoiser):
             if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                 # Apply self-conditioning
                 with torch.no_grad():
-                    x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
+                    x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched,
+                                                           h_S_batched, aatype_noised_batched, t_batched,
                                                            seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                            cond_labels_in=cond_labels_in_batched)
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                 denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched)
 
-            x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
+            x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched,
+                                                   h_S_batched, aatype_noised_batched, t_batched,
                                                    seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                    cond_labels_in=cond_labels_in_batched)
 
@@ -254,7 +267,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             aatype_override_mask = aux_inputs["aatype_override_mask"]  # currently unused
 
             # Run integration steps
-            denoiser_fn = partial(self.dit, aatype_noised=aatype_noised,
+            denoiser_fn = partial(self.dit, h_S=h_S, aatype_noised=aatype_noised,
                                   residue_index=residue_index, seq_mask=seq_mask,
                                   cond_labels_in=cond_labels_in)
 
@@ -300,6 +313,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
     def dit(self,
             x_noised: TensorType["b n 4 3", float],
+            h_S: TensorType["b n h", float],
             aatype_noised: Optional[TensorType["b n", int]],
             t: Tuple[TensorType["b", float]],  # can also be tuple [t_ca, t_nco]
             residue_index: TensorType["b n", int],
@@ -327,7 +341,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             aatype_oh = F.one_hot(aatype_noised, num_classes=self.n_aatype).float()
             x = torch.cat([x, aatype_oh], dim=-1)
 
-        # Begin DiT forward pass
+        ### Begin DiT forward pass ###
         x = self.x_embedder(x)
 
         if self.pos_encoding == "absolute":
@@ -335,7 +349,9 @@ class DiTDenoiser(BaseAtomDenoiser):
         elif self.pos_encoding == "absolute_residx":
             x = x + self.pos_embed(x, residue_index=residue_index.float())
 
-        # Conditioning
+        ### Conditioning ###
+
+        # time conditioning
         if not isinstance(t, (tuple, list)):
             # make unimodal timestep into a tuple for convenience
             t = (t, )
@@ -343,6 +359,8 @@ class DiTDenoiser(BaseAtomDenoiser):
         t = sum([self.t_embedders[i](t[i]) for i in range(len(t))])
 
         c = t
+
+        # label conditioning
         for label_name in self.cond_labels:
             if label_name not in cond_labels_in:
                 if self.cond_embedders[label_name].has_unconditional_token:
@@ -359,13 +377,16 @@ class DiTDenoiser(BaseAtomDenoiser):
             # embed the label
             c = c + self.cond_embedders[label_name](labels_in, self.training)
 
-        # Blocks
+        # sequence embedding conditioning
+        c = c.unsqueeze(1) + h_S
+
+        ### Blocks ###
         attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
         for block in self.blocks:
-            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None)
+            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True)
 
-        # Final layer
-        x = self.final_layer(x, c)
+        ### Final layer ###
+        x = self.final_layer(x, c, per_token_conditioning=True)
         x = x * seq_mask[..., None]  # zero out padding positions
 
         # Reshape back to coordinates
@@ -374,3 +395,149 @@ class DiTDenoiser(BaseAtomDenoiser):
 
         return x, aux_preds
 
+
+class ESMWrapper(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        """
+        Wrapper around ESM model to return sequence embeddings. Code is based on:
+        https://github.com/facebookresearch/esm/blob/main/esm/esmfold/v1/esmfold.py
+        """
+        super().__init__()
+
+        self.cfg = cfg
+        c_s = cfg.c_s
+
+
+        self.esm, self.esm_dict = esm_registry.get(cfg.esm_type)()
+        self.esm.requires_grad_(False)
+        # self.esm.half()  # we train with bf16, so we shouldn't need to half the model
+
+        self.esm_feats = self.esm.embed_dim
+        self.esm_attns = self.esm.num_layers * self.esm.attention_heads
+        self.register_buffer("af2_to_esm", ESMWrapper._af2_to_esm(self.esm_dict))
+        self.esm_s_combine = nn.Parameter(torch.zeros(self.esm.num_layers + 1))
+        self.embedding = nn.Embedding(self.cfg.n_tokens_embed, c_s, padding_idx=0)
+        self.esm_s_mlp = nn.Sequential(
+            nn.LayerNorm(self.esm_feats),
+            nn.Linear(self.esm_feats, c_s),
+            nn.ReLU(),
+            nn.Linear(c_s, c_s),
+        )
+
+
+    def forward(
+        self,
+        aatype_noised: TensorType["b n", int],
+        seq_mask: TensorType["b n", float],
+        residue_index: TensorType["b n", int],
+        mlm_mask: TensorType["b n", float],
+        aux_inputs: dict,
+        is_sampling: bool,
+    ):
+        """Runs a forward pass given input tokens.
+
+        Args:
+            aatype_noised: Tensor containing indices corresponding to amino acids. Indices match
+                openfold.np.residue_constants.restype_order_with_x.
+            seq_mask: Binary tensor with 1 meaning position is unmasked and 0 meaning position is masked.
+            residue_index: Residue indices of amino acids.
+            mlm_mask: MLM mask on the input sequence, 1 denotes unmasked and 0 denotes masked
+        """
+        esm_aatype = self._af2_idx_to_esm_idx(aatype_noised, seq_mask)
+        esm_aatype = self._mask_inputs_to_esm(esm_aatype, seq_mask, mlm_mask)
+
+        esm_s, _ = self._compute_language_model_representations(esm_aatype, aux_inputs, is_sampling=is_sampling)  # ESM2 doesn't use RoPE on residx?
+        esm_s = esm_s.detach()
+
+        # preprocess ESM sequence embedding
+        esm_s = (self.esm_s_combine.softmax(0).unsqueeze(0) @ esm_s).squeeze(2)
+        s_s_0 = self.esm_s_mlp(esm_s)
+        s_s_0 += self.embedding(aatype_noised)
+
+        return s_s_0
+
+
+    def _compute_language_model_representations(
+        self, esmaa: torch.Tensor, aux_inputs: dict, is_sampling: bool
+    ) -> torch.Tensor:
+        """Adds bos/eos tokens for the language model, since the structure module doesn't use these."""
+        batch_size = esmaa.size(0)
+
+        bosi, eosi = self.esm_dict.cls_idx, self.esm_dict.eos_idx
+        bos = esmaa.new_full((batch_size, 1), bosi)
+        eos = esmaa.new_full((batch_size, 1), self.esm_dict.padding_idx)
+        esmaa = torch.cat([bos, esmaa, eos], dim=1)
+        # Use the first padding index as eos during inference.
+        esmaa[range(batch_size), (esmaa != 1).sum(1)] = eosi
+
+        # bosi, eosi, padi = self.esm_dict.cls_idx, self.esm_dict.eos_idx, self.esm_dict.padding_idx
+
+        # # Handle EOS tokens
+        # # append a dummy pad token
+        # dummy_pad = esmaa.new_full((batch_size, 1), padi)
+        # esmaa = torch.cat([esmaa, dummy_pad], dim=1)  # [B, N+1]
+        # eos_pos = (esmaa != padi).sum(dim=1)
+        # if not is_sampling:
+        #     # during training, conditionally add EOS tokens based on the input example
+        #     add_eos = aux_inputs["add_eos"]
+        #     eos = torch.where(add_eos, esmaa.new_full((batch_size, ), eosi), esmaa.new_full((batch_size, ), padi))
+        # else:
+        #     # during sampling, use the first non-padding token as the EOS token
+        #     eos = esmaa.new_full((batch_size, ), eosi)
+        # esmaa[torch.arange(batch_size), eos_pos] = eos  # [B, N+1]
+
+        # # Handle BOS tokens
+        # if not is_sampling:
+        #     # during training, conditionally add BOS tokens based on the input example
+        #     add_bos = aux_inputs["add_bos"].unsqueeze(1)
+        #     bos = torch.where(add_bos, esmaa.new_full((batch_size, 1), bosi), esmaa.new_full((batch_size, 1), padi))
+        # else:
+        #     # during sampling, always add BOS tokens
+        #     bos = esmaa.new_full((batch_size, 1), bosi)
+        # esmaa = torch.cat([bos, esmaa], dim=1)  # [B, N+2]
+
+        res = self.esm(
+            esmaa,
+            repr_layers=range(self.esm.num_layers + 1),
+            need_head_weights=False,
+        )
+        esm_s = torch.stack(
+            [v for _, v in sorted(res["representations"].items())], dim=2
+        )
+        esm_s = esm_s[:, 1:-1]  # B, L, nLayers, C
+        esm_z = None
+        return esm_s, esm_z
+
+    def _mask_inputs_to_esm(self,
+                            esmaa: TensorType["b n", int],
+                            seq_mask: TensorType["b n", float],
+                            mlm_mask: TensorType["b n", float]):
+        """
+        Mask nonpad positions where mlm_mask is 0.
+        """
+        new_esmaa = esmaa.clone()
+        new_esmaa[(mlm_mask == 0) & (seq_mask == 1)] = self.esm_dict.mask_idx
+        return new_esmaa
+
+    def _af2_idx_to_esm_idx(self, aa, mask):
+        aa = (aa + 1).masked_fill(mask != 1, 0)
+        return self.af2_to_esm[aa]
+
+
+    @staticmethod
+    def _af2_to_esm(d: esm.Alphabet):
+        # Remember that t is shifted from residue_constants by 1 (0 is padding).
+        esm_reorder = [d.padding_idx] + [
+            d.get_idx(v) for v in rc.restypes_with_x
+        ]
+        return torch.tensor(esm_reorder)
+
+
+esm_registry = {
+    "esm2_8M": esm.pretrained.esm2_t6_8M_UR50D,
+    "esm2_35M": esm.pretrained.esm2_t12_35M_UR50D,
+    "esm2_150M": esm.pretrained.esm2_t30_150M_UR50D,
+    "esm2_650M": esm.pretrained.esm2_t33_650M_UR50D,
+    "esm2_3B": esm.pretrained.esm2_t36_3B_UR50D,
+    "esm2_15B": esm.pretrained.esm2_t48_15B_UR50D,
+}

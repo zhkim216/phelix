@@ -19,6 +19,8 @@ from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     DiTDenoiser
+from allatom_design.model.atom_denoiser.denoisers.esm_dit_denoiser import \
+    ESMDiTDenoiser
 
 
 class AtomDenoiser(nn.Module):
@@ -70,23 +72,27 @@ class AtomDenoiser(nn.Module):
             # don't noise
             batch["x_noised"] = batch["x"]
             batch["aatype_noised"] = batch["aatype"]
+            batch["mlm_mask"] = torch.ones_like(batch["seq_mask"]) * batch["seq_mask"]
         else:
             interpolant_out = self.sd_interpolant(batch, t)
             batch["x_noised"] = interpolant_out["x_noised"]
             batch["aatype_noised"] = interpolant_out["aatype_noised"]
+            batch["mlm_mask"] = interpolant_out["mlm_mask"]
 
         # During training, keep track of certain additional features
         aux_inputs = {
             "x": batch["x"],  # ground truth coordinates
+            # "add_bos": batch["add_bos"],  # per-example flag of whether to add BOS token
+            # "add_eos": batch["add_eos"],  # per-example flag of whether to add EOS token
             "t_ca": batch.get("t_ca", None),  # scalar; fix t_ca if provided, usually for eval
             "t_nco": batch.get("t_nco", None),  # scalar; fix t_nco if provided, usually for eval
         }
 
         # Denoise coords
         _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"], None,
-                                           batch["residue_index"], batch["seq_mask"],
-                                           cond_labels_in=batch["cond_labels_in"],
-                                           aux_inputs=aux_inputs)
+                                     batch["residue_index"], batch["seq_mask"], batch["mlm_mask"],
+                                     cond_labels_in=batch["cond_labels_in"],
+                                     aux_inputs=aux_inputs)
 
         # Additional outputs for computing loss
         outputs.update(aux_preds)
@@ -146,6 +152,11 @@ class AtomDenoiser(nn.Module):
         seq_mask = (ranges < lengths[:, None]).float()
         aux["seq_mask"] = seq_mask.cpu()
 
+        # Initialize sequence prior (all masked)
+        aatype_noised = torch.full_like(residue_index, fill_value=self.restype_order_with_x["X"])
+        mlm_mask = torch.zeros_like(seq_mask)
+        aux["mlm_mask"] = mlm_mask
+
         # Make unimodal timesteps into a tuple for consistency
         if not isinstance(timesteps, (tuple, list)):
             timesteps = (timesteps,)
@@ -155,7 +166,6 @@ class AtomDenoiser(nn.Module):
         # Handle xt overrides
         if xt_override is None:
             # dummy values
-            A = rc.atom_type_num
             xt_override = torch.zeros(1, device=residue_index.device).expand(num_steps + 1, B, N, rc.atom_type_num, 3)
             xt_override_mask = torch.zeros(1, device=residue_index.device).expand(num_steps + 1, B, N, rc.atom_type_num, 3)
 
@@ -177,8 +187,8 @@ class AtomDenoiser(nn.Module):
             "aatype_override": aatype_override,
             "aatype_override_mask": aatype_override_mask,
         }
-        x1_bb, aux_preds = self.denoiser(x_noised=None, aatype_noised=None, t=None, residue_index=residue_index,
-                                         seq_mask=seq_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs, is_sampling=True)
+        x1_bb, aux_preds = self.denoiser(x_noised=None, aatype_noised=aatype_noised, t=None, residue_index=residue_index,
+                                         seq_mask=seq_mask, mlm_mask=mlm_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs, is_sampling=True)
 
         aux.update(aux_preds["bb_diffusion_aux"])
         return x1_bb, aux
@@ -284,6 +294,8 @@ def get_denoiser(cfg: DictConfig,
     """
     if cfg.name == "dit":
         return DiTDenoiser(cfg, sigma_data)
+    elif cfg.name == "esm_dit":
+        return ESMDiTDenoiser(cfg, sigma_data)
     else:
         raise ValueError(f"Unknown denoiser: {cfg.name}")
 
