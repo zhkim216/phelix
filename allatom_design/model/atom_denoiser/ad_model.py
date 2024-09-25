@@ -82,8 +82,6 @@ class AtomDenoiser(nn.Module):
         # During training, keep track of certain additional features
         aux_inputs = {
             "x": batch["x"],  # ground truth coordinates
-            # "add_bos": batch["add_bos"],  # per-example flag of whether to add BOS token
-            # "add_eos": batch["add_eos"],  # per-example flag of whether to add EOS token
             "t_ca": batch.get("t_ca", None),  # scalar; fix t_ca if provided, usually for eval
             "t_nco": batch.get("t_nco", None),  # scalar; fix t_nco if provided, usually for eval
         }

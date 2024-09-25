@@ -158,8 +158,7 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
                            Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
-        h_S = self.esm_wrapper(aatype_noised, seq_mask, residue_index, mlm_mask,
-                               aux_inputs=aux_inputs, is_sampling=is_sampling)
+        h_S = self.esm_wrapper(aatype_noised, seq_mask, residue_index, mlm_mask)
 
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
             h_S=h_S,
@@ -431,8 +430,6 @@ class ESMWrapper(nn.Module):
         seq_mask: TensorType["b n", float],
         residue_index: TensorType["b n", int],
         mlm_mask: TensorType["b n", float],
-        aux_inputs: dict,
-        is_sampling: bool,
     ):
         """Runs a forward pass given input tokens.
 
@@ -446,7 +443,11 @@ class ESMWrapper(nn.Module):
         esm_aatype = self._af2_idx_to_esm_idx(aatype_noised, seq_mask)
         esm_aatype = self._mask_inputs_to_esm(esm_aatype, seq_mask, mlm_mask)
 
-        esm_s, _ = self._compute_language_model_representations(esm_aatype, aux_inputs, is_sampling=is_sampling)  # ESM2 doesn't use RoPE on residx?
+        # ESM2 doesn't use RoPE on residx?
+        # Also, they seem to prepend BOS and append EOS tokens to every example regardless of cropping -- discrepancy with their supplement
+        # https://github.com/facebookresearch/esm/issues/299
+        # The pretrained ESM model seems to NaN out when neither BOS/EOS are provided
+        esm_s, _ = self._compute_language_model_representations(esm_aatype)
         esm_s = esm_s.detach()
 
         # preprocess ESM sequence embedding
@@ -458,7 +459,7 @@ class ESMWrapper(nn.Module):
 
 
     def _compute_language_model_representations(
-        self, esmaa: torch.Tensor, aux_inputs: dict, is_sampling: bool
+        self, esmaa: torch.Tensor
     ) -> torch.Tensor:
         """Adds bos/eos tokens for the language model, since the structure module doesn't use these."""
         batch_size = esmaa.size(0)
@@ -469,32 +470,6 @@ class ESMWrapper(nn.Module):
         esmaa = torch.cat([bos, esmaa, eos], dim=1)
         # Use the first padding index as eos during inference.
         esmaa[range(batch_size), (esmaa != 1).sum(1)] = eosi
-
-        # bosi, eosi, padi = self.esm_dict.cls_idx, self.esm_dict.eos_idx, self.esm_dict.padding_idx
-
-        # # Handle EOS tokens
-        # # append a dummy pad token
-        # dummy_pad = esmaa.new_full((batch_size, 1), padi)
-        # esmaa = torch.cat([esmaa, dummy_pad], dim=1)  # [B, N+1]
-        # eos_pos = (esmaa != padi).sum(dim=1)
-        # if not is_sampling:
-        #     # during training, conditionally add EOS tokens based on the input example
-        #     add_eos = aux_inputs["add_eos"]
-        #     eos = torch.where(add_eos, esmaa.new_full((batch_size, ), eosi), esmaa.new_full((batch_size, ), padi))
-        # else:
-        #     # during sampling, use the first non-padding token as the EOS token
-        #     eos = esmaa.new_full((batch_size, ), eosi)
-        # esmaa[torch.arange(batch_size), eos_pos] = eos  # [B, N+1]
-
-        # # Handle BOS tokens
-        # if not is_sampling:
-        #     # during training, conditionally add BOS tokens based on the input example
-        #     add_bos = aux_inputs["add_bos"].unsqueeze(1)
-        #     bos = torch.where(add_bos, esmaa.new_full((batch_size, 1), bosi), esmaa.new_full((batch_size, 1), padi))
-        # else:
-        #     # during sampling, always add BOS tokens
-        #     bos = esmaa.new_full((batch_size, 1), bosi)
-        # esmaa = torch.cat([bos, esmaa], dim=1)  # [B, N+2]
 
         res = self.esm(
             esmaa,
