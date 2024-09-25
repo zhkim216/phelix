@@ -162,14 +162,6 @@ class ADDataset(data.Dataset):
         # Add conditioning labels
         example_out["cond_labels_in"] = cond_labels_in
 
-        # # Based on cropping, calculate whether we should add BOS/EOS for ESM input
-        # example_out["add_bos"] = torch.tensor(True)
-        # example_out["add_eos"] = torch.tensor(True)
-        # if start_idx not in [None, 0]:
-        #     example_out["add_bos"] = torch.tensor(False)
-        # if start_idx not in [None, extra_len]:
-        #     example_out["add_eos"] = torch.tensor(False)
-
         return example_out
 
 
