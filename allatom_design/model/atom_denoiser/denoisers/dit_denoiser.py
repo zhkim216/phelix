@@ -9,6 +9,7 @@
 # MAE: https://github.com/facebookresearch/mae/blob/main/models_mae.py
 # --------------------------------------------------------
 
+import copy
 from collections import defaultdict
 from functools import partial
 from typing import Dict, Optional, Tuple, Union
@@ -18,7 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
 from tqdm import tqdm
 
@@ -56,6 +57,12 @@ class DiTDenoiser(BaseAtomDenoiser):
 
         # Set up DiT
         self.dit = DiT(cfg.dit, self.interpolant)
+
+        # Autoguidance
+        self.use_autoguidance = cfg.autoguidance.enabled
+        if self.use_autoguidance:
+            self.autoguidance_train_p = 1 / cfg.autoguidance.subsample_train_iter_mult
+            self.guiding_model = DiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.interpolant)  # override with autoguidance config
 
 
     def forward(self,
@@ -126,7 +133,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             interpolant_out = self.interpolant({"x": x_bb_gt_batched, "aatype": None}, t=t_bb)
             xt_bb_batched = interpolant_out["x_noised"]
             t_batched = interpolant_out["t"]
-            diffusion_aux["loss_weight_t"] = interpolant_out["loss_weight_t"]
+            loss_weight_t_batched = interpolant_out["loss_weight_t"]
 
             # Run denoising DiT
             denoiser_fn = self.dit
@@ -143,6 +150,30 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                    seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                    cond_labels_in=cond_labels_in_batched)
 
+            # Train autoguidance model
+            diffusion_aux["autoguidance_aux"] = None
+            if self.use_autoguidance and (np.random.uniform() < self.autoguidance_train_p):
+                ### If memory spikes due to running the autoguidance model,
+                ### consider activation checkpointing, separate optimization steps, alternating head predictions, or just training the models separately.
+                denoiser_fn = self.guiding_model
+                if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
+                    with torch.no_grad():
+                        x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
+                                                             seq_mask=seq_mask_batched, residue_index=residue_index_batched,
+                                                             cond_labels_in=cond_labels_in_batched)
+                    torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
+                    denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_guide)
+
+                x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
+                                                     seq_mask=seq_mask_batched, residue_index=residue_index_batched,
+                                                     cond_labels_in=cond_labels_in_batched)
+
+                # add to autoguidance outputs
+                diffusion_aux["autoguidance_aux"] = {
+                    "bb_pred": x1_bb_batched_guide,
+                    "bb_target": x_bb_gt_batched,
+                    "loss_weight_t": loss_weight_t_batched
+                }
 
             # Outputs
             x1_bb = None  # during training, we return the batched version in diffusion_aux
@@ -150,6 +181,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             # Cache intermediates for computing loss
             diffusion_aux["bb_pred"] = x1_bb_batched
             diffusion_aux["bb_target"] = x_bb_gt_batched
+            diffusion_aux["loss_weight_t"] = loss_weight_t_batched
 
         else:
             ### SAMPLING ###
