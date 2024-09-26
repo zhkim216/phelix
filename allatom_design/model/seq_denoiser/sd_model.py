@@ -9,7 +9,7 @@ from torchtyping import TensorType
 from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import cat_bb_scn
+from allatom_design.data.data import cat_bb_scn, stack_aux_traj
 from allatom_design.data.pdb_utils import *
 from allatom_design.eval import sampling_utils
 from allatom_design.interpolants.sd_interpolants.mar_interpolant import MAR
@@ -159,7 +159,7 @@ class SeqDenoiser(nn.Module):
         x0[..., rc.non_bb_idxs, :] = 0.0  # zero out sidechain atoms
 
         # Handle default overrides
-        # TODO: handle xt overrides, especially important for conditioning on known sequence/sidechain atoms
+        # TODO: handle xt overrides, especially important for conditioning on known sequence/sidechain atoms? or maybe we want to do this directly in aatype/x input
         if aatype_override is None:
             # dummy values
             aatype_override = torch.full((S + 1, B, N), fill_value=rc.restype_order_with_x["X"], device=residue_index.device)
@@ -168,18 +168,18 @@ class SeqDenoiser(nn.Module):
         # Add sidechain diffusion inputs
         aux_inputs["scd"] = scd_inputs
 
-        # Initialize trajectories
-        xt_traj = []
-        aatype_t_traj, aatype_pred_traj = [], []
-        seq_logits_traj = []
-        scn_diffusion_aux_traj = []
-
         # Sample aatype prior
         aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()  # TODO: make seq prior use MASK rather than UNK
 
         # Get residue decoding order
         aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps)
         aux_inputs["lengths"] = seq_mask.sum(dim=-1)
+
+        # Initialize trajectories
+        xt_traj = []
+        aatype_t_traj, aatype_pred_traj = [], []
+        seq_logits_traj = []
+        scn_diffusion_aux_traj = []
 
         # Run denoising steps
         denoiser_fn = partial(self.denoiser,
@@ -226,8 +226,7 @@ class SeqDenoiser(nn.Module):
 
         # preprocess diffusion aux traj
         if scd_inputs.get("return_scn_diffusion_aux", False):
-            # values are shape (B, S, S_scd, N, A, 3)
-            aux["scn_diffusion_aux_traj"] = {k: torch.stack([x[k] for x in scn_diffusion_aux_traj], dim=1) for k in scn_diffusion_aux_traj[0].keys()}
+            aux["scn_diffusion_aux_traj"] = stack_aux_traj(scn_diffusion_aux_traj, dim=1)  # values are shape (B, S, S_scd, N, A, 3)
 
         return xt, aatype_t, aux
 

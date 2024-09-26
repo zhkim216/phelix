@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -8,10 +8,10 @@ from einops import rearrange
 from torchtyping import TensorType
 
 import openfold.data.data_transforms as data_transforms
-from openfold.utils.feats import atom14_to_atom37
-from openfold.utils.rigid_utils import Rigid
 from allatom_design.data import protein
 from allatom_design.data import residue_constants as rc
+from openfold.utils.feats import atom14_to_atom37
+from openfold.utils.rigid_utils import Rigid
 
 
 def load_feats_from_pdb(pdb, chain_residx_gap: int, max_conformers: int = 1):
@@ -283,3 +283,20 @@ def cat_ca_nco(x_ca: TensorType["... 1 3", float],
     x[..., 1:2, :] = x_ca
     x[..., rc.nco_idxs, :] = x_nco
     return x
+
+
+def stack_aux_traj(aux_traj: List[Dict[str, Any]], dim: int = 1) -> Dict[str, Any]:
+    """
+    Stacks tensors from a list of dictionaries, recursively handling nested dictionaries.
+    """
+    stacked = {}
+    first_item = aux_traj[0]
+
+    for key, value in first_item.items():
+        if isinstance(value, dict):
+            sub_dicts = [x[key] for x in aux_traj]
+            stacked[key] = stack_aux_traj(sub_dicts, dim=dim)
+        else:
+            stacked[key] = torch.stack([x[key] for x in aux_traj], dim=dim)
+
+    return stacked

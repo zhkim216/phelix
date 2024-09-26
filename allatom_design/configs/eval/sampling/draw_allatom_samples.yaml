@@ -19,12 +19,29 @@ length_range: [64,128]
 length_step_size: 4
 n_samples_per_length: 2
 n_traj_per_length: 1  # number of trajectories to save per length
-limit_traj_steps: 0  # limit the number of steps we save in a trajectory (evenly spaced)
+limit_traj_steps: 5  # limit the number of steps we save in a trajectory (evenly spaced)
 traj_conect: false
-align_traj_to_last_step: false  # whether to align trajectories to the last step
+align_traj_to_last_step: true  # whether to align trajectories to the last step
 
 # Sampling hyperparameters
+joint:
+  # All-atom model sampling parameters
+  num_steps: 5
+  sd:
+    timestep_schedule:
+      num_steps: ${joint.num_steps}
+      mode: "linear"
+      t_start: 0.0
+      t_end: 1.0
+  ad:
+    timestep_schedule:
+      num_steps: ${joint.num_steps}
+      mode: "linear"
+      t_start: 0.0
+      t_end: 1.0
+
 ad:
+  # Atom denoiser sampling parameters
   num_steps: 500
   ca:
     timestep_schedule:
@@ -56,6 +73,7 @@ ad:
       num_steps: ${ad.num_steps}
 
 sd:
+  # Sequence denoiser sampling parameters
   seq:
     aatype_decoding_order_mode: "random"
     num_steps: 2
