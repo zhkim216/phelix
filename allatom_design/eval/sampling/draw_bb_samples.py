@@ -88,9 +88,9 @@ def main(cfg: DictConfig):
         residue_index = residue_index[None].expand(B, -1)
 
         # Create timesteps, separating timesteps for CA and NCO
-        t_ca = sampling_utils.get_timestep_schedule(**cfg.timestep_schedule.ca)
+        t_ca = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule.ca)
         t_ca = t_ca[None].expand(B, -1).to(lit_ad_model.device)
-        t_nco = sampling_utils.get_timestep_schedule(**cfg.timestep_schedule.nco)
+        t_nco = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule.nco)
         t_nco = t_nco[None].expand(B, -1).to(lit_ad_model.device)
         timesteps = (t_ca, t_nco)
 

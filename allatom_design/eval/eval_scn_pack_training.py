@@ -95,7 +95,7 @@ def main(cfg: DictConfig):
             dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
 
         # Create sidechain diffusion inputs
-        sd_inputs = {"num_steps": None,  # filled in based on S_sd
+        scd_inputs = {"num_steps": None,  # filled in based on S_scd
                      "timesteps": None,  # filled in based on batch size
                      "noise_schedule": None,
                      "churn_cfg": None,
@@ -105,18 +105,18 @@ def main(cfg: DictConfig):
         ### BEGIN EVAL ###
         metrics = {}
 
-        for S_sd in cfg.scn_diffusion.num_steps_list:
+        for S_scd in cfg.scn_diffusion.num_steps_list:
             # Set up sidechain diffusion inputs
-            sd_inputs["num_steps"] = S_sd
-            cfg.scn_diffusion.timestep_schedule.num_steps = S_sd
-            t_sd = sampling_utils.get_timestep_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
+            scd_inputs["num_steps"] = S_scd
+            cfg.scn_diffusion.timestep_schedule.num_steps = S_scd
+            t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
 
             # Sidechain pack
             sample_info = defaultdict(list)
 
-            for batch in tqdm(val_dataloader, desc=f"Evaluating sidechain packing on validation set using {S_sd} denoising steps", leave=False):
+            for batch in tqdm(val_dataloader, desc=f"Evaluating sidechain packing on validation set using {S_scd} denoising steps", leave=False):
                 x, aatype = batch["x"].to(device), batch["aatype"].to(device)
-                sd_inputs["timesteps"] = t_sd.expand(x.shape[0], -1).to(device)
+                scd_inputs["timesteps"] = t_scd.expand(x.shape[0], -1).to(device)
                 seq_mask, residue_index = batch["seq_mask"].to(device), batch["residue_index"].to(device)
                 cond_labels_in = {"crop_aug": batch["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
 
@@ -127,7 +127,7 @@ def main(cfg: DictConfig):
                     seq_mask=seq_mask,
                     residue_index=residue_index,
                     cond_labels=cond_labels_in,
-                    sd_inputs=sd_inputs,
+                    scd_inputs=scd_inputs,
                 )
 
                 # Store sample info
@@ -146,8 +146,8 @@ def main(cfg: DictConfig):
             sample_info = {k: torch.cat(v, dim=0) if k != "pdb" else v for k, v in sample_info.items()}
 
             ### Compute sidechain metrics ###
-            metrics[f"S_sd{S_sd}/scn_rmsd_avg"] = (sample_info["scn_rmsd_per_pos"] * sample_info["seq_mask"]).sum() / sample_info["seq_mask"].sum()  # average over all residues in the dataset
-            metrics[f"S_sd{S_sd}/scn_rmsd_avg"] = metrics[f"S_sd{S_sd}/scn_rmsd_avg"].item()
+            metrics[f"S_scd{S_scd}/scn_rmsd_avg"] = (sample_info["scn_rmsd_per_pos"] * sample_info["seq_mask"]).sum() / sample_info["seq_mask"].sum()  # average over all residues in the dataset
+            metrics[f"S_scd{S_scd}/scn_rmsd_avg"] = metrics[f"S_scd{S_scd}/scn_rmsd_avg"].item()
 
             # Get average RMSD per residue
             for aa_idx, aa in enumerate(rc.restypes_with_x):
@@ -155,7 +155,7 @@ def main(cfg: DictConfig):
                 rmsd_i = sample_info["scn_rmsd_per_pos"][aatype_mask]
                 rmsd_avg_i = (rmsd_i * sample_info["seq_mask"][aatype_mask]).sum() / sample_info["seq_mask"][aatype_mask].sum()
 
-                metrics[f"S_sd{S_sd}/scn_rmsd_{aa}"] = rmsd_avg_i.item()
+                metrics[f"S_scd{S_scd}/scn_rmsd_{aa}"] = rmsd_avg_i.item()
 
         # Save metrics
         metrics_dir = f"{log_dir}/scn_pack_metrics"

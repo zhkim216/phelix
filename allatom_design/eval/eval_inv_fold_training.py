@@ -114,14 +114,14 @@ def main(cfg: DictConfig):
             dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
 
         # Set up sidechain diffusion inputs
-        t_sd = sampling_utils.get_timestep_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
+        t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
 
         # create sidechain diffusion noise schedule
         noise_schedule = NoiseSchedule(cfg.scn_diffusion.noise_schedule)
 
         # create sidechain diffusion churn config
         churn_cfg = dict(cfg.scn_diffusion.churn_cfg)
-        sd_inputs = {"num_steps": cfg.scn_diffusion.num_steps,
+        scd_inputs = {"num_steps": cfg.scn_diffusion.num_steps,
                     "timesteps": None,  # filled in based on batch size
                     "noise_schedule": noise_schedule,
                     "churn_cfg": churn_cfg,
@@ -137,7 +137,7 @@ def main(cfg: DictConfig):
                 # Evaluate sequence recovery with different numbers of steps
                 print(f"Evaluating with num denoising steps S={S}")
                 cfg.timestep_schedule.num_steps = S
-                t_seq = sampling_utils.get_timestep_schedule(**cfg.timestep_schedule)
+                t_seq = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
 
                 # Inverse fold
                 seq_recovery_dir = f"{log_dir}/seq_recovery"
@@ -148,7 +148,7 @@ def main(cfg: DictConfig):
                     timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
 
                     # Define sidechain diffusion timesteps
-                    sd_inputs["timesteps"] = t_sd[None].expand(x.shape[0], -1).to(device)
+                    scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
 
                     # Define conditioning labels when we inverse fold
                     cond_labels_in = {"crop_aug": batch["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
@@ -160,7 +160,7 @@ def main(cfg: DictConfig):
                         timesteps=timesteps,
                         aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
                         cond_labels=cond_labels_in,
-                        sd_inputs=sd_inputs,
+                        scd_inputs=scd_inputs,
                     )
                     samples = {"x_denoised": x_denoised,
                             "seq_mask": seq_mask,
@@ -235,7 +235,7 @@ def main(cfg: DictConfig):
             for S in cfg.num_steps_list:
                 print(f"Evaluating with num denoising steps S={S}")
                 cfg.timestep_schedule.num_steps = S
-                t_seq = sampling_utils.get_timestep_schedule(**cfg.timestep_schedule)
+                t_seq = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
 
                 val_dataloader = DataLoader(
                     dataset,
@@ -258,7 +258,7 @@ def main(cfg: DictConfig):
 
                     # Define timesteps for sequence and sidechain diffusion
                     timesteps = t_seq[None].expand(B, -1).to(device)
-                    sd_inputs["timesteps"] = t_sd[None].expand(B, -1).to(device)
+                    scd_inputs["timesteps"] = t_scd[None].expand(B, -1).to(device)
 
                     # Generate samples
                     x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
@@ -268,7 +268,7 @@ def main(cfg: DictConfig):
                         timesteps=timesteps,
                         aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
                         cond_labels=cond_labels_in,
-                        sd_inputs=sd_inputs,
+                        scd_inputs=scd_inputs,
                     )
 
                     samples = {

@@ -85,14 +85,14 @@ def main(cfg: DictConfig):
     save_sd_traj_steps = np.linspace(0, cfg.scn_diffusion.num_steps - 1, cfg.limit_diff_traj_steps, dtype=int)  # get the steps of the trajectories we'll save for scn diffusion
 
     # Create sidechain diffusion inputs
-    t_sd = sampling_utils.get_timestep_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
+    t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
 
     # create noise schedule
     noise_schedule = NoiseSchedule(cfg.scn_diffusion.noise_schedule)
 
     # create churn config
     churn_cfg = dict(cfg.scn_diffusion.churn_cfg)
-    sd_inputs = {"num_steps": cfg.scn_diffusion.num_steps,
+    scd_inputs = {"num_steps": cfg.scn_diffusion.num_steps,
                  "timesteps": None,  # filled in based on batch size
                  "noise_schedule": noise_schedule,
                  "churn_cfg": churn_cfg,
@@ -107,7 +107,7 @@ def main(cfg: DictConfig):
         idxs = example_indices[bi:bi + cfg.batch_size]
         batch_i = ADDataset.index_into_batch(examples, idxs)
         x, aatype = batch_i["x"].to(device), batch_i["aatype"].to(device)
-        sd_inputs["timesteps"] = t_sd[None].expand(x.shape[0], -1).to(device)
+        scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
         seq_mask, residue_index = batch_i["seq_mask"].to(device), batch_i["residue_index"].to(device)
         cond_labels_in = {"crop_aug": batch_i["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
 
@@ -117,7 +117,7 @@ def main(cfg: DictConfig):
             seq_mask=seq_mask,
             residue_index=residue_index,
             cond_labels=cond_labels_in,
-            sd_inputs=sd_inputs,
+            scd_inputs=scd_inputs,
         )
 
         samples = {"x_denoised": x_denoised,

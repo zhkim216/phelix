@@ -68,14 +68,13 @@ def get_random_bidirectional(seq_mask: TensorType["b n", float]) -> TensorType["
     return indices
 
 
-def get_timestep_schedule(mode: str,
-                          num_steps: int,
-                          t_start: float,
-                          t_end: float
-                          ) -> TensorType["S+1", float]:
+def get_timesteps_from_schedule(mode: str,
+                                num_steps: int,
+                                t_start: float,
+                                t_end: float
+                                ) -> TensorType["S+1", float]:
     """
-    Get timestep schedule for sampling. Essentially warps the time schedule to be non-linear.
-
+    Get timesteps from timestep schedule for sampling. Essentially warps the time schedule to be non-linear.
     """
     S = num_steps
     timesteps = torch.linspace(t_start, t_end, S + 1)

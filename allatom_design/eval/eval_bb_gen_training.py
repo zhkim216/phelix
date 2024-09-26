@@ -128,9 +128,9 @@ def main(cfg: DictConfig):
 
                 # Create timesteps, separating timesteps for CA and NCO
                 cfg.timestep_schedule.num_steps = S  # set num_steps for this iteration
-                t_ca = sampling_utils.get_timestep_schedule(**cfg.timestep_schedule.ca)
+                t_ca = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule.ca)
                 t_ca = t_ca[None].expand(B, -1).to(lit_ad_model.device)
-                t_nco = sampling_utils.get_timestep_schedule(**cfg.timestep_schedule.nco)
+                t_nco = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule.nco)
                 t_nco = t_nco[None].expand(B, -1).to(lit_ad_model.device)
                 timesteps = (t_ca, t_nco)
 
