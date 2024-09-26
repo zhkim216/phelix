@@ -232,49 +232,69 @@ def main(cfg: DictConfig):
             sampled_pdbs_dir = f"{codes_sc_dir}/sampled_pdbs"
             Path(sampled_pdbs_dir).mkdir(parents=True, exist_ok=True)
 
-            # Grab a batch for inverse folding
-            B = cfg.num_codes_sc_samples
-            val_dataloader = DataLoader(dataset, batch_size=B, num_workers=cfg.num_workers, pin_memory=True, shuffle=True, drop_last=False)
-            batch = next(iter(val_dataloader))  # get a random batch for inverse folding
-            x, seq_mask, residue_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device)
-            cond_labels_in = create_cond_labels_input(B, {"designability": "DESIGNABLE"}, device)  # for now we always use "DESIGNABLE" for eval
-            cond_labels_in["crop_aug"] = batch["cond_labels_in"]["crop_aug"].to(device)
-
             for S in cfg.num_steps_list:
-                # Define multi-time timesteps
+                print(f"Evaluating with num denoising steps S={S}")
                 cfg.timestep_schedule.num_steps = S
                 t_seq = sampling_utils.get_timestep_schedule(**cfg.timestep_schedule)
-                timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
 
-                sd_inputs["timesteps"] = t_sd[None].expand(x.shape[0], -1).to(device)
-
-                x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
-                    x,
-                    seq_mask=seq_mask,
-                    residue_index=residue_index,
-                    timesteps=timesteps,
-                    aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
-                    cond_labels=cond_labels_in,
-                    sd_inputs=sd_inputs,
+                val_dataloader = DataLoader(
+                    dataset,
+                    batch_size=cfg.batch_size,
+                    num_workers=cfg.num_workers,
+                    pin_memory=True,
+                    shuffle=True,
+                    drop_last=False,
                 )
 
-                samples = {"x_denoised": x_denoised,
-                           "seq_mask": seq_mask.cpu(),
-                           "residue_index": residue_index,
-                           "pred_aatype": aatype_denoised.cpu()}
+                pdbs = []
+                for bi, batch in enumerate(val_dataloader):
+                    if bi >= cfg.num_codes_sc_batches:
+                        break
+                    x, seq_mask, residue_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device)
 
-                # Save samples
-                filenames = [f"{sampled_pdbs_dir}/epoch_{epoch}_S{S}_sample_{i}.pdb" for i in range(B)]
-                SeqDenoiser.save_samples_to_pdb(samples, filenames)
+                    B = x.shape[0]
+                    cond_labels_in = create_cond_labels_input(B, {"designability": "DESIGNABLE"}, device)
+                    cond_labels_in["crop_aug"] = batch["cond_labels_in"]["crop_aug"].to(device)  # we provide whether this example was cropped
 
-                # Run self-consistency eval
-                pdbs = natsorted(filenames)
-                codes_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
-                                                                    None, None,  # no MPNN model for co-design eval
-                                                                    esmfold, tokenizer,
-                                                                    device,
-                                                                    out_dir=codes_sc_dir,
-                                                                    eval_codesign=True)
+                    # Define timesteps for sequence and sidechain diffusion
+                    timesteps = t_seq[None].expand(B, -1).to(device)
+                    sd_inputs["timesteps"] = t_sd[None].expand(B, -1).to(device)
+
+                    # Generate samples
+                    x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
+                        x,
+                        seq_mask=seq_mask,
+                        residue_index=residue_index,
+                        timesteps=timesteps,
+                        aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
+                        cond_labels=cond_labels_in,
+                        sd_inputs=sd_inputs,
+                    )
+
+                    samples = {
+                        "x_denoised": x_denoised,
+                        "seq_mask": seq_mask.cpu(),
+                        "residue_index": residue_index,
+                        "pred_aatype": aatype_denoised.cpu(),
+                    }
+
+                    # Save samples
+                    filenames = [f"{sampled_pdbs_dir}/epoch_{epoch}_S{S}_batch_{bi}_sample_{i}.pdb" for i in range(B)]
+                    SeqDenoiser.save_samples_to_pdb(samples, filenames)
+                    pdbs.extend(filenames)
+
+                # After processing the specified number of batches, run self-consistency eval
+                pdbs = natsorted(pdbs)
+                codes_sc_info = eval_metrics.run_self_consistency_eval(
+                    pdbs,
+                    None,
+                    None,  # no MPNN model for co-design eval
+                    esmfold,
+                    tokenizer,
+                    device,
+                    out_dir=codes_sc_dir,
+                    eval_codesign=True,
+                )
 
                 # Aggregate results
                 codes_metrics = defaultdict(list)
@@ -282,6 +302,7 @@ def main(cfg: DictConfig):
                     for k, v in codes_sc_info[pdb]["sc_metrics"].items():
                         codes_metrics[f"codes_{k}"].append(v.item())
 
+                # Update metrics
                 metrics.update({f"inv_fold/S{S}/{k}": np.mean(v) for k, v in codes_metrics.items()})
 
         # Log metrics to wandb
