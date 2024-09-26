@@ -22,7 +22,6 @@ limit_traj_steps: 0  # limit the number of steps we save in a trajectory (evenly
 traj_conect: false
 align_traj_to_last_step: false  # whether to align trajectories to the last step
 
-
 timestep_schedule:
   num_steps: 500
   # for ca nco backbone diffusion

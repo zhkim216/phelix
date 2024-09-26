@@ -202,8 +202,8 @@ class SidechainDiffusionModule(nn.Module):
 
             # Evaluate at specific timesteps (for validation)
             t_sd_batched = None
-            if aux_inputs["t_sd"] is not None:
-                t_sd_batched = torch.full((M * B, ), aux_inputs["t_sd"], device=x_scn_gt.device)
+            if aux_inputs["t_scd"] is not None:
+                t_sd_batched = torch.full((M * B, ), aux_inputs["t_scd"], device=x_scn_gt.device)
 
             # Noise the ground truth sidechains
             interpolant_out = self.scn_interpolant({"x": x_scn_gt_batched, "aatype": aatype_batched}, t=t_sd_batched)
@@ -236,10 +236,10 @@ class SidechainDiffusionModule(nn.Module):
             x0_scn = self.scn_interpolant.sample_prior((B, N, A, 3), z.device)
 
             # Extract sampling parameters
-            S_sd = aux_inputs["sd"]["num_steps"]
-            timesteps = aux_inputs["sd"]["timesteps"]
-            churn_cfg = aux_inputs["sd"]["churn_cfg"]
-            noise_schedule = aux_inputs["sd"]["noise_schedule"]
+            S_scd = aux_inputs["scd"]["num_steps"]
+            timesteps = aux_inputs["scd"]["timesteps"]
+            churn_cfg = aux_inputs["scd"]["churn_cfg"]
+            noise_schedule = aux_inputs["scd"]["noise_schedule"]
 
             # Store trajectory
             xt_scn_traj, x1_scn_traj = [], []
@@ -248,7 +248,7 @@ class SidechainDiffusionModule(nn.Module):
             denoiser_fn = partial(self.forward, aatype=aatype, x_bb=x_bb, z=z, seq_mask=seq_mask, residue_index=residue_index)
 
             xt_scn = x0_scn
-            for i in range(S_sd):
+            for i in range(S_scd):
                 t = timesteps[:, i]
                 t_next = timesteps[:, i + 1]
 
@@ -272,8 +272,8 @@ class SidechainDiffusionModule(nn.Module):
 
             # Finalize outputs
             x1_scn = xt_scn
-            diffusion_aux["xt_scn_traj"] = torch.stack(xt_scn_traj, dim=1)  # (B, S_sd, N, A, 3)
-            diffusion_aux["x1_scn_traj"] = torch.stack(x1_scn_traj, dim=1)  # (B, S_sd, N, A, 3)
+            diffusion_aux["xt_scn_traj"] = torch.stack(xt_scn_traj, dim=1)  # (B, S_scd, N, A, 3)
+            diffusion_aux["x1_scn_traj"] = torch.stack(x1_scn_traj, dim=1)  # (B, S_scd, N, A, 3)
             diffusion_aux["scn_pred"] = x1_scn
 
             # Undo centering of sidechain coordinates on CA

@@ -76,7 +76,7 @@ class SeqDenoiser(nn.Module):
             "aatype": batch["aatype"],  # ground truth aatype
             "ghost_atom_mask": batch["ghost_atom_mask"],
             "missing_atom_mask": batch["missing_atom_mask"],
-            "t_sd": batch.get("t_scn_diff", None),  # scalar; fix t_sd (sidechain diffusion time) if provided, usually for eval
+            "t_scd": batch.get("t_scd", None),  # scalar; fix t_scd (sidechain diffusion time) if provided, usually for eval
         }
 
         # Denoise coords
@@ -109,7 +109,7 @@ class SeqDenoiser(nn.Module):
                        aatype: TensorType["b n", int],
                        seq_mask: TensorType["b n", float],
                        residue_index: TensorType["b n", int],
-                       sd_inputs: Dict[str, Any],
+                       scd_inputs: Dict[str, Any],
                        **sampling_kwargs) -> Tuple[TensorType["b n", int],
                                                    Dict[str, torch.Tensor]]:
         """
@@ -128,7 +128,7 @@ class SeqDenoiser(nn.Module):
         return self.sample(x, seq_mask, residue_index, timesteps,
                            aatype_decoding_order_mode="random",  # does not matter for sidechain packing
                            aatype_override=aatype_override, aatype_override_mask=aatype_override_mask,
-                           sd_inputs=sd_inputs,
+                           scd_inputs=scd_inputs,
                            **sampling_kwargs)
 
 
@@ -141,12 +141,12 @@ class SeqDenoiser(nn.Module):
                cond_labels: Dict[str, TensorType["b", int]],
                aatype_override: Optional[TensorType["s+1 b n", int]] = None,  # for fixed-sequence sampling, e.g. in sidechain packing
                aatype_override_mask: Optional[TensorType["s+1 b n", int]] = None,
-               sd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
+               scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
                ):
         """
-        sd_inputs should contain the following keys:
+        scd_inputs should contain the following keys:
         - num_steps: int
-        - timesteps: TensorType["b S_sd+1", float]
+        - timesteps: TensorType["b S_scd+1", float]
         - churn_cfg: Dict[str, Any]
         - noise_schedule: Dict[str, Any]
         """
@@ -159,14 +159,14 @@ class SeqDenoiser(nn.Module):
         x0[..., rc.non_bb_idxs, :] = 0.0  # zero out sidechain atoms
 
         # Handle default overrides
-        # TODO: handle xt overrides
+        # TODO: handle xt overrides, especially important for conditioning on known sequence/sidechain atoms
         if aatype_override is None:
             # dummy values
             aatype_override = torch.full((S + 1, B, N), fill_value=rc.restype_order_with_x["X"], device=residue_index.device)
             aatype_override_mask = torch.zeros((S + 1, B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
 
         # Add sidechain diffusion inputs
-        aux_inputs["sd"] = sd_inputs
+        aux_inputs["scd"] = scd_inputs
 
         # Initialize trajectories
         xt_traj = []
@@ -214,7 +214,7 @@ class SeqDenoiser(nn.Module):
             aatype_pred_traj.append(aux_preds["aatype_pred"].cpu())
             seq_logits_traj.append(aux_preds["seq_logits"].cpu())
 
-            if sd_inputs.get("return_scn_diffusion_aux", False):
+            if scd_inputs.get("return_scn_diffusion_aux", False):
                 scn_diffusion_aux_traj.append({k: v.cpu() for k, v in aux_preds["scn_diffusion_aux"].items()})
 
         aux["xt_traj"] = torch.stack(xt_traj, dim=1)
@@ -225,8 +225,8 @@ class SeqDenoiser(nn.Module):
         aux["seq_mask"] = seq_mask
 
         # preprocess diffusion aux traj
-        if sd_inputs.get("return_scn_diffusion_aux", False):
-            # values are shape (B, S, S_sd, N, A, 3)
+        if scd_inputs.get("return_scn_diffusion_aux", False):
+            # values are shape (B, S, S_scd, N, A, 3)
             aux["scn_diffusion_aux_traj"] = {k: torch.stack([x[k] for x in scn_diffusion_aux_traj], dim=1) for k in scn_diffusion_aux_traj[0].keys()}
 
         return xt, aatype_t, aux
@@ -314,25 +314,25 @@ class SeqDenoiser(nn.Module):
 
                 elif x_traj_key in ["x1_scn_traj", "xt_scn_traj"]:
                     # Save sidechain diffusion traj
-                    B, S, S_sd, N, A, _ = traj_aux["scn_diffusion_aux_traj"][x_traj_key].shape
+                    B, S, S_scd, N, A, _ = traj_aux["scn_diffusion_aux_traj"][x_traj_key].shape
 
                     # index with both save_traj_steps and save_diff_traj_steps
-                    grid_S, grid_S_sd = torch.meshgrid(torch.tensor(save_traj_steps), torch.tensor(save_diff_traj_steps), indexing='ij')
+                    grid_S, grid_S_scd = torch.meshgrid(torch.tensor(save_traj_steps), torch.tensor(save_diff_traj_steps), indexing='ij')
 
                     # get aatype and atom mask
-                    aatype_traj = traj_aux["aatype_t_traj"].unsqueeze(2).expand(-1, -1, S_sd, -1)  # expand along diffusion steps dim, [B, S, S_sd, N, A]
-                    aatype_traj = aatype_traj[i, grid_S, grid_S_sd]  # [S, S_sd, N]
-                    atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * traj_aux["seq_mask"][i, :, None]  # [S, S_sd, N, A]
+                    aatype_traj = traj_aux["aatype_t_traj"].unsqueeze(2).expand(-1, -1, S_scd, -1)  # expand along diffusion steps dim, [B, S, S_scd, N, A]
+                    aatype_traj = aatype_traj[i, grid_S, grid_S_scd]  # [S, S_scd, N]
+                    atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * traj_aux["seq_mask"][i, :, None]  # [S, S_scd, N, A]
 
                     # construct full atom positions from sidechain diffusion aux
-                    x_scn_traj = traj_aux["scn_diffusion_aux_traj"][x_traj_key][i, grid_S, grid_S_sd]  # [S, S_sd, N, A, X]
+                    x_scn_traj = traj_aux["scn_diffusion_aux_traj"][x_traj_key][i, grid_S, grid_S_scd]  # [S, S_scd, N, A, X]
                     x_bb_traj = rearrange(traj_aux["xt_traj"][i, -1][..., rc.bb_idxs, :], "n a x -> 1 1 n a x").expand(x_scn_traj.shape[0], x_scn_traj.shape[1], -1, -1, -1)
-                    x_traj = cat_bb_scn(x_bb_traj, x_scn_traj)  # [S, S_sd, N, A, X]
+                    x_traj = cat_bb_scn(x_bb_traj, x_scn_traj)  # [S, S_scd, N, A, X]
 
                     # flatten steps
-                    x_traj = rearrange(x_traj, "s s_sd n a x -> (s s_sd) n a x")
-                    aatype_traj = rearrange(aatype_traj, "s s_sd n -> (s s_sd) n")
-                    atom_mask = rearrange(atom_mask, "s s_sd n a -> (s s_sd) n a")
+                    x_traj = rearrange(x_traj, "s S_scd n a x -> (s S_scd) n a x")
+                    aatype_traj = rearrange(aatype_traj, "s S_scd n -> (s S_scd) n")
+                    atom_mask = rearrange(atom_mask, "s S_scd n a -> (s S_scd) n a")
 
                 else:
                     assert False, f"Unknown x_traj_key: {x_traj_key}"
