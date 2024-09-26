@@ -54,7 +54,7 @@ class AtomDenoiser(nn.Module):
 
     def forward(self,
                 batch: Dict[str, TensorType["b ..."]],
-                t: Optional[TensorType["b", float]] = None,  # (t_bb, t_scn) if multimodal
+                t_sd: Optional[TensorType["b", float]] = None,  # timestep of sequence design inputs
                 ) -> Dict[str, TensorType["b ..."]]:
         """
         batch should contain:
@@ -70,12 +70,12 @@ class AtomDenoiser(nn.Module):
         # Mask out sequence and sidechains with sd_interpolant
         if self.sd_interpolant is None:
             # don't noise
-            batch["x_noised"] = batch["x"]
+            batch["xt_scn"] = batch["x"][..., rc.non_bb_idxs, :]
             batch["aatype_noised"] = batch["aatype"]
             batch["mlm_mask"] = torch.ones_like(batch["seq_mask"]) * batch["seq_mask"]
         else:
-            interpolant_out = self.sd_interpolant(batch, t)
-            batch["x_noised"] = interpolant_out["x_noised"]
+            interpolant_out = self.sd_interpolant(batch, t_sd)
+            batch["xt_scn"] = interpolant_out["x_noised"][..., rc.non_bb_idxs, :]
             batch["aatype_noised"] = interpolant_out["aatype_noised"]
             batch["mlm_mask"] = interpolant_out["mlm_mask"]
 
@@ -87,7 +87,7 @@ class AtomDenoiser(nn.Module):
         }
 
         # Denoise coords
-        _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"], None,
+        _, aux_preds = self.denoiser(batch["xt_scn"], batch["aatype_noised"], t_sd,
                                      batch["residue_index"], batch["seq_mask"], batch["mlm_mask"],
                                      cond_labels_in=batch["cond_labels_in"],
                                      aux_inputs=aux_inputs)
@@ -150,7 +150,8 @@ class AtomDenoiser(nn.Module):
         seq_mask = (ranges < lengths[:, None]).float()
         aux["seq_mask"] = seq_mask.cpu()
 
-        # Initialize sequence prior (all masked)
+        # Initialize sidechain and sequence prior (all masked)
+        xt_scn = torch.zeros(B, N, len(rc.non_bb_idxs), 3, device=residue_index.device)
         aatype_noised = torch.full_like(residue_index, fill_value=self.restype_order_with_x["X"])
         mlm_mask = torch.zeros_like(seq_mask)
 
@@ -184,7 +185,8 @@ class AtomDenoiser(nn.Module):
             "aatype_override": aatype_override,
             "aatype_override_mask": aatype_override_mask,
         }
-        x1_bb, aux_preds = self.denoiser(x_noised=None, aatype_noised=aatype_noised, t=None, residue_index=residue_index,
+        x1_bb, aux_preds = self.denoiser(xt_scn=xt_scn,
+                                         aatype_noised=aatype_noised, t=None, residue_index=residue_index,
                                          seq_mask=seq_mask, mlm_mask=mlm_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs, is_sampling=True)
 
         aux.update(aux_preds["bb_diffusion_aux"])

@@ -64,7 +64,7 @@ class AllAtomModel():
 
         # Sample backbone
         x1_bb, aux_preds_bb = self.sample_backbone(
-            x_noised=None,  # once we get partial diffusion working, feed in x0
+            xt_scn=None,  # once we get partial diffusion working, feed in x0
             aatype_noised=aatype_noised,
             residue_index=residue_index,
             seq_mask=seq_mask,
@@ -88,7 +88,7 @@ class AllAtomModel():
 
     def sample_backbone(
         self,
-        x_noised: TensorType["b n 4 3", float],  # TODO: handle partial diffusion somewhere.
+        xt_scn: TensorType["b n 33 3", float],  # TODO: handle partial diffusion somewhere.
         aatype_noised: TensorType["b n", int],
         residue_index: TensorType["b n", int],
         seq_mask: TensorType["b n", float],
@@ -125,7 +125,7 @@ class AllAtomModel():
         }
 
         # Run atom denoiser
-        x1_bb, aux_preds_bb = self.ad_model.denoiser(x_noised=x_noised, aatype_noised=aatype_noised, t=None,
+        x1_bb, aux_preds_bb = self.ad_model.denoiser(xt_scn=xt_scn, aatype_noised=aatype_noised, t=None,
                                                      residue_index=residue_index, seq_mask=seq_mask, mlm_mask=mlm_mask,
                                                      cond_labels_in=cond_labels, aux_inputs=aux_inputs_bb, is_sampling=True)
 

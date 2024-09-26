@@ -17,9 +17,9 @@ class BaseAtomDenoiser(nn.Module, ABC):
 
     @abstractmethod
     def forward(self,
-                x_noised: TensorType["b n a 3", float],
+                xt_scn: TensorType["b n 33 3", float],
                 aatype_noised: Optional[TensorType["b n", int]],
-                t: TensorType["b", float],
+                t_sd: TensorType["b", float],  # timestep of sequence design inputs
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
                 mlm_mask: TensorType["b n", float],  # MLM mask for the input sequence
