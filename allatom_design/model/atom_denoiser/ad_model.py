@@ -153,7 +153,6 @@ class AtomDenoiser(nn.Module):
         # Initialize sequence prior (all masked)
         aatype_noised = torch.full_like(residue_index, fill_value=self.restype_order_with_x["X"])
         mlm_mask = torch.zeros_like(seq_mask)
-        aux["mlm_mask"] = mlm_mask
 
         # Make unimodal timesteps into a tuple for consistency
         if not isinstance(timesteps, (tuple, list)):

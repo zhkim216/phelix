@@ -180,8 +180,6 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
             ## extract overrides
             xt_bb_override = aux_inputs["xt_override"][..., rc.bb_idxs, :]
             xt_bb_override_mask = aux_inputs["xt_override_mask"][..., rc.bb_idxs, :]
-            aatype_override = aux_inputs["aatype_override"]  # currently unused
-            aatype_override_mask = aux_inputs["aatype_override_mask"]  # currently unused
 
             # Run integration steps
             denoiser_fn = partial(self.dit, h_S=h_S, aatype_noised=aatype_noised,
