@@ -69,6 +69,8 @@ def main(cfg: DictConfig):
     start, end = cfg.length_range
     lengths_to_sample = np.arange(start, end + 1, cfg.length_step_size)
     all_lengths = lengths_to_sample.repeat(cfg.n_samples_per_length)  # get the length of each protein we'll sample
+    save_traj_mask = np.tile(np.arange(cfg.n_samples_per_length) < cfg.n_traj_per_length, len(lengths_to_sample))  # get mask of the trajectories we'll save
+    save_traj_steps = np.linspace(0, cfg.joint.num_steps - 1, cfg.limit_traj_steps, dtype=int)  # get the steps of the trajectories we'll save
     print(f"Drawing {cfg.n_samples_per_length} samples each of lengths {start} to {end} with step size {cfg.length_step_size}")
 
     ### SAMPLE ###
@@ -81,6 +83,11 @@ def main(cfg: DictConfig):
         residue_index = torch.arange(lengths.max(), dtype=torch.long).to(device)
         residue_index = residue_index[None].expand(B, -1)
         cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, device)
+
+        # === Handle all-atom model joint timesteps === #
+        T_ad = sampling_utils.get_timesteps_from_schedule(**cfg.joint.ad.timestep_schedule)
+        T_sd = sampling_utils.get_timesteps_from_schedule(**cfg.joint.sd.timestep_schedule)
+        timesteps = (T_ad[None].expand(B, -1).to(device), T_sd[None].expand(B, -1).to(device))
 
         # === Handle atom denoiser inputs === #
         ad_sampling_inputs = {}
@@ -123,6 +130,7 @@ def main(cfg: DictConfig):
         # === Sample from allatom model === #
         x_denoised, aatype_denoised, aux = allatom_model.sample(lengths=lengths,
                                                                 residue_index=residue_index,
+                                                                timesteps=timesteps,
                                                                 ad_sampling_inputs=ad_sampling_inputs,
                                                                 sd_sampling_inputs=sd_sampling_inputs,
                                                                 cond_labels=cond_labels_in)
@@ -138,7 +146,23 @@ def main(cfg: DictConfig):
         filenames = [f"{sample_out_dir}/sample_len{lengths[j]}_{i + j}.pdb" for j in range(B)]
         AllAtomModel.save_samples_to_pdb(samples, filenames)
 
+        # Write trajectories to file
+        align_models_to_idx = None
+        if cfg.align_traj_to_last_step:
+            # align all predictions along the trajectory to the last step
+            align_models_to_idx = cfg.limit_traj_steps - 1
+
+        save_trajs_fn = partial(AllAtomModel.save_trajs_to_pdb, aux, residue_index=residue_index, chain_index=torch.zeros_like(residue_index),
+                                save_traj_mask=save_traj_mask, save_traj_steps=save_traj_steps,
+                                save_ad_traj_steps=None, save_sd_traj_steps=None, save_scd_traj_steps=None,
+                                traj_conect=cfg.traj_conect, align_models_to_idx=align_models_to_idx)
+        # save xt traj
+        save_trajs_fn(x_traj_key="xt_traj", filenames=[f"{traj_out_dir}/xt_traj_sample_len{lengths[j]}_{i + j}.pdb" for j in range(B)])
+
+
         pbar.update(B)
+
+
 
     pbar.close()
 
