@@ -1,4 +1,5 @@
 import copy
+import math
 from functools import partial
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -13,10 +14,10 @@ from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import cat_bb_scn, stack_aux_traj
 from allatom_design.data.pdb_utils import *
 from allatom_design.eval import sampling_utils
-from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
-from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
+from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
+from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
 
 class AllAtomModel():
@@ -36,7 +37,7 @@ class AllAtomModel():
     def sample(self,
                lengths: TensorType["b", int],
                residue_index: TensorType["b n", int],
-               timesteps: Tuple[TensorType["b S+1", float]],  # joint timesteps (T_ad, T_sd)
+               timesteps: Tuple[TensorType["S+1", float]],  # joint timesteps (T_ad, T_sd); same for all batch elements
                ad_sampling_inputs: Dict[str, Any],
                sd_sampling_inputs: Dict[str, Any],
                cond_labels: Dict[str, TensorType["b", int]] = {},
@@ -56,7 +57,6 @@ class AllAtomModel():
         aux["seq_mask"] = seq_mask.cpu()
 
         # Initialize sequence / sidechain prior (all masked, time t=0)
-        t_sd = torch.zeros((B, ), device=residue_index.device)
         xt_scn = torch.zeros(B, N, len(rc.non_bb_idxs), 3, device=residue_index.device)
         aatype_t = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
         mlm_mask = torch.zeros_like(seq_mask)
@@ -66,14 +66,13 @@ class AllAtomModel():
         xt_traj, aatype_t_traj = [], []
         aux_preds_ad_traj, aux_preds_sd_traj = [], []
 
-        S = timesteps[0].shape[1] - 1  # number of sampling steps
+        S = timesteps[0].shape[0] - 1  # number of sampling steps
         for i in tqdm(range(S), desc="Sampling", leave=False):
-            T = tuple(ts[:, i] for ts in timesteps) if len(timesteps) > 1 else timesteps[0][:, i]
-            T_next = tuple(ts[:, i+1] for ts in timesteps) if len(timesteps) > 1 else timesteps[0][:, i+1]
+            T = tuple(ts[i] for ts in timesteps)
+            T_next = tuple(ts[i+1] for ts in timesteps)
 
             # Sample backbone
-            # TODO: set up partial diffusion here with T
-            T_ad, T_sd = T
+            T_sd = T[1].expand(B)
             x1_bb, aux_preds_ad = self.sample_backbone(
                 xt_scn=xt_scn,
                 aatype_noised=aatype_t,
@@ -95,13 +94,16 @@ class AllAtomModel():
                 **sd_sampling_inputs
             )
 
-            # Noise sequence back to time T_next_sd
-            T_next_sd = T_next[1]
-            sd_interpolant_out = self.sd_model.interpolant({"x": x1, "aatype": aatype_pred, "seq_mask": seq_mask}, t=T_next_sd)
+            # Set up partial diffusion for next backbone diffusion
+            T_next_ad, T_next_sd = T_next
+            S_bb = ad_sampling_inputs["timesteps"][0].shape[1] - 1  # number of backbone sampling steps
+            partial_diff_inputs = {"x_bb_in": x1_bb, "num_steps_partial": math.ceil(((1 - T_next_ad) * S_bb).item())}
+            ad_sampling_inputs["partial_diff_inputs"] = partial_diff_inputs
 
-            xt_scn = sd_interpolant_out["x_noised"][..., rc.non_bb_idxs, :]
-            aatype_t = sd_interpolant_out["aatype_noised"]
-            mlm_mask = sd_interpolant_out["mlm_mask"]
+            # Noise sequence back to time T_next_sd
+            T_next_sd = T_next_sd.expand(B)
+            xt, aatype_t, mlm_mask = self.sd_model.interpolant.noise_samples(x1, aatype_pred, T_next_sd, seq_mask)
+            xt_scn = xt[..., rc.non_bb_idxs, :]
 
             # Save auxiliary outputs
             xt_traj.append(cat_bb_scn(x1_bb, xt_scn).cpu())
@@ -114,8 +116,8 @@ class AllAtomModel():
         aux["aatype_t_traj"] = torch.stack(aatype_t_traj, dim=1)  # [B, S, N]
 
         # preprocess aux trajectories
-        aux["aux_preds_ad_traj"] = stack_aux_traj(aux_preds_ad_traj)  # values are [B, S, S_bb, N, A, X]
-        aux["aux_preds_sd_traj"] = stack_aux_traj(aux_preds_sd_traj)  # values are [B, S, S_seq, ...]
+        # aux["aux_preds_ad_traj"] = stack_aux_traj(aux_preds_ad_traj)  # values are [B, S, S_bb, N, A, X]
+        # aux["aux_preds_sd_traj"] = stack_aux_traj(aux_preds_sd_traj)  # values are [B, S, S_seq, ...]
 
         return x1, aatype_pred, aux
 
@@ -134,6 +136,7 @@ class AllAtomModel():
         cond_labels: Dict[str, TensorType["b", int]] = {},
         noise_schedule: Tuple[Optional[NoiseSchedule]] = None,  # noise schedule for (t_ca, t_nco)
         churn_cfg: Tuple[Optional[Dict[str, float]]] = None, # churn config for (t_ca, t_nco)
+        partial_diff_inputs: Dict[str, Any] = {},
         ):
         """
         Run diffusion (or partial diffusion) to generate backbone, conditioned on noisy sequence.
@@ -157,6 +160,8 @@ class AllAtomModel():
             # overrides
             "xt_override": xt_override,
             "xt_override_mask": xt_override_mask,
+            "x_bb_in": partial_diff_inputs.get("x_bb_in", None),
+            "num_steps_partial": partial_diff_inputs.get("num_steps_partial", None),
         }
 
         # Run atom denoiser

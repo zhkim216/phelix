@@ -41,3 +41,18 @@ class SDInterpolant(nn.Module, ABC):
     @abstractmethod
     def sample_prior(self, shape: Tuple, device: torch.device) -> TensorType["b n a 3"]:
         pass
+
+
+    @abstractmethod
+    def noise_samples(self,
+                      x: TensorType["b n a 3"],
+                      aatype: TensorType["b n", int],
+                      t: TensorType["b"],
+                      seq_mask: TensorType["b n"],
+                      ) -> Tuple[TensorType["b n a 3", float],
+                                 TensorType["b n", int],
+                                 TensorType["b n", int]]:
+        """
+        Add noise to x and aatype. Return x_noised, aatype_noised, and mlm_mask.
+        """
+        pass

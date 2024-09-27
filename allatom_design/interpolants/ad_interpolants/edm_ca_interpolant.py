@@ -101,9 +101,9 @@ class EDM_CA(ADInterpolant):
         return x0
 
 
-    def noise_x(self, x: TensorType["b n a 3"], t: TensorType["b"]) -> TensorType["b n a 3"]:
+    def noise_x(self, x: TensorType["b n a 3"], t: Tuple[TensorType["b"]]) -> TensorType["b n a 3"]:
         """
-        Add noise to the latent.
+        Add noise to x.
         """
         sigma_ca, sigma_nco = self.sigma(t)
         x_ca = x[..., 1:2, :] + torch.randn_like(x[..., 1:2, :]) * rearrange(sigma_ca, "b -> b 1 1 1")

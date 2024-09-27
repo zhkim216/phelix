@@ -202,12 +202,28 @@ class DiTDenoiser(BaseAtomDenoiser):
             xt_bb_override = aux_inputs["xt_override"][..., rc.bb_idxs, :]
             xt_bb_override_mask = aux_inputs["xt_override_mask"][..., rc.bb_idxs, :]
 
+            # If a backbone input is provided, run partial diffusion instead
+            if aux_inputs.get("x_bb_in", None) is not None:
+                xt_bb = aux_inputs["x_bb_in"]
+                S = aux_inputs["num_steps_partial"]
+
+                if self.cfg.interpolant.name == "edm_ca":
+                    # Center N, C, and O on CA
+                    xt_bb[..., rc.nco_idxs, :] = xt_bb[..., rc.nco_idxs, :] - xt_bb[..., 1:2, :]
+
+                timesteps = [ts[:, -(S + 1):] for ts in timesteps]  # truncate timesteps to the partial diffusion range
+                xt_bb = self.interpolant.noise_x(xt_bb, [t[:, 0] for t in timesteps])  # noise samples to first of the truncated timesteps
+
+                xt_bb_override = xt_bb_override[-(S + 1):]
+                xt_bb_override_mask = xt_bb_override_mask[-(S + 1):]
+            else:
+                xt_bb = x0_bb
+
             # Run integration steps
             denoiser_fn = partial(self.dit, aatype_noised=aatype_noised,
                                   residue_index=residue_index, seq_mask=seq_mask,
                                   cond_labels_in=cond_labels_in)
 
-            xt_bb = x0_bb
             for i in tqdm(range(S), leave=False, desc="Sampling..."):
                 t = tuple(ts[:, i] for ts in timesteps) if len(timesteps) > 1 else timesteps[0][:, i]
                 t_next = tuple(ts[:, i + 1] for ts in timesteps) if len(timesteps) > 1 else timesteps[0][:, i + 1]
