@@ -183,10 +183,6 @@ def update_config(cfg: DictConfig) -> None:
     if cfg.denoiser.interpolant.name == "edm_ca":
         cfg.model.scale_factor_mode = "ca_nco_bb"
 
-    if getattr(cfg.denoiser, "autoguidance", None) and cfg.denoiser.autoguidance.enabled:
-        # Autoguidance model parameters are not always used
-        cfg.trainer.strategy = "ddp_find_unused_parameters_true"
-
 
 if __name__ == "__main__":
     main()
