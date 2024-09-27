@@ -22,47 +22,41 @@ limit_traj_steps: 0  # limit the number of steps we save in a trajectory (evenly
 traj_conect: false
 align_traj_to_last_step: false  # whether to align trajectories to the last step
 
-timestep_schedule:
-  num_steps: 500
-  # for ca nco backbone diffusion
-  ca:
+num_steps: 500
+ca:
+  timestep_schedule:
+    num_steps: ${num_steps}
     mode: "linear"
-    num_steps: ${timestep_schedule.num_steps}
     t_start: 0.0
     t_end: 1.0
-  nco:
+  noise_schedule:
+    name: "linear"
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${num_steps}
+  s_max_override: null  # if not null, override s_max in interpolant
+
+nco:
+  timestep_schedule:
+    num_steps: ${num_steps}
     mode: "linear"
-    num_steps: ${timestep_schedule.num_steps}
     t_start: 0.0
     t_end: 1.0
+  noise_schedule:
+    name: "linear"
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${num_steps}
+  s_max_override: null  # if not null, override s_max in interpolant
 
 # cond_labels: {"designability": "DESIGNABLE"}  # null for unconditional sampling
 cond_labels: null
-
-ca_diffusion:
-  # CA backbone diffusion parameters
-  noise_schedule:
-    name: "linear"
-  churn_cfg:
-    s_churn: 0
-    s_noise: 1.0
-    s_t_min: 0.01
-    s_t_max: 50.0
-    num_steps: ${timestep_schedule.num_steps}
-  s_max_override: null  # if not null, override s_max in interpolant
-
-nco_diffusion:
-  # NCO backbone diffusion parameters
-  noise_schedule:
-    name: "linear"
-  churn_cfg:
-    s_churn: 0
-    s_noise: 1.0
-    s_t_min: 0.01
-    s_t_max: 50.0
-    num_steps: ${timestep_schedule.num_steps}
-  s_max_override: null  # if not null, override s_max in interpolant
-
 
 # MPNN args
 mpnn:
