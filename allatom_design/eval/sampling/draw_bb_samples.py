@@ -67,15 +67,15 @@ def main(cfg: DictConfig):
     lengths_to_sample = np.arange(start, end + 1, cfg.length_step_size)
     all_lengths = lengths_to_sample.repeat(cfg.n_samples_per_length)  # get the length of each protein we'll sample
     save_traj_mask = np.tile(np.arange(cfg.n_samples_per_length) < cfg.n_traj_per_length, len(lengths_to_sample))  # get mask of the trajectories we'll save
-    save_traj_steps = np.linspace(0, cfg.timestep_schedule.num_steps - 1, cfg.limit_traj_steps, dtype=int)  # get the steps of the trajectories we'll save
+    save_traj_steps = np.linspace(0, cfg.num_steps - 1, cfg.limit_traj_steps, dtype=int)  # get the steps of the trajectories we'll save
     print(f"Drawing {cfg.n_samples_per_length} samples each of lengths {start} to {end} with step size {cfg.length_step_size}")
 
     # Override s_max
-    if cfg.ca_diffusion.s_max_override is not None:
-        lit_ad_model.model.denoiser.interpolant.ca_interpolant.set_s_max(cfg.ca_diffusion.s_max_override)
+    if cfg.ca.s_max_override is not None:
+        lit_ad_model.model.denoiser.interpolant.ca_interpolant.set_s_max(cfg.ca.s_max_override)
 
-    if cfg.nco_diffusion.s_max_override is not None:
-        lit_ad_model.model.denoiser.interpolant.nco_interpolant.set_s_max(cfg.nco_diffusion.s_max_override)
+    if cfg.nco.s_max_override is not None:
+        lit_ad_model.model.denoiser.interpolant.nco_interpolant.set_s_max(cfg.nco.s_max_override)
 
     ### SAMPLE ###
     pbar = tqdm(total=len(all_lengths))
@@ -88,18 +88,18 @@ def main(cfg: DictConfig):
         residue_index = residue_index[None].expand(B, -1)
 
         # Create timesteps, separating timesteps for CA and NCO
-        t_ca = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule.ca)
+        t_ca = sampling_utils.get_timesteps_from_schedule(**cfg.ca.timestep_schedule)
         t_ca = t_ca[None].expand(B, -1).to(lit_ad_model.device)
-        t_nco = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule.nco)
+        t_nco = sampling_utils.get_timesteps_from_schedule(**cfg.nco.timestep_schedule)
         t_nco = t_nco[None].expand(B, -1).to(lit_ad_model.device)
         timesteps = (t_ca, t_nco)
 
         # Create noise schedules for CA and NCO
-        noise_schedule = (NoiseSchedule(cfg.ca_diffusion.noise_schedule),
-                          NoiseSchedule(cfg.nco_diffusion.noise_schedule))
+        noise_schedule = (NoiseSchedule(cfg.ca.noise_schedule),
+                          NoiseSchedule(cfg.nco.noise_schedule))
 
         # Create churn configs for CA and NCO
-        churn_cfg = (dict(cfg.ca_diffusion.churn_cfg), dict(cfg.nco_diffusion.churn_cfg))
+        churn_cfg = (dict(cfg.ca.churn_cfg), dict(cfg.nco.churn_cfg))
 
         cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, lit_ad_model.device)
         x_bb_denoised, aux = lit_ad_model.model.sample(lengths,

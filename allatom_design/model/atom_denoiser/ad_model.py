@@ -150,9 +150,10 @@ class AtomDenoiser(nn.Module):
         seq_mask = (ranges < lengths[:, None]).float()
         aux["seq_mask"] = seq_mask.cpu()
 
-        # Initialize sidechain and sequence prior (all masked)
-        xt_scn = torch.zeros(B, N, len(rc.non_bb_idxs), 3, device=residue_index.device)
-        aatype_noised = torch.full_like(residue_index, fill_value=self.restype_order_with_x["X"])
+        # Initialize sequence / sidechain prior (all masked, time t=0)
+        t_sd = torch.zeros((B, ), device=residue_index.device)
+        xt_scn = torch.zeros((B, N, len(rc.non_bb_idxs), 3), device=residue_index.device)
+        aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
         mlm_mask = torch.zeros_like(seq_mask)
 
         # Make unimodal timesteps into a tuple for consistency
@@ -186,7 +187,7 @@ class AtomDenoiser(nn.Module):
             "aatype_override_mask": aatype_override_mask,
         }
         x1_bb, aux_preds = self.denoiser(xt_scn=xt_scn,
-                                         aatype_noised=aatype_noised, t=None, residue_index=residue_index,
+                                         aatype_noised=aatype_noised, t_sd=t_sd, residue_index=residue_index,
                                          seq_mask=seq_mask, mlm_mask=mlm_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs, is_sampling=True)
 
         aux.update(aux_preds["bb_diffusion_aux"])
