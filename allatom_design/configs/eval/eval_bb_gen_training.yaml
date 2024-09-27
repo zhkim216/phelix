@@ -31,23 +31,29 @@ n_samples_per_length: 2
 cond_labels: null
 
 num_steps_list: [1, 20, 100]  # number of diffusion steps for backbone generation
-timestep_schedule:
-  num_steps: 10
-  # for ca nco backbone diffusion
-  ca:
+num_steps: null  # filled in based on num_steps_list
+ca:
+  timestep_schedule:
+    num_steps: ${num_steps}
     mode: "linear"
-    num_steps: ${timestep_schedule.num_steps}
     t_start: 0.0
     t_end: 1.0
-  nco:
+  noise_schedule:
+    name: "linear"
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${num_steps}
+  s_max_override: null  # if not null, override s_max in interpolant
+
+nco:
+  timestep_schedule:
+    num_steps: ${num_steps}
     mode: "linear"
-    num_steps: ${timestep_schedule.num_steps}
     t_start: 0.0
     t_end: 1.0
-
-bb_diffusion:
-  # Backbone diffusion parameters
-  num_steps: 200
   noise_schedule:
     name: "linear"
   churn_cfg:
@@ -55,31 +61,18 @@ bb_diffusion:
     s_noise: 1.0
     s_t_min: 0.01
     s_t_max: 50.0
-    num_steps: ${bb_diffusion.num_steps}
-
-ca_diffusion:
-  # CA backbone diffusion parameters
-  noise_schedule:
-    name: "linear"
-  churn_cfg:
-    s_churn: 0
-    s_noise: 1.0
-    s_t_min: 0.01
-    s_t_max: 50.0
-    num_steps: ${timestep_schedule.num_steps}
+    num_steps: ${num_steps}
   s_max_override: null  # if not null, override s_max in interpolant
 
-nco_diffusion:
-  # NCO backbone diffusion parameters
-  noise_schedule:
-    name: "linear"
-  churn_cfg:
-    s_churn: 0
-    s_noise: 1.0
-    s_t_min: 0.01
-    s_t_max: 50.0
-    num_steps: ${timestep_schedule.num_steps}
-  s_max_override: null  # if not null, override s_max in interpolant
+autoguidance_cfg:
+  use_autoguidance: false
+  w: 1.0
+  use_ag_self_cond: false  # use self conditioning from guidance model rather than main model
+
+sc_guidance_cfg:
+  use_sc_guidance: false
+  w: 1.0
+
 
 # MPNN args
 mpnn:
