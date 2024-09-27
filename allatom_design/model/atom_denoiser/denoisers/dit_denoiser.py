@@ -61,9 +61,15 @@ class DiTDenoiser(BaseAtomDenoiser):
         # Autoguidance
         self.use_autoguidance = cfg.autoguidance.enabled
         if self.use_autoguidance:
-            assert cfg.autoguidance.main_model_ckpt is not None, "Must provide a checkpoint for training autoguidance"
-            self.load_pretrained_module(cfg.autoguidance.main_model_ckpt, "dit", freeze=True)  # Load in main model's DiT
             self.guiding_model = DiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.interpolant)  # override with autoguidance config
+
+
+    def setup(self):
+        cfg = self.cfg
+        if self.use_autoguidance:
+            # Load in a pretrained main model's DiT
+            assert cfg.autoguidance.main_model_ckpt is not None, "Must provide a checkpoint for training autoguidance"
+            self.load_pretrained_module(cfg.autoguidance.main_model_ckpt, "dit", freeze=True)
 
 
     def forward(self,
