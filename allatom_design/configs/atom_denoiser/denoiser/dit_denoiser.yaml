@@ -4,7 +4,6 @@ defaults:
   - _self_
   - interpolant: edm_ca_interpolant
 
-pretrained_ckpt_path: null
 
 # Diffusion settings
 use_self_conditioning: true
@@ -42,7 +41,7 @@ dit:
 
 autoguidance:
   enabled: false
-  subsample_train_iter_mult: 16  # train with roughly 1/K of the training iterations
+  main_model_ckpt: null
 
   # Config for guiding model; overrides config for DiT
   dit:
