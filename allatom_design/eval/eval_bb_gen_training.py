@@ -103,11 +103,11 @@ def main(cfg: DictConfig):
             lit_ad_model.cfg.data.update({k: v for k, v in cfg.data.items() if v is not None})  # override data config where specified
 
         # Override s_max
-        if cfg.ca_diffusion.s_max_override is not None:
-            lit_ad_model.model.denoiser.interpolant.ca_interpolant.set_s_max(cfg.ca_diffusion.s_max_override)
+        if cfg.ca.s_max_override is not None:
+            lit_ad_model.model.denoiser.interpolant.ca_interpolant.set_s_max(cfg.ca.s_max_override)
 
-        if cfg.nco_diffusion.s_max_override is not None:
-            lit_ad_model.model.denoiser.interpolant.nco_interpolant.set_s_max(cfg.nco_diffusion.s_max_override)
+        if cfg.nco.s_max_override is not None:
+            lit_ad_model.model.denoiser.interpolant.nco_interpolant.set_s_max(cfg.nco.s_max_override)
 
         ### BEGIN EVAL ###
         # Define the range of lengths to sample
@@ -118,6 +118,7 @@ def main(cfg: DictConfig):
         # Sample backbones
         for S in cfg.num_steps_list:
             pdbs = []
+            cfg.num_steps = S
 
             for i in range(0, len(all_lengths), cfg.batch_size):
                 # Choose lengths and residue index
@@ -127,27 +128,29 @@ def main(cfg: DictConfig):
                 residue_index = residue_index[None].expand(B, -1)
 
                 # Create timesteps, separating timesteps for CA and NCO
-                cfg.timestep_schedule.num_steps = S  # set num_steps for this iteration
-                t_ca = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule.ca)
+                t_ca = sampling_utils.get_timesteps_from_schedule(**cfg.ca.timestep_schedule)
                 t_ca = t_ca[None].expand(B, -1).to(lit_ad_model.device)
-                t_nco = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule.nco)
+                t_nco = sampling_utils.get_timesteps_from_schedule(**cfg.nco.timestep_schedule)
                 t_nco = t_nco[None].expand(B, -1).to(lit_ad_model.device)
                 timesteps = (t_ca, t_nco)
 
                 # Create noise schedules for CA and NCO
-                noise_schedule = (NoiseSchedule(cfg.ca_diffusion.noise_schedule),
-                                  NoiseSchedule(cfg.nco_diffusion.noise_schedule))
+                noise_schedule = (NoiseSchedule(cfg.ca.noise_schedule),
+                                  NoiseSchedule(cfg.nco.noise_schedule))
 
                 # Create churn configs for CA and NCO
-                churn_cfg = (dict(cfg.ca_diffusion.churn_cfg), dict(cfg.nco_diffusion.churn_cfg))
+                churn_cfg = (dict(cfg.ca.churn_cfg), dict(cfg.nco.churn_cfg))
 
                 cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, lit_ad_model.device)
                 x_bb_denoised, aux = lit_ad_model.model.sample(lengths,
-                                                            residue_index=residue_index,
-                                                            timesteps=timesteps,
-                                                            cond_labels=cond_labels_in,
-                                                            noise_schedule=noise_schedule,
-                                                            churn_cfg=churn_cfg)
+                                                               residue_index=residue_index,
+                                                               timesteps=timesteps,
+                                                               cond_labels=cond_labels_in,
+                                                               noise_schedule=noise_schedule,
+                                                               churn_cfg=churn_cfg,
+                                                               autoguidance_cfg=dict(cfg.autoguidance_cfg),
+                                                               sc_guidance_cfg=dict(cfg.sc_guidance_cfg),
+                                                               )
 
                 samples = {"x_bb_denoised": x_bb_denoised,
                             "seq_mask": aux["seq_mask"],
