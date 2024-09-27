@@ -182,9 +182,9 @@ class EDM_CA(ADInterpolant):
         # Handle autoguidance
         autoguidance_cfg = aux_inputs.get("autoguidance_cfg", None)
         if (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"]):
+            # TODO: move this to each edm_interpolant
             f_autoguidance = autoguidance_cfg["autoguidance_fn"]
             x1_pred_ag, aux_preds_ag = f_autoguidance(xt, t=t)
-            aux_preds["x1_pred_ag"] = x1_pred_ag
 
             w = autoguidance_cfg["w"]
             x1_pred = w * x1_pred + (1 - w) * x1_pred_ag
