@@ -33,6 +33,9 @@ class BaseAtomDenoiser(nn.Module, ABC):
 
 
     def setup(self, **kwargs):
+        """
+        Setup function is only called at the start of training. Useful for loading pre-trained modules only at the start of training.
+        """
         pass
 
 
