@@ -178,13 +178,14 @@ class EDM_CA(ADInterpolant):
         - It should take in the current state and the current time.
         """
         x1_pred, aux_preds = f(xt, t=t)
+        aux_preds["x1_pred"] = x1_pred  # save x1_pred before any guidance modifications
 
         # Handle autoguidance
         autoguidance_cfg = aux_inputs.get("autoguidance_cfg", None)
         if (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"]):
             # TODO: move this to each edm_interpolant
             f_autoguidance = autoguidance_cfg["autoguidance_fn"]
-            x1_pred_ag, aux_preds_ag = f_autoguidance(xt, t=t)
+            x1_pred_ag, _ = f_autoguidance(xt, t=t)
 
             w = autoguidance_cfg["w"]
             x1_pred = w * x1_pred + (1 - w) * x1_pred_ag
@@ -202,9 +203,6 @@ class EDM_CA(ADInterpolant):
             score_ca = noise_schedule_ca.scale_vf(score_ca, t)
         if noise_schedule_nco is not None:
             score_nco = noise_schedule_nco.scale_vf(score_nco, t)
-
-        # Add to auxiliary outputs
-        aux_preds["x1_pred"] = x1_pred
 
         # take the step
         sigma_next_ca, sigma_next_nco = self.sigma(t_next)

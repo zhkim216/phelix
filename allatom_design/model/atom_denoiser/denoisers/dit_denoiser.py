@@ -61,15 +61,8 @@ class DiTDenoiser(BaseAtomDenoiser):
         # Autoguidance
         self.use_autoguidance = cfg.autoguidance.enabled
         if self.use_autoguidance:
+            self.autoguidance_train_p = 1 / cfg.autoguidance.subsample_train_iter_mult
             self.guiding_model = DiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.interpolant)  # override with autoguidance config
-
-
-    def setup(self):
-        cfg = self.cfg
-        if self.use_autoguidance:
-            # Load in a pretrained main model's DiT
-            assert cfg.autoguidance.main_model_ckpt is not None, "Must provide a checkpoint for training autoguidance"
-            self.load_pretrained_module(cfg.autoguidance.main_model_ckpt, "dit", freeze=True)
 
 
     def forward(self,
@@ -154,17 +147,18 @@ class DiTDenoiser(BaseAtomDenoiser):
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
             else:
                 x1_bb_batched_sc = None
+            denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_sc)
 
-            # Run either main model or autoguidance model
-            if not self.use_autoguidance:
-                # Denoiser forward pass
-                denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_sc)
-                x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
-                                                    seq_mask=seq_mask_batched, residue_index=residue_index_batched,
-                                                    cond_labels_in=cond_labels_in_batched)
-                diffusion_aux["autoguidance_aux"] = None
-            else:
-                # Autoguidance model forward pass
+            # Denoiser forward pass
+            x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
+                                                   seq_mask=seq_mask_batched, residue_index=residue_index_batched,
+                                                   cond_labels_in=cond_labels_in_batched)
+
+            # Autoguidance model forward pass
+            diffusion_aux["autoguidance_aux"] = None
+            if self.use_autoguidance and (np.random.uniform() < self.autoguidance_train_p):
+                ### If memory spikes due to running the autoguidance model,
+                ### consider conditional activation checkpointing, separate optimization steps, alternating head predictions, or just training the models separately.
                 ag_denoiser_fn = partial(self.guiding_model, x_self_cond=x1_bb_batched_sc)  # use self-conditioning from main model
                 x1_bb_batched_guide, _ = ag_denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
                                                         seq_mask=seq_mask_batched, residue_index=residue_index_batched,
@@ -176,10 +170,6 @@ class DiTDenoiser(BaseAtomDenoiser):
                     "bb_target": x_bb_gt_batched,
                     "loss_weight_t": loss_weight_t_batched
                 }
-
-                # make dummy main model outputs
-                x1_bb_batched = x_bb_gt_batched
-
 
             # Outputs
             x1_bb = None  # during training, we return the batched version in diffusion_aux
@@ -229,11 +219,16 @@ class DiTDenoiser(BaseAtomDenoiser):
             use_autoguidance = (aux_inputs["autoguidance_cfg"] is not None) and (aux_inputs["autoguidance_cfg"]["use_autoguidance"])
             if use_autoguidance:
                 assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
-                # TODO: how do we use autoguidance with self-conditioning? should we even?
                 aux_inputs["autoguidance_cfg"]["autoguidance_fn"] = partial(self.guiding_model, aatype_noised=aatype_noised,
                                                                             residue_index=residue_index, seq_mask=seq_mask,
                                                                             cond_labels_in=cond_labels_in)
 
+            # Guidance from non-self-conditioned model
+            use_sc_guidance = (aux_inputs["sc_guidance_cfg"] is not None) and (aux_inputs["sc_guidance_cfg"]["use_sc_guidance"])
+            if use_sc_guidance:
+                aux_inputs["sc_guidance_cfg"]["sc_guidance_fn"] = partial(self.dit, aatype_noised=aatype_noised,
+                                                                        residue_index=residue_index, seq_mask=seq_mask,
+                                                                        cond_labels_in=cond_labels_in)
 
             # Run integration steps
             denoiser_fn = partial(self.dit, aatype_noised=aatype_noised,
