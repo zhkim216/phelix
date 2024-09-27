@@ -179,6 +179,16 @@ class EDM_CA(ADInterpolant):
         """
         x1_pred, aux_preds = f(xt, t=t)
 
+        # Handle autoguidance
+        autoguidance_cfg = aux_inputs.get("autoguidance_cfg", None)
+        if (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"]):
+            f_autoguidance = autoguidance_cfg["autoguidance_fn"]
+            x1_pred_ag, aux_preds_ag = f_autoguidance(xt, t=t)
+            aux_preds["x1_pred_ag"] = x1_pred_ag
+
+            w = autoguidance_cfg["w"]
+            x1_pred = w * x1_pred + (1 - w) * x1_pred_ag
+
         sigma_ca, sigma_nco = self.sigma(t)
         score_ca = (xt[..., 1:2, :] - x1_pred[..., 1:2, :]) / rearrange(sigma_ca, "b -> b 1 1 1")
         score_nco = (xt[..., rc.nco_idxs, :] - x1_pred[..., rc.nco_idxs, :]) / rearrange(sigma_nco, "b -> b 1 1 1")

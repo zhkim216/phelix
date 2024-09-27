@@ -58,6 +58,10 @@ nco:
 # cond_labels: {"designability": "DESIGNABLE"}  # null for unconditional sampling
 cond_labels: null
 
+autoguidance_cfg:
+  use_autoguidance: false
+  w: 1.0
+
 # MPNN args
 mpnn:
   mpnn_cfg: allatom_design/configs/mpnn/proteinmpnn.yaml

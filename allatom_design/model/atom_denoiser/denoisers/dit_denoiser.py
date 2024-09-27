@@ -137,36 +137,32 @@ class DiTDenoiser(BaseAtomDenoiser):
 
             # Run denoising DiT
             denoiser_fn = self.dit
-            if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
-                # Apply self-conditioning
-                with torch.no_grad():
-                    x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
-                                                           seq_mask=seq_mask_batched, residue_index=residue_index_batched,
-                                                           cond_labels_in=cond_labels_in_batched)
-                torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
-                denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched)
 
+            # Apply self-conditioning
+            if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
+                with torch.no_grad():
+                    x1_bb_batched_sc, _ = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
+                                                      seq_mask=seq_mask_batched, residue_index=residue_index_batched,
+                                                      cond_labels_in=cond_labels_in_batched)
+                torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
+            else:
+                x1_bb_batched_sc = None
+            denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_sc)
+
+            # Denoiser forward pass
             x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
                                                    seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                    cond_labels_in=cond_labels_in_batched)
 
-            # Train autoguidance model
+            # Autoguidance model forward pass
             diffusion_aux["autoguidance_aux"] = None
             if self.use_autoguidance and (np.random.uniform() < self.autoguidance_train_p):
                 ### If memory spikes due to running the autoguidance model,
-                ### consider activation checkpointing, separate optimization steps, alternating head predictions, or just training the models separately.
-                denoiser_fn = self.guiding_model
-                if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
-                    with torch.no_grad():
-                        x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
-                                                             seq_mask=seq_mask_batched, residue_index=residue_index_batched,
-                                                             cond_labels_in=cond_labels_in_batched)
-                    torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
-                    denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_guide)
-
-                x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
-                                                     seq_mask=seq_mask_batched, residue_index=residue_index_batched,
-                                                     cond_labels_in=cond_labels_in_batched)
+                ### consider conditional activation checkpointing, separate optimization steps, alternating head predictions, or just training the models separately.
+                ag_denoiser_fn = partial(self.guiding_model, x_self_cond=x1_bb_batched_sc)  # use self-conditioning from main model
+                x1_bb_batched_guide, _ = ag_denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
+                                                        seq_mask=seq_mask_batched, residue_index=residue_index_batched,
+                                                        cond_labels_in=cond_labels_in_batched)
 
                 # add to autoguidance outputs
                 diffusion_aux["autoguidance_aux"] = {
@@ -219,6 +215,15 @@ class DiTDenoiser(BaseAtomDenoiser):
             else:
                 xt_bb = x0_bb
 
+            # Apply autoguidance
+            use_autoguidance = (aux_inputs["autoguidance_cfg"] is not None) and (aux_inputs["autoguidance_cfg"]["use_autoguidance"])
+            if use_autoguidance:
+                assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
+                # TODO: how do we use autoguidance with self-conditioning? should we even?
+                aux_inputs["autoguidance_cfg"]["autoguidance_fn"] = partial(self.guiding_model, aatype_noised=aatype_noised,
+                                                                            residue_index=residue_index, seq_mask=seq_mask,
+                                                                            cond_labels_in=cond_labels_in)
+
             # Run integration steps
             denoiser_fn = partial(self.dit, aatype_noised=aatype_noised,
                                   residue_index=residue_index, seq_mask=seq_mask,
@@ -242,6 +247,10 @@ class DiTDenoiser(BaseAtomDenoiser):
                 if self.use_self_conditioning:
                     # Apply self-conditioning
                     denoiser_fn = partial(denoiser_fn, x_self_cond=aux_preds["x1_pred"])
+
+                    if use_autoguidance:
+                        aux_inputs["autoguidance_cfg"]["autoguidance_fn"] = partial(aux_inputs["autoguidance_cfg"]["autoguidance_fn"],
+                                                                                    x_self_cond=aux_preds["x1_pred"])
 
                 # Save current state
                 xt_bb_traj.append(xt_bb.cpu())
