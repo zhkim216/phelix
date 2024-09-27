@@ -85,9 +85,9 @@ def main(cfg: DictConfig):
         cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, device)
 
         # === Handle all-atom model joint timesteps === #
-        T_ad = sampling_utils.get_timesteps_from_schedule(**cfg.joint.ad.timestep_schedule)
-        T_sd = sampling_utils.get_timesteps_from_schedule(**cfg.joint.sd.timestep_schedule)
-        timesteps = (T_ad[None].expand(B, -1).to(device), T_sd[None].expand(B, -1).to(device))
+        T_ad = sampling_utils.get_timesteps_from_schedule(**cfg.joint.ad.timestep_schedule).to(device)
+        T_sd = sampling_utils.get_timesteps_from_schedule(**cfg.joint.sd.timestep_schedule).to(device)
+        timesteps = (T_ad, T_sd)
 
         # === Handle atom denoiser inputs === #
         ad_sampling_inputs = {}

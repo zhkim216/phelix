@@ -93,7 +93,7 @@ class MAR(SDInterpolant):
                                  TensorType["b n", int],
                                  TensorType["b n", int]]:
         """
-        Add noise to x and aatype.
+        Add noise to x and aatype. Return x_noised, aatype_noised, and mlm_mask.
 
         For MAR, we keep each residue with probability t.
         When masking residues, we zero out the coordinates and set aatype to X.
