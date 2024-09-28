@@ -180,7 +180,7 @@ class EDM_CA(ADInterpolant):
         x1_pred, aux_preds = f(xt, t=t)
         aux_preds["x1_pred"] = x1_pred  # save x1_pred before any guidance modifications
 
-        # Handle autoguidance
+        # Handle guidance
         autoguidance_cfg = aux_inputs.get("autoguidance_cfg", None)
         if (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"]):
             # TODO: move this to each edm_interpolant
@@ -188,8 +188,19 @@ class EDM_CA(ADInterpolant):
             x1_pred_ag, _ = f_autoguidance(xt, t=t)
 
             w = autoguidance_cfg["w"]
-            x1_pred = w * x1_pred + (1 - w) * x1_pred_ag
+            # x1_pred = w * x1_pred + (1 - w) * x1_pred_ag
+            x1_pred += (w - 1) * (aux_preds["x1_pred"] - x1_pred_ag)
             aux_preds["x1_pred_ag"] = x1_pred_ag
+
+        sc_guidance_cfg = aux_inputs.get("sc_guidance_cfg", None)
+        if (sc_guidance_cfg is not None) and (sc_guidance_cfg["use_sc_guidance"]):
+            f_sc_guidance = sc_guidance_cfg["sc_guidance_fn"]
+            x1_pred_sg, _ = f_sc_guidance(xt, t=t)
+
+            w = sc_guidance_cfg["w"]
+            x1_pred += (w - 1) * (aux_preds["x1_pred"] - x1_pred_sg)
+            aux_preds["x1_pred_sg"] = x1_pred_sg
+
 
         sigma_ca, sigma_nco = self.sigma(t)
         score_ca = (xt[..., 1:2, :] - x1_pred[..., 1:2, :]) / rearrange(sigma_ca, "b -> b 1 1 1")
