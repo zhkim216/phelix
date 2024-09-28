@@ -227,13 +227,6 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                                             residue_index=residue_index, seq_mask=seq_mask,
                                                                             cond_labels_in=cond_labels_in)
 
-            # Guidance from non-self-conditioned model
-            use_sc_guidance = (aux_inputs["sc_guidance_cfg"] is not None) and (aux_inputs["sc_guidance_cfg"]["use_sc_guidance"])
-            if use_sc_guidance:
-                aux_inputs["sc_guidance_cfg"]["sc_guidance_fn"] = partial(self.dit, aatype_noised=aatype_noised,
-                                                                        residue_index=residue_index, seq_mask=seq_mask,
-                                                                        cond_labels_in=cond_labels_in)
-
             # Run integration steps
             denoiser_fn = partial(self.dit, aatype_noised=aatype_noised,
                                   residue_index=residue_index, seq_mask=seq_mask,
