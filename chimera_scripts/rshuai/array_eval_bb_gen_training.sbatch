@@ -29,7 +29,7 @@ cd ${BASE_DIR}
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
-NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
+NNTM_DATASET=null  # disable for array jobs
 
 # Model name
 MODEL_NAME=a8_bb4
@@ -65,12 +65,13 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     data.designability_csv=${DESIGNABILITY_CSV} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     nntm_dataset=${NNTM_DATASET} \
-    length_range=[64,256] \
+    length_range=[256,384] \
     num_steps_list=[500] \
     length_step_size=4 \
-    n_samples_per_length=8 \
+    n_samples_per_length=4 \
     autoguidance_cfg.use_autoguidance=true \
     autoguidance_cfg.use_ag_self_cond=${use_ag_self_cond} \
     autoguidance_cfg.w=${w} \
+    mpnn.overrides.batch_size=1 \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}
