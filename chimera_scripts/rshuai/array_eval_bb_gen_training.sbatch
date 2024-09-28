@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=a8_bb4_eval_bb_gen_array
+#SBATCH --job-name=a8_bb5_eval_bb_gen_array
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
-#SBATCH --array=0-9
+#SBATCH --array=0-4
 
 # Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
@@ -32,24 +32,21 @@ DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmf
 NNTM_DATASET=null  # disable for array jobs
 
 # Model name
-MODEL_NAME=a8_bb4
-GROUP=chimera_a8_s0
+MODEL_NAME=a8_bb5
+GROUP=chimera_a8_s1
 
 # Directory where denoiser was trained
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Define parameter options
-use_ag_self_cond_options=(true false)
 w_options=(0.5 1.0 1.2 1.5 2.0)
 
 # Calculate indices based on SLURM_ARRAY_TASK_ID
-use_index=$(( SLURM_ARRAY_TASK_ID / 5 ))    # 0 for 'true', 1 for 'false'
 w_index=$(( SLURM_ARRAY_TASK_ID % 5 ))     # 0 to 4 for 'w' values
 
 # Assign parameter values
-use_ag_self_cond=${use_ag_self_cond_options[$use_index]}
 w=${w_options[$w_index]}
-EXP_NAME=${MODEL_NAME}_eval_bb_gen_agsc${use_ag_self_cond}_w${w}
+EXP_NAME=${MODEL_NAME}_eval_bb_gen_w${w}
 
 # Run the evaluation script with the current parameter combination
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
@@ -70,7 +67,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     length_step_size=4 \
     n_samples_per_length=4 \
     autoguidance_cfg.use_autoguidance=true \
-    autoguidance_cfg.use_ag_self_cond=${use_ag_self_cond} \
+    autoguidance_cfg.use_ag_self_cond=false \
     autoguidance_cfg.w=${w} \
     mpnn.overrides.batch_size=1 \
     +cond_labels.designability=DESIGNABLE \
