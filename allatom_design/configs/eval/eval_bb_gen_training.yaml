@@ -67,7 +67,6 @@ nco:
 autoguidance_cfg:
   use_autoguidance: false
   w: 1.0
-  use_ag_self_cond: false  # use self conditioning from guidance model rather than main model
 
 
 # MPNN args

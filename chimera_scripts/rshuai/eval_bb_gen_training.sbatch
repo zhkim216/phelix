@@ -58,7 +58,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     length_step_size=4 \
     n_samples_per_length=8 \
     autoguidance_cfg.use_autoguidance=true \
-    autoguidance_cfg.use_ag_self_cond=true \
     autoguidance_cfg.w=1.0 \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}

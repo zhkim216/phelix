@@ -252,9 +252,8 @@ class DiTDenoiser(BaseAtomDenoiser):
                     denoiser_fn = partial(denoiser_fn, x_self_cond=aux_preds["x1_pred"])
 
                     if use_autoguidance:
-                        ag_x_self_cond = aux_preds["x1_pred_ag"] if aux_inputs["autoguidance_cfg"]["use_ag_self_cond"] else aux_preds["x1_pred"]
                         aux_inputs["autoguidance_cfg"]["autoguidance_fn"] = partial(aux_inputs["autoguidance_cfg"]["autoguidance_fn"],
-                                                                                    x_self_cond=ag_x_self_cond)
+                                                                                    x_self_cond=aux_preds["x1_pred_ag"])
 
                 # Save current state
                 xt_bb_traj.append(xt_bb.cpu())

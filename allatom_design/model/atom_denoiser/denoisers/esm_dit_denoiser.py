@@ -19,7 +19,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
+
 from torchtyping import TensorType
 from tqdm import tqdm
 
@@ -60,6 +61,12 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
 
         # Set up DiT model
         self.dit = ESMConditionedDiT(cfg.dit, self.interpolant)
+
+        # Autoguidance
+        self.use_autoguidance = cfg.autoguidance.enabled
+        if self.use_autoguidance:
+            self.autoguidance_train_p = 1 / cfg.autoguidance.subsample_train_iter_mult
+            self.guiding_model = ESMConditionedDiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.interpolant)  # override with autoguidance config
 
 
     def forward(self,
@@ -135,7 +142,7 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
             interpolant_out = self.interpolant({"x": x_bb_gt_batched, "aatype": None}, t=t_bb)
             xt_bb_batched = interpolant_out["x_noised"]
             t_batched = interpolant_out["t"]
-            diffusion_aux["loss_weight_t"] = interpolant_out["loss_weight_t"]
+            loss_weight_t_batched = interpolant_out["loss_weight_t"]
 
             # Run denoising DiT
             denoiser_fn = self.dit
@@ -155,12 +162,40 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
                                                    cond_labels_in=cond_labels_in_batched)
 
 
+            # Train autoguidance model
+            diffusion_aux["autoguidance_aux"] = None
+            if self.use_autoguidance and (np.random.uniform() < self.autoguidance_train_p):
+                ### If memory spikes due to running the autoguidance model,
+                ### consider activation checkpointing, separate optimization steps, alternating head predictions, or just training the models separately.
+                denoiser_fn = self.guiding_model
+                if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
+                    with torch.no_grad():
+                        x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched,
+                                                             h_S_batched, aatype_noised_batched, t_batched,
+                                                             seq_mask=seq_mask_batched, residue_index=residue_index_batched,
+                                                             cond_labels_in=cond_labels_in_batched)
+                    torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
+                    denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_guide)
+
+                x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched,
+                                                     h_S_batched, aatype_noised_batched, t_batched,
+                                                     seq_mask=seq_mask_batched, residue_index=residue_index_batched,
+                                                     cond_labels_in=cond_labels_in_batched)
+
+                # add to autoguidance outputs
+                diffusion_aux["autoguidance_aux"] = {
+                    "bb_pred": x1_bb_batched_guide,
+                    "bb_target": x_bb_gt_batched,
+                    "loss_weight_t": loss_weight_t_batched
+                }
+
             # Outputs
             x1_bb = None  # during training, we return the batched version in diffusion_aux
 
             # Cache intermediates for computing loss
             diffusion_aux["bb_pred"] = x1_bb_batched
             diffusion_aux["bb_target"] = x_bb_gt_batched
+            diffusion_aux["loss_weight_t"] = loss_weight_t_batched
 
         else:
             ### SAMPLING ###
@@ -198,6 +233,14 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
             else:
                 xt_bb = x0_bb
 
+            # Apply autoguidance
+            use_autoguidance = (aux_inputs["autoguidance_cfg"] is not None) and (aux_inputs["autoguidance_cfg"]["use_autoguidance"])
+            if use_autoguidance:
+                assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
+                aux_inputs["autoguidance_cfg"]["autoguidance_fn"] = partial(self.guiding_model, aatype_noised=aatype_noised,
+                                                                            residue_index=residue_index, seq_mask=seq_mask,
+                                                                            cond_labels_in=cond_labels_in)
+
             # Run integration steps
             denoiser_fn = partial(self.dit, h_S=h_S, aatype_noised=aatype_noised,
                                   residue_index=residue_index, seq_mask=seq_mask,
@@ -221,6 +264,10 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
                 if self.use_self_conditioning:
                     # Apply self-conditioning
                     denoiser_fn = partial(denoiser_fn, x_self_cond=aux_preds["x1_pred"])
+
+                    if use_autoguidance:
+                        aux_inputs["autoguidance_cfg"]["autoguidance_fn"] = partial(aux_inputs["autoguidance_cfg"]["autoguidance_fn"],
+                                                                                    x_self_cond=aux_preds["x1_pred_ag"])
 
                 # Save current state
                 xt_bb_traj.append(xt_bb.cpu())
@@ -296,6 +343,9 @@ class ESMConditionedDiT(nn.Module):
                                  hidden_size=cfg.hidden_size,
                                  dropout_prob=self.cond_label_to_dropout_p[label]) for label in self.cond_labels
         })
+
+        # ESM conditioning
+        self.h_S_embedder = Linear(cfg.c_s, cfg.hidden_size)
 
         # QK-normalization from SD3
         self.qk_normlayer = None
@@ -409,6 +459,7 @@ class ESMConditionedDiT(nn.Module):
             c = c + self.cond_embedders[label_name](labels_in, self.training)
 
         # sequence embedding conditioning
+        h_S = self.h_S_embedder(h_S)
         c = c.unsqueeze(1) + h_S
 
         ### Blocks ###
