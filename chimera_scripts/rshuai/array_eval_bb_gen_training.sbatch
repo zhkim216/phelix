@@ -6,7 +6,7 @@
 #SBATCH --time=96:00:00
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
-#SBATCH --array=0-4
+#SBATCH --array=0-5
 
 # Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
@@ -67,8 +67,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     length_step_size=4 \
     n_samples_per_length=4 \
     autoguidance_cfg.use_autoguidance=false \
-    sc_guidance_cfg.use_sc_guidance=true \
-    sc_guidance_cfg.w=${w} \
     mpnn.overrides.batch_size=1 \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}

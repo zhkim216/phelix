@@ -69,10 +69,6 @@ autoguidance_cfg:
   w: 1.0
   use_ag_self_cond: false  # use self conditioning from guidance model rather than main model
 
-sc_guidance_cfg:
-  use_sc_guidance: false
-  w: 1.0
-
 
 # MPNN args
 mpnn:
