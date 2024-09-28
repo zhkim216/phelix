@@ -39,6 +39,9 @@ dit:
     crop_aug: 0.0
     designability: 0.2
 
+  # ESM conditioning
+  c_s: ${denoiser.hidden_size}
+
   # QK normalization
   qk_rmsnorm: true
 
@@ -49,3 +52,15 @@ dit:
   mlp_dropout: 0.1
   mlp_ratio: 4.0
 
+# Autoguidance
+autoguidance:
+  enabled: false
+  subsample_train_iter_mult: 16  # train with roughly 1/K of the training iterations
+
+  # Config for guiding model; overrides config for DiT
+  dit:
+    depth: 9
+    hidden_size: 288
+    num_heads: 6
+    mlp_dropout: 0.1
+    mlp_ratio: 4.0
