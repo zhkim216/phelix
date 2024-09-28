@@ -92,77 +92,37 @@ class PowerFunctionEMA:
     def __init__(self, net, stds=[0.050, 0.100]):
         self.net = net
         self.stds = stds
-        self.emas = [copy.deepcopy(net) for _std in stds]
-
-        # Disable gradient tracking for EMA parameters
-        for ema in self.emas:
-            for param in ema.parameters():
-                param.requires_grad = False
+        self.trainable_params = [n for n, p in self.net.named_parameters() if p.requires_grad]
 
 
     @torch.no_grad()
     def reset(self):
-        for ema in self.emas:
-            for p_net, p_ema in zip(self.net.parameters(), ema.parameters()):
-                p_ema.copy_(p_net)
+        net_state_dict = self.net.state_dict()
+        self.emas = []
+
+        # create EMA parameters
+        for _ in self.stds:
+            ema = {}
+            for n in self.trainable_params:
+                p = net_state_dict[n]
+                ema[n] = copy.deepcopy(p).to(p.device).detach().requires_grad_(False)
+            self.emas.append(ema)
+
 
     @torch.no_grad()
     def update(self, t: int):
+        net_state_dict = self.net.state_dict()
+
         for std, ema in zip(self.stds, self.emas):
             beta = power_function_beta(std=std, t=t)
-            for p_net, p_ema in zip(self.net.parameters(), ema.parameters()):
+            for n in self.trainable_params:
+                p_net, p_ema = net_state_dict[n], ema[n]
                 p_ema.lerp_(p_net, 1 - beta)
 
-    @torch.no_grad()
-    def get(self):
-        for ema in self.emas:
-            for p_net, p_ema in zip(self.net.buffers(), ema.buffers()):
-                p_ema.copy_(p_net)
-        return [(ema, f'-{std:.3f}') for std, ema in zip(self.stds, self.emas)]
 
     def state_dict(self):
-        return dict(stds=self.stds, emas=[ema.state_dict() for ema in self.emas])
+        return dict(stds=self.stds, emas=self.emas)
 
     def load_state_dict(self, state):
         self.stds = state['stds']
-        for ema, s_ema in zip(self.emas, state['emas']):
-            ema.load_state_dict(s_ema)
-
-#----------------------------------------------------------------------------
-# Class for tracking traditional EMA during training.
-
-class TraditionalEMA:
-    @torch.no_grad()
-    def __init__(self, net, halflife_Mimg=float('inf'), rampup_ratio=0.09):
-        self.net = net
-        self.halflife_Mimg = halflife_Mimg
-        self.rampup_ratio = rampup_ratio
-        self.ema = copy.deepcopy(net)
-
-    @torch.no_grad()
-    def reset(self):
-        for p_net, p_ema in zip(self.net.parameters(), self.ema.parameters()):
-            p_ema.copy_(p_net)
-
-    @torch.no_grad()
-    def update(self, cur_nimg, batch_size):
-        halflife_Mimg = self.halflife_Mimg
-        if self.rampup_ratio is not None:
-            halflife_Mimg = min(halflife_Mimg, cur_nimg / 1e6 * self.rampup_ratio)
-        beta = 0.5 ** (batch_size / max(halflife_Mimg * 1e6, 1e-8))
-        for p_net, p_ema in zip(self.net.parameters(), self.ema.parameters()):
-            p_ema.lerp_(p_net, 1 - beta)
-
-    @torch.no_grad()
-    def get(self):
-        for p_net, p_ema in zip(self.net.buffers(), self.ema.buffers()):
-            p_ema.copy_(p_net)
-        return self.ema
-
-    def state_dict(self):
-        return self.ema.state_dict()
-
-    def load_state_dict(self, state):
-        self.ema.load_state_dict(state)
-
-#----------------------------------------------------------------------------
+        self.emas = state['emas']
