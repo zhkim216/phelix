@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a8_bb5_eval_bb_gen_array
+#SBATCH --job-name=a8_bb4_eval_bb_gen_scg_array
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -32,21 +32,21 @@ DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmf
 NNTM_DATASET=null  # disable for array jobs
 
 # Model name
-MODEL_NAME=a8_bb5
-GROUP=chimera_a8_s1
+MODEL_NAME=a8_bb4
+GROUP=chimera_a8_s2
 
 # Directory where denoiser was trained
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Define parameter options
-w_options=(0.5 1.0 1.2 1.5 2.0)
+w_options=(0.5 0.75 1.0 1.2 1.5 2.0)
 
 # Calculate indices based on SLURM_ARRAY_TASK_ID
 w_index=$(( SLURM_ARRAY_TASK_ID % 5 ))     # 0 to 4 for 'w' values
 
 # Assign parameter values
 w=${w_options[$w_index]}
-EXP_NAME=${MODEL_NAME}_eval_bb_gen_w${w}
+EXP_NAME=${MODEL_NAME}_eval_bb_gen_scg_w${w}
 
 # Run the evaluation script with the current parameter combination
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
@@ -66,9 +66,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     num_steps_list=[500] \
     length_step_size=4 \
     n_samples_per_length=4 \
-    autoguidance_cfg.use_autoguidance=true \
-    autoguidance_cfg.use_ag_self_cond=false \
-    autoguidance_cfg.w=${w} \
+    autoguidance_cfg.use_autoguidance=false \
+    sc_guidance_cfg.use_sc_guidance=true \
+    sc_guidance_cfg.w=${w} \
     mpnn.overrides.batch_size=1 \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}
