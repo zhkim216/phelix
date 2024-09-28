@@ -137,32 +137,36 @@ class DiTDenoiser(BaseAtomDenoiser):
 
             # Run denoising DiT
             denoiser_fn = self.dit
-
-            # Apply self-conditioning
             if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
+                # Apply self-conditioning
                 with torch.no_grad():
-                    x1_bb_batched_sc, _ = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
-                                                      seq_mask=seq_mask_batched, residue_index=residue_index_batched,
-                                                      cond_labels_in=cond_labels_in_batched)
+                    x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
+                                                           seq_mask=seq_mask_batched, residue_index=residue_index_batched,
+                                                           cond_labels_in=cond_labels_in_batched)
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
-            else:
-                x1_bb_batched_sc = None
-            denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_sc)
+                denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched)
 
-            # Denoiser forward pass
             x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
                                                    seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                    cond_labels_in=cond_labels_in_batched)
 
-            # Autoguidance model forward pass
+            # Train autoguidance model
             diffusion_aux["autoguidance_aux"] = None
             if self.use_autoguidance and (np.random.uniform() < self.autoguidance_train_p):
                 ### If memory spikes due to running the autoguidance model,
-                ### consider conditional activation checkpointing, separate optimization steps, alternating head predictions, or just training the models separately.
-                ag_denoiser_fn = partial(self.guiding_model, x_self_cond=x1_bb_batched_sc)  # use self-conditioning from main model
-                x1_bb_batched_guide, _ = ag_denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
-                                                        seq_mask=seq_mask_batched, residue_index=residue_index_batched,
-                                                        cond_labels_in=cond_labels_in_batched)
+                ### consider activation checkpointing, separate optimization steps, alternating head predictions, or just training the models separately.
+                denoiser_fn = self.guiding_model
+                if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
+                    with torch.no_grad():
+                        x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
+                                                             seq_mask=seq_mask_batched, residue_index=residue_index_batched,
+                                                             cond_labels_in=cond_labels_in_batched)
+                    torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
+                    denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_guide)
+
+                x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched, aatype_noised_batched, t_batched,
+                                                     seq_mask=seq_mask_batched, residue_index=residue_index_batched,
+                                                     cond_labels_in=cond_labels_in_batched)
 
                 # add to autoguidance outputs
                 diffusion_aux["autoguidance_aux"] = {

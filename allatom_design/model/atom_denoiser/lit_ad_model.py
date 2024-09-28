@@ -13,6 +13,7 @@ from torchtyping import TensorType
 
 from allatom_design.model.atom_denoiser.ad_loss import ADLoss
 from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
+from allatom_design.model.phema import PowerFunctionEMA
 
 
 class LitAtomDenoiser(L.LightningModule):
@@ -24,6 +25,9 @@ class LitAtomDenoiser(L.LightningModule):
         if cfg.train.compile_model:
             print(f"Using torch.compile to optimize model performance...")
             self.model = torch.compile(self.model)
+
+        # Initialize EMA tracker after torch.compile
+        self.ema_tracker = PowerFunctionEMA(self.model)
 
         # Set up loss
         self.loss = ADLoss(cfg.loss)
@@ -41,6 +45,11 @@ class LitAtomDenoiser(L.LightningModule):
         return self.model(batch, **kwargs)
 
 
+    def on_train_start(self):
+        # Initialize EMA trackers at the start of training
+        self.ema_tracker.reset()
+
+
     def training_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int):
         outputs = self(batch)
         loss, aux = self.loss(outputs, batch, return_aux=True)
@@ -49,6 +58,11 @@ class LitAtomDenoiser(L.LightningModule):
         self._log(batch, outputs, aux, batch_idx, phase="train")
 
         return loss
+
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        # Update EMA tracker
+        self.ema_tracker.update(t=self.trainer.global_step)
 
 
     def validation_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
@@ -162,6 +176,16 @@ class LitAtomDenoiser(L.LightningModule):
             if total_norm_key in grad_norms:
                 total_norm = grad_norms[total_norm_key]
                 self.log_dict({f"total_l{norm_type}_grad_norm": total_norm})
+
+
+    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+        checkpoint["ema_tracker"] = self.ema_tracker.state_dict()
+
+
+    def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+        ema_state = checkpoint.get("ema_tracker", None)
+        if ema_state is not None:
+            self.ema_tracker.load_state_dict(ema_state)
 
 
 class NoamLR(LRScheduler):
