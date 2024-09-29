@@ -40,7 +40,7 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Run eval script
-WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/post_hoc_ema.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
@@ -53,11 +53,11 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     data.designability_csv=${DESIGNABILITY_CSV} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     nntm_dataset=${NNTM_DATASET} \
-    length_range=[64,256] \
+    length_range=[256,384] \
     num_steps_list=[500] \
     length_step_size=4 \
-    n_samples_per_length=8 \
-    autoguidance_cfg.use_autoguidance=true \
-    autoguidance_cfg.w=1.0 \
+    n_samples_per_length=4 \
+    autoguidance_cfg.use_autoguidance=false \
+    mpnn.overrides.batch_size=1 \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}
