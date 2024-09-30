@@ -171,14 +171,14 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
                 if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                     with torch.no_grad():
                         x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched,
-                                                             h_S_batched, aatype_noised_batched, t_batched,
+                                                             h_S_batched.detach(), aatype_noised_batched, t_batched,
                                                              seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                              cond_labels_in=cond_labels_in_batched)
                     torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                     denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_guide)
 
                 x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched,
-                                                     h_S_batched, aatype_noised_batched, t_batched,
+                                                     h_S_batched.detach(), aatype_noised_batched, t_batched,
                                                      seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                      cond_labels_in=cond_labels_in_batched)
 
