@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
+from colabdesign import clear_mem
+from colabdesign.af import mk_af_model
 from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
@@ -144,17 +146,27 @@ def main(cfg: DictConfig):
     all_metrics = defaultdict(dict)
     pdbs = natsorted(glob.glob(f"{sample_out_dir}/*.pdb"))
 
-    # Load in MPNN and ESMFold models
+    # Load in MPNN and ESMFold/AF2 models
     if cfg.run_mpnn_sc:
         mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
         mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)  # override base mpnn config with mpnn.overrides
         mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
 
-    if cfg.run_mpnn_sc or cfg.run_codes_sc:
-        esmfold = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
-        esmfold.esm = esmfold.esm.half()
-        esmfold = esmfold.to(device)
-        tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
+    esmfold, tokenizer, af_model = None, None, None
+    if (cfg.run_mpnn_sc or cfg.run_codes_sc):
+        if cfg.struct_pred_model == "af2":
+            # Set up AF2 model
+            clear_mem()
+            af_model = mk_af_model(data_dir=cfg.af2.data_dir,
+                                   use_multimer=cfg.af2.use_multimer,
+                                   best_metric="dgram_cce")
+        elif cfg.struct_pred_model == "esmfold":
+            esmfold = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
+            esmfold.esm = esmfold.esm.half()
+            esmfold = esmfold.to(device)
+            tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
+        else:
+            raise ValueError(f"Invalid struct_pred_model: {cfg.struct_pred_model}")
 
     # Get secondary structure info
     ss_info = eval_metrics.compute_secondary_structure_content(pdbs)
@@ -164,10 +176,12 @@ def main(cfg: DictConfig):
     # Run MPNN self-consistency evaluation
     if cfg.run_mpnn_sc:
         mpnn_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
-                                                            mpnn_model, mpnn_cfg,
-                                                            esmfold, tokenizer,
-                                                            device,
-                                                            out_dir=cfg.out_dir)
+                                                              mpnn_model, mpnn_cfg,
+                                                              cfg.struct_pred_model,
+                                                              esmfold, tokenizer,
+                                                              af_model, cfg.af2,
+                                                              device,
+                                                              out_dir=cfg.out_dir)
         for pdb, v in mpnn_sc_info.items():
             all_metrics[pdb]["mpnn_sc_info"] = v
 
@@ -175,7 +189,9 @@ def main(cfg: DictConfig):
     if cfg.run_codes_sc:
         codes_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
                                                                None, None,  # no MPNN model for co-design eval
+                                                               cfg.struct_pred_model,
                                                                esmfold, tokenizer,
+                                                               af_model, cfg.af2,
                                                                device,
                                                                out_dir=cfg.out_dir,
                                                                eval_codesign=True)
@@ -216,7 +232,7 @@ def main(cfg: DictConfig):
                 metrics_df["mpnn_seq"].append(mpnn_sc_info["mpnn_preds"]["mpnn_seqs"][i])
                 metrics_df["mpnn_sc_ca_rmsd"].append(mpnn_sc_info["sc_metrics"]["sc_ca_rmsd"][i].item())
                 metrics_df["mpnn_sc_ca_tm"].append(mpnn_sc_info["sc_metrics"]["sc_ca_tm"][i].item())
-                metrics_df["mpnn_sc_avg_plddt"].append(mpnn_sc_info["esm_preds"]["avg_plddt"][i].item())
+                metrics_df["mpnn_sc_avg_plddt"].append(mpnn_sc_info["struct_preds"]["avg_plddt"][i].item())
 
             # add co-design self-consistency metrics (same for each MPNN sequence since we calculate these on the original sample)
             if cfg.run_codes_sc:
@@ -226,7 +242,7 @@ def main(cfg: DictConfig):
                 metrics_df["codes_sc_aa_rmsd"].append(codes_sc_info["sc_metrics"]["sc_aa_rmsd"].squeeze().item())
                 metrics_df["codes_sc_ca_tm"].append(codes_sc_info["sc_metrics"]["sc_ca_tm"].squeeze().item())
                 metrics_df["codes_sc_aa_tm"].append(codes_sc_info["sc_metrics"]["sc_aa_tm"].squeeze().item())
-                metrics_df["codes_sc_avg_plddt"].append(codes_sc_info["esm_preds"]["avg_plddt"].squeeze().item())
+                metrics_df["codes_sc_avg_plddt"].append(codes_sc_info["struct_preds"]["avg_plddt"].squeeze().item())
 
             # add nntm metrics
             if cfg.nntm_dataset is not None:

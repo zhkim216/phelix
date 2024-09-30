@@ -11,6 +11,7 @@ batch_size: 64
 # Evaluation mode
 run_mpnn_sc: true  # run MPNN self-consistency eval
 run_codes_sc: false  # run co-design self-consistency eval
+struct_pred_model: "esmfold"  # ["esmfold", "af2"]
 
 # Sampling run parameters
 # length_range: [63,63]
@@ -72,6 +73,15 @@ mpnn:
     batch_size: 8
     number_of_batches: 1
     verbose: false
+
+# AF2 args
+af2:
+  data_dir: /media/scratch/huang_lab/af2
+  num_models: 1  # only 1 model is currently supported
+  sample_models: true  # randomly sample models from the ensemble
+  num_recycles: 3
+  use_multimer: false
+
 
 # Dataset for nnTM calculation, path to directory containing PDBs
 nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered

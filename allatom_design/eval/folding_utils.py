@@ -1,7 +1,10 @@
 from collections import defaultdict
-from typing import Dict, Generator, List, Tuple
+from pathlib import Path
+from typing import Dict, Generator, List, Optional, Tuple
 
+import jax.numpy as jnp
 import torch
+from colabdesign.af import mk_af_model
 from torchtyping import TensorType
 from tqdm import tqdm
 from transformers import EsmForProteinFolding, EsmTokenizer
@@ -114,7 +117,7 @@ def run_esmfold_batched(sequences_list: List[str],
         seq_mask = inputs["attention_mask"]
         pred_coords_atom14 = outputs["positions"][-1]  # positions is shape (l, b, n, 14, 3)
         pred_coords_atom37 = data.atom14_aatype_to_atom37(pred_coords_atom14, outputs["aatype"])
-        plddts = outputs["plddt"][:, :, 1] * seq_mask
+        plddts = outputs["plddt"][:, :, 1] * seq_mask  # get pLDDT for CA atoms
         avg_plddt = (plddts * seq_mask).sum(dim=-1) / seq_mask.sum(dim=-1).clamp(min=1e-3)
 
         aatype, seq_mask = outputs.aatype.cpu(), seq_mask.cpu()
@@ -205,3 +208,62 @@ def create_batched_seq_dataset(all_sequences: List[str],
         pbar.update(len(seq))
 
     yield collate_fn(batch_examples)
+
+
+def run_af2(sequences_list: List[str],
+            pdbs: List[str],  # used for extracting residue index. TODO remove dependence on pdb file
+            af_model: mk_af_model,
+            out_dir: str,
+            data_dir: str,  # directory containing "params" with AF2 model params
+            num_models: int,
+            sample_models: bool,
+            num_recycles: int,
+            use_multimer: bool = False,
+            use_templates: bool = False,
+            rm_template_interchain: bool = False,
+            chains: Optional[str] = None,
+            homooligomer: bool = False) -> Tuple[Dict[str, torch.Tensor],
+                                                 List[str]]:
+    """
+    Predict sequences with AlphaFold2.
+
+    Return a tuple (dictionary of outputs, output filenames).
+    """
+    Path(out_dir).mkdir(exist_ok=True, parents=True)
+    output_files = []
+
+    # Predict structures
+    for _, (seq, pdb) in enumerate(zip(sequences_list, pdbs)):
+        output_pdb = f"{out_dir}/af2_{Path(pdb).stem}.pdb"
+        af_model.prep_inputs(pdb, chains, homooligomer=homooligomer)
+
+        af_model.restart()
+        af_model.set_opt("template", rm_ic=rm_template_interchain)
+        af_model.predict(seq=seq,
+                         num_models=num_models,
+                         sample_models=sample_models,
+                         num_recycles=num_recycles,
+                         verbose=False)
+
+        af_model._save_results(save_best=True, verbose=False)
+        af_model.save_current_pdb(output_pdb)
+        output_files.append(output_pdb)
+
+    preds = [data.load_feats_from_pdb(pdb, chain_residx_gap=None) for pdb in output_files]
+
+    # Preprocess plddt-CA
+    plddts = [pred["b_factors"][:, 1] for pred in preds]
+    avg_plddts = [torch.mean(plddt, dim=0, keepdim=True) for plddt in plddts]  # keep sequence dim for consistency
+
+    # Prepare AF2 outputs
+    af2_outputs = {
+        "pred_coords": [pred["all_atom_positions"] for pred in preds],
+        "plddts": plddts,
+        "seq_mask": [pred["seq_mask"] for pred in preds],
+        "aatype": [pred["aatype"] for pred in preds],
+        "residue_index": [pred["residue_index"] for pred in preds],
+        "avg_plddt": avg_plddts,
+        "atom_mask": [pred["all_atom_mask"] for pred in preds],
+    }
+
+    return af2_outputs, output_files

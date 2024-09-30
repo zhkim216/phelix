@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import torch
 from Bio.PDB.DSSP import DSSP
+from colabdesign.af import mk_af_model
 from einops import rearrange
 from omegaconf import DictConfig
 from torchtyping import TensorType
@@ -15,14 +16,15 @@ from tqdm import tqdm
 from transformers import EsmForProteinFolding, EsmTokenizer
 
 import allatom_design.data.residue_constants as rc
-from ligandmpnn.model_utils import ProteinMPNN
 from allatom_design.data import data
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
 from allatom_design.eval import eval_metrics
-from allatom_design.eval.esmfold_utils import run_esmfold, run_esmfold_batched
+from allatom_design.eval.folding_utils import (run_af2, run_esmfold,
+                                               run_esmfold_batched)
 from allatom_design.eval.proteinmpnn_utils import run_mpnn
+from ligandmpnn.model_utils import ProteinMPNN
 
 
 def compute_secondary_structure_content(pdbs: List[str]) -> Dict[str, Dict[str, float]]:
@@ -78,26 +80,30 @@ def get_dssp_string(pdb: str) -> str:
 def run_self_consistency_eval(pdbs: List[str],
                               mpnn_model: Optional[ProteinMPNN],
                               mpnn_cfg: Optional[DictConfig],
-                              esmfold: EsmForProteinFolding,
-                              tokenizer: EsmTokenizer,
+                              struct_pred_model: str,  # "af2" or "esmfold"
+                              esmfold: Optional[EsmForProteinFolding],
+                              esm_tokenizer: Optional[EsmTokenizer],
+                              af_model: Optional[mk_af_model],
+                              af2_cfg: Optional[DictConfig],
                               device: torch.device,
                               out_dir: str,
                               eval_codesign: bool = False,
                               max_tokens_per_batch: int = 1024,  # for ESMFold
                               ) -> Dict[str, Dict[str, TensorType]]:
     """
-    Run self-consistency evaluation on a list of PDBs (MPNN -> ESMFold -> eval metrics).
+    Run self-consistency evaluation on a list of PDBs (MPNN -> AF2 / ESMFold -> eval metrics).
 
     The number of MPNN sequences per PDB is determined by the mpnn_cfg (batch_size * number of batches).
 
     Returns a dictionary mapping from PDB file path to a dictionary containing:
     - "mpnn_preds": MPNN predictions
-    - "esm_preds": ESMFold predictions
+    - "struct_preds": ESMFold or AF2 predictions. Contains:
+        - "avg_plddt": average plddt-CA score
     - "sc_metrics": Evaluation metrics
 
     In out_dir, this function will create:
-    - out_dir/mpnn_preds: ESMFold predicted PDBs
-    - out_dir/mpnn_ca_aligned_preds: ESMFold predicted PDBs, CA aligned to the original PDBs
+    - out_dir/mpnn_preds: AF2/ESMFold predicted PDBs
+    - out_dir/mpnn_ca_aligned_preds: AF2/ESMFold predicted PDBs, CA aligned to the original PDBs
 
     If eval_codesign is True, rather than use MPNN predictions, the sequences in the original PDBs will be used.
     - In this case, mpnn_model and mpnn_cfg are not required, and "mpnn_preds" will not be included in the output.
@@ -116,69 +122,94 @@ def run_self_consistency_eval(pdbs: List[str],
     ca_aligned_preds_dir = Path(out_dir, f"{'codesign_' if eval_codesign else 'mpnn_'}ca_aligned_preds")
     ca_aligned_preds_dir.mkdir(parents=True, exist_ok=True)
 
-    # Run MPNN
+    # === Run MPNN === #
     if not eval_codesign:
         mpnn_preds_dict = run_mpnn(mpnn_model, pdb_paths=pdbs, device=device, cfg=mpnn_cfg)
         for pdb, mpnn_preds in mpnn_preds_dict.items():
             sc_info[pdb]["mpnn_preds"] = mpnn_preds
 
-    # Run ESMFold
+    # === Run structure prediction === #
     if not eval_codesign:
-        # for backbone eval, run ESMFold on MPNN sequences for each PDB
-        for pdb in tqdm(pdbs, desc="Running ESMFold", leave=False):
+        # For backbone eval, run structure prediction on MPNN sequences for each PDB
+        for pdb in tqdm(pdbs, desc=f"Running {'ESMFold' if struct_pred_model == 'esmfold' else 'AF2'}", leave=False):
             mpnn_preds = sc_info[pdb]["mpnn_preds"]
             sequences_list, residue_index_list = mpnn_preds["mpnn_seqs"], mpnn_preds["residue_index"]
 
+            if struct_pred_model == "af2":
+                # === Run AlphaFold2 === #
+                af2_preds, filenames = run_af2(sequences_list=sequences_list,
+                                               pdbs=[pdb] * len(sequences_list),
+                                               af_model=af_model,
+                                               out_dir=preds_dir, **af2_cfg)
+
+                # stack all outputs since they are the same length for a given PDB
+                af2_preds = {k: torch.stack(v, dim=0) for k, v in af2_preds.items()}
+                sc_info[pdb]["struct_preds"] = af2_preds
+
+            elif struct_pred_model == "esmfold":
+                # === Run ESMFold === #
+                esm_preds = run_esmfold_batched(sequences_list=sequences_list,
+                                                residue_index_list=residue_index_list,
+                                                model=esmfold,
+                                                tokenizer=esm_tokenizer,
+                                                max_tokens_per_batch=max_tokens_per_batch,
+                                                )
+                # stack all outputs since they are the same length for a given PDB
+                esm_preds = {k: torch.stack(v, dim=0) for k, v in esm_preds.items()}
+                sc_info[pdb]["struct_preds"] = esm_preds
+
+                # Write to pdb file
+                feats = {
+                    "aatype": esm_preds["aatype"],
+                    "atom_positions": esm_preds["pred_coords"],
+                    "atom_mask": esm_preds["atom_mask"],
+                    "residue_index": esm_preds["residue_index"],
+                    "chain_index": torch.zeros_like(esm_preds["residue_index"]),
+                    "b_factors": None,
+                }
+
+                B, _, _, _ = esm_preds["pred_coords"].shape
+                filenames = [f"{preds_dir}/esmfold_{Path(pdb).stem}_{i}.pdb" for i in range(B)]
+                write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
+    else:
+        # For allatom/co-design eval, run ESMFold on sequences directly from PDBs
+        sequences_list, residue_index_list = load_sequence_and_residx_from_pdbs(pdbs)
+        if struct_pred_model == "af2":
+            # === Run AlphaFold2 === #
+            af2_preds, filenames = run_af2(sequences_list=sequences_list,
+                                           pdbs=pdbs,
+                                           af_model=af_model,
+                                           out_dir=preds_dir, **af2_cfg)
+
+            # Add to sc_info
+            for i, pdb in enumerate(pdbs):
+                sc_info[pdb]["sample_seq"] = sequences_list[i]
+                sc_info[pdb]["struct_preds"] = {k: v[i][None] for k, v in af2_preds.items()}  # unpack preds and add batch dim
+
+        elif struct_pred_model == "esmfold":
             esm_preds = run_esmfold_batched(sequences_list=sequences_list,
                                             residue_index_list=residue_index_list,
                                             model=esmfold,
-                                            tokenizer=tokenizer,
-                                            max_tokens_per_batch=max_tokens_per_batch,
-                                            )
-            # stack all outputs since they are the same length for a given PDB
-            esm_preds = {k: torch.stack(v, dim=0) for k, v in esm_preds.items()}
-
-            sc_info[pdb]["esm_preds"] = esm_preds
-
+                                            tokenizer=esm_tokenizer,
+                                            max_tokens_per_batch=max_tokens_per_batch)
             # Write to pdb file
-            feats = {
-                "aatype": esm_preds["aatype"],
-                "atom_positions": esm_preds["pred_coords"],
-                "atom_mask": esm_preds["atom_mask"],
-                "residue_index": esm_preds["residue_index"],
-                "chain_index": torch.zeros_like(esm_preds["residue_index"]),
-                "b_factors": None,
-            }
+            for i, pdb in enumerate(pdbs):
+                sc_info[pdb]["sample_seq"] = sequences_list[i]
+                sc_info[pdb]["struct_preds"] = {k: v[i][None] for k, v in esm_preds.items()}  # unpack preds and add batch dim
 
-            B, _, _, _ = esm_preds["pred_coords"].shape
-            filenames = [f"{preds_dir}/esmfold_{Path(pdb).stem}_{i}.pdb" for i in range(B)]
-            write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
-    else:
-        # for allatom eval, run ESMFold on sequences directly from PDBs
-        sequences_list, residue_index_list = load_sequence_and_residx_from_pdbs(pdbs)
-        esm_preds = run_esmfold_batched(sequences_list=sequences_list,
-                                        residue_index_list=residue_index_list,
-                                        model=esmfold,
-                                        tokenizer=tokenizer,
-                                        max_tokens_per_batch=max_tokens_per_batch)
-        # Write to pdb file
-        for i, pdb in enumerate(pdbs):
-            sc_info[pdb]["sample_seq"] = sequences_list[i]
-            sc_info[pdb]["esm_preds"] = {k: v[i][None] for k, v in esm_preds.items()}  # unpack preds and add batch dim
+                feats = {
+                    "aatype": esm_preds["aatype"][i],
+                    "atom_positions": esm_preds["pred_coords"][i],
+                    "atom_mask": esm_preds["atom_mask"][i],
+                    "residue_index": esm_preds["residue_index"][i],
+                    "chain_index": torch.zeros_like(esm_preds["residue_index"][i]),
+                    "b_factors": None,
+                }
 
-            feats = {
-                "aatype": esm_preds["aatype"][i],
-                "atom_positions": esm_preds["pred_coords"][i],
-                "atom_mask": esm_preds["atom_mask"][i],
-                "residue_index": esm_preds["residue_index"][i],
-                "chain_index": torch.zeros_like(esm_preds["residue_index"][i]),
-                "b_factors": None,
-            }
+                filename = f"{preds_dir}/esmfold_{Path(pdb).stem}.pdb"
+                write_to_pdb(**feats, filename=filename, mode="aa")
 
-            filename = f"{preds_dir}/esmfold_{Path(pdb).stem}.pdb"
-            write_to_pdb(**feats, filename=filename, mode="aa")
-
-    # Compute eval metrics based on predicted structures
+    # === Compute eval metrics === #
     if not eval_codesign:
         metrics_to_compute = ["sc_ca_rmsd", "sc_ca_tm"]
     else:
@@ -189,13 +220,13 @@ def run_self_consistency_eval(pdbs: List[str],
         # Load in sampled structure
         sampled_pdb_feats = data.load_feats_from_pdb(pdb, chain_residx_gap=None)
 
-        # Retrieve ESMFold predictions
-        esm_preds = sc_info[pdb]["esm_preds"]
+        # Retrieve structure predictions
+        struct_preds = sc_info[pdb]["struct_preds"]
 
         # Compute structure metrics
-        B, _, _, _ = esm_preds["pred_coords"].shape
+        B, _, _, _ = struct_preds["pred_coords"].shape
         metrics, pred_coords_ca_aligned = eval_metrics.compute_structure_metrics(
-            esm_preds["pred_coords"],
+            struct_preds["pred_coords"],
             sampled_pdb_feats["all_atom_positions"][None].expand(B, -1, -1, -1),
             sampled_pdb_feats["all_atom_mask"][None].expand(B, -1, -1),
             metrics_to_compute=metrics_to_compute
@@ -204,18 +235,20 @@ def run_self_consistency_eval(pdbs: List[str],
 
         # Write aligned coords to pdb file
         feats = {
-            "aatype": esm_preds["aatype"],
+            "aatype": struct_preds["aatype"],
             "atom_positions": pred_coords_ca_aligned,
-            "atom_mask": esm_preds["atom_mask"],
-            "residue_index": esm_preds["residue_index"],
-            "chain_index": torch.zeros_like(esm_preds["residue_index"]),
+            "atom_mask": struct_preds["atom_mask"],
+            "residue_index": struct_preds["residue_index"],
+            "chain_index": torch.zeros_like(struct_preds["residue_index"]),
             "b_factors": None,
         }
+
+        prefix = "esmfold" if struct_pred_model == "esmfold" else "af2"
         if not eval_codesign:
-            filenames = [f"{ca_aligned_preds_dir}/esmfold_{Path(pdb).stem}_{i}.pdb" for i in range(B)]
+            filenames = [f"{ca_aligned_preds_dir}/{prefix}_{Path(pdb).stem}_{i}.pdb" for i in range(B)]
         else:
             assert B == 1, "We should only have one prediction per PDB for eval_codesign eval"
-            filenames = [f"{ca_aligned_preds_dir}/esmfold_{Path(pdb).stem}.pdb"]
+            filenames = [f"{ca_aligned_preds_dir}/{prefix}_{Path(pdb).stem}.pdb"]
         write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
 
     return sc_info
@@ -384,3 +417,4 @@ def run_nntm_eval(pdbs: List[str],
         pdb_to_nntm[pdb] = pdb_to_nntm.get(pdb, 0.0)
 
     return pdb_to_nntm
+
