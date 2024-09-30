@@ -227,7 +227,7 @@ def main(cfg: DictConfig):
                 metrics_df["codes_sc_aa_rmsd"].append(codes_sc_info["sc_metrics"]["sc_aa_rmsd"].squeeze().item())
                 metrics_df["codes_sc_ca_tm"].append(codes_sc_info["sc_metrics"]["sc_ca_tm"].squeeze().item())
                 metrics_df["codes_sc_aa_tm"].append(codes_sc_info["sc_metrics"]["sc_aa_tm"].squeeze().item())
-                metrics_df["codes_sc_avg_plddt"].append(codes_sc_info["esm_preds"]["avg_plddt"].squeeze().item())
+                metrics_df["codes_sc_avg_plddt"].append(codes_sc_info["struct_preds"]["avg_plddt"].squeeze().item())
 
     metrics_df = pd.DataFrame(metrics_df)
 
