@@ -1,16 +1,24 @@
+import os
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import jax.numpy as jnp
 import torch
+from colabdesign import clear_mem
 from colabdesign.af import mk_af_model
+from omegaconf import DictConfig
 from torchtyping import TensorType
 from tqdm import tqdm
-from transformers import EsmForProteinFolding, EsmTokenizer
+from transformers import AutoTokenizer, EsmForProteinFolding, EsmTokenizer
 
+import omegafold
 from allatom_design.data import data
 from allatom_design.data.residue_constants import STANDARD_ATOM_MASK
+from omegafold import pipeline as of_pipeline
+from omegafold.utils.torch_utils import recursive_to
+import argparse
+from allatom_design.data import residue_constants as rc
 
 
 def run_esmfold(sequence_list: List[str],
@@ -214,16 +222,14 @@ def run_af2(sequences_list: List[str],
             pdbs: List[str],  # used for extracting residue index. TODO remove dependence on pdb file
             af_model: mk_af_model,
             out_dir: str,
-            data_dir: str,  # directory containing "params" with AF2 model params
             num_models: int,
             sample_models: bool,
             num_recycles: int,
-            use_multimer: bool = False,
-            use_templates: bool = False,
             rm_template_interchain: bool = False,
             chains: Optional[str] = None,
-            homooligomer: bool = False) -> Tuple[Dict[str, torch.Tensor],
-                                                 List[str]]:
+            homooligomer: bool = False,
+            **kwargs) -> Tuple[Dict[str, torch.Tensor],
+                               List[str]]:
     """
     Predict sequences with AlphaFold2.
 
@@ -267,3 +273,141 @@ def run_af2(sequences_list: List[str],
     }
 
     return af2_outputs, output_files
+
+
+def run_omegafold(sequences_list: List[str],
+                  residue_index_list: List[TensorType["n_s", int]],
+                  omegafold_model: omegafold.OmegaFold,
+                  out_dir: str,
+                  device: str,
+                  num_pseudo_msa: int = 15,
+                  mask_rate: float = 0.12,
+                  num_recycle: int = 10,
+                  deterministic: bool = True,
+                  subbatch_size: Optional[int] = None,
+                  **kwargs):
+    forward_config = argparse.Namespace(
+        subbatch_size=subbatch_size,
+        num_recycle=num_recycle,
+    )
+    of_inputs = omegafold_inputs(sequences_list, num_pseudo_msa, mask_rate, num_recycle, deterministic, device)
+    of_outputs = defaultdict(list)
+
+    for (of_input, of_aux), residue_index in zip(of_inputs, residue_index_list):
+        # TODO: like ESMFold, omegafold seems to ignore discontiguous residues
+        output = omegafold_model(of_input, predict_with_confidence=True, fwd_cfg=forward_config)
+
+        # Save outputs
+        aatype, seq_mask = of_aux["aatype"], of_aux["seq_mask"]
+        atom37_coords = data.atom14_aatype_to_atom37(output["final_atom_positions"].detach().cpu(), aatype.detach().cpu())
+        atom37_mask = torch.tensor(STANDARD_ATOM_MASK[aatype]) * seq_mask[..., None]
+
+        of_outputs["pred_coords"].append(atom37_coords)
+        of_outputs["plddts"].append(output["confidence"].detach().cpu())
+        of_outputs["seq_mask"].append(seq_mask)
+        of_outputs["aatype"].append(aatype)
+        of_outputs["residue_index"].append(residue_index.detach().cpu())
+        of_outputs["avg_plddt"].append(output["confidence"].mean(dim=0, keepdim=True).detach().cpu())
+        of_outputs["atom_mask"].append(atom37_mask)
+
+
+    return of_outputs
+
+
+
+def omegafold_inputs(sequences_list: List[str],
+                     num_pseudo_msa: int,
+                     mask_rate: float,
+                     num_cycle: int,
+                     deterministic: bool,
+                     device: str):
+    """
+    Adapted from omegafold.pipeline.fasta2inputs
+    """
+    aux = {}
+
+    for seq in sequences_list:
+        seq = seq.replace("Z", "E").replace("B", "D").replace("U", "C")
+        aatype = torch.LongTensor(
+            [rc.restypes_with_x.index(aa) if aa != '-' else 21 for aa in seq]
+        )
+        mask = torch.ones_like(aatype).float()
+
+        num_res = len(aatype)
+        data = list()
+        g = None
+        if deterministic:
+            g = torch.Generator()
+            g.manual_seed(num_res)
+        for _ in range(num_cycle):
+            p_msa = aatype[None, :].repeat(num_pseudo_msa, 1)
+            p_msa_mask = torch.rand([num_pseudo_msa, num_res], generator=g).gt(mask_rate)
+            p_msa_mask = torch.cat((mask[None, :], p_msa_mask), dim=0)
+            p_msa = torch.cat((aatype[None, :], p_msa), dim=0)
+            p_msa[~p_msa_mask.bool()] = 21
+            data.append({"p_msa": p_msa, "p_msa_mask": p_msa_mask})
+
+        aux["aatype"] = aatype
+        aux["seq_mask"] = mask
+        yield recursive_to(data, device=device), aux
+
+
+def get_omegafold_model(cache_file: str, device: str):
+    Path(cache_file).parent.mkdir(exist_ok=True, parents=True)
+    model = omegafold.OmegaFold(omegafold.make_config(1))
+    state_dict = of_pipeline._load_weights("https://helixon.s3.amazonaws.com/release1.pt", cache_file)
+    if "model" in state_dict:
+        state_dict = state_dict.pop("model")
+    model.load_state_dict(state_dict)
+    model.eval()
+    model.to(device)
+    return model
+
+
+def get_esmfold_model(device: str):
+    # Set up ESMFold
+    esmfold = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
+    esmfold.esm = esmfold.esm.half()
+    esmfold = esmfold.to(device)
+    tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
+    return esmfold, tokenizer
+
+
+def get_struct_pred_model(cfg: DictConfig,
+                          device: str) -> Dict[str, Any]:
+    """
+    Get structure prediction model components as a dictionary based on config.
+
+    Example config:
+    struct_pred_cfg:
+        model_name: "esmfold"  # ["esmfold", "af2", "omegafold"]
+        af2:
+            data_dir: # directory containing "params/" with af2 model params
+            num_models: 1  # only 1 model is currently supported
+            sample_models: true  # randomly sample models from the ensemble
+            num_recycles: 3
+            use_multimer: false
+        omegafold:
+            cache_dir: # directory to cache omegafold model
+    """
+    model_name = cfg.model_name
+    struct_pred_model = {"model_name": model_name, "cfg": cfg, "device": device}
+
+    if model_name == "af2":
+        clear_mem()
+        af_model = mk_af_model(data_dir=cfg.af2.data_dir,
+                               use_multimer=cfg.af2.use_multimer)
+        struct_pred_model["af_model"] = af_model
+
+    elif model_name == "esmfold":
+        esmfold, tokenizer = get_esmfold_model(device=device)
+        struct_pred_model["esmfold"] = esmfold
+        struct_pred_model["tokenizer"] = tokenizer
+
+    elif model_name == "omegafold":
+        omegafold = get_omegafold_model(cache_file=cfg.omegafold.cache_file, device=device)
+        struct_pred_model["omegafold"] = omegafold
+    else:
+        raise ValueError(f"Invalid model name: {model_name}")
+
+    return struct_pred_model

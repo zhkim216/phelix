@@ -300,3 +300,11 @@ def stack_aux_traj(aux_traj: List[Dict[str, Any]], dim: int = 1) -> Dict[str, An
             stacked[key] = torch.stack([x[key] for x in aux_traj], dim=dim)
 
     return stacked
+
+
+def atom14_aatype_to_atom37(atom14_pos: TensorType["b n 14 3", float],
+                            aatype: TensorType["b n", int]) -> TensorType["b n 37 3", float]:
+    feats = {}
+    feats["aatype"] = aatype
+    feats = data_transforms.make_atom14_masks(feats)
+    return atom14_to_atom37(atom14_pos, feats)
