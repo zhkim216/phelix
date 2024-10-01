@@ -12,12 +12,10 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
-from colabdesign import clear_mem
-from colabdesign.af import mk_af_model
+from allatom_design.eval.folding_utils import get_struct_pred_model
 from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
-from transformers import AutoTokenizer, EsmForProteinFolding
 
 from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.eval import eval_metrics, sampling_utils
@@ -146,27 +144,14 @@ def main(cfg: DictConfig):
     all_metrics = defaultdict(dict)
     pdbs = natsorted(glob.glob(f"{sample_out_dir}/*.pdb"))
 
-    # Load in MPNN and ESMFold/AF2 models
+    # Load in MPNN and struct pred models
     if cfg.run_mpnn_sc:
         mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
         mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)  # override base mpnn config with mpnn.overrides
         mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
 
-    esmfold, tokenizer, af_model = None, None, None
     if (cfg.run_mpnn_sc or cfg.run_codes_sc):
-        if cfg.struct_pred_model == "af2":
-            # Set up AF2 model
-            clear_mem()
-            af_model = mk_af_model(data_dir=cfg.af2.data_dir,
-                                   use_multimer=cfg.af2.use_multimer,
-                                   best_metric="dgram_cce")
-        elif cfg.struct_pred_model == "esmfold":
-            esmfold = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
-            esmfold.esm = esmfold.esm.half()
-            esmfold = esmfold.to(device)
-            tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
-        else:
-            raise ValueError(f"Invalid struct_pred_model: {cfg.struct_pred_model}")
+        struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     # Get secondary structure info
     ss_info = eval_metrics.compute_secondary_structure_content(pdbs)
@@ -177,9 +162,7 @@ def main(cfg: DictConfig):
     if cfg.run_mpnn_sc:
         mpnn_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
                                                               mpnn_model, mpnn_cfg,
-                                                              cfg.struct_pred_model,
-                                                              esmfold, tokenizer,
-                                                              af_model, cfg.af2,
+                                                              struct_pred_model,
                                                               device,
                                                               out_dir=cfg.out_dir)
         for pdb, v in mpnn_sc_info.items():
@@ -189,9 +172,7 @@ def main(cfg: DictConfig):
     if cfg.run_codes_sc:
         codes_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
                                                                None, None,  # no MPNN model for co-design eval
-                                                               cfg.struct_pred_model,
-                                                               esmfold, tokenizer,
-                                                               af_model, cfg.af2,
+                                                               struct_pred_model,
                                                                device,
                                                                out_dir=cfg.out_dir,
                                                                eval_codesign=True)
