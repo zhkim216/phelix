@@ -90,7 +90,8 @@ logging:
   wandb_watch_freq: 5000  # Log gradients every n steps
 
 checkpointing:
-  save_latest_every_n_epochs: 50  # Save the latest model every n epochs (if validation set is being checked)
+  save_latest_every_n_epochs: 50  # Save the full model every n epochs (if validation set is being checked)
+  save_ema_every_n_epochs: 20  # Save the EMA model every n epochs
   save_top_k: 1
 
 hydra:
