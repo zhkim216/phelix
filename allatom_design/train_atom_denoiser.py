@@ -15,6 +15,7 @@ from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 
+from allatom_design.checkpoint_utils import EMATrackerCheckpoint
 import allatom_design.data.datasets.ad_dataset as ad_dataset
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import ADDataset
@@ -125,7 +126,10 @@ def main(cfg: DictConfig):
                                               filename="ad-epoch{epoch:02d}-val_loss{val/total_loss:.4f}",
                                               auto_insert_metric_name=False  # needed since metric has / in name
                                               )
-    callbacks += [latest_checkpoint_callback, val_checkpoint_callback]
+    ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
+                                          save_freq_epochs=cfg.checkpointing.save_ema_every_n_epochs)
+
+    callbacks += [latest_checkpoint_callback, val_checkpoint_callback, ema_checkpoint]
 
     train_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                                 save_top_k=cfg.checkpointing.save_top_k,
@@ -134,6 +138,7 @@ def main(cfg: DictConfig):
                                                 filename="ad-epoch{epoch:02d}-train_loss{train/total_loss:.4f}",
                                                 auto_insert_metric_name=False  # needed since metric has / in name
                                                 )
+
     callbacks.append(train_checkpoint_callback)
 
     if logger:

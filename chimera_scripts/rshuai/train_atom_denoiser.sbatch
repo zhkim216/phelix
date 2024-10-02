@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=a10_bb2
+#SBATCH --job-name=a10_bb4
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=2
-#SBATCH --cpus-per-task=16
+#SBATCH --gpus-per-node=4
+#SBATCH --cpus-per-task=32
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=a10_bb2
+EXP_NAME=a10_bb4
 GROUP=chimera_a10
 
 # Dataset paths
@@ -49,7 +49,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser.training_batch_size_mult=8 \
     eval.eval_timesteps_seq=[0.25,0.5,0.75,1.0] \
     optim.optimizer=noam \
-    checkpointing.save_latest_every_n_epochs=40 \
-    trainer.check_val_every_n_epoch=20 \
+    checkpointing.save_latest_every_n_epochs=80 \
+    checkpointing.save_ema_every_n_epochs=10 \
+    trainer.check_val_every_n_epoch=40 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}

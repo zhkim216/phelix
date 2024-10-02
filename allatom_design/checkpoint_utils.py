@@ -5,6 +5,9 @@ import torch
 import yaml
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf, open_dict
+import os
+import torch
+import lightning as L
 
 
 
@@ -88,3 +91,60 @@ def repair_state_dict(state_dict: Dict[str, Any]) -> Dict[str, Any]:
         out_state_dict[dest_key] = state_dict[src_key]
 
     return out_state_dict
+
+
+class EMATrackerCheckpoint(L.Callback):
+    def __init__(self, save_dir, save_freq_steps=None, save_freq_epochs=None):
+        """
+        Args:
+            save_dir (str): Directory where EMA tracker checkpoints will be saved.
+            save_freq_steps (int): Save EMA tracker every N steps.
+            save_freq_epochs (int): Save EMA tracker every N epochs.
+        """
+        super().__init__()
+        self.save_dir = save_dir
+        self.save_freq_steps = save_freq_steps
+        self.save_freq_epochs = save_freq_epochs
+        assert (save_freq_steps is not None) or (save_freq_epochs is not None), "Either save_freq_steps or save_freq_epochs must be provided."
+
+
+    def setup(self, trainer, pl_module, stage):
+        Path(self.save_dir).mkdir(parents=True, exist_ok=True)
+
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if self.save_freq_steps is not None:
+            global_step = trainer.global_step
+            if (global_step > 0) and (global_step % self.save_freq_steps == 0):
+                self.save_ema_tracker(trainer, pl_module, global_step=global_step)
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        if self.save_freq_epochs is not None:
+            current_epoch = trainer.current_epoch
+            if (current_epoch > 0) and (current_epoch % self.save_freq_epochs) == 0:
+                self.save_ema_tracker(trainer, pl_module, epoch=current_epoch)
+
+    def save_ema_tracker(self, trainer, pl_module, global_step=None, epoch=None):
+        ema_state = pl_module.ema_tracker.state_dict()
+        # Construct the filename
+        if global_step is not None:
+            filename = f"ema_tracker_step_{global_step}.ckpt"
+        elif epoch is not None:
+            filename = f"ema_tracker_epoch_{epoch}.ckpt"
+        else:
+            filename = "ema_tracker.ckpt"
+
+        # Prepare the checkpoint dictionary
+        checkpoint = {
+            'ema_state': ema_state,
+            'global_step': trainer.global_step,
+            'epoch': trainer.current_epoch,
+        }
+
+        # Save the checkpoint
+        save_path = f"{self.save_dir}/{filename}"
+        torch.save(checkpoint, save_path)
+
+        # Optionally, log that the EMA tracker has been saved
+        pl_module.log("ema_tracker_saved", True, on_step=False, on_epoch=True, sync_dist=True)
+
