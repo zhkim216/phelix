@@ -44,10 +44,13 @@ def main(cfg: DictConfig):
     with open(Path(cfg.out_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
-    # Gather atom denoiser checkpoints (TODO: make this also support a sequence denoiser)
-    pattern = re.compile(r"ad-epoch\d+\.ckpt$")  # only consider ckpts of form ad-epochXXXX.ckpt
-    ad_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
-    ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])
+    # Gather EMA checkpoints
+    ema_ckpts = natsorted(glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/ema_tracker/*.ckpt"))
+
+    # Gather denoiser checkpoints
+    pattern = re.compile(r"(?:ad|sd)-epoch\d+\.ckpt$")  # only consider ckpts of form ad-epochXXXX.ckpt or sd-epochXXXX.ckpt
+    denoiser_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
+    denoiser_ckpts = natsorted([ckpt for ckpt in denoiser_ckpts if pattern.search(Path(ckpt).name)])
 
     # Compute posthoc EMA coefficients based on input steps/stds and desired output step/stds
     out_step = cfg.out_step
@@ -56,13 +59,13 @@ def main(cfg: DictConfig):
     in_steps = []
     in_stds = []
     in_ckpts = []
-    for ckpt in tqdm(ad_ckpts, desc="Loading checkpoints for computing phema coefficients"):
+    for ckpt in tqdm(ema_ckpts, desc="Loading checkpoints for computing phema coefficients"):
         ckpt_dict = torch.load(ckpt, map_location="cpu")
         if ckpt_dict["global_step"] > out_step:
             # only consider ckpts up to the desired output step
             break
 
-        stds = ckpt_dict["ema_tracker"]["stds"]
+        stds = ckpt_dict["ema_state"]["stds"]
         in_stds += stds
         in_steps += [ckpt_dict["global_step"]] * len(stds)
         in_ckpts.append(ckpt)
@@ -72,7 +75,7 @@ def main(cfg: DictConfig):
     # Initialize output state dicts
     out_state_dicts = []
     for _ in out_stds:
-        out_state_dict = copy.deepcopy(ckpt_dict["ema_tracker"]["emas"][0])
+        out_state_dict = copy.deepcopy(ckpt_dict["ema_state"]["emas"][0])
         for p in out_state_dict.values():
             p.data.zero_()
         out_state_dicts.append(out_state_dict)
@@ -81,8 +84,8 @@ def main(cfg: DictConfig):
     ei = 0
     for ckpt in tqdm(in_ckpts, desc="Computing EMA weights"):
         ckpt_dict = torch.load(ckpt, map_location="cpu")
-        for i in range(len(ckpt_dict["ema_tracker"]["emas"])):
-            ema_weights_in = ckpt_dict["ema_tracker"]["emas"][i]
+        for i in range(len(ckpt_dict["ema_state"]["emas"])):
+            ema_weights_in = ckpt_dict["ema_state"]["emas"][i]
 
             # Update output state dicts
             for j, out_state_dict in enumerate(out_state_dicts):
@@ -92,16 +95,14 @@ def main(cfg: DictConfig):
 
     for out_std, out_state_dict in zip(out_stds, out_state_dicts):
         # Create new checkpoints containing EMA weights
-        out_ckpt = Path(cfg.out_dir, f"ad-ema-step{out_step}-std{out_std:.2f}.ckpt")
-        base_ckpt = ad_ckpts[-1]  # besides the updated EMA weights, the rest of the model will be the same as the last checkpoint
+        out_ckpt = Path(cfg.out_dir, f"ema-step{out_step}-std{out_std:.2f}.ckpt")
+        base_ckpt = denoiser_ckpts[0]  # besides the updated EMA weights, the rest of the model will be the same as the last checkpoint
         ckpt_dict = torch.load(base_ckpt, map_location="cpu")
         lit_ad_model = LitAtomDenoiser.load_from_checkpoint(base_ckpt)
 
         model_state_dict = lit_ad_model.model.state_dict()
         model_state_dict.update(out_state_dict)
-        _, unexpected_keys = lit_ad_model.model.load_state_dict(model_state_dict, strict=False)
-        if unexpected_keys:
-            raise ValueError(f"Unexpected keys in EMA state dict: {unexpected_keys}")
+        lit_ad_model.model.load_state_dict(model_state_dict, strict=True)
 
         ckpt_dict["state_dict"] = lit_ad_model.state_dict()
         torch.save(ckpt_dict, out_ckpt)
