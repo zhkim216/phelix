@@ -489,7 +489,6 @@ class ESMWrapper(nn.Module):
         self.cfg = cfg
         c_s = cfg.c_s
 
-
         self.esm, self.esm_dict = esm_registry.get(cfg.esm_type)()
         self.esm.requires_grad_(False)
         # self.esm.half()  # we train with bf16, so we shouldn't need to half the model

@@ -650,3 +650,29 @@ def compute_ss_kl(p_alpha: List[float], p_beta: List[float],
     kl_div = entropy(p_probs_flat, q_probs_flat)
 
     return kl_div
+
+
+def bootstrap_se(data: List[float], n_samples: int) -> float:
+    """
+    Perform bootstrapping on the provided data to compute the standard error.
+
+    Args:
+        data (List[float]): The data to bootstrap.
+        num_samples (int): Number of bootstrap samples.
+
+    Returns:
+        float: The bootstrapped standard error.
+    """
+    if len(data) == 0:
+        return np.nan
+
+    data_array = np.array(data)
+    bootstrap_means = np.empty(n_samples)
+
+    for i in range(n_samples):
+        # Resample with replacement
+        resampled = np.random.choice(data_array, size=len(data_array), replace=True)
+        bootstrap_means[i] = np.mean(resampled)
+
+    boot_se = np.std(bootstrap_means, ddof=1)
+    return boot_se
