@@ -114,7 +114,7 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
         diffusion_aux = defaultdict(lambda: None)
 
         if not is_sampling:
-            ### TRAINING ###
+            # === Training === #
 
             # Get ground truth backbone coordinates
             x_bb_gt = aux_inputs["x"][..., rc.bb_idxs, :]
@@ -198,7 +198,7 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
             diffusion_aux["loss_weight_t"] = loss_weight_t_batched
 
         else:
-            ### SAMPLING ###
+            # === Sampling === #
 
             # Sample backbone from prior
             A = len(rc.bb_idxs)

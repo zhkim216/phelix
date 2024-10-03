@@ -97,6 +97,7 @@ logging:
 
 checkpointing:
   save_latest_every_n_epochs: 50  # Save the latest model every n epochs (if validation set is being checked)
+  save_ema_every_n_epochs: 5  # Save the EMA model every n epochs
   save_top_k: 1
 
 hydra:

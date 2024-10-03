@@ -31,7 +31,6 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
         # Sidechain diffusion head: DiT
         if self.use_scn_diffusion:
-            self.proj_z = Linear(cfg.minimpnn.n_channel, cfg.scn_diffusion_module.hidden_size)  # project h_V to conditioning input
             self.scn_diffusion_module = SidechainDiffusionModule(cfg.scn_diffusion_module, self.scn_sigma_data)
 
 
@@ -59,10 +58,9 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         # 2. Sidechain diffusion
         x1_pred = None
         if self.use_scn_diffusion:
-            z = self.proj_z(h_V)
             x_bb = mpnn_feature_dict["X"]  # use backbone coordinates from MPNN features (which are possibly noised by augment_eps)
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
-                z,
+                h_V,
                 aatype_pred,
                 x_bb,
                 seq_mask=seq_mask,

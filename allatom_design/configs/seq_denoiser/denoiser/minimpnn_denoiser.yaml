@@ -30,24 +30,46 @@ seq_head:
   n_aatype: ${model.n_aatype}
 
 scn_diffusion_module:
-  num_atoms_in: ${model.num_atoms_in}
-  n_aatype: ${model.n_aatype}
-  pos_encoding: ${model.denoiser.pos_encoding}
+  hidden_size: 256
+
+  # Diffusion settings
+  interpolant: ${model.denoiser.interpolant}
   use_self_conditioning: true
   self_cond_p: 0.5
+  training_batch_size_mult: 4  # batch size multiplier for diffusion module
 
-  # QK normalization
-  qk_rmsnorm: true
+  dit:
+    num_atoms_in: ${model.num_atoms_in}
+    use_self_conditioning: ${model.denoiser.scn_diffusion_module.use_self_conditioning}
+    n_aatype: ${model.n_aatype}
+    self_cond_p: ${model.denoiser.scn_diffusion_module.self_cond_p}
+    pos_encoding: ${model.denoiser.pos_encoding}
 
-  # Blocks
-  depth: 4
-  hidden_size: 256
-  num_heads: 8
-  mlp_dropout: 0.0
-  mlp_ratio: 4.0
-  inf: ${model.inf}
+    # h_V conditioning
+    c_h_V: ${denoiser.minimpnn.n_channel}
 
-  interpolant: ${model.denoiser.interpolant}
+    # QK normalization
+    qk_rmsnorm: true
 
-  # Batch size multiplier for diffusion module
-  training_batch_size_mult: 4
+    # Blocks
+    depth: 4
+    hidden_size: ${model.denoiser.scn_diffusion_module.hidden_size}
+    num_heads: 8
+    mlp_dropout: 0.0
+    mlp_ratio: 4.0
+    inf: ${model.inf}
+
+  autoguidance: ${model.denoiser.autoguidance}
+
+# Autoguidance for sidechain diffusion module
+autoguidance:
+  enabled: false
+  subsample_train_iter_mult: 16  # train with roughly 1/K of the training iterations
+
+  # Config for guiding model; overrides config for scn_diffusion_module DiT
+  dit:
+    depth: 3
+    hidden_size: 192
+    num_heads: 6
+    mlp_dropout: 0.0
+    mlp_ratio: 4.0
