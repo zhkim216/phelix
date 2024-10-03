@@ -222,8 +222,15 @@ def main(cfg: DictConfig):
                 metrics_b["nntm"].append(all_metrics[pdb]["nntm_info"])
 
         # Average metrics across samples
-        metrics_b = {k: np.mean(v) for k, v in metrics_b.items()}
-        bin_to_metrics[bin] = metrics_b
+        metrics_b_avg = {}
+        for k, v in metrics_b.items():
+            metrics_b_avg[k] = np.mean(v)
+
+            # For MPNN metrics, get SE from bootstrapping
+            if "mpnn" in k:
+                metrics_b_avg[f"{k}_se"] = eval_metrics.bootstrap_se(v, n_samples=1000)
+
+        bin_to_metrics[bin] = metrics_b_avg
 
     # === Calculate mean pairwise TM score by length === #
     for bin in set(bins):

@@ -18,13 +18,13 @@ conda activate rshuai_allatom_design
 BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
 OUT_DIR=/scratch/hielab/rshuai/allatom_design
-WANDB_ID=richardshuai
 cd $BASE_DIR
 
 # Set cache directories
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
-# Experiment name and group
+# Wandb settings / experiment name
+WANDB_ID=richardshuai
 EXP_NAME=a10_bb4
 GROUP=chimera_a10
 

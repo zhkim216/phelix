@@ -39,11 +39,18 @@ OMEGAFOLD_CACHE=/scratch/users/rshuai/cache/omegafold/omegafold.pt
 # Denoiser checkpoint
 MODEL_NAME=a10_bb3
 AD_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-epoch1279.ckpt
+
+# Wandb settings / experiment name
+WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_draw_bb_samples
+GROUP=${MODEL_NAME}_s0
 
 # Run eval script
 cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py \
+    wandb_id=${WANDB_ID} \
+    exp_name=${EXP_NAME} \
+    group=${GROUP} \
     ad_ckpt=${AD_CKPT} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
@@ -51,7 +58,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py 
     ss_kld.dssp_csv=${DSSP_CSV} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
-    exp_name=${EXP_NAME} \
     n_samples_per_length=10 \
     ca.timestep_schedule.mode=linear \
     nco.timestep_schedule.mode=linear \
