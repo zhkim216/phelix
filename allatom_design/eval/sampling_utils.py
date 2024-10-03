@@ -86,8 +86,9 @@ def get_timesteps_from_schedule(mode: str,
         timesteps = timesteps ** 3
     elif mode == "sqrt":
         timesteps = timesteps ** 0.5
+    elif mode == "cbrt":
+        timesteps = timesteps ** (1.0 / 3.0)
     elif mode == "cosine":
-        # TODO: double check that this is what MaskGIT means by cosine
         timesteps = 1 - torch.cos(timesteps * np.pi / 2)
     elif mode == "last_only":
         timesteps = torch.zeros_like(timesteps)
