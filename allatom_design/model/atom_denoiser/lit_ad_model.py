@@ -178,16 +178,6 @@ class LitAtomDenoiser(L.LightningModule):
                 self.log_dict({f"total_l{norm_type}_grad_norm": total_norm})
 
 
-    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
-        checkpoint["ema_tracker"] = self.ema_tracker.state_dict()
-
-
-    def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
-        ema_state = checkpoint.get("ema_tracker", None)
-        if ema_state is not None:
-            self.ema_tracker.load_state_dict(ema_state)
-
-
 class NoamLR(LRScheduler):
     def __init__(self, optimizer, model_size, factor, warmup, last_epoch=-1):
         self.model_size = model_size

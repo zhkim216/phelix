@@ -11,6 +11,7 @@ from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import LinearLR, LRScheduler
 from torchtyping import TensorType
 
+from allatom_design.model.phema import PowerFunctionEMA
 from allatom_design.model.seq_denoiser.sd_loss import SDLoss
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 
@@ -24,6 +25,9 @@ class LitSeqDenoiser(L.LightningModule):
         if cfg.train.compile_model:
             print(f"Using torch.compile to optimize model performance...")
             self.model = torch.compile(self.model)
+
+        # Initialize EMA tracker after torch.compile
+        self.ema_tracker = PowerFunctionEMA(self.model)
 
         # Set up loss
         self.loss = SDLoss(cfg.loss)
@@ -41,6 +45,11 @@ class LitSeqDenoiser(L.LightningModule):
         return self.model(batch, **kwargs)
 
 
+    def on_train_start(self):
+        # Initialize EMA trackers at the start of training
+        self.ema_tracker.reset()
+
+
     def training_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int):
         outputs = self(batch)
         loss, aux = self.loss(outputs, batch, return_aux=True)
@@ -49,6 +58,11 @@ class LitSeqDenoiser(L.LightningModule):
         self._log(batch, outputs, aux, batch_idx, phase="train")
 
         return loss
+
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        # Update EMA tracker
+        self.ema_tracker.update(t=self.trainer.global_step)
 
 
     def validation_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
