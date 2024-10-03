@@ -212,10 +212,13 @@ def main(cfg: DictConfig):
                 mpnn_sc_info = all_metrics[pdb]["mpnn_sc_info"]
                 for k, v in mpnn_sc_info["sc_metrics"].items():
                     # take mean and best across MPNN sequences
-                    mean_sc_metric = torch.mean(v)
                     best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
-                    metrics_b[f"mpnn_{k}_mean"].append(mean_sc_metric.item())
                     metrics_b[f"mpnn_{k}_best"].append(best_sc_metric.item())
+
+                    if len(v) > 1:
+                        # only log mean if there are multiple MPNN sequences per backbone
+                        mean_sc_metric = torch.mean(v)
+                        metrics_b[f"mpnn_{k}_mean"].append(mean_sc_metric.item())
 
             # nnTM metrics
             if "nntm_info" in all_metrics[pdb]:
