@@ -21,6 +21,10 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
+# Set cache directories
+export TORCH_HOME=/scratch/users/rshuai/cache/torch
+
+# Experiment name and group
 EXP_NAME=a10_bb4
 GROUP=chimera_a10
 

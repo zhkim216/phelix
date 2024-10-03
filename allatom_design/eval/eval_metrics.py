@@ -1,5 +1,6 @@
 import subprocess
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -8,12 +9,11 @@ import numpy as np
 import pandas as pd
 import torch
 from Bio.PDB.DSSP import DSSP
-from colabdesign.af import mk_af_model
 from einops import rearrange
 from omegaconf import DictConfig
+from scipy.stats import entropy
 from torchtyping import TensorType
 from tqdm import tqdm
-from transformers import EsmForProteinFolding, EsmTokenizer
 
 import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
@@ -84,6 +84,7 @@ def run_self_consistency_eval(pdbs: List[str],
                               device: torch.device,
                               out_dir: str,
                               eval_codesign: bool = False,
+                              temp_dir: Optional[str] = None,
                               ) -> Dict[str, Dict[str, TensorType]]:
     """
     Run self-consistency evaluation on a list of PDBs (MPNN -> struct_pred -> eval metrics).
@@ -259,7 +260,7 @@ def run_self_consistency_eval(pdbs: List[str],
     if not eval_codesign:
         metrics_to_compute = ["sc_ca_rmsd", "sc_ca_tm"]
     else:
-        metrics_to_compute = ["sc_ca_rmsd", "sc_ca_tm", "sc_aa_rmsd", "sc_aa_tm"]
+        metrics_to_compute = ["sc_ca_rmsd", "sc_ca_tm", "sc_aa_rmsd"]
 
     Path(ca_aligned_preds_dir).mkdir(parents=True, exist_ok=True)
     for pdb in tqdm(pdbs, desc="Computing metrics", leave=False):
@@ -275,7 +276,8 @@ def run_self_consistency_eval(pdbs: List[str],
             struct_preds["pred_coords"],
             sampled_pdb_feats["all_atom_positions"][None].expand(B, -1, -1, -1),
             sampled_pdb_feats["all_atom_mask"][None].expand(B, -1, -1),
-            metrics_to_compute=metrics_to_compute
+            metrics_to_compute=metrics_to_compute,
+            temp_dir=temp_dir,
         )
         sc_info[pdb]["sc_metrics"] = metrics
 
@@ -308,10 +310,56 @@ def load_sequence_and_residx_from_pdbs(pdbs: List[str]) -> Tuple[List[str],
     return sequences_list, residue_index_list
 
 
+def compute_pairwise_tm_score(coords_list: List[TensorType["n 37 3"]],
+                              temp_dir: str,
+                              subsample_pairs: Optional[int] = None) -> float:
+    """
+    Compute the mean CA TM-align -> TM-score among all pairwise comparisons in a batch of structures.
+
+    Averages over the TM-score normalized over either structure, then averages over b(b-1)/2 pairs of structures.
+    """
+    B = len(coords_list)
+    if B == 1:
+        return 0.0
+
+    # First, parse coords_list into a tensor with seq_mask for padding
+    seq_mask = [torch.ones_like(c[..., 0, 0]) for c in coords_list]
+    max_length = max([c.shape[0] for c in coords_list])
+    coords = torch.stack([data.make_fixed_size_1d(c, fixed_size=max_length, start_idx=None) for c in coords_list], dim=0)
+    seq_mask = torch.stack([data.make_fixed_size_1d(m, fixed_size=max_length, start_idx=None) for m in seq_mask], dim=0)
+
+    # Get all pairs of structures
+    pairs = torch.combinations(torch.arange(B), r=2, with_replacement=False)
+    if subsample_pairs is not None:
+        # randomly subsample pairs
+        pairs = pairs[torch.randperm(pairs.shape[0])[:subsample_pairs]]
+
+    i_idxs = pairs[:, 0]  # [num_pairs]
+    j_idxs = pairs[:, 1]  # [num_pairs]
+
+    # Extract CA coordinates and atom_mask
+    coords_a = coords[i_idxs, :, 1]  # [num_pairs, N, 3]
+    coords_b = coords[j_idxs, :, 1]  # [num_pairs, N, 3]
+    atom_mask_a = seq_mask[i_idxs, :]  # [num_pairs, N]
+    atom_mask_b = seq_mask[j_idxs, :]  # [num_pairs, N]
+
+    # Get TM scores and average
+    try:
+        pairwise_tm_scores = run_tm_align_coords_batch(coords_a, coords_b,
+                                                       atom_mask_a, atom_mask_b,
+                                                       temp_dir=temp_dir)
+    except Exception as e:
+        print(f"Error in compute_pairwise_tm_score: {e}")
+        return np.nan
+    pairwise_tm_scores = (pairwise_tm_scores[0] + pairwise_tm_scores[1]) / 2  # average TM-score normalized over both structures
+    return pairwise_tm_scores.mean().item()
+
+
 def compute_structure_metrics(coords1: TensorType["b n 37 3"],
                               coords2: TensorType["b n 37 3"],
                               atom_mask: TensorType["b n 37"],
                               metrics_to_compute: List[str],
+                              **kwargs,
                               ) -> Tuple[Dict[str, float],
                                          TensorType["b n 37 3"]
                                          ]:
@@ -324,9 +372,11 @@ def compute_structure_metrics(coords1: TensorType["b n 37 3"],
     Metrics:
     - sc_ca_rmsd: scRMSD between Ca atoms
     - sc_ca_tm: scTM score between Ca atoms
-    - sc_aa_tm: TM score between all atoms, aligned on Ca atoms
     - sc_aa_rmsd: RMSD between all atoms, aligned on all atoms
     - scn_rmsd_per_pos: sidechain RMSD per residue, aligned on backbone atoms
+
+    If using tm score metrics, kwargs must include:
+    - temp_dir: str, to store temporary files
 
     Returns:
     - structure_metrics: Dict of computed metrics
@@ -356,12 +406,10 @@ def compute_structure_metrics(coords1: TensorType["b n 37 3"],
         if metric == "sc_ca_rmsd":
             structure_metrics["sc_ca_rmsd"] = ca_rmsd
         elif metric == "sc_ca_tm":
-            structure_metrics["sc_ca_tm"] = data.tm_score(ca_aligned_coords1[..., 1:2, :],
-                                                          coords2[..., 1:2, :],
-                                                          mask=ca_atom_mask[..., 1:2])
-        elif metric == "sc_aa_tm":
-            # Align on Ca, compute allatom TM
-            structure_metrics["sc_aa_tm"] = data.tm_score(ca_aligned_coords1, coords2, mask=atom_mask)
+            structure_metrics["sc_ca_tm"] = run_tm_align_coords_batch(coords1[..., 1, :], coords2[..., 1, :],
+                                                                      ca_atom_mask[..., 1], ca_atom_mask[..., 1],
+                                                                      temp_dir=kwargs["temp_dir"])
+            structure_metrics["sc_ca_tm"] = structure_metrics["sc_ca_tm"][0]  # get TM-score normalized to coords1 length
         elif metric == "sc_aa_rmsd":
             # Align on all atoms, compute all-atom RMSD
             structure_metrics["sc_aa_rmsd"] = data.torch_rmsd_weighted(rearrange(coords1, "b n a x -> b (n a) x"),
@@ -406,7 +454,6 @@ def get_sort_key_fn(metric_name: str) -> Callable[[float], float]:
     - 'sc_ca_rmsd': min is best
     - 'sc_aa_rmsd': min is best
     - 'sc_ca_tm': max is best
-    - 'sc_aa_tm': max is best
 
     Args:
     - metric_name (str): The name of the metric.
@@ -417,7 +464,7 @@ def get_sort_key_fn(metric_name: str) -> Callable[[float], float]:
     if metric_name in ["sc_ca_rmsd", "sc_aa_rmsd"]:
         # Ascending order, min is best
         return lambda x: -x
-    elif metric_name in ["sc_ca_tm", "sc_aa_tm"]:
+    elif metric_name in ["sc_ca_tm"]:
         # Descending order, max is already best
         return lambda x: x
     else:
@@ -443,23 +490,163 @@ def run_nntm_eval(pdbs: List[str],
     foldseek_tsv = Path(nntm_out, f"{tsv_prefix}foldseek_tm_results.tsv")
     temp_dir = Path(nntm_out, "temp")
 
-    command = [
-        "foldseek", "easy-search",
-        *pdbs, dataset, str(foldseek_tsv), str(temp_dir),
-        "--alignment-type", "1",
-        "--format-output", "query,target,alntmscore,qtmscore,ttmscore"
-    ]
-    subprocess.run(command, check=True)
+    try:
+        command = [
+            "foldseek", "easy-search",
+            *pdbs, dataset, str(foldseek_tsv), str(temp_dir),
+            "--alignment-type", "1",
+            "--format-output", "query,target,alntmscore,qtmscore,ttmscore"
+        ]
+        subprocess.run(command, check=True)
 
-    # Read results and reformat
-    foldseek_df = pd.read_csv(foldseek_tsv, sep="\t", names=["query", "target", "align_tm_score", "query_tm_score", "target_tm_score"])
-    foldseek_df["query"] = foldseek_df["query"].replace({Path(pdb).stem: pdb for pdb in pdbs})  # add full path back
-    foldseek_df.to_csv(foldseek_tsv, sep="\t", index=False)
-    pdb_to_nntm = foldseek_df.groupby("query").agg({"query_tm_score": "max"}).to_dict()["query_tm_score"]
+        # Read results and reformat
+        foldseek_df = pd.read_csv(foldseek_tsv, sep="\t", names=["query", "target", "align_tm_score", "query_tm_score", "target_tm_score"])
+        foldseek_df["query"] = foldseek_df["query"].replace({Path(pdb).stem: pdb for pdb in pdbs})  # add full path back
+        foldseek_df.to_csv(foldseek_tsv, sep="\t", index=False)
+        pdb_to_nntm = foldseek_df.groupby("query").agg({"query_tm_score": "max"}).to_dict()["query_tm_score"]
 
-    for pdb in pdbs:
-        # if no match, set to 0
-        pdb_to_nntm[pdb] = pdb_to_nntm.get(pdb, 0.0)
+        for pdb in pdbs:
+            # if no match, set to 0
+            pdb_to_nntm[pdb] = pdb_to_nntm.get(pdb, 0.0)
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error running foldseek: {e}")
+        pdb_to_nntm = {pdb: np.nan for pdb in pdbs}
 
     return pdb_to_nntm
 
+
+def run_tmalign(pdb_a: str, pdb_b: str) -> Tuple[float, float]:
+    """
+    Runs TM-align between two PDB files and returns the TM-scores.
+    """
+    cmd = ["TMalign", pdb_a, pdb_b]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    output = result.stdout
+
+    tm_score_a = None
+    tm_score_b = None
+
+    # Parse TM-align output
+    for line in output.splitlines():
+        if line.startswith("TM-score="):
+            parts = line.strip().split()
+            score = float(parts[1])
+            if "Chain_1" in line:
+                tm_score_a = score
+            elif "Chain_2" in line:
+                tm_score_b = score
+
+    tm_score_a = tm_score_a if tm_score_a is not None else 0.0
+    tm_score_b = tm_score_b if tm_score_b is not None else 0.0
+
+    return tm_score_a, tm_score_b
+
+
+def run_tm_align_coords_batch(a: TensorType["b n 3", float],
+                              b: TensorType["b n 3", float],
+                              mask_a: TensorType["b n", float],
+                              mask_b: TensorType["b n", float],
+                              temp_dir: str) -> Tuple[TensorType["b", float], TensorType["b", float]]:
+    """
+    Given a batch of CA-only atom coordinates, aligns a to b and computes TM-score in parallel.
+
+    Assumes residue_index starts at 0 and is contiguous, and returns TM-score normalized by lengths (a, b).
+    """
+    Path(temp_dir).mkdir(parents=True, exist_ok=True)
+    B, N, _ = a.shape
+
+    # Make sure tensors are on cpu to avoid CUDA issues in threads
+    a = a.cpu()
+    b = b.cpu()
+    mask_a = mask_a.cpu()
+    mask_b = mask_b.cpu()
+
+    # Write to temp files
+    for prefix, x, mask in zip(["a", "b"], [a, b], [mask_a, mask_b]):
+        atom37_positions = torch.zeros((B, N, 37, 3), dtype=a.dtype)
+        atom37_positions[..., 1, :] = x
+        atom37_mask = torch.zeros((B, N, 37), dtype=mask.dtype)
+        atom37_mask[..., 1] = mask
+
+        feats = {
+            "aatype": torch.full_like(mask, fill_value=rc.restype_order["G"]).long(),
+            "atom_positions": atom37_positions,
+            "atom_mask": atom37_mask,
+            "residue_index": torch.arange(N, dtype=torch.int64).unsqueeze(0).expand(B, -1),
+            "chain_index": torch.zeros((B, N), dtype=torch.int64),
+            "b_factors": None,
+            "filenames": [f"{temp_dir}/{prefix}_{i}.pdb" for i in range(B)],
+        }
+        write_batched_to_pdb(**feats)
+
+    pdb_pairs = [(f"{temp_dir}/a_{i}.pdb", f"{temp_dir}/b_{i}.pdb") for i in range(B)]
+
+    # Run TM-align in parallel
+    with ThreadPoolExecutor() as executor:
+        results = list(tqdm(
+            executor.map(lambda pair: run_tmalign(*pair), pdb_pairs),
+            total=B, desc="Running TM-align", leave=False
+        ))
+
+    # Extract TM-scores
+    tm_scores_a, tm_scores_b = zip(*results)
+    tm_scores_a = torch.tensor(tm_scores_a, dtype=a.dtype)
+    tm_scores_b = torch.tensor(tm_scores_b, dtype=a.dtype)
+
+    # Clean up
+    for prefix in ["a", "b"]:
+        for i in range(B):
+            Path(f"{temp_dir}/{prefix}_{i}.pdb").unlink()
+
+    return tm_scores_a, tm_scores_b
+
+
+def compute_ss_kl(p_alpha: List[float], p_beta: List[float],
+                  q_alpha: List[float], q_beta: List[float],
+                  bin_size: int, pseudocount: float) -> float:
+    """
+    Compute an approximate to the empirical KL-divergence between the ground truth distribution p
+    and the sampled distribution q for secondary structure (helix and strand percentages).
+
+    We bin SS into a 2D grid, and only sum over the lower-triangular part of the grid since helix+strand <= 100%.
+
+    Inputs should be in units of percentage (0-100).
+
+    Parameters:
+    - p_alpha: helix percentages for the ground truth distribution p.
+    - p_beta: strand percentages for the ground truth distribution p.
+    - q_alpha: helix percentages for the sampled distribution q.
+    - q_beta: strand percentages for the sampled distribution q.
+    - bin_size (int, optional): Size of each bin for helix and strand proportions (default: 10).
+    - pseudocount (float, optional): Value to add to each histogram bin to avoid zero probabilities (default: 1.0).
+
+    Returns:
+    - kl_div (float): The KL divergence value KL(p || q)
+    """
+    p_alpha, p_beta, q_alpha, q_beta = np.array(p_alpha), np.array(p_beta), np.array(q_alpha), np.array(q_beta)
+
+    # Define histogram bins
+    bins = np.arange(0, 101, bin_size)
+    if bins[-1] < 100:
+        bins = np.append(bins, 100)
+
+    # 2D histogram for ground truth distribution
+    p_counts, _, _ = np.histogram2d(p_beta, p_alpha, bins=[bins, bins])
+    p_counts = np.flipud(p_counts)  # flip so that 0,0 is in the bottom-left corner
+    p_counts += pseudocount
+    p_probs = p_counts / p_counts.sum()
+
+    # 2D histogram for sampled distribution
+    q_counts, _, _ = np.histogram2d(q_beta, q_alpha, bins=[bins, bins])
+    q_counts = np.flipud(q_counts)  # flip so that 0,0 is in the bottom-left corner
+    q_counts += pseudocount
+    q_probs = q_counts / q_counts.sum()
+
+    # Compute KL divergence on the lower-triangular part of the matrix, including the diagonal
+    tril_indices = np.tril_indices(len(bins) - 1)
+    p_probs_flat = p_probs[tril_indices]
+    q_probs_flat = q_probs[tril_indices]
+    kl_div = entropy(p_probs_flat, q_probs_flat)
+
+    return kl_div

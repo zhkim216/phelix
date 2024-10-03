@@ -11,7 +11,9 @@ import openfold.data.data_transforms as data_transforms
 from allatom_design.data import protein
 from allatom_design.data import residue_constants as rc
 from openfold.utils.feats import atom14_to_atom37
+from pathlib import Path
 from openfold.utils.rigid_utils import Rigid
+import subprocess
 
 
 def load_feats_from_pdb(pdb, chain_residx_gap: int, max_conformers: int = 1):
