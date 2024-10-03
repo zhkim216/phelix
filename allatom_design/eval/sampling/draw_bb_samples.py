@@ -282,15 +282,11 @@ def main(cfg: DictConfig):
             dir=wandb_dir,
         )
 
-        # Define length_bin as our x-axis
-        wandb.define_metric("length_bin", step=False)
-        wandb.define_metric("*", step=False)
-
         # Log metrics
         for bin in sorted(bin_to_metrics.keys()):
             metrics_b = bin_to_metrics[bin]
             metrics_b["length_bin"] = bin
-            wandb.log(metrics_b)
+            wandb.log(metrics_b, step=bin)
 
         wandb.finish()
 
