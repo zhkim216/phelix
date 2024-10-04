@@ -122,11 +122,12 @@ def main(cfg: DictConfig):
         # create sidechain diffusion churn config
         churn_cfg = dict(cfg.scn_diffusion.churn_cfg)
         scd_inputs = {"num_steps": cfg.scn_diffusion.num_steps,
-                    "timesteps": None,  # filled in based on batch size
-                    "noise_schedule": noise_schedule,
-                    "churn_cfg": churn_cfg,
-                    "return_scn_diffusion_aux": False
-                    }
+                      "timesteps": None,  # filled in based on batch size
+                      "noise_schedule": noise_schedule,
+                      "churn_cfg": churn_cfg,
+                      "autoguidance_cfg": dict(cfg.scn_diffusion.autoguidance_cfg),
+                      "return_scn_diffusion_aux": False
+                      }
 
         ### BEGIN EVAL ###
         metrics = {}

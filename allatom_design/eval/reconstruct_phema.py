@@ -14,6 +14,7 @@ from omegaconf import DictConfig, OmegaConf
 import allatom_design.model.phema as phema
 from tqdm import tqdm
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
+from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
 
 @hydra.main(config_path="../configs/eval", config_name="reconstruct_phema", version_base="1.3.2")
@@ -98,13 +99,27 @@ def main(cfg: DictConfig):
         out_ckpt = Path(cfg.out_dir, f"ema-step{out_step}-std{out_std:.2f}.ckpt")
         base_ckpt = denoiser_ckpts[0]  # besides the updated EMA weights, the rest of the model will be the same as the last checkpoint
         ckpt_dict = torch.load(base_ckpt, map_location="cpu")
-        lit_ad_model = LitAtomDenoiser.load_from_checkpoint(base_ckpt)
 
-        model_state_dict = lit_ad_model.model.state_dict()
+        # Load the base model
+        if cfg.model_type == "seq_denoiser":
+            lit_model = LitSeqDenoiser.load_from_checkpoint(base_ckpt)
+        elif cfg.model_type == "atom_denoiser":
+            lit_model = LitAtomDenoiser.load_from_checkpoint(base_ckpt)
+        else:
+            raise ValueError(f"Unsupported model_type: {cfg.model_type}")
+
+        # Make sure every parameter that required grad in the base model is overridden with the new state dict
+        for n, p in lit_model.model.named_parameters():
+            if p.requires_grad:
+                assert n in out_state_dict
+
+        # Update the model state dict with the new EMA weights
+        model_state_dict = lit_model.model.state_dict()
         model_state_dict.update(out_state_dict)
-        lit_ad_model.model.load_state_dict(model_state_dict, strict=True)
+        lit_model.model.load_state_dict(model_state_dict, strict=True)
 
-        ckpt_dict["state_dict"] = lit_ad_model.state_dict()
+        # Save the new checkpoint
+        ckpt_dict["state_dict"] = lit_model.state_dict()
         torch.save(ckpt_dict, out_ckpt)
 
 

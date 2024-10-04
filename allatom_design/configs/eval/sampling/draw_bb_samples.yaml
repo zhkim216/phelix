@@ -60,9 +60,11 @@ nco:
     num_steps: ${num_steps}
   s_max_override: null  # if not null, override s_max in interpolant
 
+# Conditioning
 # cond_labels: {"designability": "DESIGNABLE"}  # null for unconditional sampling
 cond_labels: null
 
+# Autoguidance
 autoguidance_cfg:
   use_autoguidance: false
   w: 1.0

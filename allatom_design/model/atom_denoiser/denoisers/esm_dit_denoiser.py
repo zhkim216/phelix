@@ -212,6 +212,8 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
             timesteps = aux_inputs["timesteps"]
             churn_cfg = aux_inputs["churn_cfg"]
             noise_schedule = aux_inputs["noise_schedule"]
+            autoguidance_cfg = aux_inputs["autoguidance_cfg"]
+
             ## extract overrides
             xt_bb_override = aux_inputs["xt_override"][..., rc.bb_idxs, :]
             xt_bb_override_mask = aux_inputs["xt_override_mask"][..., rc.bb_idxs, :]
@@ -234,12 +236,12 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
                 xt_bb = x0_bb
 
             # Apply autoguidance
-            use_autoguidance = (aux_inputs["autoguidance_cfg"] is not None) and (aux_inputs["autoguidance_cfg"]["use_autoguidance"])
+            use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])
             if use_autoguidance:
                 assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
-                aux_inputs["autoguidance_cfg"]["autoguidance_fn"] = partial(self.guiding_model, aatype_noised=aatype_noised,
-                                                                            residue_index=residue_index, seq_mask=seq_mask,
-                                                                            cond_labels_in=cond_labels_in)
+                autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model, aatype_noised=aatype_noised,
+                                                              residue_index=residue_index, seq_mask=seq_mask,
+                                                              cond_labels_in=cond_labels_in)
 
             # Run integration steps
             denoiser_fn = partial(self.dit, h_S=h_S, aatype_noised=aatype_noised,
@@ -258,6 +260,7 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
                                                                t=t, t_next=t_next,
                                                                noise_schedule=noise_schedule,
                                                                cfg_cfg=None,
+                                                               autoguidance_cfg=autoguidance_cfg,
                                                                aux_inputs=aux_inputs)
                 xt_bb = xt_bb * (1 - xt_bb_override_mask[i + 1]) + xt_bb_override[i + 1] * xt_bb_override_mask[i + 1]  # override xt for outputs  # TODO: should we override self-cond input too?
 
@@ -266,8 +269,9 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
                     denoiser_fn = partial(denoiser_fn, x_self_cond=aux_preds["x1_pred"])
 
                     if use_autoguidance:
-                        aux_inputs["autoguidance_cfg"]["autoguidance_fn"] = partial(aux_inputs["autoguidance_cfg"]["autoguidance_fn"],
-                                                                                    x_self_cond=aux_preds["x1_pred_ag"])
+                        # self-conditioning for autoguidance
+                        autoguidance_cfg["autoguidance_fn"] = partial(autoguidance_cfg["autoguidance_fn"],
+                                                                      x_self_cond=aux_preds["x1_pred_ag"])
 
                 # Save current state
                 xt_bb_traj.append(xt_bb.cpu())

@@ -165,6 +165,7 @@ class EDM(ADInterpolant):
                    t_next: TensorType["b", float],
                    noise_schedule: Optional[NoiseSchedule],
                    cfg_cfg: Optional[DictConfig],  # classifier-free guidance config
+                   autoguidance_cfg: Optional[DictConfig],  # autoguidance config
                    aux_inputs: Optional[Dict[str, Any]] = None
                    ) -> Tuple[TensorType["b n a 3", float],  # xt_next
                               Dict[str, TensorType["b ..."]]  # aux preds
@@ -175,14 +176,24 @@ class EDM(ADInterpolant):
         f is the forward function of the denoiser trained with this interpolant.
         - It should take in the current state and the current time.
         """
-        x1_pred, aatype_pred, aux_preds = f(xt, t=t)
-        score = (xt - x1_pred) / rearrange(self.sigma(t), "b -> b 1 1 1")
+        x1_pred, aux_preds = f(xt, t=t)
+        aux_preds["x1_pred"] = x1_pred  # save x1_pred before any guidance modifications
 
         if cfg_cfg is not None:
             raise NotImplementedError("Classifier-free guidance is not implemented yet.")
 
+        # Handle autoguidance
+        if (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"]):
+            f_autoguidance = autoguidance_cfg["autoguidance_fn"]
+            x1_pred_ag, _ = f_autoguidance(xt, t=t)
+
+            w = autoguidance_cfg["w"]
+            x1_pred += (w - 1) * (aux_preds["x1_pred"] - x1_pred_ag)
+            aux_preds["x1_pred_ag"] = x1_pred_ag
+
+        # Handle noise schedules (after guidance)
+        score = (xt - x1_pred) / rearrange(self.sigma(t), "b -> b 1 1 1")
         if noise_schedule is not None:
-            # TODO: make sure this is accurate since we are operating on score not vf
             score = noise_schedule.scale_vf(score, t)
 
         dsigma = rearrange(self.sigma(t_next) - self.sigma(t), "b -> b 1 1 1")
@@ -190,7 +201,6 @@ class EDM(ADInterpolant):
 
         # Add to auxiliary outputs
         aux_preds["x1_pred"] = x1_pred
-        aux_preds["aatype_pred"] = aatype_pred
 
         return xt_next, aux_preds
 

@@ -153,16 +153,26 @@ class SidechainDiffusionModule(nn.Module):
             x0_scn = self.scn_interpolant.sample_prior((B, N, A, 3), h_V.device)
 
             # Extract sampling parameters
-            S_scd = aux_inputs["scd"]["num_steps"]
-            timesteps = aux_inputs["scd"]["timesteps"]
-            churn_cfg = aux_inputs["scd"]["churn_cfg"]
-            noise_schedule = aux_inputs["scd"]["noise_schedule"]
+            scd_aux_inputs = aux_inputs["scd"]
+            S_scd = scd_aux_inputs["num_steps"]
+            timesteps = scd_aux_inputs["timesteps"]
+            churn_cfg = scd_aux_inputs["churn_cfg"]
+            noise_schedule = scd_aux_inputs["noise_schedule"]
+            autoguidance_cfg = scd_aux_inputs["autoguidance_cfg"]
+
+            # Apply autoguidance
+            use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])
+            if use_autoguidance:
+                assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
+                autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model, aatype=aatype, x_bb=x_bb,
+                                                              h_V=h_V, seq_mask=seq_mask, residue_index=residue_index)
 
             # Store trajectory
             xt_scn_traj, x1_scn_traj = [], []
 
             # Run integration steps
-            denoiser_fn = partial(self.dit, aatype=aatype, x_bb=x_bb, h_V=h_V, seq_mask=seq_mask, residue_index=residue_index)
+            denoiser_fn = partial(self.dit, aatype=aatype, x_bb=x_bb,
+                                  h_V=h_V, seq_mask=seq_mask, residue_index=residue_index)
 
             xt_scn = x0_scn
             for i in range(S_scd):
@@ -175,11 +185,16 @@ class SidechainDiffusionModule(nn.Module):
                                                                     xt_scn,
                                                                     t=t, t_next=t_next,
                                                                     noise_schedule=noise_schedule,
+                                                                    autoguidance_cfg=autoguidance_cfg,
                                                                     cfg_cfg=None)
 
                 if self.use_self_conditioning:
                     # Apply self-conditioning
                     denoiser_fn = partial(denoiser_fn, x_scn_self_cond=aux_preds["x1_pred"])
+
+                    if use_autoguidance:
+                        autoguidance_cfg["autoguidance_fn"] = partial(autoguidance_cfg["autoguidance_fn"],
+                                                                      x_scn_self_cond=aux_preds["x1_pred_ag"])
 
                 # Save current state
                 xt_scn_traj.append(xt_scn.cpu())
