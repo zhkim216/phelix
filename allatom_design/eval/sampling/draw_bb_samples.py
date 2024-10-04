@@ -116,8 +116,8 @@ def main(cfg: DictConfig):
                                                     )
 
         samples = {"x_bb_denoised": x_bb_denoised,
-                "seq_mask": aux["seq_mask"],
-                "residue_index": residue_index}
+                   "seq_mask": aux["seq_mask"],
+                   "residue_index": residue_index}
         samples = {k: v.cpu() if v is not None else v for k, v  in samples.items()}
 
         # Save samples
