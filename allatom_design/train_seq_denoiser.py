@@ -145,8 +145,8 @@ def main(cfg: DictConfig):
         lr_monitor = LearningRateMonitor(logging_interval="step")
         callbacks.append(lr_monitor)
 
-    # Compute scale factors for sigma data separately for both CA and NCO
-    scale_factors = ad_dataset.compute_scale_factors(train_dataloader, n_examples=1000, scale_factor_mode=None)
+    # Compute scale factors for sigma data
+    scale_factors = ad_dataset.compute_scale_factors(train_dataloader, n_examples=1000)
     lit_model.model.set_scale_factors(scale_factors)  # set scale factors in model
 
     # Train

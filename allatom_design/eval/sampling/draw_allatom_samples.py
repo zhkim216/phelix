@@ -92,19 +92,16 @@ def main(cfg: DictConfig):
         # === Handle atom denoiser inputs === #
         ad_sampling_inputs = {}
 
-        # Create timesteps, separating timesteps for CA and NCO
-        t_ca = sampling_utils.get_timesteps_from_schedule(**cfg.ad.ca.timestep_schedule)
-        t_nco = sampling_utils.get_timesteps_from_schedule(**cfg.ad.nco.timestep_schedule)
-        t_ca = t_ca[None].expand(B, -1).to(device)
-        t_nco = t_nco[None].expand(B, -1).to(device)
-        ad_sampling_inputs["timesteps"] = (t_ca, t_nco)
+        # Create timesteps for backbone
+        t_bb = sampling_utils.get_timesteps_from_schedule(**cfg.ad.timestep_schedule)
+        t_bb = t_bb[None].expand(B, -1).to(device)
+        ad_sampling_inputs["timesteps"] = t_bb
 
-        # Create noise schedules for CA and NCO
-        ad_sampling_inputs["noise_schedule"] = (NoiseSchedule(cfg.ad.ca.noise_schedule),
-                                                NoiseSchedule(cfg.ad.nco.noise_schedule))
+        # Create noise schedule for backbone
+        ad_sampling_inputs["noise_schedule"] = NoiseSchedule(cfg.ad.noise_schedule)
 
-        # Create churn configs for CA and NCO
-        ad_sampling_inputs["churn_cfg"] = (dict(cfg.ad.ca.churn_cfg), dict(cfg.ad.nco.churn_cfg))
+        # Create churn config for backbone
+        ad_sampling_inputs["churn_cfg"] = dict(cfg.ad.churn_cfg)
 
         # === Handle sequence denoiser inputs === #
         sd_sampling_inputs = {}

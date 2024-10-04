@@ -34,17 +34,14 @@ class AtomDenoiser(nn.Module):
         self.task = cfg.task
 
         # Data scaling parameters
-        # Scale CA separately from rest of the backbone
-        self.register_buffer("ca_mean", torch.tensor(0.0))
-        self.register_buffer("ca_std", torch.tensor(1.0))
+        self.register_buffer("bb_mean", torch.tensor(0.0))
+        self.register_buffer("bb_std", torch.tensor(1.0))
 
-        self.register_buffer("nco_mean", torch.tensor(0.0))
-        self.register_buffer("nco_std", torch.tensor(1.0))
-
-        self.sigma_data = (self.ca_std, self.nco_std)
+        self.sigma_data = self.bb_std
 
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
-        self.sd_interpolant = get_interpolant(getattr(cfg, "sd_interpolant", None))
+        # self.sd_interpolant = get_interpolant(getattr(cfg, "sd_interpolant", None))
+        self.sd_interpolant = None
 
 
     def setup(self):
@@ -82,8 +79,7 @@ class AtomDenoiser(nn.Module):
         # During training, keep track of certain additional features
         aux_inputs = {
             "x": batch["x"],  # ground truth coordinates
-            "t_ca": batch.get("t_ca", None),  # scalar; fix t_ca if provided, usually for eval
-            "t_nco": batch.get("t_nco", None),  # scalar; fix t_nco if provided, usually for eval
+            "t_bb": batch.get("t_bb", None),  # scalar; fix t_bb if provided, usually for eval
         }
 
         # Denoise coords
@@ -100,28 +96,23 @@ class AtomDenoiser(nn.Module):
 
     def set_scale_factors(self,
                           scale_factors: Dict[str, Tuple[float, float]]):
-        ca_mean, ca_std = scale_factors["ca"]
-        self.ca_mean.data = torch.tensor(ca_mean)
-        self.ca_std.data = torch.tensor(ca_std)
-        print(f"Setting ca_mean: {ca_mean}, ca_std: {ca_std}")
-
-        nco_mean, nco_std = scale_factors["nco"]
-        self.nco_mean.data = torch.tensor(nco_mean)
-        self.nco_std.data = torch.tensor(nco_std)
-        print(f"Setting nco_mean: {nco_mean}, nco_std: {nco_std}")
+        bb_mean, bb_std = scale_factors["bb"]
+        self.bb_mean.data = torch.tensor(bb_mean)
+        self.bb_std.data = torch.tensor(bb_std)
+        print(f"Setting bb_mean: {bb_mean}, bb_std: {bb_std}")
 
 
     def sample(self,
                lengths: TensorType["b", int],
                residue_index: TensorType["b n", int],
-               timesteps: Tuple[TensorType["b s+1", float]],  # tuple of timesteps for (t_ca, t_nco)
+               timesteps: TensorType["b s+1", float],
                xt_override: Optional[TensorType["s+1 b n a 3", float]] = None,
                xt_override_mask: Optional[TensorType["s+1 b n a 3", float]] = None,
                aatype_override: Optional[TensorType["s+1 b n", int]] = None,
                aatype_override_mask: Optional[TensorType["s+1 b n", int]] = None,
                cond_labels: Dict[str, TensorType["b", int]] = {},
-               noise_schedule: Tuple[Optional[NoiseSchedule]] = None,  # noise schedule for (t_ca, t_nco)
-               churn_cfg: Tuple[Optional[Dict[str, float]]] = None, # churn config for (t_ca, t_nco)
+               noise_schedule: NoiseSchedule = None,
+               churn_cfg: Dict[str, float] = None,
                autoguidance_cfg: Optional[Dict[str, Any]] = None,  # autoguidance config
                ) -> Tuple[TensorType["b n 4 3", float],
                           Dict[str, torch.Tensor]]:
@@ -157,11 +148,7 @@ class AtomDenoiser(nn.Module):
         aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
         mlm_mask = torch.zeros_like(seq_mask)
 
-        # Make unimodal timesteps into a tuple for consistency
-        if not isinstance(timesteps, (tuple, list)):
-            timesteps = (timesteps,)
-
-        num_steps = timesteps[0].shape[-1] - 1
+        num_steps = timesteps.shape[-1] - 1
 
         # Handle xt overrides
         if xt_override is None:
@@ -289,7 +276,7 @@ class AtomDenoiser(nn.Module):
 
 
 def get_denoiser(cfg: DictConfig,
-                 sigma_data: TensorType[(), float]  # can also be a tuple of sigmas for ca, nco
+                 sigma_data: TensorType[(), float]
                  ) -> BaseAtomDenoiser:
     """
     Get the denoiser specified in the config.

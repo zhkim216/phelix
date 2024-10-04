@@ -2,7 +2,7 @@ name: dit
 
 defaults:
   - _self_
-  - interpolant: edm_ca_interpolant
+  - interpolant: edm_interpolant
 
 
 # Diffusion settings

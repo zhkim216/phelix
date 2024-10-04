@@ -103,11 +103,8 @@ def main(cfg: DictConfig):
             lit_ad_model.cfg.data.update({k: v for k, v in cfg.data.items() if v is not None})  # override data config where specified
 
         # Override s_max
-        if cfg.ca.s_max_override is not None:
-            lit_ad_model.model.denoiser.interpolant.ca_interpolant.set_s_max(cfg.ca.s_max_override)
-
-        if cfg.nco.s_max_override is not None:
-            lit_ad_model.model.denoiser.interpolant.nco_interpolant.set_s_max(cfg.nco.s_max_override)
+        if cfg.s_max_override is not None:
+            lit_ad_model.model.denoiser.interpolant.set_s_max(cfg.s_max_override)
 
         ### BEGIN EVAL ###
         # Define the range of lengths to sample
@@ -127,19 +124,16 @@ def main(cfg: DictConfig):
                 residue_index = torch.arange(lengths.max(), dtype=torch.long).to(lit_ad_model.device)
                 residue_index = residue_index[None].expand(B, -1)
 
-                # Create timesteps, separating timesteps for CA and NCO
-                t_ca = sampling_utils.get_timesteps_from_schedule(**cfg.ca.timestep_schedule)
-                t_ca = t_ca[None].expand(B, -1).to(lit_ad_model.device)
-                t_nco = sampling_utils.get_timesteps_from_schedule(**cfg.nco.timestep_schedule)
-                t_nco = t_nco[None].expand(B, -1).to(lit_ad_model.device)
-                timesteps = (t_ca, t_nco)
+                # Create timesteps for backbone
+                t_bb = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
+                t_bb = t_bb[None].expand(B, -1).to(lit_ad_model.device)
+                timesteps = t_bb
 
-                # Create noise schedules for CA and NCO
-                noise_schedule = (NoiseSchedule(cfg.ca.noise_schedule),
-                                  NoiseSchedule(cfg.nco.noise_schedule))
+                # Create noise schedule for backbone
+                noise_schedule = NoiseSchedule(cfg.noise_schedule)
 
-                # Create churn configs for CA and NCO
-                churn_cfg = (dict(cfg.ca.churn_cfg), dict(cfg.nco.churn_cfg))
+                # Create churn config for backbone
+                churn_cfg = dict(cfg.churn_cfg)
 
                 cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, lit_ad_model.device)
                 x_bb_denoised, aux = lit_ad_model.model.sample(lengths,
