@@ -116,6 +116,7 @@ class ADDataset(data.Dataset):
         x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
 
         # Construct example
+        x = x * atom_mask[..., None]  # ensure missing & ghost atoms are zeroed out
         example["x"] = x
         example["seq_mask"] = seq_mask
         example["x_mask"] = x_mask
