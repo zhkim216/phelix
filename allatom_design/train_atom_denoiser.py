@@ -145,8 +145,8 @@ def main(cfg: DictConfig):
         lr_monitor = LearningRateMonitor(logging_interval="step")
         callbacks.append(lr_monitor)
 
-    # Compute scale factors for sigma data separately for both CA and NCO
-    scale_factors = ad_dataset.compute_scale_factors(train_dataloader, n_examples=1000, scale_factor_mode=cfg.model.scale_factor_mode)
+    # Compute scale factors for sigma data
+    scale_factors = ad_dataset.compute_scale_factors(train_dataloader, n_examples=1000)
     lit_model.model.set_scale_factors(scale_factors)  # set scale factors in model
 
     # Train
@@ -184,9 +184,6 @@ def update_config(cfg: DictConfig) -> None:
     if str(cfg.trainer.precision) in ["16", "16-true", "16-mixed"]:
         cfg.model.inf = 1e4
         cfg.model.eps = 1e-4
-
-    if cfg.denoiser.interpolant.name == "edm_ca":
-        cfg.model.scale_factor_mode = "ca_nco_bb"
 
     if getattr(cfg.denoiser, "autoguidance", None) and cfg.denoiser.autoguidance.enabled:
         # Autoguidance model parameters are not always used

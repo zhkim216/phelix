@@ -351,7 +351,7 @@ class SeqDenoiser(nn.Module):
 
 
 def get_denoiser(cfg: DictConfig,
-                 sigma_data: TensorType[(), float]  # can also be a tuple of sigmas for ca, nco
+                 sigma_data: TensorType[(), float]
                  ) -> BaseSeqDenoiser:
     """
     Get the denoiser specified in the config.

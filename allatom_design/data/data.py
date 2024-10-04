@@ -275,18 +275,6 @@ def cat_bb_scn(x_bb: TensorType["... a1 3", float],
     return x
 
 
-def cat_ca_nco(x_ca: TensorType["... 1 3", float],
-               x_nco: TensorType["... 3 3", float]
-               ) -> TensorType["... 4 3", float]:
-    """
-    Concatenate the ca and nco atoms to their corresponding indices.
-    """
-    x = torch.zeros(x_ca.shape[:-2] + (4, 3), device=x_ca.device, dtype=x_ca.dtype)
-    x[..., 1:2, :] = x_ca
-    x[..., rc.nco_idxs, :] = x_nco
-    return x
-
-
 def stack_aux_traj(aux_traj: List[Dict[str, Any]], dim: int = 1) -> Dict[str, Any]:
     """
     Stacks tensors from a list of dictionaries, recursively handling nested dictionaries.

@@ -59,16 +59,14 @@ model:
   sd_interpolant: ${sd_interpolant}
 
 eval:
-  eval_timesteps_ca_nco: [0.0, 0.2, 0.4, 0.6, 0.8]  # timesteps to evaluate CA/NCO denoising (2D grid)
-  eval_timesteps_seq: []  # seq timesteps to evaluate at; ca/nco are set to same timestep taken from eval_timesteps_ca_nco
+  eval_timesteps_bb: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]  # backbone timesteps to evaluate at
+  eval_timesteps_seq: []  # seq timesteps to evaluate at
 
 
 loss:
   task: ${model.task}
   loss_weights:
-    bb_ca:
-      mse_loss: 1.0
-    bb_nco:
+    bb:
       mse_loss: 1.0
 
 optim:

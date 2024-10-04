@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a11_bb0
+#SBATCH --job-name=a11_bb1
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
@@ -25,7 +25,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=a11_bb0
+EXP_NAME=a11_bb1
 GROUP=chimera_a11
 
 # Dataset paths
