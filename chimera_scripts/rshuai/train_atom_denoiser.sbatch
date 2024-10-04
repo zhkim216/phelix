@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a10_bb4
+#SBATCH --job-name=a11_bb0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
@@ -25,8 +25,8 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=a10_bb4
-GROUP=chimera_a10
+EXP_NAME=a11_bb0
+GROUP=chimera_a11
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
@@ -42,19 +42,14 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
     data.fixed_size=512 \
-    train.batch_size=8 \
+    train.batch_size=64 \
     train.compile_model=true \
     model.task=backbone \
-    sd_interpolant.full_noise_p=0.3 \
-    sd_interpolant.training_noise_schedule=uniform_t \
-    denoiser=esm_dit_denoiser \
-    denoiser.esm.esm_type=esm2_650M \
+    denoiser=dit_denoiser \
     denoiser.autoguidance.enabled=true \
-    denoiser.training_batch_size_mult=8 \
-    eval.eval_timesteps_seq=[0.25,0.5,0.75,1.0] \
     optim.optimizer=noam \
-    checkpointing.save_latest_every_n_epochs=80 \
+    checkpointing.save_latest_every_n_epochs=40 \
     checkpointing.save_ema_every_n_epochs=10 \
-    trainer.check_val_every_n_epoch=40 \
+    trainer.check_val_every_n_epoch=20 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
