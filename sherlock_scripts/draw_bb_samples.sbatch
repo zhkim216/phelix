@@ -29,7 +29,7 @@ AF2_DATA_DIR=/scratch/users/rshuai/model_params/af2
 
 # Dataset paths
 NNTM_DATASET=/scratch/users/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
-DSSP_CSV=/scratch/users/rshuai/datasets/ingraham_cath_dataset/dssp/ingraham_cath_dssp_with_length.csv
+DSSP_CSV=/scratch/users/rshuai/datasets/ingraham_cath_dataset/dssp/dssp_length_strict.csv
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
