@@ -121,7 +121,6 @@ def main(cfg: DictConfig):
                 seq_mask, residue_index = batch["seq_mask"].to(device), batch["residue_index"].to(device)
                 cond_labels_in = {"crop_aug": batch["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
 
-
                 x_denoised, _, _ = lit_ad_model.model.sidechain_pack(
                     x,
                     aatype,

@@ -16,12 +16,12 @@ from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf, open_dict
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import AutoTokenizer, EsmForProteinFolding
 
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import ADDataset
 from allatom_design.data.pdb_utils import write_to_pdb_frames
 from allatom_design.eval import eval_metrics, sampling_utils
+from allatom_design.eval.folding_utils import get_struct_pred_model
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
@@ -192,20 +192,18 @@ def main(cfg: DictConfig):
 
     # Run co-design self-consistency evaluation
     if cfg.run_codes_sc:
-        esmfold = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
-        esmfold.esm = esmfold.esm.half()
-        esmfold = esmfold.to(device)
-        tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
+        struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
         codes_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
                                                                None, None,  # no MPNN model for co-design eval
-                                                               esmfold, tokenizer,
+                                                               struct_pred_model,
                                                                device,
                                                                out_dir=cfg.out_dir,
-                                                               eval_codesign=True)
+                                                               eval_codesign=True,
+                                                               temp_dir=f"{cfg.out_dir}/tmp")
+
         for pdb, v in codes_sc_info.items():
             all_metrics[pdb]["codes_sc_info"] = v
-
 
     ### SAVE METRICS ###
     # Save all metrics to pickle file

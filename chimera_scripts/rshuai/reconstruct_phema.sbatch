@@ -22,6 +22,7 @@ cd ${BASE_DIR}
 
 # Model name to evaluate
 MODEL_NAME=a8_bb6
+MODEL_TYPE=atom_denoiser  # atom_denoiser or seq_denoiser
 
 # Directory where denoiser was trained to
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
@@ -29,4 +30,5 @@ DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_
 # Run eval script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/reconstruct_phema.py \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
+    model_type=${MODEL_TYPE} \
     hydra.run.dir=${HYDRA_DIR}
