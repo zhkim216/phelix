@@ -4,6 +4,7 @@ overwrite_out_dir: true  # if true, delete existing output directory
 
 # Denoiser options
 denoiser_train_dir:
+model_type: "atom_denoiser"  # "seq_denoiser" or "atom_denoiser"
 out_dir: null  # if null, write to ${denoiser_train_dir}/post_hoc_ema_ckpts
 
 out_step: 500000

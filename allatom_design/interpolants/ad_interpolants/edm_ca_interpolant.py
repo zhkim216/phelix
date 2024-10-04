@@ -167,6 +167,7 @@ class EDM_CA(ADInterpolant):
                    t_next: TensorType["b", float],
                    noise_schedule: Tuple[Optional[NoiseSchedule]],
                    cfg_cfg: Optional[DictConfig],  # classifier-free guidance config
+                   autoguidance_cfg: Optional[DictConfig],  # autoguidance config
                    aux_inputs: Optional[Dict[str, Any]] = None
                    ) -> Tuple[TensorType["b n a 3", float],  # xt_next
                               Dict[str, TensorType["b ..."]]  # aux preds
@@ -181,17 +182,13 @@ class EDM_CA(ADInterpolant):
         aux_preds["x1_pred"] = x1_pred  # save x1_pred before any guidance modifications
 
         # Handle guidance
-        autoguidance_cfg = aux_inputs.get("autoguidance_cfg", None)
         if (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"]):
-            # TODO: move this to each edm_interpolant
             f_autoguidance = autoguidance_cfg["autoguidance_fn"]
             x1_pred_ag, _ = f_autoguidance(xt, t=t)
 
             w = autoguidance_cfg["w"]
-            # x1_pred = w * x1_pred + (1 - w) * x1_pred_ag
             x1_pred += (w - 1) * (aux_preds["x1_pred"] - x1_pred_ag)
             aux_preds["x1_pred_ag"] = x1_pred_ag
-
 
         sigma_ca, sigma_nco = self.sigma(t)
         score_ca = (xt[..., 1:2, :] - x1_pred[..., 1:2, :]) / rearrange(sigma_ca, "b -> b 1 1 1")
@@ -200,7 +197,7 @@ class EDM_CA(ADInterpolant):
         if cfg_cfg is not None:
             raise NotImplementedError("Classifier-free guidance is not implemented yet.")
 
-        # Handle noise schedules
+        # Handle noise schedules (after guidance)
         noise_schedule_ca, noise_schedule_nco = noise_schedule
         if noise_schedule_ca is not None:
             score_ca = noise_schedule_ca.scale_vf(score_ca, t)
