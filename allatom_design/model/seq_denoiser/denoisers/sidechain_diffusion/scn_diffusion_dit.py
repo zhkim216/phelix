@@ -64,6 +64,9 @@ class SidechainDiffusionModule(nn.Module):
 
         if not is_sampling:
             # === Training === #
+            # Teacher forcing: use ground truth aatype
+            aatype = aux_inputs["aatype"]
+
             # Repeat the inputs for batch multiplier
             M = self.cfg.training_batch_size_mult
             h_V_batched = repeat(h_V, "b n h -> (m b) n h", m=M, b=B)
@@ -90,9 +93,6 @@ class SidechainDiffusionModule(nn.Module):
             # Ensure that missing / ghost atoms are zeroed out
             x_scn_gt_batched = torch.where(missing_atom_mask_batched[..., rc.non_bb_idxs, None].bool(), 0, x_scn_gt_batched)
             x_scn_gt_batched = torch.where(ghost_atom_mask_batched[..., rc.non_bb_idxs, None].bool(), 0, x_scn_gt_batched)
-
-            # Teacher forcing: use ground truth aatype
-            aatype = aux_inputs["aatype"]
 
             # Evaluate at specific timesteps (for validation)
             t_sd_batched = None
