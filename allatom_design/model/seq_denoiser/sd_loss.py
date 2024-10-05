@@ -57,8 +57,12 @@ class SDLoss(nn.Module):
             # compute sequence loss from sequence design module
             seq_lengths = batch["seq_mask"].sum(-1).long()
             
-            # compute sequence loss from sequence design module
+            # compute sequence loss on masked tokens
             seq_loss_mask = batch['seq_mask'] * (1 - outputs["seq_mlm_mask"])
+
+            #mask unk tokens from loss calculation
+            seq_loss_mask = seq_loss_mask * (1 - batch['seq_unk_mask'])
+
             aux["seq_loss"] = masked_cross_entropy(outputs["seq_logits"], batch["aatype"], seq_loss_mask,
                                                    seq_loss_cfg=self.cfg.seq_loss)
             aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], batch["aatype"], seq_loss_mask).mean().detach().clone()

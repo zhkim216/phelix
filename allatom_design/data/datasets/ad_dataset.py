@@ -129,6 +129,7 @@ class ADDataset(data.Dataset):
         example["aatype"] = data["aatype"]  # not one-hot encoded
         example["ghost_atom_mask"] = data["ghost_atom_mask"]
         example["missing_atom_mask"] = data["missing_atom_mask"]
+        example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
 
         # Construct conditioning inputs
         cond_labels_in = {}
