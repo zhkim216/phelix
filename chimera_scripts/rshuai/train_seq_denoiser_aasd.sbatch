@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a8_aasd0
+#SBATCH --job-name=a10_aasd5
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,8 +21,8 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=a8_aasd0
-GROUP=chimera_a8
+EXP_NAME=a10_aasd5
+GROUP=chimera_a10
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
@@ -43,9 +43,12 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     model.task=allatom_seq_des \
     interpolant.training_noise_schedule=uniform_squared_t \
     denoiser=minimpnn_denoiser \
-    denoiser.minimpnn.augment_eps=0.0 \
+    denoiser.minimpnn.augment_eps=0.2 \
+    denoiser.scn_diffusion_module.training_batch_size_mult=8 \
+    denoiser.autoguidance.enabled=true \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_epochs=20 \
+    checkpointing.save_ema_every_n_epochs=5 \
     trainer.check_val_every_n_epoch=20 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}

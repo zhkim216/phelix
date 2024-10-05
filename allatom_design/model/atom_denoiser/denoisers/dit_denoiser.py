@@ -12,7 +12,7 @@
 import copy
 from collections import defaultdict
 from functools import partial
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import torch
@@ -28,8 +28,7 @@ import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_t
 from allatom_design.data import residue_constants as rc
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
-from allatom_design.interpolants.ad_interpolants.edm_ca_interpolant import \
-    EDM_CA
+from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_utils import (
@@ -53,7 +52,7 @@ class DiTDenoiser(BaseAtomDenoiser):
         self.cfg = cfg
         self.use_self_conditioning = cfg.use_self_conditioning
 
-        self.interpolant = EDM_CA(cfg.interpolant, sigma_data=sigma_data)
+        self.interpolant = EDM(cfg.interpolant, sigma_data=sigma_data)
 
         # Set up DiT
         self.dit = DiT(cfg.dit, self.interpolant)
@@ -111,10 +110,6 @@ class DiTDenoiser(BaseAtomDenoiser):
             # Get ground truth backbone coordinates
             x_bb_gt = aux_inputs["x"][..., rc.bb_idxs, :]
 
-            if self.cfg.interpolant.name == "edm_ca":
-                # Center N, C, and O on CA
-                x_bb_gt[..., rc.nco_idxs, :] = x_bb_gt[..., rc.nco_idxs, :] - x_bb_gt[..., 1:2, :]
-
             # Repeat inputs for batch multiplier  # TODO: randomly augment these too
             M = self.cfg.training_batch_size_mult
             x_bb_gt_batched = repeat(x_bb_gt, "b n a x -> (m b) n a x", m=M, b=B)
@@ -125,9 +120,8 @@ class DiTDenoiser(BaseAtomDenoiser):
 
             # Evaluate at specific timesteps (for validation)
             t_bb = None
-            if aux_inputs["t_ca"] is not None and aux_inputs["t_nco"] is not None:
-                t_bb = (torch.full((M * B, ), aux_inputs["t_ca"], device=x_bb_gt.device),
-                        torch.full((M * B, ), aux_inputs["t_nco"], device=x_bb_gt.device))
+            if aux_inputs["t_bb"] is not None:
+                t_bb = torch.full((M * B, ), aux_inputs["t_bb"], device=x_bb_gt.device)
 
             # Noise the ground truth backbone
             interpolant_out = self.interpolant({"x": x_bb_gt_batched, "aatype": None}, t=t_bb)
@@ -198,6 +192,8 @@ class DiTDenoiser(BaseAtomDenoiser):
             timesteps = aux_inputs["timesteps"]
             churn_cfg = aux_inputs["churn_cfg"]
             noise_schedule = aux_inputs["noise_schedule"]
+            autoguidance_cfg = aux_inputs["autoguidance_cfg"]
+
             ## extract overrides
             xt_bb_override = aux_inputs["xt_override"][..., rc.bb_idxs, :]
             xt_bb_override_mask = aux_inputs["xt_override_mask"][..., rc.bb_idxs, :]
@@ -207,12 +203,8 @@ class DiTDenoiser(BaseAtomDenoiser):
                 xt_bb = aux_inputs["x_bb_in"]
                 S = aux_inputs["num_steps_partial"]
 
-                if self.cfg.interpolant.name == "edm_ca":
-                    # Center N, C, and O on CA
-                    xt_bb[..., rc.nco_idxs, :] = xt_bb[..., rc.nco_idxs, :] - xt_bb[..., 1:2, :]
-
-                timesteps = [ts[:, -(S + 1):] for ts in timesteps]  # truncate timesteps to the partial diffusion range
-                xt_bb = self.interpolant.noise_x(xt_bb, [t[:, 0] for t in timesteps])  # noise samples to first of the truncated timesteps
+                timesteps = timesteps[:, -(S + 1):]  # truncate timesteps to the partial diffusion range
+                xt_bb = self.interpolant.noise_x(xt_bb, timesteps[:, 0])  # noise samples to first of the truncated timesteps
 
                 xt_bb_override = xt_bb_override[-(S + 1):]
                 xt_bb_override_mask = xt_bb_override_mask[-(S + 1):]
@@ -220,12 +212,12 @@ class DiTDenoiser(BaseAtomDenoiser):
                 xt_bb = x0_bb
 
             # Apply autoguidance
-            use_autoguidance = (aux_inputs["autoguidance_cfg"] is not None) and (aux_inputs["autoguidance_cfg"]["use_autoguidance"])
+            use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])
             if use_autoguidance:
                 assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
-                aux_inputs["autoguidance_cfg"]["autoguidance_fn"] = partial(self.guiding_model, aatype_noised=aatype_noised,
-                                                                            residue_index=residue_index, seq_mask=seq_mask,
-                                                                            cond_labels_in=cond_labels_in)
+                autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model, aatype_noised=aatype_noised,
+                                                              residue_index=residue_index, seq_mask=seq_mask,
+                                                              cond_labels_in=cond_labels_in)
 
             # Run integration steps
             denoiser_fn = partial(self.dit, aatype_noised=aatype_noised,
@@ -233,8 +225,8 @@ class DiTDenoiser(BaseAtomDenoiser):
                                   cond_labels_in=cond_labels_in)
 
             for i in tqdm(range(S), leave=False, desc="Sampling..."):
-                t = tuple(ts[:, i] for ts in timesteps) if len(timesteps) > 1 else timesteps[0][:, i]
-                t_next = tuple(ts[:, i + 1] for ts in timesteps) if len(timesteps) > 1 else timesteps[0][:, i + 1]
+                t = timesteps[:, i]
+                t_next = timesteps[:, i + 1]
 
                 xt_bb, t = self.interpolant.churn(xt_bb, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
 
@@ -244,6 +236,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                                t=t, t_next=t_next,
                                                                noise_schedule=noise_schedule,
                                                                cfg_cfg=None,
+                                                               autoguidance_cfg=autoguidance_cfg,
                                                                aux_inputs=aux_inputs)
                 xt_bb = xt_bb * (1 - xt_bb_override_mask[i + 1]) + xt_bb_override[i + 1] * xt_bb_override_mask[i + 1]  # override xt for outputs  # TODO: should we override self-cond input too?
 
@@ -252,8 +245,9 @@ class DiTDenoiser(BaseAtomDenoiser):
                     denoiser_fn = partial(denoiser_fn, x_self_cond=aux_preds["x1_pred"])
 
                     if use_autoguidance:
-                        aux_inputs["autoguidance_cfg"]["autoguidance_fn"] = partial(aux_inputs["autoguidance_cfg"]["autoguidance_fn"],
-                                                                                    x_self_cond=aux_preds["x1_pred_ag"])
+                        # self-conditioning for autoguidance
+                        autoguidance_cfg["autoguidance_fn"] = partial(autoguidance_cfg["autoguidance_fn"],
+                                                                      x_self_cond=aux_preds["x1_pred_ag"])
 
                 # Save current state
                 xt_bb_traj.append(xt_bb.cpu())
@@ -265,12 +259,6 @@ class DiTDenoiser(BaseAtomDenoiser):
             x1_bb = xt_bb
             diffusion_aux["xt_bb_traj"] = torch.stack(xt_bb_traj, dim=1)  # [B S N A 3]
             diffusion_aux["x1_bb_traj"] = torch.stack(x1_bb_traj, dim=1)  # [B S N A 3]
-
-            if self.cfg.interpolant.name == "edm_ca":
-                # Undo centering of N, C, and O on CA
-                x1_bb[..., rc.nco_idxs, :] = x1_bb[..., rc.nco_idxs, :] + x1_bb[..., 1:2, :]
-                diffusion_aux["xt_bb_traj"][..., rc.nco_idxs, :] = diffusion_aux["xt_bb_traj"][..., rc.nco_idxs, :] + diffusion_aux["xt_bb_traj"][..., 1:2, :]
-                diffusion_aux["x1_bb_traj"][..., rc.nco_idxs, :] = diffusion_aux["x1_bb_traj"][..., rc.nco_idxs, :] + diffusion_aux["x1_bb_traj"][..., 1:2, :]
 
         return x1_bb, diffusion_aux
 
@@ -318,8 +306,7 @@ class DiT(nn.Module):
             self.rotary_emb = rope.RotaryEmbedding(dim=dim, use_residx=use_residx, cache_if_possible=False)
 
         # Time embeddings
-        n_time_embedders = 2
-        self.t_embedders = nn.ModuleList([TimestepEmbedder(cfg.hidden_size) for _ in range(n_time_embedders)])
+        self.t_embedder = TimestepEmbedder(cfg.hidden_size)
 
         # Conditioning
         self.cond_label_to_dropout_p = getattr(cfg, "cond_label_to_dropout_p", {})
@@ -358,9 +345,8 @@ class DiT(nn.Module):
         self.apply(_basic_init)
 
         # Initialize timestep embedding MLP:
-        for t_embedder in self.t_embedders:
-            nn.init.normal_(t_embedder.mlp[0].weight, std=0.02)
-            nn.init.normal_(t_embedder.mlp[2].weight, std=0.02)
+        nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
+        nn.init.normal_(self.t_embedder.mlp[2].weight, std=0.02)
 
         # Zero-out adaLN modulation layers in DiT blocks:
         for block in self.blocks:
@@ -378,7 +364,7 @@ class DiT(nn.Module):
     def forward(self,
                 x_noised: TensorType["b n 4 3", float],
                 aatype_noised: Optional[TensorType["b n", int]],
-                t: Tuple[TensorType["b", float]],  # can also be tuple [t_ca, t_nco]
+                t: TensorType["b", float],
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
                 x_self_cond: Optional[TensorType["b n 4 3", float]] = None,
@@ -413,11 +399,7 @@ class DiT(nn.Module):
             x = x + self.pos_embed(x, residue_index=residue_index.float())
 
         # Conditioning
-        if not isinstance(t, (tuple, list)):
-            # make unimodal timestep into a tuple for convenience
-            t = (t, )
-
-        t = sum([self.t_embedders[i](t[i]) for i in range(len(t))])
+        t = self.t_embedder(t)
 
         c = t
         for label_name in self.cond_labels:

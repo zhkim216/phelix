@@ -38,6 +38,11 @@ class SDLoss(nn.Module):
         else:
             raise ValueError(f"Unrecognized task: {self.task}")
 
+        # Handle autoguidance loss and loss weights
+        if self.task in ["allatom_seq_des"]:
+            self.loss_keys.add("autoguidance/scn/mse_loss")
+            self.loss_weights["autoguidance/scn/mse_loss"] = self.loss_weights["scn/mse_loss"]
+
 
     def forward(self, outputs, batch, eval_pack = True, eval_seq = True, eval_total = True, return_aux: bool = False):
         """
@@ -87,6 +92,22 @@ class SDLoss(nn.Module):
                                              mask=mask)
             aux_monitor["scn/unweighted_mse_loss"] = aux["scn/mse_loss"].mean().detach().clone()
             aux["scn/mse_loss"] = aux["scn/mse_loss"] * loss_weight_scn  # apply time step loss weight
+
+            # Compute loss for autoguidance model
+            if scn_diff_outputs.get("autoguidance_aux") is not None:
+                guidance_outputs = scn_diff_outputs["autoguidance_aux"]
+                loss_weight_scn = guidance_outputs["loss_weight_t"]
+
+                scn_pred = guidance_outputs["scn_pred"]
+                scn_target = guidance_outputs["scn_target"]
+                M = scn_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
+                mask = repeat(batch["x_mask"][..., rc.non_bb_idxs, :], "b n a x -> (m b) n a x", m=M)
+
+                # Compute sidechain MSE loss
+                aux["autoguidance/scn/mse_loss"] = masked_mse(scn_pred,
+                                                              scn_target,
+                                                              mask=mask)
+                aux["autoguidance/scn/mse_loss"] = aux["autoguidance/scn/mse_loss"] * loss_weight_scn  # apply time step loss weight
 
 
         # Aggregate losses

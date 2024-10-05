@@ -99,6 +99,7 @@ def main(cfg: DictConfig):
                      "timesteps": None,  # filled in based on batch size
                      "noise_schedule": None,
                      "churn_cfg": None,
+                     "autoguidance_cfg": None,
                      "return_scn_diffusion_aux": False
                      }
 
@@ -119,7 +120,6 @@ def main(cfg: DictConfig):
                 scd_inputs["timesteps"] = t_scd.expand(x.shape[0], -1).to(device)
                 seq_mask, residue_index = batch["seq_mask"].to(device), batch["residue_index"].to(device)
                 cond_labels_in = {"crop_aug": batch["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
-
 
                 x_denoised, _, _ = lit_ad_model.model.sidechain_pack(
                     x,

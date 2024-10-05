@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (apply_random_se3, load_feats_from_pdb,
+from allatom_design.data.data import (center_random_augmentation, load_feats_from_pdb,
                                       make_fixed_size_1d)
 
 FEATURES_LONG = ("residue_index", "chain_index", "aatype")
@@ -114,7 +114,7 @@ class ADDataset(data.Dataset):
 
         if self.se3_augment:
             # Center on CA and apply random rotation
-            x = apply_random_se3(x, data["missing_atom_mask"], translation_scale=self.translation_scale)
+            x = center_random_augmentation(x, seq_mask, atom_mask, data["missing_atom_mask"],translation_scale=self.translation_scale)
 
         # per-channel mask for x, used for loss.
         # We only mask out missing atoms from PDB files, not ghost atoms.
@@ -271,26 +271,18 @@ class ADDataset(data.Dataset):
 
 def compute_scale_factors(train_dataloader: DataLoader,
                           n_examples: int = 1000,
-                          scale_factor_mode: Optional[str] = None,
                           ) -> Dict[str, Tuple[float, float]]:
     """
     Compute mu and sigma of data based on at least n random examples (rounded up to multiple of batch size).
 
     Returns a dict mapping from "bb" to (mu, sigma) for backbone features, and "scn" to (mu, sigma) for sidechain
 
-    scale_factor_mode:
-    - ca_nco_bb: we center N, C, and O on the CA atom and return a scale factor for each {"ca": float, "nco": float}
-
     Adapted from: https://github.com/Stability-AI/stablediffusion/blob/main/ldm/models/diffusion/ddpm.py
     """
     # Collect x's
     counter = 0
-    if scale_factor_mode == "ca_nco_bb":
-        # separate CA and NCO features
-        xs_ca, xs_nco = [], []
-    else:
-        # separate backbone and sidechain features
-        xs_bb, xs_scn = [], []
+    # separate backbone and sidechain features
+    xs_bb, xs_scn = [], []
 
     pbar = tqdm(total=n_examples, desc="Computing scale factors")
     for batch in train_dataloader:
@@ -299,42 +291,25 @@ def compute_scale_factors(train_dataloader: DataLoader,
         # Mask out padding and missing atoms
         mask = batch["x_mask"]
 
-        if scale_factor_mode == "ca_nco_bb":
-            # Subset to backbone-only atoms
-            x = x[..., rc.bb_idxs, :]
+        # scale backbone and sidechain features separately
+        x_bb = x[..., rc.bb_idxs, :]
+        x_bb = x_bb[mask[..., rc.bb_idxs, :].bool()]
 
-            ### Center N, C, and O on CA
-            x[..., rc.nco_idxs, :] = x[..., rc.nco_idxs, :] - x[..., 1:2, :]
+        # Subset to sidechain-only atoms
+        x_scn = x[..., rc.non_bb_idxs, :]
+        scn_mask = mask[..., rc.non_bb_idxs, :]
 
-            # scale CA separately from N, C, and O
-            x_ca = x[..., 1:2, :]
-            x_ca = x_ca[mask[..., 1:2, :].bool()]
+        ### Center sidechain on CA
+        x_scn = x_scn - x[..., 1:2, :]
+        scn_missing_atom_mask = batch["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
+        x_scn = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn)  # fill missing atoms with zeroes
+        scn_ghost_atom_mask = batch["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
+        x_scn = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn)  # fill ghost atoms with zeroes
 
-            x_nco = x[..., rc.nco_idxs, :]
-            x_nco = x_nco[mask[..., rc.nco_idxs, :].bool()]
+        x_scn = x_scn[scn_mask.bool()]
 
-            xs_ca.append(x_ca)
-            xs_nco.append(x_nco)
-        else:
-            # scale backbone and sidechain features separately
-            x_bb = x[..., rc.bb_idxs, :]
-            x_bb = x_bb[mask[..., rc.bb_idxs, :].bool()]
-
-            # Subset to sidechain-only atoms
-            x_scn = x[..., rc.non_bb_idxs, :]
-            scn_mask = mask[..., rc.non_bb_idxs, :]
-
-            ### Center sidechain on CA
-            x_scn = x_scn - x[..., 1:2, :]
-            scn_missing_atom_mask = batch["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
-            x_scn = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn)  # fill missing atoms with zeroes
-            scn_ghost_atom_mask = batch["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
-            x_scn = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn)  # fill ghost atoms with zeroes
-
-            x_scn = x_scn[scn_mask.bool()]
-
-            xs_scn.append(x_scn)
-            xs_bb.append(x_bb)
+        xs_scn.append(x_scn)
+        xs_bb.append(x_bb)
 
         counter += batch["x"].shape[0]
         if counter >= n_examples:
@@ -344,15 +319,6 @@ def compute_scale_factors(train_dataloader: DataLoader,
     pbar.close()
 
     # Aggregate and compute mean and std
-    if scale_factor_mode == "ca_nco_bb":
-        xs_ca = torch.cat(xs_ca, dim=0)
-        xs_nco = torch.cat(xs_nco, dim=0)
-
-        mean_ca, std_ca = xs_ca.mean().item(), xs_ca.std().item()
-        mean_nco, std_nco = xs_nco.mean().item(), xs_nco.std().item()
-
-        return {"ca": (mean_ca, std_ca), "nco": (mean_nco, std_nco)}
-
     xs_scn = torch.cat(xs_scn, dim=0)  # [b, n, a_scn, 3]
     xs_bb = torch.cat(xs_bb, dim=0)  # [b, n, a_bb, 3]
 

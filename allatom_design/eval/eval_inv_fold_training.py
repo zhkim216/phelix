@@ -19,14 +19,12 @@ from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf, open_dict
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import AutoTokenizer, EsmForProteinFolding
 
-from allatom_design.data import protein
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.datasets.ad_dataset import ADDataset
-from allatom_design.data.pdb_utils import write_to_pdb_frames
 from allatom_design.eval import eval_metrics, sampling_utils
+from allatom_design.eval.folding_utils import get_struct_pred_model
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
@@ -80,12 +78,9 @@ def main(cfg: DictConfig):
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Load in ESMFold for co-design self-consistency evals
+    # Load in structure prediction model for co-design self-consistency evals
     if cfg.run_codes_sc:
-        esmfold = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
-        esmfold.esm = esmfold.esm.half()
-        esmfold = esmfold.to(device)
-        tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
+        struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     # Get checkpoints from denoiser training run
     pattern = re.compile(r"sd-epoch\d+\.ckpt$")  # only consider ckpts of form sd-epochXXXX.ckpt
@@ -122,11 +117,12 @@ def main(cfg: DictConfig):
         # create sidechain diffusion churn config
         churn_cfg = dict(cfg.scn_diffusion.churn_cfg)
         scd_inputs = {"num_steps": cfg.scn_diffusion.num_steps,
-                    "timesteps": None,  # filled in based on batch size
-                    "noise_schedule": noise_schedule,
-                    "churn_cfg": churn_cfg,
-                    "return_scn_diffusion_aux": False
-                    }
+                      "timesteps": None,  # filled in based on batch size
+                      "noise_schedule": noise_schedule,
+                      "churn_cfg": churn_cfg,
+                      "autoguidance_cfg": dict(cfg.scn_diffusion.autoguidance_cfg),
+                      "return_scn_diffusion_aux": False
+                      }
 
         ### BEGIN EVAL ###
         metrics = {}
@@ -212,18 +208,6 @@ def main(cfg: DictConfig):
                 print(f"Sequence recovery accuracy: {med_seq_rec:.4f}")
                 metrics[f"inv_fold/S{S}/median_seq_recovery"] = med_seq_rec
 
-                # # Save seq accuracy across trajectory
-                # for t in np.linspace(0, 0.9, 10):
-                #     # Denoised seqs
-                #     pred_seq_rec_t_med = seq_rec_df_S[f"pred_seq_rec_t{t:.1f}"].median()
-                #     # print(f"Sequence recovery accuracy at t={t:.1f}: {pred_seq_rec_t_med:.4f}")
-                #     metrics[f"inv_fold/S{S}/traj/med_seq_rec_t{t:.1f}"] = pred_seq_rec_t_med
-
-                #     # Noisy seqs
-                #     noisy_seq_rec_t_med = seq_rec_df_S[f"noisy_seq_rec_t{t:.1f}"].median()
-                #     # print(f"Sequence recovery among unmasked tokens at t={t:.1f}: {noisy_seq_rec_t_med:.4f}")
-                #     metrics[f"inv_fold/S{S}/traj/med_noisy_seq_rec_t{t:.1f}"] = noisy_seq_rec_t_med
-
 
         ### Co-design self-consistency eval ###
         if cfg.run_codes_sc:
@@ -285,16 +269,15 @@ def main(cfg: DictConfig):
 
                 # After processing the specified number of batches, run self-consistency eval
                 pdbs = natsorted(pdbs)
+
                 codes_sc_info = eval_metrics.run_self_consistency_eval(
                     pdbs,
-                    None,
-                    None,  # no MPNN model for co-design eval
-                    esmfold,
-                    tokenizer,
+                    None, None,  # no MPNN model for co-design eval
+                    struct_pred_model,
                     device,
                     out_dir=codes_sc_dir,
                     eval_codesign=True,
-                )
+                    temp_dir=f"{cfg.out_dir}/tmp")
 
                 # Aggregate results
                 codes_metrics = defaultdict(list)

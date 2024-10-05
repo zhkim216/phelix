@@ -75,32 +75,27 @@ class LitAtomDenoiser(L.LightningModule):
 
         B = batch["seq_mask"].shape[0]
 
-        # Log metrics in a 2D grid of timestepss
-        ts = list(itertools.product(self.cfg.eval.eval_timesteps_ca_nco, self.cfg.eval.eval_timesteps_ca_nco))
+        # Log metrics per timestep
+        ts = list(self.cfg.eval.eval_timesteps_bb)
 
-        for t1, t2 in ts:
+        for t in ts:
             t_sd = 0.0  # assume no sequence/sidechain information
             t_sd_batch = torch.full((B,), fill_value=t_sd, device=batch["seq_mask"].device)
 
-            batch["t_ca"] = t1
-            batch["t_nco"] = t2
-
+            batch["t_bb"] = t
             outputs = self(batch, t_sd=t_sd_batch)
             _, aux = self.loss(outputs, batch, return_aux=True)
             aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
             aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
-            self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix,
-                      key_suffix=f"_ts{t_sd}_tca{t1}_tnco{t2}")
+            self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_ts{t}_tbb{t}")
 
-        del batch["t_ca"]
-        del batch["t_nco"]
 
         # Log metrics as a function of sequence time
         if self.cfg.eval.eval_timesteps_seq:
-            ts = list(itertools.product(self.cfg.eval.eval_timesteps_seq, self.cfg.eval.eval_timesteps_ca_nco))
+            ts = list(itertools.product(self.cfg.eval.eval_timesteps_seq, self.cfg.eval.eval_timesteps_bb))
             for t_sd, t_bb in ts:
                 t_sd_batch = torch.full((B,), fill_value=t_sd, device=batch["seq_mask"].device)
-                batch["t_ca"] = batch["t_nco"] = t_bb   # assume same t for CA and NCO
+                batch["t_bb"]
 
                 outputs = self(batch, t_sd=t_sd_batch)
                 _, aux = self.loss(outputs, batch, return_aux=True)
@@ -108,9 +103,6 @@ class LitAtomDenoiser(L.LightningModule):
                 aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
                 self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix,
                           key_suffix=f"_ts{t_sd}_tca{t_bb}_tnco{t_bb}")
-
-            del batch["t_ca"]
-            del batch["t_nco"]
 
 
     def _log(self,
@@ -176,16 +168,6 @@ class LitAtomDenoiser(L.LightningModule):
             if total_norm_key in grad_norms:
                 total_norm = grad_norms[total_norm_key]
                 self.log_dict({f"total_l{norm_type}_grad_norm": total_norm})
-
-
-    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
-        checkpoint["ema_tracker"] = self.ema_tracker.state_dict()
-
-
-    def on_load_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
-        ema_state = checkpoint.get("ema_tracker", None)
-        if ema_state is not None:
-            self.ema_tracker.load_state_dict(ema_state)
 
 
 class NoamLR(LRScheduler):
