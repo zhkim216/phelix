@@ -1,4 +1,5 @@
 import glob
+import os
 import pickle
 import shutil
 from collections import defaultdict
@@ -7,10 +8,9 @@ from pathlib import Path
 
 import hydra
 import lightning as L
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import torch
+import wandb
 import yaml
 from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf, open_dict
@@ -19,7 +19,6 @@ from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import ADDataset
-from allatom_design.data.pdb_utils import write_to_pdb_frames
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.eval.folding_utils import get_struct_pred_model
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
@@ -210,24 +209,43 @@ def main(cfg: DictConfig):
     with open(f"{cfg.out_dir}/all_metrics.pkl", "wb") as f:
         pickle.dump(all_metrics, f)
 
-    # Save certain metrics to a csv file
-    metrics_df = defaultdict(list)
-    for pdb in pdbs:
-        num_seqs = 1  # TODO: fix this
-        for i in range(num_seqs):
-            metrics_df["pdb"].append(pdb)
-            metrics_df["seq_idx"].append(i)
+    # Summarize metrics
+    metrics = {}
+    if cfg.run_codes_sc:
+        codes_metrics = defaultdict(list)
+        for pdb in all_metrics:
+            codes_sc_info = all_metrics[pdb]["codes_sc_info"]
+            for k, v in codes_sc_info["sc_metrics"].items():
+                codes_metrics[k].append(v.item())
 
-            # add co-design self-consistency metrics (same for each MPNN sequence since we calculate these on the original sample)
-            if cfg.run_codes_sc:
-                codes_sc_info = all_metrics[pdb]["codes_sc_info"]
-                metrics_df["codes_seq"].append(codes_sc_info["sample_seq"])
-                metrics_df["codes_sc_ca_rmsd"].append(codes_sc_info["sc_metrics"]["sc_ca_rmsd"].squeeze().item())
-                metrics_df["codes_sc_aa_rmsd"].append(codes_sc_info["sc_metrics"]["sc_aa_rmsd"].squeeze().item())
-                metrics_df["codes_sc_ca_tm"].append(codes_sc_info["sc_metrics"]["sc_ca_tm"].squeeze().item())
-                metrics_df["codes_sc_avg_plddt"].append(codes_sc_info["struct_preds"]["avg_plddt"].squeeze().item())
+        for k, v in codes_metrics.items():
+            metrics[f"codes_{k}"] = np.mean(v)
 
-    metrics_df = pd.DataFrame(metrics_df)
+    metrics["med_seq_acc"] = np.median(seq_rec_metrics["seq_acc"])
+
+    # Set up wandb logging
+    if not cfg.no_wandb:
+        # Create wandb dir
+        wandb_dir = str(Path(cfg.out_dir))
+        Path(wandb_dir, "wandb").mkdir(parents=True, exist_ok=True)
+
+        # Set wandb cache directory
+        wandb_cache_dir = str(Path(cfg.out_dir, "cache", "wandb"))
+        os.environ["WANDB_CACHE_DIR"] = wandb_cache_dir
+
+        wandb.init(
+            project=cfg.project,
+            entity=cfg.wandb_id,
+            name=cfg.exp_name,
+            group=cfg.group,
+            config=cfg_dict,
+            dir=wandb_dir,
+        )
+
+        # Log metrics
+        wandb.log(metrics)
+
+        wandb.finish()
 
 
 if __name__ == "__main__":
