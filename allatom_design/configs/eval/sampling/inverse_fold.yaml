@@ -1,8 +1,16 @@
+# Wandb configuration
+project: "allatom_design"  # Wandb project name
+wandb_id: "richardshuai"  # Wandb username
+group: "debug" # Wandb group name
+no_wandb: false
+
+
+# Sampling run settings
 sd_ckpt:
+exp_name: test  # sampling experiment name
 
 num_workers: 10
 out_dir: null  # null to save in the model run directory
-exp_name: test  # sampling experiment name
 overwrite_out_dir: true  # if true, delete existing output directory
 seed: 0
 batch_size: 16
@@ -20,11 +28,10 @@ run_codes_sc: true  # run co-design self-consistency eval
 num_pdbs: 16  # number of structures to inverse fold
 num_seqs_per_pdb: 1  # number of sequences per structure to inverse fold
 subset_length_range: [32, 256]
-n_traj: 8  # number of trajectories to randomly save
+n_traj: 0  # number of trajectories to randomly save
 limit_traj_steps: 10  # limit the number of steps we save in a trajectory (evenly spaced)
 limit_diff_traj_steps: 3
 traj_conect: false
-
 
 # Sampling hyperparameters
 aatype_decoding_order_mode: "random"
