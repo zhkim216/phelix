@@ -8,7 +8,8 @@ model_type: "atom_denoiser"  # "seq_denoiser" or "atom_denoiser"
 out_dir: null  # if null, write to ${denoiser_train_dir}/post_hoc_ema_ckpts
 
 out_step: 500000
-out_stds: [0.1, 0.2, 0.3]
+out_stds: null # if null, choose based on out_stds_arange instead
+out_stds_arange: [0.01, 0.3, 0.005]   # [start, stop, step]
 
 hydra:
   run:
