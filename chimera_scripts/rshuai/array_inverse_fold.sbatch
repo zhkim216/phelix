@@ -1,21 +1,19 @@
 #!/bin/bash
-#SBATCH --job-name=a10_aasd3_inv_fold_array
+#SBATCH --job-name=a10_aasd3_inv_fold
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
+#SBATCH --array=0-57%10  # must be precomputed
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
-#
-# Array job based on the number of matching checkpoints
-#SBATCH --array=0-$(ls /scratch/hielab/rshuai/allatom_design/allatom_design/a10_aasd3/post_hoc_ema_ckpts/step500000*.ckpt | wc -l)%10
 
 # Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.sh
 
-# Load modules and activate conda environment
+# Load modules and conda environment
 source ~/.rshuai_bash_profile
 conda activate rshuai_allatom_design
 
@@ -35,14 +33,24 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
-# Get the list of sd_ckpt files and select the one for the current task
-CKPT_FILES=(/scratch/hielab/rshuai/allatom_design/allatom_design/a10_aasd3/post_hoc_ema_ckpts/step500000*.ckpt)
+# Denoiser checkpoint directory
+MODEL_NAME=a10_aasd3
+CKPT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/post_hoc_ema_ckpts
+
+# Get the list of checkpoint files and sort them
+CKPT_FILES=($(ls ${CKPT_DIR}/*.ckpt | sort))
+
+# Get the checkpoint corresponding to the SLURM_ARRAY_TASK_ID
 SD_CKPT=${CKPT_FILES[$SLURM_ARRAY_TASK_ID]}
+
+# Extract the checkpoint filename without the path for naming
+CKPT_NAME=$(basename ${SD_CKPT} .ckpt)
+STD_VALUE=${CKPT_NAME##*-std}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=a10_aasd3_inv_fold_${SLURM_ARRAY_TASK_ID}
-GROUP=a10_aasd3_inv_fold_s0
+EXP_NAME=${MODEL_NAME}_ema${STD_VALUE}_inv_fold
+GROUP=${MODEL_NAME}_${MODEL_NAME}_s0
 
 # Run inverse folding script
 cd ${BASE_DIR}
