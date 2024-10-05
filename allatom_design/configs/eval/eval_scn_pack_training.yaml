@@ -33,6 +33,7 @@ scn_diffusion:
     t_start: 0.0
     t_end: 1.0
 
+
 hydra:
   run:
     dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

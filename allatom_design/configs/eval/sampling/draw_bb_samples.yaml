@@ -28,41 +28,27 @@ traj_conect: false
 align_traj_to_last_step: false  # whether to align trajectories to the last step
 
 num_steps: 500
-ca:
-  timestep_schedule:
-    num_steps: ${num_steps}
-    mode: "linear"
-    t_start: 0.0
-    t_end: 1.0
-  noise_schedule:
-    name: "linear"
-  churn_cfg:
-    s_churn: 0
-    s_noise: 1.0
-    s_t_min: 0.01
-    s_t_max: 50.0
-    num_steps: ${num_steps}
-  s_max_override: null  # if not null, override s_max in interpolant
+timestep_schedule:
+  num_steps: ${num_steps}
+  mode: "linear"
+  t_start: 0.0
+  t_end: 1.0
+noise_schedule:
+  name: "linear"
+churn_cfg:
+  s_churn: 0
+  s_noise: 1.0
+  s_t_min: 0.01
+  s_t_max: 50.0
+  num_steps: ${num_steps}
+s_max_override: null  # if not null, override s_max in interpolant
 
-nco:
-  timestep_schedule:
-    num_steps: ${num_steps}
-    mode: "linear"
-    t_start: 0.0
-    t_end: 1.0
-  noise_schedule:
-    name: "linear"
-  churn_cfg:
-    s_churn: 0
-    s_noise: 1.0
-    s_t_min: 0.01
-    s_t_max: 50.0
-    num_steps: ${num_steps}
-  s_max_override: null  # if not null, override s_max in interpolant
 
+# Conditioning
 # cond_labels: {"designability": "DESIGNABLE"}  # null for unconditional sampling
 cond_labels: null
 
+# Autoguidance
 autoguidance_cfg:
   use_autoguidance: false
   w: 1.0
@@ -77,11 +63,11 @@ sc:
 nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered
 
 # Pairwise TM-scores
-pairwise_tm_subsample: 5000  # number of pairs to subsample
+pairwise_tm_subsample: 1000  # number of pairs to subsample
 
 # Secondary structure KL divergence
 ss_kld:
-  dssp_csv: /media/scratch/datasets/ingraham_cath_dataset/dssp/ingraham_cath_dssp_with_length.csv
+  dssp_csv: /media/scratch/datasets/ingraham_cath_dataset/dssp/dssp_length_strict.csv
   bin_size: 10  # size of secondary structure percentage bins
   pseudocount: 0.01  # pseudocount for KL divergence calculation; set arbitrarily to 0.01
 
@@ -109,7 +95,7 @@ struct_pred_cfg:
   omegafold:
     num_pseudo_msa: 15
     mask_rate: 0.12
-    num_recycle: 10  # performance saturates after around 10 recycles
+    num_recycle: 2  # performance saturates after around 10 recycles
     deterministic: true
     subbatch_size: null
     cache_file: /media/scratch/huang_lab/cache/omegafold/omegafold.pt

@@ -17,6 +17,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 
 import allatom_design.data.datasets.ad_dataset as ad_dataset
+from allatom_design.checkpoint_utils import EMATrackerCheckpoint
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import ADDataset
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
@@ -126,7 +127,11 @@ def main(cfg: DictConfig):
                                               filename="sd-epoch{epoch:02d}-val_loss{val/total_loss:.4f}",
                                               auto_insert_metric_name=False  # needed since metric has / in name
                                               )
-    callbacks += [latest_checkpoint_callback, val_checkpoint_callback]
+
+    ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
+                                          save_freq_epochs=cfg.checkpointing.save_ema_every_n_epochs)
+
+    callbacks += [latest_checkpoint_callback, val_checkpoint_callback, ema_checkpoint]
 
     train_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                                 save_top_k=cfg.checkpointing.save_top_k,
@@ -141,8 +146,8 @@ def main(cfg: DictConfig):
         lr_monitor = LearningRateMonitor(logging_interval="step")
         callbacks.append(lr_monitor)
 
-    # Compute scale factors for sigma data separately for both CA and NCO
-    scale_factors = ad_dataset.compute_scale_factors(train_dataloader, n_examples=1000, scale_factor_mode=None)
+    # Compute scale factors for sigma data
+    scale_factors = ad_dataset.compute_scale_factors(train_dataloader, n_examples=1000)
     lit_model.model.set_scale_factors(scale_factors)  # set scale factors in model
 
     # Train
@@ -184,6 +189,10 @@ def update_config(cfg: DictConfig) -> None:
     if str(cfg.trainer.precision) in ["16", "16-true", "16-mixed"]:
         cfg.model.inf = 1e4
         cfg.model.eps = 1e-4
+
+    if getattr(cfg.denoiser, "autoguidance", None) and cfg.denoiser.autoguidance.enabled:
+        # Autoguidance model parameters are not always used
+        cfg.trainer.strategy = "ddp_find_unused_parameters_true"
 
 
 if __name__ == "__main__":

@@ -26,12 +26,11 @@ class ADLoss(nn.Module):
                 self.loss_weights[k] = cfg.loss_weights[k]
 
         # Define losses based on task
-        self.loss_keys = {"bb_ca/mse_loss", "bb_nco/mse_loss"}
+        self.loss_keys = {"bb/mse_loss"}
 
         # Handle autoguidance loss and loss weights
-        self.loss_keys = self.loss_keys.union({"autoguidance/bb_ca/mse_loss", "autoguidance/bb_nco/mse_loss"})
-        self.loss_weights["autoguidance/bb_ca/mse_loss"] = self.loss_weights["bb_ca/mse_loss"]
-        self.loss_weights["autoguidance/bb_nco/mse_loss"] = self.loss_weights["bb_nco/mse_loss"]
+        self.loss_keys = self.loss_keys.union({"autoguidance/bb/mse_loss"})
+        self.loss_weights["autoguidance/bb/mse_loss"] = self.loss_weights["bb/mse_loss"]
 
 
     def forward(self, outputs, batch, return_aux: bool = False):
@@ -41,57 +40,41 @@ class ADLoss(nn.Module):
         Expects outputs to contain a "bb_diffusion_aux" key with the following structure:
         - x1_pred: (m*b, n, a, 3) x1 prediction
         - x_target: (m*b, n, a, 3) target
-        - loss_weight_t: (m*b) or Tuple[(m*b), (m*b)] loss weight for each time step. If tuple: (loss_weight_ca, loss_weight_nco)
+        - loss_weight_t: (m*b) loss weight for each time step.
 
         m denotes batch size multiplier, b denotes batch size.
         """
         aux = {}  # losses
         aux_monitor = {}  # monitor other metrics that do not contribute to the loss
 
-        # Compute loss for CA and NCO separately
         bb_diff_outputs = outputs["bb_diffusion_aux"]
-        loss_weight_ca, loss_weight_nco = bb_diff_outputs["loss_weight_t"]
+        loss_weight_bb = bb_diff_outputs["loss_weight_t"]
 
         bb_pred = bb_diff_outputs["bb_pred"]
         bb_target = bb_diff_outputs["bb_target"]
         M = bb_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
         bb_mask = repeat(batch["x_mask"][..., rc.bb_idxs, :], "b n a x -> (m b) n a x", m=M)
 
-        # CA
-        aux["bb_ca/mse_loss"] = masked_mse(bb_pred[..., 1:2, :],
-                                           bb_target[..., 1:2, :],
-                                           mask=bb_mask[..., 1:2, :])
-        aux_monitor["bb_ca/unweighted_mse_loss"] = aux["bb_ca/mse_loss"].mean().detach().clone()
-        aux["bb_ca/mse_loss"] = aux["bb_ca/mse_loss"] * loss_weight_ca  # apply time step loss weight
-
-        # NCO
-        aux["bb_nco/mse_loss"] = masked_mse(bb_pred[..., rc.nco_idxs, :],
-                                            bb_target[..., rc.nco_idxs, :],
-                                            mask=bb_mask[..., rc.nco_idxs, :])
-        aux_monitor["bb_nco/unweighted_mse_loss"] = aux["bb_nco/mse_loss"].mean().detach().clone()
-        aux["bb_nco/mse_loss"] = aux["bb_nco/mse_loss"] * loss_weight_nco  # apply time step loss weight
+        aux["bb/mse_loss"] = masked_mse(bb_pred,
+                                        bb_target,
+                                        mask=bb_mask)
+        aux_monitor["bb/unweighted_mse_loss"] = aux["bb/mse_loss"].mean().detach().clone()
+        aux["bb/mse_loss"] = aux["bb/mse_loss"] * loss_weight_bb  # apply time step loss weight
 
         # Compute loss for autoguidance model
         if bb_diff_outputs.get("autoguidance_aux") is not None:
             guidance_outputs = bb_diff_outputs["autoguidance_aux"]
-            loss_weight_ca, loss_weight_nco = guidance_outputs["loss_weight_t"]
+            loss_weight_bb_ag = guidance_outputs["loss_weight_t"]
 
-            bb_pred = guidance_outputs["bb_pred"]
-            bb_target = guidance_outputs["bb_target"]
-            M = bb_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
-            bb_mask = repeat(batch["x_mask"][..., rc.bb_idxs, :], "b n a x -> (m b) n a x", m=M)
+            bb_pred_ag = guidance_outputs["bb_pred"]
+            bb_target_ag = guidance_outputs["bb_target"]
+            M = bb_pred_ag.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
+            bb_mask_ag = repeat(batch["x_mask"][..., rc.bb_idxs, :], "b n a x -> (m b) n a x", m=M)
 
-            # CA
-            aux["autoguidance/bb_ca/mse_loss"] = masked_mse(bb_pred[..., 1:2, :],
-                                                        bb_target[..., 1:2, :],
-                                                        mask=bb_mask[..., 1:2, :])
-            aux["autoguidance/bb_ca/mse_loss"] = aux["autoguidance/bb_ca/mse_loss"] * loss_weight_ca  # apply time step loss weight
-
-            # NCO
-            aux["autoguidance/bb_nco/mse_loss"] = masked_mse(bb_pred[..., rc.nco_idxs, :],
-                                                        bb_target[..., rc.nco_idxs, :],
-                                                        mask=bb_mask[..., rc.nco_idxs, :])
-            aux["autoguidance/bb_nco/mse_loss"] = aux["autoguidance/bb_nco/mse_loss"] * loss_weight_nco  # apply time step loss weight
+            aux["autoguidance/bb/mse_loss"] = masked_mse(bb_pred_ag,
+                                                         bb_target_ag,
+                                                         mask=bb_mask_ag)
+            aux["autoguidance/bb/mse_loss"] = aux["autoguidance/bb/mse_loss"] * loss_weight_bb_ag  # apply time step loss weight
 
 
         # Aggregate losses

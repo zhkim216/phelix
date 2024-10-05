@@ -4,11 +4,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import Bio
 import numpy as np
 import pandas as pd
 import torch
-from Bio.PDB.DSSP import DSSP
+from Bio.PDB import PDBParser
 from einops import rearrange
 from omegaconf import DictConfig
 from scipy.stats import entropy
@@ -21,6 +20,7 @@ from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
 from allatom_design.eval import eval_metrics
+from allatom_design.eval.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.folding_utils import (run_af2, run_esmfold_batched,
                                                run_omegafold)
 from allatom_design.eval.proteinmpnn_utils import run_mpnn
@@ -29,52 +29,32 @@ from ligandmpnn.model_utils import ProteinMPNN
 
 def compute_secondary_structure_content(pdbs: List[str]) -> Dict[str, Dict[str, float]]:
     """
-    Given a list of PDBs, compute the secondary structure content of each protein.
+    Given a list of PDBs, compute the secondary structure content of each protein using the new method.
     Returns a dict mapping from the PDB to a dict containing:
     - pct_alpha: the proportion of residues that are in alpha helices
     - pct_beta: the proportion of residues that are in beta sheets
     """
     dssp_metrics = defaultdict(dict)
-    for pdb in pdbs:
+    parser = PDBParser()
+    for pdb in tqdm(pdbs, desc="Computing secondary structure content"):
         try:
-            dssp_str = get_3state_dssp(pdb)
-            dssp_metrics[pdb]["pct_alpha"] = np.mean([c == "H" for c in dssp_str]) * 100
-            dssp_metrics[pdb]["pct_beta"] = np.mean([c == "E" for c in dssp_str]) * 100
-        except Exception:
+            structure = parser.get_structure("s", pdb)
+            xyz_ca = pdb_to_xyz(structure)
+            if len(xyz_ca) == 0:
+                raise ValueError("No CA atoms found in the structure.")
+            sse = annotate_sse(xyz_ca)
+            stats = sse.sum(0) / len(xyz_ca)
+            helix = stats[0].item()
+            strand = stats[1].item()
+            dssp_metrics[pdb]["pct_alpha"] = helix * 100
+            dssp_metrics[pdb]["pct_beta"] = strand * 100
+            dssp_metrics[pdb]["pct_loop"] = (1 - helix - strand) * 100
+        except Exception as e:
+            print(f"Error processing {pdb}: {e}")
             dssp_metrics[pdb]["pct_alpha"] = np.nan
             dssp_metrics[pdb]["pct_beta"] = np.nan
+            dssp_metrics[pdb]["pct_loop"] = np.nan
     return dssp_metrics
-
-
-def get_3state_dssp(pdb: str) -> str:
-    """
-    Given a PDB file, return the DSSP string for the protein, with 3 states: H, E, L.
-    """
-    dssp_string = get_dssp_string(pdb)
-    dssp_string = pool_dssp_symbols(dssp_string, newchar="L", chars=["-", "T", "S", "C", " "])
-    dssp_string = pool_dssp_symbols(dssp_string, newchar="H", chars=["H", "G", "I"])
-    dssp_string = pool_dssp_symbols(dssp_string, newchar="E", chars=["E", "B"])
-    return dssp_string
-
-
-def pool_dssp_symbols(dssp_string: str,
-                      newchar: str,
-                      chars: List[str]) -> str:
-    """Replaces all instances of chars with newchar. DSSP chars are helix=GHI, strand=EB, loop=- TSC"""
-    string_out = dssp_string
-    for c in chars:
-        string_out = string_out.replace(c, newchar)
-    return string_out
-
-
-def get_dssp_string(pdb: str) -> str:
-    """
-    Given a PDB file, return the DSSP string for the protein.
-    """
-    structure = Bio.PDB.PDBParser(QUIET=True).get_structure(Path(pdb).stem, pdb)
-    dssp = DSSP(structure[0], pdb, dssp="mkdssp")
-    dssp_string = "".join([dssp[k][2] for k in dssp.keys()])
-    return dssp_string
 
 
 def run_self_consistency_eval(pdbs: List[str],

@@ -55,8 +55,32 @@ scn_diffusion:
     s_t_max: 50.0
     num_steps: ${scn_diffusion.num_steps}
 
+  # Autoguidance
+  autoguidance_cfg:
+    use_autoguidance: false
+    w: 1.0
+
 # Co-design self-consistency eval options
 num_codes_sc_batches: 1
+
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: "omegafold"  # ["esmfold", "af2", "omegafold"]
+  af2:
+    data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
+    num_models: 1  # only 1 model is currently supported
+    sample_models: true  # randomly sample models from the ensemble
+    num_recycles: 3
+    use_multimer: false
+  esmfold:
+    max_tokens_per_batch: 1024
+  omegafold:
+    num_pseudo_msa: 15
+    mask_rate: 0.12
+    num_recycle: 2  # performance saturates after around 10 recycles
+    deterministic: true
+    subbatch_size: null
+    cache_file: /media/scratch/huang_lab/cache/omegafold/omegafold.pt
 
 hydra:
   run:

@@ -130,19 +130,19 @@ class AllAtomModel():
         residue_index: TensorType["b n", int],
         seq_mask: TensorType["b n", float],
         mlm_mask: TensorType["b n", float],
-        timesteps: Tuple[TensorType["b s+1", float]],  # tuple of timesteps for (t_ca, t_nco)
+        timesteps: TensorType["b s+1", float],
         xt_override: Optional[TensorType["s+1 b n a 3", float]] = None,
         xt_override_mask: Optional[TensorType["s+1 b n a 3", float]] = None,
         cond_labels: Dict[str, TensorType["b", int]] = {},
-        noise_schedule: Tuple[Optional[NoiseSchedule]] = None,  # noise schedule for (t_ca, t_nco)
-        churn_cfg: Tuple[Optional[Dict[str, float]]] = None, # churn config for (t_ca, t_nco)
+        noise_schedule: Optional[NoiseSchedule] = None,
+        churn_cfg: Optional[Dict[str, float]] = None,
         partial_diff_inputs: Dict[str, Any] = {},
         ):
         """
         Run diffusion (or partial diffusion) to generate backbone, conditioned on noisy sequence.
         """
         B, N = residue_index.shape
-        S_bb = timesteps[0].shape[-1] - 1
+        S_bb = timesteps.shape[-1] - 1
 
         # Handle xt overrides
         if xt_override is None:
