@@ -14,6 +14,7 @@ from openfold.utils.feats import atom14_to_atom37
 from pathlib import Path
 from openfold.utils.rigid_utils import Rigid
 import subprocess
+from typing import Tuple, Union
 
 
 def load_feats_from_pdb(pdb, chain_residx_gap: int, max_conformers: int = 1):
@@ -242,24 +243,55 @@ def uniform_rand_rotation(batch_size):
     return rotation
 
 
-def apply_random_se3(coords_in: TensorType["n a 3", float],
-                     missing_atom_mask: TensorType["n a", float] = None,
-                     translation_scale=1.0):
+def center_random_augmentation(coords_in: TensorType["n a 3", float],
+                               seq_mask: TensorType["n", float],
+                               atom_mask: TensorType["n a", float],
+                               missing_atom_mask: TensorType["n a", float],
+                               translation_scale=1.0,
+                               return_transforms=False
+                               ):
     """
-    Unbatched. Mean center on CA atoms, then apply random rotation and translation.
+    Batched or unbatched.
+    Mean center on CA atoms, then apply random rotation and translation.
 
-    missing_atom_mask: 1 if atom is missing, 0 if present
+    Inputs:
+        - seq_mask: 0 if residue is padding
+        - atom_mask: 1 if not ghost and not missing atom, 0 otherwise
+        - missing_atom_mask: 1 if atom is missing, 0 if present
     """
-    X = coords_in[:, 1:2]
-    M = (1 - missing_atom_mask[:, 1:2])
-    coords_mean = (X * M[..., None]).sum(dim=0, keepdim=True) / M.sum()
-    coords_in -= coords_mean
-    random_rot = uniform_rand_rotation(1).squeeze(0)
-    coords_in = coords_in @ random_rot
+    if coords_in.dim() == 3:
+        # unbatched; add batch dimension
+        coords_in = coords_in.unsqueeze(0)
+        missing_atom_mask = missing_atom_mask.unsqueeze(0)
+        seq_mask = seq_mask.unsqueeze(0)
+
+    X = coords_in[:, :, 1:2]  # [b n 1 3]
+
+    # Center coords
+    M = (1 - missing_atom_mask[:, :, 1:2]) * seq_mask[:, :, None]  # [b n 1]
+    M_sum = M.sum(dim=1, keepdim=True)[..., None]  # [b 1 1 1]
+    coords_mean = (X * M[..., None]).sum(dim=1, keepdim=True) / M_sum  # [b 1 1 3]
+    coords_in = coords_in - coords_mean
+
+    # Apply random rotation
+    random_rot = uniform_rand_rotation(coords_in.shape[0]).to(coords_in.device)
+    coords_in = torch.einsum("b n a i, b i j -> b n a j", coords_in, random_rot)
+
+    # Apply random translation
     random_trans = torch.randn_like(coords_mean) * translation_scale
-    coords_in += random_trans
-    if missing_atom_mask is not None:
-        coords_in = coords_in * (1 - missing_atom_mask[..., None])
+    coords_in = coords_in + random_trans
+
+    # Zero out padding + missing / ghost atoms
+    coords_in = coords_in * rearrange(seq_mask, "b n -> b n 1 1")
+    coords_in = coords_in * atom_mask[..., None]
+
+    if coords_in.shape[0] == 1:
+        # unbatched; remove batch dimension
+        coords_in = coords_in.squeeze(0)
+
+    if return_transforms:
+        return coords_in, (coords_mean, random_rot, random_trans)
+
     return coords_in
 
 

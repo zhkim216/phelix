@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (apply_random_se3, load_feats_from_pdb,
+from allatom_design.data.data import (center_random_augmentation, load_feats_from_pdb,
                                       make_fixed_size_1d)
 
 FEATURES_LONG = ("residue_index", "chain_index", "aatype")
@@ -109,7 +109,7 @@ class ADDataset(data.Dataset):
 
         if self.se3_augment:
             # Center on CA and apply random rotation
-            x = apply_random_se3(x, data["missing_atom_mask"], translation_scale=self.translation_scale)
+            x = center_random_augmentation(x, seq_mask, atom_mask, data["missing_atom_mask"],translation_scale=self.translation_scale)
 
         # per-channel mask for x, used for loss.
         # We only mask out missing atoms from PDB files, not ghost atoms.

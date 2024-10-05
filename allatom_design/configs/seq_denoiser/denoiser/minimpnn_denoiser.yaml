@@ -37,6 +37,7 @@ scn_diffusion_module:
   use_self_conditioning: true
   self_cond_p: 0.5
   training_batch_size_mult: 4  # batch size multiplier for diffusion module
+  translation_scale: ${data.translation_scale}
 
   dit:
     num_atoms_in: ${model.num_atoms_in}
