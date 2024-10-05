@@ -23,6 +23,7 @@ from allatom_design.data.data import (
 )
 
 from .graph_transformer import GraphTransformer
+from .esm_model import ESMWrapper
 
 class FaMPNN(nn.Module):
     """Modified ProteinMPNN network to predict sequence from full atom structure."""
@@ -55,6 +56,7 @@ class FaMPNN(nn.Module):
         self.num_heads = cfg.graph_transformer.num_heads
         self.pos_enc = cfg.graph_transformer.pos_enc
         self.attn_bias = cfg.graph_transformer.attn_bias
+        self.use_esm = cfg.use_esm
 
         if self.model_type not in ['graph_transformer', 'sidechain', 'baseline']:
             raise ValueError(f'Incorrect model type specified: {self.model_type}, must be one of: graph_transformer, sidechain, or baseline!')

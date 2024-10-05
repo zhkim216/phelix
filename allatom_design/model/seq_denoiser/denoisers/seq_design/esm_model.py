@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchtyping import TensorType
+from omegaconf import DictConfig, OmegaConf
 
 class ESMWrapper(nn.Module):
     def __init__(self, cfg: DictConfig):
@@ -18,8 +19,6 @@ class ESMWrapper(nn.Module):
 
         self.esm, self.esm_dict = esm_registry.get(cfg.esm_type)()
         self.esm.requires_grad_(False)
-        # self.esm.half()  # we train with bf16, so we shouldn't need to half the model
-
         self.esm_feats = self.esm.embed_dim
         self.esm_attns = self.esm.num_layers * self.esm.attention_heads
         self.register_buffer("af2_to_esm", ESMWrapper._af2_to_esm(self.esm_dict))
@@ -51,11 +50,6 @@ class ESMWrapper(nn.Module):
         """
         esm_aatype = self._af2_idx_to_esm_idx(aatype_noised, seq_mask)
         esm_aatype = self._mask_inputs_to_esm(esm_aatype, seq_mask, mlm_mask)
-
-        # ESM2 doesn't use RoPE on residx?
-        # Also, they seem to prepend BOS and append EOS tokens to every example regardless of cropping -- discrepancy with their supplement
-        # https://github.com/facebookresearch/esm/issues/299
-        # The pretrained ESM model seems to NaN out when neither BOS/EOS are provided
         esm_s, _ = self._compute_language_model_representations(esm_aatype)
         esm_s = esm_s.detach()
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=mlm_scn_atom
+#SBATCH --job-name=mlm_gt_atom
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -19,7 +19,7 @@ OUT_DIR=/scratch/hielab/talal/allatom_design
 WANDB_ID=talal-widatalla
 cd $BASE_DIR
 
-EXP_NAME=mlm_scn_atom
+EXP_NAME=mlm_gt_atom
 GROUP=chimera_a8
 
 # Dataset paths
@@ -44,7 +44,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     interpolant=mar_interpolant \
     interpolant.training_noise_schedule=uniform_squared_t \
     denoiser=minimpnn_denoiser \
-    denoiser.minimpnn.model_type=sidechain \
+    denoiser.minimpnn.model_type=graph_transformer \
     denoiser.minimpnn.augment_eps=0.0 \
     denoiser.minimpnn.graph_transformer.layers_per_nn=4 \
     denoiser.minimpnn.aggregation=sum \
