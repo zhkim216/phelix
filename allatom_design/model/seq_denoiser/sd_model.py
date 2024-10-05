@@ -13,6 +13,7 @@ from allatom_design.data.data import cat_bb_scn, stack_aux_traj
 from allatom_design.data.pdb_utils import *
 from allatom_design.eval import sampling_utils
 from allatom_design.interpolants.sd_interpolants.mar_interpolant import MAR
+from allatom_design.interpolants.sd_interpolants.double_mar_interpolant import DOUBLE_MAR
 from allatom_design.interpolants.sd_interpolants.sd_interpolant import \
     SDInterpolant
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
@@ -69,6 +70,8 @@ class SeqDenoiser(nn.Module):
         interpolant_out = self.interpolant(batch, t)
         batch["x_noised"] = interpolant_out["x_noised"]
         batch["aatype_noised"] = interpolant_out["aatype_noised"]
+        batch['seq_mlm_mask'] = interpolant_out["seq_mlm_mask"]
+        batch['scn_mlm_mask'] = interpolant_out.get("scn_mlm_mask", None) #None if running just seq_des
 
         # During training, keep track of certain additional features
         aux_inputs = {
@@ -77,11 +80,13 @@ class SeqDenoiser(nn.Module):
             "ghost_atom_mask": batch["ghost_atom_mask"],
             "missing_atom_mask": batch["missing_atom_mask"],
             "t_scd": batch.get("t_scd", None),  # scalar; fix t_scd (sidechain diffusion time) if provided, usually for eval
+            "seq_mlm_mask": batch['seq_mlm_mask'],
+            "scn_mlm_mask": batch['seq_mlm_mask'],
         }
 
         # Denoise coords
         _, _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"], None,
-                                        batch["residue_index"], batch["seq_mask"],
+                                        batch["residue_index"], batch['chain_index'], batch["seq_mask"],
                                         cond_labels_in=batch["cond_labels_in"],
                                         aux_inputs=aux_inputs)
 
@@ -367,5 +372,7 @@ def get_interpolant(cfg: DictConfig) -> SDInterpolant:
     """
     if cfg.name == "mar":
         return MAR(cfg)
+    elif cfg.name == 'double_mar':
+        return DOUBLE_MAR(cfg)
     else:
         raise ValueError(f"Unknown interpolant: {cfg.name}")

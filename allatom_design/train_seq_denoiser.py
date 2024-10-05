@@ -12,6 +12,7 @@ from lightning.fabric.loggers.logger import _DummyExperiment as DummyExperiment
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.strategies import DDPStrategy
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 
@@ -145,10 +146,14 @@ def main(cfg: DictConfig):
     lit_model.model.set_scale_factors(scale_factors)  # set scale factors in model
 
     # Train
+
+    # Needs to be added for graph transformer checkpointing
+    strategy = DDPStrategy(static_graph=True)
     trainer = L.Trainer(logger=logger,
                         default_root_dir=cfg.logging.log_dir,
                         log_every_n_steps=cfg.logging.log_every_n_steps,
                         callbacks=callbacks,
+                        strategy=strategy,
                         **cfg.trainer
                         )
     trainer.fit(model=lit_model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloaders)
