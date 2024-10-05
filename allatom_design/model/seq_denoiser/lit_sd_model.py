@@ -1,4 +1,5 @@
 import itertools
+from collections import defaultdict
 from typing import Any, Dict
 
 import lightning as L
@@ -58,32 +59,39 @@ class LitSeqDenoiser(L.LightningModule):
         outputs = self(batch)
         _, aux = self.loss(outputs, batch, return_aux=True)
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
+        
+        # eval seq design over discrete sequence noise
+        if self.model.task in ['seq_des', 'allatom_seq_des']:
+            aux_t = defaultdict(list)
+            for eval_t in self.cfg.eval.eval_timesteps:
+                B = batch["seq_mask"].shape[0]
+                t_seq = torch.full((B, ), fill_value=eval_t).to(self.device)
+                outputs = self(batch, t=t_seq)
+                _, aux = self.loss(outputs, batch, eval_total = False, return_aux=True)
+                aux = {k: v for k, v in aux.items() if "seq" in k}  # trim aux to sequence metrics
+                self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_t{eval_t}")
 
-        # eval seq design
-        for eval_t in self.cfg.eval.eval_timesteps:
+                # aggregate across timesteps
+                for k, v in aux.items():
+                    aux_t[k].append(v)
+
+            # average across timesteps and log
+            aux_t = {k: torch.stack(v).mean().item() for k, v in aux_t.items()}
+            self._log(batch, None, aux_t, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix="_avg_t")
+
+        # eval sidechain packing over edm sidechain noise, fully unmasked sequence
+        if self.model.task in ["allatom_seq_des", "scn_pack"]:
             B = batch["seq_mask"].shape[0]
-            t = torch.full((B, ), fill_value=eval_t).to(self.device)
-            outputs = self(batch, t=t)
-            _, aux = self.loss(outputs, batch, return_aux=True)
-            aux = {k: v for k, v in aux.items() if "seq" in k}  # trim aux to sequence metrics
-            self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_ts{eval_t}")
-
-
-        # eval sidechain packing: no noise for backbone or sequence
-        if self.model.task in ["allatom_seq_des"]:
-            B = batch["seq_mask"].shape[0]
-            t = torch.full((B, ), fill_value=1.0).to(self.device)
+            t_seq = torch.full((B, ), fill_value=0).to(self.device)
 
             for t_scd in self.cfg.eval.eval_timesteps:
                 batch["t_scd"] = t_scd
-                outputs = self(batch, t=t)
-                _, aux = self.loss(outputs, batch, return_aux=True)
+                outputs = self(batch, t=t_seq)
+                _, aux = self.loss(outputs, batch, eval_seq = False, eval_total = False, return_aux=True)
                 aux = {k: v for k, v in aux.items() if "scn/" in k}  # trim aux to sidechain diffusion metrics
-                aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
                 aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
                 self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix="/scn_diff",
-                            key_suffix=f"_ts1.0_tscd{t_scd}")
-
+                            key_suffix=f"_t_scd{t_scd}")
 
     def _log(self,
              batch: Dict[str, TensorType["b ..."]],

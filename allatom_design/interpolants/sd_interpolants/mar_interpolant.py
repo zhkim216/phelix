@@ -48,7 +48,7 @@ class MAR(SDInterpolant):
         outputs["t"] = t  # [b]
         outputs["x_noised"] = xt  # [b n a 3]
         outputs["aatype_noised"] = aatype_noised  # [b n]
-        outputs["mlm_mask"] = mlm_mask  # [b n]
+        outputs["seq_mlm_mask"] = mlm_mask  # [b n]
 
         return outputs
 

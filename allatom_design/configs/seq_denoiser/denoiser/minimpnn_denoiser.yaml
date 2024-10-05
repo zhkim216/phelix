@@ -11,19 +11,40 @@ defaults:
 
 minimpnn:
   autoregressive: false
-  no_aatype_pred: true
+  no_aatype_pred: false
   n_aatype: ${model.n_aatype}
   use_self_conditioning_seq: ${model.denoiser.use_self_conditioning_seq}
   use_time_cond: false
+  use_esm: false
 
   n_channel: 128
   n_layers: 3
   k_neighbors: 48
   noise_cond_mult: 4
 
-  model_type: "protein_mpnn"
+  model_type: "graph_transformer"
   augment_eps: 0.0
   dropout_p: 0.1
+  dec_edge_up: true
+  aggregation: "sum"
+  return_embedding: "last"
+  
+  graph_transformer: 
+    nns: [8,16,32,64]
+    layers_per_nn: 4
+    hidden_dim: 32
+    input_dim: 37
+    num_heads: 2 
+    dim_key: 3
+    out_dim: ${model.denoiser.minimpnn.n_channel}
+    dim_pos_enc: 16
+    pos_enc: true
+    attn_bias: true
+
+  esm:
+    esm_type: "esm2_8M"  # one of ["esm2_8M", "esm2_35M", "esm2_150M", "esm2_650M", "esm2_3B", "esm2_15B"]
+    n_tokens_embed: ${model.n_aatype}
+    c_s: ${model.denoiser.minimpnn.n_channel}
 
 seq_head:
   in_channels: ${model.denoiser.minimpnn.n_channel}

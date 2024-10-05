@@ -191,6 +191,9 @@ class SidechainDiffusionModule(nn.Module):
             # Teacher forcing: use ground truth aatype
             aatype = aux_inputs["aatype"]
 
+            #mlm mask for sidechain positions
+            scn_mlm_mask = aux_inputs['scn_mlm_mask']
+
             # Repeat inputs for batch multiplier
             M = self.cfg.training_batch_size_mult
             x_scn_gt_batched = repeat(x_scn_gt, "b n a x -> (m b) n a x", m=M, b=B)
@@ -199,6 +202,7 @@ class SidechainDiffusionModule(nn.Module):
             x_bb_batched = repeat(x_bb, "b n a x -> (m b) n a x", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
             residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
+            scn_mlm_mask_batched = repeat(scn_mlm_mask, "b n -> (m b) n", m=M, b=B)
 
             # Evaluate at specific timesteps (for validation)
             t_sd_batched = None
@@ -207,7 +211,8 @@ class SidechainDiffusionModule(nn.Module):
 
             # Noise the ground truth sidechains
             interpolant_out = self.scn_interpolant({"x": x_scn_gt_batched, "aatype": aatype_batched}, t=t_sd_batched)
-            xt_scn_batched = interpolant_out["x_noised"]
+            scn_mlm_mask_batched_expanded = rearrange(scn_mlm_mask_batched, "mb n -> mb n 1 1")
+            xt_scn_batched = torch.where(scn_mlm_mask_batched_expanded == 1, x_scn_gt_batched, interpolant_out["x_noised"])
             t_batched = interpolant_out["t"]
             diffusion_aux["loss_weight_t"] = interpolant_out["loss_weight_t"]
 

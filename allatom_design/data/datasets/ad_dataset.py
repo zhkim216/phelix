@@ -34,6 +34,7 @@ class ADDataset(data.Dataset):
         se3_augment: bool = True,
         translation_scale: float = 1.0,
         overwrite_cache: bool = False,
+        subset_length_range: Optional[int] = None
     ):
         """
         Args:
@@ -47,6 +48,7 @@ class ADDataset(data.Dataset):
         - se3_augment: If True, apply SE3 augmentation to the data.
         - translation_scale: Scale of translation augmentation (when using raw coords or coords feats)
         - overwrite_cache: If True, overwrite the dataset cache. Useful if the dataset features have been updated.
+        - subset_length_range: List with with [min, max] length of proteins to subset form training data
         """
         self.pdb_path = pdb_path
         self.fixed_size = fixed_size
@@ -57,6 +59,7 @@ class ADDataset(data.Dataset):
         self.se3_augment = se3_augment
         self.translation_scale = translation_scale
         self.overwrite_cache = overwrite_cache
+        self.subset_length_range = subset_length_range
 
         # Read in PDB keys
         self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
@@ -82,7 +85,9 @@ class ADDataset(data.Dataset):
 
         if n_random_subset is not None:
             self.pdb_keys = np.random.choice(self.pdb_keys, min(n_random_subset, len(self.pdb_keys)), replace=False)
-
+        
+        if subset_length_range is not None:
+            self.subset_to_length_range(*self.subset_length_range)
 
     def __len__(self):
         return len(self.pdb_keys)
@@ -116,7 +121,7 @@ class ADDataset(data.Dataset):
         x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
 
         # Construct example
-        example["x"] = x
+        example["x"] = x * atom_mask[..., None]
         example["seq_mask"] = seq_mask
         example["x_mask"] = x_mask
         example["residue_index"] = data["residue_index"]
@@ -233,7 +238,20 @@ class ADDataset(data.Dataset):
 
         self.pdb_keys = np.array(pdb_keys)
 
+    def subset_to_length_range(self, min_len: int, max_len: int):
+        """
+        Subsets the dataset to only include proteins with sequence length in [min_len, max_len].
+        """
+        pdb_keys = []
+        for pdb_key in tqdm(self.pdb_keys, desc=f"Subsetting to length range [{min_len}, {max_len}]", leave=False):
+            data_file = self._get_data_file(pdb_key)
+            latent = torch.load(data_file, weights_only=True)
+            seq_len = latent["seq_mask"].sum().item()
+            if min_len <= seq_len <= max_len:
+                pdb_keys.append(pdb_key)
 
+        self.pdb_keys = np.array(pdb_keys)
+        
     @staticmethod
     def index_into_batch(batch: Dict[str, torch.Tensor], idxs: List) -> Dict[str, torch.Tensor]:
         """
