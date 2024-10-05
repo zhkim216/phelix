@@ -43,7 +43,7 @@ GROUP=${MODEL_NAME}_s0
 
 # Run inverse folding script
 cd ${BASE_DIR}
-WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/inverse_fold.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/inverse_fold.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \

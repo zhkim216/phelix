@@ -14,7 +14,7 @@ from torchtyping import TensorType
 
 import allatom_design.data.residue_constants as rc
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
-from allatom_design.data.data import cat_bb_scn, center_random_augmentation
+from allatom_design.data.data import cat_bb_scn, center_random_augmentation, apply_random_augmentation
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
@@ -64,32 +64,28 @@ class SidechainDiffusionModule(nn.Module):
 
         if not is_sampling:
             # === Training === #
-
-            # Repeat inputs for batch multiplier
+            # Repeat the inputs for batch multiplier
             M = self.cfg.training_batch_size_mult
             h_V_batched = repeat(h_V, "b n h -> (m b) n h", m=M, b=B)
             aatype_batched = repeat(aatype, "b n -> (m b) n", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
             residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
-            x_bb_batched = repeat(x_bb, "b n a x -> (m b) n a x", m=M, b=B)
+            x_batched = repeat(aux_inputs["x"], "b n a x -> (m b) n a x", m=M, b=B)  # ground truth backbone (unnoised)
+            x_bb_batched = repeat(x_bb, "b n a x -> (m b) n a x", m=M, b=B)  # input backbone (possibly noised)
 
-            # Apply center random augmentation on the batched input backbone
+            # Apply center random augmentation on the batched ground truth
             missing_atom_mask_batched = repeat(aux_inputs["missing_atom_mask"], "b n a -> (m b) n a", m=M, b=B)
             ghost_atom_mask_batched = repeat(aux_inputs["ghost_atom_mask"], "b n a -> (m b) n a", m=M, b=B)
+            atom_mask_batched = (1 - missing_atom_mask_batched) * (1 - ghost_atom_mask_batched)
+            x_batched, transforms = center_random_augmentation(x_batched, seq_mask_batched, atom_mask_batched, missing_atom_mask_batched,
+                                                               translation_scale=self.cfg.translation_scale, return_transforms=True)
 
-            bb_missing_atom_mask_batched = missing_atom_mask_batched[..., rc.bb_idxs]  # 1 for atoms that are missing
-            bb_atom_mask_batched = (1 - bb_missing_atom_mask_batched)  # backbone doesn't have ghost atoms
-            x_bb_batched, transforms = center_random_augmentation(x_bb_batched, seq_mask_batched, bb_atom_mask_batched, bb_missing_atom_mask_batched,
-                                                                  translation_scale=self.cfg.translation_scale, return_transforms=True)
-            _, random_rot, _ = transforms
+            # Apply the same exact augmentation to the input backbone
+            x_bb_batched = apply_random_augmentation(x_bb_batched, transforms, seq_mask_batched, atom_mask_batched[..., rc.bb_idxs])
 
-            # Get ground truth sidechains
-            x_scn_gt = aux_inputs["x"][..., rc.non_bb_idxs, :]
-
-            # Center sidechains on CA of *ground truth backbone*, and apply the same random rotation
-            x_scn_gt = x_scn_gt - aux_inputs["x"][..., 1:2, :]
-            x_scn_gt_batched = repeat(x_scn_gt, "b n a x -> (m b) n a x", m=M, b=B)
-            x_scn_gt_batched = torch.einsum("b n a i, b i j -> b n a j", x_scn_gt_batched, random_rot)
+            # Extract the ground truth sidechains and center on CA of ground truth backbone
+            x_scn_gt_batched = x_batched[..., rc.non_bb_idxs, :]
+            x_scn_gt_batched = x_scn_gt_batched - x_batched[..., 1:2, :]  # center on CA
 
             # Ensure that missing / ghost atoms are zeroed out
             x_scn_gt_batched = torch.where(missing_atom_mask_batched[..., rc.non_bb_idxs, None].bool(), 0, x_scn_gt_batched)
@@ -101,7 +97,7 @@ class SidechainDiffusionModule(nn.Module):
             # Evaluate at specific timesteps (for validation)
             t_sd_batched = None
             if aux_inputs["t_scd"] is not None:
-                t_sd_batched = torch.full((M * B, ), aux_inputs["t_scd"], device=x_scn_gt.device)
+                t_sd_batched = torch.full((M * B, ), aux_inputs["t_scd"], device=x_scn_gt_batched.device)
 
             # Noise the ground truth sidechains
             interpolant_out = self.scn_interpolant({"x": x_scn_gt_batched, "aatype": aatype_batched}, t=t_sd_batched)

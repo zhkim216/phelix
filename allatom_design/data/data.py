@@ -253,15 +253,18 @@ def center_random_augmentation(coords_in: TensorType["n a 3", float],
     """
     Batched or unbatched.
     Mean center on CA atoms, then apply random rotation and translation.
+    Ensures that missing/ghost/padding atoms are set back to 0.
 
     Inputs:
         - seq_mask: 0 if residue is padding
         - atom_mask: 1 if not ghost and not missing atom, 0 otherwise
         - missing_atom_mask: 1 if atom is missing, 0 if present
     """
-    if coords_in.dim() == 3:
+    input_dim = coords_in.dim()
+    if input_dim == 3:
         # unbatched; add batch dimension
         coords_in = coords_in.unsqueeze(0)
+        atom_mask = atom_mask.unsqueeze(0)
         missing_atom_mask = missing_atom_mask.unsqueeze(0)
         seq_mask = seq_mask.unsqueeze(0)
 
@@ -285,12 +288,48 @@ def center_random_augmentation(coords_in: TensorType["n a 3", float],
     coords_in = coords_in * rearrange(seq_mask, "b n -> b n 1 1")
     coords_in = coords_in * atom_mask[..., None]
 
-    if coords_in.shape[0] == 1:
+    transforms = (coords_mean, random_rot, random_trans)
+    if input_dim == 3:
         # unbatched; remove batch dimension
         coords_in = coords_in.squeeze(0)
+        transforms = tuple(t.squeeze(0) for t in transforms)
 
     if return_transforms:
-        return coords_in, (coords_mean, random_rot, random_trans)
+        return coords_in, transforms
+
+    return coords_in
+
+
+def apply_random_augmentation(coords_in: TensorType["b n a 3", float],
+                              transforms: Tuple[TensorType["b 1 1 3", float], TensorType["b 3 3", float], TensorType["b 1 1 3", float]],
+                              seq_mask: TensorType["b n", float],
+                              atom_mask: TensorType["b n a", float]) -> TensorType["b n a 3", float]:
+    """
+    Batched or unbatched.
+
+    Given the output transforms of center_random_augmentation, applies the same transformation to a set of coordinates.
+    Ensures that missing/ghost/padding atoms are set back to 0.
+    """
+    input_dim = coords_in.dim()
+    if input_dim == 3:
+        # unbatched; add batch dimension
+        coords_in = coords_in.unsqueeze(0)
+        transforms = tuple(t.unsqueeze(0) for t in transforms)
+
+    coords_mean, random_rot, random_trans = transforms
+
+    # Apply transforms
+    coords_in = coords_in - coords_mean
+    coords_in = torch.einsum("b n a i, b i j -> b n a j", coords_in, random_rot)
+    coords_in = coords_in + random_trans
+
+    # Zero out padding + missing / ghost atoms
+    coords_in = coords_in * rearrange(seq_mask, "b n -> b n 1 1")
+    coords_in = coords_in * atom_mask[..., None]
+
+    if input_dim == 3:
+        # unbatched; remove batch dimension
+        coords_in = coords_in.squeeze(0)
 
     return coords_in
 
