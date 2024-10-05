@@ -14,7 +14,7 @@ from torchtyping import TensorType
 
 import allatom_design.data.residue_constants as rc
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
-from allatom_design.data.data import cat_bb_scn
+from allatom_design.data.data import cat_bb_scn, center_random_augmentation
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
@@ -25,6 +25,7 @@ from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
 from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
     TimestepEmbedder
 from openfold.model.primitives import Linear
+
 
 
 class SidechainDiffusionModule(nn.Module):
@@ -64,27 +65,38 @@ class SidechainDiffusionModule(nn.Module):
         if not is_sampling:
             # === Training === #
 
+            # Repeat inputs for batch multiplier
+            M = self.cfg.training_batch_size_mult
+            h_V_batched = repeat(h_V, "b n h -> (m b) n h", m=M, b=B)
+            aatype_batched = repeat(aatype, "b n -> (m b) n", m=M, b=B)
+            seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
+            residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
+            x_bb_batched = repeat(x_bb, "b n a x -> (m b) n a x", m=M, b=B)
+
+            # Apply center random augmentation on the batched input backbone
+            missing_atom_mask_batched = repeat(aux_inputs["missing_atom_mask"], "b n a -> (m b) n a", m=M, b=B)
+            ghost_atom_mask_batched = repeat(aux_inputs["ghost_atom_mask"], "b n a -> (m b) n a", m=M, b=B)
+
+            bb_missing_atom_mask_batched = missing_atom_mask_batched[..., rc.bb_idxs]  # 1 for atoms that are missing
+            bb_atom_mask_batched = (1 - bb_missing_atom_mask_batched)  # backbone doesn't have ghost atoms
+            x_bb_batched, transforms = center_random_augmentation(x_bb_batched, seq_mask_batched, bb_atom_mask_batched, bb_missing_atom_mask_batched,
+                                                                  translation_scale=self.cfg.translation_scale, return_transforms=True)
+            _, random_rot, _ = transforms
+
             # Get ground truth sidechains
             x_scn_gt = aux_inputs["x"][..., rc.non_bb_idxs, :]
 
-            # Center sidechains on CA
+            # Center sidechains on CA of *ground truth backbone*, and apply the same random rotation
             x_scn_gt = x_scn_gt - aux_inputs["x"][..., 1:2, :]
-            scn_missing_atom_mask = aux_inputs["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
-            x_scn_gt = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn_gt)  # fill missing atoms with zeroes
-            scn_ghost_atom_mask = aux_inputs["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
-            x_scn_gt = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn_gt)  # fill ghost atoms with zeroes
+            x_scn_gt_batched = repeat(x_scn_gt, "b n a x -> (m b) n a x", m=M, b=B)
+            x_scn_gt_batched = torch.einsum("b n a i, b i j -> b n a j", x_scn_gt_batched, random_rot)
+
+            # Ensure that missing / ghost atoms are zeroed out
+            x_scn_gt_batched = torch.where(missing_atom_mask_batched[..., rc.non_bb_idxs, None].bool(), 0, x_scn_gt_batched)
+            x_scn_gt_batched = torch.where(ghost_atom_mask_batched[..., rc.non_bb_idxs, None].bool(), 0, x_scn_gt_batched)
 
             # Teacher forcing: use ground truth aatype
             aatype = aux_inputs["aatype"]
-
-            # Repeat inputs for batch multiplier
-            M = self.cfg.training_batch_size_mult
-            x_scn_gt_batched = repeat(x_scn_gt, "b n a x -> (m b) n a x", m=M, b=B)
-            h_V_batched = repeat(h_V, "b n h -> (m b) n h", m=M, b=B)
-            aatype_batched = repeat(aatype, "b n -> (m b) n", m=M, b=B)
-            x_bb_batched = repeat(x_bb, "b n a x -> (m b) n a x", m=M, b=B)
-            seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
-            residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
 
             # Evaluate at specific timesteps (for validation)
             t_sd_batched = None
