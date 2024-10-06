@@ -67,32 +67,24 @@ class SidechainDiffusionModule(nn.Module):
             # Teacher forcing: use ground truth aatype
             aatype = aux_inputs["aatype"]
 
-            # Repeat the inputs for batch multiplier
+            # Get ground truth sidechains for diffusion
+            x_scn_gt = aux_inputs["x"][..., rc.non_bb_idxs, :]
+
+            # Center sidechains on CA
+            x_scn_gt = x_scn_gt - aux_inputs["x"][..., 1:2, :]
+            scn_missing_atom_mask = aux_inputs["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
+            x_scn_gt = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn_gt)  # fill missing atoms with zeroes
+            scn_ghost_atom_mask = aux_inputs["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
+            x_scn_gt = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn_gt)  # fill ghost atoms with zeroes
+
+            # Repeat inputs for batch multiplier
             M = self.cfg.training_batch_size_mult
+            x_scn_gt_batched = repeat(x_scn_gt, "b n a x -> (m b) n a x", m=M, b=B)
             h_V_batched = repeat(h_V, "b n h -> (m b) n h", m=M, b=B)
             aatype_batched = repeat(aatype, "b n -> (m b) n", m=M, b=B)
+            x_bb_batched = repeat(x_bb, "b n a x -> (m b) n a x", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
             residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
-            x_batched = repeat(aux_inputs["x"], "b n a x -> (m b) n a x", m=M, b=B)  # ground truth backbone (unnoised)
-            x_bb_batched = repeat(x_bb, "b n a x -> (m b) n a x", m=M, b=B)  # input backbone (possibly noised)
-
-            # Apply center random augmentation on the batched ground truth
-            missing_atom_mask_batched = repeat(aux_inputs["missing_atom_mask"], "b n a -> (m b) n a", m=M, b=B)
-            ghost_atom_mask_batched = repeat(aux_inputs["ghost_atom_mask"], "b n a -> (m b) n a", m=M, b=B)
-            atom_mask_batched = (1 - missing_atom_mask_batched) * (1 - ghost_atom_mask_batched)
-            x_batched, transforms = center_random_augmentation(x_batched, seq_mask_batched, atom_mask_batched, missing_atom_mask_batched,
-                                                               translation_scale=self.cfg.translation_scale, return_transforms=True)
-
-            # Apply the same exact augmentation to the input backbone
-            x_bb_batched = apply_random_augmentation(x_bb_batched, transforms, seq_mask_batched, atom_mask_batched[..., rc.bb_idxs])
-
-            # Extract the ground truth sidechains and center on CA of ground truth backbone
-            x_scn_gt_batched = x_batched[..., rc.non_bb_idxs, :]
-            x_scn_gt_batched = x_scn_gt_batched - x_batched[..., 1:2, :]  # center on CA
-
-            # Ensure that missing / ghost atoms are zeroed out
-            x_scn_gt_batched = torch.where(missing_atom_mask_batched[..., rc.non_bb_idxs, None].bool(), 0, x_scn_gt_batched)
-            x_scn_gt_batched = torch.where(ghost_atom_mask_batched[..., rc.non_bb_idxs, None].bool(), 0, x_scn_gt_batched)
 
             # Evaluate at specific timesteps (for validation)
             t_sd_batched = None
