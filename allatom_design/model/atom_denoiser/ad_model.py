@@ -40,8 +40,7 @@ class AtomDenoiser(nn.Module):
         self.sigma_data = self.bb_std
 
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
-        # self.sd_interpolant = get_interpolant(getattr(cfg, "sd_interpolant", None))
-        self.sd_interpolant = None
+        self.sd_interpolant = get_interpolant(getattr(cfg, "sd_interpolant", None))
 
 
     def setup(self):
