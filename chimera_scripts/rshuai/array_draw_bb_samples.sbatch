@@ -48,7 +48,7 @@ WANDB_ID=richardshuai
 GROUP=${MODEL_NAME}_s0
 
 # Set the experiment name to include the current s_max_override value
-EXP_NAME=${MODEL_NAME}_bb_smax${s}
+EXP_NAME=${MODEL_NAME}_bb_smax${s_max}
 
 # Run eval script
 cd ${BASE_DIR}
