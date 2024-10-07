@@ -87,7 +87,7 @@ class LitAtomDenoiser(L.LightningModule):
             _, aux = self.loss(outputs, batch, return_aux=True)
             aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
             aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
-            self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_ts{t}_tbb{t}")
+            self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_ts{t_sd}_tbb{t}")
 
 
         # Log metrics as a function of sequence time
@@ -102,7 +102,7 @@ class LitAtomDenoiser(L.LightningModule):
                 aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
                 aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
                 self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix,
-                          key_suffix=f"_ts{t_sd}_tca{t_bb}_tnco{t_bb}")
+                          key_suffix=f"_ts{t_sd}_tbb{t_bb}")
 
 
     def _log(self,
