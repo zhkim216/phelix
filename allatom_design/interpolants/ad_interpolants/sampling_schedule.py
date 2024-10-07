@@ -34,8 +34,7 @@ class NoiseSchedule():
 
     def scale_vf(self,
                  vf: TensorType["b n a 3"],
-                 t: Union[TensorType["b", float],
-                          Tuple[TensorType["b", float], TensorType["b", float]]]
+                 t: TensorType["b", float],
                  ) -> TensorType["b n a 3"]:
         """
         Scales vector field according to the noise schedule.
@@ -48,6 +47,12 @@ class NoiseSchedule():
             return vf * c * torch.exp(-c * t)
         elif self.cfg.name == "step_scale":
             c = self.cfg.c
-            return vf * c
+            t_min = getattr(self.cfg, "t_min", 0.0)
+            t_max = getattr(self.cfg, "t_max", 1.0)
+
+            # scale only in the interval [t_min, t_max]
+            c_t = torch.where((t_min <= t) & (t <= t_max), c, 1.0)
+            c_t = rearrange(c_t, "b -> b 1 1 1")
+            return vf * c_t
         else:
             raise NotImplementedError(f"Unknown noise schedule: {self.cfg.name}")
