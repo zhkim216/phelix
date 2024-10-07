@@ -15,3 +15,4 @@ training_noise_cfg:
 
 # Additional training tasks
 full_noise_p: 0.0  # probability of using full noise during training
+drop_scn_p: 0.0  # probability of setting all sidechains to 0 during training

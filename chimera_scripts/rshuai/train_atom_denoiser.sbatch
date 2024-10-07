@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a11_bb2
+#SBATCH --job-name=a11_bb3
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
@@ -25,7 +25,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=a11_bb2
+EXP_NAME=a11_bb3
 GROUP=chimera_a11
 
 # Dataset paths
@@ -47,9 +47,11 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     model.task=backbone \
     sd_interpolant.full_noise_p=0.3 \
     sd_interpolant.training_noise_schedule=uniform_t \
+    sd_interpolant.drop_scn_p=0.5 \
     denoiser=esm_dit_denoiser \
     denoiser.esm.esm_type=esm2_650M \
     denoiser.autoguidance.enabled=true \
+    denoiser.use_sidechain_conditioning=true \
     denoiser.training_batch_size_mult=8 \
     eval.eval_timesteps_seq=[0.25,0.5,0.75,1.0] \
     optim.optimizer=noam \

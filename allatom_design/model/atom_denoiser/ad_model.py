@@ -79,6 +79,7 @@ class AtomDenoiser(nn.Module):
         aux_inputs = {
             "x": batch["x"],  # ground truth coordinates
             "t_bb": batch.get("t_bb", None),  # scalar; fix t_bb if provided, usually for eval
+            "missing_atom_mask": batch["missing_atom_mask"]
         }
 
         # Denoise coords

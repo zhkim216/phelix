@@ -11,7 +11,7 @@
 
 from collections import defaultdict
 from functools import partial
-from typing import Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import esm
 import numpy as np
@@ -20,7 +20,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
 from omegaconf import DictConfig, OmegaConf
-
 from torchtyping import TensorType
 from tqdm import tqdm
 
@@ -58,6 +57,11 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
         # Set up ESM
         self.esm_wrapper = ESMWrapper(cfg.esm)
 
+        # Set up sidechain conditioning
+        self.use_sidechain_conditioning = getattr(cfg, "use_sidechain_conditioning", False)
+        if self.use_sidechain_conditioning:
+            self.sidechain_conditioning_dit = SidechainConditioningDiT(cfg.sidechain_conditioning_dit)
+
         # Set up DiT model
         self.dit = ESMConditionedDiT(cfg.dit, self.interpolant)
 
@@ -82,8 +86,14 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
                            Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
+        # ESM embeddings
         h_S = self.esm_wrapper(aatype_noised, seq_mask, residue_index, mlm_mask)
 
+        # Sidechain conditioning
+        if self.use_sidechain_conditioning:
+            h_S = h_S + self.sidechain_conditioning_dit(xt_scn, h_S, aatype_noised, residue_index, seq_mask, aux_inputs, is_sampling)
+
+        # Backbone diffusion
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
             h_S=h_S,
             aatype_noised=aatype_noised,
@@ -275,6 +285,128 @@ class ESMDiTDenoiser(BaseAtomDenoiser):
             diffusion_aux["x1_bb_traj"] = torch.stack(x1_bb_traj, dim=1)  # [B S N A 3]
 
         return x1_bb, diffusion_aux
+
+
+class SidechainConditioningDiT(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        """
+        DiT for preprocessing sidechain coordinates for backbone diffusion.
+        """
+        super().__init__()
+
+        self.cfg = cfg
+
+        # Set up DiT model
+        self.num_atoms_in = cfg.num_atoms_in
+
+        # Input and output channels
+        self.in_channels = self.num_atoms_in * 3
+        self.out_channels = cfg.c_s
+
+        # Model parameters
+        self.num_heads = cfg.num_heads
+        self.pos_encoding = cfg.pos_encoding
+
+        self.x_embedder = Linear(self.in_channels, cfg.hidden_size, bias=True, init="glorot")  # "glorot" should match DiT Patchify init
+
+        # Positional encodings
+        assert self.pos_encoding in ["absolute", "absolute_residx", "rotary", "rotary_residx"]
+        if self.pos_encoding in ["absolute", "absolute_residx"]:
+            self.pos_embed = posemb_sincos_1d
+
+        self.rotary_emb = None
+        if self.pos_encoding in ["rotary", "rotary_residx"]:
+            dim = cfg.hidden_size // cfg.num_heads
+            use_residx = (self.pos_encoding == "rotary_residx")
+            self.rotary_emb = rope.RotaryEmbedding(dim=dim, use_residx=use_residx, cache_if_possible=False)
+
+        # ESM conditioning
+        self.h_S_embedder = Linear(cfg.c_s, cfg.hidden_size)
+
+        # QK-normalization from SD3
+        self.qk_normlayer = None
+        if cfg.qk_rmsnorm:
+            self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
+
+        # Blocks
+        self.blocks = nn.ModuleList([
+            DiTBlock(cfg.hidden_size, cfg.num_heads,
+                     mlp_dropout=cfg.mlp_dropout, mlp_ratio=cfg.mlp_ratio,
+                     inf=cfg.inf,
+                     rotary_emb=self.rotary_emb,
+                     qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
+                     ) for _ in range(cfg.depth)
+        ])
+        self.final_layer = FinalLayer(cfg.hidden_size, self.out_channels)
+        self.initialize_weights()
+
+
+    def initialize_weights(self):
+        # Initialize transformer layers:
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+        self.apply(_basic_init)
+
+        # Zero-out adaLN modulation layers in DiT blocks:
+        for block in self.blocks:
+            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+
+        # Zero-out output layers:
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
+        nn.init.constant_(self.final_layer.linear.weight, 0)
+        nn.init.constant_(self.final_layer.linear.bias, 0)
+
+
+
+    def forward(self,
+                xt_scn: TensorType["b n 33 3", float],
+                h_S: TensorType["b n h", float],
+                aatype_noised: TensorType["b n", int],
+                residue_index: TensorType["b n", int],
+                seq_mask: TensorType["b n", float],
+                aux_inputs: Dict[str, Any],
+                is_sampling: bool,
+                ) -> TensorType["b n h", float]:
+        # First, we center sidechain coordinates on CB
+        CB = torch.where(torch.tensor(rc.non_bb_idxs) == rc.atom_order["CB"])[0].item()
+        xt_scn = xt_scn - xt_scn[..., CB:CB+1, :]
+
+        scn_ghost_atom_mask = (1 - torch.tensor(rc.restype_atom37_mask, device=xt_scn.device)[aatype_noised])[..., rc.non_bb_idxs]  # 1 for ghost atoms
+        xt_scn = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, xt_scn)  # fill ghost atoms with zeroes
+
+        if not is_sampling:
+            # mask out missing atoms to avoid leaking backbone information from them
+            scn_missing_atom_mask = aux_inputs["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
+            xt_scn = torch.where(scn_missing_atom_mask[..., None].bool(), 0, xt_scn)  # fill missing atoms with zeroes
+
+        ### Begin DiT forward pass ###
+        x = rearrange(xt_scn, "b n a x -> b n (a x)")
+        x = self.x_embedder(x)
+
+        if self.pos_encoding == "absolute":
+            x = x + self.pos_embed(x)
+        elif self.pos_encoding == "absolute_residx":
+            x = x + self.pos_embed(x, residue_index=residue_index.float())
+
+        ### Conditioning ###
+        # sequence embedding conditioning
+        c = self.h_S_embedder(h_S)
+
+        ### Blocks ###
+        attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
+        for block in self.blocks:
+            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True)
+
+        ### Final layer ###
+        x = self.final_layer(x, c, per_token_conditioning=True)
+        x = x * seq_mask[..., None]  # zero out padding positions
+
+        return x
 
 
 class ESMConditionedDiT(nn.Module):

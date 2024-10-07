@@ -26,6 +26,7 @@ class MAR(SDInterpolant):
 
         # Additional training tasks
         self.full_noise_p = getattr(cfg, "full_noise_p", 0.0)  # randomly set full_noise_p timesteps to full noise
+        self.drop_scn_p = getattr(cfg, "drop_scn_p", 0.0)  # randomly set all sidechain atoms to zero
 
 
     @torch.compiler.disable
@@ -103,13 +104,19 @@ class MAR(SDInterpolant):
         mlm_mask = (mlm_mask * seq_mask).float()  # mask out residues that are not in the sequence
         x_noised = x.clone()
 
-        # Mask sidechains
+        # Mask sidechains based on mlm_mask
         x_noised[..., rc.non_bb_idxs, :] = x[..., rc.non_bb_idxs, :] * rearrange(mlm_mask, "b n -> b n 1 1").float()
 
-        # Mask sequence
+        # Mask sequence based on mlm_mask
         aatype_noised = torch.where(mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
         aatype_noised = aatype_noised * seq_mask  # set pad residues back to 0
         aatype_noised = aatype_noised.long()
+
+        # Occasionally zero out all sidechain atoms
+        scn_mask = torch.ones(B, device=x.device)
+        if self.drop_scn_p > 0:
+            scn_mask = (torch.rand(B, device=x.device) > self.drop_scn_p).float()
+            x_noised[..., rc.non_bb_idxs, :] = x_noised[..., rc.non_bb_idxs, :] * rearrange(scn_mask, "b -> b 1 1 1")
 
         return x_noised, aatype_noised, mlm_mask
 
