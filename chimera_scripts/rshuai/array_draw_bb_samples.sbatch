@@ -9,8 +9,7 @@
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
 #
-# Array job
-#SBATCH --array=0-24%10
+#SBATCH --array=0-4%5
 
 # Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.sh
@@ -28,7 +27,7 @@ MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Dataset paths
-NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
+NNTM_DATASET=null  # null to disable nntm computation
 DSSP_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/dssp/dssp_length_strict.csv
 
 # Set cache directories
@@ -37,25 +36,22 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Denoiser checkpoint
-MODEL_NAME=a10_bb3
-AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-epoch1279.ckpt
+MODEL_NAME=a11_bb1
+AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-epoch3239.ckpt
 
-# Define modes for array tasks
-MODES=("linear" "square" "cubic" "sqrt" "cbrt")
-ca_index=$(( SLURM_ARRAY_TASK_ID / 5 ))
-nco_index=$(( SLURM_ARRAY_TASK_ID % 5 ))
-ca_mode=${MODES[$ca_index]}
-nco_mode=${MODES[$nco_index]}
+# Sampling sweep values
+s_max_values=(40 80 120 160 320)
+s_max=${s_max_values[$SLURM_ARRAY_TASK_ID]}
 
-# Wandb settings / experiment name
+# Wandb settings
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_draw_bb_samples_ca_${ca_mode}_nco_${nco_mode}
-GROUP=chimera_${MODEL_NAME}_s1
+GROUP=${MODEL_NAME}_s0
 
-# Navigate to the base directory
+# Set the experiment name to include the current s_max_override value
+EXP_NAME=${MODEL_NAME}_bb_smax${s}
+
+# Run eval script
 cd ${BASE_DIR}
-
-# Run the evaluation script with appropriate parameters
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
@@ -67,8 +63,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py 
     ss_kld.dssp_csv=${DSSP_CSV} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
+    s_max_override=${s_max} \
     n_samples_per_length=10 \
-    ca.timestep_schedule.mode=${ca_mode} \
-    nco.timestep_schedule.mode=${nco_mode} \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}

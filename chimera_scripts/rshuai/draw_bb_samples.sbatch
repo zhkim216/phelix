@@ -25,7 +25,8 @@ MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Dataset paths
-NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
+# NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
+NNTM_DATASET=null  # null to disable nntm computation
 DSSP_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/dssp/dssp_length_strict.csv
 
 # Set cache directories
@@ -34,8 +35,8 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Denoiser checkpoint
-MODEL_NAME=a10_bb3
-AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-epoch1279.ckpt
+MODEL_NAME=a11_bb1
+AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-epoch3239.ckpt
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
@@ -55,6 +56,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py 
     ss_kld.dssp_csv=${DSSP_CSV} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
-    n_samples_per_length=1 \
+    s_max_override=80 \
+    n_samples_per_length=10 \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}
