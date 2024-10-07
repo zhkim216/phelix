@@ -577,7 +577,7 @@ def run_tm_align_coords_batch(a: TensorType["b n 3", float],
     # Clean up
     for prefix in ["a", "b"]:
         for i in range(B):
-            Path(f"{temp_dir}/{prefix}_{i}.pdb").unlink()
+            Path(f"{temp_dir}/{prefix}_{i}.pdb").unlink(missing_ok=True)
 
     return tm_scores_a, tm_scores_b
 
