@@ -47,11 +47,11 @@ class NoiseSchedule():
             return vf * c * torch.exp(-c * t)
         elif self.cfg.name == "step_scale":
             c = self.cfg.c
-            t_min = getattr(self.cfg, "t_min", 0.0)
-            t_max = getattr(self.cfg, "t_max", 1.0)
-
-            # scale only in the interval [t_min, t_max]
-            c_t = torch.where((t_min <= t) & (t <= t_max), c, 1.0)
+        elif self.cfg.name == "step_scale_interval":
+            c1 = self.cfg.c1
+            c2 = self.cfg.c2
+            t_c = self.cfg.t_c
+            c_t = torch.where((0 <= t) & (t <= t_c), c1, c2)
             c_t = rearrange(c_t, "b -> b 1 1 1")
             return vf * c_t
         else:
