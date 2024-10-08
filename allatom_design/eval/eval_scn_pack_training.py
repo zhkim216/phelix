@@ -68,19 +68,20 @@ def main(cfg: DictConfig):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Get checkpoints from denoiser training run
-    pattern = re.compile(r"sd-epoch\d+\.ckpt$")  # only consider ckpts of form sd-epochXXXX.ckpt
+    pattern = re.compile(r"sd-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form sd-step{step}-epoch{epoch}.ckpt
     sd_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
     sd_ckpts = natsorted([ckpt for ckpt in sd_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
-    sd_ckpts = sd_ckpts
 
     dataset = None  # we will load the dataset based on the model config
 
     pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints")
     for sd_ckpt in pbar:
-        # Skip if epoch is before start_epoch
-        epoch = int(Path(sd_ckpt).stem.replace("sd-epoch", ""))
-        pbar.set_postfix_str(f"Epoch: {epoch}")
-        if (cfg.start_epoch is not None) and (epoch < cfg.start_epoch):
+        match = pattern.search(Path(sd_ckpt).name)
+        global_step, epoch = int(match.group(1)), int(match.group(2))
+        pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
+
+        # Skip if global_step is before start_step
+        if (cfg.start_step is not None) and (global_step < cfg.start_step):
             continue
 
         # Load denoiser model and dataset
@@ -167,8 +168,6 @@ def main(cfg: DictConfig):
         # Log metrics to wandb
         metrics = {f"scn_pack/{k}": v for k, v in metrics.items()}
         if not cfg.no_wandb:
-            # Get global step
-            global_step = torch.load(sd_ckpt, map_location="cpu")["global_step"]
             metrics["trainer/global_step"] = global_step
             metrics["trainer/epoch"] = epoch
 

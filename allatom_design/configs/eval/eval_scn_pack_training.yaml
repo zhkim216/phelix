@@ -7,7 +7,7 @@ group: "eval_scn_pack_debug" # Wandb group name
 # Run settings
 no_wandb: false  # Disable wandb logging
 seed: 0
-start_epoch: 0  # start evaluation after this epoch, 0 or null to start from the beginning
+start_step: 0  # start evaluation after this epoch, 0 or null to start from the beginning
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 batch_size: 64
 num_workers: 10

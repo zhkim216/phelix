@@ -85,16 +85,18 @@ def main(cfg: DictConfig):
     tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
 
     # Get checkpoints from denoiser training run
-    pattern = re.compile(r"ad-epoch\d+\.ckpt$")  # only consider ckpts of form ad-epochXXXX.ckpt
+    pattern = re.compile(r"ad-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form ad-step{step}-epoch{epoch}.ckpt
     ad_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
     ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
 
     pbar = tqdm(ad_ckpts, desc="Evaluating checkpoints")
     for ad_ckpt in pbar:
-        # Skip if epoch is before start_epoch
-        epoch = int(Path(ad_ckpt).stem.replace("ad-epoch", ""))
-        pbar.set_postfix_str(f"Epoch: {epoch}")
-        if (cfg.start_epoch is not None) and (epoch < cfg.start_epoch):
+        match = pattern.search(Path(ad_ckpt).name)
+        global_step, epoch = int(match.group(1)), int(match.group(2))
+        pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
+
+        # Skip if global_step is before start_step
+        if (cfg.start_step is not None) and (global_step < cfg.start_step):
             continue
 
         # Load denoiser model and dataset
@@ -208,8 +210,6 @@ def main(cfg: DictConfig):
 
             # Log metrics to wandb
             if not cfg.no_wandb:
-                # Get global step
-                global_step = torch.load(ad_ckpt, map_location="cpu")["global_step"]
                 metrics["trainer/global_step"] = global_step
                 metrics["trainer/epoch"] = epoch
 

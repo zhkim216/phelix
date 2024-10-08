@@ -34,6 +34,7 @@ class ADDataset(data.Dataset):
         se3_augment: bool = True,
         translation_scale: float = 1.0,
         overwrite_cache: bool = False,
+        **kwargs
     ):
         """
         Args:
