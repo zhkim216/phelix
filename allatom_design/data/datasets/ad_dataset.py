@@ -71,6 +71,9 @@ class ADDataset(data.Dataset):
         # Load designability info
         self._load_designability_info()
 
+        # Get dataset source label
+        self.dataset_source_label = self._get_dataset_source_label()
+
         # Subsetting and overfitting
         if overfit > 0 and phase == "train":
             # Overfit on a subset of the data
@@ -79,7 +82,7 @@ class ADDataset(data.Dataset):
             self.pdb_keys = np.random.choice(self.pdb_keys, overfit, replace=False).repeat(n_data // overfit)
 
         if short_epoch:
-            self.pdb_keys = np.random.choice(self.pdb_keys, 500, replace=False)
+            self.pdb_keys = np.random.choice(self.pdb_keys, min(500, len(self.pdb_keys)), replace=False)
 
         if n_random_subset is not None:
             self.pdb_keys = np.random.choice(self.pdb_keys, min(n_random_subset, len(self.pdb_keys)), replace=False)
@@ -131,8 +134,12 @@ class ADDataset(data.Dataset):
         cond_labels_in = {}
 
         # Add designability info
+        cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
         if self.designability_csv:
             cond_labels_in["designability"] = self.pdb_to_designability[pdb_key]
+
+        # Add dataset source label
+        cond_labels_in["dataset_source"] = cl.TOKEN_TO_ID["dataset_source"][self.dataset_source_label]
 
         # Calculate random cropping start index
         orig_size = example["x"].shape[0]
@@ -187,6 +194,20 @@ class ADDataset(data.Dataset):
         else:
             assert False, f"Unknown dataset: {self.pdb_path}"
         return pdb_data_file
+
+
+    def _get_dataset_source_label(self) -> str:
+        if self.pdb_path.endswith("ingraham_cath_dataset"):
+            dataset_source_label = "EXPERIMENTAL"
+        elif self.pdb_path.endswith("afdb"):
+            dataset_source_label = "SYNTHETIC"
+        elif self.pdb_path.endswith("qfit-test-set/rcsb-pdb"):
+            dataset_source_label = "EXPERIMENTAL"
+        elif self.pdb_path.endswith("rcsb_test_cases"):
+            dataset_source_label = "EXPERIMENTAL"
+        else:
+            assert False, f"Unknown dataset: {self.pdb_path}"
+        return dataset_source_label
 
 
     def _cache_examples(self):
