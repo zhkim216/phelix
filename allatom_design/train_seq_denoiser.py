@@ -113,33 +113,21 @@ def main(cfg: DictConfig):
     callbacks = []
     latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                                  save_top_k=-1,
-                                                 monitor="epoch",
-                                                 mode="max",
-                                                 every_n_epochs=cfg.checkpointing.save_latest_every_n_epochs,
-                                                 filename="sd-epoch{epoch:02d}",
+                                                 every_n_train_steps=cfg.checkpointing.save_latest_every_n_steps,
+                                                 filename="ad-step{step}-epoch{epoch:02d}",
                                                  auto_insert_metric_name=False
                                                  )
     val_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                               save_top_k=cfg.checkpointing.save_top_k,
                                               monitor="val/total_loss",
                                               mode="min",
-                                              filename="sd-epoch{epoch:02d}-val_loss{val/total_loss:.4f}",
+                                              filename="ad-epoch{epoch:02d}-step{step}-val_loss{val/total_loss:.4f}",
                                               auto_insert_metric_name=False  # needed since metric has / in name
                                               )
-
     ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
-                                          save_freq_epochs=cfg.checkpointing.save_ema_every_n_epochs)
+                                          save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
 
     callbacks += [latest_checkpoint_callback, val_checkpoint_callback, ema_checkpoint]
-
-    train_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
-                                                save_top_k=cfg.checkpointing.save_top_k,
-                                                monitor="train/total_loss_epoch",
-                                                mode="min",
-                                                filename="sd-epoch{epoch:02d}-train_loss{train/total_loss:.4f}",
-                                                auto_insert_metric_name=False  # needed since metric has / in name
-                                                )
-    callbacks.append(train_checkpoint_callback)
 
     if logger:
         lr_monitor = LearningRateMonitor(logging_interval="step")
