@@ -75,7 +75,7 @@ WANDB_ID=richardshuai
 GROUP=${MODEL_NAME}_s2
 
 # Set the experiment name to include the current parameter values
-EXP_NAME=${MODEL_NAME}_c1${c1}_c2${c2}_tc${tc}_churn${churn}
+EXP_NAME=${MODEL_NAME}_c1_${c1}_c2_${c2}_tc${tc}_churn${churn}
 
 # Run eval script
 cd ${BASE_DIR}

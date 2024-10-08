@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a11_bb1_draw_bb_samples
+#SBATCH --job-name=a11_bb1_a0_draw_bb_samples
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -9,7 +9,7 @@
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
 #
-#SBATCH --array=0-45
+#SBATCH --array=0-62%32
 
 # Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.sh
@@ -42,7 +42,7 @@ CKPT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/post
 # Define EMA steps and w_values arrays
 # Adjust these sequences as needed
 EMA_STEPS=( $(seq 0.03 0.03 0.27) )  # 0.03 to 0.27 in steps of 0.03 (9 steps)
-W_VALUES=( $(seq 1.0 0.1 1.4) )      # 1.0 to 1.4 in steps of 0.1 (5 steps)
+W_VALUES=( $(seq 1.0 0.05 1.3) )      # 1.0 to 1.3 in steps of 0.05 (7 steps)
 
 # Calculate the number of parameters
 NUM_EMA=${#EMA_STEPS[@]}
@@ -61,7 +61,7 @@ AD_CKPT="${CKPT_DIR}/ema-step1000000-std${ema_step}.ckpt"
 
 # Wandb settings
 WANDB_ID=richardshuai
-GROUP=${MODEL_NAME}_s1
+GROUP=${MODEL_NAME}_a0_s0
 
 # Set the experiment name to include the current ema_step and w
 EXP_NAME=${MODEL_NAME}_eval_ema${ema_step}_w${w}
@@ -82,5 +82,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py 
     n_samples_per_length=10 \
     autoguidance_cfg.use_autoguidance=true \
     autoguidance_cfg.w=${w} \
+    noise_schedule.name=step_scale_interval \
+    +noise_schedule.c1=0.7 \
+    +noise_schedule.c2=1.4 \
+    +noise_schedule.t_c=0.4 \
+    churn_cfg.s_churn=100 \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}

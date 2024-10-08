@@ -47,6 +47,7 @@ class NoiseSchedule():
             return vf * c * torch.exp(-c * t)
         elif self.cfg.name == "step_scale":
             c = self.cfg.c
+            return vf * c
         elif self.cfg.name == "step_scale_interval":
             c1 = self.cfg.c1
             c2 = self.cfg.c2
