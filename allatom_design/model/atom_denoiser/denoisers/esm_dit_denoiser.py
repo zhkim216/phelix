@@ -557,16 +557,20 @@ class ESMConditionedDiT(nn.Module):
         # label conditioning
         for label_name in self.cond_labels:
             if label_name not in cond_labels_in:
-                if self.cond_embedders[label_name].has_unconditional_token:
-                    # if label is not in batch input, and the label supports unconditional tokens, default to unconditional generation
-                    token_id = cl.COND_NUM_CLASSES[label_name]  # last token is the unconditional token
-                else:
-                    # otherwise, we provide a default token ID
-                    token_id = cl.DEFAULT_TOKEN_ID[label_name]
+                # default to placeholder token
                 B = x_noised.shape[0]
-                labels_in = torch.full((B, ), token_id, dtype=torch.long).to(x_noised.device)
+                labels_in = torch.full((B, ), cl.PLACEHOLDER_TOKEN_ID, dtype=torch.long, device=x_noised.device)
             else:
                 labels_in = cond_labels_in[label_name]
+
+            # convert placeholder tokens to labels
+            if self.cond_embedders[label_name].has_unconditional_token:
+                # if the label supports unconditional tokens, default to unconditional generation
+                token_id = cl.COND_NUM_CLASSES[label_name]  # last token is the unconditional token
+            else:
+                # otherwise, we provide a default token ID
+                token_id = cl.DEFAULT_TOKEN_ID[label_name]
+            labels_in = torch.where(labels_in == cl.PLACEHOLDER_TOKEN_ID, token_id, labels_in)
 
             # embed the label
             c = c + self.cond_embedders[label_name](labels_in, self.training)
