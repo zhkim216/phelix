@@ -1,5 +1,7 @@
 import glob
+import os
 import pickle
+import re
 import shutil
 from collections import defaultdict
 from functools import partial
@@ -11,15 +13,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+import wandb
 import yaml
 from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
-from transformers import AutoTokenizer, EsmForProteinFolding
 
 from allatom_design.data.conditioning_labels import create_cond_labels_input
+from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.eval import eval_metrics, sampling_utils
-from allatom_design.eval.proteinmpnn_utils import load_mpnn
+from allatom_design.eval.folding_utils import get_struct_pred_model
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.allatom_denoiser.allatom_model import AllAtomModel
@@ -49,7 +52,7 @@ def main(cfg: DictConfig):
     if cfg.out_dir is None:
         model_run_dir = Path(cfg.ad_ckpt).parent.parent
         model_name = Path(cfg.ad_ckpt).stem
-        cfg.out_dir = f"{model_run_dir}/draw_samples/{model_name}/{cfg.exp_name}"
+        cfg.out_dir = f"{model_run_dir}/draw_allatom_samples/{model_name}/{cfg.exp_name}"
 
     if cfg.overwrite_out_dir and Path(cfg.out_dir).exists():
         # delete existing out_dir
@@ -103,6 +106,9 @@ def main(cfg: DictConfig):
         # Create churn config for backbone
         ad_sampling_inputs["churn_cfg"] = dict(cfg.ad.churn_cfg)
 
+        # Autoguidance cfg
+        ad_sampling_inputs["autoguidance_cfg"] = dict(cfg.ad.autoguidance_cfg)
+
         # === Handle sequence denoiser inputs === #
         sd_sampling_inputs = {}
 
@@ -121,6 +127,7 @@ def main(cfg: DictConfig):
                       "timesteps": t_scd,
                       "noise_schedule": noise_schedule,
                       "churn_cfg": churn_cfg,
+                      "autoguidance_cfg": dict(cfg.sd.scd.autoguidance_cfg),
                       "return_scn_diffusion_aux": False}
         sd_sampling_inputs["scd_inputs"] = scd_inputs
 
@@ -155,13 +162,157 @@ def main(cfg: DictConfig):
                                 traj_conect=cfg.traj_conect, align_models_to_idx=align_models_to_idx)
         # save xt traj
         save_trajs_fn(x_traj_key="xt_traj", filenames=[f"{traj_out_dir}/xt_traj_sample_len{lengths[j]}_{i + j}.pdb" for j in range(B)])
-
-
         pbar.update(B)
 
-
-
     pbar.close()
+
+    # free up memory; we don't need denoisers anymore
+    del lit_ad_model
+    del lit_sd_model
+
+    ### CALCULATE STRUCTURE METRICS ###
+    all_metrics = defaultdict(dict)
+    pdbs = natsorted(glob.glob(f"{sample_out_dir}/*.pdb"))
+
+    # === Get lengths and bins of sampled structures === #
+    lengths = [int(re.search(r"len(\d+)", pdb).groups()[-1]) for pdb in pdbs]
+    bins = [int(length / cfg.length_bin_size) * cfg.length_bin_size for length in lengths]  # bins are defined by their starting length
+    for pdb, length, bin in zip(pdbs, lengths, bins):
+        all_metrics[pdb]["length"] = length
+        all_metrics[pdb]["bin"] = bin
+
+    # === Load MPNN and structure prediction models === #
+    if cfg.sc.run_codes_sc:
+        struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
+
+    # === Get secondary structure info === #
+    ss_info = eval_metrics.compute_secondary_structure_content(pdbs)
+    for pdb, v in ss_info.items():
+        all_metrics[pdb]["ss_info"] = v
+
+    # === Run self-consistency evaluations === #
+    sc_pdbs, sc_bins = pdbs, bins
+    if cfg.sc.bin_range is not None:
+        # run self-consistency only on samples within the specified bin range
+        sc_subset = list(zip(*[(pdb, b) for pdb, b in zip(pdbs, bins) if cfg.sc.bin_range[0] <= b <= cfg.sc.bin_range[1]]))
+        sc_pdbs, sc_bins = sc_subset if len(sc_subset) > 0 else ([], [])
+
+    if cfg.sc.max_samples_per_bin is not None and len(sc_pdbs) > 0:
+        # randomly sample to limit the number of samples per bin
+        df = pd.DataFrame({"pdb": sc_pdbs, "bin": sc_bins})
+        sc_pdbs = df.groupby("bin")["pdb"].apply(lambda x: x.sample(n=min(cfg.sc.max_samples_per_bin, len(x)))).tolist()
+
+    if cfg.sc.run_codes_sc:
+        codes_sc_info = eval_metrics.run_self_consistency_eval(sc_pdbs,
+                                                               None, None,  # no MPNN model for co-design eval
+                                                               struct_pred_model,
+                                                               device,
+                                                               out_dir=cfg.out_dir,
+                                                               eval_codesign=True,
+                                                               temp_dir=f"{cfg.out_dir}/tmp")
+
+        for pdb, v in codes_sc_info.items():
+            all_metrics[pdb]["codes_sc_info"] = v
+
+    # === Run nnTM evaluation === #
+    if cfg.nntm_dataset is not None:
+        nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=cfg.out_dir)
+        for pdb, v in nntm_info.items():
+            all_metrics[pdb]["nntm_info"] = v
+
+    # === Aggregate metrics by length === #
+    bin_to_metrics = {}
+    for bin in set(bins):
+        pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if b == bin]
+
+        metrics_b = defaultdict(list)
+        for pdb in pdbs_b:
+            # Secondary structure metrics
+            for k, v in all_metrics[pdb]["ss_info"].items():
+                metrics_b[f"{k}"].append(v)
+
+            # Co-design self-consistency metrics
+            if "codes_sc_info" in all_metrics[pdb]:
+                codes_sc_info = all_metrics[pdb]["codes_sc_info"]
+                for k, v in codes_sc_info["sc_metrics"].items():
+                    # take best across co-designed sequences
+                    # TODO: make it possible to do multiple co-design sequences per backbone / multiple trajectories
+                    best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
+                    metrics_b[f"codes_{k}_best"].append(best_sc_metric.item())
+
+            # nnTM metrics
+            if "nntm_info" in all_metrics[pdb]:
+                metrics_b["nntm"].append(all_metrics[pdb]["nntm_info"])
+
+        # Average metrics across samples
+        metrics_b_avg = {}
+        for k, v in metrics_b.items():
+            metrics_b_avg[k] = np.mean(v)
+
+            # For codes metrics, get SE from bootstrapping
+            if "codes" in k:
+                metrics_b_avg[f"{k}_se"] = eval_metrics.bootstrap_se(v, n_samples=1000)
+
+        bin_to_metrics[bin] = metrics_b_avg
+
+    # === Calculate mean pairwise TM score by length === #
+    for bin in set(bins):
+        pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if b == bin]
+        coords_b = [load_feats_from_pdb(pdb, chain_residx_gap=None)["all_atom_positions"] for pdb in pdbs_b]
+        bin_to_metrics[bin]["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(coords_b,
+                                                                                    temp_dir=f"{cfg.out_dir}/tmp",
+                                                                                    subsample_pairs=cfg.pairwise_tm_subsample)
+
+    # === Compute KL(p||q) for secondary structure distributions === #
+    dssp_df = pd.read_csv(cfg.ss_kld.dssp_csv)
+    dssp_df["% Helix"] = dssp_df["% Helix"] * 100
+    dssp_df["% Strand"] = dssp_df["% Strand"] * 100
+    for bin in set(bins):
+        pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if b == bin]
+        dssp_df_b = dssp_df[(bin <= dssp_df["length"]) & (dssp_df["length"] <= bin + cfg.length_bin_size)]
+        ss_info_df_b = pd.DataFrame([all_metrics[pdb]["ss_info"] for pdb in pdbs_b], index=pdbs_b)
+
+        p_alpha, p_beta = dssp_df_b["% Helix"].tolist(), dssp_df_b["% Strand"].tolist()
+        q_alpha, q_beta = ss_info_df_b["pct_alpha"].tolist(), ss_info_df_b["pct_beta"].tolist()
+        bin_to_metrics[bin]["ss_kld"] = eval_metrics.compute_ss_kl(p_alpha, p_beta, q_alpha, q_beta,
+                                                                   bin_size=cfg.ss_kld.bin_size, pseudocount=cfg.ss_kld.pseudocount)
+
+
+    ### SAVE METRICS ###
+    # Save metrics to pickle file
+    with open(f"{cfg.out_dir}/all_metrics.pkl", "wb") as f:
+        pickle.dump(all_metrics, f)
+
+    with open(f"{cfg.out_dir}/L_to_metrics.pkl", "wb") as f:
+        pickle.dump(bin_to_metrics, f)
+
+    # Set up wandb logging
+    if not cfg.no_wandb:
+        # Create wandb dir
+        wandb_dir = str(Path(cfg.out_dir))
+        Path(wandb_dir, "wandb").mkdir(parents=True, exist_ok=True)
+
+        # Set wandb cache directory
+        wandb_cache_dir = str(Path(cfg.out_dir, "cache", "wandb"))
+        os.environ["WANDB_CACHE_DIR"] = wandb_cache_dir
+
+        wandb.init(
+            project=cfg.project,
+            entity=cfg.wandb_id,
+            name=cfg.exp_name,
+            group=cfg.group,
+            config=cfg_dict,
+            dir=wandb_dir,
+        )
+
+        # Log metrics
+        for bin in sorted(bin_to_metrics.keys()):
+            metrics_b = bin_to_metrics[bin]
+            metrics_b["length_bin"] = bin
+            wandb.log(metrics_b, step=bin)
+
+        wandb.finish()
+
 
 
 
