@@ -96,7 +96,7 @@ class AllAtomModel():
 
             # Set up partial diffusion for next backbone diffusion
             T_next_ad, T_next_sd = T_next
-            S_bb = ad_sampling_inputs["timesteps"][0].shape[1] - 1  # number of backbone sampling steps
+            S_bb = ad_sampling_inputs["timesteps"].shape[1] - 1  # number of backbone sampling steps
             partial_diff_inputs = {"x_bb_in": x1_bb, "num_steps_partial": math.ceil(((1 - T_next_ad) * S_bb).item())}
             ad_sampling_inputs["partial_diff_inputs"] = partial_diff_inputs
 
@@ -136,6 +136,7 @@ class AllAtomModel():
         cond_labels: Dict[str, TensorType["b", int]] = {},
         noise_schedule: Optional[NoiseSchedule] = None,
         churn_cfg: Optional[Dict[str, float]] = None,
+        autoguidance_cfg: Optional[Dict[str, Any]] = None,  # autoguidance config
         partial_diff_inputs: Dict[str, Any] = {},
         ):
         """
@@ -157,6 +158,7 @@ class AllAtomModel():
             "timesteps": timesteps,
             "churn_cfg": churn_cfg,
             "noise_schedule": noise_schedule,
+            "autoguidance_cfg": autoguidance_cfg,
             # overrides
             "xt_override": xt_override,
             "xt_override_mask": xt_override_mask,

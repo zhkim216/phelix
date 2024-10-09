@@ -35,11 +35,8 @@ resume:
 # Data options
 data:
     # first dataset is the "primary" dataset
-    # pdb_paths: [/media/scratch/datasets/ingraham_cath_dataset, /media/scratch/datasets/afdb]
     pdb_paths: [/media/scratch/datasets/ingraham_cath_dataset]
-    # designability_csvs: [/media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv, null]
     designability_csvs: [/media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv]
-    # dataset_weights: [0.25, 0.75]  # probability of selecting each dataset
     dataset_weights: [1.0]  # probability of selecting each dataset
     fixed_size: 128
     overfit: ${overfit}

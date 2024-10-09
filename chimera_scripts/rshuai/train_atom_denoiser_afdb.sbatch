@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a11_bb3
+#SBATCH --job-name=a12_bb0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
@@ -25,12 +25,14 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=a11_bb3
-GROUP=chimera_a11
+EXP_NAME=a12_bb0
+GROUP=chimera_a12
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
+AFDB_PDB_PATH=/scratch/hielab/rshuai/datasets/afdb
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+AFDB_DESIGNABILITY_CSV=null
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
@@ -39,24 +41,18 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     group=${GROUP} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
-    data.pdb_paths=[${PDB_PATH}] \
-    data.designability_csvs=[${DESIGNABILITY_CSV}] \
+    data.pdb_paths=[${PDB_PATH},${AFDB_PDB_PATH}] \
+    data.designability_csvs=[${DESIGNABILITY_CSV},null] \
+    data.dataset_weights=[0.25,0.75] \
     data.fixed_size=512 \
-    train.batch_size=16 \
+    train.batch_size=64 \
     train.compile_model=true \
     model.task=backbone \
-    sd_interpolant.full_noise_p=0.3 \
-    sd_interpolant.training_noise_schedule=uniform_t \
-    sd_interpolant.drop_scn_p=0.5 \
-    denoiser=esm_dit_denoiser \
-    denoiser.esm.esm_type=esm2_650M \
+    denoiser=dit_denoiser \
     denoiser.autoguidance.enabled=true \
-    denoiser.use_sidechain_conditioning=true \
-    denoiser.training_batch_size_mult=8 \
-    eval.eval_timesteps_seq=[0.25,0.5,0.75,1.0] \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=50000 \
     checkpointing.save_ema_every_n_steps=20000 \
-    trainer.check_val_every_n_epoch=40 \
+    trainer.check_val_every_n_epoch=30 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}

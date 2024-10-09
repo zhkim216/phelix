@@ -1,3 +1,10 @@
+# Wandb configuration
+project: "allatom_design"  # Wandb project name
+wandb_id: "richardshuai"  # Wandb username
+group: "debug" # Wandb group name
+no_wandb: false
+
+# Sampling run settings
 ad_ckpt:
 sd_ckpt:
 
@@ -10,8 +17,7 @@ seed: 0
 batch_size: 64
 
 # Evaluation mode
-run_mpnn_sc: true  # run MPNN self-consistency eval
-run_codes_sc: false  # run co-design self-consistency eval
+length_bin_size: 50  # bin lengths into intervals of this size for evaluation, starting from 0
 
 # Sampling run parameters
 # length_range: [63,63]
@@ -57,6 +63,11 @@ ad:
     s_t_max: 50.0
     num_steps: ${ad.num_steps}
 
+  # Autoguidance
+  autoguidance_cfg:
+    use_autoguidance: false
+    w: 1.0
+
 sd:
   # Sequence denoiser sampling parameters
   seq:
@@ -84,20 +95,51 @@ sd:
       s_t_max: 50.0
       num_steps: ${sd.scd.num_steps}
 
+    # Autoguidance
+    autoguidance_cfg:
+      use_autoguidance: false
+      w: 1.0
+
 cond_labels: null
 
-# MPNN args
-mpnn:
-  mpnn_cfg: allatom_design/configs/mpnn/proteinmpnn.yaml
-  mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
-  overrides:
-    # num seqs per structure will be batch_size * number_of_batches
-    batch_size: 8
-    number_of_batches: 1
-    verbose: false
+# Self-consistency evaluation
+sc:
+  run_codes_sc: true  # run co-design self-consistency eval
+  bin_range: [0, 256]  # only evaluate structures for length bins that start in this range (inclusive)
+  max_samples_per_bin: 50  # maximum number of samples to evaluate per length bin
 
 # Dataset for nnTM calculation, path to directory containing PDBs
 nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered
+
+# Pairwise TM-scores
+pairwise_tm_subsample: 1000  # number of pairs to subsample
+
+# Secondary structure KL divergence
+ss_kld:
+  dssp_csv: /media/scratch/datasets/ingraham_cath_dataset/dssp/dssp_length_strict.csv
+  bin_size: 10  # size of secondary structure percentage bins
+  pseudocount: 0.01  # pseudocount for KL divergence calculation; set arbitrarily to 0.01
+
+
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: "omegafold"  # ["esmfold", "af2", "omegafold"]
+  af2:
+    data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
+    num_models: 1  # only 1 model is currently supported
+    sample_models: true  # randomly sample models from the ensemble
+    num_recycles: 3
+    use_multimer: false
+  esmfold:
+    max_tokens_per_batch: 1024
+  omegafold:
+    num_pseudo_msa: 15
+    mask_rate: 0.12
+    num_recycle: 2  # performance saturates after around 10 recycles
+    deterministic: true
+    subbatch_size: null
+    cache_file: /media/scratch/huang_lab/cache/omegafold/omegafold.pt
+
 
 hydra:
   run:
