@@ -37,6 +37,7 @@ class SidechainDiffusionModule(nn.Module):
         self.cfg = cfg
         self.use_self_conditioning = cfg.use_self_conditioning
 
+        self.aatype_masking_schedule = getattr(cfg, "aatype_masking_schedule", None)
         self.scn_interpolant = EDM(cfg.interpolant, sigma_data=scn_sigma_data)
 
         # Set up DiT model
@@ -47,6 +48,27 @@ class SidechainDiffusionModule(nn.Module):
         if self.use_autoguidance:
             self.autoguidance_train_p = 1 / cfg.autoguidance.subsample_train_iter_mult
             self.guiding_model = SidechainDiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.scn_interpolant)  # override with autoguidance config
+
+
+    def mask_aatype(self,
+                    aatype: TensorType["b n", int],
+                    mlm_mask: TensorType["b n", int]
+                    ) -> Tuple[TensorType["b n", int], TensorType["b n", int]]:
+        """
+        Mask aatype of future residues (residues that are not masked by MLM mask). If None, do not mask any aatypes.
+        """
+        if self.aatype_masking_schedule is None:
+            scd_aatype_mask = torch.ones_like(aatype, device=aatype.device, dtype=torch.bool)
+            return aatype, scd_aatype_mask
+
+        B = aatype.shape[0]
+        if self.aatype_masking_schedule == "uniform":
+            p = torch.rand(B, device=aatype.device)  # choose masking probability
+            scd_aatype_mask = (torch.rand(aatype.shape, device=aatype.device) < p[:, None]) | mlm_mask.bool()  # 0 for masked residues
+
+        # mask residues
+        aatype = aatype * scd_aatype_mask
+        return aatype, scd_aatype_mask
 
 
     def sidechain_diffusion(self,
@@ -84,6 +106,7 @@ class SidechainDiffusionModule(nn.Module):
             aatype_batched = repeat(aatype, "b n -> (m b) n", m=M, b=B)
             x_bb_batched = repeat(x_bb, "b n a x -> (m b) n a x", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
+            mlm_mask_batched = repeat(aux_inputs["mlm_mask"], "b n -> (m b) n", m=M, b=B)
             residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
 
             # Evaluate at specific timesteps (for validation)
@@ -96,6 +119,11 @@ class SidechainDiffusionModule(nn.Module):
             xt_scn_batched = interpolant_out["x_noised"]
             t_batched = interpolant_out["t"]
             loss_weight_t_batched = interpolant_out["loss_weight_t"]
+
+            # Randomly mask aatype and sidechains of future residues
+            aatype_batched, scd_aatype_mask_batched = self.mask_aatype(aatype_batched, mlm_mask_batched)
+            xt_scn_batched = xt_scn_batched * rearrange(scd_aatype_mask_batched, "(m b) n -> (m b) n 1 1", m=M)
+            x_scn_gt_batched = x_scn_gt_batched * rearrange(scd_aatype_mask_batched, "(m b) n -> (m b) n 1 1", m=M)
 
             # Run small denoising DiT
             denoiser_fn = self.dit
@@ -133,7 +161,8 @@ class SidechainDiffusionModule(nn.Module):
                 diffusion_aux["autoguidance_aux"] = {
                     "scn_pred": x1_scn_batched_guide,
                     "scn_target": x_scn_gt_batched,
-                    "loss_weight_t": loss_weight_t_batched
+                    "loss_weight_t": loss_weight_t_batched,
+                    "scd_aatype_mask": scd_aatype_mask_batched,
                 }
 
 
@@ -144,6 +173,7 @@ class SidechainDiffusionModule(nn.Module):
             diffusion_aux["scn_pred"] = x1_scn_batched
             diffusion_aux["scn_target"] = x_scn_gt_batched
             diffusion_aux["loss_weight_t"] = loss_weight_t_batched
+            diffusion_aux["scd_aatype_mask"] = scd_aatype_mask_batched
 
         else:
             # === Sampling === #
