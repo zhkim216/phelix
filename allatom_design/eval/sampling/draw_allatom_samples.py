@@ -63,9 +63,11 @@ def main(cfg: DictConfig):
     with open(Path(cfg.out_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
-    sample_out_dir = Path(cfg.out_dir, "samples")
+    sample_out_dir = Path(cfg.out_dir, "final_samples")
+    intermediate_out_dir = Path(cfg.out_dir, "intermediate_samples")
     traj_out_dir = Path(cfg.out_dir, "traj")
     Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
+    Path(intermediate_out_dir).mkdir(parents=True, exist_ok=True)
     Path(traj_out_dir).mkdir(parents=True, exist_ok=True)
 
     # Define the range of lengths to sample
@@ -93,21 +95,16 @@ def main(cfg: DictConfig):
         timesteps = (T_ad, T_sd)
 
         # === Handle atom denoiser inputs === #
-        ad_sampling_inputs = {}
-
         # Create timesteps for backbone
         t_bb = sampling_utils.get_timesteps_from_schedule(**cfg.ad.timestep_schedule)
         t_bb = t_bb[None].expand(B, -1).to(device)
-        ad_sampling_inputs["timesteps"] = t_bb
 
-        # Create noise schedule for backbone
-        ad_sampling_inputs["noise_schedule"] = NoiseSchedule(cfg.ad.noise_schedule)
-
-        # Create churn config for backbone
-        ad_sampling_inputs["churn_cfg"] = dict(cfg.ad.churn_cfg)
-
-        # Autoguidance cfg
-        ad_sampling_inputs["autoguidance_cfg"] = dict(cfg.ad.autoguidance_cfg)
+        ad_sampling_inputs = {
+            "timesteps": t_bb,
+            "noise_schedule": NoiseSchedule(cfg.ad.noise_schedule),
+            "churn_cfg": dict(cfg.ad.churn_cfg),
+            "autoguidance_cfg": dict(cfg.ad.autoguidance_cfg),
+        }
 
         # === Handle sequence denoiser inputs === #
         sd_sampling_inputs = {}
@@ -150,6 +147,18 @@ def main(cfg: DictConfig):
         filenames = [f"{sample_out_dir}/sample_len{lengths[j]}_{i + j}.pdb" for j in range(B)]
         AllAtomModel.save_samples_to_pdb(samples, filenames)
 
+        # Save samples for each intermediate step of the trajectory
+        for step in range(cfg.joint.num_steps - 1):
+            samples_step = {"x_denoised": aux["xt_traj"][:, step],
+                         "aatype_denoised": aux["aatype_pred_traj"][:, step],
+                         "seq_mask": aux["seq_mask"],
+                         "residue_index": residue_index}
+            samples_step = {k: v.cpu() if v is not None else v for k, v in samples_step.items()}
+            T_ad, T_sd = timesteps[0][step], timesteps[1][step]
+            step_suffix = f"Tad{T_ad:.2f}_Tsd{T_sd:.2f}"
+            filenames = [f"{intermediate_out_dir}/sample_len{lengths[j]}_{i + j}_{step_suffix}.pdb" for j in range(B)]
+            AllAtomModel.save_samples_to_pdb(samples_step, filenames)
+
         # Write trajectories to file
         align_models_to_idx = None
         if cfg.align_traj_to_last_step:
@@ -181,7 +190,7 @@ def main(cfg: DictConfig):
         all_metrics[pdb]["length"] = length
         all_metrics[pdb]["bin"] = bin
 
-    # === Load MPNN and structure prediction models === #
+    # === Load structure prediction model === #
     if cfg.sc.run_codes_sc:
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
@@ -214,6 +223,25 @@ def main(cfg: DictConfig):
         for pdb, v in codes_sc_info.items():
             all_metrics[pdb]["codes_sc_info"] = v
 
+    if cfg.sc.run_codes_sc_intermediate:
+        for step in tqdm(range(cfg.joint.num_steps - 1), desc="Running intermediate step self-consistency evaluations"):
+            T_ad, T_sd = timesteps[0][step], timesteps[1][step]
+            step_suffix = f"Tad{T_ad:.2f}_Tsd{T_sd:.2f}"
+            sc_pdbs_intermediate = [f"{intermediate_out_dir}/{Path(pdb).stem}_{step_suffix}.pdb" for pdb in sc_pdbs]
+            codes_sc_info_intermediate = eval_metrics.run_self_consistency_eval(sc_pdbs_intermediate,
+                                                                                None, None,  # no MPNN model for co-design eval
+                                                                                struct_pred_model,
+                                                                                device,
+                                                                                out_dir=cfg.out_dir,
+                                                                                eval_codesign=True,
+                                                                                temp_dir=f"{cfg.out_dir}/tmp")
+
+            for pdb in codes_sc_info:
+                pdb_intermediate = f"{intermediate_out_dir}/{Path(pdb).stem}_{step_suffix}.pdb"
+                v = codes_sc_info_intermediate[pdb_intermediate]
+                all_metrics[pdb][f"{step_suffix}/codes_sc_info"] = v
+
+
     # === Run nnTM evaluation === #
     if cfg.nntm_dataset is not None:
         nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=cfg.out_dir)
@@ -239,6 +267,16 @@ def main(cfg: DictConfig):
                     # TODO: make it possible to do multiple co-design sequences per backbone / multiple trajectories
                     best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
                     metrics_b[f"codes_{k}_best"].append(best_sc_metric.item())
+
+            if cfg.sc.run_codes_sc_intermediate:
+                for step in range(cfg.joint.num_steps - 1):
+                    T_ad, T_sd = timesteps[0][step], timesteps[1][step]
+                    step_suffix = f"Tad{T_ad:.2f}_Tsd{T_sd:.2f}"
+                    if f"{step_suffix}/codes_sc_info" in all_metrics[pdb]:
+                        codes_sc_info = all_metrics[pdb][f"{step_suffix}/codes_sc_info"]
+                        for k, v in codes_sc_info["sc_metrics"].items():
+                            best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
+                            metrics_b[f"{step_suffix}/codes_{k}_best"].append(best_sc_metric.item())
 
             # nnTM metrics
             if "nntm_info" in all_metrics[pdb]:

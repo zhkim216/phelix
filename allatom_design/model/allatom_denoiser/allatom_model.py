@@ -63,7 +63,7 @@ class AllAtomModel():
         aux["mlm_mask"] = mlm_mask
 
         # Initialize trajectories
-        xt_traj, aatype_t_traj = [], []
+        xt_traj, aatype_t_traj, aatype_pred_traj = [], [], []
         aux_preds_ad_traj, aux_preds_sd_traj = [], []
 
         S = timesteps[0].shape[0] - 1  # number of sampling steps
@@ -106,13 +106,15 @@ class AllAtomModel():
             xt_scn = xt[..., rc.non_bb_idxs, :]
 
             # Save auxiliary outputs
-            xt_traj.append(cat_bb_scn(x1_bb, xt_scn).cpu())
+            xt_traj.append(cat_bb_scn(x1_bb, xt_scn).cpu())  # TODO: rename this to x1 traj?
             aatype_t_traj.append(aatype_t.cpu())
+            aatype_pred_traj.append(aatype_pred.cpu())
             aux_preds_ad_traj.append(aux_preds_ad)
             aux_preds_sd_traj.append(aux_preds_sd)
 
         # preprocess trajectories
         aux["xt_traj"] = torch.stack(xt_traj, dim=1)  # [B, S, N, A, X]
+        aux["aatype_pred_traj"] = torch.stack(aatype_pred_traj, dim=1)  # [B, S, N]
         aux["aatype_t_traj"] = torch.stack(aatype_t_traj, dim=1)  # [B, S, N]
 
         # preprocess aux trajectories

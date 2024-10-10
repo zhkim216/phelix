@@ -24,7 +24,7 @@ length_bin_size: 50  # bin lengths into intervals of this size for evaluation, s
 length_range: [64,128]
 length_step_size: 4
 n_samples_per_length: 2
-n_traj_per_length: 1  # number of trajectories to save per length
+n_traj_per_length: 0  # number of trajectories to save per length
 limit_traj_steps: 5  # limit the number of steps we save in a trajectory (evenly spaced)
 traj_conect: false
 align_traj_to_last_step: true  # whether to align trajectories to the last step
@@ -105,6 +105,7 @@ cond_labels: null
 # Self-consistency evaluation
 sc:
   run_codes_sc: true  # run co-design self-consistency eval
+  run_codes_sc_intermediate: true  # run co-design self-consistency eval for intermediate steps
   bin_range: [0, 256]  # only evaluate structures for length bins that start in this range (inclusive)
   max_samples_per_bin: 50  # maximum number of samples to evaluate per length bin
 
