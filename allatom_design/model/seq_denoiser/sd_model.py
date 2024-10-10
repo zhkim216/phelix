@@ -77,6 +77,7 @@ class SeqDenoiser(nn.Module):
             "ghost_atom_mask": batch["ghost_atom_mask"],
             "missing_atom_mask": batch["missing_atom_mask"],
             "t_scd": batch.get("t_scd", None),  # scalar; fix t_scd (sidechain diffusion time) if provided, usually for eval
+            "mlm_mask": interpolant_out["mlm_mask"]
         }
 
         # Denoise coords
