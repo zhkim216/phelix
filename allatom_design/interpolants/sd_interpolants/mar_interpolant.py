@@ -133,19 +133,20 @@ class MAR(SDInterpolant):
                               TensorType["b n", int],  # aatype_t_next
                               Dict[str, TensorType["b ..."]]  # aux preds
                               ]:
-        x1_pred, aatype_pred, aux_preds = f(xt, aatype_t, t=t)
-
         # "euler" step for discrete space
         ## Unmask a certain number of residues in the sequence
         K_prev = torch.ceil(t * aux_inputs["lengths"]).long()[..., None]  # number of residues to be unmasked at the current time step
         K = torch.ceil(t_next * aux_inputs["lengths"]).long()[..., None]  # number of residues to be unmasked at the next time step
         residues_to_unmask = (K_prev <= aatype_decoding_order) & (aatype_decoding_order < K)
+        unmasked_residues = (aatype_decoding_order < K)
+        aux_inputs["mlm_mask"] = unmasked_residues.float()
+
+        # Run forward pass
+        x1_pred, aatype_pred, aux_preds = f(xt, aatype_t, t=t)
         aatype_t_next = torch.where(residues_to_unmask, aatype_pred, aatype_t)
 
         ## Unmask residues with x1_pred
-        unmasked_residues = (aatype_decoding_order < K)
         xt_next = torch.where(unmasked_residues[..., None, None], x1_pred, xt)
-        aux_inputs["mlm_mask"] = torch.where(unmasked_residues, torch.ones_like(aatype_t_next), torch.zeros_like(aatype_t_next))
 
         # Add to auxiliary outputs
         aux_preds["x1_pred"] = x1_pred
