@@ -140,7 +140,7 @@ def main(cfg: DictConfig):
                 Path(seq_recovery_dir).mkdir(parents=True, exist_ok=True)
                 seq_rec_df_S = defaultdict(list)
                 for batch in tqdm(val_dataloader, desc="Evaluating sequence recovery on validation set", leave=False):
-                    x, seq_mask, residue_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device)
+                    x, seq_mask, residue_index, chain_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
                     timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
 
                     # Define sidechain diffusion timesteps
@@ -153,11 +153,15 @@ def main(cfg: DictConfig):
                         x,
                         seq_mask=seq_mask,
                         residue_index=residue_index,
+                        chain_index=chain_index,
                         timesteps=timesteps,
                         aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
+                        num_corrector_steps=cfg.num_corrector_steps,
+                        corrector_step_ratio=cfg.corrector_step_ratio,
                         cond_labels=cond_labels_in,
                         scd_inputs=scd_inputs,
                     )
+
                     samples = {"x_denoised": x_denoised,
                             "seq_mask": seq_mask,
                             "residue_index": residue_index,
@@ -234,7 +238,7 @@ def main(cfg: DictConfig):
                 for bi, batch in enumerate(val_dataloader):
                     if bi >= cfg.num_codes_sc_batches:
                         break
-                    x, seq_mask, residue_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device)
+                    x, seq_mask, residue_index, chain_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
 
                     B = x.shape[0]
                     cond_labels_in = create_cond_labels_input(B, {"designability": "DESIGNABLE"}, device)
@@ -249,8 +253,10 @@ def main(cfg: DictConfig):
                         x,
                         seq_mask=seq_mask,
                         residue_index=residue_index,
+                        chain_index=chain_index,
                         timesteps=timesteps,
                         aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
+                        num_corrector_steps=cfg.num_corrector_steps,
                         cond_labels=cond_labels_in,
                         scd_inputs=scd_inputs,
                     )

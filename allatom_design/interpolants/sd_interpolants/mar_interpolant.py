@@ -113,35 +113,45 @@ class MAR(SDInterpolant):
 
         return x_noised, aatype_noised, mlm_mask
 
-
-    def denoising_step(self,
+    def corrector_step(self,
                    f: Callable,
                    xt: TensorType["b n a 3", float],
                    aatype_t: TensorType["b n", int],
+                   K: TensorType["b", int],
+                   unmasked_prev: TensorType["b n", int],
                    t: TensorType["b", float],
-                   t_next: TensorType["b", float],
-                   aatype_decoding_order: TensorType["b n", int],
-                   aux_inputs: Optional[Dict[str, Any]] = None
-                   ) -> Tuple[TensorType["b n a 3", float],  # xt_next
-                              TensorType["b n", int],  # aatype_t_next
-                              Dict[str, TensorType["b ..."]]  # aux preds
-                              ]:
-        x1_pred, aatype_pred, aux_preds = f(xt, aatype_t, t=t)
+                   aux_inputs: Dict[str, TensorType["b ..."]] # aux_inputs
+                   ) -> Dict[str, TensorType["b ..."]]: #aux preds
 
-        # "euler" step for discrete space
-        ## Unmask a certain number of residues in the sequence
-        K_prev = torch.ceil(t * aux_inputs["lengths"]).long()[..., None]  # number of residues to be unmasked at the current time step
-        K = torch.ceil(t_next * aux_inputs["lengths"]).long()[..., None]  # number of residues to be unmasked at the next time step
-        residues_to_unmask = (K_prev <= aatype_decoding_order) & (aatype_decoding_order < K)
-        aatype_t_next = torch.where(residues_to_unmask, aatype_pred, aatype_t)
+        # Get tokens to remask
+        b, n = aatype_t.shape
+        mlm_mask = aux_inputs['seq_mlm_mask'].clone()
+        unmasked_positions = torch.nonzero(mlm_mask, as_tuple=False)
+        unmasked_by_example = [unmasked_positions[unmasked_positions[:, 0] == i, 1] for i in range(b)]
 
-        ## Unmask residues with x1_pred
-        unmasked_residues = (aatype_decoding_order < K)
-        xt_next = torch.where(unmasked_residues[..., None, None], x1_pred, xt)
-        aux_inputs["mlm_mask"] = torch.where(unmasked_residues, torch.ones_like(aatype_t_next), torch.zeros_like(aatype_t_next))
+        # Randomly select K positions for each batch
+        selected_positions = torch.cat([
+            batch_indices[torch.randperm(len(batch_indices))[:K[i]]]
+            for i, batch_indices in enumerate(unmasked_by_example)])
+        
+        # Create indices for remasking
+        batch_indices = torch.arange(b, device=xt.device).repeat_interleave(K)
 
+        # Noise sequence by setting selected positions to 0 in mlm_mask
+        mlm_mask[batch_indices, selected_positions] = 0
+        aux_inputs['seq_mlm_mask'] = mlm_mask
+        unmasked_prev = aux_inputs['seq_mlm_mask'].clone()
+        aatype_t_noised = torch.where(mlm_mask.bool(), aatype_t, rc.restype_order_with_x["X"]) 
+        
+        # Noise sidechain
+        xt_noised = xt.clone()
+        xt_noised[..., rc.non_bb_idxs, :] = xt_noised[..., rc.non_bb_idxs, :] * rearrange(mlm_mask, "b n -> b n 1 1").float()
+        
+        # Run sequence denoiser
+        x1_pred, aatype_pred, aux_preds = f(xt_noised, aatype_t_noised, t=t)
+        
         # Add to auxiliary outputs
         aux_preds["x1_pred"] = x1_pred
         aux_preds["aatype_pred"] = aatype_pred
-
-        return xt_next, aatype_t_next, aux_preds
+        
+        return x1_pred, aatype_pred, aux_preds, unmasked_prev 
