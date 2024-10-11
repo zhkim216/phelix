@@ -81,9 +81,8 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         # 2. Sidechain diffusion
         x1_pred = None
         if self.use_scn_diffusion:
-            z = self.proj_z(node_embs)
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
-                h_V,
+                node_embs,
                 aatype_pred,
                 x_bb,
                 seq_mask=seq_mask,
