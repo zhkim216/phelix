@@ -37,7 +37,8 @@ class GraphTransformer(pt.nn.Module):
             nn.ELU(),
             nn.Linear(config.hidden_dim, config.out_dim),
         )
-
+        
+    @pt.compiler.disable
     def forward(self, X, ids_topk, q0, p_A, attn_bias):
         # encode features
         q = self.em.forward(q0)
