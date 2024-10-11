@@ -15,7 +15,6 @@ minimpnn:
   n_aatype: ${model.n_aatype}
   use_self_conditioning_seq: ${model.denoiser.use_self_conditioning_seq}
   use_time_cond: false
-  use_esm: false
 
   n_channel: 128
   n_layers: 3
@@ -57,7 +56,7 @@ scn_diffusion_module:
   interpolant: ${model.denoiser.interpolant}
   use_self_conditioning: true
   self_cond_p: 0.5
-  training_batch_size_mult: 4  # batch size multiplier for diffusion module
+  training_batch_size_mult: 16  # batch size multiplier for diffusion module
   translation_scale: ${data.translation_scale}
 
   dit:

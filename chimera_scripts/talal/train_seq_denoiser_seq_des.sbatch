@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=mlm_gt_atom
+#SBATCH --job-name=aasd_gt_atom_big
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -19,7 +19,7 @@ OUT_DIR=/scratch/hielab/talal/allatom_design
 WANDB_ID=talal-widatalla
 cd $BASE_DIR
 
-EXP_NAME=mlm_gt_atom
+EXP_NAME=aasd_gt_atom_big
 GROUP=chimera_a8
 
 # Dataset paths
@@ -39,17 +39,18 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.overwrite_cache=false \
     data.subset_length_range=[16,9999] \
     train.batch_size=32 \
-    train.compile_model=false \
+    train.compile_model=true \
     model.task=seq_des \
+    trainer.max_epochs=500 \
     interpolant=mar_interpolant \
     interpolant.training_noise_schedule=uniform_squared_t \
     denoiser=minimpnn_denoiser \
     denoiser.minimpnn.model_type=graph_transformer \
     denoiser.minimpnn.augment_eps=0.0 \
-    denoiser.minimpnn.graph_transformer.layers_per_nn=4 \
+    denoiser.minimpnn.graph_transformer.layers_per_nn=8 \
     denoiser.minimpnn.aggregation=sum \
     denoiser.minimpnn.graph_transformer.dim_key=3 \
-    denoiser.minimpnn.graph_transformer.hidden_dim=32 \
+    denoiser.minimpnn.graph_transformer.hidden_dim=64 \
     denoiser.minimpnn.graph_transformer.nns=[8,16,32,64] \
     denoiser.minimpnn.graph_transformer.attn_bias=true \
     denoiser.minimpnn.graph_transformer.num_heads=2 \
