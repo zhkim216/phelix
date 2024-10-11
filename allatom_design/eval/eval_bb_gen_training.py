@@ -14,10 +14,10 @@ import yaml
 from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
-from transformers import AutoTokenizer, EsmForProteinFolding
 
 from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.eval import eval_metrics, sampling_utils
+from allatom_design.eval.folding_utils import get_struct_pred_model
 from allatom_design.eval.proteinmpnn_utils import load_mpnn
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
@@ -74,15 +74,12 @@ def main(cfg: DictConfig):
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # # Load in MPNN + ESMFold for co-design self-consistency evals
+    # # Load in MPNN + structure prediction model for self-consistency evals
     mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
     mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)  # override base mpnn config with mpnn.overrides
     mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
 
-    esmfold = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
-    esmfold.esm = esmfold.esm.half()
-    esmfold = esmfold.to(device)
-    tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
+    struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     # Get checkpoints from denoiser training run
     pattern = re.compile(r"ad-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form ad-step{step}-epoch{epoch}.ckpt
@@ -166,12 +163,13 @@ def main(cfg: DictConfig):
             for pdb, v in ss_info.items():
                 all_metrics[pdb]["ss_info"] = v
 
-            # Run MPNN + ESMFold self-consistency evals
+            # Run MPNN + structure prediction self-consistency evals
             mpnn_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
                                                                   mpnn_model, mpnn_cfg,
-                                                                  esmfold, tokenizer,
+                                                                  struct_pred_model,
                                                                   device,
-                                                                  out_dir=log_dir)
+                                                                  out_dir=cfg.out_dir,
+                                                                  temp_dir=f"{cfg.out_dir}/tmp")
             for pdb, v in mpnn_sc_info.items():
                 all_metrics[pdb]["mpnn_sc_info"] = v
 
