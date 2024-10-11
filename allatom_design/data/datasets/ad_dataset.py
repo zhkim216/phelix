@@ -1,5 +1,3 @@
-import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -10,54 +8,13 @@ from einops import rearrange
 from torch.utils import data
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from functools import partial
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (center_random_augmentation,
-                                      load_feats_from_pdb, make_fixed_size_1d)
+from allatom_design.data.data import (center_random_augmentation, load_feats_from_pdb,
+                                      make_fixed_size_1d)
 
 FEATURES_LONG = ("residue_index", "chain_index", "aatype")
-
-
-def process_pdb_key(
-    pdb_key: str,
-    pdb_path: str,
-    cache_dir: Path,
-    overwrite_cache: bool
-):
-    """
-    Processes a single pdb_key:
-    - Checks if the cached file exists.
-    - Loads PDB data.
-    - Saves the processed data to the cache.
-    """
-    out_file = cache_dir / f"{pdb_key}.pt"
-    if out_file.exists() and not overwrite_cache:
-        return  # Skip caching if file exists and overwrite_cache is False
-
-    try:
-        # Determine the PDB data file based on pdb_path and pdb_key
-        if pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
-            pdb_data_file = f"{pdb_path}/pdb_store/{pdb_key}"
-        elif pdb_path.endswith("afdb"):  # AFDB augmentation dataset
-            pdb_data_file = f"{pdb_path}/foldseek_cluster_reps/{pdb_key}.cif"
-        elif pdb_path.endswith("qfit-test-set/rcsb-pdb"):
-            pdb_data_file = f"{pdb_path}/all/{pdb_key}.pdb1"  # qfit dataset, use only pdb1s for now
-        elif pdb_path.endswith("rcsb_test_cases"):
-            pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
-        else:
-            raise ValueError(f"Unknown dataset: {pdb_path}")
-
-        # Load features from the PDB file
-        example = load_feats_from_pdb(pdb_data_file, chain_residx_gap=None)
-
-        # Save the processed example to the cache
-        torch.save(example, out_file)
-    except Exception as e:
-        # Instead of printing, you might want to log this properly
-        print(f"Error processing {pdb_key}: {e}")
-
 
 
 class ADDataset(data.Dataset):
@@ -257,35 +214,21 @@ class ADDataset(data.Dataset):
         """
         Reads in PDB files and caches the examples to disk.
         Cached files are stored in cached_examples/ in the pdb_path.
-        This method is parallelized for efficiency.
         """
-        cache_dir = Path(f"{self.pdb_path}/cached_examples")
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_dir = f"{self.pdb_path}/cached_examples"
+
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
         print(f"Caching examples to {cache_dir}...")
+        for pdb_key in tqdm(self.pdb_keys):
+            # Skip if file already exists in cache
+            out_file = f"{cache_dir}/{pdb_key}.pt"
+            if Path(out_file).exists() and not self.overwrite_cache:
+                continue
 
-        # Define a partial function with fixed parameters
-        process_func = partial(
-            process_pdb_key,
-            pdb_path=self.pdb_path,
-            cache_dir=cache_dir,
-            overwrite_cache=self.overwrite_cache
-        )
-
-        # Use ProcessPoolExecutor for parallel processing
-        num_workers = os.cpu_count() or 4  # Default to 4 if os.cpu_count() is None
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            # Submit all tasks to the executor
-            futures = {executor.submit(process_func, pdb_key): pdb_key for pdb_key in self.pdb_keys}
-
-            # Use tqdm to display progress
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Caching PDBs"):
-                pdb_key = futures[future]
-                try:
-                    future.result()
-                except Exception as e:
-                    print(f"Exception occurred while processing {pdb_key}: {e}")
-
-        print("Caching completed.")
+            # Cache the data
+            pdb_data_file = self._get_pdb_data_file(pdb_key)
+            example = load_feats_from_pdb(pdb_data_file, chain_residx_gap=None)
+            torch.save(example, f"{cache_dir}/{pdb_key}.pt")
 
 
     def _load_designability_info(self) -> None:
