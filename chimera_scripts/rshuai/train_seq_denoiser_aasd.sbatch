@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a10_aasd7
+#SBATCH --job-name=a10_aasd9
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,11 +21,12 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=a10_aasd7
+EXP_NAME=a10_aasd9
 GROUP=chimera_a10
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
+PDB_PATH=/scratch/hielab/rshuai/dat
+asets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Run training script

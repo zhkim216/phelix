@@ -171,6 +171,7 @@ class SeqDenoiser(nn.Module):
         aux_inputs["scd"] = scd_inputs
 
         # Sample aatype prior
+        aux_inputs["mlm_mask"] = torch.zeros_like(seq_mask)
         aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()  # TODO: make seq prior use MASK rather than UNK
 
         # Get residue decoding order

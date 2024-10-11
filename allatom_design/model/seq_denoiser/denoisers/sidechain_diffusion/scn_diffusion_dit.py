@@ -52,7 +52,8 @@ class SidechainDiffusionModule(nn.Module):
 
     def mask_aatype(self,
                     aatype: TensorType["b n", int],
-                    mlm_mask: TensorType["b n", int]
+                    mlm_mask: TensorType["b n", int],
+                    seq_mask: TensorType["b n", float],
                     ) -> Tuple[TensorType["b n", int], TensorType["b n", int]]:
         """
         Mask aatype of future residues (residues that are not masked by MLM mask). If None, do not mask any aatypes.
@@ -67,7 +68,9 @@ class SidechainDiffusionModule(nn.Module):
             scd_aatype_mask = (torch.rand(aatype.shape, device=aatype.device) < p[:, None]) | mlm_mask.bool()  # 0 for masked residues
 
         # mask residues
-        aatype = aatype * scd_aatype_mask
+        aatype = torch.where(mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
+        aatype = aatype * seq_mask.long()  # set pad residues back to 0
+
         return aatype, scd_aatype_mask
 
 
@@ -121,7 +124,7 @@ class SidechainDiffusionModule(nn.Module):
             loss_weight_t_batched = interpolant_out["loss_weight_t"]
 
             # Randomly mask aatype and sidechains of future residues
-            aatype_batched, scd_aatype_mask_batched = self.mask_aatype(aatype_batched, mlm_mask_batched)
+            aatype_batched, scd_aatype_mask_batched = self.mask_aatype(aatype_batched, mlm_mask_batched, seq_mask_batched)
             xt_scn_batched = xt_scn_batched * rearrange(scd_aatype_mask_batched, "(m b) n -> (m b) n 1 1", m=M)
             x_scn_gt_batched = x_scn_gt_batched * rearrange(scd_aatype_mask_batched, "(m b) n -> (m b) n 1 1", m=M)
 
@@ -200,6 +203,11 @@ class SidechainDiffusionModule(nn.Module):
             # Store trajectory
             xt_scn_traj, x1_scn_traj = [], []
 
+            # Handle masking of future aatypes
+            mlm_mask = aux_inputs["mlm_mask"]
+            aatype = torch.where(mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
+            x0_scn = x0_scn * rearrange(mlm_mask, "b n -> b n 1 1")  # mask out sidechain coords of future aatypes
+
             # Run integration steps
             denoiser_fn = partial(self.dit, aatype=aatype, x_bb=x_bb,
                                   h_V=h_V, seq_mask=seq_mask, residue_index=residue_index)
@@ -217,6 +225,7 @@ class SidechainDiffusionModule(nn.Module):
                                                                     noise_schedule=noise_schedule,
                                                                     autoguidance_cfg=autoguidance_cfg,
                                                                     cfg_cfg=None)
+                xt_scn = xt_scn * rearrange(mlm_mask, "b n -> b n 1 1")  # mask out sidechain coords of future aatypes
 
                 if self.use_self_conditioning:
                     # Apply self-conditioning

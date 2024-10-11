@@ -114,14 +114,14 @@ def main(cfg: DictConfig):
     latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                                  save_top_k=-1,
                                                  every_n_train_steps=cfg.checkpointing.save_latest_every_n_steps,
-                                                 filename="ad-step{step}-epoch{epoch:02d}",
+                                                 filename="sd-step{step}-epoch{epoch:02d}",
                                                  auto_insert_metric_name=False
                                                  )
     val_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                               save_top_k=cfg.checkpointing.save_top_k,
                                               monitor="val/total_loss",
                                               mode="min",
-                                              filename="ad-epoch{epoch:02d}-step{step}-val_loss{val/total_loss:.4f}",
+                                              filename="sd-epoch{epoch:02d}-step{step}-val_loss{val/total_loss:.4f}",
                                               auto_insert_metric_name=False  # needed since metric has / in name
                                               )
     ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",

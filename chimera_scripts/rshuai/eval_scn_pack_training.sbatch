@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a10_aasd0_eval_scn_pack
+#SBATCH --job-name=a10_aasd7_eval_scn_pack
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -27,7 +27,7 @@ PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Model name to evaluate
-MODEL_NAME=a10_aasd0
+MODEL_NAME=a10_aasd7
 
 EXP_NAME=${MODEL_NAME}_eval_scn_pack
 GROUP=chimera_a10
