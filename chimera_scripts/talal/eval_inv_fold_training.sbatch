@@ -29,7 +29,7 @@ export TORCH_HOME=/scratch/hielab/talal/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/talal/cache/omegafold/omegafold.pt
 
 # Model to evaluate
-MODEL_NAME=aasd_gt_atom_decoder
+MODEL_NAME=aasd_scn_atom
 DENOISER_TRAIN_DIR=/scratch/hielab/talal/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
@@ -47,9 +47,11 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     num_workers=${SLURM_CPUS_ON_NODE} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
-    start_epoch=100 \
+    start_epoch=50 \
     aatype_decoding_order_mode=greedy \
-    num_steps_list=[1,3,5,10] \
+    corrector_step_ratio=0.5 \
+    num_corrector_steps=0 \
+    num_steps_list=[50] \
     eval_every_n_ckpts=4 \
     batch_size=64 \
     run_seq_recovery=true \
