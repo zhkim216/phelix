@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a12_bb6
+#SBATCH --job-name=a12_bb9
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -25,7 +25,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=a12_bb6
+EXP_NAME=a12_bb9
 GROUP=chimera_a12
 
 # Dataset paths
@@ -45,15 +45,17 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.designability_csvs=[${DESIGNABILITY_CSV},null] \
     data.dataset_weights=[0.25,0.75] \
     data.fixed_size=512 \
+    data.translation_scale=0.0 \
     train.batch_size=64 \
     train.compile_model=true \
     model.task=backbone \
     denoiser=dit_denoiser \
     denoiser.autoguidance.enabled=true \
-    denoiser.dit.depth=24 \
+    denoiser.dit.hidden_size=768 \
+    denoiser.dit.num_heads=12 \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=50000 \
-    checkpointing.save_ema_every_n_steps=20000 \
+    checkpointing.save_ema_every_n_steps=10000 \
     trainer.check_val_every_n_epoch=30 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}

@@ -234,7 +234,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                 xt_bb, t = self.interpolant.churn(xt_bb, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
                 xt_bb = xt_bb * (1 - xt_bb_override_mask[i]) + xt_bb_override[i] * xt_bb_override_mask[i]  # override xt for inputs
 
-                # AF3 CentreRandomAugmentation on both xt and the self-conditioning inputs
+                # AF3 CentreRandomAugmentation on both xt and the self-conditioning inputs  # TODO: handle xt overrides
                 xt_bb, transforms = center_random_augmentation(xt_bb,
                                                                seq_mask=seq_mask,
                                                                atom_mask=atom_mask,
