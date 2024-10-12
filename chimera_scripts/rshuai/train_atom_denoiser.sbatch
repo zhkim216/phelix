@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=a11_bb3
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=2
-#SBATCH --cpus-per-task=16
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs

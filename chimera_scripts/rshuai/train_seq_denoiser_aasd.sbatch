@@ -25,8 +25,7 @@ EXP_NAME=a10_aasd9
 GROUP=chimera_a10
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/dat
-asets/ingraham_cath_dataset
+PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Run training script
@@ -45,7 +44,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     interpolant.training_noise_schedule=uniform_squared_t \
     denoiser=minimpnn_denoiser \
     denoiser.minimpnn.augment_eps=0.0 \
-    denoiser.autoguidance.enabled=false \
+    denoiser.scn_diffusion_module.training_batch_size_mult=8 \
+    denoiser.autoguidance.enabled=true \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=5000 \
     checkpointing.save_ema_every_n_steps=1500 \

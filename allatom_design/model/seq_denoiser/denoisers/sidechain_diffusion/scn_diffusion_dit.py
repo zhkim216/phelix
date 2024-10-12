@@ -68,7 +68,7 @@ class SidechainDiffusionModule(nn.Module):
             scd_aatype_mask = (torch.rand(aatype.shape, device=aatype.device) < p[:, None]) | mlm_mask.bool()  # 0 for masked residues
 
         # mask residues
-        aatype = torch.where(mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
+        aatype = torch.where(scd_aatype_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
         aatype = aatype * seq_mask.long()  # set pad residues back to 0
 
         return aatype, scd_aatype_mask
