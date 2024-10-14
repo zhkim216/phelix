@@ -225,8 +225,8 @@ class DiTDenoiser(BaseAtomDenoiser):
                                   residue_index=residue_index, seq_mask=seq_mask,
                                   cond_labels_in=cond_labels_in)
 
-            atom_mask = torch.ones(xt_bb.shape[:-1], device=seq_mask.device, dtype=seq_mask.dtype) * seq_mask.unsqueeze(-1)
-            aux_preds = {"x1_pred": None, "x1_pred_ag": None}  # initialize predictions for self-conditioning and autoguidance
+            # atom_mask = torch.ones(xt_bb.shape[:-1], device=seq_mask.device, dtype=seq_mask.dtype) * seq_mask.unsqueeze(-1)
+            # aux_preds = {"x1_pred": None, "x1_pred_ag": None}  # initialize predictions for self-conditioning and autoguidance
             for i in tqdm(range(S), leave=False, desc="Sampling..."):
                 t = timesteps[:, i]
                 t_next = timesteps[:, i + 1]
@@ -234,14 +234,14 @@ class DiTDenoiser(BaseAtomDenoiser):
                 xt_bb, t = self.interpolant.churn(xt_bb, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
                 xt_bb = xt_bb * (1 - xt_bb_override_mask[i]) + xt_bb_override[i] * xt_bb_override_mask[i]  # override xt for inputs
 
-                # AF3 CentreRandomAugmentation on both xt and the self-conditioning inputs  # TODO: handle xt overrides
-                xt_bb, transforms = center_random_augmentation(xt_bb,
-                                                               seq_mask=seq_mask,
-                                                               atom_mask=atom_mask,
-                                                               missing_atom_mask=torch.zeros_like(atom_mask),
-                                                               translation_scale=10.0,
-                                                               return_transforms=True)
-                aux_preds["x1_pred"] = apply_random_augmentation(aux_preds["x1_pred"], transforms, seq_mask, atom_mask) if i > 0 else None
+                # # AF3 CentreRandomAugmentation on both xt and the self-conditioning inputs  # TODO: handle xt overrides
+                # xt_bb, transforms = center_random_augmentation(xt_bb,
+                #                                                seq_mask=seq_mask,
+                #                                                atom_mask=atom_mask,
+                #                                                missing_atom_mask=torch.zeros_like(atom_mask),
+                #                                                translation_scale=0.0,
+                #                                                return_transforms=True)
+                # aux_preds["x1_pred"] = apply_random_augmentation(aux_preds["x1_pred"], transforms, seq_mask, atom_mask) if i > 0 else None
 
                 # Apply self-conditioning
                 if self.use_self_conditioning and i > 0:
