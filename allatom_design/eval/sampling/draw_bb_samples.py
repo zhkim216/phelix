@@ -106,7 +106,8 @@ def main(cfg: DictConfig):
                                                        cond_labels=cond_labels_in,
                                                        noise_schedule=noise_schedule,
                                                        churn_cfg=churn_cfg,
-                                                       autoguidance_cfg=dict(cfg.autoguidance_cfg)
+                                                       autoguidance_cfg=dict(cfg.autoguidance_cfg),
+                                                       se3_augmentation_cfg=dict(cfg.se3_augmentation_cfg),
                                                        )
 
         samples = {"x_bb_denoised": x_bb_denoised,

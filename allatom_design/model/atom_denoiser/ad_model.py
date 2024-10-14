@@ -114,6 +114,7 @@ class AtomDenoiser(nn.Module):
                noise_schedule: NoiseSchedule = None,
                churn_cfg: Dict[str, float] = None,
                autoguidance_cfg: Optional[Dict[str, Any]] = None,  # autoguidance config
+               se3_augmentation_cfg: Optional[Dict[str, Any]] = None,
                ) -> Tuple[TensorType["b n 4 3", float],
                           Dict[str, torch.Tensor]]:
         """
@@ -169,6 +170,7 @@ class AtomDenoiser(nn.Module):
             "churn_cfg": churn_cfg,
             "noise_schedule": noise_schedule,
             "autoguidance_cfg": autoguidance_cfg,
+            "se3_augmentation_cfg": se3_augmentation_cfg,
             # overrides
             "xt_override": xt_override,
             "xt_override_mask": xt_override_mask,
