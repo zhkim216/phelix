@@ -52,16 +52,18 @@ autoguidance_cfg:
   use_autoguidance: false
   w: 1.0
 
-
 # MPNN args
 mpnn:
   mpnn_cfg: allatom_design/configs/mpnn/proteinmpnn.yaml
   mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
   overrides:
     # num seqs per structure will be batch_size * number_of_batches
-    batch_size: 8
+    batch_size: 1
     number_of_batches: 1
     verbose: false
+
+# Pairwise TM-scores
+pairwise_tm_subsample: 2000  # number of pairs to subsample
 
 # Structure prediction model args
 struct_pred_cfg:

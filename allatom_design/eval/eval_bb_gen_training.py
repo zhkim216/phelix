@@ -16,6 +16,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
 
 from allatom_design.data.conditioning_labels import create_cond_labels_input
+from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.eval.folding_utils import get_struct_pred_model
 from allatom_design.eval.proteinmpnn_utils import load_mpnn
@@ -180,6 +181,7 @@ def main(cfg: DictConfig):
                 for pdb, v in nntm_info.items():
                     all_metrics[pdb]["nntm_info"] = v
 
+
             ### SAVE METRICS ###
             # Save all metrics to pickle file
             with open(f"{saved_metrics_dir}/epoch_{epoch}_S{S}_all_metrics.pkl", "wb") as f:
@@ -203,6 +205,12 @@ def main(cfg: DictConfig):
                 # nntm metrics
                 if cfg.nntm_dataset is not None:
                     sample_metrics["nntm"].append(nntm_info[pdb])
+
+            # === Calculate mean pairwise TM score === #
+            coords = [load_feats_from_pdb(pdb, chain_residx_gap=None)["all_atom_positions"] for pdb in pdbs]
+            sample_metrics["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(coords,
+                                                                                   temp_dir=f"{cfg.out_dir}/tmp",
+                                                                                   subsample_pairs=cfg.pairwise_tm_subsample)
 
             metrics = {f"bb_gen/S{S}/{k}": np.mean(v) for k, v in sample_metrics.items()}
 
