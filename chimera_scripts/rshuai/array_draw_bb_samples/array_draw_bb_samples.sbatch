@@ -104,7 +104,5 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py 
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     n_samples_per_length=10 \
-    se3_augmentation_cfg.enabled=${SE3_ENABLED} \
-    se3_augmentation_cfg.translation_scale=${translation_scale} \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}

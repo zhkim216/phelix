@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -685,8 +686,16 @@ def foldseek_cluster(pdbs: List[str],
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     Path(temp_dir).mkdir(parents=True, exist_ok=True)
 
+    # Copy over PDB files to output directory
+    pdb_dir = f"{out_dir}/designable_pdbs"
+    Path(pdb_dir).mkdir(parents=True, exist_ok=True)
+    for pdb in pdbs:
+        shutil.copy(pdb, pdb_dir)
+
+    # Run Foldseek clustering
     command = ["foldseek", "easy-cluster",
-               *pdbs, f"{out_dir}/foldseek", temp_dir,
+               "--alignment-type", "0",
+               pdb_dir, f"{out_dir}/foldseek", temp_dir,
                "-c", str(c),
                "--tmscore-threshold", str(tmscore_threshold),
                "-s", str(s)]
@@ -694,7 +703,11 @@ def foldseek_cluster(pdbs: List[str],
     if cluster_reassign:
         command.append("--cluster-reassign")
 
-    subprocess.run(command, check=True)
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Foldseek clustering failed with error: {e}")
+        return np.nan
 
     # Read number of unique clusters
     tsv_path = f"{out_dir}/foldseek_cluster.tsv"
