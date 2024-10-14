@@ -656,3 +656,49 @@ def bootstrap_se(data: List[float], n_samples: int) -> float:
 
     boot_se = np.std(bootstrap_means, ddof=1)
     return boot_se
+
+
+def foldseek_cluster(pdbs: List[str],
+                     out_dir: str,
+                     temp_dir: str,
+                     tmscore_threshold: float = 0.6,
+                     c: float = 0.8,
+                     s: float = 4.0,
+                     cluster_reassign: bool = False) -> int:
+    """
+    Cluster a list of PDBs using Foldseek's easy-cluster command.
+
+    Args:
+        pdbs (List[str]): List of PDB files to cluster.
+        out_dir (str): Directory to save clustering results.
+        tmscore_threshold (float): TM-score threshold for clustering.
+        c (float, optional): Fraction of aligned residues required for a match. Defaults to 0.8.
+        s (float, optional): Sensitivity level. Defaults to 4.0.
+        cluster_reassign (bool, optional): Reassign clusters to correct criteria violations. Defaults to False.
+
+    Returns:
+        int: Number of unique clusters.
+    """
+    if len(pdbs) == 0:
+        return 0
+
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    Path(temp_dir).mkdir(parents=True, exist_ok=True)
+
+    command = ["foldseek", "easy-cluster",
+               *pdbs, f"{out_dir}/foldseek", temp_dir,
+               "-c", str(c),
+               "--tmscore-threshold", str(tmscore_threshold),
+               "-s", str(s)]
+
+    if cluster_reassign:
+        command.append("--cluster-reassign")
+
+    subprocess.run(command, check=True)
+
+    # Read number of unique clusters
+    tsv_path = f"{out_dir}/foldseek_cluster.tsv"
+    df = pd.read_csv(tsv_path, sep='\t', header=None, names=['representative', 'member'])
+    num_unique_clusters = df['representative'].nunique()
+
+    return num_unique_clusters

@@ -65,6 +65,16 @@ nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered
 # Pairwise TM-scores
 pairwise_tm_subsample: 1000  # number of pairs to subsample
 
+# Foldseek clustering analysis
+clustering:
+  sctm_cutoffs: [0.7, 0.8]
+  foldseek_opts:
+    tmscore_threshold: 0.6  # following RFDiffusion
+    c: 0.8
+    s: 4.0
+    cluster_reassign: true
+
+
 # Secondary structure KL divergence
 ss_kld:
   dssp_csv: /media/scratch/datasets/ingraham_cath_dataset/dssp/dssp_length_strict.csv
