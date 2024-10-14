@@ -43,6 +43,10 @@ churn_cfg:
   num_steps: ${num_steps}
 s_max_override: null  # if not null, override s_max in interpolant
 
+se3_augmentation_cfg:
+  enabled: true
+  translation_scale: 0.0
+
 
 # Conditioning
 # cond_labels: {"designability": "DESIGNABLE"}  # null for unconditional sampling
