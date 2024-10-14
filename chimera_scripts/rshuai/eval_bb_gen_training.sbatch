@@ -43,6 +43,7 @@ WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_eval_bb_gen
 GROUP=chimera_a12
 
+# Run eval script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
