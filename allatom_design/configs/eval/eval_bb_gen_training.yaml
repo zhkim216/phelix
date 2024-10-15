@@ -30,7 +30,7 @@ n_samples_per_length: 2
 # Backbone generation options
 cond_labels: null
 
-num_steps_list: [1, 20, 100]  # number of diffusion steps for backbone generation
+num_steps_list: [500]  # number of diffusion steps for backbone generation
 num_steps: null  # filled in based on num_steps_list
 
 timestep_schedule:
@@ -64,6 +64,15 @@ mpnn:
 
 # Pairwise TM-scores
 pairwise_tm_subsample: 2000  # number of pairs to subsample
+
+# Foldseek clustering analysis
+clustering:
+  sctm_cutoffs: [0.7, 0.8]
+  foldseek_opts:
+    tmscore_threshold: 0.5
+    c: 0.0
+    s: 7.5
+    cluster_reassign: true
 
 # Structure prediction model args
 struct_pred_cfg:

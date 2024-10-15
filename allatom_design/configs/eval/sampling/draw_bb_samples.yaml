@@ -73,7 +73,6 @@ clustering:
     s: 7.5
     cluster_reassign: true
 
-
 # Secondary structure KL divergence
 ss_kld:
   dssp_csv: /media/scratch/datasets/ingraham_cath_dataset/dssp/dssp_length_strict.csv
