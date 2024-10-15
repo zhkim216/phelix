@@ -187,7 +187,7 @@ def main(cfg: DictConfig):
             with open(f"{saved_metrics_dir}/epoch_{epoch}_S{S}_all_metrics.pkl", "wb") as f:
                 pickle.dump(all_metrics, f)
 
-            # Aggregate metrics to log
+            # Aggregate per-pdb metrics
             sample_metrics = defaultdict(list)
             for pdb in pdbs:
                 # secondary structure metrics
@@ -206,12 +206,24 @@ def main(cfg: DictConfig):
                 if cfg.nntm_dataset is not None:
                     sample_metrics["nntm"].append(nntm_info[pdb])
 
+            ### Compute metrics that require all samples ###
             # === Calculate mean pairwise TM score === #
             coords = [load_feats_from_pdb(pdb, chain_residx_gap=None)["all_atom_positions"] for pdb in pdbs]
             sample_metrics["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(coords,
                                                                                    temp_dir=f"{cfg.out_dir}/tmp",
                                                                                    subsample_pairs=cfg.pairwise_tm_subsample)
 
+            # === Run clustering analysis === #
+            for sctm_cutoff in cfg.clustering.sctm_cutoffs:
+                # Cluster only on designable samples (scTM > sctm_cutoff)
+                designable_pdbs = [pdb for pdb in pdbs if all_metrics[pdb]["mpnn_sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff]
+                sample_metrics[f"sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
+
+                cluster_out_dir = Path(f"{cfg.out_dir}/clustering/sctm{sctm_cutoff}")
+                sample_metrics[f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{cfg.out_dir}/tmp",
+                                                                                              **cfg.clustering.foldseek_opts)
+
+            # === Calculate mean metrics === #
             metrics = {f"bb_gen/S{S}/{k}": np.mean(v) for k, v in sample_metrics.items()}
 
             # Log metrics to wandb
