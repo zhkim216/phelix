@@ -12,6 +12,7 @@ out_dir: null  # null to save in the original sampling directory under reanalyze
 clustering:
   sctm_cutoffs: [0.7, 0.8]
   foldseek_opts:
+    alignment_type: 0  # 0 for structure-only
     tmscore_threshold: 0.5
     c: 0.0
     s: 7.5

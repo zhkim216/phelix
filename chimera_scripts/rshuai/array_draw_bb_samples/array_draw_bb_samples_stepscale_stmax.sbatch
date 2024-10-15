@@ -40,7 +40,7 @@ MODEL_NAME=a12_bb9
 AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/post_hoc_ema_ckpts/ema-step650000-std0.150.ckpt
 
 # Grid search parameter values
-s_t_max_values=(40 30 20)
+s_t_max_values=(10 5 1)
 churn_values=(20 50 100 200)
 
 # Compute indices based on SLURM_ARRAY_TASK_ID
