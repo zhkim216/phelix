@@ -50,7 +50,7 @@ ema_step=$(printf "%.3f" "$ema_step")
 AD_CKPT="${CKPT_DIR}/ema-step650000-std${ema_step}.ckpt"
 
 # Set the experiment name to include the current ad_ckpt step
-EXP_NAME=${MODEL_NAME}_eval_ema${formatted_step}
+EXP_NAME=${MODEL_NAME}_eval_ema${ema_step}
 
 # Optionally, set a group name that reflects the checkpoint step
 GROUP=${MODEL_NAME}_ema
