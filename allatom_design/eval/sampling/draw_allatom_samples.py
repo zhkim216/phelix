@@ -301,6 +301,23 @@ def main(cfg: DictConfig):
                                                                                     temp_dir=f"{cfg.out_dir}/tmp",
                                                                                     subsample_pairs=cfg.pairwise_tm_subsample)
 
+    # === Run clustering analysis === #
+    for sctm_cutoff in cfg.clustering.sctm_cutoffs:
+        # Cluster by length bin
+        for bin in set(bins):
+            pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if (b == bin) and ("codes_sc_info" in all_metrics[pdb])]
+            if len(pdbs_b) == 0:
+                # skip if we don't have self-consistency info for any samples in this bin
+                continue
+
+            # Cluster only on designable samples (scTM > sctm_cutoff)
+            designable_pdbs = [pdb for pdb in pdbs_b if all_metrics[pdb]["codes_sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff]
+            bin_to_metrics[bin][f"sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
+
+            cluster_out_dir = Path(f"{cfg.out_dir}/clustering/bin{bin}_sctm{sctm_cutoff}")
+            bin_to_metrics[bin][f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{cfg.out_dir}/tmp",
+                                                                                                **cfg.clustering.foldseek_opts)
+
     # === Compute KL(p||q) for secondary structure distributions === #
     dssp_df = pd.read_csv(cfg.ss_kld.dssp_csv)
     dssp_df["% Helix"] = dssp_df["% Helix"] * 100

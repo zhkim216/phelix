@@ -662,6 +662,7 @@ def bootstrap_se(data: List[float], n_samples: int) -> float:
 def foldseek_cluster(pdbs: List[str],
                      out_dir: str,
                      temp_dir: str,
+                     alignment_type: int,
                      tmscore_threshold: float = 0.6,
                      c: float = 0.8,
                      s: float = 4.0,
@@ -672,6 +673,11 @@ def foldseek_cluster(pdbs: List[str],
     Args:
         pdbs (List[str]): List of PDB files to cluster.
         out_dir (str): Directory to save clustering results.
+        alignment-type (int): How to compute the alignment:
+            - 0: 3di alignment  (for structure-only / backbone-only)
+            - 1: TM alignment
+            - 2: 3Di+AA [2]
+
         tmscore_threshold (float): TM-score threshold for clustering.
         c (float, optional): Fraction of aligned residues required for a match. Defaults to 0.8.
         s (float, optional): Sensitivity level. Defaults to 4.0.
@@ -694,7 +700,7 @@ def foldseek_cluster(pdbs: List[str],
 
     # Run Foldseek clustering
     command = ["foldseek", "easy-cluster",
-               "--alignment-type", "0",
+               "--alignment-type", str(alignment_type),
                pdb_dir, f"{out_dir}/foldseek", temp_dir,
                "-c", str(c),
                "--tmscore-threshold", str(tmscore_threshold),

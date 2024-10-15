@@ -68,6 +68,7 @@ pairwise_tm_subsample: 1000  # number of pairs to subsample
 clustering:
   sctm_cutoffs: [0.7, 0.8]
   foldseek_opts:
+    alignment_type: 0  # 0 for structure-only
     tmscore_threshold: 0.5
     c: 0.0
     s: 7.5
