@@ -287,6 +287,7 @@ class DiT(nn.Module):
         self.interpolant = interpolant
 
         # Set up DiT model
+        self.translation_invariant = getattr(cfg, "translation_invariant", False)
         self.num_atoms_in = cfg.num_atoms_in
         self.use_self_conditioning = cfg.use_self_conditioning
         self.condition_on_seq = cfg.condition_on_seq
@@ -385,6 +386,15 @@ class DiT(nn.Module):
                 ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
                            Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
+
+        if self.translation_invariant:
+            # make sure CoM of CA is at origin
+            # TODO: handle missing atoms better
+            X = x_noised[:, :, 1:2]  # [b n 1 3]
+            M = seq_mask[:, :, None]
+            M_sum = M.sum(dim=1, keepdim=True)[..., None]
+            coords_mean = (X * M[..., None]).sum(dim=1, keepdim=True) / M_sum  # [b 1 1 3]
+            x_noised = (x_noised - coords_mean) * rearrange(seq_mask, "b n -> b n 1 1")
 
         # Preconditioning
         precondition_in, precondition_out = self.interpolant.setup_preconditioning(x_noised, x_self_cond, t)
