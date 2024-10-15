@@ -105,7 +105,7 @@ cond_labels: null
 sc:
   run_codes_sc: true  # run co-design self-consistency eval
   run_codes_sc_intermediate: true  # run co-design self-consistency eval for intermediate steps
-  bin_range: [0, 256]  # only evaluate structures for length bins that start in this range (inclusive)
+  bin_range: [0, 500]  # only evaluate structures for length bins that start in this range (inclusive)
   max_samples_per_bin: 50  # maximum number of samples to evaluate per length bin
 
 # Dataset for nnTM calculation, path to directory containing PDBs

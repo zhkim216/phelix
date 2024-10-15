@@ -46,7 +46,7 @@ data:
     short_epoch: false
     n_random_subset: null
     se3_augment: true  # randomly rotate and translate data
-    translation_scale: 1.0  # scale of the translation augmentation
+    translation_scale: 0.0  # scale of the translation augmentation
     overwrite_cache: false  # overwrite the cached dataset
 
 # Model options
