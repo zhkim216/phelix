@@ -86,7 +86,6 @@ class LitAtomDenoiser(L.LightningModule):
             outputs = self(batch, t_sd=t_sd_batch)
             _, aux = self.loss(outputs, batch, return_aux=True)
             aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
-            aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
             self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_ts{t_sd}_tbb{t}")
 
 
