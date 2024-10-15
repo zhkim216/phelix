@@ -12,6 +12,7 @@ training_batch_size_mult: 1  # batch size multiplier for diffusion module
 
 # DiT
 dit:
+  translation_invariant: false
   num_atoms_in: 4
   use_self_conditioning: ${denoiser.use_self_conditioning}
   condition_on_seq: false
