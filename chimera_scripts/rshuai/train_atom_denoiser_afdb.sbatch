@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a12_bb9
+#SBATCH --job-name=a13_test
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -25,8 +25,8 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=a12_bb9
-GROUP=chimera_a12
+EXP_NAME=a13_test
+GROUP=chimera_a13
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
@@ -46,7 +46,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.dataset_weights=[0.25,0.75] \
     data.fixed_size=512 \
     data.translation_scale=0.0 \
-    train.batch_size=64 \
+    train.batch_size=128 \
     train.compile_model=true \
     model.task=backbone \
     denoiser=dit_denoiser \
