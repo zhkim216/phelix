@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a13_bb0
+#SBATCH --job-name=a13_bb1
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -25,7 +25,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=a13_bb0
+EXP_NAME=a13_bb1
 GROUP=chimera_a13
 
 # Dataset paths
@@ -41,9 +41,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     group=${GROUP} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
-    data.pdb_paths=[${PDB_PATH}] \
-    data.designability_csvs=[${DESIGNABILITY_CSV}] \
-    data.dataset_weights=[1.0] \
+    data.pdb_paths=[${PDB_PATH},${AFDB_PDB_PATH}] \
+    data.designability_csvs=[${DESIGNABILITY_CSV},null] \
+    data.dataset_weights=[0.10,0.90] \
     data.fixed_size=512 \
     data.translation_scale=0.0 \
     train.batch_size=128 \
