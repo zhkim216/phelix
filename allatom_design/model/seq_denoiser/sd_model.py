@@ -234,6 +234,18 @@ class SeqDenoiser(nn.Module):
         return xt, aatype_t, aux
 
 
+    def get_likelihood(self,
+                       x: TensorType["b n a 3", float],
+                       seq_mask: TensorType["b n", float],
+                       mlm_mask: TensorType["b n", float],
+                       residue_index: TensorType["b n", int],
+                       cond_labels: Dict[str, TensorType["b", int]],
+                       scd_inputs: Dict[str, Any] = {}  # sidechain diffusion inputs
+                       ):
+        pass
+
+
+
     @staticmethod
     def save_samples_to_pdb(samples: Dict[str, TensorType["b ..."]],
                             filenames: List[str],

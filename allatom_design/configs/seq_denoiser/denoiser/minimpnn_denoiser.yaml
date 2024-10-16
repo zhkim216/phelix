@@ -33,7 +33,7 @@ scn_diffusion_module:
   hidden_size: 256
 
   # Randomly mask out aatypes of future residues during training
-  aatype_masking_schedule: "uniform"  # if null, do not mask aatype
+  future_unmasking_schedule: "uniform"  # if null, do not mask aatype
 
   # Diffusion settings
   interpolant: ${model.denoiser.interpolant}

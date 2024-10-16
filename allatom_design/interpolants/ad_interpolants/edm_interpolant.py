@@ -205,6 +205,60 @@ class EDM(ADInterpolant):
         return xt_next, aux_preds
 
 
+    def get_likelihood(self,
+                       f: Callable,
+                       x1: TensorType["b n a 3", float],
+                       x1_mask: TensorType["b n a 3", float],  # denotes real elements of x1 vs. padding/ghost atoms
+                       num_steps: TensorType["b", float]):
+        """
+        Solve the probability flow ODE to get latent encodings and likelihoods.
+        Based on https://github.com/yang-song/score_sde_pytorch/blob/main/likelihood.py
+        See also https://github.com/crowsonkb/k-diffusion/blob/cc49cf6182284e577e896943f8e29c7c9d1a7f2c/k_diffusion/sampling.py#L281
+        """
+        # num_steps = timesteps.shape[1] - 1
+        timesteps = torch.linspace(1, 0, num_steps + 1, device=x1.device)
+
+        # Initialize xt to sigma_min
+        xt = x1 + torch.randn_like(x1) * self.s_min
+
+        # Noise for skilling-hutchinson
+        eps = torch.randn_like(xt)
+
+        for i in range(num_steps):
+            t = timesteps[:, i]
+            t_next = timesteps[:, i + 1]
+            sigma, sigma_next = self.sigma(t), self.sigma(t_next)
+
+            with torch.enable_grad():
+                # Euler integrator
+                xt.requires_grad_(True)
+                x1_pred, _ = f(xt, t=t)
+                dx_dt = (xt - x1_pred) / sigma
+                hutch_proj = (dx_dt * eps * x1_mask).sum()
+                grad = torch.autograd.grad(hutch_proj, xt)[0]
+
+            xt.requires_grad_(False)
+            dsigma = sigma_next - sigma
+            dx = dx_dt * rearrange(dsigma, "b -> b 1 1 1")
+            xt = xt + dx
+            dlogp_dt = (grad * eps * x1_mask).sum((1, 2, 3))
+            dlogp = dlogp_dt * dsigma
+            sum_dlogp = sum_dlogp + dlogp
+
+            sigma = sigma_next
+
+        batch_data_sizes = x1_mask.sum((1, 2, 3))
+        prior_logp = -1 * batch_data_sizes / 2.0 * np.log(2 * np.pi * self.s_max**2) - (
+            xt * xt
+        ).sum((1, 2, 3)) / (2 * self.s_max**2)
+
+        logp = prior_logp + sum_dlogp
+        nats_per_atom = -logp / batch_data_sizes * 3
+        bits_per_dim = -logp / batch_data_sizes / np.log(2)
+
+        return
+
+
     def get_loss_weight(self, t: TensorType["b"]) -> TensorType["b"]:
         """
         Compute the weight of the loss at time t.
