@@ -70,12 +70,12 @@ class SDLoss(nn.Module):
             ## handle batch multiplier dimension
             scn_pred = scn_diff_outputs["scn_pred"]
             scn_target = scn_diff_outputs["scn_target"]
-            scd_aatype_mask = scn_diff_outputs["scd_aatype_mask"]
+            scd_mlm_mask = scn_diff_outputs["scd_mlm_mask"]
             M = scn_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
             mask = repeat(batch["x_mask"][..., rc.non_bb_idxs, :], "b n a x -> (m b) n a x", m=M)
 
             # mask out sidechain loss when masking aatype
-            mask = mask * rearrange(scd_aatype_mask, "(m b) n -> (m b) n 1 1", m=M)
+            mask = mask * rearrange(scd_mlm_mask, "(m b) n -> (m b) n 1 1", m=M)
 
             ## loss weight based on EDM loss
             loss_weight_scn = scn_diff_outputs["loss_weight_t"]
@@ -94,12 +94,12 @@ class SDLoss(nn.Module):
 
                 scn_pred = guidance_outputs["scn_pred"]
                 scn_target = guidance_outputs["scn_target"]
-                scd_aatype_mask = scn_diff_outputs["scd_aatype_mask"]
+                scd_mlm_mask = scn_diff_outputs["scd_mlm_mask"]
                 M = scn_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
                 mask = repeat(batch["x_mask"][..., rc.non_bb_idxs, :], "b n a x -> (m b) n a x", m=M)
 
                 # mask out sidechain loss when masking aatype
-                mask = mask * rearrange(scd_aatype_mask, "(m b) n -> (m b) n 1 1", m=M)
+                mask = mask * rearrange(scd_mlm_mask, "(m b) n -> (m b) n 1 1", m=M)
 
                 # Compute sidechain MSE loss
                 aux["autoguidance/scn/mse_loss"] = masked_mse(scn_pred,

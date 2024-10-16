@@ -37,7 +37,7 @@ class SidechainDiffusionModule(nn.Module):
         self.cfg = cfg
         self.use_self_conditioning = cfg.use_self_conditioning
 
-        self.aatype_masking_schedule = getattr(cfg, "aatype_masking_schedule", None)
+        self.future_unmasking_schedule = getattr(cfg, "future_unmasking_schedule", None)
         self.scn_interpolant = EDM(cfg.interpolant, sigma_data=scn_sigma_data)
 
         # Set up DiT model
@@ -48,30 +48,6 @@ class SidechainDiffusionModule(nn.Module):
         if self.use_autoguidance:
             self.autoguidance_train_p = 1 / cfg.autoguidance.subsample_train_iter_mult
             self.guiding_model = SidechainDiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.scn_interpolant)  # override with autoguidance config
-
-
-    def mask_aatype(self,
-                    aatype: TensorType["b n", int],
-                    mlm_mask: TensorType["b n", int],
-                    seq_mask: TensorType["b n", float],
-                    ) -> Tuple[TensorType["b n", int], TensorType["b n", int]]:
-        """
-        Mask aatype of future residues (residues that are not masked by MLM mask). If None, do not mask any aatypes.
-        """
-        if self.aatype_masking_schedule is None:
-            scd_aatype_mask = torch.ones_like(aatype, device=aatype.device, dtype=torch.bool)
-            return aatype, scd_aatype_mask
-
-        B = aatype.shape[0]
-        if self.aatype_masking_schedule == "uniform":
-            p = torch.rand(B, device=aatype.device)  # choose masking probability
-            scd_aatype_mask = (torch.rand(aatype.shape, device=aatype.device) < p[:, None]) | mlm_mask.bool()  # 0 for masked residues
-
-        # mask residues
-        aatype = torch.where(scd_aatype_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
-        aatype = aatype * seq_mask.long()  # set pad residues back to 0
-
-        return aatype, scd_aatype_mask
 
 
     def sidechain_diffusion(self,
@@ -123,10 +99,9 @@ class SidechainDiffusionModule(nn.Module):
             t_batched = interpolant_out["t"]
             loss_weight_t_batched = interpolant_out["loss_weight_t"]
 
-            # Randomly mask aatype and sidechains of future residues
-            aatype_batched, scd_aatype_mask_batched = self.mask_aatype(aatype_batched, mlm_mask_batched, seq_mask_batched)
-            xt_scn_batched = xt_scn_batched * rearrange(scd_aatype_mask_batched, "(m b) n -> (m b) n 1 1", m=M)
-            x_scn_gt_batched = x_scn_gt_batched * rearrange(scd_aatype_mask_batched, "(m b) n -> (m b) n 1 1", m=M)
+            # Randomly unmask future residues to pack for training
+            scd_mlm_mask_batched = self.unmask_future_residues(mlm_mask_batched, seq_mask_batched)
+            x_scn_gt_batched = x_scn_gt_batched * rearrange(scd_mlm_mask_batched, "(m b) n -> (m b) n 1 1", m=M)
 
             # Run small denoising DiT
             denoiser_fn = self.dit
@@ -134,12 +109,14 @@ class SidechainDiffusionModule(nn.Module):
                 # Apply self-conditioning
                 with torch.no_grad():
                     x1_scn_batched, aux_preds = denoiser_fn(xt_scn_batched, aatype_batched, t_batched, h_V_batched, x_bb_batched,
-                                                       seq_mask=seq_mask_batched, residue_index=residue_index_batched)
+                                                            seq_mask=seq_mask_batched, scd_mlm_mask=scd_mlm_mask_batched,
+                                                            residue_index=residue_index_batched)
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                 denoiser_fn = partial(denoiser_fn, x_scn_self_cond=x1_scn_batched)
 
             x1_scn_batched, aux_preds = denoiser_fn(xt_scn_batched, aatype_batched, t_batched, h_V_batched, x_bb_batched,
-                                                         seq_mask=seq_mask_batched, residue_index=residue_index_batched)
+                                                    seq_mask=seq_mask_batched, scd_mlm_mask=scd_mlm_mask_batched,
+                                                    residue_index=residue_index_batched)
 
             # Train autoguidance model
             diffusion_aux["autoguidance_aux"] = None
@@ -151,23 +128,24 @@ class SidechainDiffusionModule(nn.Module):
                     with torch.no_grad():
                         x1_scn_batched_guide, _ = denoiser_fn(xt_scn_batched, aatype_batched, t_batched,
                                                               h_V_batched.detach(), x_bb_batched,
-                                                              seq_mask=seq_mask_batched, residue_index=residue_index_batched)
+                                                              seq_mask=seq_mask_batched, scd_mlm_mask=scd_mlm_mask_batched,
+                                                              residue_index=residue_index_batched)
 
                     torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                     denoiser_fn = partial(denoiser_fn, x_scn_self_cond=x1_scn_batched_guide)
 
                 x1_scn_batched_guide, _ = denoiser_fn(xt_scn_batched, aatype_batched, t_batched,
                                                       h_V_batched.detach(), x_bb_batched,
-                                                      seq_mask=seq_mask_batched, residue_index=residue_index_batched)
+                                                      seq_mask=seq_mask_batched, scd_mlm_mask=scd_mlm_mask_batched,
+                                                      residue_index=residue_index_batched)
 
                 # add to autoguidance outputs
                 diffusion_aux["autoguidance_aux"] = {
                     "scn_pred": x1_scn_batched_guide,
                     "scn_target": x_scn_gt_batched,
                     "loss_weight_t": loss_weight_t_batched,
-                    "scd_aatype_mask": scd_aatype_mask_batched,
+                    "scd_mlm_mask": scd_mlm_mask_batched,
                 }
-
 
             # Outputs
             x1_scn = None  # during training, we return the batched version in diffusion_aux
@@ -176,7 +154,7 @@ class SidechainDiffusionModule(nn.Module):
             diffusion_aux["scn_pred"] = x1_scn_batched
             diffusion_aux["scn_target"] = x_scn_gt_batched
             diffusion_aux["loss_weight_t"] = loss_weight_t_batched
-            diffusion_aux["scd_aatype_mask"] = scd_aatype_mask_batched
+            diffusion_aux["scd_mlm_mask"] = scd_mlm_mask_batched
 
         else:
             # === Sampling === #
@@ -203,14 +181,12 @@ class SidechainDiffusionModule(nn.Module):
             # Store trajectory
             xt_scn_traj, x1_scn_traj = [], []
 
-            # Handle masking of future aatypes
-            mlm_mask = aux_inputs["mlm_mask"]
-            aatype = torch.where(mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
-            x0_scn = x0_scn * rearrange(mlm_mask, "b n -> b n 1 1")  # mask out sidechain coords of future aatypes
+            # Only pack residues that are unmasked
+            scd_mlm_mask = aux_inputs["mlm_mask"]
 
             # Run integration steps
             denoiser_fn = partial(self.dit, aatype=aatype, x_bb=x_bb,
-                                  h_V=h_V, seq_mask=seq_mask, residue_index=residue_index)
+                                  h_V=h_V, seq_mask=seq_mask, scd_mlm_mask=scd_mlm_mask, residue_index=residue_index)
 
             xt_scn = x0_scn
             for i in range(S_scd):
@@ -225,7 +201,6 @@ class SidechainDiffusionModule(nn.Module):
                                                                     noise_schedule=noise_schedule,
                                                                     autoguidance_cfg=autoguidance_cfg,
                                                                     cfg_cfg=None)
-                xt_scn = xt_scn * rearrange(mlm_mask, "b n -> b n 1 1")  # mask out sidechain coords of future aatypes
 
                 if self.use_self_conditioning:
                     # Apply self-conditioning
@@ -253,6 +228,50 @@ class SidechainDiffusionModule(nn.Module):
             diffusion_aux["x1_scn_traj"] = diffusion_aux["x1_scn_traj"] + x_bb[:, None, :, 1:2, :].cpu()
 
         return x1_scn, diffusion_aux
+
+
+    def get_likelihood(self,
+                       x1_scn: TensorType["b n a_scn 3"],  # not centered on CA
+                       h_V: TensorType["b n h", float],
+                       aatype: TensorType["b n", int],
+                       x_bb: TensorType["b n a_bb 3", float],
+                       seq_mask: TensorType["b n", float],
+                       residue_index: TensorType["b n", int],
+                       aux_inputs: Optional[Dict]):
+        x1_scn = x1_scn - x_bb[:, :, 1:2, :]  # center sidechain coordinates on CA
+
+        # Extract sampling parameters
+        scd_aux_inputs = aux_inputs["scd"]
+        S_scd = scd_aux_inputs["num_steps"]
+
+        # Handle masking of future aatypes
+        mlm_mask = aux_inputs["mlm_mask"]
+        aatype = torch.where(mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
+        x0_scn = x0_scn * rearrange(mlm_mask, "b n -> b n 1 1")  # mask out sidechain coords of future aatypes
+
+        denoiser_fn = partial(self.dit, aatype=aatype, x_bb=x_bb,
+                              h_V=h_V, seq_mask=seq_mask, residue_index=residue_index)
+        x1_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=aatype.device)[aatype] * seq_mask[..., None]
+        x1_mask = x1_mask * rearrange(aux)
+
+
+    def unmask_future_residues(self,
+                               mlm_mask: TensorType["b n", int],
+                               seq_mask: TensorType["b n", float],
+                               ) -> TensorType["b n", int]:
+        """
+        For training, randomly unmask future residues (these are residues that are currently masked by MLM mask). If schedule is None, unmask all residues.
+        """
+        B = mlm_mask.shape[0]
+        if self.future_unmasking_schedule is None:
+            # Unmask all residues
+            scd_mlm_mask = torch.ones_like(mlm_mask, device=mlm_mask.device, dtype=torch.bool)
+        elif self.future_unmasking_schedule == "uniform":
+            # Unmask probability is uniform
+            p = torch.rand(B, device=mlm_mask.device)  # choose masking probability
+            scd_mlm_mask = (torch.rand(mlm_mask.shape, device=mlm_mask.device) < p[:, None]) | mlm_mask.bool()  # 0 for masked residues
+
+        return scd_mlm_mask
 
 
 class SidechainDiT(nn.Module):
@@ -344,11 +363,17 @@ class SidechainDiT(nn.Module):
                 h_V: TensorType["b n h", float],  # conditioning latent
                 x_bb: TensorType["b n a_bb 3", float],  # denoised backbone atoms
                 seq_mask: TensorType["b n", float],
+                scd_mlm_mask: TensorType["b n", float],  # for masking future aatypes from being packed
                 residue_index: TensorType["b n", float],
                 x_scn_self_cond: Optional[TensorType["b n a_scn 3", float]] = None,  # self-conditioning input
                 ) -> Tuple[TensorType["b n a 3", float], Dict[str, TensorType["b ..."]]]:
 
         aux_preds = {}
+
+        # Only pack residues that are not masked
+        aatype = torch.where(scd_mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
+        aatype = aatype * seq_mask.long()  # set pad residues back to 0
+        x_scn = x_scn * rearrange(scd_mlm_mask, "b n -> b n 1 1")  # mask out sidechain coords of future aatypes
 
         # Preconditioning
         precondition_in, precondition_out = self.scn_interpolant.setup_preconditioning(x_scn, x_scn_self_cond, t)
@@ -396,5 +421,8 @@ class SidechainDiT(nn.Module):
         # Reshape back to coordinates
         x = rearrange(x, "b n (a x) -> b n a x", x=3)
         x_scn = precondition_out(x)  # output preconditioning on sidechains
+
+        # Re-mask sidechain atoms of masked residues
+        x_scn = x_scn * rearrange(scd_mlm_mask, "b n -> b n 1 1")
 
         return x_scn, aux_preds
