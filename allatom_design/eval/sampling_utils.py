@@ -22,10 +22,7 @@ def get_decoding_order(mode: str,
     """
     B, N = seq_mask.shape
 
-    if mode == "random":
-        res_decoding_order = torch.where(seq_mask.bool(), torch.rand_like(seq_mask), 1.0e6)  # decode padded positions last
-        res_decoding_order = res_decoding_order.argsort(dim=-1)
-    elif mode == "autoregressive":
+    if mode == "autoregressive":
         res_decoding_order = torch.arange(N, device=seq_mask.device).expand(B, N)
         res_decoding_order = torch.where(seq_mask.bool(), res_decoding_order, 1.0e6)  # decode padded positions last
     elif mode == "random_spans":
@@ -43,10 +40,61 @@ def get_decoding_order(mode: str,
         indices = get_random_bidirectional(seq_mask)
         res_decoding_order = torch.argsort(indices, dim=-1)
     else:
-        raise NotImplementedError(f"residue decoding order mode {mode} not implemented")
+        res_decoding_order = torch.where(seq_mask.bool(), torch.rand_like(seq_mask), 1.0e6)  # decode padded positions last
+        res_decoding_order = res_decoding_order.argsort(dim=-1)
 
     return res_decoding_order.long()
 
+def get_confidence_decoding_order(mode: str,
+                                  seq_probs: TensorType["b n", float],
+                                  seq_mask: TensorType["b n", float],
+                                  unmasked_prev: TensorType["b n", int]) -> TensorType["b n", int]:
+    """
+    Use sequence probabilities to decide a confidence based sampling order
+    """        
+    if mode == 'greedy':
+        confidence, _ = torch.max(seq_probs, dim = -1)
+        confidence = torch.where(seq_mask == 0, -1e6, confidence) #padded tokens sent to end of order
+        confidence = torch.where(unmasked_prev == 1, 1e6, confidence) #previously unmasked tokens sent to beginning of order
+        confidence_decoding_order = torch.argsort(torch.argsort(confidence, dim = -1, descending = True)) #update decoding order based on confidence
+    else:
+        raise ValueError(f'Confidence mode {mode} has not been implemented yet!')
+
+    return confidence_decoding_order
+
+def unmask(xt,
+           aatype_t,
+           x1_pred, 
+           aatype_pred,
+           aux_preds,
+           unmasked_prev,
+           K,
+           aatype_decoding_order,
+           aatype_decoding_order_mode,
+           seq_mask, 
+           aux_inputs) -> Tuple[TensorType["b n a 3", float],
+                      TensorType["b n", int],
+                      TensorType["b n", int]]:
+    
+    if aatype_decoding_order_mode in ['greedy']: 
+        aatype_decoding_order = get_confidence_decoding_order(mode=aatype_decoding_order_mode,
+                                                              seq_mask=seq_mask, 
+                                                              seq_probs=aux_preds['seq_probs'],
+                                                              unmasked_prev=unmasked_prev)
+
+    ## using decoding order to decide positions to unmask
+    num_unmasked = torch.sum(unmasked_prev, dim = -1)[:,None]
+    residues_to_unmask = (aatype_decoding_order >= num_unmasked) & (aatype_decoding_order < K[:,None])
+    aatype_t = torch.where(residues_to_unmask, aatype_pred, aatype_t) 
+    unmasked_residues = residues_to_unmask + unmasked_prev
+    aux_inputs['seq_mlm_mask'] = unmasked_residues.clone() # just being safe now, but can prob change this
+    unmasked_prev = unmasked_residues.clone() # just being safe now, but can prob change this
+    
+    ## Repack sidechains of all unmasked residues, if using an aasd model
+    if x1_pred is not None:
+        xt = torch.where(unmasked_residues[..., None, None] ==  1, x1_pred, xt)
+
+    return xt, aatype_t, unmasked_prev
 
 def get_random_bidirectional(seq_mask: TensorType["b n", float]) -> TensorType["b n", int]:
     """

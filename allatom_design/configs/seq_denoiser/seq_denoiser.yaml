@@ -1,6 +1,6 @@
 # Wandb configuration
 project: "allatom_design"  # Wandb project name
-wandb_id: "richardshuai"  # Wandb username
+wandb_id: "talal-widatalla"  # Wandb username
 exp_name: null # Wandb exp name
 group: "debug" # Wandb group name
 
@@ -18,7 +18,6 @@ train:
 
 # Some trainer options
 trainer:
-  strategy: ddp  # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
   max_epochs: 100000
   accumulate_grad_batches: 1
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
@@ -40,6 +39,7 @@ data:
     overfit: ${overfit}
     short_epoch: false
     n_random_subset: null
+    subset_length_range: null
     se3_augment: true  # randomly rotate and translate data
     translation_scale: 1.0  # scale of the translation augmentation
     overwrite_cache: false  # overwrite the cached dataset

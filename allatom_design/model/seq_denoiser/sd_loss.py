@@ -15,6 +15,8 @@ class SDLoss(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.task = cfg.task
+        self.use_scn_diffusion_loss = self.task in ["scn_pack", "allatom_seq_des"]
+        self.use_seq_pred = self.task in ["seq_des", "allatom_seq_des"]
 
         # Parse loss_weights
         self.loss_weights = {}
@@ -29,6 +31,8 @@ class SDLoss(nn.Module):
         # Define losses based on task
         if self.task == "seq_des":
             self.loss_keys = {"seq_loss"}
+        elif self.task == "scn_pack":
+            self.loss_keys = {"scn/mse_loss"}
         elif self.task == "allatom_seq_des":
             self.loss_keys = {"seq_loss", "scn/mse_loss"}
         else:
@@ -40,7 +44,7 @@ class SDLoss(nn.Module):
             self.loss_weights["autoguidance/scn/mse_loss"] = self.loss_weights["scn/mse_loss"]
 
 
-    def forward(self, outputs, batch, return_aux: bool = False):
+    def forward(self, outputs, batch, eval_pack = True, eval_seq = True, eval_total = True, return_aux: bool = False):
         """
         Compute losses for the atom denoiser.
         If computing seq_loss, expects outputs to contain:
@@ -54,16 +58,21 @@ class SDLoss(nn.Module):
         """
         aux = {}  # losses
         aux_monitor = {}  # monitor other metrics that do not contribute to the loss
-
-        if "seq_loss" in self.loss_keys:
+        if self.use_seq_pred and eval_seq:
             # compute sequence loss from sequence design module
-            seq_loss_mask = batch["seq_mask"]
+            seq_lengths = batch["seq_mask"].sum(-1).long()
+            
+            # compute sequence loss on masked tokens
+            seq_loss_mask = batch['seq_mask'] * (1 - outputs["seq_mlm_mask"])
+
+            #mask unk tokens from loss calculation
+            seq_loss_mask = seq_loss_mask * (1 - batch['seq_unk_mask'])
+
             aux["seq_loss"] = masked_cross_entropy(outputs["seq_logits"], batch["aatype"], seq_loss_mask,
                                                    seq_loss_cfg=self.cfg.seq_loss)
             aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], batch["aatype"], seq_loss_mask).mean().detach().clone()
 
-
-        if "scn/mse_loss" in self.loss_keys:
+        if self.use_scn_diffusion_loss and eval_pack:
             # We use sidechain diffusion auxiliary outputs to compute loss
             scn_diff_outputs = outputs["scn_diffusion_aux"]
 
@@ -73,6 +82,7 @@ class SDLoss(nn.Module):
             scd_mlm_mask = scn_diff_outputs["scd_mlm_mask"]
             M = scn_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
             mask = repeat(batch["x_mask"][..., rc.non_bb_idxs, :], "b n a x -> (m b) n a x", m=M)
+            mask = mask * repeat(1 - outputs["scn_mlm_mask"], "b n -> (m b) n 1 1", m=M)  # only compute loss on masked sidechain positions
 
             # mask out sidechain loss when masking aatype
             mask = mask * rearrange(scd_mlm_mask, "(m b) n -> (m b) n 1 1", m=M)
@@ -120,19 +130,21 @@ class SDLoss(nn.Module):
                 logging.warning(f"Loss {loss_name} is NaN or Inf, skipping...")
                 loss = loss.new_tensor(0., requires_grad=True)
 
-            if loss_name in self.loss_keys:
-                # Only allow losses that are in the loss_keys to contribute to the total loss
-                total_loss += loss * self.loss_weights[loss_name]  # apply manual per-loss loss weighting
-
-        aux["total_loss"] = total_loss
+            if eval_total:
+                if loss_name in self.loss_keys:
+                    # Only allow losses that are in the loss_keys to contribute to the total loss
+                    total_loss += loss * self.loss_weights[loss_name]  # apply manual per-loss loss weighting
+            
+        if eval_total:
+            aux["total_loss"] = total_loss
 
         # Monitor other metrics
         aux.update(aux_monitor)
 
         if return_aux:
             return total_loss, aux
-        return total_loss
 
+        return total_loss
 
 def masked_mse(x: TensorType["b ...", float],
                y: TensorType["b ...", float],
