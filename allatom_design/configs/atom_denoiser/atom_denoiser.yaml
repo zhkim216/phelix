@@ -29,8 +29,8 @@ trainer:
 # Resuming training options
 resume:
   ckpt_path: null  # Path to checkpoint to resume from, null to disable
-  # use_current_cfg: false  # whether to override the config in the checkpoint with the current config
-  # overrides: {}  # add any specific overrides to apply to the config
+  use_current_cfg: false  # whether to override the config in the checkpoint with the current config
+  overrides: {}  # add any specific overrides to apply to the config
 
 # Data options
 data:
