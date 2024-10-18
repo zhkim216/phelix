@@ -172,7 +172,7 @@ class SidechainDiffusionModule(nn.Module):
             autoguidance_cfg = scd_aux_inputs["autoguidance_cfg"]
 
             # Only pack residues that are unmasked
-            scd_mlm_mask = aux_inputs["mlm_mask"]
+            scd_mlm_mask = aux_inputs["seq_mlm_mask"]
 
             # Apply autoguidance
             use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])
