@@ -701,7 +701,7 @@ def foldseek_cluster(pdbs: List[str],
     # Run Foldseek clustering
     command = ["foldseek", "easy-cluster",
                "--alignment-type", str(alignment_type),
-               pdb_dir, f"{out_dir}/foldseek", temp_dir,
+               *pdbs, f"{out_dir}/foldseek", temp_dir,
                "-c", str(c),
                "--tmscore-threshold", str(tmscore_threshold),
                "-s", str(s)]
