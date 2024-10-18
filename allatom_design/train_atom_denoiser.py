@@ -21,6 +21,7 @@ from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import ADDataset
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
 from allatom_design.data.datasets.multi_dataset import MultiDataset
+from allatom_design.checkpoint_utils import resume_ckpt_cfg
 
 
 @hydra.main(config_path="configs/atom_denoiser", config_name="atom_denoiser", version_base="1.3.2")
@@ -28,7 +29,10 @@ def main(cfg: DictConfig):
     """
     Script for training an atom denoiser model.
     """
-    assert cfg.resume.ckpt_path is None, "Resuming checkpoints not supported yet, should be None"
+    # If resuming from checkpoint, get config
+    if cfg.resume.ckpt_path:
+        print(f"Resuming from checkpoint: {cfg.resume.ckpt_path}")
+        cfg, safe_ckpt_to_resume = resume_ckpt_cfg(cfg)
 
     # Update config and resolve
     update_config(cfg)  # Conditionally update certain config values
@@ -105,7 +109,15 @@ def main(cfg: DictConfig):
         yaml.safe_dump(OmegaConf.to_container(cfg, resolve=False), f)
 
     # Set up model
-    lit_model = LitAtomDenoiser(cfg)
+    resumed_ckpt_path = None
+    if cfg.resume.ckpt_path:
+        resumed_ckpt_path = f"{ckpt_dir}/orig_resumed.ckpt"
+        if local_rank is None:
+            # save the original checkpoint to resume from (also handles overrides to torch.compile)
+            torch.save(safe_ckpt_to_resume, resumed_ckpt_path)
+        lit_model = LitAtomDenoiser.load_from_checkpoint(resumed_ckpt_path, cfg=cfg)
+    else:
+        lit_model = LitAtomDenoiser(cfg)
 
     if not cfg.no_wandb:
         logger.watch(lit_model.model, log="all", log_freq=cfg.logging.wandb_watch_freq)
@@ -145,7 +157,7 @@ def main(cfg: DictConfig):
                         callbacks=callbacks,
                         **cfg.trainer
                         )
-    trainer.fit(model=lit_model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloaders)
+    trainer.fit(model=lit_model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloaders, ckpt_path=resumed_ckpt_path)
 
 
 def get_dataloader(phase: str,
