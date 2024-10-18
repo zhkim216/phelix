@@ -268,9 +268,9 @@ class SidechainDiffusionModule(nn.Module):
 
 
     def unmask_future_residues(self,
-                               mlm_mask: TensorType["b n", int],
+                               mlm_mask: TensorType["b n", float],
                                seq_mask: TensorType["b n", float],
-                               ) -> TensorType["b n", int]:
+                               ) -> TensorType["b n", float]:
         """
         For training, randomly unmask future residues (these are residues that are currently masked by MLM mask). If schedule is None, unmask all residues.
         """
@@ -280,9 +280,10 @@ class SidechainDiffusionModule(nn.Module):
             scd_mlm_mask = torch.ones_like(mlm_mask, device=mlm_mask.device, dtype=torch.bool)
         elif self.future_unmasking_schedule == "uniform":
             # Unmask probability is uniform
-            p = torch.rand(B, device=mlm_mask.device)  # choose masking probability
-            scd_mlm_mask = (torch.rand(mlm_mask.shape, device=mlm_mask.device) < p[:, None]) | mlm_mask.bool()  # 0 for masked residues
+            p = torch.rand(B, device=mlm_mask.device)  # choose unmasking probability
+            scd_mlm_mask = (torch.rand(mlm_mask.shape, device=mlm_mask.device) < p[:, None]) | mlm_mask.bool()  # unmask some currently masked residues; 0 for masked residues
 
+        scd_mlm_mask = scd_mlm_mask.float() * seq_mask  # mask out residues that are not in sequence
         return scd_mlm_mask
 
 
