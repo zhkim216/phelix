@@ -29,7 +29,9 @@ data:
 subset_length_range: [64, 256]  # only evaluate on sequences within this length range
 
 # Inverse folding options
-aatype_decoding_order_mode: "random"
+aatype_decoding_order_mode: "greedy"
+num_corrector_steps: 0
+corrector_step_ratio: 0.5
 num_steps_list: [1, 20, 100]  # number of denoising steps for inverse folding
 timestep_schedule:
   num_steps: null  # will be filled in by num_steps_list

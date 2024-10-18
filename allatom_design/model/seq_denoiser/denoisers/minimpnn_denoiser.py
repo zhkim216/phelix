@@ -10,8 +10,8 @@ from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.scn_diffusion_dit import \
     SidechainDiffusionModule
-from allatom_design.model.seq_denoiser.denoisers.seq_design.minimpnn import \
-    MiniMPNN
+from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import \
+    FaMPNN
 from openfold.model.primitives import Linear
 
 
@@ -23,11 +23,11 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
         self.cfg = cfg
         self.bb_sigma_data, self.scn_sigma_data = sigma_data
-        self.use_scn_diffusion = cfg.task in ["allatom_seq_des"]
+        self.task = cfg.task
+        self.use_scn_diffusion = self.task in ["allatom_seq_des", 'scn_pack']
 
         # Sequence design model: MiniMPNN
-        self.seq_design_module = MiniMPNN(cfg.minimpnn)
-        self.seq_head = Linear(cfg.seq_head.in_channels, cfg.seq_head.n_aatype, init="final")
+        self.seq_design_module = FaMPNN(cfg.minimpnn)
 
         # Sidechain diffusion head: DiT
         if self.use_scn_diffusion:
@@ -39,6 +39,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
                 aatype_noised: TensorType["b n", int],
                 t: TensorType["b", float],  # possibly a tuple (t_seq, t_scn)
                 residue_index: TensorType["b n", int],
+                chain_encoding: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
                 seq_self_cond: Optional[TensorType["b n k", float]] = None,  # k = n_aatype, logits
                 cond_labels_in: Dict[str, TensorType["b", int]] = {},
@@ -48,19 +49,40 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
                            TensorType["b n", int],  # aatype pred
                            Dict[str, TensorType["b ..."]]  # aux_preds
                            ]:
-        aux_preds = {}
 
-        # 1. MiniMPNN for sequence design
-        _, h_V, mpnn_feature_dict = self.seq_design_module(x_noised, aatype_noised, seq_self_cond, None, seq_mask, residue_index)
-        seq_logits = self.seq_head(h_V)
+        # 1. Sequence design
+        if self.task in ['scn_pack']:
+            seq_mlm_mask = torch.full_like(residue_index, 1.0)
+        elif self.task in ['allatom_seq_des', 'seq_des']:
+            seq_mlm_mask = aux_inputs['seq_mlm_mask']
+        else:
+            raise ValueError(f"Unrecognized task: {self.task}")
+
+        seq_logits, node_embs, x_bb = self.seq_design_module(
+            x_noised,
+            aatype_noised, 
+            None, #no seq self cond
+            seq_mask, 
+            residue_index, 
+            chain_encoding,
+            seq_mlm_mask)
+
         aatype_pred = seq_logits.argmax(dim=-1)  # TODO: need different handling for sampling
+
+        # Outputs
+        aux_preds = {
+            "seq_logits": seq_logits,
+            "seq_probs": F.softmax(seq_logits, dim=-1),
+            'seq_mask': seq_mask,
+            'seq_mlm_mask': seq_mlm_mask,
+            'scn_mlm_mask': aux_inputs.get('scn_mlm_mask', None)
+        }
 
         # 2. Sidechain diffusion
         x1_pred = None
         if self.use_scn_diffusion:
-            x_bb = mpnn_feature_dict["X"]  # use backbone coordinates from MPNN features (which are possibly noised by augment_eps)
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
-                h_V,
+                node_embs,
                 aatype_pred,
                 x_bb,
                 seq_mask=seq_mask,
@@ -68,16 +90,14 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
                 aux_inputs=aux_inputs,
                 is_sampling=is_sampling
             )
-            aux_preds["scn_diffusion_aux"] = scn_diffusion_aux
+
+            aux_preds['scn_diffusion_aux'] = scn_diffusion_aux
 
             if is_sampling:
                 # store the predicted sidechain coordinates with known backbone
                 x1_pred = cat_bb_scn(x_bb, x1_scn_pred)
 
 
-        # Outputs
-        aux_preds["seq_logits"] = seq_logits
-        aux_preds["seq_probs"] = F.softmax(seq_logits, dim=-1)
         return x1_pred, aatype_pred, aux_preds
 
 

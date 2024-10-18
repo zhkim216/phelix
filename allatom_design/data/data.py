@@ -369,3 +369,92 @@ def atom14_aatype_to_atom37(atom14_pos: TensorType["b n 14 3", float],
     feats["aatype"] = aatype
     feats = data_transforms.make_atom14_masks(feats)
     return atom14_to_atom37(atom14_pos, feats)
+
+def get_rc_tensor(rc_np, aatype):
+    return torch.tensor(rc_np, device=aatype.device)[aatype]
+
+def batched_gather(data, inds, dim=0, no_batch_dims=0):
+    ranges = []
+    for i, s in enumerate(data.shape[:no_batch_dims]):
+        r = torch.arange(s)
+        r = r.view(*(*((1,) * i), -1, *((1,) * (len(inds.shape) - i - 1))))
+        ranges.append(r)
+
+    remaining_dims = [
+        slice(None) for _ in range(len(data.shape) - no_batch_dims)
+    ]
+    remaining_dims[dim - no_batch_dims if dim >= 0 else dim] = inds
+    ranges.extend(remaining_dims)
+    return data[ranges]
+
+def atom37_to_atom14(aatype, all_atom_pos):
+    """Convert Atom37 positions to Atom14 positions."""
+    atom37_mask = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)
+
+    residx_atom14_to_atom37 = get_rc_tensor(
+        rc.RESTYPE_ATOM14_TO_ATOM37, aatype
+    )
+
+    no_batch_dims = len(aatype.shape) - 1
+
+    atom14_mask = batched_gather(
+        atom37_mask, 
+        residx_atom14_to_atom37, 
+        dim=no_batch_dims + 1,
+        no_batch_dims=no_batch_dims + 1,
+    ).to(all_atom_pos.dtype)
+
+    # create a mask for known groundtruth positions
+    atom14_mask *= get_rc_tensor(rc.RESTYPE_ATOM14_MASK_WITH_X, aatype) 
+
+    # gather the groundtruth positions
+    atom14_positions = batched_gather(
+        all_atom_pos, 
+        residx_atom14_to_atom37, 
+        dim=no_batch_dims + 1,
+        no_batch_dims=no_batch_dims + 1,
+    )
+
+    return atom14_positions, atom14_mask
+
+
+# >>> GRAPH TRANSFORMER UTILS
+
+def extract_ids_topk(X, num_nn = 64):
+    # compute displacement vectors
+    R = X.unsqueeze(0) - X.unsqueeze(1)
+
+    # compute distance matrix
+    D = torch.norm(R, dim=2)
+
+    # mask distances
+    D = D + torch.max(D)*(D < 1e-2).float()
+
+    # find nearest neighbors
+    knn = min(num_nn, D.shape[0])
+    _, ids_topk = torch.topk(D, knn, dim=1, largest=False)
+
+    return ids_topk
+
+def unpack(packed_rep, tgt_shape, mask):
+    device, dtype = packed_rep.device, packed_rep.dtype
+    out = torch.zeros(tgt_shape, device = device, dtype = dtype)
+    out[mask, :] = packed_rep
+    return out
+
+def pack(unpacked_rep, tgt_shape, mask):
+    return unpacked_rep[mask].reshape(tgt_shape)
+
+def gather_pos_enc(
+        ids_topk, 
+        positional_enc,
+        return_zero = False
+    ):
+
+    ids_topk_expanded = ids_topk.unsqueeze(2).expand(-1, -1, positional_enc.shape[-1])
+    positional_enc_topk = torch.gather(
+        positional_enc, dim=1, 
+        index=ids_topk_expanded
+    ).float()
+    
+    return positional_enc_topk if not return_zero else torch.zeros_like(ids_topk_expanded)

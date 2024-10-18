@@ -85,7 +85,7 @@ class SidechainDiffusionModule(nn.Module):
             aatype_batched = repeat(aatype, "b n -> (m b) n", m=M, b=B)
             x_bb_batched = repeat(x_bb, "b n a x -> (m b) n a x", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
-            mlm_mask_batched = repeat(aux_inputs["mlm_mask"], "b n -> (m b) n", m=M, b=B)
+            mlm_mask_batched = repeat(aux_inputs["seq_mlm_mask"], "b n -> (m b) n", m=M, b=B)
             residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
 
             # Evaluate at specific timesteps (for validation)
