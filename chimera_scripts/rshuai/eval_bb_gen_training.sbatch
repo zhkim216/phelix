@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a12_bb0_eval_bb_gen
+#SBATCH --job-name=a13_bb0_eval_bb_gen
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -35,13 +35,13 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Denoiser path
-MODEL_NAME=a12_bb0
+MODEL_NAME=a13_bb0
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_eval_bb_gen
-GROUP=chimera_a12
+GROUP=chimera_a13
 
 # Run eval script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
