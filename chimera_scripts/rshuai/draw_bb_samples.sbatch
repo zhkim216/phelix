@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a12_bb9_draw_bb_samples
+#SBATCH --job-name=a13_bb0_draw_samples
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -35,12 +35,12 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Denoiser checkpoint
-MODEL_NAME=a12_bb9
-AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-step550000-epoch3313.ckpt
+MODEL_NAME=a13_bb0
+AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-step650000-epoch3915.ckpt
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_bb_samp_baseline
+EXP_NAME=${MODEL_NAME}_bb_samp_noaug
 GROUP=${MODEL_NAME}
 
 # Run eval script

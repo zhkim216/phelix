@@ -114,6 +114,8 @@ def main(cfg: DictConfig):
         t_seq = t_seq[None].expand(B, -1).to(device)
         sd_sampling_inputs["timesteps"] = t_seq
         sd_sampling_inputs["aatype_decoding_order_mode"] = cfg.sd.seq.aatype_decoding_order_mode
+        sd_sampling_inputs["num_corrector_steps"] = cfg.sd.seq.num_corrector_steps
+        sd_sampling_inputs["corrector_step_ratio"] = cfg.sd.seq.corrector_step_ratio
 
         # Set up sidechain diffusion inputs
         t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.sd.scd.timestep_schedule)
@@ -131,6 +133,7 @@ def main(cfg: DictConfig):
         # === Sample from allatom model === #
         x_denoised, aatype_denoised, aux = allatom_model.sample(lengths=lengths,
                                                                 residue_index=residue_index,
+                                                                chain_index=torch.ones_like(residue_index),
                                                                 timesteps=timesteps,
                                                                 ad_sampling_inputs=ad_sampling_inputs,
                                                                 sd_sampling_inputs=sd_sampling_inputs,
