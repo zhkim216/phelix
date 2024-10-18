@@ -61,7 +61,7 @@ class SDLoss(nn.Module):
         if self.use_seq_pred and eval_seq:
             # compute sequence loss from sequence design module
             seq_lengths = batch["seq_mask"].sum(-1).long()
-            
+
             # compute sequence loss on masked tokens
             seq_loss_mask = batch['seq_mask'] * (1 - outputs["seq_mlm_mask"])
 
@@ -82,10 +82,10 @@ class SDLoss(nn.Module):
             scd_mlm_mask = scn_diff_outputs["scd_mlm_mask"]
             M = scn_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
             mask = repeat(batch["x_mask"][..., rc.non_bb_idxs, :], "b n a x -> (m b) n a x", m=M)
-            mask = mask * repeat(1 - outputs["scn_mlm_mask"], "b n -> (m b) n 1 1", m=M)  # only compute loss on masked sidechain positions
 
-            # mask out sidechain loss when masking aatype
-            mask = mask * rearrange(scd_mlm_mask, "(m b) n -> (m b) n 1 1", m=M)
+            # Only compute loss where we know aatype but not sidechain
+            mask = mask * repeat(1 - outputs["scn_mlm_mask"], "b n -> (m b) n 1 1", m=M)  # only compute loss on masked sidechain positions
+            mask = mask * rearrange(scd_mlm_mask, "(m b) n -> (m b) n 1 1", m=M)  # mask out sidechain loss when masking aatype
 
             ## loss weight based on EDM loss
             loss_weight_scn = scn_diff_outputs["loss_weight_t"]
@@ -134,7 +134,7 @@ class SDLoss(nn.Module):
                 if loss_name in self.loss_keys:
                     # Only allow losses that are in the loss_keys to contribute to the total loss
                     total_loss += loss * self.loss_weights[loss_name]  # apply manual per-loss loss weighting
-            
+
         if eval_total:
             aux["total_loss"] = total_loss
 
