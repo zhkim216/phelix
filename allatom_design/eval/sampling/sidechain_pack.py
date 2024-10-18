@@ -10,6 +10,7 @@ import lightning as L
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy.stats import spearmanr
 import torch
 import yaml
 from omegaconf import DictConfig, OmegaConf, open_dict
@@ -121,6 +122,14 @@ def main(cfg: DictConfig):
             scd_inputs=scd_inputs,
         )
 
+        likelihood_aux = lit_sd_model.model.get_sidechain_likelihoods(cfg.likelihood_num_steps,
+                                                                      x, aatype,
+                                                                      seq_mask=seq_mask,
+                                                                      residue_index=residue_index,
+                                                                      cond_labels=cond_labels_in,
+                                                                      atom_mask=batch_i["atom_mask"].to(device),
+                                                                      scd_inputs=scd_inputs)
+
         samples = {"x_denoised": x_denoised,
                    "seq_mask": seq_mask,
                    "residue_index": residue_index,
@@ -134,11 +143,10 @@ def main(cfg: DictConfig):
         sample_info["pdb"] += batch_i["pdb_key"]
         sample_info["seq_mask"].append(seq_mask)
         sample_info["aatype"].append(aatype)
+        [sample_info[k].append(v.cpu()) for k, v in likelihood_aux.items()]
 
         # Sidechain RMSD per residue
-        atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK)[aatype] * seq_mask[..., None]
-        atom_mask = atom_mask * (1 - batch_i["missing_atom_mask"])  # handle atoms missing from the ground truth PDB
-
+        atom_mask = batch_i["atom_mask"]
         scn_info, ca_aligned_coords1 = eval_metrics.compute_structure_metrics(x.cpu(), x_denoised.cpu(), atom_mask, metrics_to_compute=["scn_rmsd_per_pos"])
         sample_info["scn_rmsd_per_pos"].append(scn_info["scn_rmsd_per_pos"])
 
@@ -162,7 +170,6 @@ def main(cfg: DictConfig):
         filenames = [f"{ca_aligned_gt_dir}/gt_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)]
         write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
 
-
         # Write trajectories to file
         save_traj_mask = [bi + i in save_traj_indices for i in range(batch_i["x"].shape[0])]  # which among the batch to save
         save_traj_steps = [0]   # only 1 seq design step in inverse folding to save (the first index)
@@ -175,13 +182,20 @@ def main(cfg: DictConfig):
                                 save_diff_traj_steps=save_sd_traj_steps,
                                 traj_conect=cfg.traj_conect)
 
-        # save x1_scn traj
-        save_trajs_fn(x_traj_key="x1_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
-                      filenames=[f"{traj_out_dir}/x1_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
+        # # save x1_scn traj
+        # save_trajs_fn(x_traj_key="x1_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
+        #               filenames=[f"{traj_out_dir}/x1_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
 
-        # save xt_scn traj
-        save_trajs_fn(x_traj_key="xt_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
-                      filenames=[f"{traj_out_dir}/xt_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
+        # # save xt_scn traj
+        # save_trajs_fn(x_traj_key="xt_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
+        #               filenames=[f"{traj_out_dir}/xt_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
+
+        # save likelihood traj
+        SeqDenoiser.save_sidechain_likelihood_traj(likelihood_aux, aatype, seq_mask, batch_i["residue_index"], batch_i["chain_index"],
+                                                   save_traj_mask=save_traj_mask, save_diff_traj_steps=save_sd_traj_steps,
+                                                   filenames=[f"{traj_out_dir}/likelihood_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)],
+                                                   traj_conect=cfg.traj_conect)
+
 
 
     del lit_sd_model  # free up memory; we don't need denoiser anymore
@@ -221,6 +235,98 @@ def main(cfg: DictConfig):
     # Save metrics as csv with pandas
     metrics_df = pd.DataFrame(scn_metrics, index=[0])
     metrics_df.to_csv(f"{cfg.out_dir}/scn_metrics.csv", index=False)
+
+    plot_rmsd_vs_npa(sample_info, cfg.out_dir)
+    plot_rmsd_vs_npa_per_residue(sample_info, cfg.out_dir)
+    plot_per_protein_rmsd_vs_npa(sample_info, cfg.out_dir)
+
+
+def plot_rmsd_vs_npa(sample_info, out_dir: str):
+    scn_rmsd_per_pos = sample_info["scn_rmsd_per_pos"]
+    npa = sample_info["npa"]
+    res_num_atoms = sample_info["res_num_atoms"]
+
+    valid_mask = (res_num_atoms > 0) & torch.isfinite(npa)
+    valid_rmsd = scn_rmsd_per_pos[valid_mask]
+    valid_npa = npa[valid_mask]
+    rho, _ = spearmanr(valid_npa.cpu().numpy(), valid_rmsd.cpu().numpy())
+
+    plt.figure(figsize=(8, 6))
+    plt.scatter(valid_npa.cpu(), valid_rmsd.cpu(), alpha=0.5)
+    plt.xlabel('Nats per Atom (npa)')
+    plt.ylabel('RMSD per Position')
+    plt.title(f'Scatter Plot of RMSD vs Nats per Atom\nSpearman r = {rho:.3f}')
+    plt.grid(True)
+    plt.xlim([0, 50])
+    plt.tight_layout()
+    plt.savefig(f"{out_dir}/scn_rmsd_vs_npa.png")
+    plt.close()
+
+def plot_rmsd_vs_npa_per_residue(sample_info, out_dir: str):
+    scn_rmsd_per_pos = sample_info["scn_rmsd_per_pos"]
+    npa = sample_info["npa"]
+    res_num_atoms = sample_info["res_num_atoms"]
+    aatype = sample_info["aatype"]
+    seq_mask = sample_info["seq_mask"]
+
+    valid_mask = (res_num_atoms > 0) & torch.isfinite(npa) & (seq_mask > 0)
+    valid_rmsd = scn_rmsd_per_pos[valid_mask]
+    valid_npa = npa[valid_mask]
+    valid_aatype = aatype[valid_mask]
+
+    residue_types = rc.restypes_with_x
+    output_dir = Path(f"{out_dir}/scn_rmsd_vs_npa_per_residue")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for aa_idx, aa in enumerate(residue_types):
+        residue_mask = (valid_aatype == aa_idx)
+        rmsd_i = valid_rmsd[residue_mask]
+        npa_i = valid_npa[residue_mask]
+        if len(rmsd_i) == 0:
+            continue
+        rho, _ = spearmanr(npa_i.cpu().numpy(), rmsd_i.cpu().numpy())
+        plt.figure(figsize=(8, 6))
+        plt.scatter(npa_i.cpu(), rmsd_i.cpu(), alpha=0.5)
+        plt.title(f'Residue: {aa}\nSpearman r = {rho:.3f}')
+        plt.xlabel('Nats per Atom (npa)')
+        plt.ylabel('RMSD per Position')
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(output_dir / f'scn_rmsd_vs_npa_{aa}.png')
+        plt.close()
+
+
+def plot_per_protein_rmsd_vs_npa(sample_info, out_dir: str):
+    scn_rmsd_per_pos = sample_info["scn_rmsd_per_pos"]
+    npa = sample_info["npa"]
+    res_num_atoms = sample_info["res_num_atoms"]
+    seq_mask = sample_info["seq_mask"]
+
+    # valid_mask = (res_num_atoms > 0) & torch.isfinite(npa) & (seq_mask > 0)
+    valid_mask = (res_num_atoms > 1) & torch.isfinite(npa) & (seq_mask > 0)  # excludes alanine
+    num_valid_residues = valid_mask.sum(dim=1)
+    valid_protein_mask = num_valid_residues > 0
+
+    avg_rmsd_per_protein = torch.zeros_like(num_valid_residues, dtype=torch.float)
+    avg_npa_per_protein = torch.zeros_like(num_valid_residues, dtype=torch.float)
+
+    sum_rmsd_per_protein = (scn_rmsd_per_pos * valid_mask.float()).sum(dim=1)
+    sum_npa_per_protein = (torch.where(valid_mask.bool(), npa, 0)).sum(dim=1)
+
+    avg_rmsd_per_protein[valid_protein_mask] = sum_rmsd_per_protein[valid_protein_mask] / num_valid_residues[valid_protein_mask]
+    avg_npa_per_protein[valid_protein_mask] = sum_npa_per_protein[valid_protein_mask] / num_valid_residues[valid_protein_mask]
+
+    rho, _ = spearmanr(avg_npa_per_protein[valid_protein_mask].cpu().numpy(), avg_rmsd_per_protein[valid_protein_mask].cpu().numpy())
+    plt.figure(figsize=(8, 6))
+    plt.scatter(avg_npa_per_protein[valid_protein_mask].cpu(), avg_rmsd_per_protein[valid_protein_mask].cpu(), alpha=0.5)
+    plt.xlabel('Average Nats per Atom (npa) per Protein')
+    plt.ylabel('Average RMSD per Protein')
+    plt.title(f'Per-Protein RMSD vs Nats per Atom\nSpearman r = {rho:.3f}')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f"{out_dir}/per_protein_rmsd_vs_npa.png")
+    plt.close()
+
 
 
 if __name__ == "__main__":

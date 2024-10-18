@@ -171,6 +171,9 @@ class SidechainDiffusionModule(nn.Module):
             noise_schedule = scd_aux_inputs["noise_schedule"]
             autoguidance_cfg = scd_aux_inputs["autoguidance_cfg"]
 
+            # Only pack residues that are unmasked
+            scd_mlm_mask = aux_inputs["mlm_mask"]
+
             # Apply autoguidance
             use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])
             if use_autoguidance:
@@ -178,15 +181,12 @@ class SidechainDiffusionModule(nn.Module):
                 autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model, aatype=aatype, x_bb=x_bb,
                                                               h_V=h_V, seq_mask=seq_mask, residue_index=residue_index)
 
-            # Store trajectory
-            xt_scn_traj, x1_scn_traj = [], []
 
-            # Only pack residues that are unmasked
-            scd_mlm_mask = aux_inputs["mlm_mask"]
-
-            # Run integration steps
             denoiser_fn = partial(self.dit, aatype=aatype, x_bb=x_bb,
                                   h_V=h_V, seq_mask=seq_mask, scd_mlm_mask=scd_mlm_mask, residue_index=residue_index)
+            # Run integration steps
+            # Store trajectory
+            xt_scn_traj, x1_scn_traj = [], []
 
             xt_scn = x0_scn
             for i in range(S_scd):
@@ -230,29 +230,41 @@ class SidechainDiffusionModule(nn.Module):
         return x1_scn, diffusion_aux
 
 
-    def get_likelihood(self,
-                       x1_scn: TensorType["b n a_scn 3"],  # not centered on CA
-                       h_V: TensorType["b n h", float],
-                       aatype: TensorType["b n", int],
-                       x_bb: TensorType["b n a_bb 3", float],
-                       seq_mask: TensorType["b n", float],
-                       residue_index: TensorType["b n", int],
-                       aux_inputs: Optional[Dict]):
+    def get_likelihoods(self,
+                        num_steps: int,
+                        x1_scn: TensorType["b n a_scn 3"],  # not centered on CA
+                        h_V: TensorType["b n h", float],
+                        aatype: TensorType["b n", int],
+                        x_bb: TensorType["b n a_bb 3", float],
+                        seq_mask: TensorType["b n", float],
+                        residue_index: TensorType["b n", int],
+                        aux_inputs: Optional[Dict]):
         x1_scn = x1_scn - x_bb[:, :, 1:2, :]  # center sidechain coordinates on CA
+        scn_atom_mask = aux_inputs["atom_mask"][..., rc.non_bb_idxs, None].expand_as(x1_scn)
+        x1_scn = torch.where(scn_atom_mask.bool(), x1_scn, 0)  # re-fill missing / ghost atoms with zeroes
+
+        # DEBUG
+        x1_scn = x1_scn * 0  # hack: for some reason, zeroing out sidechain atoms gives us better (inverse) correlations
 
         # Extract sampling parameters
         scd_aux_inputs = aux_inputs["scd"]
-        S_scd = scd_aux_inputs["num_steps"]
+        S_scd = num_steps
 
-        # Handle masking of future aatypes
-        mlm_mask = aux_inputs["mlm_mask"]
-        aatype = torch.where(mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
-        x0_scn = x0_scn * rearrange(mlm_mask, "b n -> b n 1 1")  # mask out sidechain coords of future aatypes
+        # Only pack residues that are unmasked
+        scd_mlm_mask = aux_inputs["mlm_mask"]
 
         denoiser_fn = partial(self.dit, aatype=aatype, x_bb=x_bb,
-                              h_V=h_V, seq_mask=seq_mask, residue_index=residue_index)
-        x1_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=aatype.device)[aatype] * seq_mask[..., None]
-        x1_mask = x1_mask * rearrange(aux)
+                              h_V=h_V, seq_mask=seq_mask, scd_mlm_mask=scd_mlm_mask, residue_index=residue_index)
+
+        x1_mask = scn_atom_mask * rearrange(scd_mlm_mask, "b n -> b n 1 1")
+
+        likelihood_aux = self.scn_interpolant.get_likelihoods(denoiser_fn, x1_scn, x1_mask, S_scd)
+
+        # Preprocess trajectory output
+        x_bb_traj = x_bb[:, None].expand(-1, S_scd, -1, -1, -1).cpu()
+        likelihood_aux["likelihood_xt_traj"] = likelihood_aux["likelihood_xt_traj"] + x_bb_traj[..., 1:2, :]  # undo centering of sidechain coordinates on CA
+        likelihood_aux["likelihood_xt_traj"] = cat_bb_scn(x_bb_traj, likelihood_aux["likelihood_xt_traj"])  # put scn coords back into full structure
+        return likelihood_aux
 
 
     def unmask_future_residues(self,

@@ -183,6 +183,19 @@ class AtomDenoiser(nn.Module):
         return x1_bb, aux
 
 
+    def get_backbone_likelihoods(self,
+                                 num_steps: int,
+                                 x: TensorType["b n a 3", float],
+                                 seq_mask: TensorType["b n", float],
+                                 residue_index: TensorType["b n", int],
+                                 atom_mask: TensorType["b n 4", float],
+                                 cond_labels: Dict[str, TensorType["b", int]]
+                                 ):
+        aatype = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])  # assume aatype are all masked for backbone-only
+        likelihood_aux = self.denoiser.get_likelihoods(num_steps, x, aatype, seq_mask, atom_mask, residue_index, cond_labels_in=cond_labels)
+        return likelihood_aux
+
+
     @staticmethod
     def save_samples_to_pdb(samples: Dict[str, TensorType["b ..."]],
                             filenames: List[str]
@@ -273,6 +286,47 @@ class AtomDenoiser(nn.Module):
                 }
                 traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
                 write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
+
+
+    @staticmethod
+    def save_backbone_likelihood_traj(likelihood_aux: Dict[str, Any],
+                                      seq_mask: TensorType["b n", float],
+                                      residue_index: TensorType["b n", int],
+                                      chain_index: TensorType["b n", int],
+                                      save_traj_mask: List[bool],
+                                      save_traj_steps: List[int],
+                                      filenames: List[str],
+                                      traj_conect: bool,
+                                      align_models_to_idx: Optional[int] = None):
+        """
+        Save trajectories from backbone likelihood calculation to PDB files.
+        """
+        B = seq_mask.shape[0]
+        device = seq_mask.device
+        for i in range(B):
+            if save_traj_mask[i]:
+                x_bb_traj = likelihood_aux["likelihood_xt_traj"][i, save_traj_steps]
+                S, N, A, _ = x_bb_traj.shape
+                aatype_i = torch.full_like(seq_mask[i], fill_value=rc.restype_order["G"], dtype=torch.long)  # force aatype to glycine
+                aatype_traj = aatype_i[None].expand(S, -1)
+                atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * seq_mask[i, :, None]  # [S, N, A]
+
+                # Put backbone positions into atom37 format
+                S, N, _, X = x_bb_traj.shape
+                x_traj = torch.zeros((S, N, rc.atom_type_num, 3), device=device)
+                x_traj[:, :, rc.bb_idxs, :] = x_bb_traj
+
+                traj_feats = {
+                    "aatype": aatype_traj,
+                    "atom_positions": x_traj,
+                    "atom_mask": atom_mask,
+                    "residue_index": residue_index[i].unsqueeze(0).expand(S, -1),
+                    "chain_index": chain_index[i].unsqueeze(0).expand(S, -1),
+                    "b_factors": None
+                }
+                traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
+                write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
+
 
 
 def get_denoiser(cfg: DictConfig,

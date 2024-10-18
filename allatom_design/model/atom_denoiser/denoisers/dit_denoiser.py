@@ -276,6 +276,25 @@ class DiTDenoiser(BaseAtomDenoiser):
         return x1_bb, diffusion_aux
 
 
+    def get_likelihoods(self,
+                        num_steps: int,
+                        x_bb: TensorType["b n 4 3"],
+                        aatype: TensorType["b n", int],
+                        seq_mask: TensorType["b n", float],
+                        atom_mask: TensorType["b n 4", float],
+                        residue_index: TensorType["b n", int],
+                        cond_labels_in: Dict[str, TensorType["b", int]] = {},):
+        denoiser_fn = partial(self.dit,
+                              aatype_noised=aatype,
+                              seq_mask=seq_mask,
+                              residue_index=residue_index,
+                              cond_labels_in=cond_labels_in)
+        x1_mask = atom_mask[..., None].expand_as(x_bb)
+        x1_mask = x1_mask * rearrange(seq_mask, "b n -> b n 1 1")
+        likelihood_aux = self.interpolant.get_likelihoods(denoiser_fn, x_bb, x1_mask, num_steps)
+        return likelihood_aux
+
+
 class DiT(nn.Module):
     def __init__(self, cfg: DictConfig, interpolant: ADInterpolant):
         """
