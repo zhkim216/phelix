@@ -80,7 +80,6 @@ class SeqDenoiser(nn.Module):
             "ghost_atom_mask": batch["ghost_atom_mask"],
             "missing_atom_mask": batch["missing_atom_mask"],
             "t_scd": batch.get("t_scd", None),  # scalar; fix t_scd (sidechain diffusion time) if provided, usually for eval
-            "mlm_mask": interpolant_out["mlm_mask"],
             "seq_mlm_mask": batch["seq_mlm_mask"],
             "scn_mlm_mask": batch["scn_mlm_mask"],
         }
@@ -179,7 +178,6 @@ class SeqDenoiser(nn.Module):
         aux_inputs["scd"] = scd_inputs
 
         # Sample aatype prior
-        aux_inputs["mlm_mask"] = torch.zeros_like(seq_mask)
         aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()  # TODO: make seq prior use MASK rather than UNK
 
         # Get residue decoding order

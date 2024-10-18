@@ -13,6 +13,7 @@ from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.scn_diffusi
 from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import \
     FaMPNN
 from openfold.model.primitives import Linear
+import torch
 
 
 class MiniMPNNDenoiser(BaseSeqDenoiser):
@@ -60,10 +61,10 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
         seq_logits, node_embs, x_bb = self.seq_design_module(
             x_noised,
-            aatype_noised, 
+            aatype_noised,
             None, #no seq self cond
-            seq_mask, 
-            residue_index, 
+            seq_mask,
+            residue_index,
             chain_encoding,
             seq_mlm_mask)
 

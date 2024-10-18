@@ -45,7 +45,7 @@ class FaMPNN(nn.Module):
         self.no_aatype_pred = getattr(cfg, "no_aatype_pred", False)
         self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors, augment_eps=self.augment_eps)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
-        self.W_s = nn.Embedding(self.n_aatype, self.hidden_dim)        
+        self.W_s = nn.Embedding(self.n_aatype, self.hidden_dim)
         self.dropout = nn.Dropout(cfg.dropout_p)
         self.decoder_in = self.hidden_dim * 3
         self.aggregation = cfg.aggregation
@@ -56,20 +56,19 @@ class FaMPNN(nn.Module):
         self.num_heads = cfg.graph_transformer.num_heads
         self.pos_enc = cfg.graph_transformer.pos_enc
         self.attn_bias = cfg.graph_transformer.attn_bias
-        self.use_esm = cfg.use_esm
 
         if self.model_type not in ['graph_transformer', 'sidechain', 'baseline']:
             raise ValueError(f'Incorrect model type specified: {self.model_type}, must be one of: graph_transformer, sidechain, or baseline!')
-        
+
         if self.autoregressive and self.model_type in ['graph_transformer']:
             raise ValueError(f'Autoregressive training not implemented for model type: {self.model_type}')
 
         if self.model_type in ['graph_transformer', 'sidechain']:
             self.decoder_in += self.hidden_dim
             self.sidechain_features = SidechainProteinFeatures(autoregressive = self.autoregressive,
-                                                              node_features = self.node_features, 
-                                                              edge_features = self.edge_features, 
-                                                              top_k=self.k_neighbors, 
+                                                              node_features = self.node_features,
+                                                              edge_features = self.edge_features,
+                                                              top_k=self.k_neighbors,
                                                               augment_eps=self.augment_eps,)
             self.W_e2 = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
 
@@ -106,10 +105,10 @@ class FaMPNN(nn.Module):
 
     def get_gt_inputs(
         self,
-        X, 
-        atom14_mask, 
+        X,
+        atom14_mask,
         aatype_noised,
-        seq_mask, 
+        seq_mask,
         chain_encoding
     ):
         #get one hot encoding of atom identities
@@ -161,7 +160,7 @@ class FaMPNN(nn.Module):
                 atom_chain_enc_i = torch.repeat_interleave(
                     chain_encoding_i,
                     num_atoms_per_residue_i
-                )  
+                )
 
                 same_res = torch.eq(atom_residue_idx_i.unsqueeze(0), atom_residue_idx_i.unsqueeze(1))
                 same_chain = torch.eq(atom_chain_enc_i.unsqueeze(0), atom_chain_enc_i.unsqueeze(1))
@@ -185,12 +184,12 @@ class FaMPNN(nn.Module):
 
             # fill ids_topk and positional_enc_topk for entire batch with current example
             ids_topk[start_a: end_a, :] = ids_topk_i + start_a + 1
-            
+
         return q, ids_topk, unmasked_packed_X, num_atoms_per_residue, positional_enc_topk, tot_num_atoms
 
     def aggregate(
-        self, 
-        h_A, 
+        self,
+        h_A,
         num_atoms_per_residue
     ):
 
@@ -249,7 +248,7 @@ class FaMPNN(nn.Module):
 
         #keep copy of node embeddings from encoder
         h_V_enc = h_V.clone()
-        
+
         # Concatenate self-conditioning
         if self.use_self_conditioning_seq:
             if seq_self_cond is None:
@@ -285,16 +284,16 @@ class FaMPNN(nn.Module):
 
             # Add empty hidden dim of 128 to end of h_EXV to later sum with added sidechain distance information
             h_EX_encoder = cat_neighbors_nodes(torch.zeros((B, N, self.hidden_dim), device = h_S.device), h_EX_encoder, E_idx)
-        
+
             # Extract sidechain features and concatenate to edge embeddings
             E2, _ = self.sidechain_features(X, seq_mask, residue_index, chain_encoding, E_idx, atom14_mask)
-            
+
             #128 -> 128
             h_E2 = self.W_e2(E2)
-                        
+
             #concatenate sidechain information to Edge and Seq embeddings, Hidden dim is [128 Enc Edge, 128 Seq, 128 SC] = [128 * 3]
             h_ES = torch.cat([h_ES, h_E2], dim = -1)
-        
+
         #concat h_V to edge embedding
         h_EXV_encoder = cat_neighbors_nodes(h_V, h_EX_encoder, E_idx)
         h_EXV_encoder_fw = mask_fw * h_EXV_encoder
@@ -309,19 +308,19 @@ class FaMPNN(nn.Module):
 
         #keep copy of node embeddings from encoder
         h_V_dec = h_V.clone()
-    
+
         if self.model_type in ['graph_transformer']:
-            
+
             # Add empty hidden dim of 128 to end of h_EXV to later sum with added atom information
             h_EX_encoder = cat_neighbors_nodes(torch.zeros((B, N, self.hidden_dim), device = h_S.device), h_EX_encoder, E_idx)
 
             #get graph transformer inputs
             q, ids_topk, unmasked_packed_X, num_atoms_per_residue, positional_enc, num_atoms = self.get_gt_inputs(X, atom14_mask, aatype_noised, seq_mask, chain_encoding)
-            
+
             #embed full atomic positional encoding into edge embedding and attention bias
             p_A = self.embed_pos(positional_enc).squeeze(-1) if self.pos_enc else None
             attn_bias = self.proj_attn_bias(positional_enc).view(num_atoms, self.max_nn, self.num_heads).permute(0,2,1) if self.attn_bias else None
-            
+
             #graph transformer forward pass, garbage collect inputs
             h_A = self.gt(unmasked_packed_X, ids_topk, q, p_A, attn_bias)
             del q, ids_topk, unmasked_packed_X
@@ -336,7 +335,7 @@ class FaMPNN(nn.Module):
                 tgt_shape = (B, N, self.hidden_dim),
                 mask = (seq_mask == 1)
             )
-            
+
             #concatenate residue embedding to sequence embedding
             h_ESVR = cat_neighbors_nodes(h_R, h_ESV, E_idx)
 
@@ -346,8 +345,8 @@ class FaMPNN(nn.Module):
         logits = self.W_out(h_V)
 
         if self.no_aatype_pred:
-            logits = None 
-        
+            logits = None
+
         if self.return_embedding == 'encoder':
             return logits, h_V_enc, X_bb
         elif self.return_embedding == 'decoder':
@@ -465,7 +464,7 @@ class ProteinFeatures(nn.Module):
         self.edge_features = edge_features
         self.node_features = node_features
         self.top_k = top_k
-        self.augment_eps = augment_eps 
+        self.augment_eps = augment_eps
         self.num_rbf = num_rbf
         self.num_positional_embeddings = num_positional_embeddings
 
@@ -503,7 +502,7 @@ class ProteinFeatures(nn.Module):
     def forward(self, X, mask, residue_idx, chain_labels):
         if self.training and self.augment_eps > 0:
             X = X + self.augment_eps * torch.randn_like(X)
-        
+
         b = X[:,:,1,:] - X[:,:,0,:]
         c = X[:,:,2,:] - X[:,:,1,:]
         a = torch.cross(b, c, dim=-1)
@@ -512,7 +511,7 @@ class ProteinFeatures(nn.Module):
         Ca = X[:,:,1,:]
         C = X[:,:,2,:]
         O = X[:,:,3,:]
- 
+
         D_neighbors, E_idx = self._dist(Ca, mask)
 
         RBF_all = []
@@ -563,7 +562,7 @@ class SidechainProteinFeatures(nn.Module):
         self.edge_features = edge_features
         self.node_features = node_features
         self.top_k = top_k
-        self.augment_eps = augment_eps 
+        self.augment_eps = augment_eps
         self.num_rbf = num_rbf
         self.num_positional_embeddings = num_positional_embeddings
 
@@ -607,13 +606,13 @@ class SidechainProteinFeatures(nn.Module):
 
     def forward(self, X, mask, residue_idx, chain_labels, E_idx, atom_mask):
         max_atoms = X.shape[-2] #14
-        
+
         N = X[:,:,0,:]
         Ca = X[:,:,1,:]
         C = X[:,:,2,:]
         O = X[:,:,3,:]
 
-        RBF_all = []        
+        RBF_all = []
         for bb_atom in [Ca, N, C, O]:
             for non_bb_atom_pos in range(rc.num_bb_atoms, max_atoms):
                     non_bb_atom_mask = atom_mask[:,:,non_bb_atom_pos]
@@ -631,7 +630,7 @@ class SidechainProteinFeatures(nn.Module):
         E = torch.cat((E_positional, RBF_all), -1)
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
-        return E, E_idx 
+        return E, E_idx
 
 
 class PositionWiseFeedForward(torch.nn.Module):
@@ -666,7 +665,7 @@ class PositionalEncodings(torch.nn.Module):
 class DecLayer(nn.Module):
     def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
         super(DecLayer, self).__init__()
-        self.num_hidden = num_hidden 
+        self.num_hidden = num_hidden
         self.num_in = num_in
         self.scale = scale
         self.dropout1 = nn.Dropout(dropout)
@@ -715,7 +714,7 @@ class DecLayer(nn.Module):
         h_EV = torch.cat([h_V_expand, h_EV], -1)
         h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
         h_E = self.norm3(h_E + self.dropout3(h_message))
-        
+
         return h_V, h_E
 
 
