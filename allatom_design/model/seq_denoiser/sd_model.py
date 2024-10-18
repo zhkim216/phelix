@@ -234,16 +234,25 @@ class SeqDenoiser(nn.Module):
         return xt, aatype_t, aux
 
 
-    def get_likelihood(self,
-                       x: TensorType["b n a 3", float],
-                       seq_mask: TensorType["b n", float],
-                       mlm_mask: TensorType["b n", float],
-                       residue_index: TensorType["b n", int],
-                       cond_labels: Dict[str, TensorType["b", int]],
-                       scd_inputs: Dict[str, Any] = {}  # sidechain diffusion inputs
-                       ):
-        pass
+    def get_sidechain_likelihoods(self,
+                                  num_steps: int,
+                                  x: TensorType["b n a 3", float],
+                                  aatype: TensorType["b n", int],
+                                  seq_mask: TensorType["b n", float],
+                                  residue_index: TensorType["b n", int],
+                                  cond_labels: Dict[str, TensorType["b", int]],
+                                  atom_mask: TensorType["b n a", float],  # handles ghost and missing atoms
+                                  scd_inputs: Dict[str, Any] = {}  # sidechain diffusion inputs
+                                  ):
+        aux_inputs = {}
+        # Add sidechain diffusion inputs
+        aux_inputs["scd"] = scd_inputs
+        aux_inputs["mlm_mask"] = seq_mask.clone()  # sidechain pack with all residues unmasked  # TODO: we can also score sidechains with masked sequence
+        aux_inputs["atom_mask"] = atom_mask  # 1 for valid atoms
 
+        likelihood_aux = self.denoiser.get_sidechain_likelihoods(num_steps, x, aatype, residue_index, seq_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs)
+
+        return likelihood_aux
 
 
     @staticmethod
@@ -362,6 +371,40 @@ class SeqDenoiser(nn.Module):
                 traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
                 write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
 
+
+    @staticmethod
+    def save_sidechain_likelihood_traj(likelihood_aux: Dict[str, Any],
+                                    aatype: TensorType["b n", int],
+                                    seq_mask: TensorType["b n", float],
+                                    residue_index: TensorType["b n", int],
+                                    chain_index: TensorType["b n", int],
+                                    save_traj_mask: List[bool],
+                                    save_diff_traj_steps: List[int],
+                                    filenames: List[str],
+                                    traj_conect: bool,
+                                    align_models_to_idx: Optional[int] = None):
+        """
+
+        """
+        B = seq_mask.shape[0]
+        device = seq_mask.device
+        for i in range(B):
+            if save_traj_mask[i]:
+                x_traj = likelihood_aux["likelihood_xt_traj"][i, save_diff_traj_steps]
+                S_scd, N, A, _ = x_traj.shape
+                aatype_traj = aatype[i][None].expand(S_scd, -1)
+                atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * seq_mask[i, :, None]  # [S_scd, N, A]
+
+                traj_feats = {
+                    "aatype": aatype_traj,
+                    "atom_positions": x_traj,
+                    "atom_mask": atom_mask,
+                    "residue_index": residue_index[i].unsqueeze(0).expand(S_scd, -1),
+                    "chain_index": chain_index[i].unsqueeze(0).expand(S_scd, -1),
+                    "b_factors": None
+                }
+                traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
+                write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
 
 
 def get_denoiser(cfg: DictConfig,
