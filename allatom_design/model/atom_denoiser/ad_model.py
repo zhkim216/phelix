@@ -73,7 +73,7 @@ class AtomDenoiser(nn.Module):
             interpolant_out = self.sd_interpolant(batch, t_sd)
             batch["xt_scn"] = interpolant_out["x_noised"][..., rc.non_bb_idxs, :]
             batch["aatype_noised"] = interpolant_out["aatype_noised"]
-            batch["mlm_mask"] = interpolant_out["mlm_mask"]
+            batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]
 
         # During training, keep track of certain additional features
         aux_inputs = {
@@ -84,7 +84,7 @@ class AtomDenoiser(nn.Module):
 
         # Denoise coords
         _, aux_preds = self.denoiser(batch["xt_scn"], batch["aatype_noised"], t_sd,
-                                     batch["residue_index"], batch["seq_mask"], batch["mlm_mask"],
+                                     batch["residue_index"], batch["seq_mask"], batch["seq_mlm_mask"],
                                      cond_labels_in=batch["cond_labels_in"],
                                      aux_inputs=aux_inputs)
 

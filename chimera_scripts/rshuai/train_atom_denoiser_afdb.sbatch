@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a13_bb4
+#SBATCH --job-name=a13_bb10
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -25,7 +25,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=a13_bb4
+EXP_NAME=a13_bb10
 GROUP=chimera_a13
 
 # Dataset paths
@@ -43,9 +43,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH},${AFDB_PDB_PATH}] \
     data.designability_csvs=[${DESIGNABILITY_CSV},null] \
-    data.dataset_weights=[0.25,0.75] \
+    data.dataset_weights=[0.10,0.90] \
     data.fixed_size=512 \
-    data.translation_scale=0.0 \
+    data.afdb_res_plddt_cutoff=80 \
     train.batch_size=128 \
     train.compile_model=true \
     model.task=backbone \
@@ -53,7 +53,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser.autoguidance.enabled=true \
     denoiser.dit.hidden_size=768 \
     denoiser.dit.num_heads=12 \
-    denoiser.dit.translation_invariant=true \
+    denoiser.dit.cond_label_to_dropout_p.dataset_source=null \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=50000 \
     checkpointing.save_ema_every_n_steps=10000 \
