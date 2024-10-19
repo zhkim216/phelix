@@ -40,7 +40,7 @@ AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/check
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_bb_samp_noaug
+EXP_NAME=${MODEL_NAME}_bb_samp_noaug_undesignable
 GROUP=${MODEL_NAME}
 
 # Run eval script
@@ -57,5 +57,5 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py 
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     n_samples_per_length=10 \
-    +cond_labels.designability=DESIGNABLE \
+    +cond_labels.designability=UNDESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}
