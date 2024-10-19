@@ -173,6 +173,8 @@ class SidechainDiffusionModule(nn.Module):
 
             # Only pack residues that are unmasked
             scd_mlm_mask = aux_inputs["seq_mlm_mask"]
+             # TODO: hack to pack all residues no matter what. assumes that all aatype are reasonable; i.e. in argmax sampling. We should figure out a better way to handle this.
+            scd_mlm_mask = torch.ones_like(scd_mlm_mask)
 
             # Apply autoguidance
             use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])

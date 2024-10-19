@@ -51,7 +51,7 @@ def get_confidence_decoding_order(mode: str,
                                   unmasked_prev: TensorType["b n", int]) -> TensorType["b n", int]:
     """
     Use sequence probabilities to decide a confidence based sampling order
-    """        
+    """
     if mode == 'greedy':
         confidence, _ = torch.max(seq_probs, dim = -1)
         confidence = torch.where(seq_mask == 0, -1e6, confidence) #padded tokens sent to end of order
@@ -64,32 +64,32 @@ def get_confidence_decoding_order(mode: str,
 
 def unmask(xt,
            aatype_t,
-           x1_pred, 
+           x1_pred,
            aatype_pred,
            aux_preds,
            unmasked_prev,
            K,
            aatype_decoding_order,
            aatype_decoding_order_mode,
-           seq_mask, 
+           seq_mask,
            aux_inputs) -> Tuple[TensorType["b n a 3", float],
                       TensorType["b n", int],
                       TensorType["b n", int]]:
-    
-    if aatype_decoding_order_mode in ['greedy']: 
+
+    if aatype_decoding_order_mode in ['greedy']:
         aatype_decoding_order = get_confidence_decoding_order(mode=aatype_decoding_order_mode,
-                                                              seq_mask=seq_mask, 
+                                                              seq_mask=seq_mask,
                                                               seq_probs=aux_preds['seq_probs'],
                                                               unmasked_prev=unmasked_prev)
 
     ## using decoding order to decide positions to unmask
     num_unmasked = torch.sum(unmasked_prev, dim = -1)[:,None]
     residues_to_unmask = (aatype_decoding_order >= num_unmasked) & (aatype_decoding_order < K[:,None])
-    aatype_t = torch.where(residues_to_unmask, aatype_pred, aatype_t) 
+    aatype_t = torch.where(residues_to_unmask, aatype_pred, aatype_t)
     unmasked_residues = residues_to_unmask + unmasked_prev
     aux_inputs['seq_mlm_mask'] = unmasked_residues.clone() # just being safe now, but can prob change this
     unmasked_prev = unmasked_residues.clone() # just being safe now, but can prob change this
-    
+
     ## Repack sidechains of all unmasked residues, if using an aasd model
     if x1_pred is not None:
         xt = torch.where(unmasked_residues[..., None, None] ==  1, x1_pred, xt)
@@ -141,6 +141,9 @@ def get_timesteps_from_schedule(mode: str,
     elif mode == "last_only":
         timesteps = torch.zeros_like(timesteps)
         timesteps[-1] = 1.0
+    elif mode == "first_only":
+        timesteps = torch.ones_like(timesteps)
+        timesteps[0] = 0.0
     else:
         raise NotImplementedError(f"timestep schedule mode {mode} not implemented")
 

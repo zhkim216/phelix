@@ -108,7 +108,7 @@ sc:
   run_codes_sc: true  # run co-design self-consistency eval
   run_codes_sc_intermediate: true  # run co-design self-consistency eval for intermediate steps
   bin_range: [0, 500]  # only evaluate structures for length bins that start in this range (inclusive)
-  max_samples_per_bin: 50  # maximum number of samples to evaluate per length bin
+  max_samples_per_bin: 100  # maximum number of samples to evaluate per length bin
 
 # Dataset for nnTM calculation, path to directory containing PDBs
 nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered
