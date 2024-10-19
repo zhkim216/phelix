@@ -48,6 +48,7 @@ data:
     se3_augment: true  # randomly rotate and translate data
     translation_scale: 0.0  # scale of the translation augmentation
     overwrite_cache: false  # overwrite the cached dataset
+    afdb_res_plddt_cutoff: 0  # 0-100, only keep residues with pLDDT >= cutoff
 
 # Model options
 defaults:

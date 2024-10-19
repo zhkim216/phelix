@@ -7,12 +7,13 @@ import torch
 from einops import rearrange
 from torch.utils import data
 from torch.utils.data import DataLoader
+from torchtyping import TensorType
 from tqdm import tqdm
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (center_random_augmentation, load_feats_from_pdb,
-                                      make_fixed_size_1d)
+from allatom_design.data.data import (center_random_augmentation,
+                                      load_feats_from_pdb, make_fixed_size_1d)
 
 FEATURES_LONG = ("residue_index", "chain_index", "aatype")
 
@@ -35,6 +36,7 @@ class ADDataset(data.Dataset):
         translation_scale: float = 1.0,
         overwrite_cache: bool = False,
         subset_length_range: Optional[int] = None,
+        afdb_res_plddt_cutoff: float = 0.0,
         **kwargs
     ):
         """
@@ -50,6 +52,7 @@ class ADDataset(data.Dataset):
         - translation_scale: Scale of translation augmentation (when using raw coords or coords feats)
         - overwrite_cache: If True, overwrite the dataset cache. Useful if the dataset features have been updated.
         - subset_length_range: List with with [min, max] length of proteins to subset form training data
+        - afdb_res_plddt_cutoff: If > 0, for AFDB dataset, cut out any residues with PLDDT < cutoff
         """
         self.pdb_path = pdb_path
         self.fixed_size = fixed_size
@@ -61,6 +64,7 @@ class ADDataset(data.Dataset):
         self.translation_scale = translation_scale
         self.overwrite_cache = overwrite_cache
         self.subset_length_range = subset_length_range
+        self.afdb_res_plddt_cutoff = afdb_res_plddt_cutoff
 
         # Read in PDB keys
         self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
@@ -106,6 +110,9 @@ class ADDataset(data.Dataset):
     def get_item(self, pdb_key):
         data_file = self._get_data_file(pdb_key)
         data = torch.load(data_file, weights_only=True)
+
+        # Remove any residues with PLDDT < cutoff
+        data = self._remove_low_plddt_residues(data)
 
         example = {}
 
@@ -275,6 +282,20 @@ class ADDataset(data.Dataset):
                 pdb_keys.append(pdb_key)
 
         self.pdb_keys = np.array(pdb_keys)
+
+
+    def _remove_low_plddt_residues(self, data: Dict[str, TensorType["n ..."]]) -> Dict[str, TensorType["n ..."]]:
+        """
+        If data comes from the afdb dataset, remove residues with plddt lower than self.afdb_res_plddt_cutoff.
+        """
+        if not self.pdb_path.endswith("afdb"):
+            return data
+
+        plddt_mask = data["b_factors"][:, 1] >= self.afdb_res_plddt_cutoff  # filter by C-alpha pLDDT
+        for k, v in data.items():
+            data[k] = v[plddt_mask]
+        return data
+
 
     @staticmethod
     def index_into_batch(batch: Dict[str, torch.Tensor], idxs: List) -> Dict[str, torch.Tensor]:
