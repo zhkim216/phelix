@@ -233,22 +233,22 @@ class DiTDenoiser(BaseAtomDenoiser):
                 xt_bb, t = self.interpolant.churn(xt_bb, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
                 xt_bb = xt_bb * (1 - xt_bb_override_mask[i]) + xt_bb_override[i] * xt_bb_override_mask[i]  # override xt for inputs
 
-                # # AF3 CentreRandomAugmentation on both xt and the self-conditioning inputs  # TODO: handle xt overrides
-                # xt_bb, transforms = center_random_augmentation(xt_bb,
-                #                                             seq_mask=seq_mask,
-                #                                             atom_mask=atom_mask,
-                #                                             missing_atom_mask=torch.zeros_like(atom_mask),
-                #                                             translation_scale=0.0,
-                #                                             return_transforms=True)
+                # AF3 CentreRandomAugmentation on both xt and the self-conditioning inputs  # TODO: handle xt overrides
+                xt_bb, transforms = center_random_augmentation(xt_bb,
+                                                            seq_mask=seq_mask,
+                                                            atom_mask=atom_mask,
+                                                            missing_atom_mask=torch.zeros_like(atom_mask),
+                                                            translation_scale=0.0,
+                                                            return_transforms=True)
 
                 # Apply self-conditioning
                 if self.use_self_conditioning and i > 0:
-                    # aux_preds["x1_pred"] = apply_random_augmentation(aux_preds["x1_pred"], transforms, seq_mask, atom_mask)  # apply random augmentation to the self-conditioning inputs
+                    aux_preds["x1_pred"] = apply_random_augmentation(aux_preds["x1_pred"], transforms, seq_mask, atom_mask)  # apply random augmentation to the self-conditioning inputs
                     denoiser_fn = partial(denoiser_fn, x_self_cond=aux_preds["x1_pred"])
 
                     # self-conditioning for autoguidance
                     if use_autoguidance:
-                        # aux_preds["x1_pred_ag"] = apply_random_augmentation(aux_preds["x1_pred_ag"], transforms, seq_mask, atom_mask)  # apply random augmentation to the self-conditioning inputs
+                        aux_preds["x1_pred_ag"] = apply_random_augmentation(aux_preds["x1_pred_ag"], transforms, seq_mask, atom_mask)  # apply random augmentation to the self-conditioning inputs
                         autoguidance_cfg["autoguidance_fn"] = partial(autoguidance_cfg["autoguidance_fn"],
                                                                       x_self_cond=aux_preds["x1_pred_ag"])
 
