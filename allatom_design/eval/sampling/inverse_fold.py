@@ -121,6 +121,8 @@ def main(cfg: DictConfig):
             residue_index=residue_index,
             timesteps=timesteps,
             aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
+            num_corrector_steps=cfg.num_corrector_steps,
+            corrector_step_ratio=cfg.corrector_step_ratio,
             cond_labels=cond_labels_in,
             scd_inputs=scd_inputs,
         )
