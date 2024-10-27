@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=aasd_scn_atom
-#SBATCH -p gpu_batch
+#SBATCH --job-name=aasd_gvp
+#SBATCH -p gpu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=96:00:00
+#SBATCH --time=23:59:00
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/talal/slurm_log_files/job_%j.out
@@ -19,7 +19,7 @@ OUT_DIR=/scratch/hielab/talal/allatom_design
 WANDB_ID=talal-widatalla
 cd $BASE_DIR
 
-EXP_NAME=aasd_scn_atom
+EXP_NAME=aasd_gvp
 GROUP=chimera_a8
 
 # Dataset paths
@@ -37,16 +37,15 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
     data.overwrite_cache=false \
-    data.subset_length_range=[16,9999] \
     train.batch_size=32 \
     train.compile_model=true \
     trainer.max_epochs=500 \
     model.task=allatom_seq_des \
     interpolant=mar_interpolant \
     interpolant.training_noise_schedule=uniform_squared_t \
-    interpolant.training_noise_cfg.uniform_squared_t.t_min=0.5 \
     denoiser=minimpnn_denoiser \
-    denoiser.minimpnn.model_type=baseline \
+    denoiser.minimpnn.model_type=sidechain \
+    denoiser.minimpnn.use_gvp=true \
     denoiser.minimpnn.augment_eps=0 \
     denoiser.minimpnn.graph_transformer.layers_per_nn=4 \
     denoiser.minimpnn.aggregation=sum \
