@@ -131,10 +131,9 @@ class SeqDenoiser(nn.Module):
         # aatype_override_mask = torch.ones_like(aatype)
         # aatype_override_mask = aatype_override_mask.unsqueeze(0).expand(*target_dims).long()  # view not clone to save a bit of memory
 
-        # Sequence time goes to 1 with a single pass
+        # Sequence time goes to 1 with a single pass; we start at 0 since we only pass in sequence info to sidechain diffusion
         t_seq = torch.tensor([0.0, 1.0]).to(x.device)[None].expand(x.shape[0], -1)  # [B, 2]
         timesteps = t_seq
-        target_dims = (t_seq.shape[1], *aatype.shape)
 
         # Override aatype with the input aatype during sidechain diffusion only
         scd_inputs["aatype_override"] = aatype
@@ -279,6 +278,8 @@ class SeqDenoiser(nn.Module):
         if scd_inputs.get("return_scn_diffusion_aux", False):
             aux["scn_diffusion_aux_traj"] = stack_aux_traj(scn_diffusion_aux_traj, dim=1)  # values are shape (B, S, S_scd, N, A, 3)
 
+        # override output aatype if we're overriding aatype in sidechain diffusion
+        aatype_t = scd_inputs.get("aatype_override", aatype_t)
         return xt, aatype_t, aux
 
 

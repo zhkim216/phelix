@@ -119,7 +119,8 @@ def main(cfg: DictConfig):
             for batch in tqdm(val_dataloader, desc=f"Evaluating sidechain packing on validation set using {S_scd} denoising steps", leave=False):
                 x, aatype = batch["x"].to(device), batch["aatype"].to(device)
                 scd_inputs["timesteps"] = t_scd.expand(x.shape[0], -1).to(device)
-                seq_mask, residue_index = batch["seq_mask"].to(device), batch["residue_index"].to(device)
+                seq_mask = batch["seq_mask"].to(device)
+                residue_index, chain_index = batch["residue_index"].to(device), batch["chain_index"].to(device)
                 cond_labels_in = {"crop_aug": batch["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
 
                 x_denoised, _, _ = lit_ad_model.model.sidechain_pack(
@@ -127,6 +128,7 @@ def main(cfg: DictConfig):
                     aatype,
                     seq_mask=seq_mask,
                     residue_index=residue_index,
+                    chain_index=chain_index,
                     cond_labels=cond_labels_in,
                     scd_inputs=scd_inputs,
                 )
