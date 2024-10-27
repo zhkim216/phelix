@@ -87,7 +87,7 @@ class SeqDenoiser(nn.Module):
         # Denoise coords
         _, _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"], None,
                                         batch["residue_index"], batch['chain_index'], batch["seq_mask"],
-                                        cond_labels_in=batch["cond_labels_in"],
+                                        batch['res_b_factors'], cond_labels_in=batch["cond_labels_in"],
                                         aux_inputs=aux_inputs)
 
         # Additional outputs for computing loss
@@ -95,6 +95,35 @@ class SeqDenoiser(nn.Module):
 
         return outputs
 
+    def score(self,
+              x,
+              aatype,
+              seq_mlm_mask,
+              seq_mask,
+              residue_index,
+              chain_index,
+              confidence              
+        ) -> TensorType["b n"]:
+        """
+        batch should contain:
+        - x: TensorType["b n a 3", float]
+        - residue_index: TensorType["b n", int]
+        - seq_mask: TensorType["b n", float]
+        - cond_labels_in: Dict[str, TensorType["b", int]]
+        """
+
+        # Denoise coords
+        seq_logits, _, _ = self.denoiser.seq_design_module(x,
+                                                          aatype, 
+                                                          None, #no seq self cond
+                                                          seq_mask, 
+                                                          residue_index, 
+                                                          chain_index,
+                                                          seq_mlm_mask,
+                                                          confidence
+                                                    )
+
+        return seq_logits
 
     def set_scale_factors(self,
                           scale_factors: Dict[str, Tuple[float, float]]):
