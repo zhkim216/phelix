@@ -22,8 +22,18 @@ from allatom_design.data.data import (
     gather_pos_enc
 )
 
-from .graph_transformer import GraphTransformer
-from .esm_model import ESMWrapper
+from allatom_design.model.seq_denoiser.denoisers.seq_design.graph_transformer import GraphTransformer
+
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_utils import (
+    GVPGraphEmbedding,
+    unflatten_graph
+)
+
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_modules import (
+    GVPConvLayer,
+    GVP,
+    LayerNorm
+)
 
 class FaMPNN(nn.Module):
     """Modified ProteinMPNN network to predict sequence from full atom structure."""
@@ -56,9 +66,9 @@ class FaMPNN(nn.Module):
         self.num_heads = cfg.graph_transformer.num_heads
         self.pos_enc = cfg.graph_transformer.pos_enc
         self.attn_bias = cfg.graph_transformer.attn_bias
-        self.use_esm = cfg.use_esm
+        self.use_gvp = getattr(cfg, "use_gvp", False)
 
-        if self.model_type not in ['graph_transformer', 'sidechain', 'baseline']:
+        if self.model_type not in ['graph_transformer', 'sidechain', 'baseline','gvp']:
             raise ValueError(f'Incorrect model type specified: {self.model_type}, must be one of: graph_transformer, sidechain, or baseline!')
         
         if self.autoregressive and self.model_type in ['graph_transformer']:
@@ -79,6 +89,7 @@ class FaMPNN(nn.Module):
             self.embed_pos = nn.Linear(self.pos_enc_size, self.dim_pos_enc, bias=True)
             self.proj_attn_bias = nn.Linear(self.pos_enc_size, self.num_heads, bias=True)
 
+            #Full atom encoder layers
             self.atom_decoder_layers = nn.ModuleList([
                 DecLayer(self.hidden_dim, self.atom_decoder_in, dropout=cfg.dropout_p)
                 for _ in range(self.num_decoder_layers)
@@ -95,6 +106,10 @@ class FaMPNN(nn.Module):
             DecLayer(self.hidden_dim, self.decoder_in, dropout=cfg.dropout_p)
             for _ in range(self.num_decoder_layers)
         ])
+
+        #GVP layers
+        if self.use_gvp:
+            self.gvp_encoder = GVPEncoder(cfg.gvp)
 
         # Output layers
         self.W_out = nn.Linear(self.hidden_dim, self.n_aatype, bias=True)
@@ -223,6 +238,7 @@ class FaMPNN(nn.Module):
         residue_index: TensorType["b n", int],
         chain_encoding: TensorType["b n", int],
         mlm_mask: TensorType["b n", bool],
+        confidence: TensorType["b n", float],
     ):
 
         B, N, _, _ = denoised_coords.shape
@@ -287,7 +303,7 @@ class FaMPNN(nn.Module):
             h_EX_encoder = cat_neighbors_nodes(torch.zeros((B, N, self.hidden_dim), device = h_S.device), h_EX_encoder, E_idx)
         
             # Extract sidechain features and concatenate to edge embeddings
-            E2, _ = self.sidechain_features(X, seq_mask, residue_index, chain_encoding, E_idx, atom14_mask)
+            E2, _ = self.sidechain_features(X, residue_index, chain_encoding, E_idx, atom14_mask)
             
             #128 -> 128
             h_E2 = self.W_e2(E2)
@@ -309,12 +325,13 @@ class FaMPNN(nn.Module):
 
         #keep copy of node embeddings from encoder
         h_V_dec = h_V.clone()
-    
-        if self.model_type in ['graph_transformer']:
-            
-            # Add empty hidden dim of 128 to end of h_EXV to later sum with added atom information
-            h_EX_encoder = cat_neighbors_nodes(torch.zeros((B, N, self.hidden_dim), device = h_S.device), h_EX_encoder, E_idx)
 
+        if self.use_gvp:
+            padding_mask = torch.where(seq_mask != 1, True, False)
+            h_V_flattened = self.gvp_encoder(X, E_idx, h_V, h_ESV, padding_mask, confidence, atom14_mask)
+            h_V = h_V_flattened.reshape(B, N, -1)
+
+        if self.model_type in ['graph_transformer']:
             #get graph transformer inputs
             q, ids_topk, unmasked_packed_X, num_atoms_per_residue, positional_enc, num_atoms = self.get_gt_inputs(X, atom14_mask, aatype_noised, seq_mask, chain_encoding)
             
@@ -592,7 +609,7 @@ class SidechainProteinFeatures(nn.Module):
         RBF = torch.exp(-((D_expand - D_mu) / D_sigma)**2)
         return RBF
 
-    def _get_rbf(self, A, B, E_idx, atom_mask):
+    def _get_rbf(self, A, B, E_idx):
         D_A_B = torch.sqrt(torch.sum((A[:,:,None,:] - B[:,None,:,:])**2,-1) + 1e-6) #[B, L, L]
         D_A_B_neighbors = gather_edges(D_A_B[:,:,:,None], E_idx)[:,:,:,0] #[B,L,K]
         RBF_A_B = self._rbf(D_A_B_neighbors)
@@ -605,19 +622,24 @@ class SidechainProteinFeatures(nn.Module):
 
         return RBF_A_B
 
-    def forward(self, X, mask, residue_idx, chain_labels, E_idx, atom_mask):
+    def forward(self, X, residue_idx, chain_labels, E_idx, atom_mask):
         max_atoms = X.shape[-2] #14
-        
         N = X[:,:,0,:]
         Ca = X[:,:,1,:]
         C = X[:,:,2,:]
         O = X[:,:,3,:]
 
         RBF_all = []        
+        
         for bb_atom in [Ca, N, C, O]:
             for non_bb_atom_pos in range(rc.num_bb_atoms, max_atoms):
-                    non_bb_atom_mask = atom_mask[:,:,non_bb_atom_pos]
-                    RBF_all.append(self._get_rbf(bb_atom, X[:, :, non_bb_atom_pos, :],  E_idx, non_bb_atom_mask))
+                non_bb_atom_mask = atom_mask[:,:,non_bb_atom_pos]
+                non_bb_atom_mask_neighbors = torch.gather(non_bb_atom_mask[...,None].expand(-1,-1,self.top_k), 1, E_idx)
+                rbf = self._get_rbf(bb_atom, X[:, :, non_bb_atom_pos, :],  E_idx)
+                
+                #insert 0 for rbf where destination atom does not exist
+                #rbf = torch.where(non_bb_atom_mask_neighbors[...,None].expand(-1,-1,-1,self.num_rbf) == 1, rbf, 0)
+                RBF_all.append(rbf)
 
         RBF_all = torch.cat(tuple(RBF_all), dim=-1)
 
@@ -719,8 +741,6 @@ class DecLayer(nn.Module):
         return h_V, h_E
 
 
-
-
 class EncLayer(nn.Module):
     def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
         super(EncLayer, self).__init__()
@@ -800,3 +820,49 @@ def cat_neighbors_nodes(h_nodes, h_neighbors, E_idx):
     h_nodes = gather_nodes(h_nodes, E_idx)
     h_nn = torch.cat([h_neighbors, h_nodes], -1)
     return h_nn
+
+
+class GVPEncoder(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
+        self.embed_graph = GVPGraphEmbedding(cfg.graph_embedding)
+
+        node_hidden_dim = (cfg.node_hidden_dim_scalar,
+                cfg.node_hidden_dim_vector)
+        edge_hidden_dim = (cfg.edge_hidden_dim_scalar,
+                cfg.edge_hidden_dim_vector)
+        
+        conv_activations = (F.relu, torch.sigmoid)
+        self.encoder_layers = nn.ModuleList(
+                GVPConvLayer(
+                    node_hidden_dim,
+                    edge_hidden_dim,
+                    drop_rate=cfg.dropout,
+                    vector_gate=True,
+                    attention_heads=0,
+                    n_message=3,
+                    conv_activations=conv_activations,
+                    n_edge_gvps=0,
+                    eps=1e-4,
+                    layernorm=True,
+                ) 
+            for i in range(cfg.num_encoder_layers)
+        )
+        
+
+        self.W_out = nn.Sequential(
+            LayerNorm(node_hidden_dim),
+            GVP(node_hidden_dim, (cfg.out_dim, 0)))
+        
+    def forward(self, coords, E_idx, h_V, h_E, padding_mask, confidence, atom14_mask):
+        node_embeddings, edge_embeddings, edge_index = self.embed_graph(
+                coords, E_idx, h_V, h_E, padding_mask, confidence, atom14_mask)
+                
+        for _, layer in enumerate(self.encoder_layers):
+            node_embeddings, edge_embeddings = layer(node_embeddings,
+                    edge_index, edge_embeddings)
+
+        h_V = self.W_out(node_embeddings)    
+
+        return h_V

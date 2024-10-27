@@ -1,4 +1,5 @@
 from typing import Dict, Optional, Tuple
+import torch
 
 import torch.nn.functional as F
 from omegaconf import DictConfig
@@ -41,6 +42,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
                 residue_index: TensorType["b n", int],
                 chain_encoding: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
+                confidence: TensorType["b n", float],
                 seq_self_cond: Optional[TensorType["b n k", float]] = None,  # k = n_aatype, logits
                 cond_labels_in: Dict[str, TensorType["b", int]] = {},
                 aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
@@ -65,7 +67,8 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
             seq_mask, 
             residue_index, 
             chain_encoding,
-            seq_mlm_mask)
+            seq_mlm_mask,
+            confidence)
 
         aatype_pred = seq_logits.argmax(dim=-1)  # TODO: need different handling for sampling
 
