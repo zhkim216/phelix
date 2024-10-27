@@ -170,6 +170,7 @@ class SidechainDiffusionModule(nn.Module):
             churn_cfg = scd_aux_inputs["churn_cfg"]
             noise_schedule = scd_aux_inputs["noise_schedule"]
             autoguidance_cfg = scd_aux_inputs["autoguidance_cfg"]
+            aatype = scd_aux_inputs.get("aatype_override", aatype)  # use aatype_override for sidechain diffusion instead
 
             # Only pack residues that are unmasked
             scd_mlm_mask = aux_inputs["seq_mlm_mask"]
