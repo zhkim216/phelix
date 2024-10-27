@@ -114,25 +114,36 @@ class SeqDenoiser(nn.Module):
                        aatype: TensorType["b n", int],
                        seq_mask: TensorType["b n", float],
                        residue_index: TensorType["b n", int],
+                       chain_index: TensorType["b n", int],
                        scd_inputs: Dict[str, Any],
                        **sampling_kwargs) -> Tuple[TensorType["b n", int],
                                                    Dict[str, torch.Tensor]]:
         """
         Given backbone and sequence, denoise sidechain atoms (sidechain packing).
         """
-        # Fix sequence time to 1 with a single pass
-        t_seq = torch.tensor([1.0, 1.0]).to(x.device)[None].expand(x.shape[0], -1)  # [B, 2]
+        # # Fix sequence time to 1 with a single pass
+        # t_seq = torch.tensor([1.0, 1.0]).to(x.device)[None].expand(x.shape[0], -1)  # [B, 2]
+        # timesteps = t_seq
+        # target_dims = (t_seq.shape[1], *aatype.shape)
+
+        # # Override aatype with the input aatype during sequence denoising
+        # aatype_override = aatype.unsqueeze(0).expand(*target_dims)
+        # aatype_override_mask = torch.ones_like(aatype)
+        # aatype_override_mask = aatype_override_mask.unsqueeze(0).expand(*target_dims).long()  # view not clone to save a bit of memory
+
+        # Sequence time goes to 1 with a single pass
+        t_seq = torch.tensor([0.0, 1.0]).to(x.device)[None].expand(x.shape[0], -1)  # [B, 2]
         timesteps = t_seq
         target_dims = (t_seq.shape[1], *aatype.shape)
 
-        # Override aatype with the input aatype during sequence denoising
-        aatype_override = aatype.unsqueeze(0).expand(*target_dims)
-        aatype_override_mask = torch.ones_like(aatype)
-        aatype_override_mask = aatype_override_mask.unsqueeze(0).expand(*target_dims).long()  # view not clone to save a bit of memory
+        # Override aatype with the input aatype during sidechain diffusion only
+        scd_inputs["aatype_override"] = aatype
 
-        return self.sample(x, seq_mask, residue_index, timesteps,
+        return self.sample(x, seq_mask, residue_index, chain_index, timesteps,
+                           num_corrector_steps=0,  # does not matter for sidechain packing
+                           corrector_step_ratio=0.0,  # does not matter for sidechain packing
                            aatype_decoding_order_mode="random",  # does not matter for sidechain packing
-                           aatype_override=aatype_override, aatype_override_mask=aatype_override_mask,
+                        #    aatype_override=aatype_override, aatype_override_mask=aatype_override_mask,
                            scd_inputs=scd_inputs,
                            **sampling_kwargs)
 
@@ -145,7 +156,7 @@ class SeqDenoiser(nn.Module):
                timesteps: TensorType["b s+1", float],  # timesteps for t_seq
                aatype_decoding_order_mode: str,
                num_corrector_steps: int,
-               corrector_step_ratio: TensorType["1", float],
+               corrector_step_ratio: float,
                cond_labels: Dict[str, TensorType["b", int]],
                aatype_override: Optional[TensorType["s+1 b n", int]] = None,  # for fixed-sequence sampling, e.g. in sidechain packing
                aatype_override_mask: Optional[TensorType["s+1 b n", int]] = None,

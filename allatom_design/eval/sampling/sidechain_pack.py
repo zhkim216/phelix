@@ -110,7 +110,8 @@ def main(cfg: DictConfig):
         batch_i = ADDataset.index_into_batch(examples, idxs)
         x, aatype = batch_i["x"].to(device), batch_i["aatype"].to(device)
         scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
-        seq_mask, residue_index = batch_i["seq_mask"].to(device), batch_i["residue_index"].to(device)
+        seq_mask = batch_i["seq_mask"].to(device)
+        residue_index, chain_index = batch_i["residue_index"].to(device), batch_i["chain_index"].to(device)
         cond_labels_in = {"crop_aug": batch_i["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
 
         x_denoised, aatype_denoised, aux = lit_sd_model.model.sidechain_pack(
@@ -118,17 +119,19 @@ def main(cfg: DictConfig):
             aatype,
             seq_mask=seq_mask,
             residue_index=residue_index,
+            chain_index=chain_index,
             cond_labels=cond_labels_in,
             scd_inputs=scd_inputs,
         )
 
-        likelihood_aux = lit_sd_model.model.get_sidechain_likelihoods(cfg.likelihood_num_steps,
-                                                                      x, aatype,
-                                                                      seq_mask=seq_mask,
-                                                                      residue_index=residue_index,
-                                                                      cond_labels=cond_labels_in,
-                                                                      atom_mask=batch_i["atom_mask"].to(device),
-                                                                      scd_inputs=scd_inputs)
+        # likelihood_aux = lit_sd_model.model.get_sidechain_likelihoods(cfg.likelihood_num_steps,
+        #                                                               x, aatype,
+        #                                                               seq_mask=seq_mask,
+        #                                                               residue_index=residue_index,
+        #                                                               chain_index=chain_index,
+        #                                                               cond_labels=cond_labels_in,
+        #                                                               atom_mask=batch_i["atom_mask"].to(device),
+        #                                                               scd_inputs=scd_inputs)
 
         samples = {"x_denoised": x_denoised,
                    "seq_mask": seq_mask,
@@ -143,7 +146,7 @@ def main(cfg: DictConfig):
         sample_info["pdb"] += batch_i["pdb_key"]
         sample_info["seq_mask"].append(seq_mask)
         sample_info["aatype"].append(aatype)
-        [sample_info[k].append(v.cpu()) for k, v in likelihood_aux.items()]
+        # [sample_info[k].append(v.cpu()) for k, v in likelihood_aux.items()]
 
         # Sidechain RMSD per residue
         atom_mask = batch_i["atom_mask"]
@@ -191,10 +194,10 @@ def main(cfg: DictConfig):
         #               filenames=[f"{traj_out_dir}/xt_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
 
         # save likelihood traj
-        SeqDenoiser.save_sidechain_likelihood_traj(likelihood_aux, aatype, seq_mask, batch_i["residue_index"], batch_i["chain_index"],
-                                                   save_traj_mask=save_traj_mask, save_diff_traj_steps=save_sd_traj_steps,
-                                                   filenames=[f"{traj_out_dir}/likelihood_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)],
-                                                   traj_conect=cfg.traj_conect)
+        # SeqDenoiser.save_sidechain_likelihood_traj(likelihood_aux, aatype, seq_mask, batch_i["residue_index"], batch_i["chain_index"],
+        #                                            save_traj_mask=save_traj_mask, save_diff_traj_steps=save_sd_traj_steps,
+        #                                            filenames=[f"{traj_out_dir}/likelihood_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)],
+        #                                            traj_conect=cfg.traj_conect)
 
 
 
@@ -236,9 +239,9 @@ def main(cfg: DictConfig):
     metrics_df = pd.DataFrame(scn_metrics, index=[0])
     metrics_df.to_csv(f"{cfg.out_dir}/scn_metrics.csv", index=False)
 
-    plot_rmsd_vs_npa(sample_info, cfg.out_dir)
-    plot_rmsd_vs_npa_per_residue(sample_info, cfg.out_dir)
-    plot_per_protein_rmsd_vs_npa(sample_info, cfg.out_dir)
+    # plot_rmsd_vs_npa(sample_info, cfg.out_dir)
+    # plot_rmsd_vs_npa_per_residue(sample_info, cfg.out_dir)
+    # plot_per_protein_rmsd_vs_npa(sample_info, cfg.out_dir)
 
 
 def plot_rmsd_vs_npa(sample_info, out_dir: str):

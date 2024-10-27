@@ -94,7 +94,7 @@ class LitAtomDenoiser(L.LightningModule):
             ts = list(itertools.product(self.cfg.eval.eval_timesteps_seq, self.cfg.eval.eval_timesteps_bb))
             for t_sd, t_bb in ts:
                 t_sd_batch = torch.full((B,), fill_value=t_sd, device=batch["seq_mask"].device)
-                batch["t_bb"]
+                batch["t_bb"] = t_bb
 
                 outputs = self(batch, t_sd=t_sd_batch)
                 _, aux = self.loss(outputs, batch, return_aux=True)
