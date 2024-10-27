@@ -804,6 +804,7 @@ restype_num = len(restypes)  # := 20.
 unk_restype_index = restype_num  # Catch-all index for unknown restypes.
 
 restypes_with_x = restypes + ["X"]
+restype_with_x_num = len(restypes_with_x)
 restype_order_with_x = {restype: i for i, restype in enumerate(restypes_with_x)}
 idx_to_restype_with_x = {i: restype for restype, i in restype_order_with_x.items()}
 
@@ -1259,3 +1260,34 @@ r_max = 32
 
 #max relative chain distance
 s_max = 2
+
+"""
+Residue mapping for NCAAs, some we map to X/UNK, other's we map to a corresponding canonical amino acid
+
+MSE: Selenomethionine (Methionine with selenium replacing sulfur)
+CME: S,S-(2-Hydroxyethyl)thio-cysteine (Cysteine modified with a hydroxyethyl group)
+CSO: S-hydroxycysteine (Cysteine with a hydroxyl group replacing sulfur)
+TPO: Phosphothreonine (Threonine with a phosphate group)
+SEP: Phosphoserine (Serine with a phosphate group)
+PTR: Phosphotyrosine (Tyrosine with a phosphate group)
+MLY: Nε-methyllysine (Lysine methylated at the ε-amino group)
+HYP: Hydroxyproline (Proline with a hydroxyl group)
+PCA: Pyroglutamate (Cyclized glutamine or glutamic acid)
+ACE: Acetyl group (Used as a blocking group, often at the N-terminus)
+"""
+
+ncaa_mapping = {
+    'MSE':"M",
+    'CME':"X",
+    'CSO':"X",
+    'TPO':"X",
+    'SEP':"X",
+    'PTR':"X",
+    'MLY':"X",
+    'HYP':"X",
+    'PCA':"X",
+    'ACE':"X",
+    'GTS':"X",
+    'GSH':"X"
+}
+

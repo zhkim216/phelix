@@ -15,7 +15,7 @@ minimpnn:
   n_aatype: ${model.n_aatype}
   use_self_conditioning_seq: ${model.denoiser.use_self_conditioning_seq}
   use_time_cond: false
-
+  use_gvp: false
   n_channel: 128
   n_layers: 3
   k_neighbors: 48
@@ -40,10 +40,24 @@ minimpnn:
     pos_enc: true
     attn_bias: true
 
-  esm:
-    esm_type: "esm2_8M"  # one of ["esm2_8M", "esm2_35M", "esm2_150M", "esm2_650M", "esm2_3B", "esm2_15B"]
-    n_tokens_embed: ${model.n_aatype}
-    c_s: ${model.denoiser.minimpnn.n_channel}
+  gvp:
+    out_dim: ${model.denoiser.minimpnn.n_channel}
+    node_hidden_dim_scalar: 128
+    node_hidden_dim_vector: 16
+    edge_hidden_dim_scalar: 512
+    edge_hidden_dim_vector: 1
+    graph_embedding:
+      top_k_neighbors: ${model.denoiser.minimpnn.k_neighbors}
+      num_positional_embeddings: 16
+      n_aatype: ${model.n_aatype}
+      remove_edges_without_coords: true
+      node_hidden_dim_scalar: ${model.denoiser.minimpnn.gvp.node_hidden_dim_scalar}
+      node_hidden_dim_vector: ${model.denoiser.minimpnn.gvp.node_hidden_dim_vector}
+      edge_hidden_dim_scalar: ${model.denoiser.minimpnn.gvp.edge_hidden_dim_scalar}
+      edge_hidden_dim_vector: ${model.denoiser.minimpnn.gvp.edge_hidden_dim_vector}
+    dropout: ${model.denoiser.minimpnn.dropout_p}
+    num_encoder_layers: ${model.denoiser.minimpnn.n_layers}
+
 
 seq_head:
   in_channels: ${model.denoiser.minimpnn.n_channel}

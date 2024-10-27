@@ -60,7 +60,7 @@ def load_feats_from_pdb(pdb, chain_residx_gap: int, max_conformers: int = 1):
 
     feats["ghost_atom_mask"] = ghost_atom_mask  # [n, a] or [n, c, a]
     feats["missing_atom_mask"] = missing_atom_mask  # [n, a] or [n, c, a]
-
+    feats["res_b_factors"] = torch.sum(feats["b_factors"], dim = -1) / torch.sum((1 - ghost_atom_mask), dim = -1)
     return feats
 
 

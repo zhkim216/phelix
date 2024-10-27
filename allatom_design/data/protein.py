@@ -95,9 +95,8 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_id: Optional[str] 
 
     models = list(structure.get_models())
     if len(models) != 1:
-        raise ValueError(
-            f"Only single model PDBs are supported. Found {len(models)} models."
-        )
+        print(f"Only single model PDBs are supported. Found {len(models)} models, but using first model by default.")
+        
     model = models[0]
 
     atom_positions = []
@@ -120,8 +119,10 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_id: Optional[str] 
                 # print(f"WARNING: PDB {pdb_file} contains an insertion code at chain {chain.id} and residue index {res.id[1]}. These aren't supported at the moment.")
                 pass
             if res.id[0] != " ":
-                # Ignore heteroatoms.
-                continue
+                if res.resname in residue_constants.ncaa_mapping.keys(): #allow all ncaas to get classified as 'X'
+                    pass
+                else:
+                    continue
 
             res_shortname = residue_constants.restype_3to1.get(res.resname, "X")
             restype_idx = residue_constants.restype_order.get(
