@@ -21,6 +21,8 @@ from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     DiTDenoiser
 from allatom_design.model.atom_denoiser.denoisers.esm_dit_denoiser import \
     ESMDiTDenoiser
+from allatom_design.model.atom_denoiser.denoisers.triangle_dit_denoiser import \
+    TriangleDiTDenoiser
 
 
 class AtomDenoiser(nn.Module):
@@ -339,6 +341,8 @@ def get_denoiser(cfg: DictConfig,
         return DiTDenoiser(cfg, sigma_data)
     elif cfg.name == "esm_dit":
         return ESMDiTDenoiser(cfg, sigma_data)
+    elif cfg.name == "triangle_dit":
+        return TriangleDiTDenoiser(cfg, sigma_data)
     else:
         raise ValueError(f"Unknown denoiser: {cfg.name}")
 
