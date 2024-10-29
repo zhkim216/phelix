@@ -20,28 +20,38 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
 from omegaconf import DictConfig, OmegaConf
+from timm.models.vision_transformer import Mlp
 from torchtyping import TensorType
 from tqdm import tqdm
 
 import allatom_design.data.conditioning_labels as cl
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
 from allatom_design.data import residue_constants as rc
+from allatom_design.data.data import (apply_random_augmentation,
+                                      build_struct_pair_feat, cat_bb_scn,
+                                      center_random_augmentation)
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
-from allatom_design.data.data import center_random_augmentation, apply_random_augmentation
 from allatom_design.model.atom_denoiser.denoisers.dit_utils import (
-    DiTBlock, FinalLayer, LabelEmbedder, MultiHeadRMSNorm)
+    Attention, DiTBlock, FinalLayer, LabelEmbedder, MultiHeadRMSNorm)
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
 from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
     TimestepEmbedder
-from openfold.model.primitives import Linear
+from openfold.model.dropout import DropoutColumnwise, DropoutRowwise
+from openfold.model.heads import DistogramHead
+from openfold.model.pair_transition import PairTransition
+from openfold.model.primitives import LayerNorm, Linear
+from openfold.model.triangular_attention import (TriangleAttentionEndingNode,
+                                                 TriangleAttentionStartingNode)
+from openfold.model.triangular_multiplicative_update import (
+    TriangleMultiplicationIncoming, TriangleMultiplicationOutgoing)
 
 
-class DiTDenoiser(BaseAtomDenoiser):
+class TriangleDiTDenoiser(BaseAtomDenoiser):
     def __init__(self,
                  cfg: DictConfig,
                  sigma_data: Tuple[TensorType[(), float]]):
@@ -56,13 +66,13 @@ class DiTDenoiser(BaseAtomDenoiser):
         self.interpolant = EDM(cfg.interpolant, sigma_data=sigma_data)
 
         # Set up DiT
-        self.dit = DiT(cfg.dit, self.interpolant)
+        self.dit = PairStackDiT(cfg.dit, self.interpolant)
 
         # Autoguidance
         self.use_autoguidance = cfg.autoguidance.enabled
         if self.use_autoguidance:
             self.autoguidance_train_p = 1 / cfg.autoguidance.subsample_train_iter_mult
-            self.guiding_model = DiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.interpolant)  # override with autoguidance config
+            self.guiding_model = PairStackDiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.interpolant)  # override with autoguidance config
 
 
     def forward(self,
@@ -225,7 +235,6 @@ class DiTDenoiser(BaseAtomDenoiser):
                                   residue_index=residue_index, seq_mask=seq_mask,
                                   cond_labels_in=cond_labels_in)
 
-            atom_mask = torch.ones(xt_bb.shape[:-1], device=seq_mask.device, dtype=seq_mask.dtype) * seq_mask.unsqueeze(-1)
             for i in tqdm(range(S), leave=False, desc="Sampling..."):
                 t = timesteps[:, i]
                 t_next = timesteps[:, i + 1]
@@ -233,22 +242,12 @@ class DiTDenoiser(BaseAtomDenoiser):
                 xt_bb, t = self.interpolant.churn(xt_bb, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
                 xt_bb = xt_bb * (1 - xt_bb_override_mask[i]) + xt_bb_override[i] * xt_bb_override_mask[i]  # override xt for inputs
 
-                # # AF3 CentreRandomAugmentation on both xt and the self-conditioning inputs  # TODO: handle xt overrides
-                # xt_bb, transforms = center_random_augmentation(xt_bb,
-                #                                             seq_mask=seq_mask,
-                #                                             atom_mask=atom_mask,
-                #                                             missing_atom_mask=torch.zeros_like(atom_mask),
-                #                                             translation_scale=0.0,
-                #                                             return_transforms=True)
-
                 # Apply self-conditioning
                 if self.use_self_conditioning and i > 0:
-                    # aux_preds["x1_pred"] = apply_random_augmentation(aux_preds["x1_pred"], transforms, seq_mask, atom_mask)  # apply random augmentation to the self-conditioning inputs
                     denoiser_fn = partial(denoiser_fn, x_self_cond=aux_preds["x1_pred"])
 
                     # self-conditioning for autoguidance
                     if use_autoguidance:
-                        # aux_preds["x1_pred_ag"] = apply_random_augmentation(aux_preds["x1_pred_ag"], transforms, seq_mask, atom_mask)  # apply random augmentation to the self-conditioning inputs
                         autoguidance_cfg["autoguidance_fn"] = partial(autoguidance_cfg["autoguidance_fn"],
                                                                       x_self_cond=aux_preds["x1_pred_ag"])
 
@@ -295,10 +294,10 @@ class DiTDenoiser(BaseAtomDenoiser):
         return likelihood_aux
 
 
-class DiT(nn.Module):
+class PairStackDiT(nn.Module):
     def __init__(self, cfg: DictConfig, interpolant: ADInterpolant):
         """
-        DiT for unconditional backbone diffusion
+        DiT with a pair stack applied to the self-conditioning track.
         """
         super().__init__()
 
@@ -308,6 +307,7 @@ class DiT(nn.Module):
         # Set up DiT model
         self.num_atoms_in = cfg.num_atoms_in
         self.use_self_conditioning = cfg.use_self_conditioning
+        assert self.use_self_conditioning, "PairStackDiT requires self-conditioning."
         self.condition_on_seq = cfg.condition_on_seq
 
         # Input and output channels
@@ -319,6 +319,12 @@ class DiT(nn.Module):
 
         self.out_channels = self.c
         self.n_aatype = cfg.n_aatype
+
+        # Self-conditioning pair stack
+        self.self_cond_pair_stack = SelfCondPairStack(cfg.self_cond_pair_stack)
+        self.pair_bias_embedder = nn.Sequential(LayerNorm(cfg.channels_2d),
+                                                Linear(cfg.channels_2d, cfg.num_heads, init="normal", bias=False))
+
 
         # Model parameters
         self.num_heads = cfg.num_heads
@@ -414,6 +420,7 @@ class DiT(nn.Module):
             if x_self_cond is None:
                 x_self_cond = torch.zeros_like(x_noised)
             x_noised = torch.cat([x_noised, x_self_cond], dim=-1)
+            pair_bias = self.pair_bias_embedder(self.self_cond_pair_stack(x_self_cond, residue_index, seq_mask))
 
         x = rearrange(x_noised, "b n a x -> b n (a x)")
 
@@ -457,7 +464,8 @@ class DiT(nn.Module):
         # Blocks
         attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
         for block in self.blocks:
-            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None)
+            attn_bias = rearrange(pair_bias, "b i j h -> b h i j")
+            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=attn_bias)
 
         # Final layer
         x = self.final_layer(x, c)
@@ -468,3 +476,207 @@ class DiT(nn.Module):
         x = precondition_out(x)  # output preconditioning
 
         return x, aux_preds
+
+
+class SelfCondPairStack(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        """
+        Based on AF2/AF3 Evoformer/Pairformer pair stack. Currently not implemented exactly the same as the original.
+        Input should be self-conditioning input and residue index.
+        """
+        super().__init__()
+
+        self.cfg = cfg
+        self.rel_pos_embedder = RelativePositionalEncoding(cfg.relative_positional_encoding)
+        self.structure_embedder = StructureEmbedder(cfg.structure_embedder)
+
+        # Blocks
+        self.pair_block = PairStackBlock(cfg.pair_stack_block)
+
+
+    def forward(self,
+                x_self_cond: TensorType["b n 4 3", float],
+                residue_index: TensorType["b n", int],
+                seq_mask: TensorType["b n", float],
+                ) -> Tuple[TensorType["b n c_in", float], TensorType["b n n c_z", float]]:
+        # Handle masking
+        mask_2d = seq_mask[:, :, None] * seq_mask[:, None, :]
+
+        # Begin forward pass
+        z = self.rel_pos_embedder(residue_index)
+        z = z + self.structure_embedder(x_self_cond, seq_mask)
+        z = self.pair_block(z, z_mask=mask_2d)
+
+        return z
+
+
+class RelativePositionalEncoding(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        super().__init__()
+        self.cfg = cfg
+
+        self.c_z = cfg.c_z
+        self.relpos_k = cfg.relpos_k
+
+        # RPE
+        self.n_bins = 2 * self.relpos_k + 1
+        self.linear_relpos = Linear(self.n_bins, self.c_z)
+
+
+    def relpos(self, ri: TensorType["b n", int]) -> TensorType["b n n c_z", float]:
+        """
+        Computes relative positional encodings
+
+        Implements Algorithm 4.
+
+        Args:
+            ri:
+                "residue_index" features of shape [*, N]
+        """
+        d = ri[..., None] - ri[..., None, :]
+        boundaries = torch.arange(
+            start=-self.relpos_k, end=self.relpos_k + 1, device=d.device
+        )
+        reshaped_bins = boundaries.view(((1,) * len(d.shape)) + (len(boundaries),))
+        d = d[..., None] - reshaped_bins
+        d = torch.abs(d)
+        d = torch.argmin(d, dim=-1)
+        d = nn.functional.one_hot(d, num_classes=len(boundaries)).float()
+        d = d.to(ri.dtype)
+        return self.linear_relpos(d)
+
+
+    def forward(self, ri: TensorType["b n", int]) -> TensorType["b n n c_z", float]:
+        z = self.relpos(ri.float())  # [b, n, n, c_z]
+        return z
+
+
+class StructureEmbedder(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        super().__init__()
+        self.cfg = cfg
+
+        # 2D embedder
+        self.pair_embedder = Linear(cfg.embedder_2d.n_bins + 1,  # +1 for the mask
+                                    cfg.embedder_2d.c_z,
+                                    init="relu")  # TemplatePairEmbedder: Despite there being no relu nearby, the source uses that initializer
+        self.pair_stack = PairStack(cfg.embedder_2d.pair_stack)
+
+
+    def forward(self,
+                x_noised: TensorType["b n 4 3", float],
+                seq_mask: TensorType["b n", float]) -> TensorType["b n n c_z", float]:
+        # Build 2D embeddings
+        dgram_batch = {"pseudo_beta_mask": seq_mask, "pseudo_beta": x_noised[..., 1, :]}
+
+        z = build_struct_pair_feat(dgram_batch, self.cfg.distogram.min_bin, self.cfg.distogram.max_bin, self.cfg.distogram.no_bins)
+        z = self.pair_embedder(z)
+
+        mask_2d = seq_mask[..., None] * seq_mask[..., None, :]
+        z = self.pair_stack(z, z_mask=mask_2d)
+        return z
+
+
+class PairStack(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        super().__init__()
+
+        self.cfg = cfg
+        # self.blocks_per_ckpt = cfg.blocks_per_ckpt
+        self.blocks = nn.ModuleList()
+
+        for _ in range(self.cfg.n_blocks):
+            self.blocks.append(PairStackBlock(self.cfg.pair_stack_block))
+
+        self.layer_norm = LayerNorm(self.cfg.c_z, eps=cfg.eps)
+
+
+    def forward(self,
+                z: TensorType["b n n c_z", float],
+                z_mask: TensorType["b n n", float]
+                ) -> TensorType["b n n c_z", float]:
+        """
+        Run the pair stack with gradient checkpointing. Without gradient checkpointing, equivalent to:
+        for block in self.blocks:
+            z = block(z, z_mask)
+        """
+        # Run blocks with gradient checkpointing
+        # blocks = [partial(block, z_mask=z_mask) for block in self.blocks]
+        # z, = checkpoint_blocks(blocks=blocks,
+        #                        args=(z, ),
+        #                        blocks_per_ckpt=self.blocks_per_ckpt if self.training else None)
+        for block in self.blocks:
+            z = block(z, z_mask)
+
+        return self.layer_norm(z)
+
+
+
+class PairStackBlock(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        super().__init__()
+
+        self.cfg = cfg
+        self.use_tri_mul = cfg.use_tri_mul
+        self.tri_mul_first = cfg.tri_mul_first
+
+        self.dropout_row = DropoutRowwise(cfg.dropout_rate)
+        self.dropout_col = DropoutColumnwise(cfg.dropout_rate)
+
+        self.tri_att_start = TriangleAttentionStartingNode(cfg.c_z, cfg.c_hidden_tri_att, cfg.n_heads, inf=cfg.inf)
+        self.tri_att_end = TriangleAttentionEndingNode(cfg.c_z, cfg.c_hidden_tri_att, cfg.n_heads, inf=cfg.inf)
+
+        if self.use_tri_mul:
+            self.tri_mul_out = TriangleMultiplicationOutgoing(cfg.c_z, cfg.c_hidden_tri_mul)
+            self.tri_mul_in = TriangleMultiplicationIncoming(cfg.c_z, cfg.c_hidden_tri_mul)
+
+        self.pair_transition = PairTransition(cfg.c_z, cfg.pair_transition_n)
+
+
+    def forward(self,
+                z: TensorType["b n n c_z", float],
+                z_mask: TensorType["b n n", float],
+                ) -> TensorType["b n n c_z", float]:
+        if not self.use_tri_mul:
+            z = self.tri_att_start_end(z, z_mask)
+        else:
+            if self.tri_mul_first:
+                z = self.tri_mul_out_in(z, z_mask)
+                z = self.tri_att_start_end(z, z_mask)
+            else:
+                z = self.tri_att_start_end(z, z_mask)
+                z = self.tri_mul_out_in(z, z_mask)
+
+        z = z + self.pair_transition(z, mask=z_mask)
+
+        return z
+
+
+    def tri_mul_out_in(self,
+                       z: TensorType["b n n c_z", float],
+                       z_mask: TensorType["b n n", float]
+                       ) -> TensorType["b n n c_z", float]:
+        tmu_update = self.tri_mul_out(z, mask=z_mask)
+        z = z + self.dropout_row(tmu_update)
+        del tmu_update
+
+        tmu_update = self.tri_mul_in(z, mask=z_mask)
+        z = z + self.dropout_row(tmu_update)
+        del tmu_update
+
+        return z
+
+
+    def tri_att_start_end(self,
+                          z: TensorType["b n n c_z", float],
+                          z_mask: TensorType["b n n", float],
+                          ) -> TensorType["b n n c_z", float]:
+        ta_update = self.tri_att_start(z, mask=z_mask)
+        z = z + self.dropout_row(ta_update)
+        del ta_update
+
+        ta_update = self.tri_att_end(z, mask=z_mask)
+        z = z + self.dropout_col(ta_update)
+        del ta_update
+
+        return z
