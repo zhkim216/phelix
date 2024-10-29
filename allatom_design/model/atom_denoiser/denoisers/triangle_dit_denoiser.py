@@ -426,7 +426,7 @@ class PairStackDiT(nn.Module):
                 B, N, N_heads = *x_noised.shape[:2], self.num_heads
                 pair_bias = torch.zeros((B, N, N, N_heads), device=x_noised.device)
             else:
-                pair_bias = self.pair_bias_embedder(self.self_cond_pair_stack(x_self_cond, residue_index, seq_mask))
+                pair_bias = self.pair_bias_embedder(self.self_cond_pair_stack(x_self_cond * self.interpolant.sigma_data, residue_index, seq_mask))
 
         x = rearrange(x_noised, "b n a x -> b n (a x)")
 
