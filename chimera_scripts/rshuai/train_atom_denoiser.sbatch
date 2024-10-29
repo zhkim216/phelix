@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=b1_bb1
+#SBATCH --job-name=b1_bb4
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=1
-#SBATCH --cpus-per-task=8
+#SBATCH --gpus-per-node=2
+#SBATCH --cpus-per-task=16
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -25,7 +25,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=b1_bb1
+EXP_NAME=b1_bb4
 GROUP=chimera_b1
 
 # Dataset paths
@@ -41,12 +41,12 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
     data.designability_csvs=[${DESIGNABILITY_CSV}] \
-    data.fixed_size=512 \
-    train.batch_size=64 \
+    data.fixed_size=256 \
+    train.batch_size=32 \
     train.compile_model=true \
+    trainer.strategy=ddp_find_unused_parameters_true \
     model.task=backbone \
-    denoiser=triangle_dit_denoiser \
-    denoiser.dit.skip_pair_when_no_self_cond=false \
+    denoiser=mpnn_dit_denoiser \
     denoiser.autoguidance.enabled=false \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=50000 \
