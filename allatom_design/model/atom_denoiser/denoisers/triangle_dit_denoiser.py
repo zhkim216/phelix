@@ -321,6 +321,7 @@ class PairStackDiT(nn.Module):
         self.n_aatype = cfg.n_aatype
 
         # Self-conditioning pair stack
+        self.skip_pair_when_no_self_cond = cfg.skip_pair_when_no_self_cond
         self.self_cond_pair_stack = SelfCondPairStack(cfg.self_cond_pair_stack)
         self.pair_bias_embedder = nn.Sequential(LayerNorm(cfg.channels_2d),
                                                 Linear(cfg.channels_2d, cfg.num_heads, init="normal", bias=False))
@@ -417,10 +418,15 @@ class PairStackDiT(nn.Module):
 
         # Concatenate self-conditioning
         if self.use_self_conditioning:
-            if x_self_cond is None:
-                x_self_cond = torch.zeros_like(x_noised)
+            has_self_cond = x_self_cond is not None
+            x_self_cond = x_self_cond if has_self_cond else torch.zeros_like(x_noised)
             x_noised = torch.cat([x_noised, x_self_cond], dim=-1)
-            pair_bias = self.pair_bias_embedder(self.self_cond_pair_stack(x_self_cond, residue_index, seq_mask))
+
+            if not has_self_cond and self.skip_pair_when_no_self_cond:
+                B, N, N_heads = *x_noised.shape[:2], self.num_heads
+                pair_bias = torch.zeros((B, N, N, N_heads), device=x_noised.device)
+            else:
+                pair_bias = self.pair_bias_embedder(self.self_cond_pair_stack(x_self_cond, residue_index, seq_mask))
 
         x = rearrange(x_noised, "b n a x -> b n (a x)")
 

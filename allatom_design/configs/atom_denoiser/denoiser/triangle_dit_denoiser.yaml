@@ -41,6 +41,7 @@ dit:
   mlp_ratio: 4.0
 
   # Self-conditioning pair stack
+  skip_pair_when_no_self_cond: false
   self_cond_pair_stack:
     channels_2d: ${model.denoiser.dit.channels_2d}
 
