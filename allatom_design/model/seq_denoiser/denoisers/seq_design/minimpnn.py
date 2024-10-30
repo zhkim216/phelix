@@ -23,7 +23,7 @@ class MiniMPNN(nn.Module):
         self.seq_emb_dim = cfg.n_channel
         self.use_self_conditioning_seq = cfg.use_self_conditioning_seq
         self.use_time_cond = cfg.use_time_cond
-        assert not cfg.use_self_conditioning_seq and not cfg.use_time_cond, "Not implemented yet"
+        # assert not cfg.use_self_conditioning_seq and not cfg.use_time_cond, "Not implemented yet"
 
         self.model_type = cfg.model_type
         self.node_features = cfg.n_channel
