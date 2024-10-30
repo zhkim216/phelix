@@ -322,6 +322,7 @@ class MPNNDiT(nn.Module):
         self.n_aatype = cfg.n_aatype
 
         # MPNN encoder
+        self.mpnn_downsample_factor = cfg.mpnn_downsample_factor
         self.mpnn_encoder = MiniMPNN(cfg.minimpnn_encoder)
         self.proj_h_V = Linear(cfg.minimpnn_encoder.n_channel, cfg.hidden_size)  # project h_V to DiT hidden size
 
@@ -415,7 +416,9 @@ class MPNNDiT(nn.Module):
         x_noised, x_self_cond, t = precondition_in()  # input preconditioning
 
         # Embed preconditioned x_noised with MPNN
-        h_V = self.mpnn_encoder.encode_bb_coords(x_noised, seq_mask, residue_index, t_bb=t)
+        x_noised_ds, seq_mask_ds, residue_index_ds = downsample_mpnn_inputs(x_noised, seq_mask, residue_index, self.mpnn_downsample_factor)
+        h_V = self.mpnn_encoder.encode_bb_coords(x_noised_ds, seq_mask_ds, residue_index_ds, t_bb=t)
+        h_V = upsample_mpnn_outputs(h_V, self.mpnn_downsample_factor)
 
         # Concatenate self-conditioning
         if self.use_self_conditioning:
@@ -478,3 +481,38 @@ class MPNNDiT(nn.Module):
         x = precondition_out(x)  # output preconditioning
 
         return x, aux_preds
+
+
+def downsample_mpnn_inputs(x_noised: TensorType["b n a 3", float],
+                           seq_mask: TensorType["b n", float],
+                           residue_index: TensorType["b n", int],
+                           downsample_factor: int):
+    B, N, A, X = x_noised.shape
+    ds = downsample_factor
+    assert N % ds == 0, "fixed_size must be divisible by downsample_factor"
+
+    # Reshape tensors for downsampling
+    x_noised_window = x_noised.reshape(B, N // ds, ds, A, X)
+    seq_mask_window = seq_mask.reshape(B, N // ds, ds)
+    residue_index_window = residue_index.reshape(B, N // ds, ds)
+
+    # Downsample seq_mask
+    num_non_pad = seq_mask_window.sum(dim=-1)
+    seq_mask = (num_non_pad > 0).float()
+
+    # Downsample x_noised: average within the window
+    x_noised = (x_noised_window * rearrange(seq_mask_window, "b n df -> b n df 1 1")).sum(dim=2) / torch.clamp(rearrange(num_non_pad, "b n -> b n 1 1"), min=1e-8)
+
+    # Downsample residue_index (taking the first index in each window)
+    residue_index = residue_index_window[:, :, 0]
+
+    return x_noised, seq_mask, residue_index
+
+
+def upsample_mpnn_outputs(h_V: TensorType["b n h"], downsample_factor: int):
+    B, N, H = h_V.shape
+    ds = downsample_factor
+
+    # Repeat along the downsampling dimension
+    h_V_upsampled = repeat(h_V, "b n h -> b (n ds) h", ds=ds)
+    return h_V_upsampled
