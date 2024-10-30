@@ -47,7 +47,7 @@ dit:
     no_aatype_pred: true
     n_aatype: 21
     use_self_conditioning_seq: false
-    use_time_cond: false
+    use_time_cond: true
 
     n_channel: 128
     n_layers: 3
