@@ -40,8 +40,8 @@ dit:
   mlp_dropout: 0.1
   mlp_ratio: 4.0
 
-
   # MPNN encoder denoiser
+  mpnn_downsample_factor: 2
   minimpnn_encoder:
     autoregressive: false
     no_aatype_pred: true
