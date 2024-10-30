@@ -490,6 +490,7 @@ def downsample_mpnn_inputs(x_noised: TensorType["b n a 3", float],
     B, N, A, X = x_noised.shape
     ds = downsample_factor
     assert N % ds == 0, "fixed_size must be divisible by downsample_factor"
+    # TODO: support different fixed sizes by simply padding
 
     # Reshape tensors for downsampling
     x_noised_window = x_noised.reshape(B, N // ds, ds, A, X)
