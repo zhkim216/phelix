@@ -58,7 +58,7 @@ defaults:
 
 model:
   task: "backbone"  # "backbone"
-  scale_factor_mode: null  # filled in based on the denoiser and its interpolant
+  override_sigma_data: [9.6, 0.66]  # override sigma data for [backbone, sidechain]
   eps: 1.0e-8
   inf: 1.0e9
   denoiser: ${denoiser}
