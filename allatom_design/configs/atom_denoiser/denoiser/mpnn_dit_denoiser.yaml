@@ -42,12 +42,8 @@ dit:
 
   # MPNN encoder denoiser
   mpnn_downsample_factor: 2
-  minimpnn_encoder:
-    autoregressive: false
-    no_aatype_pred: true
-    n_aatype: 21
-    use_self_conditioning_seq: false
-    use_time_cond: true
+  mpnn_encoder:
+    use_time_cond: false
 
     n_channel: 128
     n_layers: 3
@@ -55,7 +51,6 @@ dit:
     noise_cond_mult: 4
 
     model_type: "protein_mpnn"
-    augment_eps: 0.0
     dropout_p: 0.1
 
 
