@@ -93,7 +93,13 @@ class MPNNEncoder(nn.Module):
         ### Encoder ###
         h_V, h_E, E_idx = self.encode(feature_dict)
 
-        return h_V
+        # Re-order edge embeddings to match 2D adjacency matrix; 0 if no edge
+        B, N, K, D = h_E.shape
+        pair_rep = torch.zeros((B, N, N, D), device=h_E.device)
+        E_idx_expanded = E_idx.unsqueeze(-1).expand(-1, -1, -1, D)
+        pair_rep.scatter_(dim=2, index=E_idx_expanded, src=h_E)
+
+        return h_V, pair_rep
 
 
     def encode(self, feature_dict):
