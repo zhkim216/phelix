@@ -27,9 +27,6 @@ from tqdm import tqdm
 import allatom_design.data.conditioning_labels as cl
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (apply_random_augmentation,
-                                      build_struct_pair_feat, cat_bb_scn,
-                                      center_random_augmentation)
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
@@ -43,14 +40,7 @@ from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
 from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
     TimestepEmbedder
-from openfold.model.dropout import DropoutColumnwise, DropoutRowwise
-from openfold.model.heads import DistogramHead
-from openfold.model.pair_transition import PairTransition
 from openfold.model.primitives import LayerNorm, Linear
-from openfold.model.triangular_attention import (TriangleAttentionEndingNode,
-                                                 TriangleAttentionStartingNode)
-from openfold.model.triangular_multiplicative_update import (
-    TriangleMultiplicationIncoming, TriangleMultiplicationOutgoing)
 
 
 class MPNNDiTDenoiser(BaseAtomDenoiser):
@@ -369,6 +359,9 @@ class MPNNDiT(nn.Module):
                      qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
                      ) for _ in range(cfg.depth)
         ])
+        self.pair_bias_embedders = nn.ModuleList([
+             PairBiasUpsample(cfg.mpnn_encoder.n_channel, cfg.num_heads, cfg.mpnn_downsample_factor)
+         for _ in range(cfg.depth)])
         self.final_layer = FinalLayer(cfg.hidden_size, self.out_channels)
         self.initialize_weights()
 
@@ -423,7 +416,7 @@ class MPNNDiT(nn.Module):
 
         # Embed preconditioned x_noised (with self-conditioning) with MPNN
         x_noised_ds, seq_mask_ds, residue_index_ds = downsample_mpnn_inputs(x_noised, seq_mask, residue_index, self.mpnn_downsample_factor)
-        h_V = self.mpnn_encoder(x_noised_ds, seq_mask_ds, residue_index_ds, t_bb=t)
+        h_V, pair_rep = self.mpnn_encoder(x_noised_ds, seq_mask_ds, residue_index_ds, t_bb=t)
         h_V = upsample_mpnn_outputs(h_V, self.mpnn_downsample_factor)
         h_V = self.proj_h_V(h_V)
 
@@ -472,8 +465,9 @@ class MPNNDiT(nn.Module):
 
         # Blocks
         attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
-        for block in self.blocks:
-            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True)
+        for block, pair_bias_embedder in zip(self.blocks, self.pair_bias_embedders):
+            attn_bias = pair_bias_embedder(pair_rep, seq_mask)
+            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=attn_bias, per_token_conditioning=True)
 
         # Final layer
         x = self.final_layer(x, c, per_token_conditioning=True)
@@ -520,3 +514,30 @@ def upsample_mpnn_outputs(h_V: TensorType["b n h"], downsample_factor: int):
     # Repeat along the downsampling dimension
     h_V_upsampled = repeat(h_V, "b n h -> b (n ds) h", ds=ds)
     return h_V_upsampled
+
+
+class PairBiasUpsample(nn.Module):
+    def __init__(self, input_dim: int, num_heads: int, downsample_factor: int):
+        """
+        Transform pair representation to pair bias for attention; upsample the pair bias to the original sequence length.
+        """
+        super().__init__()
+        self.input_dim = input_dim
+        self.num_heads = num_heads
+        self.downsample_factor = downsample_factor
+        self.to_pair_bias = nn.Sequential(LayerNorm(input_dim),
+                                          Linear(input_dim, num_heads, bias=False))
+
+
+    def forward(self,
+                pair_rep: TensorType["b n_ds n_ds h", float],
+                seq_mask: TensorType["b n", float]) -> TensorType["b heads n n", float]:
+        # Transform to pair bias
+        pair_bias = rearrange(self.to_pair_bias(pair_rep), "b i j heads -> b heads i j")
+
+        # Upsample pair bias
+        pair_bias = repeat(pair_bias, "b heads i j -> b heads (i ds1) (j ds2)", ds1=self.downsample_factor, ds2=self.downsample_factor)
+
+        mask_2d = seq_mask[:, :, None] * seq_mask[:, None, :]
+        pair_bias = pair_bias * mask_2d[:, None, ...]  # zero out padding positions
+        return pair_bias
