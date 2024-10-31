@@ -37,12 +37,12 @@ from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_utils import (
     Attention, DiTBlock, FinalLayer, LabelEmbedder, MultiHeadRMSNorm)
+from allatom_design.model.atom_denoiser.denoisers.mpnn_encoder import \
+    MPNNEncoder
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
 from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
     TimestepEmbedder
-from allatom_design.model.seq_denoiser.denoisers.seq_design.minimpnn import \
-    MiniMPNN
 from openfold.model.dropout import DropoutColumnwise, DropoutRowwise
 from openfold.model.heads import DistogramHead
 from openfold.model.pair_transition import PairTransition
@@ -323,8 +323,8 @@ class MPNNDiT(nn.Module):
 
         # MPNN encoder
         self.mpnn_downsample_factor = cfg.mpnn_downsample_factor
-        self.mpnn_encoder = MiniMPNN(cfg.minimpnn_encoder)
-        self.proj_h_V = Linear(cfg.minimpnn_encoder.n_channel, cfg.hidden_size)  # project h_V to DiT hidden size
+        self.mpnn_encoder = MPNNEncoder(cfg.mpnn_encoder)
+        self.proj_h_V = Linear(cfg.mpnn_encoder.n_channel, cfg.hidden_size)  # project h_V to DiT hidden size
 
         # Model parameters
         self.num_heads = cfg.num_heads
@@ -417,8 +417,9 @@ class MPNNDiT(nn.Module):
 
         # Embed preconditioned x_noised with MPNN
         x_noised_ds, seq_mask_ds, residue_index_ds = downsample_mpnn_inputs(x_noised, seq_mask, residue_index, self.mpnn_downsample_factor)
-        h_V = self.mpnn_encoder.encode_bb_coords(x_noised_ds, seq_mask_ds, residue_index_ds, t_bb=t)
+        h_V = self.mpnn_encoder(x_noised_ds, seq_mask_ds, residue_index_ds, t_bb=t)
         h_V = upsample_mpnn_outputs(h_V, self.mpnn_downsample_factor)
+        h_V = self.proj_h_V(h_V)
 
         # Concatenate self-conditioning
         if self.use_self_conditioning:
@@ -435,6 +436,7 @@ class MPNNDiT(nn.Module):
 
         # Begin DiT forward pass
         x = self.x_embedder(x)
+        x = x + h_V
 
         if self.pos_encoding == "absolute":
             x = x + self.pos_embed(x)
@@ -465,7 +467,7 @@ class MPNNDiT(nn.Module):
             # embed the label
             c = c + self.cond_embedders[label_name](labels_in, self.training)
 
-        c = c.unsqueeze(1) + self.proj_h_V(h_V)  # embed mpnn encoding
+        c = c.unsqueeze(1) + h_V  # embed mpnn encoding
 
         # Blocks
         attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)

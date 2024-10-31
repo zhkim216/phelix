@@ -13,27 +13,19 @@ from torchtyping import TensorType
 import allatom_design.data.residue_constants as rc
 
 
-class MiniMPNN(nn.Module):
-    """Modified ProteinMPNN network to predict sequence from structure."""
+class MPNNEncoder(nn.Module):
+    """Modified ProteinMPNN network to encode backbone structure."""
     def __init__(self, cfg: DictConfig):
         super().__init__()
         self.cfg = cfg
-        self.autoregressive = cfg.autoregressive
-        self.n_aatype = cfg.n_aatype
-        self.seq_emb_dim = cfg.n_channel
-        self.use_self_conditioning_seq = cfg.use_self_conditioning_seq
         self.use_time_cond = cfg.use_time_cond
-        assert not cfg.use_self_conditioning_seq and not cfg.use_time_cond, "Not implemented yet"
 
         self.model_type = cfg.model_type
         self.node_features = cfg.n_channel
         self.edge_features = cfg.n_channel
         self.hidden_dim = cfg.n_channel
         self.num_encoder_layers = cfg.n_layers
-        self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
-        self.augment_eps = cfg.augment_eps
-        self.no_aatype_pred = cfg.no_aatype_pred
 
         if self.model_type == "protein_mpnn":
             self.features = ProteinFeatures(
@@ -43,15 +35,6 @@ class MiniMPNN(nn.Module):
             print("Choose --model_type flag from currently available models")
             sys.exit()
 
-        self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
-
-        # Input sequence embeddings
-        self.in_channels = self.n_aatype
-        if self.use_self_conditioning_seq:
-            self.in_channels = self.in_channels + self.n_aatype  # concatenate previous prediction
-
-        self.W_s = nn.Linear(self.in_channels, self.hidden_dim, bias=False)
-        self.dropout = nn.Dropout(cfg.dropout_p)
 
         # MiniMPNN: time conditioning
         time_cond_dim = None
@@ -63,6 +46,10 @@ class MiniMPNN(nn.Module):
                     nn.Linear(time_cond_dim, self.hidden_dim)
             )
 
+        # Edge feature embedding
+        self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
+        self.dropout = nn.Dropout(cfg.dropout_p)
+
         # Encoder layers
         self.encoder_layers = torch.nn.ModuleList(
             [
@@ -71,109 +58,34 @@ class MiniMPNN(nn.Module):
             ]
         )
 
-        # Decoder layers
-        self.decoder_layers = torch.nn.ModuleList(
-            [
-                DecLayer(self.hidden_dim, self.hidden_dim * 3, dropout=cfg.dropout_p, time_cond_dim=time_cond_dim)
-                for _ in range(self.num_decoder_layers)
-            ]
-        )
-
-        # Output layers
-        if not self.no_aatype_pred:
-            self.W_out = nn.Linear(self.hidden_dim, self.n_aatype, bias=True)
-
         # Initialize weights
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
 
-    def forward(
-        self,
-        denoised_coords: TensorType["b n a x", float],
-        aatype_noised: TensorType["b n", int],
-        seq_self_cond: Optional[TensorType["b n k", float]],  # logits
-        t_bb: TensorType["b", float],  # backbone time
-        seq_mask: TensorType["b n", float],
-        residue_index: TensorType["b n", int],
-    ):
-        # use backbone atoms only as X
-        denoised_coords = denoised_coords[..., rc.bb_idxs, :]
-
-        # use one-hot aatype as S
-        aatype_oh_noised = F.one_hot(aatype_noised, self.n_aatype).float()
-
+    def forward(self, bb_coords, seq_mask, residue_index, t_bb: TensorType["b", float]):
+        """
+        Encodes backbone coordinates into node embeddings.
+        """
         # condition on backbone time
         time_cond = None
         if self.use_time_cond:
             time_cond = self.noise_block(t_bb)
 
         feature_dict = {
-            "X": denoised_coords,
-            "S": aatype_oh_noised,
-            "S_self_cond": seq_self_cond,
+            "X": bb_coords,
             "time_cond": time_cond,
             "mask": seq_mask,
             "chain_mask": seq_mask,  # TODO: double check this
             "R_idx": residue_index,
             "chain_labels": seq_mask,  # TODO: add chain index here?
-            "randn": None,
-            }
-
-        # Add noise to the input features during training
-        if self.training and self.augment_eps > 0:
-            feature_dict["X"] = feature_dict["X"] + self.augment_eps * torch.randn_like(feature_dict["X"])
+        }
 
         ### Encoder ###
         h_V, h_E, E_idx = self.encode(feature_dict)
 
-        ### Decoder ###
-        S = feature_dict["S"]
-        S_self_cond = feature_dict["S_self_cond"]
-
-        # Concatenate self-conditioning
-        if self.use_self_conditioning_seq:
-            if S_self_cond is None:
-                S_self_cond = torch.zeros_like(S)
-            else:
-                # One-hot encode the argmax prediction
-                S_self_cond = F.one_hot(S_self_cond.argmax(dim=-1), self.n_aatype)
-            S = torch.cat([S, S_self_cond], dim=-1)
-
-        # Concatenate sequence embeddings for autoregressive decoder
-        h_S = self.W_s(S)
-        h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
-
-        # Build encoder embeddings
-        h_EX_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, E_idx)
-        h_EXV_encoder = cat_neighbors_nodes(h_V, h_EX_encoder, E_idx)
-
-        mask_size = E_idx.shape[1]
-        if self.autoregressive:
-            decoding_order = torch.argsort((seq_mask+0.0001)*(torch.abs(torch.randn(seq_mask.shape, device=seq_mask.device)))) #[numbers will be smaller for places where chain_M = 0.0 and higher for places where chain_M = 1.0]
-            permutation_matrix_reverse = torch.nn.functional.one_hot(decoding_order, num_classes=mask_size).float()
-            order_mask_backward = torch.einsum('ij, biq, bjp->bqp',(1-torch.triu(torch.ones(mask_size,mask_size, device=seq_mask.device))), permutation_matrix_reverse, permutation_matrix_reverse)
-        else:
-            order_mask_backward = torch.ones(S.shape[0], mask_size, mask_size, device=E_idx.device)
-        mask_attend = torch.gather(order_mask_backward, 2, E_idx).unsqueeze(-1)
-        mask_1D = seq_mask.view([seq_mask.size(0), seq_mask.size(1), 1, 1])
-        mask_bw = mask_1D * mask_attend
-        mask_fw = mask_1D * (1. - mask_attend)
-
-        h_EXV_encoder_fw = mask_fw * h_EXV_encoder
-
-        for layer in self.decoder_layers:
-            # Masked positions attend to encoder information, unmasked seq.
-            h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
-            h_ESV = mask_bw * h_ESV + h_EXV_encoder_fw
-            h_V = layer(h_V, h_ESV, seq_mask, time_cond=time_cond)
-
-        if self.no_aatype_pred:
-            return None, h_V, feature_dict
-
-        logits = self.W_out(h_V)
-        return logits, h_V, feature_dict
+        return h_V
 
 
     def encode(self, feature_dict):
@@ -200,33 +112,6 @@ class MiniMPNN(nn.Module):
             h_V, h_E = layer(h_V, h_E, E_idx, seq_mask, mask_attend, time_cond)
 
         return h_V, h_E, E_idx
-
-
-    def encode_bb_coords(self, bb_coords, seq_mask, residue_index, t_bb: TensorType["b", float]):
-        # create dummy aatype
-        aatype_dummy = F.one_hot(torch.zeros_like(residue_index), self.n_aatype).float()
-
-        # condition on backbone time
-        time_cond = None
-        if self.use_time_cond:
-            time_cond = self.noise_block(t_bb)
-
-        feature_dict = {
-            "X": bb_coords,
-            "S": aatype_dummy,
-            "S_self_cond": None,
-            "time_cond": time_cond,
-            "mask": seq_mask,
-            "chain_mask": seq_mask,  # TODO: double check this
-            "R_idx": residue_index,
-            "chain_labels": seq_mask,  # TODO: add chain index here?
-            "randn": None,
-        }
-
-        ### Encoder ###
-        h_V, h_E, E_idx = self.encode(feature_dict)
-
-        return h_V
 
 
 class NoiseConditioningBlock(nn.Module):
