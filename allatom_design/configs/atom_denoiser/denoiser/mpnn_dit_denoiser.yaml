@@ -43,6 +43,7 @@ dit:
   # MPNN encoder denoiser
   mpnn_downsample_factor: 2
   mpnn_encoder:
+    use_self_conditioning: ${denoiser.use_self_conditioning}
     use_time_cond: false
 
     n_channel: 128
