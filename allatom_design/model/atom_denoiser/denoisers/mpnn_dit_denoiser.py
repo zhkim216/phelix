@@ -415,18 +415,19 @@ class MPNNDiT(nn.Module):
         precondition_in, precondition_out = self.interpolant.setup_preconditioning(x_noised, x_self_cond, t)
         x_noised, x_self_cond, t = precondition_in()  # input preconditioning
 
-        # Embed preconditioned x_noised with MPNN
-        x_noised_ds, seq_mask_ds, residue_index_ds = downsample_mpnn_inputs(x_noised, seq_mask, residue_index, self.mpnn_downsample_factor)
-        h_V = self.mpnn_encoder(x_noised_ds, seq_mask_ds, residue_index_ds, t_bb=t)
-        h_V = upsample_mpnn_outputs(h_V, self.mpnn_downsample_factor)
-        h_V = self.proj_h_V(h_V)
-
         # Concatenate self-conditioning
         if self.use_self_conditioning:
             if x_self_cond is None:
                 x_self_cond = torch.zeros_like(x_noised)
             x_noised = torch.cat([x_noised, x_self_cond], dim=-1)
 
+        # Embed preconditioned x_noised (with self-conditioning) with MPNN
+        x_noised_ds, seq_mask_ds, residue_index_ds = downsample_mpnn_inputs(x_noised, seq_mask, residue_index, self.mpnn_downsample_factor)
+        h_V = self.mpnn_encoder(x_noised_ds, seq_mask_ds, residue_index_ds, t_bb=t)
+        h_V = upsample_mpnn_outputs(h_V, self.mpnn_downsample_factor)
+        h_V = self.proj_h_V(h_V)
+
+        # Begin DiT forward pass
         x = rearrange(x_noised, "b n a x -> b n (a x)")
 
         # Concatenate one-hot sequence conditioning
@@ -485,7 +486,7 @@ class MPNNDiT(nn.Module):
         return x, aux_preds
 
 
-def downsample_mpnn_inputs(x_noised: TensorType["b n a 3", float],
+def downsample_mpnn_inputs(x_noised: TensorType["b n a x", float],
                            seq_mask: TensorType["b n", float],
                            residue_index: TensorType["b n", int],
                            downsample_factor: int):

@@ -18,6 +18,7 @@ class MPNNEncoder(nn.Module):
     def __init__(self, cfg: DictConfig):
         super().__init__()
         self.cfg = cfg
+        self.use_self_conditioning = cfg.use_self_conditioning
         self.use_time_cond = cfg.use_time_cond
 
         self.model_type = cfg.model_type
@@ -48,6 +49,9 @@ class MPNNEncoder(nn.Module):
 
         # Edge feature embedding
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
+        if self.use_self_conditioning:
+            self.self_cond_embed = nn.Sequential(nn.LayerNorm(self.hidden_dim),
+                                                 nn.Linear(self.hidden_dim, self.hidden_dim))
         self.dropout = nn.Dropout(cfg.dropout_p)
 
         # Encoder layers
@@ -64,7 +68,11 @@ class MPNNEncoder(nn.Module):
                 nn.init.xavier_uniform_(p)
 
 
-    def forward(self, bb_coords, seq_mask, residue_index, t_bb: TensorType["b", float]):
+    def forward(self,
+                bb_coords: TensorType["b n a x", float],  # possibly contains self-conditioning input in last dimension
+                seq_mask: TensorType["b n", float],
+                residue_index: TensorType["b n", int],
+                t_bb: TensorType["b", float]):
         """
         Encodes backbone coordinates into node embeddings.
         """
@@ -94,7 +102,18 @@ class MPNNEncoder(nn.Module):
         device = seq_mask.device
 
         # Prepare node and edge embeddings
+        if self.use_self_conditioning:
+            # handle self-conditioning input
+            feature_dict_self_cond = feature_dict.copy()
+            feature_dict["X"] = feature_dict["X"][..., :3]
+            feature_dict_self_cond["X"] = feature_dict_self_cond["X"][..., 3:]
+            E_self_cond, _ = self.features(feature_dict_self_cond)
+
         E, E_idx = self.features(feature_dict)
+        if self.use_self_conditioning:
+            # add self-conditioning input
+            E = E + self.self_cond_embed(E_self_cond)
+
         h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=device)
 
         # Time conditioning
