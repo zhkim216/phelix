@@ -147,7 +147,20 @@ def main(cfg: DictConfig):
 
     # Compute scale factors for sigma data
     scale_factors = ad_dataset.compute_scale_factors(train_dataloader, n_examples=1000)
-    lit_model.model.set_scale_factors(scale_factors)  # set scale factors in model
+
+    # override sigma_data if specified for consistent loss scaling
+    bb_sigma_data_override, scn_sigma_data_override = cfg.model.override_sigma_data
+    if bb_sigma_data_override is not None:
+        bb_mean, bb_std = scale_factors["bb"]
+        bb_std = bb_sigma_data_override
+        scale_factors["bb"] = (bb_mean, bb_std)
+    if scn_sigma_data_override is not None:
+        scn_mean, scn_std = scale_factors["scn"]
+        scn_std = scn_sigma_data_override
+        scale_factors["scn"] = (scn_mean, scn_std)
+
+    # set scale factors in model
+    lit_model.model.set_scale_factors(scale_factors)
 
     # Train
     trainer = L.Trainer(logger=logger,
