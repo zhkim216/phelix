@@ -31,16 +31,30 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch_geometric.nn import MessagePassing
-from allatom_design.data.data import (
+from allatom_design.data import residue_constants as rc
+
+from allatom_design.data.data import (  
     get_rotation_frames, 
-    rotate
+    rotate,
+    get_rc_tensor,
+    orientations,
+    dihedrals,
+    sidechains,
+    positional_embeddings,
+    normalize,
+    rbf,
+    nan_to_num,
+    dist
 )
 
-from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_utils import GVPGraphEmbedding
-from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_modules import (
-    GVPConvLayer,
-    GVP,
-    LayerNorm
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_utils import (
+    flatten_graph,
+    tuple_cat,
+    tuple_index,
+    tuple_sum,
+    _norm_no_nan,
+    _split,
+    _merge,
 )
 
 class GVPEncoder(nn.Module):
@@ -105,83 +119,162 @@ class GVPEncoder(nn.Module):
         h_V = self.W_out(node_embeddings)    
         return h_V
 
-def tuple_size(tp):
-    return tuple([0 if a is None else a.size() for a in tp])
+class GVPGraphEmbedding(nn.Module):
 
-def tuple_sum(tp1, tp2):
-    s1, v1 = tp1
-    s2, v2 = tp2
-    if v2 is None and v2 is None:
-        return (s1 + s2, None)
-    return (s1 + s2, v1 + v2)
+    def __init__(self, cfg):
+        super().__init__()
+        self.top_k_neighbors = cfg.top_k_neighbors
+        self.num_positional_embeddings = cfg.num_positional_embeddings
+        self.remove_edges_without_coords = cfg.remove_edges_without_coords
+        node_input_dim = (6, 15) #changed from (7,3) because we no longer condition on coords mask, and we add seq + 20
+        edge_input_dim = (32, 56) #changed from (7,3) because we no longer condition on coords_mask i, coords_mask j
+        node_hidden_dim = (cfg.node_hidden_dim_scalar,
+                cfg.node_hidden_dim_vector)
+        edge_hidden_dim = (cfg.edge_hidden_dim_scalar,
+                cfg.edge_hidden_dim_vector)
+        self.embed_node = nn.Sequential(
+            GVP(node_input_dim, node_hidden_dim, activations=(None, None)),
+            LayerNorm(node_hidden_dim, eps=1e-4)
+        )
+        self.embed_edge = nn.Sequential(
+            GVP(edge_input_dim, edge_hidden_dim, activations=(None, None)),
+            LayerNorm(edge_hidden_dim, eps=1e-4)
+        )
 
-def tuple_cat(*args, dim=-1):
-    '''
-    Concatenates any number of tuples (s, V) elementwise.
+        self.embed_mpnn_node = nn.Linear(cfg.node_hidden_dim_scalar, cfg.node_hidden_dim_scalar)
+        self.embed_mpnn_edge = nn.Linear(cfg.edge_hidden_dim_scalar, cfg.edge_hidden_dim_scalar)
+        self.zero_ghost_atoms = False
+
+    def forward(self, coords, seq, mpnn_E_idx, mpnn_node_embedding, mpnn_edge_embedding, padding_mask, atom14_mask):
+        with torch.no_grad():
+            node_features = self.get_node_features(coords, padding_mask, atom14_mask)
+            edge_features, edge_index = self.get_edge_features(
+                coords, padding_mask, mpnn_E_idx, atom14_mask)
+
+        node_embeddings_scalar, node_embeddings_vector = self.embed_node(node_features)
+        edge_embeddings = self.embed_edge(edge_features)
+        
+        node_embeddings = (
+            node_embeddings_scalar + self.embed_mpnn_node(mpnn_node_embedding),
+            node_embeddings_vector
+        )
+
+        edge_embeddings = (
+            edge_embeddings[0] + self.embed_mpnn_edge(mpnn_edge_embedding.flatten(1,2)),
+            edge_embeddings[1]
+        )
+
+        node_embeddings, edge_embeddings, edge_index = flatten_graph(
+            node_embeddings, edge_embeddings, edge_index)
+
+        return node_embeddings, edge_embeddings, edge_index
+
+    def get_atom_type(self, seq, atom14_mask):
+        atom_indices = get_rc_tensor(rc.RESTYPE_TO_ATOM37_IDX, seq)
+        atom_indices = torch.where(atom_indices == -1, 0, atom_indices) #temporaily set ghost atom idx to 0
+        atom_indices_one_hot = F.one_hot(atom_indices, num_classes=rc.atom_type_num).float()
+        atom_indices_one_hot *= atom14_mask[..., None].expand_as(atom_indices_one_hot)
+        atom_types_summed = torch.sum(atom_indices_one_hot, dim = -2)
+        return atom_types_summed
     
-    :param dim: dimension along which to concatenate when viewed
-                as the `dim` index for the scalar-channel tensors.
-                This means that `dim=-1` will be applied as
-                `dim=-2` for the vector-channel tensors.
-    '''
-    dim %= len(args[0][0].shape)
-    s_args, v_args = list(zip(*args))
-    return torch.cat(s_args, dim=dim), torch.cat(v_args, dim=dim)
+    def get_node_features(self, coords, padding_mask, atom14_mask):
+        # scalar features
+        node_scalar_features = dihedrals(coords)
 
-def tuple_index(x, idx):
-    '''
-    Indexes into a tuple (s, V) along the first dimension.
-    
-    :param idx: any object which can be used to index into a `torch.Tensor`
-    '''
-    return x[0][idx], x[1][idx]
+        # vector features
+        X_ca = coords[:, :, 1]
+        ca_orientations = orientations(X_ca)
+        fa_orientations = self.intra_residue_orientations(coords, atom14_mask)
 
-def randn(n, dims, device="cpu"):
-    '''
-    Returns random tuples (s, V) drawn elementwise from a normal distribution.
-    
-    :param n: number of data points
-    :param dims: tuple of dimensions (n_scalar, n_vector)
-    
-    :return: (s, V) with s.shape = (n, n_scalar) and
-             V.shape = (n, n_vector, 3)
-    '''
-    return torch.randn(n, dims[0], device=device), \
-            torch.randn(n, dims[1], 3, device=device)
+        #for residues w/out CB, overwrite with pseudo CB
+        cb_orientations = sidechains(coords)
+        no_cb_mask = atom14_mask[:, :, 4] == 0 #use atom14 mask to find positions with no cb
+        no_cb_mask = torch.where(padding_mask, False, no_cb_mask) #exclude padded positions from getting pseudo cb
+        fa_orientations[:,:,3][no_cb_mask, :] = cb_orientations[no_cb_mask]
 
-def _norm_no_nan(x, axis=-1, keepdims=False, eps=1e-8, sqrt=True):
-    '''
-    L2 norm of tensor clamped above a minimum value `eps`.
-    
-    :param sqrt: if `False`, returns the square of the L2 norm
-    '''
-    # clamp is slow
-    # out = torch.clamp(torch.sum(torch.square(x), axis, keepdims), min=eps)
-    out = torch.sum(torch.square(x), axis, keepdims) + eps
-    return torch.sqrt(out) if sqrt else out
+        node_vector_features = torch.cat([ca_orientations, fa_orientations], dim=-2)
+        return node_scalar_features, node_vector_features
 
-def _split(x, nv):
-    '''
-    Splits a merged representation of (s, V) back into a tuple. 
-    Should be used only with `_merge(s, V)` and only if the tuple 
-    representation cannot be used.
-    
-    :param x: the `torch.Tensor` returned from `_merge`
-    :param nv: the number of vector channels in the input to `_merge`
-    '''
-    v = torch.reshape(x[..., -3*nv:], x.shape[:-1] + (nv, 3))
-    s = x[..., :-3*nv]
-    return s, v
+    def intra_residue_orientations(self, coords, atom14_mask):
+        X_ca = coords[:, :, 1]
+        vectors = []
+        atom_positions = [0,2,3,4,5,6,7,8,9,10,11,12,13]
 
-def _merge(s, v):
-    '''
-    Merges a tuple (s, V) into a single `torch.Tensor`, where the
-    vector channels are flattened and appended to the scalar channels.
-    Should be used only if the tuple representation cannot be used.
-    Use `_split(x, nv)` to reverse.
-    '''
-    v = torch.reshape(v, v.shape[:-2] + (3*v.shape[-2],))
-    return torch.cat([s, v], -1)
+        for atom_pos in atom_positions:
+            atom_pos_mask = atom14_mask[:, :, atom_pos][:,:,None].expand(-1, -1, 3)
+            intra_residue_vector = normalize(X_ca - coords[:, :, atom_pos])
+
+            #set unit vector for missing atoms to 0
+            if self.zero_ghost_atoms:
+                intra_residue_vector = torch.where(atom_pos_mask == 1, intra_residue_vector, 0)
+            vectors.append(intra_residue_vector)
+
+        return torch.stack(vectors, dim=2)
+    
+    def get_edge_features(self, coords, padding_mask, E_idx, atom14_mask):
+        X_ca = coords[:, :, 1]
+
+        # Get distances to the top k neighbors, using E_idx from ProteinMPNN
+        E_dist, E_residue_mask = dist(X_ca, E_idx, padding_mask)
+
+        # Flatten the graph to be batch size 1 for torch_geometric package 
+        dest = E_idx
+        B, L, k = E_idx.shape[:3]
+        src = torch.arange(L, device=E_idx.device).view([1, L, 1]).expand(B, L, k)
+        # After flattening, [2, B, E]
+        edge_index = torch.stack([src, dest], dim=0).flatten(2, 3)
+        # After flattening, [B, E]
+        E_dist = E_dist.flatten(1, 2)
+        E_residue_mask = E_residue_mask.flatten(1, 2)
+        # Calculate relative positional embeddings and distance RBF 
+        pos_embeddings = positional_embeddings(
+            edge_index,
+            num_positional_embeddings=self.num_positional_embeddings,
+        )
+        D_rbf = rbf(E_dist, 0., 20.)
+        
+        # Calculate relative orientation 
+        E_vectors = self.get_edge_vectors(coords, E_idx, edge_index, B, L, k, atom14_mask)
+
+        # Normalize and remove nans 
+        edge_s = torch.cat([D_rbf, pos_embeddings], dim=-1)
+        edge_v = normalize(E_vectors)
+        edge_s, edge_v = map(nan_to_num, (edge_s, edge_v))
+        edge_index[:, ~E_residue_mask] = -1
+
+        return (edge_s, edge_v), edge_index.transpose(0, 1) 
+    
+    def get_edge_vectors(self, coords, E_idx, edge_index, B, L, k, atom14_mask):
+        max_atoms = coords.shape[-2] #14
+        X_n = coords[:, :, 0]
+        X_ca = coords[:, :, 1]
+        X_c = coords[:, :, 2]
+        X_o = coords[:, :, 3]
+        
+        vectors = []
+        
+        for bb_atom in [X_ca, X_n, X_c, X_o]:
+            for atom_pos in range(max_atoms):
+                atom_mask_pos = atom14_mask[:,:,atom_pos]
+                atom_mask_neighbors = torch.gather(atom_mask_pos[...,None].expand(-1,-1,k), 1, E_idx)
+                relative_orientation_vector = normalize(self.get_relative_orientation(bb_atom, coords[:,:,atom_pos], edge_index, B, L, k))
+
+                #insert 0 for unit vectors where destination atom does not exist, if specified
+                if self.zero_ghost_atoms:
+                    relative_orientation_vector = torch.where(atom_mask_neighbors[...,None].expand(-1,-1,-1,3) == 1, relative_orientation_vector, 0).flatten(1, 2)
+                vectors.append(relative_orientation_vector)
+        
+        return torch.stack(vectors, dim=2)
+
+    def get_relative_orientation(self, X, Y, edge_index, B, L, k):
+        X_src = X.unsqueeze(2).expand(-1, -1, k, -1).flatten(1, 2)
+        X_dest = torch.gather(
+            Y,
+            1,
+            edge_index[1, :, :].unsqueeze(-1).expand([B, L*k, 3])
+        )
+
+        return X_src - X_dest
 
 class GVP(nn.Module):
     '''
@@ -463,75 +556,53 @@ class GVPConvLayer(nn.Module):
             self.edge_dropout = Dropout(drop_rate)
 
     def forward(self, x, edge_index, edge_attr,
-                autoregressive_x=None, node_mask=None):
-        '''
-        :param x: tuple (s, V) of `torch.Tensor`
-        :param edge_index: array of shape [2, n_edges]
-        :param edge_attr: tuple (s, V) of `torch.Tensor`
-        :param autoregressive_x: tuple (s, V) of `torch.Tensor`. 
-                If not `None`, will be used as srcqq node embeddings
-                for forming messages where src >= dst. The corrent node 
-                embeddings `x` will still be the base of the update and the 
-                pointwise feedforward.
-        :param node_mask: array of type `bool` to index into the first
-                dim of node embeddings (s, V). If not `None`, only
-                these nodes will be updated.
-        '''
-        if self.edge_message_func:
-            src, dst = edge_index
-            if autoregressive_x is None:
-                x_src = x[0][src], x[1][src]
-            else: 
-                mask = (src < dst).unsqueeze(-1)
-                x_src = (
-                    torch.where(mask, x[0][src], autoregressive_x[0][src]),
-                    torch.where(mask.unsqueeze(-1), x[1][src],
-                        autoregressive_x[1][src])
+                    autoregressive_x=None, node_mask=None):
+            '''
+            :param x: tuple (s, V) of `torch.Tensor`
+            :param edge_index: array of shape [2, n_edges]
+            :param edge_attr: tuple (s, V) of `torch.Tensor`
+            :param autoregressive_x: tuple (s, V) of `torch.Tensor`. 
+                    If not `None`, will be used as srcqq node embeddings
+                    for forming messages where src >= dst. The corrent node 
+                    embeddings `x` will still be the base of the update and the 
+                    pointwise feedforward.
+            :param node_mask: array of type `bool` to index into the first
+                    dim of node embeddings (s, V). If not `None`, only
+                    these nodes will be updated.
+            '''
+            if self.edge_message_func:
+                src, dst = edge_index
+                if autoregressive_x is None:
+                    x_src = x[0][src], x[1][src]
+                else: 
+                    mask = (src < dst).unsqueeze(-1)
+                    x_src = (
+                        torch.where(mask, x[0][src], autoregressive_x[0][src]),
+                        torch.where(mask.unsqueeze(-1), x[1][src],
+                            autoregressive_x[1][src])
+                    )
+                x_dst = x[0][dst], x[1][dst]
+                x_edge = (
+                    torch.cat([x_src[0], edge_attr[0], x_dst[0]], dim=-1),
+                    torch.cat([x_src[1], edge_attr[1], x_dst[1]], dim=-2)
                 )
-            x_dst = x[0][dst], x[1][dst]
-            x_edge = (
-                torch.cat([x_src[0], edge_attr[0], x_dst[0]], dim=-1),
-                torch.cat([x_src[1], edge_attr[1], x_dst[1]], dim=-2)
-            )
-            edge_attr_dh = self.edge_message_func(x_edge)
-            edge_attr = self.edge_norm(tuple_sum(edge_attr,
-                self.edge_dropout(edge_attr_dh)))
-        
-        if autoregressive_x is not None:
-            # Guarding this import here to remove the dependency on torch_scatter, since this isn't used
-            # in ESM-IF1
-            from torch_scatter import scatter_add
-            src, dst = edge_index
-            mask = src < dst
-            edge_index_forward = edge_index[:, mask]
-            edge_index_backward = edge_index[:, ~mask]
-            edge_attr_forward = tuple_index(edge_attr, mask)
-            edge_attr_backward = tuple_index(edge_attr, ~mask)
-            
-            dh = tuple_sum(
-                self.conv(x, edge_index_forward, edge_attr_forward),
-                self.conv(autoregressive_x, edge_index_backward, edge_attr_backward)
-            )
-                        
-            count = scatter_add(torch.ones_like(dst), dst,
-                        dim_size=dh[0].size(0)).clamp(min=1).unsqueeze(-1)
-            
-            dh = dh[0] / count, dh[1] / count.unsqueeze(-1)
+                edge_attr_dh = self.edge_message_func(x_edge)
+                edge_attr = self.edge_norm(tuple_sum(edge_attr,
+                    self.edge_dropout(edge_attr_dh)))
 
-        else:
             dh = self.conv(x, edge_index, edge_attr)
-        
-        if node_mask is not None:
-            x_ = x
-            x, dh = tuple_index(x, node_mask), tuple_index(dh, node_mask)
-            
-        x = self.norm[0](tuple_sum(x, self.dropout[0](dh)))
-        
-        dh = self.ff_func(x)
-        x = self.norm[1](tuple_sum(x, self.dropout[1](dh)))
-        
-        if node_mask is not None:
-            x_[0][node_mask], x_[1][node_mask] = x[0], x[1]
-            x = x_
 
-        return x, edge_attr
+            if node_mask is not None:
+                x_ = x
+                x, dh = tuple_index(x, node_mask), tuple_index(dh, node_mask)
+
+            x = self.norm[0](tuple_sum(x, self.dropout[0](dh)))
+
+            dh = self.ff_func(x)
+            x = self.norm[1](tuple_sum(x, self.dropout[1](dh)))
+
+            if node_mask is not None:
+                x_[0][node_mask], x_[1][node_mask] = x[0], x[1]
+                x = x_
+
+            return x, edge_attr
