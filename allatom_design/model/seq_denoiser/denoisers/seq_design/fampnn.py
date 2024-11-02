@@ -19,21 +19,22 @@ from allatom_design.data.data import (
     pack,
     get_rc_tensor,
     extract_ids_topk,
-    gather_pos_enc
+    gather_pos_enc,
+    get_rotation_frames, 
+    rotate
 )
 
 from allatom_design.model.seq_denoiser.denoisers.seq_design.graph_transformer import GraphTransformer
 
-from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_utils import (
-    GVPGraphEmbedding,
-    unflatten_graph
-)
-
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_utils import GVPGraphEmbedding
 from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_modules import (
     GVPConvLayer,
     GVP,
     LayerNorm
 )
+
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gcp_net.gcp_net import GCPNet
+
 
 class FaMPNN(nn.Module):
     """Modified ProteinMPNN network to predict sequence from full atom structure."""
@@ -67,8 +68,11 @@ class FaMPNN(nn.Module):
         self.pos_enc = cfg.graph_transformer.pos_enc
         self.attn_bias = cfg.graph_transformer.attn_bias
         self.use_gvp = getattr(cfg, "use_gvp", False)
+        self.use_gcp = getattr(cfg, "use_gcp", False)
 
-        if self.model_type not in ['graph_transformer', 'sidechain', 'baseline','gvp']:
+        assert int(self.use_gvp) + int(self.use_gcp) < 2, 'Only one architecture for processing vector features is permitted!'
+
+        if self.model_type not in ['graph_transformer', 'sidechain', 'baseline']:
             raise ValueError(f'Incorrect model type specified: {self.model_type}, must be one of: graph_transformer, sidechain, or baseline!')
         
         if self.autoregressive and self.model_type in ['graph_transformer']:
@@ -109,7 +113,10 @@ class FaMPNN(nn.Module):
 
         #GVP layers
         if self.use_gvp:
-            self.gvp_encoder = GVPEncoder(cfg.gvp)
+            self.vector_encoder = GVPEncoder(cfg.gvp)
+
+        if self.use_gcp:
+            self.vector_encoder = GCPNet(cfg.gcp)
 
         # Output layers
         self.W_out = nn.Linear(self.hidden_dim, self.n_aatype, bias=True)
@@ -147,7 +154,6 @@ class FaMPNN(nn.Module):
         num_atoms_per_example = atoms14_mask_no_pad.sum(dim =(1,2)).long()
         num_residues_per_example = seq_mask.sum(dim = -1).long()
         num_atoms_per_residue = atom14_mask_packed_no_pad.sum(dim = -1).long().to(X.device)
-        tot_num_residues = len(num_atoms_per_residue)
 
         batch_atom_start_idx = torch.cat((torch.tensor([0], device=q.device), num_atoms_per_example[:-1])).cumsum(dim=0)
         batch_residue_start_idx = torch.cat((torch.tensor([0], device=q.device), num_residues_per_example[:-1])).cumsum(dim=0)
@@ -237,8 +243,7 @@ class FaMPNN(nn.Module):
         seq_mask: TensorType["b n", float],
         residue_index: TensorType["b n", int],
         chain_encoding: TensorType["b n", int],
-        mlm_mask: TensorType["b n", bool],
-        confidence: TensorType["b n", float],
+        mlm_mask: TensorType["b n", bool]
     ):
 
         B, N, _, _ = denoised_coords.shape
@@ -326,9 +331,9 @@ class FaMPNN(nn.Module):
         #keep copy of node embeddings from encoder
         h_V_dec = h_V.clone()
 
-        if self.use_gvp:
-            padding_mask = torch.where(seq_mask != 1, True, False)
-            h_V_flattened = self.gvp_encoder(X, E_idx, h_V, h_ESV, padding_mask, confidence, atom14_mask)
+        if self.use_gvp or self.use_gcp:
+            padding_mask = (seq_mask != 1)
+            h_V_flattened = self.vector_encoder(X, aatype_noised, E_idx, h_V, h_ESV, padding_mask, atom14_mask)
             h_V = h_V_flattened.reshape(B, N, -1)
 
         if self.model_type in ['graph_transformer']:
@@ -827,6 +832,9 @@ class GVPEncoder(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.embed_graph = GVPGraphEmbedding(cfg.graph_embedding)
+        self.rotate_out = getattr(cfg, "rotate_out", False)
+        self.node_hidden_dim_vector = cfg.node_hidden_dim_vector
+        self.node_hidden_dim_scalar = cfg.node_hidden_dim_scalar
 
         node_hidden_dim = (cfg.node_hidden_dim_scalar,
                 cfg.node_hidden_dim_vector)
@@ -850,19 +858,35 @@ class GVPEncoder(nn.Module):
             for i in range(cfg.num_encoder_layers)
         )
         
+        if not self.rotate_out:
+            self.W_out = nn.Sequential(
+                LayerNorm(node_hidden_dim),
+                GVP(node_hidden_dim, (cfg.out_dim, 0)))
+        else:
+            flattened_hidden_dim = self.node_hidden_dim_scalar + 3 * self.node_hidden_dim_vector
+            self.W_out = nn.Linear(flattened_hidden_dim, cfg.out_dim)
 
-        self.W_out = nn.Sequential(
-            LayerNorm(node_hidden_dim),
-            GVP(node_hidden_dim, (cfg.out_dim, 0)))
         
-    def forward(self, coords, E_idx, h_V, h_E, padding_mask, confidence, atom14_mask):
-        node_embeddings, edge_embeddings, edge_index = self.embed_graph(
-                coords, E_idx, h_V, h_E, padding_mask, confidence, atom14_mask)
-                
+    def forward(self, coords, seq, E_idx, h_V, h_E, padding_mask, atom14_mask):
+        node_embeddings, edge_embeddings, edge_index = self.embed_graph(coords, seq, E_idx, h_V, h_E, padding_mask, atom14_mask)
+        
         for _, layer in enumerate(self.encoder_layers):
             node_embeddings, edge_embeddings = layer(node_embeddings,
                     edge_index, edge_embeddings)
 
+        B, N  = coords.shape[0], coords.shape[1]
+
+        if self.rotate_out:
+            gvp_out_scalars, gvp_out_vectors = node_embeddings
+            R = get_rotation_frames(coords)
+            gvp_out_vectors = rotate(gvp_out_vectors.reshape(B, N, -1, 3), R.transpose(-2, -1))
+            gvp_out_vectors = gvp_out_vectors.reshape(B * N, self.node_hidden_dim_vector, 3).flatten(-2, -1)
+            node_embeddings = torch.cat([
+                gvp_out_scalars,
+                gvp_out_vectors,
+            ], dim=-1)
+
         h_V = self.W_out(node_embeddings)    
+        
 
         return h_V
