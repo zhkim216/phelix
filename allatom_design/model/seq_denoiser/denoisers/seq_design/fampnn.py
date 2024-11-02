@@ -21,6 +21,7 @@ from allatom_design.data.data import (
 from allatom_design.model.seq_denoiser.denoisers.seq_design.graph_transformer import GraphTransformer
 from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_modules import GVPEncoder
 from allatom_design.model.seq_denoiser.denoisers.seq_design.gcp_net.gcp_net import GCPNet
+from allatom_design.model.seq_denoiser.denoisers.seq_design.residue_transformer import ResidueTransformer
 
 
 class FaMPNN(nn.Module):
@@ -56,6 +57,8 @@ class FaMPNN(nn.Module):
         self.attn_bias = cfg.graph_transformer.attn_bias
         self.use_gvp = getattr(cfg, "use_gvp", False)
         self.use_gcp = getattr(cfg, "use_gcp", False)
+        self.use_residue_transformer = getattr(cfg, "use_residue_transformer", False)
+
 
         assert int(self.use_gvp) + int(self.use_gcp) < 2, 'Only one architecture for processing vector features is permitted!'
 
@@ -104,6 +107,9 @@ class FaMPNN(nn.Module):
 
         if self.use_gcp:
             self.vector_encoder = GCPNet(cfg.gcp)
+
+        if self.use_residue_transformer:
+            self.transformer = ResidueTransformer(cfg.residue_transformer)
 
         # Output layers
         self.W_out = nn.Linear(self.hidden_dim, self.n_aatype, bias=True)
@@ -228,10 +234,14 @@ class FaMPNN(nn.Module):
             )
             
             #concatenate residue embedding to sequence embedding
-            h_ESVR = cat_neighbors_nodes(h_R, h_ESV, E_idx)
+            h_ESV = cat_neighbors_nodes(h_R, h_ESV, E_idx)
 
             for layer in self.atom_decoder_layers:
-                h_V, h_ESVR = layer(h_V, h_ESVR, seq_mask, E_idx)
+                h_V, h_ESV = layer(h_V, h_ESV, seq_mask, E_idx)
+
+        if self.use_residue_transformer:
+            h_V_gnn = h_V.clone()
+            h_V = self.transformer(h_V, h_ESV, E_idx, aatype_noised, seq_mask)
 
         logits = self.W_out(h_V)
 
@@ -242,10 +252,12 @@ class FaMPNN(nn.Module):
             return logits, h_V_enc, X_bb
         elif self.return_embedding == 'decoder':
             return logits, h_V_dec, X_bb
+        elif self.return_embedding == 'gnn':
+            return logits, h_V_gnn, X_bb
         elif self.return_embedding == 'last':
             return logits, h_V, X_bb
         else:
-            raise ValueError(f'Incorrect return embedding type specified: {self.return_embedding}, must be one of: encoder, decoder, or last!')
+            raise ValueError(f'Incorrect return embedding type specified: {self.return_embedding}, must be one of: encoder, decoder, gnn, or last!')
 
 class ProteinFeatures(nn.Module):
     def __init__(self, edge_features, node_features, num_positional_embeddings=16,
