@@ -31,6 +31,79 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch_geometric.nn import MessagePassing
+from allatom_design.data.data import (
+    get_rotation_frames, 
+    rotate
+)
+
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_utils import GVPGraphEmbedding
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_modules import (
+    GVPConvLayer,
+    GVP,
+    LayerNorm
+)
+
+class GVPEncoder(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
+        self.embed_graph = GVPGraphEmbedding(cfg.graph_embedding)
+        self.rotate_out = getattr(cfg, "rotate_out", False)
+        self.node_hidden_dim_vector = cfg.node_hidden_dim_vector
+        self.node_hidden_dim_scalar = cfg.node_hidden_dim_scalar
+
+        node_hidden_dim = (cfg.node_hidden_dim_scalar,
+                cfg.node_hidden_dim_vector)
+        edge_hidden_dim = (cfg.edge_hidden_dim_scalar,
+                cfg.edge_hidden_dim_vector)
+        
+        conv_activations = (F.relu, torch.sigmoid)
+        self.encoder_layers = nn.ModuleList(
+                GVPConvLayer(
+                    node_hidden_dim,
+                    edge_hidden_dim,
+                    drop_rate=cfg.dropout,
+                    vector_gate=True,
+                    attention_heads=0,
+                    n_message=3,
+                    conv_activations=conv_activations,
+                    n_edge_gvps=0,
+                    eps=1e-4,
+                    layernorm=True,
+                ) 
+            for i in range(cfg.num_encoder_layers)
+        )
+        
+        if not self.rotate_out:
+            self.W_out = nn.Sequential(
+                LayerNorm(node_hidden_dim),
+                GVP(node_hidden_dim, (cfg.out_dim, 0)))
+        else:
+            flattened_hidden_dim = self.node_hidden_dim_scalar + 3 * self.node_hidden_dim_vector
+            self.W_out = nn.Linear(flattened_hidden_dim, cfg.out_dim)
+
+        
+    def forward(self, coords, seq, E_idx, h_V, h_E, padding_mask, atom14_mask):
+        node_embeddings, edge_embeddings, edge_index = self.embed_graph(coords, seq, E_idx, h_V, h_E, padding_mask, atom14_mask)
+        
+        for _, layer in enumerate(self.encoder_layers):
+            node_embeddings, edge_embeddings = layer(node_embeddings,
+                    edge_index, edge_embeddings)
+
+        B, N  = coords.shape[0], coords.shape[1]
+
+        if self.rotate_out:
+            gvp_out_scalars, gvp_out_vectors = node_embeddings
+            R = get_rotation_frames(coords)
+            gvp_out_vectors = rotate(gvp_out_vectors.reshape(B, N, -1, 3), R.transpose(-2, -1))
+            gvp_out_vectors = gvp_out_vectors.reshape(B * N, self.node_hidden_dim_vector, 3).flatten(-2, -1)
+            node_embeddings = torch.cat([
+                gvp_out_scalars,
+                gvp_out_vectors,
+            ], dim=-1)
+
+        h_V = self.W_out(node_embeddings)    
+        return h_V
 
 def tuple_size(tp):
     return tuple([0 if a is None else a.size() for a in tp])
