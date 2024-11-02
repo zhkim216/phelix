@@ -22,7 +22,6 @@ from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (
     get_rc_tensor,  
     orientations,
-    intra_residue_orientations,
     dihedrals,
     sidechains,
     positional_embeddings,
@@ -686,6 +685,7 @@ class GCPInputFeaturizer(nn.Module):
         
         super().__init__()
         self.num_positional_embeddings = num_positional_embeddings
+        self.zero_ghost_atoms = False
         self.batch = Batch.from_data_list([Data()])
     
     def forward(self, coords, seq, mpnn_E_idx, padding_mask, atom14_mask):
@@ -740,7 +740,7 @@ class GCPInputFeaturizer(nn.Module):
         # vector features
         X_ca = coords[:, :, 1]
         ca_orientations = orientations(X_ca)
-        fa_orientations = intra_residue_orientations(coords, atom14_mask)
+        fa_orientations = self.intra_residue_orientations(coords, atom14_mask)
 
         #for residues w/out CB, overwrite with pseudo CB
         cb_orientations = sidechains(coords)
@@ -751,6 +751,22 @@ class GCPInputFeaturizer(nn.Module):
         node_vector_features = torch.cat([ca_orientations, fa_orientations], dim=-2)
         return node_scalar_features, node_vector_features
 
+
+    def intra_residue_orientations(self, coords, atom14_mask):
+        X_ca = coords[:, :, 1]
+        vectors = []
+        atom_positions = [0,2,3,4,5,6,7,8,9,10,11,12,13]
+
+        for atom_pos in atom_positions:
+            atom_pos_mask = atom14_mask[:, :, atom_pos][:,:,None].expand(-1, -1, 3)
+            intra_residue_vector = normalize(X_ca - coords[:, :, atom_pos])
+
+            #set unit vector for missing atoms to 0
+            if self.zero_ghost_atoms:
+                intra_residue_vector = torch.where(atom_pos_mask == 1, intra_residue_vector, 0)
+            vectors.append(intra_residue_vector)
+
+        return torch.stack(vectors, dim=2)
 
     def get_edge_features(self, coords, padding_mask, E_idx, atom14_mask):
         X_ca = coords[:, :, 1]
