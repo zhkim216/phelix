@@ -68,125 +68,20 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import allatom_design.data.residue_constants
-from einops import rearrange
-from .gvp_modules import GVP, LayerNorm
-
-class GVPInputFeaturizer(nn.Module):
-
-    @staticmethod
-    def get_node_features(coords, padding_mask, atom14_mask):
-        # scalar features
-        node_scalar_features = GVPInputFeaturizer._dihedrals(coords)
-
-        # vector features
-        X_ca = coords[:, :, 1]
-        ca_orientations = GVPInputFeaturizer._orientations(X_ca)
-        fa_orientations = GVPInputFeaturizer._intra_residue_orientations(coords, atom14_mask)
-
-        #for residues w/out CB, overwrite with pseudo CB
-        cb_orientations = GVPInputFeaturizer._sidechains(coords)
-        no_cb_mask = atom14_mask[:, :, 4] == 0 #use atom14 mask to find positions with no cb
-        no_cb_mask = torch.where(padding_mask, False, no_cb_mask) #exclude padded positions from getting pseudo cb
-        fa_orientations[:,:,3][no_cb_mask, :] = cb_orientations[no_cb_mask]
-
-        node_vector_features = torch.cat([ca_orientations, fa_orientations], dim=-2)
-        return node_scalar_features, node_vector_features
-
-    @staticmethod
-    def _orientations(X):
-        forward = normalize(X[:, 1:] - X[:, :-1])
-        backward = normalize(X[:, :-1] - X[:, 1:])
-        forward = F.pad(forward, [0, 0, 0, 1])
-        backward = F.pad(backward, [0, 0, 1, 0])
-        return torch.cat([forward.unsqueeze(-2), backward.unsqueeze(-2)], -2)
-    
-    @staticmethod
-    def _intra_residue_orientations(coords, atom14_mask):
-        X_ca = coords[:, :, 1]
-        vectors = []
-        atom_positions = [0,2,3,4,5,6,7,8,9,10,11,12,13]
-        
-        for atom_pos in atom_positions:
-            atom_pos_mask = atom14_mask[:, :, atom_pos][:,:,None].expand(-1, -1, 3)
-            intra_residue_vector = normalize(X_ca - coords[:, :, atom_pos])
-
-            #set unit vector for missing atoms to 0
-            #intra_residue_vector = torch.where(atom_pos_mask == 1, intra_residue_vector, 0)
-            vectors.append(intra_residue_vector)
-        
-        return torch.stack(vectors, dim=2)
-
-    
-    @staticmethod
-    def _sidechains(X):
-        n, origin, c = X[:, :, 0], X[:, :, 1], X[:, :, 2]
-        c, n = normalize(c - origin), normalize(n - origin)
-        bisector = normalize(c + n)
-        perp = normalize(torch.cross(c, n, dim=-1))
-        vec = -bisector * math.sqrt(1 / 3) - perp * math.sqrt(2 / 3)
-        return vec 
-
-    @staticmethod
-    def _dihedrals(X, eps=1e-7):
-        X = torch.flatten(X[:, :, :3], 1, 2)
-        bsz = X.shape[0]
-        dX = X[:, 1:] - X[:, :-1]
-        U = normalize(dX, dim=-1)
-        u_2 = U[:, :-2]
-        u_1 = U[:, 1:-1]
-        u_0 = U[:, 2:]
-    
-        # Backbone normals
-        n_2 = normalize(torch.cross(u_2, u_1, dim=-1), dim=-1)
-        n_1 = normalize(torch.cross(u_1, u_0, dim=-1), dim=-1)
-    
-        # Angle between normals
-        cosD = torch.sum(n_2 * n_1, -1)
-        cosD = torch.clamp(cosD, -1 + eps, 1 - eps)
-        D = torch.sign(torch.sum(u_2 * n_1, -1)) * torch.acos(cosD)
-    
-        # This scheme will remove phi[0], psi[-1], omega[-1]
-        D = F.pad(D, [1, 2]) 
-        D = torch.reshape(D, [bsz, -1, 3])
-        # Lift angle representations to the circle
-        D_features = torch.cat([torch.cos(D), torch.sin(D)], -1)
-        return D_features
-
-    @staticmethod
-    def _positional_embeddings(edge_index, 
-                               num_embeddings=None,
-                               num_positional_embeddings=16,
-                               period_range=[2, 1000]):
-        # From https://github.com/jingraham/neurips19-graph-protein-design
-        num_embeddings = num_embeddings or num_positional_embeddings
-        d = edge_index[0] - edge_index[1]
-     
-        frequency = torch.exp(
-            torch.arange(0, num_embeddings, 2, dtype=torch.float32,
-                device=edge_index.device)
-            * -(np.log(10000.0) / num_embeddings)
-        )
-        angles = d.unsqueeze(-1) * frequency
-        E = torch.cat((torch.cos(angles), torch.sin(angles)), -1)
-        return E
-
-    @staticmethod
-    def _dist(X, E_idx, padding_mask, top_k_neighbors, eps=1e-8):
-        """ Pairwise euclidean distances """
-        residue_mask = ~padding_mask
-        residue_mask_2D = torch.unsqueeze(residue_mask,1) * torch.unsqueeze(residue_mask,2)
-        dX = torch.unsqueeze(X,1) - torch.unsqueeze(X,2)
-        D = norm(dX, dim=-1)
-    
-        # sorting preference: first those with coords,then the
-        # residues that came from padding are last
-        D_adjust = nan_to_num(D) + (~residue_mask_2D) * (1e10)
-        D_neighbors = torch.gather(D_adjust, 2, E_idx)
-    
-        residue_mask_neighbors = (D_neighbors < 5e9)
-        return D_neighbors, residue_mask_neighbors
-
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_modules import GVP, LayerNorm
+from allatom_design.data import residue_constants as rc
+from allatom_design.data.data import (  
+    get_rc_tensor,
+    orientations,
+    intra_residue_orientations,
+    dihedrals,
+    sidechains,
+    positional_embeddings,
+    normalize,
+    rbf,
+    nan_to_num,
+    dist
+)
 
 class Normalize(nn.Module):
     def __init__(self, features, epsilon=1e-6):
@@ -259,7 +154,7 @@ class DihedralFeatures(nn.Module):
         return D_features
 
 
-class GVPGraphEmbedding(GVPInputFeaturizer):
+class GVPGraphEmbedding(nn.Module):
 
     def __init__(self, cfg):
         super().__init__()
@@ -280,12 +175,11 @@ class GVPGraphEmbedding(GVPInputFeaturizer):
             GVP(edge_input_dim, edge_hidden_dim, activations=(None, None)),
             LayerNorm(edge_hidden_dim, eps=1e-4)
         )
-        self.embed_seq = nn.Embedding(cfg.n_aatype, cfg.n_aatype)
-        self.embed_confidence = nn.Linear(16, cfg.node_hidden_dim_scalar)
+
         self.embed_mpnn_node = nn.Linear(cfg.node_hidden_dim_scalar, cfg.node_hidden_dim_scalar)
         self.embed_mpnn_edge = nn.Linear(cfg.edge_hidden_dim_scalar, cfg.edge_hidden_dim_scalar)
 
-    def forward(self, coords, mpnn_E_idx, mpnn_node_embedding, mpnn_edge_embedding, padding_mask, confidence, atom14_mask):
+    def forward(self, coords, seq, mpnn_E_idx, mpnn_node_embedding, mpnn_edge_embedding, padding_mask, atom14_mask):
         with torch.no_grad():
             node_features = self.get_node_features(coords, padding_mask, atom14_mask)
             edge_features, edge_index = self.get_edge_features(
@@ -293,11 +187,9 @@ class GVPGraphEmbedding(GVPInputFeaturizer):
 
         node_embeddings_scalar, node_embeddings_vector = self.embed_node(node_features)
         edge_embeddings = self.embed_edge(edge_features)
-
-        rbf_rep = rbf(confidence, 0., 1.)
         
         node_embeddings = (
-            node_embeddings_scalar + self.embed_mpnn_node(mpnn_node_embedding), #+ self.embed_confidence(rbf_rep),
+            node_embeddings_scalar + self.embed_mpnn_node(mpnn_node_embedding),
             node_embeddings_vector
         )
 
@@ -311,12 +203,37 @@ class GVPGraphEmbedding(GVPInputFeaturizer):
 
         return node_embeddings, edge_embeddings, edge_index
 
+    def get_atom_type(self, seq, atom14_mask):
+        atom_indices = get_rc_tensor(rc.RESTYPE_TO_ATOM37_IDX, seq)
+        atom_indices = torch.where(atom_indices == -1, 0, atom_indices) #temporaily set ghost atom idx to 0
+        atom_indices_one_hot = F.one_hot(atom_indices, num_classes=rc.atom_type_num).float()
+        atom_indices_one_hot *= atom14_mask[..., None].expand_as(atom_indices_one_hot)
+        atom_types_summed = torch.sum(atom_indices_one_hot, dim = -2)
+        return atom_types_summed
+    
+    def get_node_features(self, coords, padding_mask, atom14_mask):
+        # scalar features
+        node_scalar_features = dihedrals(coords)
+
+        # vector features
+        X_ca = coords[:, :, 1]
+        ca_orientations = orientations(X_ca)
+        fa_orientations = intra_residue_orientations(coords, atom14_mask)
+
+        #for residues w/out CB, overwrite with pseudo CB
+        cb_orientations = sidechains(coords)
+        no_cb_mask = atom14_mask[:, :, 4] == 0 #use atom14 mask to find positions with no cb
+        no_cb_mask = torch.where(padding_mask, False, no_cb_mask) #exclude padded positions from getting pseudo cb
+        fa_orientations[:,:,3][no_cb_mask, :] = cb_orientations[no_cb_mask]
+
+        node_vector_features = torch.cat([ca_orientations, fa_orientations], dim=-2)
+        return node_scalar_features, node_vector_features
+    
     def get_edge_features(self, coords, padding_mask, E_idx, atom14_mask):
         X_ca = coords[:, :, 1]
 
         # Get distances to the top k neighbors, using E_idx from ProteinMPNN
-        E_dist, E_residue_mask = GVPInputFeaturizer._dist(
-                X_ca, E_idx, padding_mask, self.top_k_neighbors)
+        E_dist, E_residue_mask = dist(X_ca, E_idx, padding_mask)
 
         # Flatten the graph to be batch size 1 for torch_geometric package 
         dest = E_idx
@@ -328,7 +245,7 @@ class GVPGraphEmbedding(GVPInputFeaturizer):
         E_dist = E_dist.flatten(1, 2)
         E_residue_mask = E_residue_mask.flatten(1, 2)
         # Calculate relative positional embeddings and distance RBF 
-        pos_embeddings = GVPInputFeaturizer._positional_embeddings(
+        pos_embeddings = positional_embeddings(
             edge_index,
             num_positional_embeddings=self.num_positional_embeddings,
         )
@@ -436,39 +353,3 @@ def unflatten_graph(node_embeddings, batch_size):
     x_s = x_s.reshape(batch_size, -1, x_s.shape[1])
     x_v = x_v.reshape(batch_size, -1, x_v.shape[1], x_v.shape[2])
     return (x_s, x_v)
-
-def nan_to_num(ts, val=0.0):
-    """
-    Replaces nans in tensor with a fixed value.    
-    """
-    val = torch.tensor(val, dtype=ts.dtype, device=ts.device)
-    return torch.where(~torch.isfinite(ts), val, ts)
-
-
-def rbf(values, v_min, v_max, n_bins=16):
-    """
-    Returns RBF encodings in a new dimension at the end.
-    """
-    rbf_centers = torch.linspace(v_min, v_max, n_bins, device=values.device)
-    rbf_centers = rbf_centers.view([1] * len(values.shape) + [-1])
-    rbf_std = (v_max - v_min) / n_bins
-    v_expand = torch.unsqueeze(values, -1)
-    z = (values.unsqueeze(-1) - rbf_centers) / rbf_std
-    return torch.exp(-z ** 2)
-
-
-def norm(tensor, dim, eps=1e-8, keepdim=False):
-    """
-    Returns L2 norm along a dimension.
-    """
-    return torch.sqrt(
-            torch.sum(torch.square(tensor), dim=dim, keepdim=keepdim) + eps)
-
-
-def normalize(tensor, dim=-1):
-    """
-    Normalizes a tensor along a dimension after removing nans.
-    """
-    return nan_to_num(
-        torch.div(tensor, norm(tensor, dim=dim, keepdim=True))
-    )

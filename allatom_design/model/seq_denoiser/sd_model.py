@@ -101,8 +101,7 @@ class SeqDenoiser(nn.Module):
               seq_mlm_mask,
               seq_mask,
               residue_index,
-              chain_index,
-              confidence              
+              chain_index
         ) -> TensorType["b n"]:
         """
         batch should contain:
@@ -119,8 +118,7 @@ class SeqDenoiser(nn.Module):
                                                           seq_mask, 
                                                           residue_index, 
                                                           chain_index,
-                                                          seq_mlm_mask,
-                                                          confidence
+                                                          seq_mlm_mask
                                                     )
 
         return seq_logits
