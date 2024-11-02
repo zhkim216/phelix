@@ -73,7 +73,6 @@ from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (  
     get_rc_tensor,
     orientations,
-    intra_residue_orientations,
     dihedrals,
     sidechains,
     positional_embeddings,
@@ -178,6 +177,7 @@ class GVPGraphEmbedding(nn.Module):
 
         self.embed_mpnn_node = nn.Linear(cfg.node_hidden_dim_scalar, cfg.node_hidden_dim_scalar)
         self.embed_mpnn_edge = nn.Linear(cfg.edge_hidden_dim_scalar, cfg.edge_hidden_dim_scalar)
+        self.zero_ghost_atoms = False
 
     def forward(self, coords, seq, mpnn_E_idx, mpnn_node_embedding, mpnn_edge_embedding, padding_mask, atom14_mask):
         with torch.no_grad():
@@ -218,7 +218,7 @@ class GVPGraphEmbedding(nn.Module):
         # vector features
         X_ca = coords[:, :, 1]
         ca_orientations = orientations(X_ca)
-        fa_orientations = intra_residue_orientations(coords, atom14_mask)
+        fa_orientations = self.intra_residue_orientations(coords, atom14_mask)
 
         #for residues w/out CB, overwrite with pseudo CB
         cb_orientations = sidechains(coords)
@@ -228,6 +228,22 @@ class GVPGraphEmbedding(nn.Module):
 
         node_vector_features = torch.cat([ca_orientations, fa_orientations], dim=-2)
         return node_scalar_features, node_vector_features
+
+    def intra_residue_orientations(self, coords, atom14_mask):
+        X_ca = coords[:, :, 1]
+        vectors = []
+        atom_positions = [0,2,3,4,5,6,7,8,9,10,11,12,13]
+
+        for atom_pos in atom_positions:
+            atom_pos_mask = atom14_mask[:, :, atom_pos][:,:,None].expand(-1, -1, 3)
+            intra_residue_vector = normalize(X_ca - coords[:, :, atom_pos])
+
+            #set unit vector for missing atoms to 0
+            if self.zero_ghost_atoms:
+                intra_residue_vector = torch.where(atom_pos_mask == 1, intra_residue_vector, 0)
+            vectors.append(intra_residue_vector)
+
+        return torch.stack(vectors, dim=2)
     
     def get_edge_features(self, coords, padding_mask, E_idx, atom14_mask):
         X_ca = coords[:, :, 1]
@@ -277,8 +293,9 @@ class GVPGraphEmbedding(nn.Module):
                 atom_mask_neighbors = torch.gather(atom_mask_pos[...,None].expand(-1,-1,k), 1, E_idx)
                 relative_orientation_vector = normalize(self.get_relative_orientation(bb_atom, coords[:,:,atom_pos], edge_index, B, L, k))
 
-                #insert 0 for unit vectors where destination atom does not exist
-                #relative_orientation_vector = torch.where(atom_mask_neighbors[...,None].expand(-1,-1,-1,3) == 1, relative_orientation_vector, 0).flatten(1, 2)
+                #insert 0 for unit vectors where destination atom does not exist, if specified
+                if self.zero_ghost_atoms:
+                    relative_orientation_vector = torch.where(atom_mask_neighbors[...,None].expand(-1,-1,-1,3) == 1, relative_orientation_vector, 0).flatten(1, 2)
                 vectors.append(relative_orientation_vector)
         
         return torch.stack(vectors, dim=2)
