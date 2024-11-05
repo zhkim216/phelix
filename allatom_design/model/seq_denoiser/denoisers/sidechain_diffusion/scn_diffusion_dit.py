@@ -241,6 +241,7 @@ class SidechainDiffusionModule(nn.Module):
                         x_bb: TensorType["b n a_bb 3", float],
                         seq_mask: TensorType["b n", float],
                         residue_index: TensorType["b n", int],
+                        chain_index: TensorType["b n", int],
                         aux_inputs: Optional[Dict]):
         x1_scn = x1_scn - x_bb[:, :, 1:2, :]  # center sidechain coordinates on CA
         scn_atom_mask = aux_inputs["atom_mask"][..., rc.non_bb_idxs, None].expand_as(x1_scn)
@@ -254,7 +255,7 @@ class SidechainDiffusionModule(nn.Module):
         S_scd = num_steps
 
         # Only pack residues that are unmasked
-        scd_mlm_mask = aux_inputs["mlm_mask"]
+        scd_mlm_mask = aux_inputs["seq_mlm_mask"]
 
         denoiser_fn = partial(self.dit, aatype=aatype, x_bb=x_bb,
                               h_V=h_V, seq_mask=seq_mask, scd_mlm_mask=scd_mlm_mask, residue_index=residue_index)

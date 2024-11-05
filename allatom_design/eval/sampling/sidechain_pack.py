@@ -10,10 +10,10 @@ import lightning as L
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import spearmanr
 import torch
 import yaml
 from omegaconf import DictConfig, OmegaConf, open_dict
+from scipy.stats import spearmanr
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -124,14 +124,14 @@ def main(cfg: DictConfig):
             scd_inputs=scd_inputs,
         )
 
-        # likelihood_aux = lit_sd_model.model.get_sidechain_likelihoods(cfg.likelihood_num_steps,
-        #                                                               x, aatype,
-        #                                                               seq_mask=seq_mask,
-        #                                                               residue_index=residue_index,
-        #                                                               chain_index=chain_index,
-        #                                                               cond_labels=cond_labels_in,
-        #                                                               atom_mask=batch_i["atom_mask"].to(device),
-        #                                                               scd_inputs=scd_inputs)
+        likelihood_aux = lit_sd_model.model.get_sidechain_likelihoods(cfg.likelihood_num_steps,
+                                                                      x, aatype,
+                                                                      seq_mask=seq_mask,
+                                                                      residue_index=residue_index,
+                                                                      chain_index=chain_index,
+                                                                      cond_labels=cond_labels_in,
+                                                                      atom_mask=batch_i["atom_mask"].to(device),
+                                                                      scd_inputs=scd_inputs)
 
         samples = {"x_denoised": x_denoised,
                    "seq_mask": seq_mask,
@@ -146,7 +146,7 @@ def main(cfg: DictConfig):
         sample_info["pdb"] += batch_i["pdb_key"]
         sample_info["seq_mask"].append(seq_mask)
         sample_info["aatype"].append(aatype)
-        # [sample_info[k].append(v.cpu()) for k, v in likelihood_aux.items()]
+        [sample_info[k].append(v.cpu()) for k, v in likelihood_aux.items()]
 
         # Sidechain RMSD per residue
         atom_mask = batch_i["atom_mask"]
@@ -241,7 +241,7 @@ def main(cfg: DictConfig):
 
     # plot_rmsd_vs_npa(sample_info, cfg.out_dir)
     # plot_rmsd_vs_npa_per_residue(sample_info, cfg.out_dir)
-    # plot_per_protein_rmsd_vs_npa(sample_info, cfg.out_dir)
+    plot_per_protein_rmsd_vs_npa(sample_info, cfg.out_dir)
 
 
 def plot_rmsd_vs_npa(sample_info, out_dir: str):
@@ -321,13 +321,15 @@ def plot_per_protein_rmsd_vs_npa(sample_info, out_dir: str):
 
     rho, _ = spearmanr(avg_npa_per_protein[valid_protein_mask].cpu().numpy(), avg_rmsd_per_protein[valid_protein_mask].cpu().numpy())
     plt.figure(figsize=(8, 6))
-    plt.scatter(avg_npa_per_protein[valid_protein_mask].cpu(), avg_rmsd_per_protein[valid_protein_mask].cpu(), alpha=0.5)
-    plt.xlabel('Average Nats per Atom (npa) per Protein')
-    plt.ylabel('Average RMSD per Protein')
-    plt.title(f'Per-Protein RMSD vs Nats per Atom\nSpearman r = {rho:.3f}')
-    plt.grid(True)
+    plt.scatter(avg_npa_per_protein[valid_protein_mask].cpu(), avg_rmsd_per_protein[valid_protein_mask].cpu(), alpha=0.6, edgecolors="none", s=75, c="forestgreen")
+    plt.xlabel('Likelihood of corrupted sidechains per protein (nats per atom)')
+    plt.ylabel('Sidechain RMSD')
+    plt.title(f'Sidechain RMSD vs. corruption likelihood \nSpearman $\\rho$ = {rho:.3f}')
+    plt.grid(False)
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
     plt.tight_layout()
-    plt.savefig(f"{out_dir}/per_protein_rmsd_vs_npa.png")
+    plt.savefig(f"{out_dir}/per_protein_rmsd_vs_npa.pdf", dpi=300, bbox_inches='tight')
     plt.close()
 
 
