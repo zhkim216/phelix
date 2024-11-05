@@ -143,22 +143,35 @@ def main(cfg: DictConfig):
                 atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK)[aatype] * seq_mask[..., None]
                 atom_mask = atom_mask * (1 - batch["missing_atom_mask"])  # handle atoms missing from the ground truth PDB
 
-                scn_info, ca_aligned_coords1 = eval_metrics.compute_structure_metrics(x.cpu(), x_denoised.cpu(), atom_mask, metrics_to_compute=["scn_rmsd_per_pos"])
-                sample_info["scn_rmsd_per_pos"].append(scn_info["scn_rmsd_per_pos"])
+                scn_info, _ = eval_metrics.compute_structure_metrics(x.cpu(), x_denoised.cpu(),
+                                                                     atom_mask, aatype=aatype,
+                                                                     metrics_to_compute=["scn_rmsd_per_pos", "chi_metrics_per_pos"])
+                for k, v in scn_info.items():
+                    sample_info[k].append(v)
 
             sample_info = {k: torch.cat(v, dim=0) if k != "pdb" else v for k, v in sample_info.items()}
 
             ### Compute sidechain metrics ###
-            metrics[f"S_scd{S_scd}/scn_rmsd_avg"] = (sample_info["scn_rmsd_per_pos"] * sample_info["seq_mask"]).sum() / sample_info["seq_mask"].sum()  # average over all residues in the dataset
+            # Get average RMSD over all residues
+            seq_mask = sample_info["seq_mask"]
+            metrics[f"S_scd{S_scd}/scn_rmsd_avg"] = (sample_info["scn_rmsd_per_pos"] * seq_mask).sum() / seq_mask.sum()  # average over all residues in the dataset
             metrics[f"S_scd{S_scd}/scn_rmsd_avg"] = metrics[f"S_scd{S_scd}/scn_rmsd_avg"].item()
 
             # Get average RMSD per residue
             for aa_idx, aa in enumerate(rc.restypes_with_x):
                 aatype_mask = sample_info["aatype"] == aa_idx
                 rmsd_i = sample_info["scn_rmsd_per_pos"][aatype_mask]
-                rmsd_avg_i = (rmsd_i * sample_info["seq_mask"][aatype_mask]).sum() / sample_info["seq_mask"][aatype_mask].sum()
+                rmsd_avg_i = (rmsd_i * seq_mask[aatype_mask]).sum() / seq_mask[aatype_mask].sum()
 
                 metrics[f"S_scd{S_scd}/scn_rmsd_{aa}"] = rmsd_avg_i.item()
+
+            # Get average chi metrics per chi angle
+            chi_mask = sample_info["chi_mask"]  # [B, N, 4]
+            chi_mae_avg = (sample_info["chi_mae_per_pos"] * chi_mask).sum(dim=(0, 1)) / chi_mask.sum(dim=(0, 1))
+            chi_acc_avg = (sample_info["chi_acc_per_pos"] * chi_mask).sum(dim=(0, 1)) / chi_mask.sum(dim=(0, 1))
+            for ci in range(4):
+                metrics[f"S_scd{S_scd}/chi{ci+1}_mae_avg"] = chi_mae_avg[ci].item()
+                metrics[f"S_scd{S_scd}/chi{ci+1}_acc_avg"] = chi_acc_avg[ci].item()
 
         # Save metrics
         metrics_dir = f"{log_dir}/scn_pack_metrics"
