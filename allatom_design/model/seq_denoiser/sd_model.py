@@ -289,6 +289,7 @@ class SeqDenoiser(nn.Module):
                                   aatype: TensorType["b n", int],
                                   seq_mask: TensorType["b n", float],
                                   residue_index: TensorType["b n", int],
+                                  chain_index: TensorType["b n", int],
                                   cond_labels: Dict[str, TensorType["b", int]],
                                   atom_mask: TensorType["b n a", float],  # handles ghost and missing atoms
                                   scd_inputs: Dict[str, Any] = {}  # sidechain diffusion inputs
@@ -296,10 +297,10 @@ class SeqDenoiser(nn.Module):
         aux_inputs = {}
         # Add sidechain diffusion inputs
         aux_inputs["scd"] = scd_inputs
-        aux_inputs["mlm_mask"] = seq_mask.clone()  # sidechain pack with all residues unmasked  # TODO: we can also score sidechains with masked sequence
+        aux_inputs["seq_mlm_mask"] = seq_mask.clone()  # sidechain pack with all residues unmasked  # TODO: we can also score sidechains with masked sequence
         aux_inputs["atom_mask"] = atom_mask  # 1 for valid atoms
 
-        likelihood_aux = self.denoiser.get_sidechain_likelihoods(num_steps, x, aatype, residue_index, seq_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs)
+        likelihood_aux = self.denoiser.get_sidechain_likelihoods(num_steps, x, aatype, residue_index, chain_index, seq_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs)
 
         return likelihood_aux
 

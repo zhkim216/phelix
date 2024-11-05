@@ -107,15 +107,16 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
                                   x: TensorType["b n a 3", float],
                                   aatype: TensorType["b n", int],
                                   residue_index: TensorType["b n", int],
+                                  chain_index: TensorType["b n", int],
                                   seq_mask: TensorType["b n", float],
                                   cond_labels_in: Dict[str, TensorType["b", int]] = {},
                                   aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
                                   ):
         # 1. MiniMPNN on ground truth aatype for sequence embeddings
-        _, h_V, mpnn_feature_dict = self.seq_design_module(x, aatype, None, None, seq_mask, residue_index)
+        _, h_V, mpnn_feature_dict = self.seq_design_module(x, aatype, None, seq_mask, residue_index, chain_index, aux_inputs["seq_mlm_mask"])
 
         # 2. Get sidechain likelihoods
         x1_scn, x_bb = x[..., rc.non_bb_idxs, :], x[..., rc.bb_idxs, :]
-        likelihood_aux = self.scn_diffusion_module.get_likelihoods(num_steps, x1_scn, h_V, aatype, x_bb, seq_mask, residue_index, aux_inputs)
+        likelihood_aux = self.scn_diffusion_module.get_likelihoods(num_steps, x1_scn, h_V, aatype, x_bb, seq_mask, residue_index, chain_index, aux_inputs)
 
         return likelihood_aux

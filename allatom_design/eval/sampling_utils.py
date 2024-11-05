@@ -92,7 +92,7 @@ def unmask(xt,
 
     ## Repack sidechains of all unmasked residues, if using an aasd model
     if x1_pred is not None:
-        xt = torch.where(unmasked_residues[..., None, None] ==  1, x1_pred, xt)
+        xt = torch.where(residues_to_unmask[..., None, None] ==  1, x1_pred, xt)
 
     return xt, aatype_t, unmasked_prev
 
