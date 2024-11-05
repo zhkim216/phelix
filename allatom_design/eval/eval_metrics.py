@@ -1,3 +1,4 @@
+import math
 import shutil
 import subprocess
 from collections import defaultdict
@@ -396,7 +397,7 @@ def compute_structure_metrics(coords1: TensorType["b n 37 3"],
             structure_metrics["sc_aa_rmsd"] = data.torch_rmsd_weighted(rearrange(coords1, "b n a x -> b (n a) x"),
                                                                        rearrange(coords2, "b n a x -> b (n a) x"),
                                                                        weights=rearrange(atom_mask, "b n a -> b (n a)"))
-        elif metric == "scn_rmsd_per_pos":
+        elif metric.startswith("scn_rmsd_per_pos"):
             # Align on backbone atoms, compute sidechain RMSD
 
             # align on backbone atoms
@@ -405,25 +406,111 @@ def compute_structure_metrics(coords1: TensorType["b n 37 3"],
             bb_atom_mask = bb_atom_mask * atom_mask
 
             bb_rmsd, (bb_aligned_coords1, _) = data.torch_rmsd_weighted(rearrange(coords1, "b n a x -> b (n a) x"),
-                                                                  rearrange(coords2, "b n a x -> b (n a) x"),
-                                                                  weights=rearrange(bb_atom_mask, "b n a -> b (n a)"),
-                                                                  return_aligned=True)
+                                                                        rearrange(coords2, "b n a x -> b (n a) x"),
+                                                                        weights=rearrange(bb_atom_mask, "b n a -> b (n a)"),
+                                                                        return_aligned=True)
             bb_aligned_coords1 = rearrange(bb_aligned_coords1, "b (n a) x -> b n a x", n=N)
 
             # compute RMSD over sidechain atoms per residue
             scn_atom_mask = torch.zeros_like(atom_mask)
             scn_atom_mask[..., rc.non_bb_idxs] = 1
-            scn_atom_mask[..., rc.atom_order["CB"]] = 0  # exclude CB atoms to match LigandMPNN eval
+            if metric == "scn_rmsd_per_pos_ligandmpnn":
+                # exclude CB atoms to match LigandMPNN eval
+                scn_atom_mask[..., rc.atom_order["CB"]] = 0
             scn_atom_mask = scn_atom_mask * atom_mask
             scn_atom_mask = scn_atom_mask[..., None].expand_as(bb_aligned_coords1)
 
             scn_rmsd_per_pos = ((scn_atom_mask * (bb_aligned_coords1 - coords2) ** 2).sum(dim=(-1, -2)) / scn_atom_mask.sum(dim=(-1, -2)).clamp(min=1)).sqrt()
-            structure_metrics["scn_rmsd_per_pos"] = scn_rmsd_per_pos
+            structure_metrics[metric] = scn_rmsd_per_pos
+        elif metric == "chi_metrics_per_pos":
+            # Compute metrics for sidechain chi angles
+            aatype = kwargs["aatype"]
+
+            # Get chi angles in radians
+            torsions1, alt_torsions1, torsions_mask1 = data.atom37_to_torsions_rad(aatype, coords1, atom_mask)
+            torsions2, alt_torsions2, torsions_mask2 = data.atom37_to_torsions_rad(aatype, coords2, atom_mask)
+
+            # Compute chi angle MAE and accuracy per residue
+            chi_metrics_per_pos = metrics_per_chi_per_pos(torsions1[..., 3:], torsions2[..., 3:], alt_torsions2[..., 3:], torsions_mask1[..., 3:])
+            structure_metrics["chi_mae_per_pos"] = chi_metrics_per_pos["chi_mae"]
+            structure_metrics["chi_acc_per_pos"] = chi_metrics_per_pos["chi_acc"]
+            structure_metrics["chi_mask"] = chi_metrics_per_pos["chi_mask"]
         else:
             assert False, f"Invalid metric: {metric}"
 
     return structure_metrics, ca_aligned_coords1
 
+##########################################
+# Adapated from FlowPacker https://gitlab.com/mjslee0921/flowpacker/-/blob/main/utils/metrics.py?ref_type=heads
+def angle_ae(pred, target):
+    ae = torch.abs(pred - target)
+    ae_alt = torch.abs(ae - 2*math.pi)
+    ae_min = torch.minimum(ae, ae_alt)
+    return ae_min
+
+def angle_mae(pred, target, target_alt, mask, deg=True):
+    ae = angle_ae(pred, target)
+    ae_alt = angle_ae(pred, target_alt)
+    ae_min = torch.minimum(ae, ae_alt)
+    mae = ((ae_min*mask).sum() / mask.sum())
+    if deg:
+        return mae * 180 / math.pi
+    return mae
+
+def angle_acc(pred, target, target_alt, mask, threshold=20):
+    ae = angle_ae(pred, target)
+    ae_alt = angle_ae(pred, target_alt)
+    ae_min = torch.minimum(ae, ae_alt)
+    acc = torch.logical_and(ae_min <= (threshold * math.pi / 180), mask == 1).sum() / mask.sum()
+    return acc
+
+def metrics_per_chi(pred, target, target_alt, chi_mask, threshold=20, deg=True):
+    mae_d, acc_d = {}, {}
+    for i in range(4):
+        mae = angle_mae(pred[..., i], target[...,i], target_alt[...,i], chi_mask[...,i], deg=deg)
+        acc = angle_acc(pred[..., i], target[...,i], target_alt[...,i], chi_mask[...,i], threshold=threshold)
+        mae_d[f'chi{i+1}'] = mae.item()
+        acc_d[f'chi{i+1}'] = acc.item()
+    return mae_d, acc_d
+
+
+def metrics_per_chi_per_pos(pred, target, target_alt, chi_mask, threshold=20):
+    mae_d, acc_d = {}, {}
+    ae = angle_ae(pred, target)
+    ae_alt = angle_ae(pred, target_alt)
+    ae_min = torch.minimum(ae, ae_alt) * chi_mask
+    ae_min = ae_min * 180 / math.pi
+    acc = (ae_min <= threshold) * chi_mask
+
+    chi_metrics_per_pos = {"chi_mae": ae_min, "chi_acc": acc, "chi_mask": chi_mask}
+    return chi_metrics_per_pos
+
+##########################################
+
+
+def compute_sidechain_metrics(coords: TensorType["b n 37 3", float],
+                              atom_mask: TensorType["b n 37", float],
+                              metrics_to_compute: List[str],
+                              ) -> Tuple[Dict[str, Any]]:
+    """
+    Compute metrics for sidechains in a given structure.
+
+    - metrics_to_compute: List of metrics to compute. Options are given below.
+
+    Metrics:
+    - sc_clashes: Number of sidechain clashes... # TODO: decide on this metric
+    - chi_angles: return chi angles for plotting or comparison
+    """
+    sidechain_metrics = {}
+
+    for metric in metrics_to_compute:
+        # if metric == "sc_clashes":
+        #     # Compute number of
+        continue
+
+
+
+    pass
 
 
 def get_sort_key_fn(metric_name: str) -> Callable[[float], float]:
