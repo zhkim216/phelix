@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b0_aasd0
+#SBATCH --job-name=b3_aasd0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b0_aasd0
+EXP_NAME=b3_aasd0
 GROUP=chimera_b0
 
 # Dataset paths
@@ -39,15 +39,14 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
     data.subset_length_range=[16,9999] \
-    train.batch_size=32 \
+    train.batch_size=64 \
     train.compile_model=true \
     model.task=allatom_seq_des \
     interpolant.training_noise_schedule=uniform_squared_t \
     denoiser=minimpnn_denoiser \
     denoiser.minimpnn.model_type=sidechain \
-    denoiser.minimpnn.augment_eps=0.0 \
-    denoiser.scn_diffusion_module.future_unmasking_schedule=null \
-    denoiser.scn_diffusion_module.training_batch_size_mult=4 \
+    denoiser.minimpnn.augment_eps=0.3 \
+    denoiser.scn_diffusion_module.training_batch_size_mult=8 \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=5000 \
     checkpointing.save_ema_every_n_steps=1500 \

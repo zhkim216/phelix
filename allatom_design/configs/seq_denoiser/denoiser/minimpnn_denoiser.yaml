@@ -17,25 +17,25 @@ minimpnn:
   use_time_cond: false
   use_gvp: false
   use_gcp: false
-  use_residue_transformer: true
+  use_residue_transformer: false
   n_channel: 128
   n_layers: 3
   k_neighbors: 48
   noise_cond_mult: 4
 
-  model_type: "graph_transformer"
+  model_type: "sidechain"
   augment_eps: 0.0
   dropout_p: 0.1
   dec_edge_up: true
   aggregation: "sum"
   return_embedding: "last"
-  
-  graph_transformer: 
+
+  graph_transformer:
     nns: [8,16,32,64]
     layers_per_nn: 4
     hidden_dim: 32
     input_dim: 37
-    num_heads: 2 
+    num_heads: 2
     dim_key: 3
     out_dim: ${model.denoiser.minimpnn.n_channel}
     dim_pos_enc: 16
