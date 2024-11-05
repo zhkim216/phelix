@@ -142,7 +142,7 @@ class ADDataset(data.Dataset):
         example["missing_atom_mask"] = data["missing_atom_mask"]
         example["atom_mask"] = atom_mask
         example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
-
+        example['res_b_factors'] = data['res_b_factors']
         # Construct conditioning inputs
         cond_labels_in = {}
 
