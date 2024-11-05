@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=eval_if
+#SBATCH --job-name=eval_fitness
 #SBATCH -p gpu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=24:00:00
+#SBATCH --time=30:00:00
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/talal/slurm_log_files/job_%j.out

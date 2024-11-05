@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=aasd_scn_atom
-#SBATCH -p gpu_batch
+#SBATCH --job-name=aasd_gvp_0.2_rotate
+#SBATCH -p gpu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=96:00:00
+#SBATCH --time=23:59:59
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/talal/slurm_log_files/job_%j.out
@@ -19,7 +19,7 @@ OUT_DIR=/scratch/hielab/talal/allatom_design
 WANDB_ID=talal-widatalla
 cd $BASE_DIR
 
-EXP_NAME=aasd_scn_atom
+EXP_NAME=aasd_gvp_trans
 GROUP=chimera_a8
 
 # Dataset paths
@@ -32,31 +32,24 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
     num_workers=${SLURM_CPUS_ON_NODE} \
-    no_wandb=false \
+    no_wandb=true \
     data.fixed_size=256 \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
     data.overwrite_cache=false \
-    data.subset_length_range=[16,9999] \
     train.batch_size=32 \
-    train.compile_model=true \
+    train.compile_model=false \
     trainer.max_epochs=500 \
     model.task=allatom_seq_des \
     interpolant=mar_interpolant \
     interpolant.training_noise_schedule=uniform_squared_t \
-    interpolant.training_noise_cfg.uniform_squared_t.t_min=0.5 \
     denoiser=minimpnn_denoiser \
-    denoiser.minimpnn.model_type=baseline \
-    denoiser.minimpnn.augment_eps=0 \
-    denoiser.minimpnn.graph_transformer.layers_per_nn=4 \
-    denoiser.minimpnn.aggregation=sum \
+    denoiser.minimpnn.model_type=sidechain \
+    denoiser.minimpnn.use_residue_transformer=true \
+    denoiser.minimpnn.use_gvp=true \
+    denoiser.minimpnn.augment_eps=0.2 \
     denoiser.minimpnn.return_embedding=last \
-    denoiser.minimpnn.graph_transformer.dim_key=3 \
-    denoiser.minimpnn.graph_transformer.hidden_dim=32 \
-    denoiser.minimpnn.graph_transformer.nns=[8,16,32,64] \
-    denoiser.minimpnn.graph_transformer.attn_bias=true \
-    denoiser.minimpnn.graph_transformer.num_heads=2 \
-    denoiser.minimpnn.graph_transformer.pos_enc=true \
+    denoiser.minimpnn.gvp.rotate_out=false \
     denoiser.scn_diffusion_module.training_batch_size_mult=4 \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_epochs=20 \

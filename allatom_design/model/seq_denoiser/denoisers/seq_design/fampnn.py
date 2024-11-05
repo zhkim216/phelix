@@ -1,13 +1,8 @@
-import itertools
-import sys
 from typing import Optional
-
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
-from einops.layers.torch import Rearrange
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
@@ -16,14 +11,18 @@ import allatom_design.data.residue_constants as rc
 from allatom_design.data.data import (
     atom37_to_atom14,
     unpack,
-    pack,
-    get_rc_tensor,
-    extract_ids_topk,
-    gather_pos_enc
+    get_graph_transformer_inputs,
+    aggregate,
+    gather_edges,
+    gather_nodes,
+    cat_neighbors_nodes
 )
 
-from .graph_transformer import GraphTransformer
-from .esm_model import ESMWrapper
+from allatom_design.model.seq_denoiser.denoisers.seq_design.graph_transformer import GraphTransformer
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_modules import GVPEncoder
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gcp_net.gcp_net import GCPNet
+from allatom_design.model.seq_denoiser.denoisers.seq_design.residue_transformer import ResidueTransformer
+
 
 class FaMPNN(nn.Module):
     """Modified ProteinMPNN network to predict sequence from full atom structure."""
@@ -56,6 +55,12 @@ class FaMPNN(nn.Module):
         self.num_heads = cfg.graph_transformer.num_heads
         self.pos_enc = cfg.graph_transformer.pos_enc
         self.attn_bias = cfg.graph_transformer.attn_bias
+        self.use_gvp = getattr(cfg, "use_gvp", False)
+        self.use_gcp = getattr(cfg, "use_gcp", False)
+        self.use_residue_transformer = getattr(cfg, "use_residue_transformer", False)
+
+
+        assert int(self.use_gvp) + int(self.use_gcp) < 2, 'Only one architecture for processing vector features is permitted!'
 
         if self.model_type not in ['graph_transformer', 'sidechain', 'baseline']:
             raise ValueError(f'Incorrect model type specified: {self.model_type}, must be one of: graph_transformer, sidechain, or baseline!')
@@ -78,6 +83,7 @@ class FaMPNN(nn.Module):
             self.embed_pos = nn.Linear(self.pos_enc_size, self.dim_pos_enc, bias=True)
             self.proj_attn_bias = nn.Linear(self.pos_enc_size, self.num_heads, bias=True)
 
+            #Full atom encoder layers
             self.atom_decoder_layers = nn.ModuleList([
                 DecLayer(self.hidden_dim, self.atom_decoder_in, dropout=cfg.dropout_p)
                 for _ in range(self.num_decoder_layers)
@@ -95,6 +101,16 @@ class FaMPNN(nn.Module):
             for _ in range(self.num_decoder_layers)
         ])
 
+        #GVP and GCP are both embed vector features with scalar features
+        if self.use_gvp:
+            self.vector_encoder = GVPEncoder(cfg.gvp)
+
+        if self.use_gcp:
+            self.vector_encoder = GCPNet(cfg.gcp)
+
+        if self.use_residue_transformer:
+            self.transformer = ResidueTransformer(cfg.residue_transformer)
+
         # Output layers
         self.W_out = nn.Linear(self.hidden_dim, self.n_aatype, bias=True)
 
@@ -102,115 +118,6 @@ class FaMPNN(nn.Module):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
-
-    def get_gt_inputs(
-        self,
-        X,
-        atom14_mask,
-        aatype_noised,
-        seq_mask,
-        chain_encoding
-    ):
-        #get one hot encoding of atom identities
-        atom_indices = get_rc_tensor(rc.RESTYPE_TO_ATOM37_IDX, aatype_noised[seq_mask == 1].flatten())
-        atom_indices_packed = atom_indices[atom_indices != -1].flatten()
-        q = F.one_hot(atom_indices_packed, num_classes=len(rc.atom_types)).float()
-        tot_num_atoms = len(atom_indices_packed)
-
-        #packing X and getting packed mask
-        atoms14_mask_no_pad = atom14_mask * seq_mask[:,:, None]
-        atom14_mask_packed_no_pad = (atom14_mask[seq_mask == 1] == 1)
-        chain_encoding_packed_no_pad = chain_encoding[seq_mask == 1].flatten()
-
-        unmasked_packed_X = pack(
-                unpacked_rep = X[seq_mask == 1, ...],
-                tgt_shape = (-1, 3),
-                mask = atom14_mask_packed_no_pad
-            )
-
-        num_atoms_per_example = atoms14_mask_no_pad.sum(dim =(1,2)).long()
-        num_residues_per_example = seq_mask.sum(dim = -1).long()
-        num_atoms_per_residue = atom14_mask_packed_no_pad.sum(dim = -1).long().to(X.device)
-        tot_num_residues = len(num_atoms_per_residue)
-
-        batch_atom_start_idx = torch.cat((torch.tensor([0], device=q.device), num_atoms_per_example[:-1])).cumsum(dim=0)
-        batch_residue_start_idx = torch.cat((torch.tensor([0], device=q.device), num_residues_per_example[:-1])).cumsum(dim=0)
-
-        ids_topk = torch.zeros((tot_num_atoms, self.max_nn), dtype=torch.long, device=q.device)
-        positional_enc_topk = torch.zeros((tot_num_atoms, self.max_nn, 137), dtype=q.dtype, device=q.device) if (self.pos_enc or self.attn_bias) else None
-
-        # Process each batch example
-        for atom_start_idx, residue_start_idx, na, nr in zip(batch_atom_start_idx, batch_residue_start_idx, num_atoms_per_example, num_residues_per_example):
-            # Extract packed_X and compute ids_topk
-            start_a, end_a = int(atom_start_idx), int(atom_start_idx + na)
-            start_r, end_r = int(residue_start_idx), int(residue_start_idx + nr)
-
-            packed_X_i = unmasked_packed_X[start_a: end_a, :]
-            ids_topk_i = extract_ids_topk(packed_X_i, num_nn = self.max_nn)
-
-            if (self.pos_enc or self.attn_bias):
-                num_atoms_per_residue_i = num_atoms_per_residue[start_r: end_r]
-                chain_encoding_i = chain_encoding_packed_no_pad[start_r: end_r]
-
-                atom_residue_idx_i = torch.repeat_interleave(
-                    torch.arange(nr).to(q.device),
-                    num_atoms_per_residue_i
-                )
-
-                atom_chain_enc_i = torch.repeat_interleave(
-                    chain_encoding_i,
-                    num_atoms_per_residue_i
-                )
-
-                same_res = torch.eq(atom_residue_idx_i.unsqueeze(0), atom_residue_idx_i.unsqueeze(1))
-                same_chain = torch.eq(atom_chain_enc_i.unsqueeze(0), atom_chain_enc_i.unsqueeze(1))
-                atom_idx_i = torch.arange(na).to(q.device)
-
-                d_atom = torch.clamp(atom_idx_i.unsqueeze(0) - atom_idx_i.unsqueeze(1) + rc.r_max, min = 0, max = 2 * rc.r_max)
-                d_atom[~(same_chain|same_res)] = 2 * rc.r_max + 1
-                rel_atom_enc = F.one_hot(d_atom, num_classes = 2 * rc.r_max + 2)
-
-                d_chain = torch.clamp(atom_chain_enc_i.unsqueeze(0) - atom_chain_enc_i.unsqueeze(1) + rc.s_max, min = 0, max = 2 * rc.s_max)
-                rel_chain_enc = F.one_hot(d_chain, num_classes = 2 * rc.s_max + 1)
-
-                d_res = torch.clamp(atom_residue_idx_i.unsqueeze(0) - atom_residue_idx_i.unsqueeze(1) + rc.r_max, min = 0, max = 2 * rc.r_max)
-                d_res[~same_chain] = 2 * rc.r_max + 1
-                rel_res_enc = F.one_hot(d_res, num_classes = 2 * rc.r_max + 2)
-
-                positional_enc_i = torch.cat([rel_res_enc, rel_atom_enc, rel_chain_enc], dim = -1)
-
-                positional_enc_topk_i = gather_pos_enc(ids_topk_i, positional_enc_i)
-                positional_enc_topk[start_a: end_a, :, :] = positional_enc_topk_i
-
-            # fill ids_topk and positional_enc_topk for entire batch with current example
-            ids_topk[start_a: end_a, :] = ids_topk_i + start_a + 1
-
-        return q, ids_topk, unmasked_packed_X, num_atoms_per_residue, positional_enc_topk, tot_num_atoms
-
-    def aggregate(
-        self,
-        h_A,
-        num_atoms_per_residue
-    ):
-
-        # Calculate the total number of residues
-        num_residues = num_atoms_per_residue.size(0)
-
-        # Generate residue indices that map each atom to its corresponding residue
-        residue_indices = (
-            torch.arange(num_residues, device=h_A.device)
-            .repeat_interleave(num_atoms_per_residue)
-            .unsqueeze(-1)
-            .expand_as(h_A)
-        )
-
-        # Initialize the aggregated residue tensor
-        h_R = torch.zeros(num_residues, self.hidden_dim, dtype=h_A.dtype, device=h_A.device)
-
-        # Aggregate atom features to residue-level using scatter_reduce
-        h_R.scatter_reduce(src=h_A, dim=0, index=residue_indices, reduce=self.aggregation)
-
-        return h_R
 
 
     def forward(
@@ -221,7 +128,7 @@ class FaMPNN(nn.Module):
         seq_mask: TensorType["b n", float],
         residue_index: TensorType["b n", int],
         chain_encoding: TensorType["b n", int],
-        mlm_mask: TensorType["b n", bool],
+        mlm_mask: TensorType["b n", bool]
     ):
 
         B, N, _, _ = denoised_coords.shape
@@ -249,18 +156,9 @@ class FaMPNN(nn.Module):
         #keep copy of node embeddings from encoder
         h_V_enc = h_V.clone()
 
-        # Concatenate self-conditioning
-        if self.use_self_conditioning_seq:
-            if seq_self_cond is None:
-                S_self_cond = torch.zeros_like(S)
-            else:
-                # One-hot encode the argmax prediction
-                S_self_cond = F.one_hot(seq_self_cond.argmax(dim=-1), self.n_aatype)
-            S = torch.cat([S, seq_self_cond], dim=-1)
-
-        mask_size = E_idx.shape[1]
 
         #implementation of causal mask if training autoregressively, otherwise mask is fully true
+        mask_size = E_idx.shape[1]
         if self.autoregressive:
             decoding_order = torch.argsort((seq_mask+0.0001)*(torch.abs(torch.randn(seq_mask.shape, device=seq_mask.device)))) #[numbers will be smaller for places where chain_M = 0.0 and higher for places where chain_M = 1.0]
             permutation_matrix_reverse = F.one_hot(decoding_order, num_classes=mask_size).float()
@@ -286,7 +184,7 @@ class FaMPNN(nn.Module):
             h_EX_encoder = cat_neighbors_nodes(torch.zeros((B, N, self.hidden_dim), device = h_S.device), h_EX_encoder, E_idx)
 
             # Extract sidechain features and concatenate to edge embeddings
-            E2, _ = self.sidechain_features(X, seq_mask, residue_index, chain_encoding, E_idx, atom14_mask)
+            E2, _ = self.sidechain_features(X, residue_index, chain_encoding, E_idx, atom14_mask)
 
             #128 -> 128
             h_E2 = self.W_e2(E2)
@@ -309,13 +207,14 @@ class FaMPNN(nn.Module):
         #keep copy of node embeddings from encoder
         h_V_dec = h_V.clone()
 
+        if self.use_gvp or self.use_gcp:
+            padding_mask = (seq_mask != 1)
+            h_V_flattened = self.vector_encoder(X, aatype_noised, E_idx, h_V, h_ESV, padding_mask, atom14_mask)
+            h_V = h_V_flattened.reshape(B, N, -1)
+
         if self.model_type in ['graph_transformer']:
-
-            # Add empty hidden dim of 128 to end of h_EXV to later sum with added atom information
-            h_EX_encoder = cat_neighbors_nodes(torch.zeros((B, N, self.hidden_dim), device = h_S.device), h_EX_encoder, E_idx)
-
             #get graph transformer inputs
-            q, ids_topk, unmasked_packed_X, num_atoms_per_residue, positional_enc, num_atoms = self.get_gt_inputs(X, atom14_mask, aatype_noised, seq_mask, chain_encoding)
+            q, ids_topk, unmasked_packed_X, num_atoms_per_residue, positional_enc, num_atoms = get_graph_transformer_inputs(X, atom14_mask, aatype_noised, seq_mask, chain_encoding, self.max_nn, self.pos_enc, self.attn_bias)
 
             #embed full atomic positional encoding into edge embedding and attention bias
             p_A = self.embed_pos(positional_enc).squeeze(-1) if self.pos_enc else None
@@ -323,11 +222,9 @@ class FaMPNN(nn.Module):
 
             #graph transformer forward pass, garbage collect inputs
             h_A = self.gt(unmasked_packed_X, ids_topk, q, p_A, attn_bias)
-            del q, ids_topk, unmasked_packed_X
 
             #aggergate atom embeddings into residue embeddings
-            h_R = self.aggregate(h_A, num_atoms_per_residue)
-            del h_A
+            h_R = aggregate(h_A, num_atoms_per_residue, self.hidden_dim, self.aggregation)
 
             #unpack residue embeddings, (B N, ...) -> (B, N, ...)
             h_R = unpack(
@@ -337,10 +234,14 @@ class FaMPNN(nn.Module):
             )
 
             #concatenate residue embedding to sequence embedding
-            h_ESVR = cat_neighbors_nodes(h_R, h_ESV, E_idx)
+            h_ESV = cat_neighbors_nodes(h_R, h_ESV, E_idx)
 
             for layer in self.atom_decoder_layers:
-                h_V, h_ESVR = layer(h_V, h_ESVR, seq_mask, E_idx)
+                h_V, h_ESV = layer(h_V, h_ESV, seq_mask, E_idx)
+
+        if self.use_residue_transformer:
+            h_V_gnn = h_V.clone()
+            h_V = self.transformer(h_V, h_ESV, E_idx, aatype_noised, seq_mask)
 
         logits = self.W_out(h_V)
 
@@ -351,110 +252,12 @@ class FaMPNN(nn.Module):
             return logits, h_V_enc, X_bb
         elif self.return_embedding == 'decoder':
             return logits, h_V_dec, X_bb
+        elif self.return_embedding == 'gnn':
+            return logits, h_V_gnn, X_bb
         elif self.return_embedding == 'last':
             return logits, h_V, X_bb
         else:
-            raise ValueError(f'Incorrect return embedding type specified: {self.return_embedding}, must be one of: encoder, decoder, or last!')
-
-    def sample(self, X, S_true, chain_encoding_all, residue_idx, mask, temperature=1.0, chain_mask = None, chain_M_pos=None):
-        device = X.device
-
-        # Prepare node and edge embeddings
-        E, E_idx = self.features(X, mask, residue_idx, chain_encoding_all)
-        h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=device)
-        h_E = self.W_e(E)
-
-        # Encoder is unmasked self-attention
-        mask_attend = gather_nodes(mask.unsqueeze(-1),  E_idx).squeeze(-1)
-        mask_attend = mask.unsqueeze(-1) * mask_attend
-        for layer in self.encoder_layers:
-            h_V, h_E = layer(h_V, h_E, E_idx, mask, mask_attend)
-
-        # Decoder uses masked self-attention
-        chain_mask = mask #TODO: update for multi-chain sampling
-        decoding_order = torch.argsort((chain_mask+0.0001)*(torch.abs(torch.randn(chain_mask.shape, device=chain_mask.device)))) #[numbers will be smaller for places where chain_M = 0.0 and higher for places where chain_M = 1.0]
-        mask_size = E_idx.shape[1]
-        permutation_matrix_reverse = F.one_hot(decoding_order, num_classes=mask_size).float()
-        order_mask_backward = torch.einsum('ij, biq, bjp->bqp',(1-torch.triu(torch.ones(mask_size,mask_size, device=device))), permutation_matrix_reverse, permutation_matrix_reverse)
-        mask_attend = torch.gather(order_mask_backward, 2, E_idx).unsqueeze(-1)
-        mask_1D = mask.view([mask.size(0), mask.size(1), 1, 1])
-        mask_bw = mask_1D * mask_attend
-        mask_fw = mask_1D * (1. - mask_attend)
-
-        N_batch, N_nodes = X.size(0), X.size(1)
-        log_probs = torch.zeros((N_batch, N_nodes, 21), device=device)
-        all_probs = torch.zeros((N_batch, N_nodes, 21), device=device, dtype=torch.float32)
-        h_S = torch.zeros_like(h_V, device=device)
-        S = torch.zeros((N_batch, N_nodes), dtype=torch.int64, device=device)
-        h_V_stack = [h_V] + [torch.zeros_like(h_V, device=device) for _ in range(len(self.decoder_layers))]
-        h_EX_encoder = cat_neighbors_nodes(torch.zeros_like(h_S), h_E, E_idx)
-        h_EXV_encoder = cat_neighbors_nodes(h_V, h_EX_encoder, E_idx)
-        h_EXV_encoder_fw = mask_fw * h_EXV_encoder
-
-        for t_ in range(N_nodes):
-            t = decoding_order[:,t_] #[B]
-            chain_mask_gathered = torch.gather(chain_mask, 1, t[:,None]) #[B]
-            mask_gathered = torch.gather(mask, 1, t[:,None]) #[B]
-            if (mask_gathered==0).all(): #for padded or missing regions only
-                S_t = torch.gather(S_true, 1, t[:,None])
-            else:
-                # Hidden layers
-                E_idx_t = torch.gather(E_idx, 1, t[:,None,None].repeat(1,1,E_idx.shape[-1]))
-                h_E_t = torch.gather(h_E, 1, t[:,None,None,None].repeat(1,1,h_E.shape[-2], h_E.shape[-1]))
-                h_ES_t = cat_neighbors_nodes(h_S, h_E_t, E_idx_t)
-                h_EXV_encoder_t = torch.gather(h_EXV_encoder_fw, 1, t[:,None,None,None].repeat(1,1,h_EXV_encoder_fw.shape[-2], h_EXV_encoder_fw.shape[-1]))
-                mask_t = torch.gather(mask, 1, t[:,None])
-                for l, layer in enumerate(self.decoder_layers):
-                    # Updated relational features for future states
-                    h_ESV_decoder_t = cat_neighbors_nodes(h_V_stack[l], h_ES_t, E_idx_t)
-                    h_V_t = torch.gather(h_V_stack[l], 1, t[:,None,None].repeat(1,1,h_V_stack[l].shape[-1]))
-                    h_ESV_t = torch.gather(mask_bw, 1, t[:,None,None,None].repeat(1,1,mask_bw.shape[-2], mask_bw.shape[-1])) * h_ESV_decoder_t + h_EXV_encoder_t
-                    h_V_stack[l+1].scatter_(1, t[:,None,None].repeat(1,1,h_V.shape[-1]), layer(h_V_t, h_ESV_t, mask_V=mask_t))
-                # Sampling step
-                h_V_t = torch.gather(h_V_stack[-1], 1, t[:,None,None].repeat(1,1,h_V_stack[-1].shape[-1]))[:,0]
-                logits = self.W_out(h_V_t) / temperature
-                probs = F.softmax(logits, dim=-1)
-                S_t = torch.multinomial(probs, 1)
-                all_probs.scatter_(1, t[:,None,None].repeat(1,1,21), (chain_mask_gathered[:,:,None,]*probs[:,None,:]).float())
-            S_true_gathered = torch.gather(S_true, 1, t[:,None])
-            S_t = (S_t*chain_mask_gathered+S_true_gathered*(1.0-chain_mask_gathered)).long()
-            temp1 = self.W_s(S_t)
-            h_S.scatter_(1, t[:,None,None].repeat(1,1,temp1.shape[-1]), temp1)
-            S.scatter_(1, t[:,None], S_t)
-        return S, all_probs
-
-class NoiseConditioningBlock(nn.Module):
-    def __init__(self, n_in_channel, n_out_channel):
-        super().__init__()
-        self.block = nn.Sequential(
-            Noise_Embedding(n_in_channel),
-            nn.Linear(n_in_channel, n_out_channel),
-            nn.SiLU(),
-            nn.Linear(n_out_channel, n_out_channel),
-            Rearrange("b d -> b 1 d"),
-        )
-
-    def forward(self, noise_level):
-        return self.block(noise_level)
-
-
-class Noise_Embedding(nn.Module):
-    def __init__(self, num_channels, max_positions=10000, endpoint=False):
-        super().__init__()
-        self.num_channels = num_channels
-        self.max_positions = max_positions
-        self.endpoint = endpoint
-
-    def forward(self, x):
-        freqs = torch.arange(
-            start=0, end=self.num_channels // 2, dtype=torch.float32, device=x.device
-        )
-        freqs = freqs / (self.num_channels // 2 - (1 if self.endpoint else 0))
-        freqs = (1 / self.max_positions) ** freqs
-        x = x.outer(freqs.to(x.dtype))
-        x = torch.cat([x.cos(), x.sin()], dim=1)
-        return x
-
+            raise ValueError(f'Incorrect return embedding type specified: {self.return_embedding}, must be one of: encoder, decoder, gnn, or last!')
 
 class ProteinFeatures(nn.Module):
     def __init__(self, edge_features, node_features, num_positional_embeddings=16,
@@ -565,9 +368,10 @@ class SidechainProteinFeatures(nn.Module):
         self.augment_eps = augment_eps
         self.num_rbf = num_rbf
         self.num_positional_embeddings = num_positional_embeddings
+        self.zero_ghost_atoms = False
 
         self.embeddings = PositionalEncodings(num_positional_embeddings)
-        node_in, edge_in = 6, num_positional_embeddings + num_rbf * 4 * 10
+        _, edge_in = 6, num_positional_embeddings + num_rbf * 4 * 10
         self.edge_embedding = nn.Linear(edge_in, edge_features, bias=False)
         self.norm_edges = nn.LayerNorm(edge_features)
 
@@ -591,7 +395,7 @@ class SidechainProteinFeatures(nn.Module):
         RBF = torch.exp(-((D_expand - D_mu) / D_sigma)**2)
         return RBF
 
-    def _get_rbf(self, A, B, E_idx, atom_mask):
+    def _get_rbf(self, A, B, E_idx):
         D_A_B = torch.sqrt(torch.sum((A[:,:,None,:] - B[:,None,:,:])**2,-1) + 1e-6) #[B, L, L]
         D_A_B_neighbors = gather_edges(D_A_B[:,:,:,None], E_idx)[:,:,:,0] #[B,L,K]
         RBF_A_B = self._rbf(D_A_B_neighbors)
@@ -604,19 +408,25 @@ class SidechainProteinFeatures(nn.Module):
 
         return RBF_A_B
 
-    def forward(self, X, mask, residue_idx, chain_labels, E_idx, atom_mask):
+    def forward(self, X, residue_idx, chain_labels, E_idx, atom_mask):
         max_atoms = X.shape[-2] #14
-
         N = X[:,:,0,:]
         Ca = X[:,:,1,:]
         C = X[:,:,2,:]
         O = X[:,:,3,:]
 
         RBF_all = []
+
         for bb_atom in [Ca, N, C, O]:
             for non_bb_atom_pos in range(rc.num_bb_atoms, max_atoms):
-                    non_bb_atom_mask = atom_mask[:,:,non_bb_atom_pos]
-                    RBF_all.append(self._get_rbf(bb_atom, X[:, :, non_bb_atom_pos, :],  E_idx, non_bb_atom_mask))
+                non_bb_atom_mask = atom_mask[:,:,non_bb_atom_pos]
+                non_bb_atom_mask_neighbors = torch.gather(non_bb_atom_mask[...,None].expand(-1,-1,self.top_k), 1, E_idx)
+                rbf = self._get_rbf(bb_atom, X[:, :, non_bb_atom_pos, :],  E_idx)
+
+                #insert 0 for rbf where destination atom does not exist, if specified
+                if self.zero_ghost_atoms:
+                    rbf = torch.where(non_bb_atom_mask_neighbors[...,None].expand(-1,-1,-1,self.num_rbf) == 1, rbf, 0)
+                RBF_all.append(rbf)
 
         RBF_all = torch.cat(tuple(RBF_all), dim=-1)
 
@@ -718,8 +528,6 @@ class DecLayer(nn.Module):
         return h_V, h_E
 
 
-
-
 class EncLayer(nn.Module):
     def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
         super(EncLayer, self).__init__()
@@ -767,35 +575,3 @@ class EncLayer(nn.Module):
         h_E = self.norm3(h_E + self.dropout3(h_message))
 
         return h_V, h_E
-
-
-# The following gather functions
-def gather_edges(edges, neighbor_idx):
-    # Features [B,N,N,C] at Neighbor indices [B,N,K] => Neighbor features [B,N,K,C]
-    neighbors = neighbor_idx.unsqueeze(-1).expand(-1, -1, -1, edges.size(-1))
-    edge_features = torch.gather(edges, 2, neighbors)
-    return edge_features
-
-
-def gather_nodes(nodes, neighbor_idx):
-    # Features [B,N,C] at Neighbor indices [B,N,K] => [B,N,K,C]
-    # Flatten and expand indices per batch [B,N,K] => [B,NK] => [B,NK,C]
-    neighbors_flat = neighbor_idx.reshape((neighbor_idx.shape[0], -1))
-    neighbors_flat = neighbors_flat.unsqueeze(-1).expand(-1, -1, nodes.size(2))
-    # Gather and re-pack
-    neighbor_features = torch.gather(nodes, 1, neighbors_flat)
-    neighbor_features = neighbor_features.view(list(neighbor_idx.shape)[:3] + [-1])
-    return neighbor_features
-
-
-def gather_nodes_t(nodes, neighbor_idx):
-    # Features [B,N,C] at Neighbor index [B,K] => Neighbor features[B,K,C]
-    idx_flat = neighbor_idx.unsqueeze(-1).expand(-1, -1, nodes.size(2))
-    neighbor_features = torch.gather(nodes, 1, idx_flat)
-    return neighbor_features
-
-
-def cat_neighbors_nodes(h_nodes, h_neighbors, E_idx):
-    h_nodes = gather_nodes(h_nodes, E_idx)
-    h_nn = torch.cat([h_neighbors, h_nodes], -1)
-    return h_nn
