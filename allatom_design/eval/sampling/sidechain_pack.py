@@ -209,6 +209,10 @@ def main(cfg: DictConfig):
 
     del lit_sd_model  # free up memory; we don't need denoiser anymore
 
+    # Save metrics
+    with open(f"{cfg.out_dir}/sample_info.pkl", "wb") as f:
+        pickle.dump(sample_info, f)
+
 
     ### Compute sidechain metrics ###
     scn_metrics = {}
@@ -255,8 +259,8 @@ def main(cfg: DictConfig):
     metrics_df = pd.DataFrame(scn_metrics, index=[0])
     metrics_df.to_csv(f"{cfg.out_dir}/scn_metrics.csv", index=False)
 
-    # plot_rmsd_vs_npa(sample_info, cfg.out_dir)
-    # plot_rmsd_vs_npa_per_residue(sample_info, cfg.out_dir)
+    plot_rmsd_vs_npa(sample_info, cfg.out_dir)
+    plot_rmsd_vs_npa_per_residue(sample_info, cfg.out_dir)
     plot_per_protein_rmsd_vs_npa(sample_info, cfg.out_dir)
 
 
