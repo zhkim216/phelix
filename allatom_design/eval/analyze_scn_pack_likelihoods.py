@@ -46,13 +46,9 @@ def main(cfg: DictConfig):
     with open(cfg.in_pkl, "rb") as f:
         sample_info = pickle.load(f)
 
-    # Construct dataframe
-    for k, v in sample_info.items():
-        if isinstance(v, torch.Tensor):
-            sample_info[k] = v.cpu().numpy()
-
     num_pdbs = len(sample_info["pdb"])
     seq_length = sample_info["seq_mask"].shape[1]
+    seq_probs = torch.tensor(sample_info["seq_logits"]).softmax(dim=-1)
 
     # Create a DataFrame in long format
     df = pd.DataFrame({
@@ -63,7 +59,9 @@ def main(cfg: DictConfig):
         'seq_mask': sample_info["seq_mask"].flatten(),
         'aatype': sample_info["aatype"].flatten(),
         'npa': sample_info["npa"].flatten(),
-        'res_num_atoms': sample_info["res_num_atoms"].flatten()
+        'res_num_atoms': sample_info["res_num_atoms"].flatten(),
+        'seq_logits_aatype': sample_info["seq_logits"][torch.arange(num_pdbs).unsqueeze(1), torch.arange(seq_length), sample_info["aatype"]].flatten(),
+        'seq_probs_aatype': seq_probs[torch.arange(num_pdbs).unsqueeze(1), torch.arange(seq_length), sample_info["aatype"]].flatten(),
     })
 
     # drop out padding, glycines, and alanines
@@ -88,34 +86,79 @@ def main(cfg: DictConfig):
     spearmanr_per_pdb = df.groupby('pdb').apply(lambda x: spearmanr(x["npa"], x["scn_rmsd_per_pos"])[0]).reset_index(name='spearmanr')
     plt.figure()
     plt.hist(spearmanr_per_pdb["spearmanr"], bins=20)
-    plt.title(f"Spearman's rho between npa and rmsd for each protein")
+    plt.title(f"Spearman's rho between npa and rmsd for each protein\nMedian: {spearmanr_per_pdb['spearmanr'].median():.4f},mean: {spearmanr_per_pdb['spearmanr'].mean():.4f}")
     plt.xlabel("Spearman's rho")
     plt.ylabel("Frequency")
     plt.savefig(f"{cfg.out_dir}/spearmanr_hist.png")
     plt.close()
 
-    # for each protein, plot spearmanr across different samples of average rmsd vs npa
-    rmsd_per_pdb_per_sample = df.groupby(['pdb', 'sample_number']).apply(lambda x: x["scn_rmsd_per_pos"].sum() / x["seq_mask"].sum()).reset_index(name='average_rmsd')
-    npa_per_pdb_per_sample = df.groupby(['pdb', 'sample_number']).apply(lambda x: x["npa"].sum() / x["seq_mask"].sum()).reset_index(name='average_npa')
-    metrics_per_pdb_per_sample = pd.merge(rmsd_per_pdb_per_sample, npa_per_pdb_per_sample, on=['pdb', 'sample_number'])
-    metrics_per_pdb_per_sample = metrics_per_pdb_per_sample.groupby('pdb').apply(lambda x: spearmanr(x["average_rmsd"], x["average_npa"])[0]).reset_index(name='spearmanr')
+    # # for each protein, plot spearmanr across different samples of average rmsd vs npa
+    # rmsd_per_pdb_per_sample = df.groupby(['pdb', 'sample_number']).apply(lambda x: x["scn_rmsd_per_pos"].sum() / x["seq_mask"].sum()).reset_index(name='average_rmsd')
+    # npa_per_pdb_per_sample = df.groupby(['pdb', 'sample_number']).apply(lambda x: x["npa"].sum() / x["seq_mask"].sum()).reset_index(name='average_npa')
+    # metrics_per_pdb_per_sample = pd.merge(rmsd_per_pdb_per_sample, npa_per_pdb_per_sample, on=['pdb', 'sample_number'])
+    # metrics_per_pdb_per_sample = metrics_per_pdb_per_sample.groupby('pdb').apply(lambda x: spearmanr(x["average_rmsd"], x["average_npa"])[0]).reset_index(name='spearmanr')
+    # plt.figure()
+    # plt.hist(metrics_per_pdb_per_sample["spearmanr"], bins=20)
+    # plt.title(f"Spearman's rho between npa and rmsd for each protein across samples\n average={metrics_per_pdb_per_sample['spearmanr'].mean():.4f}")
+    # plt.xlabel("Spearman's rho")
+    # plt.ylabel("Frequency")
+    # plt.savefig(f"{cfg.out_dir}/spearmanr_hist_across_samples.png")
+    # plt.close()
+
+    # # for each protein, plot spearmanr between npa and rmsd across the position
+    # metrics_per_pdb_per_pos = df.groupby(['pdb', 'position']).apply(lambda x: spearmanr(x["npa"], x["scn_rmsd_per_pos"])[0]).reset_index(name='spearmanr')
+    # plt.figure()
+    # plt.hist(metrics_per_pdb_per_pos["spearmanr"], bins=20)
+    # plt.title(f"Spearman's rho between npa and rmsd for each protein and sample across positions\n average={metrics_per_pdb_per_pos['spearmanr'].mean():.4f}")
+    # plt.xlabel("Spearman's rho")
+    # plt.ylabel("Frequency")
+    # plt.savefig(f"{cfg.out_dir}/spearmanr_hist_across_positions.png")
+    # plt.close()
+
+    # for each protein, plot spearmanr between aatype seq logit and rmsd within the protein
+    spearmanr_per_pdb = df.groupby('pdb').apply(lambda x: spearmanr(x["seq_logits_aatype"], x["scn_rmsd_per_pos"])[0]).reset_index(name='spearmanr')
     plt.figure()
-    plt.hist(metrics_per_pdb_per_sample["spearmanr"], bins=20)
-    plt.title(f"Spearman's rho between npa and rmsd for each protein across samples\n average={metrics_per_pdb_per_sample['spearmanr'].mean():.4f}")
+    plt.hist(spearmanr_per_pdb["spearmanr"], bins=20)
+    plt.title(f"Spearman's rho between seq logits and rmsd for each protein\nMedian={spearmanr_per_pdb['spearmanr'].median():.4f},mean={spearmanr_per_pdb['spearmanr'].mean():.4f}")
     plt.xlabel("Spearman's rho")
     plt.ylabel("Frequency")
-    plt.savefig(f"{cfg.out_dir}/spearmanr_hist_across_samples.png")
+    plt.savefig(f"{cfg.out_dir}/spearmanr_hist_seq_logits_vs_rmsd.png")
     plt.close()
 
-    # for each protein, plot spearmanr between npa and rmsd across the position
-    metrics_per_pdb_per_pos = df.groupby(['pdb', 'position']).apply(lambda x: spearmanr(x["npa"], x["scn_rmsd_per_pos"])[0]).reset_index(name='spearmanr')
+    # for each protein, plot spearmanr between aatype seq logit and npa within the protein
+    spearmanr_per_pdb = df.groupby('pdb').apply(lambda x: spearmanr(x["seq_logits_aatype"], x["npa"])[0]).reset_index(name='spearmanr')
     plt.figure()
-    plt.hist(metrics_per_pdb_per_pos["spearmanr"], bins=20)
-    plt.title(f"Spearman's rho between npa and rmsd for each protein and sample across positions\n average={metrics_per_pdb_per_pos['spearmanr'].mean():.4f}")
+    plt.hist(spearmanr_per_pdb["spearmanr"], bins=20)
+    plt.title(f"Spearman's rho between seq logits and npa for each protein\nMedian={spearmanr_per_pdb['spearmanr'].median():.4f},mean={spearmanr_per_pdb['spearmanr'].mean():.4f}")
     plt.xlabel("Spearman's rho")
     plt.ylabel("Frequency")
-    plt.savefig(f"{cfg.out_dir}/spearmanr_hist_across_positions.png")
+    plt.savefig(f"{cfg.out_dir}/spearmanr_hist_seq_logits_vs_npa.png")
     plt.close()
+
+    # for each protein, plot spearmanr between aatype seq logit * npa
+    spearmanr_per_pdb = df.groupby('pdb').apply(lambda x: spearmanr(x["seq_logits_aatype"] * x["npa"], x["scn_rmsd_per_pos"])[0]).reset_index(name='spearmanr')
+    plt.figure()
+    plt.hist(spearmanr_per_pdb["spearmanr"], bins=20)
+    plt.title(f"Spearman's rho between seq logits * npa and rmsd for each protein\nMedian={spearmanr_per_pdb['spearmanr'].median():.4f},mean={spearmanr_per_pdb['spearmanr'].mean():.4f}")
+    plt.xlabel("Spearman's rho")
+    plt.ylabel("Frequency")
+    plt.savefig(f"{cfg.out_dir}/spearmanr_hist_seq_logits_times_npa_vs_rmsd.png")
+    plt.close()
+
+    # for each protein, plot spearmanr between aatype seq prob and rmsd within the protein
+    spearmanr_per_pdb = df.groupby('pdb').apply(lambda x: spearmanr(x["seq_probs_aatype"], x["scn_rmsd_per_pos"])[0]).reset_index(name='spearmanr')
+    plt.figure()
+    plt.hist(spearmanr_per_pdb["spearmanr"], bins=20)
+    plt.title(f"Spearman's rho between seq probs and rmsd for each protein\nMedian={spearmanr_per_pdb['spearmanr'].median():.4f},mean={spearmanr_per_pdb['spearmanr'].mean():.4f}")
+    plt.xlabel("Spearman's rho")
+    plt.ylabel("Frequency")
+    plt.savefig(f"{cfg.out_dir}/spearmanr_hist_seq_probs_vs_rmsd.png")
+    plt.close()
+
+    # for each protein, plot spearmanr between aatype seq prob and npa within the protein
+
+
+
 
 
 if __name__ == "__main__":
