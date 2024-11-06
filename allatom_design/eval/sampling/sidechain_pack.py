@@ -146,6 +146,7 @@ def main(cfg: DictConfig):
         sample_info["pdb"] += batch_i["pdb_key"]
         sample_info["seq_mask"].append(seq_mask)
         sample_info["aatype"].append(aatype)
+        sample_info["seq_logits"].append(aux["seq_logits_traj"].squeeze(1))
         [sample_info[k].append(v.cpu()) for k, v in likelihood_aux.items()]
 
         # Sidechain RMSD per residue
