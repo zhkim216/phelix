@@ -287,7 +287,7 @@ class SidechainDiffusionModule(nn.Module):
             p = torch.rand(B, device=mlm_mask.device)  # choose unmasking probability
             scd_mlm_mask = (torch.rand(mlm_mask.shape, device=mlm_mask.device) < p[:, None]) | mlm_mask.bool()  # unmask some currently masked residues; 0 for masked residues
 
-        scd_mlm_mask = scd_mlm_mask.float() * seq_mask  # mask out residues that are not in sequence
+        scd_mlm_mask = scd_mlm_mask.float() * seq_mask  # mask out padding
         return scd_mlm_mask
 
 

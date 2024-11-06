@@ -83,8 +83,7 @@ class SDLoss(nn.Module):
             M = scn_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
             mask = repeat(batch["x_mask"][..., rc.non_bb_idxs, :], "b n a x -> (m b) n a x", m=M)
 
-            # Only compute loss where we know aatype but not sidechain
-            mask = mask * repeat(1 - outputs["scn_mlm_mask"], "b n -> (m b) n 1 1", m=M)  # only compute loss on masked sidechain positions
+            # Only compute loss where we know aatype
             mask = mask * rearrange(scd_mlm_mask, "(m b) n -> (m b) n 1 1", m=M)  # mask out sidechain loss when masking aatype
 
             ## loss weight based on EDM loss
