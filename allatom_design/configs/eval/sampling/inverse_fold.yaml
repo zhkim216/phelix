@@ -29,8 +29,8 @@ num_pdbs: 16  # number of structures to inverse fold
 num_seqs_per_pdb: 1  # number of sequences per structure to inverse fold
 subset_length_range: [32, 256]
 n_traj: 0  # number of trajectories to randomly save
-limit_traj_steps: 10  # limit the number of steps we save in a trajectory (evenly spaced)
-limit_diff_traj_steps: 3
+limit_traj_steps: 0  # limit the number of steps we save in a trajectory (evenly spaced)
+limit_diff_traj_steps: 0
 traj_conect: false
 
 # Sampling hyperparameters
