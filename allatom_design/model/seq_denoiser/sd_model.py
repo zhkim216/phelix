@@ -239,7 +239,6 @@ class SeqDenoiser(nn.Module):
 
         xt = x0
         aatype_t = aatype_noised
-        mlm_mask_prev = torch.zeros_like(seq_mask)
 
         # Run unmasking steps
         timesteps_K = torch.ceil(timesteps * aux_inputs["lengths"][:, None]).long()
@@ -255,24 +254,24 @@ class SeqDenoiser(nn.Module):
 
             # Run sequence denoiser
             aux_inputs["mask_update_fn"] = partial(mask_update_fn, K=K_next)
-            x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)
+            mlm_mask_prev = aux_inputs["seq_mlm_mask"].clone()
+            x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)  # seq_mlm_mask in aux_inputs is updated by denoiser
 
             # Unmask sequence and sidechains
-            xt, aatype_t = sampling_utils.unmask(xt, aatype_t, x1_pred, aatype_pred, mlm_mask_prev, aux_preds["seq_mlm_mask"])
-            mlm_mask_prev = aux_preds["seq_mlm_mask"]
+            xt, aatype_t = sampling_utils.unmask(xt, aatype_t, x1_pred, aatype_pred, mlm_mask_prev, aux_inputs["seq_mlm_mask"])
 
-            # if i > 1:
-            #     for j in range(num_corrector_steps):
-            #         # corrector step where we mask and denoise equally
-            #         K_corrector = torch.ceil(K_next * corrector_step_ratio).long()
-            #         x1_pred, aatype_pred, aux_preds, unmasked_prev = self.interpolant.corrector_step(denoiser_fn,
-            #                                                                                          xt, aatype_t, K_corrector,
-            #                                                                                          unmasked_prev,
-            #                                                                                          t=t, aux_inputs=aux_inputs)
-            #         # Unmask according to timestep and decoding order
-            #         xt, aatype_t, unmasked_prev = unmasking_fn(xt, aatype_t, x1_pred,
-            #                                                   aatype_pred, aux_preds,
-            #                                                   unmasked_prev, K_corrector)
+            for j in range(num_corrector_steps):
+                # Corrector step where we mask and denoise equally
+                # Mask out K_corrector residues
+                K_corrector = torch.ceil(K_next * corrector_step_ratio).long()
+                xt, aatype_t, aux_inputs["seq_mlm_mask"] = self.interpolant.remask_K(xt, aatype_t, aux_inputs["seq_mlm_mask"], K_corrector)
+
+                # Denoise back to K_next
+                mlm_mask_prev = aux_inputs["seq_mlm_mask"].clone()
+                x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)
+
+                # Unmask sequence and sidechains
+                xt, aatype_t = sampling_utils.unmask(xt, aatype_t, x1_pred, aatype_pred, mlm_mask_prev, aux_inputs["seq_mlm_mask"])
 
             aatype_t = aatype_t * (1 - aatype_override_mask[i + 1]) + aatype_override[i + 1] * aatype_override_mask[i + 1]  # override aatype for outputs  # TODO: should we override self-cond input too?
 
