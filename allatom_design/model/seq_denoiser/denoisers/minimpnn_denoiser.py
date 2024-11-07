@@ -72,12 +72,17 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
         aatype_pred, seq_probs = self.sample_aatype(seq_logits, aux_inputs, is_sampling)
 
+        # If sampling, update mlm mask for sidechain diffusion
+        if is_sampling:
+            seq_mlm_mask = aux_inputs["mask_update_fn"](seq_mlm_mask, seq_probs=seq_probs)
+            aux_inputs["seq_mlm_mask"] = seq_mlm_mask
+
         # Outputs
         aux_preds = {
             "seq_logits": seq_logits,
             "seq_probs": seq_probs,
             'seq_mask': seq_mask,
-            'seq_mlm_mask': seq_mlm_mask,
+            'seq_mlm_mask': aux_inputs["seq_mlm_mask"],
             'scn_mlm_mask': aux_inputs.get('scn_mlm_mask', None)
         }
 

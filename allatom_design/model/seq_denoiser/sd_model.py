@@ -148,16 +148,6 @@ class SeqDenoiser(nn.Module):
         """
         Given backbone and sequence, denoise sidechain atoms (sidechain packing).
         """
-        # # Fix sequence time to 1 with a single pass
-        # t_seq = torch.tensor([1.0, 1.0]).to(x.device)[None].expand(x.shape[0], -1)  # [B, 2]
-        # timesteps = t_seq
-        # target_dims = (t_seq.shape[1], *aatype.shape)
-
-        # # Override aatype with the input aatype during sequence denoising
-        # aatype_override = aatype.unsqueeze(0).expand(*target_dims)
-        # aatype_override_mask = torch.ones_like(aatype)
-        # aatype_override_mask = aatype_override_mask.unsqueeze(0).expand(*target_dims).long()  # view not clone to save a bit of memory
-
         # Sequence time goes to 1 with a single pass; we start at 0 since we only pass in sequence info to sidechain diffusion
         t_seq = torch.tensor([0.0, 1.0]).to(x.device)[None].expand(x.shape[0], -1)  # [B, 2]
         timesteps = t_seq
@@ -166,6 +156,7 @@ class SeqDenoiser(nn.Module):
         scd_inputs["aatype_override"] = aatype
 
         return self.sample(x, seq_mask, residue_index, chain_index, timesteps,
+                           temperature=0.0,  # does not matter for sidechain packing
                            num_corrector_steps=0,  # does not matter for sidechain packing
                            corrector_step_ratio=0.0,  # does not matter for sidechain packing
                            aatype_decoding_order_mode="random",  # does not matter for sidechain packing
@@ -230,6 +221,13 @@ class SeqDenoiser(nn.Module):
         seq_logits_traj = []
         scn_diffusion_aux_traj = []
 
+        # Set up function for updating mlm mask
+        mask_update_fn = partial(sampling_utils.update_mlm_mask,
+                                 aatype_decoding_order=aatype_decoding_order,
+                                 aatype_decoding_order_mode=aatype_decoding_order_mode,
+                                 seq_mask=seq_mask)
+        aux_inputs["mask_update_fn"] = mask_update_fn
+
         # Run denoising steps
         denoiser_fn = partial(self.denoiser,
                               residue_index=residue_index,
@@ -241,16 +239,10 @@ class SeqDenoiser(nn.Module):
 
         xt = x0
         aatype_t = aatype_noised
-        unmasked_prev = torch.zeros_like(seq_mask, dtype=torch.bool)
+        mlm_mask_prev = torch.zeros_like(seq_mask)
 
         # Run unmasking steps
-        unmasking_fn = partial(sampling_utils.unmask,
-                               aatype_decoding_order=aatype_decoding_order,
-                               aatype_decoding_order_mode=aatype_decoding_order_mode,
-                               seq_mask=seq_mask,
-                               aux_inputs=aux_inputs)
-
-        timesteps_K = torch.ceil(timesteps * aux_inputs["lengths"][:,None]).long()
+        timesteps_K = torch.ceil(timesteps * aux_inputs["lengths"][:, None]).long()
         for i in tqdm(range(S), leave=False, desc="Sampling..."):
             # get current and next timesteps
             t, t_next = timesteps[:, i], timesteps[:, i + 1]
@@ -262,24 +254,25 @@ class SeqDenoiser(nn.Module):
             aatype_t = aatype_t * (1 - aatype_override_mask[i]) + aatype_override[i] * aatype_override_mask[i]
 
             # Run sequence denoiser
+            aux_inputs["mask_update_fn"] = partial(mask_update_fn, K=K_next)
             x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)
 
-            # Unmask according to timestep and decoding order
-            xt, aatype_t, unmasked_prev = unmasking_fn(xt, aatype_t, x1_pred,
-                                                       aatype_pred, aux_preds,
-                                                       unmasked_prev, K_next)
-            if i > 1:
-                for j in range(num_corrector_steps):
-                    # corrector step where we mask and denoise equally
-                    K_corrector = torch.ceil(K_next * corrector_step_ratio).long()
-                    x1_pred, aatype_pred, aux_preds, unmasked_prev = self.interpolant.corrector_step(denoiser_fn,
-                                                                                      xt, aatype_t, K_corrector,
-                                                                                      unmasked_prev,
-                                                                                      t=t, aux_inputs=aux_inputs)
-                    # Unmask according to timestep and decoding order
-                    xt, aatype_t, unmasked_prev = unmasking_fn(xt, aatype_t, x1_pred,
-                                                              aatype_pred, aux_preds,
-                                                              unmasked_prev, K_corrector)
+            # Unmask sequence and sidechains
+            xt, aatype_t = sampling_utils.unmask(xt, aatype_t, x1_pred, aatype_pred, mlm_mask_prev, aux_preds["seq_mlm_mask"])
+            mlm_mask_prev = aux_preds["seq_mlm_mask"]
+
+            # if i > 1:
+            #     for j in range(num_corrector_steps):
+            #         # corrector step where we mask and denoise equally
+            #         K_corrector = torch.ceil(K_next * corrector_step_ratio).long()
+            #         x1_pred, aatype_pred, aux_preds, unmasked_prev = self.interpolant.corrector_step(denoiser_fn,
+            #                                                                                          xt, aatype_t, K_corrector,
+            #                                                                                          unmasked_prev,
+            #                                                                                          t=t, aux_inputs=aux_inputs)
+            #         # Unmask according to timestep and decoding order
+            #         xt, aatype_t, unmasked_prev = unmasking_fn(xt, aatype_t, x1_pred,
+            #                                                   aatype_pred, aux_preds,
+            #                                                   unmasked_prev, K_corrector)
 
             aatype_t = aatype_t * (1 - aatype_override_mask[i + 1]) + aatype_override[i + 1] * aatype_override_mask[i + 1]  # override aatype for outputs  # TODO: should we override self-cond input too?
 
