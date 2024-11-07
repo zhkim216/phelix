@@ -34,6 +34,7 @@ limit_diff_traj_steps: 3
 traj_conect: false
 
 # Sampling hyperparameters
+temperature: 0.1
 aatype_decoding_order_mode: "random"
 num_corrector_steps: 0
 corrector_step_ratio: 0.5

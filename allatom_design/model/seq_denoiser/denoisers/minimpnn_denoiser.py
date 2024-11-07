@@ -13,8 +13,9 @@ from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.scn_diffusi
     SidechainDiffusionModule
 from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import \
     FaMPNN
-from openfold.model.primitives import Linear
 import torch
+from typing import Any
+import torch.nn.functional as F
 
 
 class MiniMPNNDenoiser(BaseSeqDenoiser):
@@ -69,12 +70,12 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
             chain_encoding,
             seq_mlm_mask)
 
-        aatype_pred = seq_logits.argmax(dim=-1)  # TODO: need different handling for sampling
+        aatype_pred, seq_probs = self.sample_aatype(seq_logits, aux_inputs, is_sampling)
 
         # Outputs
         aux_preds = {
             "seq_logits": seq_logits,
-            "seq_probs": F.softmax(seq_logits, dim=-1),
+            "seq_probs": seq_probs,
             'seq_mask': seq_mask,
             'seq_mlm_mask': seq_mlm_mask,
             'scn_mlm_mask': aux_inputs.get('scn_mlm_mask', None)
@@ -101,6 +102,36 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
 
         return x1_pred, aatype_pred, aux_preds
+
+
+    def sample_aatype(self,
+                      seq_logits: TensorType["b n k", float],
+                      aux_inputs: Dict[str, Any],
+                      is_sampling: bool,
+                      ) -> Tuple[TensorType["b n", int], TensorType["b n k", float]]:
+        """
+        Sample aatype from seq logits
+        If training, just take argmax (this will be teacher-forced to the ground truth aatype during sidechain diffusion)
+        If sampling, sample from (possibly temperature-scaled) logits
+
+        Returns:
+        - aatype_pred: Tensor["b n", int]
+        - seq_probs: Tensor["b n k", float]
+        """
+        if not is_sampling:
+            return seq_logits.argmax(dim=-1), F.softmax(seq_logits, dim=-1)
+
+        tau = aux_inputs.get("temperature", 1.0)
+        B, N = seq_logits.shape[:2]
+        if tau == 0.0:
+            aatype_pred = seq_logits.argmax(dim=-1)
+            seq_probs = F.softmax(seq_logits, dim=-1)  # don't scale for confidence sampling
+        else:
+            scaled_logits = seq_logits / tau
+            scaled_logits[..., rc.restype_order_with_x["X"]] = -1e9  # do not sample mask/unknowns
+            seq_probs = F.softmax(scaled_logits, dim=-1)
+            aatype_pred = torch.multinomial(seq_probs.view(B * N, -1), num_samples=1).view(B, N)
+        return aatype_pred, seq_probs
 
 
     def get_sidechain_likelihoods(self,

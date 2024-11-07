@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a10_aasd3_inv_fold
+#SBATCH --job-name=b3_aasd5
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -33,13 +33,13 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Denoiser checkpoint
-MODEL_NAME=a10_aasd3
-SD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/sd-epoch599.ckpt
+MODEL_NAME=b3_aasd5
+SD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/sd-step200000-epoch600.ckpt
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_inv_fold
-GROUP=${MODEL_NAME}_s0
+GROUP=${MODEL_NAME}_inv_fold
 
 # Run inverse folding script
 cd ${BASE_DIR}
@@ -53,8 +53,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/inverse_fold.py \
     data.designability_csv=${DESIGNABILITY_CSV} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
-    timestep_schedule.num_steps=1 \
-    scn_diffusion.noise_schedule.c=1.0 \
+    temperature=0.1 \
+    timestep_schedule.num_steps=20 \
     num_pdbs=300 \
     num_seqs_per_pdb=1 \
     batch_size=64 \
