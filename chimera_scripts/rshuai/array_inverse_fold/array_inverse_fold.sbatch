@@ -4,7 +4,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#SBATCH --array=0-14%5
+#SBATCH --array=0-5%6
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -35,9 +35,9 @@ OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Sweep parameters
 temperature_values=(0.0 0.1 0.2)
-num_steps_values=(1 10 20 100 200)
-tau=${temperature_values[$((SLURM_ARRAY_TASK_ID / 5))]}
-S=${num_steps_values[$((SLURM_ARRAY_TASK_ID % 5))]}
+num_steps_values=(100 200)
+tau=${temperature_values[$((SLURM_ARRAY_TASK_ID / 2))]}
+S=${num_steps_values[$((SLURM_ARRAY_TASK_ID % 2))]}
 
 # Denoiser checkpoint
 MODEL_NAME=b3_aasd5
