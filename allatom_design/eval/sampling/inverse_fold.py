@@ -171,21 +171,21 @@ def main(cfg: DictConfig):
                                 save_diff_traj_steps=save_sd_traj_steps,
                                 traj_conect=cfg.traj_conect)
 
-        # # save aatype pred traj
-        # save_trajs_fn(x_traj_key="xt_traj", aatype_traj_key="aatype_pred_traj",
-        #               filenames=[f"{traj_out_dir}/aatype_pred_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
+        # save aatype pred traj
+        save_trajs_fn(x_traj_key="xt_traj", aatype_traj_key="aatype_pred_traj",
+                      filenames=[f"{traj_out_dir}/aatype_pred_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
 
         # save aatype t traj
         save_trajs_fn(x_traj_key="xt_traj", aatype_traj_key="aatype_t_traj",
                       filenames=[f"{traj_out_dir}/aatype_t_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
 
-        # # save x1_scn traj
-        # save_trajs_fn(x_traj_key="x1_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
-        #               filenames=[f"{traj_out_dir}/x1_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
+        # save x1_scn traj
+        save_trajs_fn(x_traj_key="x1_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
+                      filenames=[f"{traj_out_dir}/x1_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
 
-        # # save xt_scn traj
-        # save_trajs_fn(x_traj_key="xt_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
-        #               filenames=[f"{traj_out_dir}/xt_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
+        # save xt_scn traj
+        save_trajs_fn(x_traj_key="xt_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
+                      filenames=[f"{traj_out_dir}/xt_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
 
 
     del lit_sd_model  # free up memory; we don't need denoiser anymore
