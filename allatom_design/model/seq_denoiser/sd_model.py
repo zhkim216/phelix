@@ -113,10 +113,10 @@ class SeqDenoiser(nn.Module):
 
         # Denoise coords
         seq_logits, _, _ = self.denoiser.seq_design_module(x,
-                                                          aatype, 
+                                                          aatype,
                                                           None, #no seq self cond
-                                                          seq_mask, 
-                                                          residue_index, 
+                                                          seq_mask,
+                                                          residue_index,
                                                           chain_index,
                                                           seq_mlm_mask
                                                     )
@@ -180,6 +180,7 @@ class SeqDenoiser(nn.Module):
                residue_index: TensorType["b n", int],
                chain_index:  TensorType["b n", int],
                timesteps: TensorType["b s+1", float],  # timesteps for t_seq
+               temperature: float,  # 0.0 for argmax / greedy sampling
                aatype_decoding_order_mode: str,
                num_corrector_steps: int,
                corrector_step_ratio: float,
@@ -221,6 +222,7 @@ class SeqDenoiser(nn.Module):
         aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps)
         aux_inputs["lengths"] = seq_mask.sum(dim=-1)
         aux_inputs["seq_mlm_mask"] = torch.zeros_like(seq_mask).float()  # start with all masked tokens
+        aux_inputs["temperature"] = temperature
 
         # Initialize trajectories
         xt_traj = []

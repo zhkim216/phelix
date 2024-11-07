@@ -122,6 +122,7 @@ def main(cfg: DictConfig):
             residue_index=residue_index,
             chain_index=chain_index,
             timesteps=timesteps,
+            temperature=cfg.temperature,
             aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
             num_corrector_steps=cfg.num_corrector_steps,
             corrector_step_ratio=cfg.corrector_step_ratio,

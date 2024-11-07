@@ -29,6 +29,7 @@ data:
 subset_length_range: [64, 256]  # only evaluate on sequences within this length range
 
 # Inverse folding options
+temperature: 0.1
 aatype_decoding_order_mode: "greedy"
 num_corrector_steps: 0
 corrector_step_ratio: 0.5
