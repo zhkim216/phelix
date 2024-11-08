@@ -72,17 +72,14 @@ def update_mlm_mask(mlm_mask: TensorType["b n", float],
     """
     mlm_mask_prev = mlm_mask.clone()
     if aatype_decoding_order_mode in ['greedy']:
-        # TODO: check if this is still correct
         aatype_decoding_order = get_confidence_decoding_order(mode=aatype_decoding_order_mode,
                                                               seq_probs=seq_probs,
                                                               seq_mask=seq_mask,
                                                               unmasked_prev=mlm_mask_prev)
 
     ## using decoding order to decide positions to unmask
-    num_unmasked = torch.sum(mlm_mask_prev, dim = -1)[:,None]
     residues_to_unmask = (~mlm_mask_prev.bool()) & (aatype_decoding_order < K[:,None])
     mlm_mask = residues_to_unmask + mlm_mask_prev
-
     return mlm_mask
 
 
