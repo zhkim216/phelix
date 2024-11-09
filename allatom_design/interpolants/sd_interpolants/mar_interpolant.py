@@ -20,7 +20,9 @@ class MAR(SDInterpolant):
 
         # Training noise distribution
         self.training_noise_schedule = cfg.training_noise_schedule
-        assert self.training_noise_schedule in ["uniform_t", "constant_t", "uniform_squared_t"], f"Unknown timestep schedule: {self.timestep_schedule}"
+        assert self.training_noise_schedule in ["uniform_t", "constant_t",
+                                                "uniform_squared_t", "uniform_cubed_t",
+                                                "uniform_cosine_t", "uniform_sqrt_t", "uniform_cbrt_t"], f"Unknown timestep schedule: {self.timestep_schedule}"
 
         self.training_noise_cfg = cfg.training_noise_cfg[self.training_noise_schedule]
 
@@ -61,15 +63,26 @@ class MAR(SDInterpolant):
         - uniform_t: sample time from uniform distribution
         - constant_t: sample time from constant distribution
         """
-        if self.training_noise_schedule == "uniform_t":
-            t_min, t_max = self.training_noise_cfg.t_min, self.training_noise_cfg.t_max
-            t = torch.rand(n, device=device) * (t_max - t_min) + t_min
-        elif self.training_noise_schedule == "constant_t":
+        if self.training_noise_schedule == "constant_t":
             t = torch.ones(n, device=device) * self.training_noise_cfg.t
-        elif self.training_noise_schedule == "uniform_squared_t":
+        elif self.training_noise_schedule.startswith("uniform"):
+            # sample time from uniform distribution
             t_min, t_max = self.training_noise_cfg.t_min, self.training_noise_cfg.t_max
             t = torch.rand(n, device=device) * (t_max - t_min) + t_min
-            t = t ** 2
+
+            # apply transformation to t
+            if self.training_noise_schedule == "uniform_t":
+                t = t
+            elif self.training_noise_schedule == "uniform_squared_t":
+                t = t ** 2
+            elif self.training_noise_schedule == "uniform_cubed_t":
+                t = t ** 3
+            elif self.training_noise_schedule == "uniform_cosine_t":
+                t = 1 - torch.cos(t * np.pi / 2)
+            elif self.training_noise_schedule == "uniform_sqrt_t":
+                t = t ** 0.5
+            elif self.training_noise_schedule == "uniform_cbrt_t":
+                t = t ** (1/3)
 
         if self.full_noise_p > 0:
             # randomly set full_noise_p timesteps to full noise
