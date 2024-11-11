@@ -1,6 +1,6 @@
 # Wandb configuration
 project: "allatom_design"  # Wandb project name
-wandb_id: "richardshuai"  # Wandb username
+wandb_id: null  # Wandb username
 exp_name: null # Wandb exp name
 group: "debug" # Wandb group name
 
@@ -34,8 +34,8 @@ resume:
 
 # Data options
 data:
-    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+    pdb_path: /data/research/ingraham_cath_dataset # /media/scratch/datasets/ingraham_cath_dataset
+    designability_csv: /data/research/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv # /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
     fixed_size: 128
     overfit: ${overfit}
     short_epoch: false
@@ -94,4 +94,4 @@ checkpointing:
 
 hydra:
   run:
-    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
+    dir: /data/research/hydra_outputs # /media/scratch/huang_lab/allatom_design/hydra_outputs
