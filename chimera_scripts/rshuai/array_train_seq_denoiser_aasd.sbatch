@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=b4_aasd0_schedule
+#SBATCH --job-name=b4_aasd1_schedule
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=96:00:00
-#SBATCH --array=0-4
+#SBATCH --time=36:00:00
+#SBATCH --array=0-5%3
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -25,13 +25,13 @@ WANDB_ID=richardshuai
 cd $BASE_DIR
 
 # Define training noise schedules
-noise_schedules=("uniform_t" "uniform_cubed_t" "uniform_cosine_t" "uniform_sqrt_t" "uniform_cbrt_t")
+noise_schedules=("uniform_cubed_t" "uniform_squared_t" "uniform_cosine_t" "uniform_t" "uniform_sqrt_t" "uniform_cbrt_t")
 
 # Get the current noise schedule based on SLURM_ARRAY_TASK_ID
 TRAINING_NOISE_SCHEDULE=${noise_schedules[$SLURM_ARRAY_TASK_ID]}
 
 # Set experiment name and group
-EXP_NAME=b4_aasd0_${TRAINING_NOISE_SCHEDULE}
+EXP_NAME=b4_aasd1_${TRAINING_NOISE_SCHEDULE}
 GROUP=chimera_b4
 
 # Dataset paths

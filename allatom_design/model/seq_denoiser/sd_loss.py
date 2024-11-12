@@ -72,6 +72,12 @@ class SDLoss(nn.Module):
                                                    seq_loss_cfg=self.cfg.seq_loss)
             aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], batch["aatype"], seq_loss_mask).mean().detach().clone()
 
+            # weight loss by proportion of masked tokens
+            aux_monitor["unweighted_seq_loss"] = aux["seq_loss"].mean().detach().clone()
+            masked_proportion = seq_loss_mask.sum(dim=-1) / seq_lengths.clamp(min=1)
+            loss_weight_seq = 1 / masked_proportion.clamp(min=1e-3)
+            aux["seq_loss"] = aux["seq_loss"] * loss_weight_seq
+
         if self.use_scn_diffusion_loss and eval_pack:
             # We use sidechain diffusion auxiliary outputs to compute loss
             scn_diff_outputs = outputs["scn_diffusion_aux"]
