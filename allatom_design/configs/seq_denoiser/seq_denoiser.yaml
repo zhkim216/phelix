@@ -86,9 +86,9 @@ optim:
     factor: 2
     warmup_steps: 4000
   adam_inv_sqrt:
-    ref_lr: 1.0e-2
-    ref_steps: 70000
-    warmup_steps: 1000
+    ref_lr: 1.0e-3
+    ref_steps: 50000
+    warmup_steps: 4000
 
 logging:
   log_dir: ${out_dir}
