@@ -4,7 +4,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=36:00:00
-#SBATCH --array=0-5%3
+#SBATCH --array=0-2%3
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -25,8 +25,8 @@ WANDB_ID=richardshuai
 cd $BASE_DIR
 
 # Define arrays for ref_lr and ref_steps
-ref_lr_values=(5.0e-3 1.0e-3)
-ref_steps_values=(10000 50000 100000)
+ref_lr_values=(3.0e-3)
+ref_steps_values=(1000 5000 10000)
 
 # Calculate indices
 num_ref_lr=${#ref_lr_values[@]}        # Should be 2
