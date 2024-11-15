@@ -134,9 +134,10 @@ class SDLoss(nn.Module):
                                              self.cfg.inf,
                                              **confidence_outputs["sce_bins_cfg"])
 
-                # monitor rollout sidechain RMSD
-                msd = (mask[..., None] * (scn_target - scn_pred_rollout)).pow(2).sum(dim=(-1, -2)) / mask.sum(dim=-1).clamp(min=1)
-                rmsd = msd.sqrt()
+                # monitor rollout sidechain RMSD (averaged across residues)
+                msd_per_pos = (mask[..., None] * (scn_target - scn_pred_rollout)).pow(2).sum(dim=(-1, -2)) / mask.sum(dim=-1).clamp(min=1)
+                rmsd_per_pos = msd_per_pos.sqrt()
+                rmsd = (rmsd_per_pos * batch["seq_mask"]).sum(dim=-1) / batch["seq_mask"].sum(dim=-1).clamp(min=1)
                 aux_monitor["rollout/scn_rmsd"] = rmsd.mean().detach().clone()
 
 
