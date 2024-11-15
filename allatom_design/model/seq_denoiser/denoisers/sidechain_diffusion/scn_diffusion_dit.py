@@ -26,6 +26,9 @@ from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
     TimestepEmbedder
 from openfold.model.primitives import Linear
 
+from allatom_design.eval import sampling_utils
+from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
+    NoiseSchedule
 
 
 class SidechainDiffusionModule(nn.Module):
@@ -48,6 +51,12 @@ class SidechainDiffusionModule(nn.Module):
         if self.use_autoguidance:
             self.autoguidance_train_p = 1 / cfg.autoguidance.subsample_train_iter_mult
             self.guiding_model = SidechainDiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.scn_interpolant)  # override with autoguidance config
+
+        # Confidence module
+        self.use_confidence_module = cfg.confidence_module.enabled
+        if self.use_confidence_module:
+            self.confidence_module_train_p = 1 / cfg.confidence_module.subsample_train_iter_mult
+            self.confidence_module = SidechainConfidenceModule(cfg.confidence_module)
 
 
     def sidechain_diffusion(self,
@@ -147,6 +156,59 @@ class SidechainDiffusionModule(nn.Module):
                     "scd_mlm_mask": scd_mlm_mask_batched,
                 }
 
+            # Train confidence module
+            diffusion_aux["confidence_aux"] = None
+            if self.use_confidence_module and (np.random.uniform() < self.confidence_module_train_p):
+                # Use unbatched inputs
+                conf_cfg = self.cfg.confidence_module
+
+                with torch.no_grad():
+                    self.eval()
+
+                    # Create sidechain diffusion inputs
+
+                    # create timesteps
+                    B = h_V.shape[0]
+                    t_scd = sampling_utils.get_timesteps_from_schedule(**conf_cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
+                    t_scd = t_scd[None].expand(B, -1).to(h_V.device)  # expand to batch size
+
+                    # create noise schedule
+                    noise_schedule = NoiseSchedule(conf_cfg.scn_diffusion.noise_schedule)
+
+                    # create churn config
+                    churn_cfg = dict(conf_cfg.scn_diffusion.churn_cfg)
+                    scd_inputs = {"num_steps": conf_cfg.scn_diffusion.num_steps,
+                                  "timesteps": t_scd,
+                                  "noise_schedule": noise_schedule,
+                                  "churn_cfg": churn_cfg,
+                                  "autoguidance_cfg": dict(conf_cfg.scn_diffusion.autoguidance_cfg),
+                                  }
+
+                    rollout_aux_inputs = {"seq_mlm_mask": scd_mlm_mask_batched[::M],  # we pass in future residue mask, but without batch multiplier
+                                          "scd": scd_inputs}
+
+                    # Run diffusion mini rollout
+                    x1_scn_rollout, _ = self.sidechain_diffusion(h_V, aatype, x_bb,
+                                                                 seq_mask, residue_index,
+                                                                 aux_inputs=rollout_aux_inputs,
+                                                                 is_sampling=True)
+
+                    x1_scn_rollout = x1_scn_rollout - x_bb[..., 1:2, :]  # center sidechains on input backbone to sidechain diffusion
+
+                    self.train()
+
+                psce_logits = self.confidence_module(x1_scn_rollout.detach(),
+                                               h_V.detach(),
+                                               x_bb.detach(),
+                                               seq_mask.detach())
+                diffusion_aux["confidence_aux"] = {
+                    "psce_logits": psce_logits,
+                    "sce_bins_cfg": self.confidence_module.sce_bins_cfg,
+                    "scn_pred_rollout": x1_scn_rollout,
+                    "scn_target": x_scn_gt_batched[::M],
+                    "scd_mlm_mask": scd_mlm_mask_batched[::M],
+                }
+
             # Outputs
             x1_scn = None  # during training, we return the batched version in diffusion_aux
 
@@ -170,6 +232,7 @@ class SidechainDiffusionModule(nn.Module):
             churn_cfg = scd_aux_inputs["churn_cfg"]
             noise_schedule = scd_aux_inputs["noise_schedule"]
             autoguidance_cfg = scd_aux_inputs["autoguidance_cfg"]
+            return_scn_diffusion_aux = scd_aux_inputs.get("return_scn_diffusion_aux", False)
             aatype = scd_aux_inputs.get("aatype_override", aatype)  # use aatype_override for sidechain diffusion instead
 
             # Only pack residues that are unmasked
@@ -211,22 +274,21 @@ class SidechainDiffusionModule(nn.Module):
                         autoguidance_cfg["autoguidance_fn"] = partial(autoguidance_cfg["autoguidance_fn"],
                                                                       x_scn_self_cond=aux_preds["x1_pred_ag"])
 
-                # Save current state
-                xt_scn_traj.append(xt_scn.cpu())
+                if return_scn_diffusion_aux:
+                    # Save current state
+                    xt_scn_traj.append(xt_scn.cpu())
 
-                # Save current x1 prediction
-                x1_scn_traj.append(aux_preds["x1_pred"].cpu())
+                    # Save current x1 prediction
+                    x1_scn_traj.append(aux_preds["x1_pred"].cpu())
 
             # Finalize outputs
-            x1_scn = xt_scn
-            diffusion_aux["xt_scn_traj"] = torch.stack(xt_scn_traj, dim=1)  # (B, S_scd, N, A, 3)
-            diffusion_aux["x1_scn_traj"] = torch.stack(x1_scn_traj, dim=1)  # (B, S_scd, N, A, 3)
+            x1_scn = xt_scn + x_bb[..., 1:2, :]  # undo centering of sidechain coordinates on CA
             diffusion_aux["scn_pred"] = x1_scn
 
-            # Undo centering of sidechain coordinates on CA
-            x1_scn = x1_scn + x_bb[..., 1:2, :]
-            diffusion_aux["xt_scn_traj"] = diffusion_aux["xt_scn_traj"] + x_bb[:, None, :, 1:2, :].cpu()
-            diffusion_aux["x1_scn_traj"] = diffusion_aux["x1_scn_traj"] + x_bb[:, None, :, 1:2, :].cpu()
+            # Finalize trajectory outputs
+            if return_scn_diffusion_aux:
+                diffusion_aux["xt_scn_traj"] = torch.stack(xt_scn_traj, dim=1) + x_bb[:, None, :, 1:2, :].cpu()  # (B, S_scd, N, A, 3), undo centering
+                diffusion_aux["x1_scn_traj"] = torch.stack(x1_scn_traj, dim=1) + x_bb[:, None, :, 1:2, :].cpu()  # (B, S_scd, N, A, 3), undo centering
 
         return x1_scn, diffusion_aux
 
@@ -292,7 +354,7 @@ class SidechainDiffusionModule(nn.Module):
 class SidechainDiT(nn.Module):
     def __init__(self, cfg: DictConfig, scn_interpolant: ADInterpolant):
         """
-        DiT for backbone diffusion conditioned on ESM sequence embeddings.
+        DiT for backbone diffusion conditioned on MPNN sequence embeddings.
         """
         super().__init__()
 
@@ -441,3 +503,38 @@ class SidechainDiT(nn.Module):
         x_scn = x_scn * rearrange(scd_mlm_mask, "b n -> b n 1 1")
 
         return x_scn, aux_preds
+
+
+class SidechainConfidenceModule(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        """
+        Sidechain confidence module that predicts the confidence of each sidechain atom as Predicted Sidechain Error (PSCE).
+        """
+        super().__init__()
+        self.cfg = cfg
+
+        self.sce_bins_cfg = cfg.sce_bins
+        self.n_bins = self.sce_bins_cfg.n_bins
+
+        self.mlp = nn.Sequential(
+            Linear(cfg.c_h_V, cfg.hidden_size),
+            nn.SiLU(),
+            Linear(cfg.hidden_size, len(rc.non_bb_idxs) * self.n_bins)  # 33 sidechain atoms * n_bins
+        )
+
+
+    def forward(self,
+                x1_pred: TensorType["b n 33 3", float],
+                h_V: TensorType["b n h", float],
+                x_bb: TensorType["b n 4 3", float],
+                seq_mask: TensorType["b n", float]) -> TensorType["b n 33 n_bins", float]:
+
+        # Baseline: only use node embeddings
+        psce_logits = self.mlp(h_V)
+        psce_logits = rearrange(psce_logits, "b n (a k) -> b n a k", k=self.n_bins)
+
+        psce_logits = psce_logits * seq_mask[..., None, None]  # zero out padding positions
+        return psce_logits
+
+
+    # def compute_psce(self, psce_logits: TensorType["b n 33 n_bins", float]):

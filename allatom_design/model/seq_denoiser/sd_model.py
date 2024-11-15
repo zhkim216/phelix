@@ -286,7 +286,7 @@ class SeqDenoiser(nn.Module):
             seq_logits_traj.append(aux_preds["seq_logits"].cpu())
 
             if scd_inputs.get("return_scn_diffusion_aux", False):
-                scn_diffusion_aux_traj.append({k: v.cpu() for k, v in aux_preds["scn_diffusion_aux"].items()})
+                scn_diffusion_aux_traj.append({k: aux_preds["scn_diffusion_aux"][k].cpu() for k in ["xt_scn_traj", "x1_scn_traj"]})
 
         aux["xt_traj"] = torch.stack(xt_traj, dim=1)
         aux["aatype_t_traj"] = torch.stack(aatype_t_traj, dim=1)

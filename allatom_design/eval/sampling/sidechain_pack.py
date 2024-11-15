@@ -155,7 +155,8 @@ def main(cfg: DictConfig):
                                                                               atom_mask, aatype=aatype,
                                                                               metrics_to_compute=["scn_rmsd_per_pos",
                                                                                                 #   "scn_rmsd_per_pos_ligandmpnn",
-                                                                                                  "chi_metrics_per_pos"])
+                                                                                                  "chi_metrics_per_pos",
+                                                                                                  "sce"])
         for k, v in scn_info.items():
             sample_info[k].append(v)
 

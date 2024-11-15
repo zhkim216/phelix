@@ -82,6 +82,24 @@ def main(cfg: DictConfig):
     plt.savefig(f"{cfg.out_dir}/rmsd_vs_npa.png")
     plt.close()
 
+    # # plot histogram of sces
+    # plt.figure()
+    # plt.hist(sample_info["sce"].flatten(), bins=50)
+    # plt.title(f"Histogram of sce values\nMedian: {sample_info['sce'].median():.4f},mean: {sample_info['sce'].mean():.4f}")
+    # plt.xlabel("sce")
+    # plt.ylabel("Frequency")
+    # plt.savefig(f"{cfg.out_dir}/sce_hist.png")
+    # plt.close()
+
+    # # plot histogram of sces, binning from 0 to 4 in increments
+    # plt.figure()
+    # plt.hist(sample_info["sce"].flatten(), bins=np.arange(0, 4.1, 0.125))
+    # plt.title(f"Histogram of sce values\nMedian: {sample_info['sce'].median():.4f},mean: {sample_info['sce'].mean():.4f}")
+    # plt.xlabel("sce")
+    # plt.ylabel("Frequency")
+    # plt.savefig(f"{cfg.out_dir}/sce_hist_binned.png")
+    # plt.close()
+
     # for each protein, plot spearmanr between npa and rmsd within the protein
     spearmanr_per_pdb = df.groupby('pdb').apply(lambda x: spearmanr(x["npa"], x["scn_rmsd_per_pos"])[0]).reset_index(name='spearmanr')
     plt.figure()

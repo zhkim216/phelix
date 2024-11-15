@@ -418,10 +418,30 @@ def compute_structure_metrics(coords1: TensorType["b n 37 3"],
                 # exclude CB atoms to match LigandMPNN eval
                 scn_atom_mask[..., rc.atom_order["CB"]] = 0
             scn_atom_mask = scn_atom_mask * atom_mask
-            scn_atom_mask = scn_atom_mask[..., None].expand_as(bb_aligned_coords1)
+            scn_rmsd_per_pos = ((scn_atom_mask[..., None] * (bb_aligned_coords1 - coords2) ** 2).sum(dim=(-1, -2)) / scn_atom_mask.sum(dim=-1).clamp(min=1)).sqrt()
 
-            scn_rmsd_per_pos = ((scn_atom_mask * (bb_aligned_coords1 - coords2) ** 2).sum(dim=(-1, -2)) / scn_atom_mask.sum(dim=(-1, -2)).clamp(min=1)).sqrt()
             structure_metrics[metric] = scn_rmsd_per_pos
+        elif metric == "sce":
+            # Align on backbone atoms, compute sidechain error
+
+            # align on backbone atoms
+            bb_atom_mask = torch.zeros_like(atom_mask)
+            bb_atom_mask[..., rc.bb_idxs] = 1
+            bb_atom_mask = bb_atom_mask * atom_mask
+
+            bb_rmsd, (bb_aligned_coords1, _) = data.torch_rmsd_weighted(rearrange(coords1, "b n a x -> b (n a) x"),
+                                                                        rearrange(coords2, "b n a x -> b (n a) x"),
+                                                                        weights=rearrange(bb_atom_mask, "b n a -> b (n a)"),
+                                                                        return_aligned=True)
+            bb_aligned_coords1 = rearrange(bb_aligned_coords1, "b (n a) x -> b n a x", n=N)
+
+            # compute sidechain error
+            scn_atom_mask = torch.zeros_like(atom_mask)
+            scn_atom_mask[..., rc.non_bb_idxs] = 1
+            scn_atom_mask = scn_atom_mask * atom_mask
+            sce = torch.where(scn_atom_mask.bool(), torch.norm(bb_aligned_coords1 - coords2, dim=-1), np.nan)  # nan for backbone or missing atoms
+            structure_metrics["sce"] = sce
+
         elif metric == "chi_metrics_per_pos":
             # Compute metrics for sidechain chi angles
             aatype = kwargs["aatype"]
