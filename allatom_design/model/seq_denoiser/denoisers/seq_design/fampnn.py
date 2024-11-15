@@ -128,7 +128,8 @@ class FaMPNN(nn.Module):
         seq_mask: TensorType["b n", float],
         residue_index: TensorType["b n", int],
         chain_encoding: TensorType["b n", int],
-        mlm_mask: TensorType["b n", bool]
+        mlm_mask: TensorType["b n", bool],
+        h_V: Optional[TensorType["b n h", float]] = None,
     ):
 
         B, N, _, _ = denoised_coords.shape
@@ -144,7 +145,8 @@ class FaMPNN(nn.Module):
         X_bb = X[:,:,rc.atom14_bb_idxs, :]
 
         #h_V is size [B,N,H]
-        h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
+        if h_V is None:
+            h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
         h_E = self.W_e(E)
 
         # Encoder is unmasked self-attention
