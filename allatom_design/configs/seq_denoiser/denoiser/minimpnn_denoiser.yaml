@@ -217,3 +217,118 @@ confidence_module:
     max_bin: 4.0
     n_bins: 33
 
+  fa_encoder:
+    autoregressive: false
+    no_aatype_pred: false
+    n_aatype: ${model.n_aatype}
+    use_self_conditioning_seq: ${model.denoiser.use_self_conditioning_seq}
+    use_time_cond: false
+    use_gvp: false
+    use_gcp: false
+    use_residue_transformer: false
+    n_channel: 128
+    n_layers: 1
+    k_neighbors: 32
+    noise_cond_mult: 4
+
+    model_type: "sidechain"
+    augment_eps: 0.0
+    dropout_p: 0.1
+    dec_edge_up: true
+    aggregation: "sum"
+    return_embedding: "last"
+
+    graph_transformer:
+      nns: [8,16,32,64]
+      layers_per_nn: 4
+      hidden_dim: 32
+      input_dim: 37
+      num_heads: 2
+      dim_key: 3
+      out_dim: ${model.denoiser.minimpnn.n_channel}
+      dim_pos_enc: 16
+      pos_enc: true
+      attn_bias: true
+
+    gvp:
+      out_dim: ${model.denoiser.minimpnn.n_channel}
+      node_hidden_dim_scalar: 128
+      node_hidden_dim_vector: 16
+      edge_hidden_dim_scalar: 512
+      edge_hidden_dim_vector: 1
+      rotate_out: true
+      graph_embedding:
+        top_k_neighbors: ${model.denoiser.minimpnn.k_neighbors}
+        num_positional_embeddings: 16
+        n_aatype: ${model.n_aatype}
+        remove_edges_without_coords: true
+        node_hidden_dim_scalar: ${model.denoiser.minimpnn.gvp.node_hidden_dim_scalar}
+        node_hidden_dim_vector: ${model.denoiser.minimpnn.gvp.node_hidden_dim_vector}
+        edge_hidden_dim_scalar: ${model.denoiser.minimpnn.gvp.edge_hidden_dim_scalar}
+        edge_hidden_dim_vector: ${model.denoiser.minimpnn.gvp.edge_hidden_dim_vector}
+      dropout: ${model.denoiser.minimpnn.dropout_p}
+      num_encoder_layers: ${model.denoiser.minimpnn.n_layers}
+
+    gcp:
+      h_hidden_dim: ${model.denoiser.minimpnn.n_channel}
+      chi_hidden_dim: 16
+      e_hidden_dim: 512
+      xi_hidden_dim: 1
+      node_input_dims: [6, 15]
+      edge_input_dims: [32, 56]
+      num_encoder_layers: 3
+      dropout: ${model.denoiser.minimpnn.dropout_p}
+      decoder_residual_updates: true
+      num_positional_embeddings: 16
+      module:
+        norm_x_diff: false
+        scalar_gate: 0
+        vector_gate: true  # note: For both GCP and GCP2, this parameter is used;   For GCP2, this mimics updating vector features without directly using frame vectors
+        vector_residual: false  # note: For both GCP and GCP2, this parameter is used
+        vector_frame_residual: false  # note: for GCP2, this parameter is unused
+        frame_gate: false  # note: for GCP2, if this parameter and `vector_gate` are both set to `false`, row-wise vector self-gating is applied instead
+        sigma_frame_gate: false  # note: For GCP, this parameter overrides `frame_gate`;   For GCP2, this parameter is unused and is replaced in functionality by `vector_gate`
+        scalar_nonlinearity: relu
+        vector_nonlinearity:
+        nonlinearities:
+          - ${..scalar_nonlinearity}
+          - ${..vector_nonlinearity}
+        bottleneck: 1
+        vector_linear: true
+        vector_identity: true
+        default_vector_residual: false
+        default_bottleneck: 1
+        ablate_frame_updates: true
+        ablate_scalars: false
+        ablate_vectors: false
+        enable_e3_equivariance: false
+        scalarization_vectorization_output_dim: 3
+      layer:
+        pre_norm: false
+        num_feedforward_layers: 2
+        dropout: ${model.denoiser.minimpnn.dropout_p}
+        nonlinearity_slope: 1e-2
+        mp:
+          edge_encoder: false
+          edge_gate: false
+          num_message_layers: 3
+          message_residual: 0
+          message_ff_multiplier: 1
+          self_message: true
+          use_residual_message_gcp: true
+
+    residue_transformer:
+      in_channels: ${model.denoiser.minimpnn.n_channel}
+      out_channels:  ${model.denoiser.minimpnn.n_channel}
+      hidden_size: 256
+      n_aatype: ${model.n_aatype}
+      num_heads: 8
+      condition_on_seq: true
+      edge_attn_bias:
+      qk_rmsnorm: true
+      mlp_ratio: 4.0
+      mlp_dropout: 0.0
+      depth: 4
+      edge_hidden_size: 512
+      inf: ${model.inf}
+      rotary_emb: null

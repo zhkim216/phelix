@@ -29,6 +29,8 @@ from openfold.model.primitives import Linear
 from allatom_design.eval import sampling_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
+from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import \
+    FaMPNN
 
 
 class SidechainDiffusionModule(nn.Module):
@@ -199,8 +201,13 @@ class SidechainDiffusionModule(nn.Module):
 
                 psce_logits = self.confidence_module(x1_scn_rollout.detach(),
                                                h_V.detach(),
+                                               aatype.detach(),
                                                x_bb.detach(),
-                                               seq_mask.detach())
+                                               seq_mask.detach(),
+                                               residue_index.detach(),
+                                               chain_index=torch.zeros_like(residue_index),
+                                               scd_mlm_mask=scd_mlm_mask_batched[::M].detach(),
+                                               )  # TODO: pass in chain index
                 diffusion_aux["confidence_aux"] = {
                     "psce_logits": psce_logits,
                     "sce_bins_cfg": self.confidence_module.sce_bins_cfg,
@@ -516,6 +523,8 @@ class SidechainConfidenceModule(nn.Module):
         self.sce_bins_cfg = cfg.sce_bins
         self.n_bins = self.sce_bins_cfg.n_bins
 
+        self.fa_encoder = FaMPNN(cfg.fa_encoder)
+
         self.mlp = nn.Sequential(
             Linear(cfg.c_h_V, cfg.hidden_size),
             nn.SiLU(),
@@ -526,8 +535,25 @@ class SidechainConfidenceModule(nn.Module):
     def forward(self,
                 x1_pred: TensorType["b n 33 3", float],
                 h_V: TensorType["b n h", float],
+                aatype: TensorType["b n", int],
                 x_bb: TensorType["b n 4 3", float],
-                seq_mask: TensorType["b n", float]) -> TensorType["b n 33 n_bins", float]:
+                seq_mask: TensorType["b n", float],
+                residue_index: TensorType["b n", int],
+                chain_index: TensorType["b n", int],
+                scd_mlm_mask: TensorType["b n", float],
+                ) -> TensorType["b n 33 n_bins", float]:
+        x1_pred = x1_pred + x_bb[..., 1:2, :]  # undo CA-centering
+
+        x = cat_bb_scn(x_bb, x1_pred)
+
+        _, h_V, _ = self.fa_encoder(
+            x,
+            aatype,
+            None, #no seq self cond
+            seq_mask,
+            residue_index,
+            chain_index,
+            h_V)
 
         # Baseline: only use node embeddings
         psce_logits = self.mlp(h_V)
