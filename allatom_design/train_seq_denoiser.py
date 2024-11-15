@@ -155,13 +155,10 @@ def main(cfg: DictConfig):
     lit_model.model.set_scale_factors(scale_factors)
 
     # Train
-    # Needs to be added for graph transformer checkpointing
-    strategy = DDPStrategy(static_graph=True)
     trainer = L.Trainer(logger=logger,
                         default_root_dir=cfg.logging.log_dir,
                         log_every_n_steps=cfg.logging.log_every_n_steps,
                         callbacks=callbacks,
-                        strategy=strategy,
                         **cfg.trainer
                         )
     trainer.fit(model=lit_model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloaders)
@@ -192,6 +189,15 @@ def update_config(cfg: DictConfig) -> None:
     if str(cfg.trainer.precision) in ["16", "16-true", "16-mixed"]:
         cfg.model.inf = 1e4
         cfg.model.eps = 1e-4
+
+
+    if getattr(cfg.denoiser, "autoguidance", None) and cfg.denoiser.autoguidance.enabled:
+        # Autoguidance model parameters are not always used
+        cfg.trainer.strategy = "ddp_find_unused_parameters_true"
+
+    if getattr(cfg.denoiser, "confidence_module", None) and cfg.denoiser.confidence_module.enabled:
+        # Confidence module parameters are not always used
+        cfg.trainer.strategy = "ddp_find_unused_parameters_true"
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ train:
 
 # Some trainer options
 trainer:
+  strategy: ddp_find_unused_parameters_true  # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
   max_epochs: 100000
   accumulate_grad_batches: 1
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
@@ -65,10 +66,12 @@ eval:
 
 loss:
   task: ${model.task}
+  inf: ${model.inf}
   loss_weights:
     scn:
       mse_loss: 1.0
     seq_loss: 1.0
+    psce_loss: 1.0
 
   # loss configs
   seq_loss:
