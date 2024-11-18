@@ -186,10 +186,13 @@ class SidechainDiffusionModule(nn.Module):
                                   "autoguidance_cfg": dict(conf_cfg.scn_diffusion.autoguidance_cfg),
                                   }
 
-                    rollout_aux_inputs = {"seq_mlm_mask": scd_mlm_mask_batched[::M],  # we pass in future residue mask, but without batch multiplier
-                                          "scd": scd_inputs}
+                    # Randomly choose some residues to unmask for rollout
+                    scd_mlm_mask_rollout = self.unmask_future_residues(aux_inputs["seq_mlm_mask"], seq_mask)
+                    x_scn_gt_rollout = x_scn_gt * rearrange(scd_mlm_mask_rollout, "b n -> b n 1 1")
 
                     # Run diffusion mini rollout
+                    rollout_aux_inputs = {"seq_mlm_mask": scd_mlm_mask_rollout,
+                                          "scd": scd_inputs}
                     x1_scn_rollout, _ = self.sidechain_diffusion(h_V, aatype, x_bb,
                                                                  seq_mask, residue_index,
                                                                  aux_inputs=rollout_aux_inputs,
@@ -206,14 +209,14 @@ class SidechainDiffusionModule(nn.Module):
                                                seq_mask.detach(),
                                                residue_index.detach(),
                                                chain_index=torch.zeros_like(residue_index),
-                                               scd_mlm_mask=scd_mlm_mask_batched[::M].detach(),
+                                               scd_mlm_mask=scd_mlm_mask_rollout.detach(),
                                                )  # TODO: pass in chain index
                 diffusion_aux["confidence_aux"] = {
                     "psce_logits": psce_logits,
                     "sce_bins_cfg": self.confidence_module.sce_bins_cfg,
                     "scn_pred_rollout": x1_scn_rollout,
-                    "scn_target": x_scn_gt_batched[::M],
-                    "scd_mlm_mask": scd_mlm_mask_batched[::M],
+                    "scn_target": x_scn_gt_rollout,
+                    "scd_mlm_mask": scd_mlm_mask_rollout,
                 }
 
             # Outputs

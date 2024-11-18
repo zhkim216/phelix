@@ -126,18 +126,21 @@ class SDLoss(nn.Module):
                 scd_mlm_mask = confidence_outputs["scd_mlm_mask"]
                 scn_atom_mask = batch["atom_mask"][..., rc.non_bb_idxs]
 
-                # mask out loss when masking aatype
-                mask = scn_atom_mask * rearrange(scd_mlm_mask, "b n -> b n 1")
+                # Construct residue-level mask
+                new_scn_mask = scd_mlm_mask * (1 - outputs["seq_mlm_mask"])  # only compute loss over newly unmasked sidechains
+                new_scn_mask = new_scn_mask * (1 - batch["seq_unk_mask"])  # mask out true unk tokens
+                assert ((1 - scd_mlm_mask) * outputs["seq_mlm_mask"]).sum() == 0  # scd_mlm_mask should always be 1 if seq_mlm_mask is 1
 
                 # Compute PSCE confidence loss
-                aux["psce_loss"] = psce_loss(psce_logits, scn_pred_rollout, scn_target, mask,
+                psce_mask = scn_atom_mask * rearrange(new_scn_mask, "b n -> b n 1")  # mask out ghost and missing sidechain atoms
+                aux["psce_loss"] = psce_loss(psce_logits, scn_pred_rollout, scn_target, psce_mask,
                                              self.cfg.inf,
                                              **confidence_outputs["sce_bins_cfg"])
 
-                # monitor rollout sidechain RMSD (averaged across residues)
-                msd_per_pos = (mask[..., None] * (scn_target - scn_pred_rollout)).pow(2).sum(dim=(-1, -2)) / mask.sum(dim=-1).clamp(min=1)
-                rmsd_per_pos = msd_per_pos.sqrt()
-                rmsd = (rmsd_per_pos * batch["seq_mask"]).sum(dim=-1) / batch["seq_mask"].sum(dim=-1).clamp(min=1)
+                # monitor rollout sidechain RMSD (averaged across residues with newly unmasked sidechains)
+                msd_per_res = (psce_mask[..., None] * (scn_target - scn_pred_rollout)).pow(2).sum(dim=(-1, -2)) / psce_mask.sum(dim=-1).clamp(min=1)
+                rmsd_per_res = msd_per_res.sqrt()
+                rmsd = (rmsd_per_res * new_scn_mask).sum(dim=-1) / new_scn_mask.sum(dim=-1).clamp(min=1)
                 aux_monitor["rollout/scn_rmsd"] = rmsd.mean().detach().clone()
 
 
