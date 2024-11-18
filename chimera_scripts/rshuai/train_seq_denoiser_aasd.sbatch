@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b5_aasd3
+#SBATCH --job-name=b5_aasd4
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b5_aasd3
+EXP_NAME=b5_aasd4
 GROUP=chimera_b5
 
 # Dataset paths
