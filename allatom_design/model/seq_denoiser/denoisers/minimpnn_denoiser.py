@@ -61,7 +61,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         else:
             raise ValueError(f"Unrecognized task: {self.task}")
 
-        seq_logits, node_embs, x_bb = self.seq_design_module(
+        seq_logits, node_embs, edge_embs, x_bb = self.seq_design_module(
             x_noised,
             aatype_noised,
             None, #no seq self cond
@@ -91,10 +91,12 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         if self.use_scn_diffusion:
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
                 node_embs,
+                edge_embs,
                 aatype_pred,
                 x_bb,
                 seq_mask=seq_mask,
                 residue_index=residue_index,
+                chain_index=chain_encoding,
                 aux_inputs=aux_inputs,
                 is_sampling=is_sampling
             )
