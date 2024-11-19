@@ -55,7 +55,23 @@ class SidechainConfidenceModule(nn.Module):
         return psce_logits
 
 
-    # def compute_psce(self, psce_logits: TensorType["b n 33 n_bins", float]):
+    def compute_psce(self, psce_logits: TensorType["b n 33 n_bins", float]) -> TensorType["b n 33", float]:
+        """
+        Compute per-atom PSCE from logits as an expectation across the binned values.
+        """
+        # Compute bin centers
+        lower = torch.linspace(self.cfg.sce_bins.min_bin,
+                               self.cfg.sce_bins.max_bin,
+                               self.n_bins,
+                               device=psce_logits.device)
+        step = lower[1] - lower[0]  # assume bins are equally spaced
+        bin_centers = lower + step / 2
+
+        # Compute expectation
+        psce_probs = torch.nn.functional.softmax(psce_logits, dim=-1)
+        psce = torch.sum(psce_probs * bin_centers, dim=-1)
+
+        return psce
 
 
 class ConfidenceEncoder(nn.Module):

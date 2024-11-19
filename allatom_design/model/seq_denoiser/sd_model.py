@@ -218,6 +218,7 @@ class SeqDenoiser(nn.Module):
         # Initialize trajectories
         xt_traj = []
         aatype_t_traj, aatype_pred_traj = [], []
+        psce_t_traj = []
         seq_logits_traj = []
         scn_diffusion_aux_traj = []
 
@@ -239,6 +240,7 @@ class SeqDenoiser(nn.Module):
 
         xt = x0
         aatype_t = aatype_noised
+        psce_t = torch.zeros((B, N, len(rc.non_bb_idxs)), device=x.device)
 
         # Run unmasking steps
         timesteps_K = torch.ceil(timesteps * aux_inputs["lengths"][:, None]).long()
@@ -257,21 +259,25 @@ class SeqDenoiser(nn.Module):
             mlm_mask_prev = aux_inputs["seq_mlm_mask"].clone()
             x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)  # seq_mlm_mask in aux_inputs is updated by denoiser
 
-            # Unmask sequence and sidechains
-            xt, aatype_t = sampling_utils.unmask(xt, aatype_t, x1_pred, aatype_pred, mlm_mask_prev, aux_inputs["seq_mlm_mask"])
+            # Unmask sequence, sidechains, and sidechain confidence
+            xt, aatype_t, psce_t = sampling_utils.unmask(xt, aatype_t, psce_t,
+                                                         x1_pred, aatype_pred, aux_preds["scn_diffusion_aux"]["psce"],
+                                                         mlm_mask_prev, aux_inputs["seq_mlm_mask"])
 
             for j in range(num_corrector_steps):
                 # Corrector step where we mask and denoise equally
                 # Mask out K_corrector residues
                 K_corrector = torch.ceil(K_next * corrector_step_ratio).long()
-                xt, aatype_t, aux_inputs["seq_mlm_mask"] = self.interpolant.remask_K(xt, aatype_t, aux_inputs["seq_mlm_mask"], K_corrector)
+                xt, aatype_t, psce_t, aux_inputs["seq_mlm_mask"] = self.interpolant.remask_K(xt, aatype_t, psce_t, aux_inputs["seq_mlm_mask"], K_corrector)
 
                 # Denoise back to K_next
                 mlm_mask_prev = aux_inputs["seq_mlm_mask"].clone()
                 x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)
 
                 # Unmask sequence and sidechains
-                xt, aatype_t = sampling_utils.unmask(xt, aatype_t, x1_pred, aatype_pred, mlm_mask_prev, aux_inputs["seq_mlm_mask"])
+                xt, aatype_t, psce_t = sampling_utils.unmask(xt, aatype_t, psce_t,
+                                                             x1_pred, aatype_pred, aux_preds["scn_diffusion_aux"]["psce"],
+                                                             mlm_mask_prev, aux_inputs["seq_mlm_mask"])
 
             aatype_t = aatype_t * (1 - aatype_override_mask[i + 1]) + aatype_override[i + 1] * aatype_override_mask[i + 1]  # override aatype for outputs  # TODO: should we override self-cond input too?
 
@@ -282,6 +288,7 @@ class SeqDenoiser(nn.Module):
             # Save trajectory outputs
             xt_traj.append(xt.cpu())
             aatype_t_traj.append(aatype_t.cpu())
+            psce_t_traj.append(psce_t.cpu())
             aatype_pred_traj.append(aatype_pred.cpu())
             seq_logits_traj.append(aux_preds["seq_logits"].cpu())
 
@@ -291,6 +298,8 @@ class SeqDenoiser(nn.Module):
         aux["xt_traj"] = torch.stack(xt_traj, dim=1)
         aux["aatype_t_traj"] = torch.stack(aatype_t_traj, dim=1)
         aux["aatype_pred_traj"] = torch.stack(aatype_pred_traj, dim=1)
+        aux["psce"] = psce_t
+        aux["psce_t_traj"] = torch.stack(psce_t_traj, dim=1)
         aux["seq_logits_traj"] = torch.stack(seq_logits_traj, dim=1)
         aux["scn_diffusion_aux_traj"] = scn_diffusion_aux_traj
         aux["seq_mask"] = seq_mask
@@ -337,6 +346,7 @@ class SeqDenoiser(nn.Module):
         - seq_mask: Tensor["b n", float]
         - residue_index: Tensor["b n", int]
         - pred_aatype: Tensor["b n", int]
+        - psce: Tensor["b n 33", float]
 
         Args:
         - bb_only_samples: whether the samples come from a backbone-only model
@@ -349,13 +359,17 @@ class SeqDenoiser(nn.Module):
         # Create atom mask, including backbone atoms even for unknown aatype
         atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=aatype.device)[aatype] * seq_mask[..., None]
 
+        # Set b-factors to predicted Sidechain Error (PSCE)
+        b_factors = torch.zeros_like(atom_mask, dtype=torch.float32)
+        b_factors[..., rc.non_bb_idxs] = samples["psce"]
+
         feats = {
             "aatype": aatype,
             "atom_positions": final_atom37_positions,
             "atom_mask": atom_mask,
             "residue_index": residue_index,
             "chain_index": torch.zeros_like(residue_index),  # TODO: support multiple chains
-            "b_factors": torch.ones_like(atom_mask, dtype=torch.float32),
+            "b_factors": b_factors,
         }
 
         feats = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in feats.items()}  # move to cpu

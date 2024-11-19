@@ -199,7 +199,7 @@ class SidechainDiffusionModule(nn.Module):
                                                                  aux_inputs=rollout_aux_inputs,
                                                                  is_sampling=True)
 
-                    x1_scn_rollout = x1_scn_rollout - x_bb[..., 1:2, :]  # center sidechains on input backbone to sidechain diffusion
+                    x1_scn_rollout = x1_scn_rollout - x_bb[..., 1:2, :]  # center sidechains on input backbone to sidechain diffusion  # TODO: fix this
 
                     self.train()
 
@@ -212,7 +212,7 @@ class SidechainDiffusionModule(nn.Module):
                                                residue_index.detach(),
                                                chain_index.detach(),
                                                scd_mlm_mask=scd_mlm_mask_rollout.detach(),
-                                               )  # TODO: pass in chain index
+                                               )
                 diffusion_aux["confidence_aux"] = {
                     "psce_logits": psce_logits,
                     "sce_bins_cfg": self.confidence_module.sce_bins_cfg,
@@ -294,6 +294,23 @@ class SidechainDiffusionModule(nn.Module):
 
                     # Save current x1 prediction
                     x1_scn_traj.append(aux_preds["x1_pred"].cpu())
+
+            # Compute confidence
+            if self.use_confidence_module:
+                # TODO: uncenter by CA
+                psce_logits = self.confidence_module(xt_scn,
+                                                     h_V,
+                                                     h_ESV,
+                                                     aatype,
+                                                     x_bb,
+                                                     seq_mask,
+                                                     residue_index,
+                                                     chain_index,
+                                                     scd_mlm_mask=scd_mlm_mask)
+                psce = self.confidence_module.compute_psce(psce_logits)
+                diffusion_aux["psce"] = psce
+            else:
+                diffusion_aux["psce"] = torch.zeros((B, N, A), device=xt_scn.device)
 
             # Finalize outputs
             x1_scn = xt_scn + x_bb[..., 1:2, :]  # undo centering of sidechain coordinates on CA
@@ -403,7 +420,7 @@ class SidechainDiT(nn.Module):
         self.x_embedder = Linear(self.in_channels, cfg.hidden_size, bias=True, init="glorot")
 
         # input feature embedder: embed reference positions
-        self.f_embedder = Linear(cfg.num_atoms_in * 3, cfg.hidden_size)
+        # self.f_embedder = Linear(cfg.num_atoms_in * 3, cfg.hidden_size)
 
         # node embedding conditioning
         self.h_V_embedder = Linear(cfg.c_h_V, cfg.hidden_size)
@@ -496,10 +513,10 @@ class SidechainDiT(nn.Module):
         # Begin DiT forward pass
         x = self.x_embedder(x)
 
-        # Embed reference positions
-        ref_pos = life.RESTYPE_REF_POS_ATOM37.to(aatype.device)[aatype.long()] * rearrange(scd_mlm_mask, "b n -> b n 1 1")
-        ref_pos = rearrange(ref_pos, "b n a x -> b n (a x)")
-        x = x + self.f_embedder(ref_pos)
+        # # Embed reference positions
+        # ref_pos = life.RESTYPE_REF_POS_ATOM37.to(aatype.device)[aatype.long()] * rearrange(scd_mlm_mask, "b n -> b n 1 1")
+        # ref_pos = rearrange(ref_pos, "b n a x -> b n (a x)")
+        # x = x + self.f_embedder(ref_pos)
 
         # Positional encodings
         if self.pos_encoding == "absolute":

@@ -18,7 +18,6 @@ from tqdm import tqdm
 
 import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
-from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
 from allatom_design.eval import eval_metrics
@@ -440,7 +439,7 @@ def compute_structure_metrics(coords1: TensorType["b n 37 3"],
             scn_atom_mask[..., rc.non_bb_idxs] = 1
             scn_atom_mask = scn_atom_mask * atom_mask
             sce = torch.where(scn_atom_mask.bool(), torch.norm(bb_aligned_coords1 - coords2, dim=-1), np.nan)  # nan for backbone or missing atoms
-            structure_metrics["sce"] = sce
+            structure_metrics["sce"] = sce[..., rc.non_bb_idxs]
 
         elif metric == "chi_metrics_per_pos":
             # Compute metrics for sidechain chi angles

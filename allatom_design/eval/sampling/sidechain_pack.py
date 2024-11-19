@@ -139,14 +139,17 @@ def main(cfg: DictConfig):
                    "pred_aatype": aatype_denoised,
                    "aatype_pred_traj": aux["aatype_pred_traj"],
                    "aatype_t_traj": aux["aatype_t_traj"],
+                   "psce": aux["psce"],
                    }
 
         # Store sample info
         seq_mask, aatype = seq_mask.cpu(), aatype.cpu()
         sample_info["pdb"] += batch_i["pdb_key"]
         sample_info["seq_mask"].append(seq_mask)
+        sample_info["atom_mask"].append(batch_i["atom_mask"].cpu())
         sample_info["aatype"].append(aatype)
         sample_info["seq_logits"].append(aux["seq_logits_traj"].squeeze(1))
+        sample_info["psce"].append(aux["psce"])
         [sample_info[k].append(v.cpu()) for k, v in likelihood_aux.items()]
 
         # Sidechain RMSD per residue
