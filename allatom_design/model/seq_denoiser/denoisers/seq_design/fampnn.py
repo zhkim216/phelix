@@ -129,7 +129,6 @@ class FaMPNN(nn.Module):
         residue_index: TensorType["b n", int],
         chain_encoding: TensorType["b n", int],
         mlm_mask: TensorType["b n", bool],
-        h_V: Optional[TensorType["b n h", float]] = None,
     ):
 
         B, N, _, _ = denoised_coords.shape
@@ -145,8 +144,7 @@ class FaMPNN(nn.Module):
         X_bb = X[:,:,rc.atom14_bb_idxs, :]
 
         #h_V is size [B,N,H]
-        if h_V is None:
-            h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
+        h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
         h_E = self.W_e(E)
 
         # Encoder is unmasked self-attention
@@ -250,16 +248,20 @@ class FaMPNN(nn.Module):
         if self.no_aatype_pred:
             logits = None
 
+        h_V_out = None
         if self.return_embedding == 'encoder':
-            return logits, h_V_enc, X_bb
+            h_V_out = h_V_enc
         elif self.return_embedding == 'decoder':
-            return logits, h_V_dec, X_bb
+            h_V_out = h_V_dec
         elif self.return_embedding == 'gnn':
-            return logits, h_V_gnn, X_bb
+            h_V_out = h_V_gnn
         elif self.return_embedding == 'last':
-            return logits, h_V, X_bb
+            h_V_out = h_V
         else:
             raise ValueError(f'Incorrect return embedding type specified: {self.return_embedding}, must be one of: encoder, decoder, gnn, or last!')
+
+        return logits, h_V_out, h_ESV, X_bb
+
 
 class ProteinFeatures(nn.Module):
     def __init__(self, edge_features, node_features, num_positional_embeddings=16,
