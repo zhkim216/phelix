@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
 from omegaconf import DictConfig
+from scipy.stats import spearmanr
 from torchtyping import TensorType
 
 from allatom_design.data import residue_constants as rc
@@ -132,7 +133,7 @@ class SDLoss(nn.Module):
                 assert ((1 - scd_mlm_mask) * outputs["seq_mlm_mask"]).sum() == 0  # scd_mlm_mask should always be 1 if seq_mlm_mask is 1
 
                 # Compute PSCE confidence loss
-                psce_mask = scn_atom_mask * rearrange(new_scn_mask, "b n -> b n 1")  # mask out ghost and missing sidechain atoms
+                psce_mask = rearrange(new_scn_mask, "b n -> b n 1") * scn_atom_mask  # mask out ghost and missing sidechain atoms
                 aux["psce_loss"] = psce_loss(psce_logits, scn_pred_rollout, scn_target, psce_mask,
                                              self.cfg.inf,
                                              **confidence_outputs["sce_bins_cfg"])
@@ -142,6 +143,12 @@ class SDLoss(nn.Module):
                 rmsd_per_res = msd_per_res.sqrt()
                 rmsd = (rmsd_per_res * new_scn_mask).sum(dim=-1) / new_scn_mask.sum(dim=-1).clamp(min=1)
                 aux_monitor["rollout/scn_rmsd"] = rmsd.mean().detach().clone()
+
+                # monitor per-atom sce vs psce correlation
+                psce = confidence_outputs["psce"]
+                sce = torch.norm(scn_pred_rollout - scn_target, dim=-1)
+                rho = spearmanr(psce[psce_mask.bool()].detach().cpu(), sce[psce_mask.bool()].detach().cpu())[0]
+                aux_monitor["rollout/sce_vs_psce_rho"] = rho
 
 
         # Aggregate losses

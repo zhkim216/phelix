@@ -5,7 +5,6 @@ import os
 import gemmi
 import rdkit.Geometry.rdGeometry as rdGeometry
 import torch
-from beartype.typing import Literal
 from rdkit.Chem import AllChem as Chem
 from rdkit.Chem.rdchem import Mol
 from torchtyping import TensorType
@@ -347,7 +346,7 @@ NUCLEIC_ACID_COMPLEMENT_TENSOR = torch.tensor([3, 2, 1, 0, 4], dtype=torch.long)
 # some functions for nucleic acids
 
 
-def reverse_complement(seq: str, nucleic_acid_type: Literal["dna", "rna"] = "dna"):
+def reverse_complement(seq: str, nucleic_acid_type: str = "dna"):
     """Get the reverse complement of a nucleic acid sequence."""
     if nucleic_acid_type == "dna":
         nucleic_acid_entries = DNA_NUCLEOTIDES
