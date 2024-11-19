@@ -28,6 +28,7 @@ from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
 from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.sidechain_confidence import \
     SidechainConfidenceModule
 from openfold.model.primitives import Linear
+from allatom_design.data import life
 
 
 class SidechainDiffusionModule(nn.Module):
@@ -401,6 +402,9 @@ class SidechainDiT(nn.Module):
         self.timestep_embedder = TimestepEmbedder(cfg.hidden_size)
         self.x_embedder = Linear(self.in_channels, cfg.hidden_size, bias=True, init="glorot")
 
+        # input feature embedder: embed reference positions
+        self.f_embedder = Linear(cfg.num_atoms_in * 3, cfg.hidden_size)
+
         # node embedding conditioning
         self.h_V_embedder = Linear(cfg.c_h_V, cfg.hidden_size)
 
@@ -492,6 +496,12 @@ class SidechainDiT(nn.Module):
         # Begin DiT forward pass
         x = self.x_embedder(x)
 
+        # Embed reference positions
+        ref_pos = life.RESTYPE_REF_POS_ATOM37.to(aatype.device)[aatype.long()] * rearrange(scd_mlm_mask, "b n -> b n 1 1")
+        ref_pos = rearrange(ref_pos, "b n a x -> b n (a x)")
+        x = x + self.f_embedder(ref_pos)
+
+        # Positional encodings
         if self.pos_encoding == "absolute":
             x = x + self.pos_embed(x)
         elif self.pos_encoding == "absolute_residx":

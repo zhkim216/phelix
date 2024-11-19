@@ -18,7 +18,6 @@ from torch.utils.data import DataLoader
 
 import allatom_design.data.datasets.ad_dataset as ad_dataset
 from allatom_design.checkpoint_utils import EMATrackerCheckpoint
-from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import ADDataset
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
