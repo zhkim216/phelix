@@ -52,7 +52,10 @@ class SidechainConfidenceModule(nn.Module):
         psce_logits = rearrange(psce_logits, "b n (a k) -> b n a k", k=self.n_bins)
 
         psce_logits = psce_logits * seq_mask[..., None, None]  # zero out padding positions
-        return psce_logits
+
+        psce = self.compute_psce(psce_logits)  # compute per-atom PSCE as expectation
+
+        return psce_logits, psce
 
 
     def compute_psce(self, psce_logits: TensorType["b n 33 n_bins", float]) -> TensorType["b n 33", float]:

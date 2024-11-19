@@ -199,24 +199,22 @@ class SidechainDiffusionModule(nn.Module):
                                                                  aux_inputs=rollout_aux_inputs,
                                                                  is_sampling=True)
 
-                    x1_scn_rollout = x1_scn_rollout - x_bb[..., 1:2, :]  # center sidechains on input backbone to sidechain diffusion  # TODO: fix this
-
                     self.train()
 
-                psce_logits = self.confidence_module(x1_scn_rollout.detach(),
-                                               h_V.detach(),
-                                               h_ESV.detach(),
-                                               aatype.detach(),
-                                               x_bb.detach(),
-                                               seq_mask.detach(),
-                                               residue_index.detach(),
-                                               chain_index.detach(),
-                                               scd_mlm_mask=scd_mlm_mask_rollout.detach(),
-                                               )
+                psce_logits, psce = self.confidence_module(x1_scn_rollout.detach(),
+                                                           h_V.detach(),
+                                                           h_ESV.detach(),
+                                                           aatype.detach(),
+                                                           x_bb.detach(),
+                                                           seq_mask.detach(),
+                                                           residue_index.detach(),
+                                                           chain_index.detach(),
+                                                           scd_mlm_mask=scd_mlm_mask_rollout.detach())
                 diffusion_aux["confidence_aux"] = {
                     "psce_logits": psce_logits,
+                    "psce": psce,
                     "sce_bins_cfg": self.confidence_module.sce_bins_cfg,
-                    "scn_pred_rollout": x1_scn_rollout,
+                    "scn_pred_rollout": x1_scn_rollout - x_bb[..., 1:2, :],  # for computing loss, center sidechains on input backbone to sidechain diffusion
                     "scn_target": x_scn_gt_rollout,
                     "scd_mlm_mask": scd_mlm_mask_rollout,
                 }
@@ -295,26 +293,24 @@ class SidechainDiffusionModule(nn.Module):
                     # Save current x1 prediction
                     x1_scn_traj.append(aux_preds["x1_pred"].cpu())
 
-            # Compute confidence
-            if self.use_confidence_module:
-                # TODO: uncenter by CA
-                psce_logits = self.confidence_module(xt_scn,
-                                                     h_V,
-                                                     h_ESV,
-                                                     aatype,
-                                                     x_bb,
-                                                     seq_mask,
-                                                     residue_index,
-                                                     chain_index,
-                                                     scd_mlm_mask=scd_mlm_mask)
-                psce = self.confidence_module.compute_psce(psce_logits)
-                diffusion_aux["psce"] = psce
-            else:
-                diffusion_aux["psce"] = torch.zeros((B, N, A), device=xt_scn.device)
-
             # Finalize outputs
             x1_scn = xt_scn + x_bb[..., 1:2, :]  # undo centering of sidechain coordinates on CA
             diffusion_aux["scn_pred"] = x1_scn
+
+            # Compute confidence
+            if self.use_confidence_module:
+                _, psce = self.confidence_module(x1_scn,
+                                                 h_V,
+                                                 h_ESV,
+                                                 aatype,
+                                                 x_bb,
+                                                 seq_mask,
+                                                 residue_index,
+                                                 chain_index,
+                                                 scd_mlm_mask=scd_mlm_mask)
+                diffusion_aux["psce"] = psce
+            else:
+                diffusion_aux["psce"] = torch.zeros((B, N, A), device=xt_scn.device)
 
             # Finalize trajectory outputs
             if return_scn_diffusion_aux:
