@@ -17,6 +17,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from scipy.stats import spearmanr
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import allatom_design.data.residue_constants as rc
 
 
 @hydra.main(config_path="../configs/eval", config_name="analyze_scn_pack_likelihoods", version_base="1.3.2")
@@ -99,6 +100,63 @@ def main(cfg: DictConfig):
     # plt.ylabel("Frequency")
     # plt.savefig(f"{cfg.out_dir}/sce_hist_binned.png")
     # plt.close()
+
+    # plot sce vs psce
+    plt.figure()
+    sce_atom_mask = sample_info["atom_mask"][..., rc.non_bb_idxs]
+    sce = sample_info["sce"][sce_atom_mask.bool()].cpu()
+    psce = sample_info["psce"][sce_atom_mask.bool()].cpu()
+    # subsample sce / psce to 10K
+    idxs = np.random.choice(len(sce), 10000, replace=False)
+    plt.scatter(sce[idxs], psce[idxs], alpha=0.5, s=1)
+    plt.title(f"sce vs psce\nSpearman's rho = {spearmanr(sce, psce)[0]:.4f}")
+    plt.xlabel("sce")
+    plt.ylabel("psce")
+    plt.ylim(-0.1, 5)
+    plt.xlim(-0.1, 5)
+    plt.savefig(f"{cfg.out_dir}/sce_vs_psce.png")
+    plt.close()
+
+    # plot sce vs psce, averaged per residue
+    n_atoms_per_res = sce_atom_mask.sum(dim=-1)
+    sce = torch.where(sce_atom_mask.bool(), sample_info["sce"].cpu(), 0)
+    sce_avg_res = (sce.cpu() * sce_atom_mask).sum(dim=-1) / n_atoms_per_res.clamp(min=1)
+    psce_avg_res = (sample_info["psce"].cpu() * sce_atom_mask).sum(dim=-1) / n_atoms_per_res.clamp(min=1)
+
+    sce_avg_res = sce_avg_res[n_atoms_per_res > 0]
+    psce_avg_res = psce_avg_res[n_atoms_per_res > 0]
+    plt.figure()
+    idxs = np.random.choice(len(sce_avg_res), 10000, replace=False)
+    plt.scatter(sce_avg_res[idxs], psce_avg_res[idxs], alpha=0.5, s=1)
+    plt.title(f"sce vs psce, averaged per residue\nSpearman's rho = {spearmanr(sce_avg_res, psce_avg_res)[0]:.4f}")
+    plt.xlabel("sce")
+    plt.ylabel("psce")
+    plt.ylim(-0.1, 5)
+    plt.xlim(-0.1, 5)
+    plt.savefig(f"{cfg.out_dir}/sce_vs_psce_avg_res.png")
+    plt.close()
+
+    # plot sce vs psce, averaged per residue for each residue type
+    n_atoms_per_res = sce_atom_mask.sum(dim=-1)
+    sce = torch.where(sce_atom_mask.bool(), sample_info["sce"].cpu(), 0)
+    sce_avg_res = (sce.cpu() * sce_atom_mask).sum(dim=-1) / n_atoms_per_res.clamp(min=1)
+    psce_avg_res = (sample_info["psce"].cpu() * sce_atom_mask).sum(dim=-1) / n_atoms_per_res.clamp(min=1)
+
+    for i, restype in enumerate(rc.restypes_with_x):
+        aatype_i = sample_info["aatype"] == i
+
+        sce_avg_res_i = sce_avg_res[(aatype_i) & (n_atoms_per_res > 0)]
+        psce_avg_res_i = psce_avg_res[(aatype_i) & (n_atoms_per_res > 0)]
+        plt.figure()
+        plt.scatter(sce_avg_res_i, psce_avg_res_i, alpha=0.5, s=1)
+        plt.title(f"sce vs psce, averaged per residue for residue type {restype}\nSpearman's rho = {spearmanr(sce_avg_res_i, psce_avg_res_i)[0]:.4f}")
+        plt.xlabel("sce")
+        plt.ylabel("psce")
+        plt.ylim(-0.1, 5)
+        plt.xlim(-0.1, 5)
+        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_avg_res_{restype}.png")
+        plt.close()
+
 
     # for each protein, plot spearmanr between npa and rmsd within the protein
     spearmanr_per_pdb = df.groupby('pdb').apply(lambda x: spearmanr(x["npa"], x["scn_rmsd_per_pos"])[0]).reset_index(name='spearmanr')

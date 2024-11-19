@@ -84,11 +84,14 @@ def update_mlm_mask(mlm_mask: TensorType["b n", float],
 
 
 def unmask(xt,
-           aatype_t,
-           x1_pred,
-           aatype_pred,
-           mlm_mask_prev,
-           mlm_mask) -> Tuple[TensorType["b n a 3", float],
+           aatype_t: TensorType["b n", int],
+           psce_t: TensorType["b n 33", float],
+           x1_pred: Optional[TensorType["b n a 3", float]],
+           aatype_pred: TensorType["b n", int],
+           psce_pred: TensorType["b n 33", float],
+           mlm_mask_prev: TensorType["b n", float],
+           mlm_mask: TensorType["b n", float]
+           ) -> Tuple[TensorType["b n a 3", float],
                               TensorType["b n", int]]:
     """
     Update aatype pred and x1 based on newly unmasked residues.
@@ -101,8 +104,9 @@ def unmask(xt,
     ## Pack sidechains of residues we're unmasking, if using an aasd model
     if x1_pred is not None:
         xt = torch.where(residues_to_unmask[..., None, None].bool(), x1_pred, xt)
+        psce_t = torch.where(residues_to_unmask[..., None].bool(), psce_pred, psce_t)
 
-    return xt, aatype_t
+    return xt, aatype_t, psce_t
 
 
 def get_timesteps_from_schedule(mode: str,
