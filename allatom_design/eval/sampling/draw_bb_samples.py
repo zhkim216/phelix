@@ -106,7 +106,7 @@ def main(cfg: DictConfig):
                                                        cond_labels=cond_labels_in,
                                                        noise_schedule=noise_schedule,
                                                        churn_cfg=churn_cfg,
-                                                       autoguidance_cfg=dict(cfg.autoguidance_cfg)
+                                                       autoguidance_cfg=dict(cfg.autoguidance_cfg),
                                                        )
 
         samples = {"x_bb_denoised": x_bb_denoised,
@@ -236,6 +236,24 @@ def main(cfg: DictConfig):
         bin_to_metrics[bin]["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(coords_b,
                                                                                     temp_dir=f"{cfg.out_dir}/tmp",
                                                                                     subsample_pairs=cfg.pairwise_tm_subsample)
+
+    # === Run clustering analysis === #
+    for sctm_cutoff in cfg.clustering.sctm_cutoffs:
+        # Cluster by length bin
+        for bin in set(bins):
+            pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if (b == bin) and ("mpnn_sc_info" in all_metrics[pdb])]
+            if len(pdbs_b) == 0:
+                # skip if we don't have self-consistency info for any samples in this bin
+                continue
+
+            # Cluster only on designable samples (scTM > sctm_cutoff)
+            designable_pdbs = [pdb for pdb in pdbs_b if all_metrics[pdb]["mpnn_sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff]
+            bin_to_metrics[bin][f"sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
+
+            cluster_out_dir = Path(f"{cfg.out_dir}/clustering/bin{bin}_sctm{sctm_cutoff}")
+            bin_to_metrics[bin][f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{cfg.out_dir}/tmp",
+                                                                                                **cfg.clustering.foldseek_opts)
+
 
     # === Compute KL(p||q) for secondary structure distributions === #
     dssp_df = pd.read_csv(cfg.ss_kld.dssp_csv)
