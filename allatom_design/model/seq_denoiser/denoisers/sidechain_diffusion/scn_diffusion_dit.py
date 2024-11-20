@@ -497,11 +497,13 @@ class SidechainDiT(nn.Module):
         c = c + h_V
 
         # add conditioning from DiT-based backbone encoder
+        c_dit = h_V.clone()  #  do not pass in timestep conditioning to DiT
         x_bb = rearrange(x_bb, "b n a x -> b n (a x)")
         x_dit = self.dit_bb_embedder(x_bb)
         attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
         for block in self.dit_blocks:
-            x_dit = block(x_dit, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True)
+            x_dit = block(x_dit, c_dit, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True)
+
         c = c + x_dit
         x = x + x_dit
 
