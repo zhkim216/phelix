@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b7_aasd1
+#SBATCH --job-name=b7_aasd2
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b7_aasd1
+EXP_NAME=b7_aasd2
 GROUP=chimera_b7
 
 # Dataset paths
