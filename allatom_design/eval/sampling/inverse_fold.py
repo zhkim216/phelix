@@ -135,6 +135,7 @@ def main(cfg: DictConfig):
                    "pred_aatype": aatype_denoised,
                    "aatype_pred_traj": aux["aatype_pred_traj"],
                    "aatype_t_traj": aux["aatype_t_traj"],
+                   "psce": aux["psce"],
                    }
 
         # Update info for sequence recovery eval
