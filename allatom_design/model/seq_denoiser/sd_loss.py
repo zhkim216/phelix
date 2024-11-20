@@ -80,12 +80,8 @@ class SDLoss(nn.Module):
             ## handle batch multiplier dimension
             scn_pred = scn_diff_outputs["scn_pred"]
             scn_target = scn_diff_outputs["scn_target"]
-            scd_mlm_mask = scn_diff_outputs["scd_mlm_mask"]
             M = scn_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
             mask = repeat(batch["x_mask"][..., rc.non_bb_idxs, :], "b n a x -> (m b) n a x", m=M)
-
-            # Only compute loss where we know aatype
-            mask = mask * rearrange(scd_mlm_mask, "(m b) n -> (m b) n 1 1", m=M)  # mask out sidechain loss when masking aatype
 
             ## loss weight based on EDM loss
             loss_weight_scn = scn_diff_outputs["loss_weight_t"]
@@ -104,12 +100,8 @@ class SDLoss(nn.Module):
 
                 scn_pred = guidance_outputs["scn_pred"]
                 scn_target = guidance_outputs["scn_target"]
-                scd_mlm_mask = scn_diff_outputs["scd_mlm_mask"]
                 M = scn_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
                 mask = repeat(batch["x_mask"][..., rc.non_bb_idxs, :], "b n a x -> (m b) n a x", m=M)
-
-                # mask out sidechain loss when masking aatype
-                mask = mask * rearrange(scd_mlm_mask, "(m b) n -> (m b) n 1 1", m=M)
 
                 # Compute sidechain MSE loss
                 aux["autoguidance/scn/mse_loss"] = masked_mse(scn_pred,
@@ -124,13 +116,11 @@ class SDLoss(nn.Module):
                 psce_logits = confidence_outputs["psce_logits"]
                 scn_pred_rollout = confidence_outputs["scn_pred_rollout"]
                 scn_target = confidence_outputs["scn_target"]
-                scd_mlm_mask = confidence_outputs["scd_mlm_mask"]
                 scn_atom_mask = batch["atom_mask"][..., rc.non_bb_idxs]
 
                 # Construct residue-level mask
-                new_scn_mask = scd_mlm_mask * (1 - outputs["seq_mlm_mask"])  # only compute loss over newly unmasked sidechains
+                new_scn_mask = (1 - outputs["scn_mlm_mask"])  # only compute confidence loss over masked sidechains
                 new_scn_mask = new_scn_mask * (1 - batch["seq_unk_mask"])  # mask out true unk tokens
-                assert ((1 - scd_mlm_mask) * outputs["seq_mlm_mask"]).sum() == 0  # scd_mlm_mask should always be 1 if seq_mlm_mask is 1
 
                 # Compute PSCE confidence loss
                 psce_mask = rearrange(new_scn_mask, "b n -> b n 1") * scn_atom_mask  # mask out ghost and missing sidechain atoms
@@ -138,7 +128,7 @@ class SDLoss(nn.Module):
                                              self.cfg.inf,
                                              **confidence_outputs["sce_bins_cfg"])
 
-                # monitor rollout sidechain RMSD (averaged across residues with newly unmasked sidechains)
+                # monitor rollout sidechain RMSD (averaged across residues with masked sidechains)
                 msd_per_res = (psce_mask[..., None] * (scn_target - scn_pred_rollout)).pow(2).sum(dim=(-1, -2)) / psce_mask.sum(dim=-1).clamp(min=1)
                 rmsd_per_res = msd_per_res.sqrt()
                 rmsd = (rmsd_per_res * new_scn_mask).sum(dim=-1) / new_scn_mask.sum(dim=-1).clamp(min=1)

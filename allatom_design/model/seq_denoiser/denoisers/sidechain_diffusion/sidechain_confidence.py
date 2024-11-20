@@ -40,7 +40,6 @@ class SidechainConfidenceModule(nn.Module):
                 seq_mask: TensorType["b n", float],
                 residue_index: TensorType["b n", int],
                 chain_index: TensorType["b n", int],
-                scd_mlm_mask: TensorType["b n", float],
                 ) -> TensorType["b n 33 n_bins", float]:
         X = cat_bb_scn(x_bb, x1_scn_pred)
 

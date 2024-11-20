@@ -44,14 +44,21 @@ class MAR(SDInterpolant):
             t = self.sample_timestep(x1.shape[0], device=x1.device)
 
         # Get noisy samples
-        xt, aatype_noised, mlm_mask = self.noise_samples(x1, batch["aatype"], t, batch["seq_mask"])
+        xt, aatype_noised, seq_mlm_mask = self.noise_samples(x1, batch["aatype"], t, batch["seq_mask"])
+
+        # During training, randomly drop sidechains from unmasked aatypes
+        if self.training:
+            xt, scn_mlm_mask = self.drop_sidechains(xt, seq_mlm_mask)
+        else:
+            scn_mlm_mask = seq_mlm_mask.clone()
 
         # Construct outputs
         outputs = {}
         outputs["t"] = t  # [b]
         outputs["x_noised"] = xt  # [b n a 3]
         outputs["aatype_noised"] = aatype_noised  # [b n]
-        outputs["seq_mlm_mask"] = mlm_mask  # [b n]
+        outputs["seq_mlm_mask"] = seq_mlm_mask  # [b n]
+        outputs["scn_mlm_mask"] = scn_mlm_mask  # [b n]
 
         return outputs
 
@@ -132,6 +139,29 @@ class MAR(SDInterpolant):
             x_noised[..., rc.non_bb_idxs, :] = x_noised[..., rc.non_bb_idxs, :] * rearrange(scn_mask, "b -> b 1 1 1")
 
         return x_noised, aatype_noised, mlm_mask
+
+
+    def drop_sidechains(self,
+                        x: TensorType["b n a 3"],
+                        seq_mlm_mask: TensorType["b n"],
+                        ) -> Tuple[TensorType["b n a 3", float],
+                                   TensorType["b n", int]]:
+        """
+        Randomly drop out sidechains of unmasked aatypes.
+        """
+        # Sample probability of dropping sidechains (TODO: we can try different schedules for this)
+        drop_scn_t = torch.rand(x.shape[0], device=x.device)  # choose probability of dropping from uniform
+
+        # Create sidechain mlm mask
+        scn_mlm_mask = torch.rand_like(seq_mlm_mask) < rearrange(drop_scn_t, "b -> b 1")  # [b n]
+        scn_mlm_mask = scn_mlm_mask * seq_mlm_mask  # sidechains should be dropped where aatype is masked
+
+        # Noise sidechains
+        x_noised = x.clone()
+        x_noised[..., rc.non_bb_idxs, :] = x_noised[..., rc.non_bb_idxs, :] * rearrange(scn_mlm_mask, "b n -> b n 1 1").float()
+
+        return x_noised, scn_mlm_mask
+
 
     def corrector_step(self,
                    f: Callable,

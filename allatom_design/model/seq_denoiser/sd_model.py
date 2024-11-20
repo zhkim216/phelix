@@ -70,8 +70,8 @@ class SeqDenoiser(nn.Module):
         interpolant_out = self.interpolant(batch, t)
         batch["x_noised"] = interpolant_out["x_noised"]
         batch["aatype_noised"] = interpolant_out["aatype_noised"]
-        batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]
-        batch["scn_mlm_mask"] = interpolant_out.get("scn_mlm_mask", interpolant_out["seq_mlm_mask"])  # if just running seq_des, scn_mlm_mask is the same as seq_mlm_mask
+        batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]  # 1 for unmasked aatype
+        batch["scn_mlm_mask"] = interpolant_out["scn_mlm_mask"]  # 1 for unmasked sidechains
 
         # During training, keep track of certain additional features
         aux_inputs = {
