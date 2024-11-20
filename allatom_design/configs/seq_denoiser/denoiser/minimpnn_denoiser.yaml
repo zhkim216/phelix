@@ -144,15 +144,21 @@ scn_diffusion_module:
     use_self_conditioning: ${model.denoiser.scn_diffusion_module.use_self_conditioning}
     n_aatype: ${model.n_aatype}
     self_cond_p: ${model.denoiser.scn_diffusion_module.self_cond_p}
+    pos_encoding: ${model.denoiser.pos_encoding}
 
     # h_V conditioning
     c_h_V: ${denoiser.minimpnn.n_channel}
 
+    # QK normalization
+    qk_rmsnorm: true
+
     # Blocks
     depth: 4
     hidden_size: ${model.denoiser.scn_diffusion_module.hidden_size}
+    num_heads: 8
     mlp_dropout: 0.0
     mlp_ratio: 4.0
+    inf: ${model.inf}
 
   autoguidance: ${model.denoiser.autoguidance}
   confidence_module: ${model.denoiser.confidence_module}

@@ -21,7 +21,7 @@ from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import FinalLayer
-from allatom_design.model.atom_denoiser.denoisers.dit_utils import DiffusionMLPBlock
+from allatom_design.model.atom_denoiser.denoisers.dit_utils import DiffusionMLPBlock, DiTBlock, MultiHeadRMSNorm
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
 from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
@@ -350,6 +350,35 @@ class SidechainDiT(nn.Module):
         self.cfg = cfg
         self.scn_interpolant = scn_interpolant
 
+        # Set up DiT-based backbone encoder
+        self.dit_in_channels = len(rc.bb_idxs) * 3
+        self.dit_out_channels = cfg.hidden_size
+
+        # QK-normalization from SD3
+        self.qk_normlayer = None
+        if cfg.qk_rmsnorm:
+            self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
+
+        # DiT positional encoding
+        self.pos_encoding = cfg.pos_encoding
+        self.rotary_emb = None
+        assert self.pos_encoding in ["rotary", "rotary_residx"]
+        dim = cfg.hidden_size // cfg.num_heads
+        use_residx = (self.pos_encoding == "rotary_residx")
+        self.rotary_emb = rope.RotaryEmbedding(dim=dim, use_residx=use_residx, cache_if_possible=False)
+
+        # DiT blocks
+        self.dit_bb_embedder = nn.Linear(self.dit_in_channels, self.dit_out_channels)
+        self.dit_blocks = nn.ModuleList([
+            DiTBlock(cfg.hidden_size, cfg.num_heads,
+                     mlp_dropout=cfg.mlp_dropout, mlp_ratio=cfg.mlp_ratio,
+                     inf=cfg.inf,
+                     rotary_emb=self.rotary_emb,
+                     qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
+                     ) for _ in range(cfg.depth)
+        ])
+
+
         # Set up MLP model
         self.use_self_conditioning = cfg.use_self_conditioning
         self.in_channels = len(rc.non_bb_idxs) * 3  # 33 * 3; input sidechain atoms
@@ -395,6 +424,10 @@ class SidechainDiT(nn.Module):
         nn.init.normal_(self.timestep_embedder.mlp[2].weight, std=0.02)
 
         # Zero-out adaLN modulation layers in DiT blocks:
+        for block in self.dit_blocks:
+            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+
         for block in self.blocks:
             nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
             nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
@@ -463,7 +496,16 @@ class SidechainDiT(nn.Module):
         h_V = self.h_V_embedder(h_V)
         c = c + h_V
 
-        # Blocks
+        # add conditioning from DiT-based backbone encoder
+        x_bb = rearrange(x_bb, "b n a x -> b n (a x)")
+        x_dit = self.dit_bb_embedder(x_bb)
+        attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
+        for block in self.dit_blocks:
+            x_dit = block(x_dit, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True)
+        c = c + x_dit
+        x = x + x_dit
+
+        # MLP blocks
         for block in self.blocks:
             x = block(x, c)
 
