@@ -152,7 +152,13 @@ class SeqDenoiser(nn.Module):
         t_seq = torch.tensor([0.0, 1.0]).to(x.device)[None].expand(x.shape[0], -1)  # [B, 2]
         timesteps = t_seq
 
-        # Override aatype with the input aatype during sidechain diffusion only
+        # Override aatype with the input aatype during sequence denoising
+        target_dims = (t_seq.shape[1], *aatype.shape)
+        aatype_override = aatype.unsqueeze(0).expand(*target_dims)
+        aatype_override_mask = torch.ones_like(aatype)
+        aatype_override_mask = aatype_override_mask.unsqueeze(0).expand(*target_dims).long()  # view not clone to save a bit of memory
+
+        # Override aatype with the input aatype during sidechain diffusion also
         scd_inputs["aatype_override"] = aatype
 
         return self.sample(x, seq_mask, residue_index, chain_index, timesteps,
@@ -160,7 +166,7 @@ class SeqDenoiser(nn.Module):
                            num_corrector_steps=0,  # does not matter for sidechain packing
                            corrector_step_ratio=0.0,  # does not matter for sidechain packing
                            aatype_decoding_order_mode="random",  # does not matter for sidechain packing
-                        #    aatype_override=aatype_override, aatype_override_mask=aatype_override_mask,
+                           aatype_override=aatype_override, aatype_override_mask=aatype_override_mask,
                            scd_inputs=scd_inputs,
                            **sampling_kwargs)
 

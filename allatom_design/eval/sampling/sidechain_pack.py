@@ -124,14 +124,14 @@ def main(cfg: DictConfig):
             scd_inputs=scd_inputs,
         )
 
-        likelihood_aux = lit_sd_model.model.get_sidechain_likelihoods(cfg.likelihood_num_steps,
-                                                                      x, aatype,
-                                                                      seq_mask=seq_mask,
-                                                                      residue_index=residue_index,
-                                                                      chain_index=chain_index,
-                                                                      cond_labels=cond_labels_in,
-                                                                      atom_mask=batch_i["atom_mask"].to(device),
-                                                                      scd_inputs=scd_inputs)
+        # likelihood_aux = lit_sd_model.model.get_sidechain_likelihoods(cfg.likelihood_num_steps,
+        #                                                               x, aatype,
+        #                                                               seq_mask=seq_mask,
+        #                                                               residue_index=residue_index,
+        #                                                               chain_index=chain_index,
+        #                                                               cond_labels=cond_labels_in,
+        #                                                               atom_mask=batch_i["atom_mask"].to(device),
+        #                                                               scd_inputs=scd_inputs)
 
         samples = {"x_denoised": x_denoised,
                    "seq_mask": seq_mask,
@@ -150,7 +150,7 @@ def main(cfg: DictConfig):
         sample_info["aatype"].append(aatype)
         sample_info["seq_logits"].append(aux["seq_logits_traj"].squeeze(1))
         sample_info["psce"].append(aux["psce"])
-        [sample_info[k].append(v.cpu()) for k, v in likelihood_aux.items()]
+        # [sample_info[k].append(v.cpu()) for k, v in likelihood_aux.items()]
 
         # Sidechain RMSD per residue
         atom_mask = batch_i["atom_mask"]
@@ -264,9 +264,9 @@ def main(cfg: DictConfig):
     metrics_df = pd.DataFrame(scn_metrics, index=[0])
     metrics_df.to_csv(f"{cfg.out_dir}/scn_metrics.csv", index=False)
 
-    plot_rmsd_vs_npa(sample_info, cfg.out_dir)
-    plot_rmsd_vs_npa_per_residue(sample_info, cfg.out_dir)
-    plot_per_protein_rmsd_vs_npa(sample_info, cfg.out_dir)
+    # plot_rmsd_vs_npa(sample_info, cfg.out_dir)
+    # plot_rmsd_vs_npa_per_residue(sample_info, cfg.out_dir)
+    # plot_per_protein_rmsd_vs_npa(sample_info, cfg.out_dir)
 
 
 def plot_rmsd_vs_npa(sample_info, out_dir: str):
