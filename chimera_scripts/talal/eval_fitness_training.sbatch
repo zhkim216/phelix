@@ -25,7 +25,7 @@ export TORCH_HOME=/scratch/hielab/talal/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/talal/cache/omegafold/omegafold.pt
 
 # Model to evaluate
-MODEL_NAME=aasd_scn_atom_0.4
+MODEL_NAME=aasd_sidechain_pdb_0.3
 DENOISER_TRAIN_DIR=/scratch/hielab/talal/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
@@ -38,13 +38,13 @@ cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_fitness_training.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
-    no_wandb=false \
+    no_wandb=true \
     group=${GROUP} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     start_epoch=0 \
     eval_every_n_ckpts=4 \
     batch_size=8\
-    datasets=[megascale_test,skempi_ppi,skempi,cr6261_h1,cr6261_h9,g6,cr9114_h1,cr9114_h3] \
+    datasets=[skempi_ppi] \
     hydra.run.dir=${HYDRA_DIR} \
     data.overwrite_cache=false \
