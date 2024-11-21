@@ -12,7 +12,7 @@ from allatom_design.data import protein
 from allatom_design.data import residue_constants as rc
 from openfold.utils.feats import atom14_to_atom37
 from pathlib import Path
-from openfold.utils.rigid_utils import Rigid
+from openfold.utils.rigid_utils import Rigid, Rotation
 import subprocess
 from typing import Tuple, Union
 import math
@@ -749,3 +749,65 @@ def cat_neighbors_nodes(h_nodes, h_neighbors, E_idx):
     h_nodes = gather_nodes(h_nodes, E_idx)
     h_nn = torch.cat([h_neighbors, h_nodes], -1)
     return h_nn
+
+
+
+def backbone_coords_to_frames(x_bb: TensorType["... 4 3", float],
+                              atom_mask: TensorType["... 4", float],
+                              eps=1e-8):
+    """
+    Convert backbone coordinates to local frames (rotation + translation) for each residue.
+    """
+    base_atom_names = ["C", "CA", "N"]
+    rigid_group_base_atom37_idx = torch.tensor([rc.bb_atom_order[atom] for atom in base_atom_names])
+    base_atom_pos = x_bb[..., rigid_group_base_atom37_idx, :]
+    gt_frames = Rigid.from_3_points(
+            p_neg_x_axis=base_atom_pos[..., 0, :],
+            origin=base_atom_pos[..., 1, :],
+            p_xy_plane=base_atom_pos[..., 2, :],
+            eps=eps,
+    )
+    gt_exists = torch.min(atom_mask[..., rigid_group_base_atom37_idx], dim=-1)[0]
+
+    rots = torch.eye(3, dtype=x_bb.dtype, device=x_bb.device)
+    rots = torch.tile(rots, (*x_bb.shape[:-2], 1, 1))
+    rots[..., 0, 0] = -1
+    rots[..., 2, 2] = -1
+
+    rots = Rotation(rot_mats=rots)
+    gt_frames = gt_frames.compose(Rigid(rots, None))
+
+    gt_frames_tensor = gt_frames.to_tensor_4x4()
+
+    return gt_frames_tensor, gt_exists
+
+
+def transform_sidechain_frame(x_scn: TensorType["b n 33 3", float],
+                              x_bb: TensorType["b n 4 3", float],
+                              atom_mask_scn: TensorType["b n 33", float],
+                              atom_mask_bb: TensorType["b n 4", float],
+                              to_local: bool) -> Tuple[
+                                  TensorType["b n 33 3", float],
+                                  TensorType["b n", float]
+                              ]:
+    """
+    Transform sidechain coordinates based on the backbone frame.
+    If to_local, transform from global to local frame. Otherwise, transform from local to global frame.
+    """
+    bb_frames, bb_frames_exists = backbone_coords_to_frames(x_bb, atom_mask_bb)
+    T = Rigid.from_tensor_4x4(bb_frames[..., None, :, :])
+
+    if to_local:
+        # Transform from global to local frame, ghost atom value is at 0
+        x_scn = T.invert_apply(x_scn)
+        ghost_atom_value = 0
+    else:
+        # Transform from local to global frame, ghost atom value is at CA
+        x_scn = T.apply(x_scn)
+        ca_idx = rc.bb_atom_order["CA"]
+        ghost_atom_value = x_bb[..., ca_idx:ca_idx + 1, :]
+
+    x_scn = torch.where(atom_mask_scn[..., None].bool(), x_scn, ghost_atom_value)  # "zero out" ghost atoms and missing atoms
+    x_scn = torch.where(bb_frames_exists[..., None, None].bool(), x_scn, ghost_atom_value)  # "zero out" sidechain atoms where backbone frame does not exist
+
+    return x_scn, bb_frames_exists
