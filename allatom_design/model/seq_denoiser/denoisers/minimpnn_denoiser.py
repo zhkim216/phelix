@@ -44,7 +44,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         # Sidechain diffusion head: DiT
         if self.use_scn_diffusion:
             # Backbone encoder: DiT
-            self.backbone_encoder = BackboneEncoderDiT(cfg.backbone_encoder)
+            # self.backbone_encoder = BackboneEncoderDiT(cfg.backbone_encoder)
             self.scn_diffusion_module = SidechainDiffusionModule(cfg.scn_diffusion_module, self.scn_sigma_data)
 
 
@@ -100,8 +100,8 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         # 2. Sidechain diffusion
         x1_pred = None
         if self.use_scn_diffusion:
-            node_embs = self.backbone_encoder(node_embs, x_bb,
-                                              seq_mask, residue_index, chain_encoding)
+            # node_embs = self.backbone_encoder(node_embs, x_bb,
+            #                                   seq_mask, residue_index, chain_encoding)
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
                 node_embs,
                 edge_embs,

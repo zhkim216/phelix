@@ -163,6 +163,8 @@ scn_diffusion_module:
     n_aatype: ${model.n_aatype}
     self_cond_p: ${model.denoiser.scn_diffusion_module.self_cond_p}
 
+    c_h_V: ${denoiser.minimpnn.n_channel}
+
     # QK normalization
     qk_rmsnorm: true
 

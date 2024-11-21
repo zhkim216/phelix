@@ -574,6 +574,7 @@ atom_types = [
 atom_order = {atom_type: i for i, atom_type in enumerate(atom_types)}
 atom_type_num = len(atom_types)  # := 37.
 bb_atoms = ["N", "CA", "C", "O"]
+bb_atom_order = {atom_type: i for i, atom_type in enumerate(bb_atoms)}
 num_bb_atoms = len(bb_atoms)
 bb_idxs = [atom_order[atom_type] for atom_type in bb_atoms]  # := [0, 1, 2, 4].
 non_bb_idxs = [i for i in range(atom_type_num) if i not in bb_idxs]  # := [3, 5, ..., 36]

@@ -77,8 +77,7 @@ class SeqDenoiser(nn.Module):
         aux_inputs = {
             "x": batch["x"],  # ground truth coordinates
             "aatype": batch["aatype"],  # ground truth aatype
-            "ghost_atom_mask": batch["ghost_atom_mask"],
-            "missing_atom_mask": batch["missing_atom_mask"],
+            "atom_mask": batch["atom_mask"],
             "t_scd": batch.get("t_scd", None),  # scalar; fix t_scd (sidechain diffusion time) if provided, usually for eval
             "seq_mlm_mask": batch["seq_mlm_mask"],
             "scn_mlm_mask": batch["scn_mlm_mask"],

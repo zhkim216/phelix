@@ -195,13 +195,13 @@ def main(cfg: DictConfig):
                                 save_diff_traj_steps=save_sd_traj_steps,
                                 traj_conect=cfg.traj_conect)
 
-        # # save x1_scn traj
-        # save_trajs_fn(x_traj_key="x1_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
-        #               filenames=[f"{traj_out_dir}/x1_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
+        # save x1_scn traj
+        save_trajs_fn(x_traj_key="x1_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
+                      filenames=[f"{traj_out_dir}/x1_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
 
-        # # save xt_scn traj
-        # save_trajs_fn(x_traj_key="xt_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
-        #               filenames=[f"{traj_out_dir}/xt_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
+        # save xt_scn traj
+        save_trajs_fn(x_traj_key="xt_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
+                      filenames=[f"{traj_out_dir}/xt_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
 
         # save likelihood traj
         # SeqDenoiser.save_sidechain_likelihood_traj(likelihood_aux, aatype, seq_mask, batch_i["residue_index"], batch_i["chain_index"],

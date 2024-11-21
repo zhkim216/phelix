@@ -13,7 +13,8 @@ from tqdm import tqdm
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (center_random_augmentation,
-                                      load_feats_from_pdb, make_fixed_size_1d)
+                                      load_feats_from_pdb, make_fixed_size_1d, transform_sidechain_frame)
+
 
 FEATURES_LONG = ("residue_index", "chain_index", "aatype")
 
@@ -344,12 +345,19 @@ def compute_scale_factors(train_dataloader: DataLoader,
         scn_mask = mask[..., rc.non_bb_idxs, :]
 
         ### Center sidechain on CA
-        x_scn = x_scn - x[..., 1:2, :]
-        scn_missing_atom_mask = batch["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
-        x_scn = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn)  # fill missing atoms with zeroes
-        scn_ghost_atom_mask = batch["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
-        x_scn = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn)  # fill ghost atoms with zeroes
+        # x_scn = x_scn - x[..., 1:2, :]
+        # scn_missing_atom_mask = batch["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
+        # x_scn = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn)  # fill missing atoms with zeroes
+        # scn_ghost_atom_mask = batch["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
+        # x_scn = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn)  # fill ghost atoms with zeroes
 
+        ### Transform sidechains to local coordinates
+        x_scn, bb_frames_exists = transform_sidechain_frame(x_scn,
+                                                            x[..., rc.bb_idxs, :],
+                                                            batch["atom_mask"][..., rc.non_bb_idxs],
+                                                            batch["atom_mask"][..., rc.bb_idxs],
+                                                            to_local=True)
+        scn_mask = scn_mask * rearrange(bb_frames_exists, "b n -> b n 1 1")  # mask out sidechain atoms that don't have a frame
         x_scn = x_scn[scn_mask.bool()]
 
         xs_scn.append(x_scn)
