@@ -350,35 +350,6 @@ class SidechainDiT(nn.Module):
         self.cfg = cfg
         self.scn_interpolant = scn_interpolant
 
-        # Set up DiT-based backbone encoder
-        self.dit_in_channels = len(rc.bb_idxs) * 3
-        self.dit_out_channels = cfg.hidden_size
-
-        # QK-normalization from SD3
-        self.qk_normlayer = None
-        if cfg.qk_rmsnorm:
-            self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
-
-        # DiT positional encoding
-        self.pos_encoding = cfg.pos_encoding
-        self.rotary_emb = None
-        assert self.pos_encoding in ["rotary", "rotary_residx"]
-        dim = cfg.hidden_size // cfg.num_heads
-        use_residx = (self.pos_encoding == "rotary_residx")
-        self.rotary_emb = rope.RotaryEmbedding(dim=dim, use_residx=use_residx, cache_if_possible=False)
-
-        # DiT blocks
-        self.dit_bb_embedder = nn.Linear(self.dit_in_channels, self.dit_out_channels)
-        self.dit_blocks = nn.ModuleList([
-            DiTBlock(cfg.hidden_size, cfg.num_heads,
-                     mlp_dropout=cfg.mlp_dropout, mlp_ratio=cfg.mlp_ratio,
-                     inf=cfg.inf,
-                     rotary_emb=self.rotary_emb,
-                     qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
-                     ) for _ in range(cfg.depth)
-        ])
-
-
         # Set up MLP model
         self.use_self_conditioning = cfg.use_self_conditioning
         self.in_channels = len(rc.non_bb_idxs) * 3  # 33 * 3; input sidechain atoms
@@ -396,9 +367,6 @@ class SidechainDiT(nn.Module):
 
         # input feature embedder: embed reference positions
         self.f_embedder = Linear(cfg.num_atoms_in * 3, cfg.hidden_size)
-
-        # node embedding conditioning
-        self.h_V_embedder = Linear(cfg.c_h_V, cfg.hidden_size)
 
         # Blocks
         self.blocks = nn.ModuleList([
@@ -424,10 +392,6 @@ class SidechainDiT(nn.Module):
         nn.init.normal_(self.timestep_embedder.mlp[2].weight, std=0.02)
 
         # Zero-out adaLN modulation layers in DiT blocks:
-        for block in self.dit_blocks:
-            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
-
         for block in self.blocks:
             nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
             nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
@@ -493,19 +457,8 @@ class SidechainDiT(nn.Module):
         c = self.timestep_embedder(t).unsqueeze(1)
 
         # add conditioning from h_V
-        h_V = self.h_V_embedder(h_V)
         c = c + h_V
-
-        # add conditioning from DiT-based backbone encoder
-        c_dit = h_V.clone()  #  do not pass in timestep conditioning to DiT
-        x_bb = rearrange(x_bb, "b n a x -> b n (a x)")
-        x_dit = self.dit_bb_embedder(x_bb)
-        attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
-        for block in self.dit_blocks:
-            x_dit = block(x_dit, c_dit, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True)
-
-        c = c + x_dit
-        x = x + x_dit
+        x = x + h_V
 
         # MLP blocks
         for block in self.blocks:
