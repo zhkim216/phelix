@@ -87,7 +87,7 @@ class SeqDenoiser(nn.Module):
         # Denoise coords
         _, _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"], None,
                                         batch["residue_index"], batch['chain_index'], batch["seq_mask"],
-                                        batch['res_b_factors'], cond_labels_in=batch["cond_labels_in"],
+                                        cond_labels_in=batch["cond_labels_in"],
                                         aux_inputs=aux_inputs)
 
         # Additional outputs for computing loss
@@ -114,12 +114,10 @@ class SeqDenoiser(nn.Module):
         # Denoise coords
         seq_logits, _, _ = self.denoiser.seq_design_module(x,
                                                           aatype, 
-                                                          None, #no seq self cond
                                                           seq_mask, 
                                                           residue_index, 
-                                                          chain_index,
-                                                          seq_mlm_mask
-                                                    )
+                                                          chain_index
+                                                        )
 
         return seq_logits
 
@@ -327,7 +325,6 @@ class SeqDenoiser(nn.Module):
             "atom_mask": atom_mask,
             "residue_index": residue_index,
             "chain_index": torch.zeros_like(residue_index),  # TODO: support multiple chains
-            "b_factors": torch.ones_like(atom_mask, dtype=torch.float32),
         }
 
         feats = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in feats.items()}  # move to cpu
@@ -408,8 +405,7 @@ class SeqDenoiser(nn.Module):
                     "atom_positions": x_traj,
                     "atom_mask": atom_mask,
                     "residue_index": residue_index[i].unsqueeze(0).expand(aatype_traj.shape[0], -1),
-                    "chain_index": chain_index[i].unsqueeze(0).expand(aatype_traj.shape[0], -1),
-                    "b_factors": None
+                    "chain_index": chain_index[i].unsqueeze(0).expand(aatype_traj.shape[0], -1)
                 }
                 traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
                 write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)

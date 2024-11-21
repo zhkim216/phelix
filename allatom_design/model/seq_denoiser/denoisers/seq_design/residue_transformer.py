@@ -43,8 +43,7 @@ class ResidueTransformer(nn.Module):
                      qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
                      ) for _ in range(cfg.depth)
         ])
-
-        self.embed_seq = nn.Linear(self.n_aatype, cfg.hidden_size)
+        self.proj_edge = nn.Linear(cfg.edge_hidden_size, 1)
         self.embed_seq = nn.Linear(self.n_aatype, cfg.hidden_size)
         self.embed_node = Linear(self.in_channels, cfg.hidden_size, bias=True, init="glorot")  # "glorot" should match DiT Patchify init
         self.final_layer = FinalLayer(cfg.hidden_size, self.out_channels)
@@ -83,9 +82,10 @@ class ResidueTransformer(nn.Module):
         node_embeddings = self.embed_node(node_embeddings)
 
         # Concatenate one-hot sequence conditioning
+        x = node_embeddings
         if self.condition_on_seq:
             aatype_oh = F.one_hot(aatype_noised, num_classes=self.n_aatype).float()
-            x = node_embeddings + self.embed_seq(aatype_oh)
+            x += self.embed_seq(aatype_oh)
 
         # Conditioning 
         c = node_embeddings
@@ -95,11 +95,12 @@ class ResidueTransformer(nn.Module):
         attn_bias = None
 
         if self.edge_attn_bias:
-            B, N, _ = edge_index.shape
-            attn_bias = torch.zeros((B, N, N), device = x.device)
-            proj_edge_embedding = self.proj_edge(edge_embeddings)
+            B, N, K = edge_index.shape
+            attn_bias = torch.zeros((B, N, N), device = x.device, dtype=x.dtype)
+            proj_edge_embedding = self.proj_edge(edge_embeddings).reshape(B, N, K)
             attn_bias.scatter_(2, edge_index, proj_edge_embedding)
-
+            attn_bias = attn_bias[:,None,:,:].expand(-1, self.num_heads, -1, -1)
+            
         for block in self.blocks:
             x = block(x, c, residx=None, attn_mask=attn_mask, attn_bias=attn_bias, per_token_conditioning = True)
 
