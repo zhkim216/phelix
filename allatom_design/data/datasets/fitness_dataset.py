@@ -104,18 +104,13 @@ class FitDataset(ADDataset):
         # Calculate random cropping start index
         orig_size = example["x"].shape[0]
         extra_len = orig_size - self.fixed_size
-        if extra_len > 0:
-            start_idx = np.random.choice(np.arange(extra_len + 1))
-            cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["CROPPED"]
-        else:
-            start_idx = None
-            cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]
+        assert extra_len <= 0, "Increase fixed size, cropping is not allowed for fitness evals!"
 
         # Make fixed size example
         fixed_size_example = {}
 
         for k, v in example.items():
-            fixed_size_example[k] = make_fixed_size_1d(v, fixed_size=self.fixed_size, start_idx=start_idx)
+            fixed_size_example[k] = make_fixed_size_1d(v, fixed_size=self.fixed_size, start_idx=None)
 
         # Convert data types
         example_out = {}

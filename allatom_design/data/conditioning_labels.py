@@ -10,7 +10,7 @@ from torchtyping import TensorType
 TOKEN_TO_ID = {
     "crop_aug": {
         "UNCROPPED": 0,
-        "CROPPED": 1
+        "CROPPED": 1,
     },
     "designability": {
         "UNDESIGNABLE": 0,

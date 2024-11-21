@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 from torchtyping import TensorType
-
+import os
 import openfold.data.data_transforms as data_transforms
 from allatom_design.data import protein
 from allatom_design.data import residue_constants as rc
@@ -18,26 +18,20 @@ from typing import Tuple, Union
 import math
 
 
-def load_feats_from_pdb(pdb, chain_residx_gap: int, max_conformers: int = 1):
+def load_feats_from_pdb(pdb, chain_ids_override: str, max_conformers: int = 1):
     """
     Load model input features from a PDB file or mmcif file.
     - chain_residx_gap: Gap to add between residue indices in different chains.
     - max_conformers: Handle disordered atoms, max number of altlocs to store. If > 1, returns coords with shape [seqlen, num_atoms, max_conformers, 3]
     """
     feats = {}
-    protein_obj = protein.read_pdb(pdb, max_conformers=max_conformers)
+    protein_obj = protein.read_pdb(pdb, chain_ids_override=chain_ids_override, max_conformers=max_conformers)
     for k, v in vars(protein_obj).items():
         feats[k] = torch.Tensor(v)
 
     feats["all_atom_positions"] = feats.pop("atom_positions")
     feats["all_atom_mask"] = feats.pop("atom_mask")
-
     feats["aatype"] = feats["aatype"].long()
-
-    # Renumber residue indices; add gap for PDBs with multiple chains
-    if chain_residx_gap is not None:
-        raise NotImplementedError("Currently not supporting multiple chains, since this may require renumbering residues across chains with a scheme to handle missing residues within chains.")
-        # feats["residue_index"] = renumber_and_add_chain_gap(feats["residue_index"], feats["chain_index"], chain_residx_gap=chain_residx_gap)
 
     # Add one-hot encoding of amino acid types
     feats["target_feat"] = F.one_hot(feats["aatype"], num_classes=len(rc.restypes_with_x)).float()
@@ -61,9 +55,50 @@ def load_feats_from_pdb(pdb, chain_residx_gap: int, max_conformers: int = 1):
 
     feats["ghost_atom_mask"] = ghost_atom_mask  # [n, a] or [n, c, a]
     feats["missing_atom_mask"] = missing_atom_mask  # [n, a] or [n, c, a]
-    feats["res_b_factors"] = torch.sum(feats["b_factors"], dim = -1) / torch.sum((1 - ghost_atom_mask), dim = -1)
+    feats["interface_residue_mask"] = get_interface_residue_mask(feats['all_atom_positions'], feats['chain_index'])
+
     return feats
 
+def get_interface_residue_mask(x, chain_index):
+    # Extract C-alpha atoms' positions
+    x_ca = x[:, 1, :]
+    
+    # Calculate pairwise Euclidean distances between C-alpha atoms
+    d_ca = x_ca[None, :, :] - x_ca[:,  None, :]
+    d_ca = torch.sqrt(torch.sum(d_ca ** 2, dim=2))
+    
+    # Create a mask for residues within the same chain
+    same_chain_mask = torch.eq(chain_index[:, None], chain_index[None, :])
+    d_ca[same_chain_mask] = np.inf  # Set distances within the same chain to infinity
+    
+    # Apply cutoff to get interface residues
+    within_cutoff = d_ca < rc.interface_cutoff
+    interface_residue_mask = torch.any(within_cutoff, dim=1).to(dtype=torch.bool)
+    return interface_residue_mask
+
+def check_valid_interface(x, atom_mask, chain_index):
+    num_residues, num_atoms_per_residue, _ = x.shape
+    x_flat = x.reshape(-1, 3)
+    atom_mask_flat = atom_mask.reshape(-1)
+    
+    # Create residue index mapping
+    residue_index = torch.arange(num_residues, device=x.device).repeat_interleave(num_atoms_per_residue)
+    
+    # Mask to filter valid atoms
+    valid_mask = atom_mask_flat.bool()
+    x_valid = x_flat[valid_mask]
+    residue_index_valid = residue_index[valid_mask]
+    chain_index_valid = chain_index[residue_index_valid]
+    
+    # Calculate pairwise distances only for valid atoms
+    d_valid = torch.cdist(x_valid, x_valid, p=2)
+    
+    # Mask out same-chain residues
+    same_chain_mask = chain_index_valid[:, None] == chain_index_valid[None, :]
+    d_valid[same_chain_mask] = float('inf')
+    
+    # Check if any inter-chain distance is below the threshold
+    return torch.any(d_valid < 5.01)
 
 def aa_to_bb_feats(feats: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     """
@@ -104,11 +139,14 @@ def renumber_and_add_chain_gap(residue_index: TensorType["n"],
     return residue_index
 
 
-def make_fixed_size_1d(data: TensorType["n ..."], fixed_size: int, start_idx: int):
+def make_fixed_size_1d(data: TensorType["n ..."], fixed_size: int, start_idx: int, multimer_crop_mask: TensorType["n"] = None):
     data_len = data.shape[0]
     if data_len > fixed_size:
-        new_data = data[start_idx : (start_idx + fixed_size)]
-    if data_len <= fixed_size:
+        if multimer_crop_mask is not None:
+            new_data = data[multimer_crop_mask]
+        else:
+            new_data = data[start_idx : (start_idx + fixed_size)]
+    else:
         pad_size = fixed_size - data_len
         extra_shape = data.shape[1:]
         new_data = torch.cat([data, torch.zeros(pad_size, *extra_shape)], 0)
