@@ -20,7 +20,7 @@ HYDRA_DIR=/scratch/hielab/hydra_outputs
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/talal/datasets/ingraham_cath_dataset
+PDB_PATH=/scratch/hielab/talal/datasets/casp14
 DESIGNABILITY_CSV=/scratch/hielab/talal/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Set cache directories
@@ -29,7 +29,7 @@ export TORCH_HOME=/scratch/hielab/talal/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/talal/cache/omegafold/omegafold.pt
 
 # Model to evaluate
-MODEL_NAME=aasd_scn_atom
+MODEL_NAME=aasd_gvp_pdb
 DENOISER_TRAIN_DIR=/scratch/hielab/talal/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
@@ -43,6 +43,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
+    no_wandb=true \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
@@ -51,13 +52,12 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     aatype_decoding_order_mode=greedy \
     corrector_step_ratio=0.5 \
     num_corrector_steps=0 \
-    num_steps_list=[50] \
-    eval_every_n_ckpts=4 \
-    batch_size=64 \
+    num_steps_list=[5] \
+    eval_every_n_ckpts=1 \
+    batch_size=4 \
     run_seq_recovery=true \
     run_codes_sc=false \
     num_codes_sc_batches=1 \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     subset_length_range=[64,256] \
     hydra.run.dir=${HYDRA_DIR}
