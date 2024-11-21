@@ -1,21 +1,30 @@
-from typing import Dict, Optional, Tuple
-import torch
+from functools import partial
+from typing import Any, Dict, Optional, Tuple
 
+import torch
+import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange, repeat
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
 import allatom_design.data.residue_constants as rc
+import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
 from allatom_design.data.data import cat_bb_scn
+from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
+    FinalLayer
+from allatom_design.model.atom_denoiser.denoisers.dit_utils import (
+    DiffusionMLPBlock, DiTBlock, MultiHeadRMSNorm)
+from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
+    posemb_sincos_1d
+from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
+    TimestepEmbedder
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
-from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.scn_diffusion_dit import \
-    SidechainDiffusionModule
 from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import \
     FaMPNN
-import torch
-from typing import Any
-import torch.nn.functional as F
+from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.scn_diffusion_dit import \
+    SidechainDiffusionModule
 
 
 class MiniMPNNDenoiser(BaseSeqDenoiser):
@@ -34,6 +43,8 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
         # Sidechain diffusion head: DiT
         if self.use_scn_diffusion:
+            # Backbone encoder: DiT
+            self.backbone_encoder = BackboneEncoderDiT(cfg.backbone_encoder)
             self.scn_diffusion_module = SidechainDiffusionModule(cfg.scn_diffusion_module, self.scn_sigma_data)
 
 
@@ -89,6 +100,8 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         # 2. Sidechain diffusion
         x1_pred = None
         if self.use_scn_diffusion:
+            node_embs = self.backbone_encoder(node_embs, x_bb,
+                                              seq_mask, residue_index, chain_encoding)
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
                 node_embs,
                 edge_embs,
@@ -159,3 +172,84 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         likelihood_aux = self.scn_diffusion_module.get_likelihoods(num_steps, x1_scn, h_V, aatype, x_bb, seq_mask, residue_index, chain_index, aux_inputs)
 
         return likelihood_aux
+
+
+class BackboneEncoderDiT(nn.Module):
+    def __init__(self, cfg: DictConfig):
+        """
+        DiT to encode backbone coordinates.
+        """
+        super().__init__()
+
+        self.cfg = cfg
+
+        # Set up DiT-based backbone encoder
+        self.in_channels = len(rc.bb_idxs) * 3
+        self.out_channels = cfg.hidden_size
+
+        # QK-normalization from SD3
+        self.qk_normlayer = None
+        if cfg.qk_rmsnorm:
+            self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
+
+        # DiT positional encoding
+        self.pos_encoding = cfg.pos_encoding
+        self.rotary_emb = None
+        assert self.pos_encoding in ["rotary", "rotary_residx"]
+        dim = cfg.hidden_size // cfg.num_heads
+        use_residx = (self.pos_encoding == "rotary_residx")
+        self.rotary_emb = rope.RotaryEmbedding(dim=dim, use_residx=use_residx, cache_if_possible=False)
+
+        # DiT blocks
+        self.bb_embedder = nn.Linear(self.in_channels, self.out_channels)
+        self.blocks = nn.ModuleList([
+            DiTBlock(cfg.hidden_size, cfg.num_heads,
+                     mlp_dropout=cfg.mlp_dropout, mlp_ratio=cfg.mlp_ratio,
+                     inf=cfg.inf,
+                     rotary_emb=self.rotary_emb,
+                     qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
+                     ) for _ in range(cfg.depth)
+        ])
+
+        # node embedding conditioning
+        self.h_V_embedder = nn.Linear(cfg.c_h_V, cfg.hidden_size)
+
+        self.initialize_weights()
+
+
+    def initialize_weights(self):
+        # Initialize transformer layers:
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+        self.apply(_basic_init)
+
+        # Zero-out adaLN modulation layers in DiT blocks:
+        for block in self.blocks:
+            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
+            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+
+
+    def forward(self,
+                h_V: TensorType["b n h_mpnn", float],  # conditioning latent
+                x_bb: TensorType["b n a_bb 3", float],  # backbone atoms
+                seq_mask: TensorType["b n", float],
+                residue_index: TensorType["b n", float],
+                chain_index: TensorType["b n", float],
+                ) -> Tuple[TensorType["b n h", float]]:
+        """
+        TODO: use chain index?
+        """
+        x_bb = rearrange(x_bb, "b n a x -> b n (a x)")
+        x = self.bb_embedder(x_bb)
+
+        # Use DiT to encode backbone coordinates within node embeddings
+        c = self.h_V_embedder(h_V)
+        attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
+        for block in self.blocks:
+            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True)
+
+        c = x + c
+        return c
