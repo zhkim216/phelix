@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=b4_aasd2_lr
+#SBATCH --job-name=b8_aasd1_noise_schedule
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=36:00:00
-#SBATCH --array=0-2%3
+#SBATCH --array=0-7%8
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -24,31 +24,28 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-# Define arrays for ref_lr and ref_steps
-ref_lr_values=(3.0e-3)
-ref_steps_values=(1000 5000 10000)
+# Define arrays for psigma_mean and psigma_std
+psigma_mean_values=(-1.2 1.0 1.0 1.5 1.5 2.0 2.0 2.5)
+psigma_std_values=(1.2 1.5 1.0 1.0 1.2 1.0 1.2 1.2)
 
 # Calculate indices
-num_ref_lr=${#ref_lr_values[@]}        # Should be 2
-num_ref_steps=${#ref_steps_values[@]}  # Should be 3
-total_jobs=$((num_ref_lr * num_ref_steps))  # Should be 6
+total_jobs=${#psigma_mean_values[@]}
 
-ref_lr_idx=$(( SLURM_ARRAY_TASK_ID / num_ref_steps ))
-ref_steps_idx=$(( SLURM_ARRAY_TASK_ID % num_ref_steps ))
+psigma_idx=$SLURM_ARRAY_TASK_ID
 
-# Get the current ref_lr and ref_steps based on indices
-REF_LR=${ref_lr_values[$ref_lr_idx]}
-REF_STEPS=${ref_steps_values[$ref_steps_idx]}
+# Get the current psigma_mean and psigma_std based on index
+PSIGMA_MEAN=${psigma_mean_values[$psigma_idx]}
+PSIGMA_STD=${psigma_std_values[$psigma_idx]}
 
-# Set experiment name and group, including ref_lr and ref_steps
-EXP_NAME=b4_aasd2_lr${REF_LR}_steps${REF_STEPS}
-GROUP=chimera_b4
+# Set experiment name and group, including psigma_mean and psigma_std
+EXP_NAME=b8_aasd1_mean${PSIGMA_MEAN}_std${PSIGMA_STD}
+GROUP=chimera_b8
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
-# Run training script with the selected ref_lr and ref_steps
+# Run training script with the selected psigma_mean and psigma_std
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
@@ -67,10 +64,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.minimpnn.model_type=sidechain \
     denoiser.minimpnn.augment_eps=0.3 \
     optim.optimizer=adam_inv_sqrt \
-    optim.adam_inv_sqrt.ref_lr=${REF_LR} \
-    optim.adam_inv_sqrt.ref_steps=${REF_STEPS} \
     checkpointing.save_latest_every_n_steps=5000 \
     checkpointing.save_ema_every_n_steps=1500 \
     trainer.check_val_every_n_epoch=10 \
+    denoiser.interpolant.training_noise_cfg.lognormal.psigma_mean=${PSIGMA_MEAN} \
+    denoiser.interpolant.training_noise_cfg.lognormal.psigma_std=${PSIGMA_STD} \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
