@@ -191,7 +191,6 @@ class SeqDenoiser(nn.Module):
         - timesteps: TensorType["b S_scd+1", float]
         - churn_cfg: Dict[str, Any]
         - noise_schedule: Dict[str, Any]
-        - autoguidance_cfg: Optional[Dict[str, Any]]  # for autoguidance, None if not used
         """
         aux, aux_inputs = {}, {}
         S = timesteps.shape[1] - 1

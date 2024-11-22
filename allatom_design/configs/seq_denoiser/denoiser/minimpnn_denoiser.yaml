@@ -177,19 +177,6 @@ scn_diffusion_module:
   autoguidance: ${model.denoiser.autoguidance}
   confidence_module: ${model.denoiser.confidence_module}
 
-# Autoguidance for sidechain diffusion module
-autoguidance:
-  enabled: false
-  subsample_train_iter_mult: 16  # train with roughly 1/K of the training iterations
-
-  # Config for guiding model; overrides config for scn_diffusion_module DiT
-  dit:
-    depth: 3
-    hidden_size: 192
-    num_heads: 6
-    mlp_dropout: 0.0
-    mlp_ratio: 4.0
-
 
 # Confidence module
 confidence_module:
