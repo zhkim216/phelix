@@ -150,6 +150,9 @@ def main(cfg: DictConfig):
         sample_info["aatype"].append(aatype)
         sample_info["seq_logits"].append(aux["seq_logits_traj"].squeeze(1))
         sample_info["psce"].append(aux["psce"])
+        core_mask, surface_mask = eval_metrics.get_core_surface_mask(x.cpu(), batch_i["atom_mask"].cpu())
+        sample_info["core_mask"].append(core_mask)
+        sample_info["surface_mask"].append(surface_mask)
         # [sample_info[k].append(v.cpu()) for k, v in likelihood_aux.items()]
 
         # Sidechain RMSD per residue
@@ -227,6 +230,12 @@ def main(cfg: DictConfig):
     scn_rmsd_avg_all = (sample_info["scn_rmsd_per_pos"] * seq_mask).sum() / seq_mask.sum()
     scn_metrics["scn_rmsd_avg_all"] = scn_rmsd_avg_all.item()
 
+    # Average RMSD over all core and surface residues
+    for key in ["core", "surface"]:
+        mask = sample_info[f"{key}_mask"]
+        scn_rmsd_avg = (sample_info["scn_rmsd_per_pos"][mask] * seq_mask[mask]).sum() / seq_mask[mask].sum()
+        scn_metrics[f"scn_rmsd_avg_{key}"] = scn_rmsd_avg.item()
+
     # Get average RMSD per residue
     for aa_idx, aa in enumerate(rc.restypes_with_x):
         aatype_mask = sample_info["aatype"] == aa_idx
@@ -237,6 +246,8 @@ def main(cfg: DictConfig):
         scn_metrics[f"scn_rmsd_avg_{aa}"] = rmsd_avg_i.item()
 
     print(f"Average RMSD for all residues: {scn_metrics['scn_rmsd_avg_all']:.3f} Å")
+    print(f"Average RMSD for core residues: {scn_metrics['scn_rmsd_avg_core']:.3f} Å")
+    print(f"Average RMSD for surface residues: {scn_metrics['scn_rmsd_avg_surface']:.3f} Å")
 
     # Plot average sidechain RMSD per residue
     rmsd_avg_aas = [(aa, scn_metrics[f"scn_rmsd_avg_{aa}"]) for aa in rc.restypes_with_x]

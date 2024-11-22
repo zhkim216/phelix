@@ -138,6 +138,9 @@ def main(cfg: DictConfig):
                 sample_info["pdb"] += batch["pdb_key"]
                 sample_info["seq_mask"].append(seq_mask)
                 sample_info["aatype"].append(aatype)
+                core_mask, surface_mask = eval_metrics.get_core_surface_mask(x.cpu(), batch["atom_mask"].cpu())
+                sample_info["core_mask"].append(core_mask)
+                sample_info["surface_mask"].append(surface_mask)
 
                 # Compute sidechain RMSD per residue
                 atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK)[aatype] * seq_mask[..., None]
@@ -164,6 +167,12 @@ def main(cfg: DictConfig):
                 rmsd_avg_i = (rmsd_i * seq_mask[aatype_mask]).sum() / seq_mask[aatype_mask].sum()
 
                 metrics[f"S_scd{S_scd}/scn_rmsd_{aa}"] = rmsd_avg_i.item()
+
+            # Get average RMSD over all core and surface residues
+            for key in ["core", "surface"]:
+                mask = sample_info[f"{key}_mask"]
+                scn_rmsd_avg = (sample_info["scn_rmsd_per_pos"][mask] * seq_mask[mask]).sum() / seq_mask[mask].sum()
+                metrics[f"S_scd{S_scd}/scn_rmsd_avg_{key}"] = scn_rmsd_avg.item()
 
             # Get average chi metrics per chi angle
             chi_mask = sample_info["chi_mask"]  # [B, N, 4]
