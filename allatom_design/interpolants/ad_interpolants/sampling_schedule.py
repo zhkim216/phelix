@@ -44,7 +44,7 @@ class NoiseSchedule():
             return vf
         elif self.cfg.name == "exponential":
             c = self.cfg.c
-            return vf * c * torch.exp(-c * t)
+            return vf * c * torch.exp(-c * rearrange(t, "b -> b 1 1 1"))
         elif self.cfg.name == "step_scale":
             c = self.cfg.c
             return vf * c

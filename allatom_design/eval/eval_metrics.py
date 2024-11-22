@@ -827,3 +827,28 @@ def foldseek_cluster(pdbs: List[str],
     num_unique_clusters = df['representative'].nunique()
 
     return num_unique_clusters
+
+
+def get_core_surface_mask(coords: TensorType["b n 37 3", float],
+                          atom_mask: TensorType["b n 37", float],
+                          ):
+    """
+    Get a mask for core and surface residues based on the coordinates of a protein, possibly batched.
+
+    Core is fined as residues with at least 20CB atoms within 10A, and surface is defined as residues with at most 15CB atoms within 10A.
+
+    Adapted from FlowPacker: https://gitlab.com/mjslee0921/flowpacker/-/blob/main/sampler_pdb.py?ref_type=heads#L126
+    """
+    cb_idx = rc.atom_order["CB"]
+    cb_exists = atom_mask[:, :, cb_idx]
+    cb = coords[:, :, cb_idx, :]
+
+    cb_dist = torch.cdist(cb, cb)
+    cb_exists_2d = cb_exists.unsqueeze(-1) * cb_exists.unsqueeze(-2)
+    cb_exists_2d = torch.where(torch.eye(cb_exists_2d.shape[-1], device=cb.device).bool(), 0, cb_exists_2d)  # remove diagonal
+
+    cb_dist_w10 = ((cb_dist < 10) * cb_exists_2d).sum(-1)
+    core = cb_dist_w10 >= 20
+    surface = cb_dist_w10 <= 15
+
+    return core, surface

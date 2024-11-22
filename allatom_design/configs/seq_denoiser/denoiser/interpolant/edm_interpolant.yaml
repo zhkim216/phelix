@@ -10,7 +10,7 @@ training_noise_schedule: "lognormal"
 
 training_noise_cfg:
   lognormal:
-    psigma_mean: 1.0
+    psigma_mean: 1.5
     psigma_std: 1.0
   uniform_sigma:
   uniform_t:
