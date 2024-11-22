@@ -65,43 +65,27 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
                            ]:
 
         # 1. Sequence design
-        if self.task in ['scn_pack']:
-            seq_mlm_mask = torch.full_like(residue_index, 1.0)
-        elif self.task in ['allatom_seq_des', 'seq_des']:
-            seq_mlm_mask = aux_inputs['seq_mlm_mask']
-        else:
-            raise ValueError(f"Unrecognized task: {self.task}")
-
         seq_logits, node_embs, edge_embs, x_bb = self.seq_design_module(
             x_noised,
             aatype_noised,
-            None, #no seq self cond
             seq_mask,
             residue_index,
-            chain_encoding,
-            seq_mlm_mask)
+            chain_encoding)
 
         aatype_pred, seq_probs = self.sample_aatype(seq_logits, aux_inputs, is_sampling)
-
-        # If sampling, update mlm mask for sidechain diffusion
-        if is_sampling:
-            seq_mlm_mask = aux_inputs["mask_update_fn"](seq_mlm_mask, seq_probs=seq_probs)
-            aux_inputs["seq_mlm_mask"] = seq_mlm_mask
 
         # Outputs
         aux_preds = {
             "seq_logits": seq_logits,
             "seq_probs": seq_probs,
             'seq_mask': seq_mask,
-            'seq_mlm_mask': aux_inputs["seq_mlm_mask"],
-            'scn_mlm_mask': aux_inputs.get('scn_mlm_mask', None)
+            'seq_mlm_mask': aux_inputs.get("seq_mlm_mask", None),  # used during training
+            'scn_mlm_mask': aux_inputs.get('scn_mlm_mask', None)  # used during training
         }
 
         # 2. Sidechain diffusion
         x1_pred = None
         if self.use_scn_diffusion:
-            # node_embs = self.backbone_encoder(node_embs, x_bb,
-            #                                   seq_mask, residue_index, chain_encoding)
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
                 node_embs,
                 edge_embs,

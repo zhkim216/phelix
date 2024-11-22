@@ -216,7 +216,8 @@ class SeqDenoiser(nn.Module):
         # Get residue decoding order
         aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps)
         aux_inputs["lengths"] = seq_mask.sum(dim=-1)
-        aux_inputs["seq_mlm_mask"] = torch.zeros_like(seq_mask).float()  # start with all masked tokens
+        seq_mlm_mask = torch.zeros_like(seq_mask).float()  # start with all masked tokens
+        scd_mlm_mask = torch.zeros_like(seq_mask).float()  # start with all masked tokens
         aux_inputs["temperature"] = temperature
 
         # Initialize trajectories
@@ -231,7 +232,6 @@ class SeqDenoiser(nn.Module):
                                  aatype_decoding_order=aatype_decoding_order,
                                  aatype_decoding_order_mode=aatype_decoding_order_mode,
                                  seq_mask=seq_mask)
-        aux_inputs["mask_update_fn"] = mask_update_fn
 
         # Run denoising steps
         denoiser_fn = partial(self.denoiser,
@@ -259,29 +259,35 @@ class SeqDenoiser(nn.Module):
             aatype_t = aatype_t * (1 - aatype_override_mask[i]) + aatype_override[i] * aatype_override_mask[i]
 
             # Run sequence denoiser
-            aux_inputs["mask_update_fn"] = partial(mask_update_fn, K=K_next)
-            mlm_mask_prev = aux_inputs["seq_mlm_mask"].clone()
             x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)  # seq_mlm_mask in aux_inputs is updated by denoiser
 
-            # Unmask sequence, sidechains, and sidechain confidence
-            xt, aatype_t, psce_t = sampling_utils.unmask(xt, aatype_t, psce_t,
-                                                         x1_pred, aatype_pred, aux_preds["scn_diffusion_aux"]["psce"],
-                                                         mlm_mask_prev, aux_inputs["seq_mlm_mask"])
+            # Update mask
+            seq_mlm_mask_prev, scd_mlm_mask_prev = seq_mlm_mask.clone(), scd_mlm_mask.clone()
+            seq_mlm_mask = mask_update_fn(seq_mlm_mask, K=K_next, seq_probs=aux_preds["seq_probs"])
+            scd_mlm_mask = seq_mlm_mask.clone()
+
+            # Unmask sequence and sidechains
+            aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
+            xt = sampling_utils.unmask(xt, x1_pred, scd_mlm_mask_prev, scd_mlm_mask)
 
             for j in range(num_corrector_steps):
                 # Corrector step where we mask and denoise equally
                 # Mask out K_corrector residues
                 K_corrector = torch.ceil(K_next * corrector_step_ratio).long()
-                xt, aatype_t, psce_t, aux_inputs["seq_mlm_mask"] = self.interpolant.remask_K(xt, aatype_t, psce_t, aux_inputs["seq_mlm_mask"], K_corrector)
+                xt, aatype_t, seq_mlm_mask = self.interpolant.remask_K(xt, aatype_t, seq_mlm_mask, K_corrector)
+                scd_mlm_mask = seq_mlm_mask.clone()
 
                 # Denoise back to K_next
-                mlm_mask_prev = aux_inputs["seq_mlm_mask"].clone()
                 x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)
 
+                # Update mask
+                seq_mlm_mask_prev, scd_mlm_mask_prev = seq_mlm_mask.clone(), scd_mlm_mask.clone()
+                seq_mlm_mask = mask_update_fn(seq_mlm_mask, K=K_next, seq_probs=aux_preds["seq_probs"])
+                scd_mlm_mask = seq_mlm_mask.clone()
+
                 # Unmask sequence and sidechains
-                xt, aatype_t, psce_t = sampling_utils.unmask(xt, aatype_t, psce_t,
-                                                             x1_pred, aatype_pred, aux_preds["scn_diffusion_aux"]["psce"],
-                                                             mlm_mask_prev, aux_inputs["seq_mlm_mask"])
+                aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
+                xt = sampling_utils.unmask(xt, x1_pred, scd_mlm_mask_prev, scd_mlm_mask)
 
             aatype_t = aatype_t * (1 - aatype_override_mask[i + 1]) + aatype_override[i + 1] * aatype_override_mask[i + 1]  # override aatype for outputs  # TODO: should we override self-cond input too?
 
