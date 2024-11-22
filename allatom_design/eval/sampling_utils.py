@@ -83,30 +83,23 @@ def update_mlm_mask(mlm_mask: TensorType["b n", float],
     return mlm_mask
 
 
-def unmask(xt,
-           aatype_t: TensorType["b n", int],
-           psce_t: TensorType["b n 33", float],
-           x1_pred: Optional[TensorType["b n a 3", float]],
-           aatype_pred: TensorType["b n", int],
-           psce_pred: TensorType["b n 33", float],
+def unmask(curr: TensorType["b n ..."],
+           pred: TensorType["b n ..."],
            mlm_mask_prev: TensorType["b n", float],
-           mlm_mask: TensorType["b n", float]
-           ) -> Tuple[TensorType["b n a 3", float],
-                              TensorType["b n", int]]:
+           mlm_mask: TensorType["b n", float]) -> TensorType["b n ..."]:
     """
-    Update aatype pred and x1 based on newly unmasked residues.
+    Update curr based on pred and newly unmasked residues.
     """
     residues_to_unmask = mlm_mask - mlm_mask_prev
 
-    ## Unmask residues
-    aatype_t = torch.where(residues_to_unmask.bool(), aatype_pred, aatype_t)
+    # Expand to data dims
+    n_data_dims = len(curr.shape) - 2
+    residues_to_unmask = residues_to_unmask.view(residues_to_unmask.shape + (1,) * n_data_dims)
 
-    ## Pack sidechains of residues we're unmasking, if using an aasd model
-    if x1_pred is not None:
-        xt = torch.where(residues_to_unmask[..., None, None].bool(), x1_pred, xt)
-        psce_t = torch.where(residues_to_unmask[..., None].bool(), psce_pred, psce_t)
+    # Unmask residues
+    curr = torch.where(residues_to_unmask.bool(), pred, curr)
 
-    return xt, aatype_t, psce_t
+    return curr
 
 
 def get_timesteps_from_schedule(mode: str,

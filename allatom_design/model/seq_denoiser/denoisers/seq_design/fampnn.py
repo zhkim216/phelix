@@ -124,11 +124,9 @@ class FaMPNN(nn.Module):
         self,
         denoised_coords: TensorType["b n a x", float],
         aatype_noised: TensorType["b n", int], #will have UNK tokens where masking occurs
-        seq_self_cond: Optional[TensorType["b n k", float]],  # logits
         seq_mask: TensorType["b n", float],
         residue_index: TensorType["b n", int],
         chain_encoding: TensorType["b n", int],
-        mlm_mask: TensorType["b n", bool],
     ):
 
         B, N, _, _ = denoised_coords.shape
