@@ -157,16 +157,13 @@ scn_diffusion_module:
   training_batch_size_mult: 8  # batch size multiplier for diffusion module
   translation_scale: ${data.translation_scale}
 
-  dit:
+  scn_denoiser:
     num_atoms_in: ${model.num_atoms_in}
     use_self_conditioning: ${model.denoiser.scn_diffusion_module.use_self_conditioning}
     n_aatype: ${model.n_aatype}
     self_cond_p: ${model.denoiser.scn_diffusion_module.self_cond_p}
 
-    c_h_V: ${denoiser.minimpnn.n_channel}
-
-    # QK normalization
-    qk_rmsnorm: true
+    c_h_V: ${denoiser.minimpnn.n_channel}  # mpnn node conditioning
 
     # Blocks
     depth: 4
@@ -174,7 +171,6 @@ scn_diffusion_module:
     mlp_dropout: 0.0
     mlp_ratio: 4.0
 
-  autoguidance: ${model.denoiser.autoguidance}
   confidence_module: ${model.denoiser.confidence_module}
 
 
@@ -185,7 +181,7 @@ confidence_module:
 
   # Sidechain diffusion parameters
   scn_diffusion:
-    num_steps: 20
+    num_steps: 50
     timestep_schedule:
       num_steps: ${..num_steps}
       mode: "linear"
@@ -193,18 +189,13 @@ confidence_module:
       t_end: 1.0
     noise_schedule:
       name: "step_scale"
-      c: 1.4
+      c: 1.5
     churn_cfg:
       s_churn: 0
       s_noise: 1.0
       s_t_min: 0.01
       s_t_max: 50.0
       num_steps: ${..num_steps}
-
-    # Autoguidance
-    autoguidance_cfg:
-      use_autoguidance: false
-      w: 1.0
 
   # Model
   c_h_V: ${denoiser.minimpnn.n_channel}
