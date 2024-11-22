@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=b4_aasd0_schedule_scn_pack
+#SBATCH --job-name=b8_aasd1_scn_pack
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#SBATCH --array=0-5%3
+#SBATCH --array=0-7%4
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -29,19 +29,21 @@ DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmf
 
 # Define models array
 models=(
-  b3_aasd5
-  b4_aasd0_uniform_sqrt_t
-  b4_aasd0_uniform_cbrt_t
-  b4_aasd0_uniform_t
-  b4_aasd0_uniform_cosine_t
-  b4_aasd0_uniform_cubed_t
+  b8_aasd1_mean2.5_std1.2
+  b8_aasd1_mean2.0_std1.2
+  b8_aasd1_mean1.0_std1.0
+  b8_aasd1_mean1.5_std1.2
+  b8_aasd1_mean1.5_std1.0
+  b8_aasd1_mean2.0_std1.0
+  b8_aasd1_mean-1.2_std1.2
+  b8_aasd1_mean1.0_std1.5
 )
 
 # Get model name from array
 MODEL_NAME=${models[$SLURM_ARRAY_TASK_ID]}
 
 EXP_NAME=${MODEL_NAME}_eval_scn_pack
-GROUP=b4_aasd0_schedule_scn_pack
+GROUP=b8_aasd1_scn_pack
 
 # Set HF transformers cache
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
