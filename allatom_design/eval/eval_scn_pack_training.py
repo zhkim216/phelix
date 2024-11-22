@@ -100,7 +100,6 @@ def main(cfg: DictConfig):
                      "timesteps": None,  # filled in based on batch size
                      "noise_schedule": None,
                      "churn_cfg": None,
-                     "autoguidance_cfg": None,
                      "return_scn_diffusion_aux": False
                      }
 

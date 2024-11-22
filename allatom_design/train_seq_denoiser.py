@@ -189,11 +189,6 @@ def update_config(cfg: DictConfig) -> None:
         cfg.model.inf = 1e4
         cfg.model.eps = 1e-4
 
-
-    if getattr(cfg.denoiser, "autoguidance", None) and cfg.denoiser.autoguidance.enabled:
-        # Autoguidance model parameters are not always used
-        cfg.trainer.strategy = "ddp_find_unused_parameters_true"
-
     if getattr(cfg.denoiser, "confidence_module", None) and cfg.denoiser.confidence_module.enabled:
         # Confidence module parameters are not always used
         cfg.trainer.strategy = "ddp_find_unused_parameters_true"

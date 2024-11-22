@@ -96,10 +96,6 @@ sd:
       s_t_max: 50.0
       num_steps: ${sd.scd.num_steps}
 
-    # Autoguidance
-    autoguidance_cfg:
-      use_autoguidance: false
-      w: 1.0
 
 cond_labels: null
 

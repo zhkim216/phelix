@@ -126,7 +126,6 @@ def main(cfg: DictConfig):
                       "timesteps": t_scd,
                       "noise_schedule": noise_schedule,
                       "churn_cfg": churn_cfg,
-                      "autoguidance_cfg": dict(cfg.sd.scd.autoguidance_cfg),
                       "return_scn_diffusion_aux": False}
         sd_sampling_inputs["scd_inputs"] = scd_inputs
 

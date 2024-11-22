@@ -122,7 +122,6 @@ def main(cfg: DictConfig):
                       "timesteps": None,  # filled in based on batch size
                       "noise_schedule": noise_schedule,
                       "churn_cfg": churn_cfg,
-                      "autoguidance_cfg": dict(cfg.scn_diffusion.autoguidance_cfg),
                       "return_scn_diffusion_aux": False
                       }
 

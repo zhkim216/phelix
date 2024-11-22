@@ -45,12 +45,6 @@ class SidechainDiffusionModule(nn.Module):
         # Set up DiT model
         self.dit = SidechainDiT(cfg.dit, self.scn_interpolant)
 
-        # Autoguidance
-        self.use_autoguidance = cfg.autoguidance.enabled
-        if self.use_autoguidance:
-            self.autoguidance_train_p = 1 / cfg.autoguidance.subsample_train_iter_mult
-            self.guiding_model = SidechainDiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.scn_interpolant)  # override with autoguidance config
-
         # Confidence module
         self.use_confidence_module = cfg.confidence_module.enabled
         if self.use_confidence_module:
@@ -124,34 +118,6 @@ class SidechainDiffusionModule(nn.Module):
                                                     seq_mask=seq_mask_batched,
                                                     residue_index=residue_index_batched, chain_index=chain_index_batched)
 
-            # Train autoguidance model
-            diffusion_aux["autoguidance_aux"] = None
-            if self.use_autoguidance and (np.random.uniform() < self.autoguidance_train_p):
-                ### If memory spikes due to running the autoguidance model,
-                ### consider activation checkpointing, separate optimization steps, alternating head predictions, or just training the models separately.
-                denoiser_fn = self.guiding_model
-                if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
-                    with torch.no_grad():
-                        x1_scn_local_batched_guide, _ = denoiser_fn(xt_scn_local_batched, aatype_batched, t_batched,
-                                                              h_V_batched.detach(), x_bb_batched,
-                                                              seq_mask=seq_mask_batched,
-                                                              residue_index=residue_index_batched, chain_index=chain_index_batched)
-
-                    torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
-                    denoiser_fn = partial(denoiser_fn, x_scn_self_cond=x1_scn_local_batched_guide)
-
-                x1_scn_local_batched_guide, _ = denoiser_fn(xt_scn_local_batched, aatype_batched, t_batched,
-                                                      h_V_batched.detach(), x_bb_batched,
-                                                      seq_mask=seq_mask_batched,
-                                                      residue_index=residue_index_batched, chain_index=chain_index_batched)
-
-                # add to autoguidance outputs
-                diffusion_aux["autoguidance_aux"] = {
-                    "scn_pred": x1_scn_local_batched_guide,
-                    "scn_target": xt_scn_local_batched,
-                    "loss_weight_t": loss_weight_t_batched,
-                }
-
             # Train confidence module
             diffusion_aux["confidence_aux"] = None
             if self.use_confidence_module and (np.random.uniform() < self.confidence_module_train_p):
@@ -177,7 +143,6 @@ class SidechainDiffusionModule(nn.Module):
                                   "timesteps": t_scd,
                                   "noise_schedule": noise_schedule,
                                   "churn_cfg": churn_cfg,
-                                  "autoguidance_cfg": dict(conf_cfg.scn_diffusion.autoguidance_cfg),
                                   }
 
                     # Run diffusion mini rollout
@@ -226,18 +191,8 @@ class SidechainDiffusionModule(nn.Module):
             timesteps = scd_aux_inputs["timesteps"]
             churn_cfg = scd_aux_inputs["churn_cfg"]
             noise_schedule = scd_aux_inputs["noise_schedule"]
-            autoguidance_cfg = scd_aux_inputs["autoguidance_cfg"]
             return_scn_diffusion_aux = scd_aux_inputs.get("return_scn_diffusion_aux", False)
             aatype = scd_aux_inputs.get("aatype_override", aatype)  # use aatype_override for sidechain diffusion instead
-
-            # Apply autoguidance
-            use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])
-            if use_autoguidance:
-                assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
-                autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model, aatype=aatype, x_bb=x_bb,
-                                                              h_V=h_V, seq_mask=seq_mask,
-                                                              residue_index=residue_index, chain_index=chain_index)
-
 
             denoiser_fn = partial(self.dit, aatype=aatype, x_bb=x_bb,
                                   h_V=h_V, seq_mask=seq_mask,
@@ -257,16 +212,12 @@ class SidechainDiffusionModule(nn.Module):
                                                                           xt_scn_local,
                                                                           t=t, t_next=t_next,
                                                                           noise_schedule=noise_schedule,
-                                                                          autoguidance_cfg=autoguidance_cfg,
+                                                                          autoguidance_cfg=None,
                                                                           cfg_cfg=None)
 
                 if self.use_self_conditioning:
                     # Apply self-conditioning
                     denoiser_fn = partial(denoiser_fn, x_scn_self_cond=aux_preds["x1_pred"])
-
-                    if use_autoguidance:
-                        autoguidance_cfg["autoguidance_fn"] = partial(autoguidance_cfg["autoguidance_fn"],
-                                                                      x_scn_self_cond=aux_preds["x1_pred_ag"])
 
                 if return_scn_diffusion_aux:
                     # Save current state
