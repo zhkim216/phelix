@@ -86,7 +86,7 @@ class SeqDenoiser(nn.Module):
         # Denoise coords
         _, _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"], None,
                                         batch["residue_index"], batch['chain_index'], batch["seq_mask"],
-                                        batch['res_b_factors'], cond_labels_in=batch["cond_labels_in"],
+                                        cond_labels_in=batch["cond_labels_in"],
                                         aux_inputs=aux_inputs)
 
         # Additional outputs for computing loss
@@ -113,11 +113,9 @@ class SeqDenoiser(nn.Module):
         # Denoise coords
         seq_logits, _, _ = self.denoiser.seq_design_module(x,
                                                           aatype,
-                                                          None, #no seq self cond
                                                           seq_mask,
                                                           residue_index,
                                                           chain_index,
-                                                          seq_mlm_mask
                                                     )
 
         return seq_logits
@@ -289,11 +287,7 @@ class SeqDenoiser(nn.Module):
                 aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
                 xt = sampling_utils.unmask(xt, x1_pred, scd_mlm_mask_prev, scd_mlm_mask)
 
-            aatype_t = aatype_t * (1 - aatype_override_mask[i + 1]) + aatype_override[i + 1] * aatype_override_mask[i + 1]  # override aatype for outputs  # TODO: should we override self-cond input too?
-
-            if getattr(self.denoiser, "use_self_conditioning_seq", False):
-                # Apply sequence self-conditioning
-                denoiser_fn = partial(denoiser_fn, seq_self_cond=aux_preds["seq_logits"])
+            aatype_t = aatype_t * (1 - aatype_override_mask[i + 1]) + aatype_override[i + 1] * aatype_override_mask[i + 1]  # override aatype for outputs
 
             # Save trajectory outputs
             xt_traj.append(xt.cpu())

@@ -22,7 +22,6 @@ class BaseSeqDenoiser(nn.Module, ABC):
                 t: TensorType["b", float],  # possibly a tuple (t_seq, t_scn)
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
-                seq_self_cond: Optional[TensorType["b n k", float]] = None,  # k = n_aatype, logits
                 cond_labels_in: Dict[str, TensorType["b", int]] = {},
                 aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
                 is_sampling: bool = False,

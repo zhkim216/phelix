@@ -1,29 +1,30 @@
 from collections import defaultdict
 from functools import partial
-from typing import Dict, Final, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from torchtyping import TensorType
 
 import allatom_design.data.residue_constants as rc
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
 from allatom_design.data import life
-from allatom_design.data.data import cat_bb_scn, transform_sidechain_frame, get_rc_tensor
+from allatom_design.data.data import (cat_bb_scn, get_rc_tensor,
+                                      transform_sidechain_frame)
 from allatom_design.eval import sampling_utils
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
-from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import FinalLayer
-from allatom_design.model.atom_denoiser.denoisers.dit_utils import DiffusionMLPBlock, DiTBlock, MultiHeadRMSNorm
-from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
-    posemb_sincos_1d
+from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
+    FinalLayer
+from allatom_design.model.atom_denoiser.denoisers.dit_utils import \
+    DenoisingMLPBlock
 from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
     TimestepEmbedder
 from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.sidechain_confidence import \
@@ -42,8 +43,8 @@ class SidechainDiffusionModule(nn.Module):
 
         self.scn_interpolant = EDM(cfg.interpolant, sigma_data=scn_sigma_data)
 
-        # Set up DiT model
-        self.dit = SidechainDiT(cfg.dit, self.scn_interpolant)
+        # Set up denoising model
+        self.scn_denoiser = SidechainMLP(cfg.scn_denoiser, self.scn_interpolant)
 
         # Confidence module
         self.use_confidence_module = cfg.confidence_module.enabled
@@ -87,10 +88,7 @@ class SidechainDiffusionModule(nn.Module):
             x_scn_local_gt_batched = repeat(x_scn_local_gt, "b n a x -> (m b) n a x", m=M, b=B)
             h_V_batched = repeat(h_V, "b n h -> (m b) n h", m=M, b=B)
             aatype_batched = repeat(aatype, "b n -> (m b) n", m=M, b=B)
-            x_bb_batched = repeat(x_bb, "b n a x -> (m b) n a x", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
-            residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
-            chain_index_batched = repeat(chain_index, "b n -> (m b) n", m=M, b=B)
 
             # Evaluate at specific timesteps (for validation)
             t_sd_batched = None
@@ -103,20 +101,16 @@ class SidechainDiffusionModule(nn.Module):
             t_batched = interpolant_out["t"]
             loss_weight_t_batched = interpolant_out["loss_weight_t"]
 
-            # Run small denoising DiT
-            denoiser_fn = self.dit
+            # Run small denoising MLP
+            denoiser_fn = self.scn_denoiser
             if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                 # Apply self-conditioning
                 with torch.no_grad():
-                    x1_scn_local_batched, aux_preds = denoiser_fn(xt_scn_local_batched, aatype_batched, t_batched, h_V_batched, x_bb_batched,
-                                                            seq_mask=seq_mask_batched,
-                                                            residue_index=residue_index_batched, chain_index=chain_index_batched)
+                    x1_scn_local_batched, aux_preds = denoiser_fn(xt_scn_local_batched, aatype_batched, t_batched, h_V_batched, seq_mask=seq_mask_batched)
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                 denoiser_fn = partial(denoiser_fn, x_scn_self_cond=x1_scn_local_batched)
 
-            x1_scn_local_batched, aux_preds = denoiser_fn(xt_scn_local_batched, aatype_batched, t_batched, h_V_batched, x_bb_batched,
-                                                    seq_mask=seq_mask_batched,
-                                                    residue_index=residue_index_batched, chain_index=chain_index_batched)
+            x1_scn_local_batched, aux_preds = denoiser_fn(xt_scn_local_batched, aatype_batched, t_batched, h_V_batched, seq_mask=seq_mask_batched)
 
             # Train confidence module
             diffusion_aux["confidence_aux"] = None
@@ -194,9 +188,8 @@ class SidechainDiffusionModule(nn.Module):
             return_scn_diffusion_aux = scd_aux_inputs.get("return_scn_diffusion_aux", False)
             aatype = scd_aux_inputs.get("aatype_override", aatype)  # use aatype_override for sidechain diffusion instead
 
-            denoiser_fn = partial(self.dit, aatype=aatype, x_bb=x_bb,
-                                  h_V=h_V, seq_mask=seq_mask,
-                                  residue_index=residue_index, chain_index=chain_index)
+            denoiser_fn = partial(self.scn_denoiser, aatype=aatype,
+                                  h_V=h_V, seq_mask=seq_mask)
             # Run integration steps
             # Store trajectory
             xt_scn_traj, x1_scn_traj = [], []
@@ -290,7 +283,7 @@ class SidechainDiffusionModule(nn.Module):
         # Only pack residues that are unmasked
         scd_mlm_mask = aux_inputs["seq_mlm_mask"]
 
-        denoiser_fn = partial(self.dit, aatype=aatype, x_bb=x_bb,
+        denoiser_fn = partial(self.scn_denoiser, aatype=aatype, x_bb=x_bb,
                               h_V=h_V, seq_mask=seq_mask, scd_mlm_mask=scd_mlm_mask,
                               residue_index=residue_index, chain_index=chain_index)
 
@@ -305,10 +298,10 @@ class SidechainDiffusionModule(nn.Module):
         return likelihood_aux
 
 
-class SidechainDiT(nn.Module):
+class SidechainMLP(nn.Module):
     def __init__(self, cfg: DictConfig, scn_interpolant: ADInterpolant):
         """
-        DiT for backbone diffusion conditioned on MPNN sequence embeddings.
+        MLP for per-token sidechain diffusion conditioned on MPNN sequence embeddings.
         """
         super().__init__()
 
@@ -319,15 +312,15 @@ class SidechainDiT(nn.Module):
         self.use_self_conditioning = cfg.use_self_conditioning
         self.in_channels = len(rc.non_bb_idxs) * 3  # 33 * 3; input sidechain atoms
         self.in_channels += cfg.n_aatype  # concatenate one-hot encoded amino acid type
+
         self.out_channels = len(rc.non_bb_idxs) * 3  # 33 * 3; output all sidechain atoms
-
-        self.n_aatype = cfg.n_aatype
-
         if self.use_self_conditioning:
             self.in_channels += self.out_channels  # concatenate input with output from previous timestep
 
+        self.n_aatype = cfg.n_aatype
+
+        # Conditioning
         self.timestep_embedder = TimestepEmbedder(cfg.hidden_size)
-        self.x_embedder = Linear(self.in_channels, cfg.hidden_size, bias=True, init="glorot")
 
         # input feature embedder: embed reference positions
         self.f_embedder = Linear(cfg.num_atoms_in * 3, cfg.hidden_size)
@@ -336,8 +329,11 @@ class SidechainDiT(nn.Module):
         self.h_V_embedder = nn.Linear(cfg.c_h_V, cfg.hidden_size)
 
         # Blocks
+        self.x_embedder = Linear(self.in_channels, cfg.hidden_size, bias=True, init="glorot")
+
+        # Blocks
         self.blocks = nn.ModuleList([
-            DiffusionMLPBlock(cfg.hidden_size,
+            DenoisingMLPBlock(cfg.hidden_size,
                               mlp_dropout=cfg.mlp_dropout,
                               mlp_ratio=cfg.mlp_ratio) for _ in range(cfg.depth)
             ])
@@ -375,15 +371,9 @@ class SidechainDiT(nn.Module):
                 aatype: TensorType["b n", float],  # aatype to condition on (predicted during inference; GT during training)
                 t: TensorType["b n", float],  # timestep
                 h_V: TensorType["b n h", float],  # conditioning latent
-                x_bb: TensorType["b n a_bb 3", float],  # denoised backbone atoms
                 seq_mask: TensorType["b n", float],
-                residue_index: TensorType["b n", float],
-                chain_index: TensorType["b n", float],
                 x_scn_self_cond: Optional[TensorType["b n a_scn 3", float]] = None,  # self-conditioning input
                 ) -> Tuple[TensorType["b n a 3", float], Dict[str, TensorType["b ..."]]]:
-        """
-        TODO: use chain index / residue index?
-        """
         aux_preds = {}
 
         # Preconditioning
@@ -411,10 +401,11 @@ class SidechainDiT(nn.Module):
         x = x + self.f_embedder(ref_pos)
 
         # Conditioning
+        # embed timestep
         c = self.timestep_embedder(t).unsqueeze(1)
-        h_V = self.h_V_embedder(h_V)
 
         # add conditioning from h_V
+        h_V = self.h_V_embedder(h_V)
         c = c + h_V
         x = x + h_V
 

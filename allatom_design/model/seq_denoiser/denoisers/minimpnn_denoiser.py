@@ -1,29 +1,17 @@
-from functools import partial
 from typing import Any, Dict, Optional, Tuple
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange, repeat
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
 import allatom_design.data.residue_constants as rc
-import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
 from allatom_design.data.data import cat_bb_scn
-from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
-    FinalLayer
-from allatom_design.model.atom_denoiser.denoisers.dit_utils import (
-    DiffusionMLPBlock, DiTBlock, MultiHeadRMSNorm)
-from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
-    posemb_sincos_1d
-from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
-    TimestepEmbedder
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import \
     FaMPNN
-from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.scn_diffusion_dit import \
+from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.scn_diffusion_mlp import \
     SidechainDiffusionModule
 
 
@@ -43,8 +31,6 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
         # Sidechain diffusion head: DiT
         if self.use_scn_diffusion:
-            # Backbone encoder: DiT
-            # self.backbone_encoder = BackboneEncoderDiT(cfg.backbone_encoder)
             self.scn_diffusion_module = SidechainDiffusionModule(cfg.scn_diffusion_module, self.scn_sigma_data)
 
 
@@ -55,7 +41,6 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
                 residue_index: TensorType["b n", int],
                 chain_encoding: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
-                seq_self_cond: Optional[TensorType["b n k", float]] = None,  # k = n_aatype, logits
                 cond_labels_in: Dict[str, TensorType["b", int]] = {},
                 aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
                 is_sampling: bool = False,

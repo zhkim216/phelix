@@ -213,7 +213,7 @@ class LabelEmbedder(nn.Module):
         return embeddings
 
 
-class DiffusionMLPBlock(nn.Module):
+class DenoisingMLPBlock(nn.Module):
     """
     MLP block with adaptive layer norm zero (adaLN-Zero) conditioning. Basically a DiT block, but without attention.
     """
