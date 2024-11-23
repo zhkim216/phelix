@@ -97,7 +97,6 @@ class SeqDenoiser(nn.Module):
     def score(self,
               x,
               aatype,
-              seq_mlm_mask,
               seq_mask,
               residue_index,
               chain_index
@@ -180,8 +179,8 @@ class SeqDenoiser(nn.Module):
                num_corrector_steps: int,
                corrector_step_ratio: float,
                cond_labels: Dict[str, TensorType["b", int]],
-               aatype_override: Optional[TensorType["s+1 b n", int]] = None,  # for fixed-sequence sampling, e.g. in sidechain packing
-               aatype_override_mask: Optional[TensorType["s+1 b n", int]] = None,
+               aatype_override: Optional[TensorType["b n", int]] = None,  # for fixed-sequence sampling, e.g. in sidechain packing
+               aatype_override_mask: Optional[TensorType["b n", int]] = None,
                scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
                ):
         """
@@ -203,12 +202,11 @@ class SeqDenoiser(nn.Module):
         # TODO: handle xt overrides, especially important for conditioning on known sequence/sidechain atoms? or maybe we want to do this directly in aatype/x input
         if aatype_override is None:
             # dummy values
-            aatype_override = torch.full((S + 1, B, N), fill_value=rc.restype_order_with_x["X"], device=residue_index.device)
-            aatype_override_mask = torch.zeros((S + 1, B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
+            aatype_override = torch.full((B, N), fill_value=rc.restype_order_with_x["X"], device=residue_index.device)
+            aatype_override_mask = torch.zeros((B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
         else:
-            #ensure overrides do not include padded regions
-            aatype_override = torch.where(seq_mask.bool()[None,:,:], aatype_override, False)
-            aatype_override_mask = torch.where(seq_mask.bool()[None,:,:], aatype_override_mask, False)
+            #ensure override mask does not include padded regions
+            aatype_override_mask = torch.where(seq_mask.bool(), aatype_override_mask, False)
 
         # Add sidechain diffusion inputs
         aux_inputs["scd"] = scd_inputs
@@ -217,10 +215,10 @@ class SeqDenoiser(nn.Module):
         aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()  # TODO: make seq prior use MASK rather than UNK
 
         # Get residue decoding order
-        aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps)
-        aux_inputs["lengths"] = seq_mask.sum(dim=-1)
         seq_mlm_mask = torch.zeros_like(seq_mask).float()  + aatype_override_mask # start with all masked tokens, other than partial seq
         scd_mlm_mask = torch.zeros_like(seq_mask).float()  + aatype_override_mask # start with all masked tokens, other than partial scn, for now same as aatype
+        aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps, mlm_mask_prev=seq_mlm_mask)
+        aux_inputs["lengths"] = seq_mask.sum(dim=-1)
         aux_inputs["temperature"] = temperature
 
         # Initialize trajectories
@@ -250,7 +248,7 @@ class SeqDenoiser(nn.Module):
         psce_t = torch.zeros((B, N, len(rc.non_bb_idxs)), device=x.device)
 
         # Run unmasking steps
-        timesteps_K = torch.ceil(timesteps * aux_inputs["lengths"][:, None] - torch.sum(aatype_override_mask, dim = -1)).long()
+        timesteps_K = torch.ceil(timesteps * aux_inputs["lengths"][:, None] - torch.sum(aatype_override_mask, dim = -1)[:,None]).long()
         for i in tqdm(range(S), leave=False, desc="Sampling..."):
             # get current and next timesteps
             t, t_next = timesteps[:, i], timesteps[:, i + 1]
@@ -259,7 +257,7 @@ class SeqDenoiser(nn.Module):
             K_next = timesteps_K[:, i + 1]
 
             # override aatype for inputs
-            aatype_t = aatype_t * (1 - aatype_override_mask[i]) + aatype_override[i] * aatype_override_mask[i]
+            aatype_t = (aatype_t * (1 - aatype_override_mask) + aatype_override * aatype_override_mask).long()
 
             # Run sequence denoiser
             x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)  # seq_mlm_mask in aux_inputs is updated by denoiser
@@ -292,7 +290,7 @@ class SeqDenoiser(nn.Module):
                 aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
                 xt = sampling_utils.unmask(xt, x1_pred, scd_mlm_mask_prev, scd_mlm_mask)
 
-            aatype_t = aatype_t * (1 - aatype_override_mask[i + 1]) + aatype_override[i + 1] * aatype_override_mask[i + 1]  # override aatype for outputs
+            aatype_t = (aatype_t * (1 - aatype_override_mask) + aatype_override * aatype_override_mask).long()  # override aatype for outputs
 
             # Save trajectory outputs
             xt_traj.append(xt.cpu())
@@ -378,6 +376,7 @@ class SeqDenoiser(nn.Module):
             "atom_mask": atom_mask,
             "residue_index": residue_index,
             "chain_index": torch.zeros_like(residue_index),  # TODO: support multiple chains
+            "b_factors":b_factors
         }
 
         feats = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in feats.items()}  # move to cpu

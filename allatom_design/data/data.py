@@ -18,7 +18,7 @@ from typing import Tuple, Union
 import math
 
 
-def load_feats_from_pdb(pdb, chain_ids_override: str, max_conformers: int = 1):
+def load_feats_from_pdb(pdb, chain_ids_override: str = None, max_conformers: int = 1):
     """
     Load model input features from a PDB file or mmcif file.
     - chain_residx_gap: Gap to add between residue indices in different chains.

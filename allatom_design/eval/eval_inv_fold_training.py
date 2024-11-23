@@ -90,7 +90,6 @@ def main(cfg: DictConfig):
     dataset = None  # we will load the dataset based on the model config
 
     pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints")
-    print(sd_ckpts)
     for sd_ckpt in pbar:
         match = pattern.search(Path(sd_ckpt).name)
         epoch = int(match.group(1))
@@ -164,17 +163,16 @@ def main(cfg: DictConfig):
                         num_corrector_steps=cfg.num_corrector_steps,
                         corrector_step_ratio=cfg.corrector_step_ratio,
                         cond_labels=cond_labels_in,
-                        aatype_override=torch.zeros((S+1, x.shape[0], x.shape[1])),
-                        aatype_override_mask=seq_mask,
                         scd_inputs=scd_inputs,
                     )
-
+                    
                     samples = {"x_denoised": x_denoised,
                             "seq_mask": seq_mask,
                             "residue_index": residue_index,
                             "pred_aatype": aatype_denoised,
                             "aatype_pred_traj": aux["aatype_pred_traj"],
                             "aatype_t_traj": aux["aatype_t_traj"],
+                            "psce": torch.zeros((x.shape[0], x.shape[1], 33))
                     }
 
                     # Update info for sequence recovery eval
@@ -275,6 +273,7 @@ def main(cfg: DictConfig):
                         "seq_mask": seq_mask.cpu(),
                         "residue_index": residue_index,
                         "pred_aatype": aatype_denoised.cpu(),
+                        "psce": torch.zeros((x.shape[0], x.shape[1], 33))
                     }
 
                     # Save samples

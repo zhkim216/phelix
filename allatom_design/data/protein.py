@@ -59,6 +59,9 @@ class Protein:
     #alphabetic IDs of chains contained in the protein example
     chain_ids: list #[num_chains]
 
+    #uncertainty in electron density, or predicted error in atom coordinates
+    b_factors: np.ndarray
+
     def __post_init__(self):
         if len(np.unique(self.chain_index)) > PDB_MAX_CHAINS:
             raise ValueError(
@@ -190,6 +193,7 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
         residue_index=np.array(residue_index),
         chain_index=chain_index,
         chain_ids=chain_ids_numeric,
+        b_factors=b_factors
     )
 
 

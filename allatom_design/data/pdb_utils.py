@@ -77,6 +77,7 @@ def write_to_pdb(
         atom_mask=atom_mask.numpy(),
         residue_index=residue_index.numpy(),
         chain_index=chain_index.numpy(),
+        chain_ids=torch.sort(torch.unique(chain_index)).values.tolist(),
         b_factors=b_factors.numpy()
     )
 
