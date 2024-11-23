@@ -1,0 +1,9 @@
+in_pkl:
+out_dir:  # output directory, null to default to in_pkl directory
+overwrite_out_dir: true
+seed: 0
+
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

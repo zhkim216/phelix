@@ -15,16 +15,16 @@ class GraphTransformer(pt.nn.Module):
             nn.ELU(),
             nn.Linear(config.hidden_dim, config.hidden_dim),
         )
-        
+
         # atomic level state update model
-        sum_layers = sum([ 
+        sum_layers = sum([
             [{'Ns':config.hidden_dim,
-            'Nh':config.num_heads, 
-            'Nk':config.dim_key, 
+            'Nh':config.num_heads,
+            'Nk':config.dim_key,
             'pos_enc':config.pos_enc,
             'attn_bias':config.attn_bias,
             'dim_pos_enc':config.dim_pos_enc,
-            'nn': nn }] * config.layers_per_nn for nn in config.nns 
+            'nn': nn }] * config.layers_per_nn for nn in config.nns
             ], [])
 
         self.sum = nn.Sequential(*[StateUpdateLayer(layer_params) for layer_params in sum_layers])
@@ -37,7 +37,7 @@ class GraphTransformer(pt.nn.Module):
             nn.ELU(),
             nn.Linear(config.hidden_dim, config.out_dim),
         )
-        
+
     @pt.compiler.disable
     def forward(self, X, ids_topk, q0, p_A, attn_bias):
         # encode features
@@ -214,7 +214,7 @@ class StateUpdate(pt.nn.Module):
             Mp = pt.nn.functional.softmax(pt.matmul(Q[:,1], Kp) + attn_bias.repeat(1, 1, 3) / self.sdk, dim=2)  # [N, Nh, 3*n]
         else:
             Mq = pt.nn.functional.softmax(pt.matmul(Q[:,0], Kq) / self.sdk, dim=2)  # [N, Nh, n]
-            Mp = pt.nn.functional.softmax(pt.matmul(Q[:,1], Kp)  / self.sdk, dim=2)  # [N, Nh, 3*n] 
+            Mp = pt.nn.functional.softmax(pt.matmul(Q[:,1], Kp)  / self.sdk, dim=2)  # [N, Nh, 3*n]
 
         # scalar state attention mask and values collapse
         Zq = pt.matmul(Mq, V[:,0]).view(N, self.Nh*self.Ns)  # [N, Nh*S]

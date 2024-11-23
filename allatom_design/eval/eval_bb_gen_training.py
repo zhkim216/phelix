@@ -14,10 +14,11 @@ import yaml
 from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
-from transformers import AutoTokenizer, EsmForProteinFolding
 
 from allatom_design.data.conditioning_labels import create_cond_labels_input
+from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.eval import eval_metrics, sampling_utils
+from allatom_design.eval.folding_utils import get_struct_pred_model
 from allatom_design.eval.proteinmpnn_utils import load_mpnn
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
@@ -74,27 +75,26 @@ def main(cfg: DictConfig):
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # # Load in MPNN + ESMFold for co-design self-consistency evals
+    # # Load in MPNN + structure prediction model for self-consistency evals
     mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
     mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)  # override base mpnn config with mpnn.overrides
     mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
 
-    esmfold = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
-    esmfold.esm = esmfold.esm.half()
-    esmfold = esmfold.to(device)
-    tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
+    struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     # Get checkpoints from denoiser training run
-    pattern = re.compile(r"ad-epoch\d+\.ckpt$")  # only consider ckpts of form ad-epochXXXX.ckpt
+    pattern = re.compile(r"ad-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form ad-step{step}-epoch{epoch}.ckpt
     ad_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
     ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
 
     pbar = tqdm(ad_ckpts, desc="Evaluating checkpoints")
     for ad_ckpt in pbar:
-        # Skip if epoch is before start_epoch
-        epoch = int(Path(ad_ckpt).stem.replace("ad-epoch", ""))
-        pbar.set_postfix_str(f"Epoch: {epoch}")
-        if (cfg.start_epoch is not None) and (epoch < cfg.start_epoch):
+        match = pattern.search(Path(ad_ckpt).name)
+        global_step, epoch = int(match.group(1)), int(match.group(2))
+        pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
+
+        # Skip if global_step is before start_step
+        if (cfg.start_step is not None) and (global_step < cfg.start_step):
             continue
 
         # Load denoiser model and dataset
@@ -164,28 +164,30 @@ def main(cfg: DictConfig):
             for pdb, v in ss_info.items():
                 all_metrics[pdb]["ss_info"] = v
 
-            # Run MPNN + ESMFold self-consistency evals
+            # Run MPNN + structure prediction self-consistency evals
             mpnn_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
                                                                   mpnn_model, mpnn_cfg,
-                                                                  esmfold, tokenizer,
+                                                                  struct_pred_model,
                                                                   device,
-                                                                  out_dir=log_dir)
+                                                                  out_dir=log_dir,
+                                                                  temp_dir=f"{log_dir}/tmp")
             for pdb, v in mpnn_sc_info.items():
                 all_metrics[pdb]["mpnn_sc_info"] = v
 
             # Run nnTM evaluation
             if cfg.nntm_dataset is not None:
-                nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=cfg.out_dir)
+                nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=log_dir)
 
                 for pdb, v in nntm_info.items():
                     all_metrics[pdb]["nntm_info"] = v
+
 
             ### SAVE METRICS ###
             # Save all metrics to pickle file
             with open(f"{saved_metrics_dir}/epoch_{epoch}_S{S}_all_metrics.pkl", "wb") as f:
                 pickle.dump(all_metrics, f)
 
-            # Aggregate metrics to log
+            # Aggregate per-pdb metrics
             sample_metrics = defaultdict(list)
             for pdb in pdbs:
                 # secondary structure metrics
@@ -204,12 +206,28 @@ def main(cfg: DictConfig):
                 if cfg.nntm_dataset is not None:
                     sample_metrics["nntm"].append(nntm_info[pdb])
 
+            ### Compute metrics that require all samples ###
+            # === Calculate mean pairwise TM score === #
+            coords = [load_feats_from_pdb(pdb, chain_residx_gap=None)["all_atom_positions"] for pdb in pdbs]
+            sample_metrics["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(coords,
+                                                                                   temp_dir=f"{log_dir}/tmp",
+                                                                                   subsample_pairs=cfg.pairwise_tm_subsample)
+
+            # === Run clustering analysis === #
+            for sctm_cutoff in cfg.clustering.sctm_cutoffs:
+                # Cluster only on designable samples (scTM > sctm_cutoff)
+                designable_pdbs = [pdb for pdb in pdbs if all_metrics[pdb]["mpnn_sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff]
+                sample_metrics[f"sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
+
+                cluster_out_dir = Path(f"{log_dir}/clustering/sctm{sctm_cutoff}")
+                sample_metrics[f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{log_dir}/tmp",
+                                                                                              **cfg.clustering.foldseek_opts)
+
+            # === Calculate mean metrics === #
             metrics = {f"bb_gen/S{S}/{k}": np.mean(v) for k, v in sample_metrics.items()}
 
             # Log metrics to wandb
             if not cfg.no_wandb:
-                # Get global step
-                global_step = torch.load(ad_ckpt, map_location="cpu")["global_step"]
                 metrics["trainer/global_step"] = global_step
                 metrics["trainer/epoch"] = epoch
 

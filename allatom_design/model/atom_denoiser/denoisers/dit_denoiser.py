@@ -31,6 +31,7 @@ from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
+from allatom_design.data.data import center_random_augmentation, apply_random_augmentation
 from allatom_design.model.atom_denoiser.denoisers.dit_utils import (
     DiTBlock, FinalLayer, LabelEmbedder, MultiHeadRMSNorm)
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
@@ -224,13 +225,34 @@ class DiTDenoiser(BaseAtomDenoiser):
                                   residue_index=residue_index, seq_mask=seq_mask,
                                   cond_labels_in=cond_labels_in)
 
+            atom_mask = torch.ones(xt_bb.shape[:-1], device=seq_mask.device, dtype=seq_mask.dtype) * seq_mask.unsqueeze(-1)
             for i in tqdm(range(S), leave=False, desc="Sampling..."):
                 t = timesteps[:, i]
                 t_next = timesteps[:, i + 1]
 
                 xt_bb, t = self.interpolant.churn(xt_bb, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
-
                 xt_bb = xt_bb * (1 - xt_bb_override_mask[i]) + xt_bb_override[i] * xt_bb_override_mask[i]  # override xt for inputs
+
+                # # AF3 CentreRandomAugmentation on both xt and the self-conditioning inputs  # TODO: handle xt overrides
+                # xt_bb, transforms = center_random_augmentation(xt_bb,
+                #                                             seq_mask=seq_mask,
+                #                                             atom_mask=atom_mask,
+                #                                             missing_atom_mask=torch.zeros_like(atom_mask),
+                #                                             translation_scale=0.0,
+                #                                             return_transforms=True)
+
+                # Apply self-conditioning
+                if self.use_self_conditioning and i > 0:
+                    # aux_preds["x1_pred"] = apply_random_augmentation(aux_preds["x1_pred"], transforms, seq_mask, atom_mask)  # apply random augmentation to the self-conditioning inputs
+                    denoiser_fn = partial(denoiser_fn, x_self_cond=aux_preds["x1_pred"])
+
+                    # self-conditioning for autoguidance
+                    if use_autoguidance:
+                        # aux_preds["x1_pred_ag"] = apply_random_augmentation(aux_preds["x1_pred_ag"], transforms, seq_mask, atom_mask)  # apply random augmentation to the self-conditioning inputs
+                        autoguidance_cfg["autoguidance_fn"] = partial(autoguidance_cfg["autoguidance_fn"],
+                                                                      x_self_cond=aux_preds["x1_pred_ag"])
+
+
                 xt_bb, aux_preds = self.interpolant.euler_step(denoiser_fn,
                                                                xt_bb,
                                                                t=t, t_next=t_next,
@@ -239,15 +261,6 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                                autoguidance_cfg=autoguidance_cfg,
                                                                aux_inputs=aux_inputs)
                 xt_bb = xt_bb * (1 - xt_bb_override_mask[i + 1]) + xt_bb_override[i + 1] * xt_bb_override_mask[i + 1]  # override xt for outputs  # TODO: should we override self-cond input too?
-
-                if self.use_self_conditioning:
-                    # Apply self-conditioning
-                    denoiser_fn = partial(denoiser_fn, x_self_cond=aux_preds["x1_pred"])
-
-                    if use_autoguidance:
-                        # self-conditioning for autoguidance
-                        autoguidance_cfg["autoguidance_fn"] = partial(autoguidance_cfg["autoguidance_fn"],
-                                                                      x_self_cond=aux_preds["x1_pred_ag"])
 
                 # Save current state
                 xt_bb_traj.append(xt_bb.cpu())
@@ -261,6 +274,25 @@ class DiTDenoiser(BaseAtomDenoiser):
             diffusion_aux["x1_bb_traj"] = torch.stack(x1_bb_traj, dim=1)  # [B S N A 3]
 
         return x1_bb, diffusion_aux
+
+
+    def get_likelihoods(self,
+                        num_steps: int,
+                        x_bb: TensorType["b n 4 3"],
+                        aatype: TensorType["b n", int],
+                        seq_mask: TensorType["b n", float],
+                        atom_mask: TensorType["b n 4", float],
+                        residue_index: TensorType["b n", int],
+                        cond_labels_in: Dict[str, TensorType["b", int]] = {},):
+        denoiser_fn = partial(self.dit,
+                              aatype_noised=aatype,
+                              seq_mask=seq_mask,
+                              residue_index=residue_index,
+                              cond_labels_in=cond_labels_in)
+        x1_mask = atom_mask[..., None].expand_as(x_bb)
+        x1_mask = x1_mask * rearrange(seq_mask, "b n -> b n 1 1")
+        likelihood_aux = self.interpolant.get_likelihoods(denoiser_fn, x_bb, x1_mask, num_steps)
+        return likelihood_aux
 
 
 class DiT(nn.Module):
@@ -400,20 +432,24 @@ class DiT(nn.Module):
 
         # Conditioning
         t = self.t_embedder(t)
-
         c = t
+
         for label_name in self.cond_labels:
             if label_name not in cond_labels_in:
-                if self.cond_embedders[label_name].has_unconditional_token:
-                    # if label is not in batch input, and the label supports unconditional tokens, default to unconditional generation
-                    token_id = cl.COND_NUM_CLASSES[label_name]  # last token is the unconditional token
-                else:
-                    # otherwise, we provide a default token ID
-                    token_id = cl.DEFAULT_TOKEN_ID[label_name]
+                # default to placeholder token
                 B = x_noised.shape[0]
-                labels_in = torch.full((B, ), token_id, dtype=torch.long).to(x_noised.device)
+                labels_in = torch.full((B, ), cl.PLACEHOLDER_TOKEN_ID, dtype=torch.long, device=x_noised.device)
             else:
                 labels_in = cond_labels_in[label_name]
+
+            # convert placeholder tokens to labels
+            if self.cond_embedders[label_name].has_unconditional_token:
+                # if the label supports unconditional tokens, default to unconditional generation
+                token_id = cl.COND_NUM_CLASSES[label_name]  # last token is the unconditional token
+            else:
+                # otherwise, we provide a default token ID
+                token_id = cl.DEFAULT_TOKEN_ID[label_name]
+            labels_in = torch.where(labels_in == cl.PLACEHOLDER_TOKEN_ID, token_id, labels_in)
 
             # embed the label
             c = c + self.cond_embedders[label_name](labels_in, self.training)

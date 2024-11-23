@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a10_bb3_draw_bb_samples
+#SBATCH --job-name=a12_bb9_stmax_churn_sweep
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -9,8 +9,7 @@
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
 #
-# Array job
-#SBATCH --array=0-24%10
+#SBATCH --array=0-11
 
 # Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.sh
@@ -28,7 +27,7 @@ MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Dataset paths
-NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
+NNTM_DATASET=null  # null to disable nntm computation
 DSSP_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/dssp/dssp_length_strict.csv
 
 # Set cache directories
@@ -37,25 +36,27 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Denoiser checkpoint
-MODEL_NAME=a10_bb3
-AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-epoch1279.ckpt
+MODEL_NAME=a12_bb9
+AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/post_hoc_ema_ckpts/ema-step650000-std0.150.ckpt
 
-# Define modes for array tasks
-MODES=("linear" "square" "cubic" "sqrt" "cbrt")
-ca_index=$(( SLURM_ARRAY_TASK_ID / 5 ))
-nco_index=$(( SLURM_ARRAY_TASK_ID % 5 ))
-ca_mode=${MODES[$ca_index]}
-nco_mode=${MODES[$nco_index]}
+# Grid search parameter values
+s_t_max_values=(10 5 1)
+churn_values=(20 50 100 200)
 
-# Wandb settings / experiment name
+# Compute indices based on SLURM_ARRAY_TASK_ID
+task_id=$SLURM_ARRAY_TASK_ID
+s_t_max=${s_t_max_values[$((task_id / 4))]}
+churn=${churn_values[$((task_id % 4))]}
+
+# Wandb settings
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_draw_bb_samples_ca_${ca_mode}_nco_${nco_mode}
-GROUP=chimera_${MODEL_NAME}_s1
+GROUP=${MODEL_NAME}_stm_churn
 
-# Navigate to the base directory
+# Set the experiment name to include the current parameter values
+EXP_NAME=${MODEL_NAME}_stm${s_t_max}_churn${churn}
+
+# Run eval script
 cd ${BASE_DIR}
-
-# Run the evaluation script with appropriate parameters
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
@@ -68,7 +69,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py 
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     n_samples_per_length=10 \
-    ca.timestep_schedule.mode=${ca_mode} \
-    nco.timestep_schedule.mode=${nco_mode} \
+    churn_cfg.s_t_max=${s_t_max} \
+    churn_cfg.s_churn=${churn} \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}

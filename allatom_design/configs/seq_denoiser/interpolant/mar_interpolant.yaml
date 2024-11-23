@@ -12,3 +12,15 @@ training_noise_cfg:
   uniform_squared_t:
     t_min: 0.0
     t_max: 1.0
+  uniform_cubed_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_cosine_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_sqrt_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_cbrt_t:
+    t_min: 0.0
+    t_max: 1.0

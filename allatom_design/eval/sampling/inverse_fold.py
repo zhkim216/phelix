@@ -79,7 +79,7 @@ def main(cfg: DictConfig):
     S = cfg.timestep_schedule.num_steps
     examples = next(iter(val_dataloader))
     example_indices = np.repeat(np.arange(cfg.num_pdbs), cfg.num_seqs_per_pdb)
-    save_traj_indices = set(np.random.choice(len(example_indices), cfg.n_traj, replace=False))  # get some random indices to save trajectories for
+    save_traj_indices = set(np.random.choice(len(example_indices), min(cfg.n_traj, len(example_indices)), replace=False))  # get some random indices to save trajectories for
     save_traj_steps = np.linspace(0, S - 1, cfg.limit_traj_steps, dtype=int)  # get the steps of the trajectories we'll save
     save_sd_traj_steps = np.linspace(0, cfg.scn_diffusion.num_steps - 1, cfg.limit_diff_traj_steps, dtype=int)  # get the steps of the trajectories we'll save for scn diffusion
 
@@ -98,7 +98,6 @@ def main(cfg: DictConfig):
                  "timesteps": None,  # filled in based on batch size
                  "noise_schedule": noise_schedule,
                  "churn_cfg": churn_cfg,
-                 "autoguidance_cfg": dict(cfg.scn_diffusion.autoguidance_cfg),
                  "return_scn_diffusion_aux": cfg.limit_diff_traj_steps > 0
                  }
 
@@ -108,7 +107,8 @@ def main(cfg: DictConfig):
     for bi in pbar:
         idxs = example_indices[bi:bi + cfg.batch_size]
         batch_i = ADDataset.index_into_batch(examples, idxs)
-        x, seq_mask, residue_index = batch_i["x"].to(device), batch_i["seq_mask"].to(device), batch_i["residue_index"].to(device)
+        x, seq_mask = batch_i["x"].to(device), batch_i["seq_mask"].to(device)
+        residue_index, chain_index = batch_i["residue_index"].to(device), batch_i["chain_index"].to(device)
         timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
         scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
 
@@ -119,8 +119,12 @@ def main(cfg: DictConfig):
             x,
             seq_mask=seq_mask,
             residue_index=residue_index,
+            chain_index=chain_index,
             timesteps=timesteps,
+            temperature=cfg.temperature,
             aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
+            num_corrector_steps=cfg.num_corrector_steps,
+            corrector_step_ratio=cfg.corrector_step_ratio,
             cond_labels=cond_labels_in,
             scd_inputs=scd_inputs,
         )
@@ -130,6 +134,7 @@ def main(cfg: DictConfig):
                    "pred_aatype": aatype_denoised,
                    "aatype_pred_traj": aux["aatype_pred_traj"],
                    "aatype_t_traj": aux["aatype_t_traj"],
+                   "psce": aux["psce"],
                    }
 
         # Update info for sequence recovery eval

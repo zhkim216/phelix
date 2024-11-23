@@ -1,3 +1,5 @@
+import math
+import shutil
 import subprocess
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -16,7 +18,6 @@ from tqdm import tqdm
 
 import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
-from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
 from allatom_design.eval import eval_metrics
@@ -395,7 +396,7 @@ def compute_structure_metrics(coords1: TensorType["b n 37 3"],
             structure_metrics["sc_aa_rmsd"] = data.torch_rmsd_weighted(rearrange(coords1, "b n a x -> b (n a) x"),
                                                                        rearrange(coords2, "b n a x -> b (n a) x"),
                                                                        weights=rearrange(atom_mask, "b n a -> b (n a)"))
-        elif metric == "scn_rmsd_per_pos":
+        elif metric.startswith("scn_rmsd_per_pos"):
             # Align on backbone atoms, compute sidechain RMSD
 
             # align on backbone atoms
@@ -404,25 +405,131 @@ def compute_structure_metrics(coords1: TensorType["b n 37 3"],
             bb_atom_mask = bb_atom_mask * atom_mask
 
             bb_rmsd, (bb_aligned_coords1, _) = data.torch_rmsd_weighted(rearrange(coords1, "b n a x -> b (n a) x"),
-                                                                  rearrange(coords2, "b n a x -> b (n a) x"),
-                                                                  weights=rearrange(bb_atom_mask, "b n a -> b (n a)"),
-                                                                  return_aligned=True)
+                                                                        rearrange(coords2, "b n a x -> b (n a) x"),
+                                                                        weights=rearrange(bb_atom_mask, "b n a -> b (n a)"),
+                                                                        return_aligned=True)
             bb_aligned_coords1 = rearrange(bb_aligned_coords1, "b (n a) x -> b n a x", n=N)
 
             # compute RMSD over sidechain atoms per residue
             scn_atom_mask = torch.zeros_like(atom_mask)
             scn_atom_mask[..., rc.non_bb_idxs] = 1
-            scn_atom_mask[..., rc.atom_order["CB"]] = 0  # exclude CB atoms to match LigandMPNN eval
+            if metric == "scn_rmsd_per_pos_ligandmpnn":
+                # exclude CB atoms to match LigandMPNN eval
+                scn_atom_mask[..., rc.atom_order["CB"]] = 0
             scn_atom_mask = scn_atom_mask * atom_mask
-            scn_atom_mask = scn_atom_mask[..., None].expand_as(bb_aligned_coords1)
+            scn_rmsd_per_pos = ((scn_atom_mask[..., None] * (bb_aligned_coords1 - coords2) ** 2).sum(dim=(-1, -2)) / scn_atom_mask.sum(dim=-1).clamp(min=1)).sqrt()
 
-            scn_rmsd_per_pos = ((scn_atom_mask * (bb_aligned_coords1 - coords2) ** 2).sum(dim=(-1, -2)) / scn_atom_mask.sum(dim=(-1, -2)).clamp(min=1)).sqrt()
-            structure_metrics["scn_rmsd_per_pos"] = scn_rmsd_per_pos
+            structure_metrics[metric] = scn_rmsd_per_pos
+        elif metric == "sce":
+            # Align on backbone atoms, compute sidechain error
+
+            # align on backbone atoms
+            bb_atom_mask = torch.zeros_like(atom_mask)
+            bb_atom_mask[..., rc.bb_idxs] = 1
+            bb_atom_mask = bb_atom_mask * atom_mask
+
+            bb_rmsd, (bb_aligned_coords1, _) = data.torch_rmsd_weighted(rearrange(coords1, "b n a x -> b (n a) x"),
+                                                                        rearrange(coords2, "b n a x -> b (n a) x"),
+                                                                        weights=rearrange(bb_atom_mask, "b n a -> b (n a)"),
+                                                                        return_aligned=True)
+            bb_aligned_coords1 = rearrange(bb_aligned_coords1, "b (n a) x -> b n a x", n=N)
+
+            # compute sidechain error
+            scn_atom_mask = torch.zeros_like(atom_mask)
+            scn_atom_mask[..., rc.non_bb_idxs] = 1
+            scn_atom_mask = scn_atom_mask * atom_mask
+            sce = torch.where(scn_atom_mask.bool(), torch.norm(bb_aligned_coords1 - coords2, dim=-1), np.nan)  # nan for backbone or missing atoms
+            structure_metrics["sce"] = sce[..., rc.non_bb_idxs]
+
+        elif metric == "chi_metrics_per_pos":
+            # Compute metrics for sidechain chi angles
+            aatype = kwargs["aatype"]
+
+            # Get chi angles in radians
+            torsions1, alt_torsions1, torsions_mask1 = data.atom37_to_torsions_rad(aatype, coords1, atom_mask)
+            torsions2, alt_torsions2, torsions_mask2 = data.atom37_to_torsions_rad(aatype, coords2, atom_mask)
+
+            # Compute chi angle MAE and accuracy per residue
+            chi_metrics_per_pos = metrics_per_chi_per_pos(torsions1[..., 3:], torsions2[..., 3:], alt_torsions2[..., 3:], torsions_mask1[..., 3:])
+            structure_metrics["chi_mae_per_pos"] = chi_metrics_per_pos["chi_mae"]
+            structure_metrics["chi_acc_per_pos"] = chi_metrics_per_pos["chi_acc"]
+            structure_metrics["chi_mask"] = chi_metrics_per_pos["chi_mask"]
         else:
             assert False, f"Invalid metric: {metric}"
 
     return structure_metrics, ca_aligned_coords1
 
+##########################################
+# Adapated from FlowPacker https://gitlab.com/mjslee0921/flowpacker/-/blob/main/utils/metrics.py?ref_type=heads
+def angle_ae(pred, target):
+    ae = torch.abs(pred - target)
+    ae_alt = torch.abs(ae - 2*math.pi)
+    ae_min = torch.minimum(ae, ae_alt)
+    return ae_min
+
+def angle_mae(pred, target, target_alt, mask, deg=True):
+    ae = angle_ae(pred, target)
+    ae_alt = angle_ae(pred, target_alt)
+    ae_min = torch.minimum(ae, ae_alt)
+    mae = ((ae_min*mask).sum() / mask.sum())
+    if deg:
+        return mae * 180 / math.pi
+    return mae
+
+def angle_acc(pred, target, target_alt, mask, threshold=20):
+    ae = angle_ae(pred, target)
+    ae_alt = angle_ae(pred, target_alt)
+    ae_min = torch.minimum(ae, ae_alt)
+    acc = torch.logical_and(ae_min <= (threshold * math.pi / 180), mask == 1).sum() / mask.sum()
+    return acc
+
+def metrics_per_chi(pred, target, target_alt, chi_mask, threshold=20, deg=True):
+    mae_d, acc_d = {}, {}
+    for i in range(4):
+        mae = angle_mae(pred[..., i], target[...,i], target_alt[...,i], chi_mask[...,i], deg=deg)
+        acc = angle_acc(pred[..., i], target[...,i], target_alt[...,i], chi_mask[...,i], threshold=threshold)
+        mae_d[f'chi{i+1}'] = mae.item()
+        acc_d[f'chi{i+1}'] = acc.item()
+    return mae_d, acc_d
+
+
+def metrics_per_chi_per_pos(pred, target, target_alt, chi_mask, threshold=20):
+    mae_d, acc_d = {}, {}
+    ae = angle_ae(pred, target)
+    ae_alt = angle_ae(pred, target_alt)
+    ae_min = torch.minimum(ae, ae_alt) * chi_mask
+    ae_min = ae_min * 180 / math.pi
+    acc = (ae_min <= threshold) * chi_mask
+
+    chi_metrics_per_pos = {"chi_mae": ae_min, "chi_acc": acc, "chi_mask": chi_mask}
+    return chi_metrics_per_pos
+
+##########################################
+
+
+def compute_sidechain_metrics(coords: TensorType["b n 37 3", float],
+                              atom_mask: TensorType["b n 37", float],
+                              metrics_to_compute: List[str],
+                              ) -> Tuple[Dict[str, Any]]:
+    """
+    Compute metrics for sidechains in a given structure.
+
+    - metrics_to_compute: List of metrics to compute. Options are given below.
+
+    Metrics:
+    - sc_clashes: Number of sidechain clashes... # TODO: decide on this metric
+    - chi_angles: return chi angles for plotting or comparison
+    """
+    sidechain_metrics = {}
+
+    for metric in metrics_to_compute:
+        # if metric == "sc_clashes":
+        #     # Compute number of
+        continue
+
+
+
+    pass
 
 
 def get_sort_key_fn(metric_name: str) -> Callable[[float], float]:
@@ -577,7 +684,7 @@ def run_tm_align_coords_batch(a: TensorType["b n 3", float],
     # Clean up
     for prefix in ["a", "b"]:
         for i in range(B):
-            Path(f"{temp_dir}/{prefix}_{i}.pdb").unlink()
+            Path(f"{temp_dir}/{prefix}_{i}.pdb").unlink(missing_ok=True)
 
     return tm_scores_a, tm_scores_b
 
@@ -656,3 +763,92 @@ def bootstrap_se(data: List[float], n_samples: int) -> float:
 
     boot_se = np.std(bootstrap_means, ddof=1)
     return boot_se
+
+
+def foldseek_cluster(pdbs: List[str],
+                     out_dir: str,
+                     temp_dir: str,
+                     alignment_type: int,
+                     tmscore_threshold: float = 0.6,
+                     c: float = 0.8,
+                     s: float = 4.0,
+                     cluster_reassign: bool = False) -> int:
+    """
+    Cluster a list of PDBs using Foldseek's easy-cluster command.
+
+    Args:
+        pdbs (List[str]): List of PDB files to cluster.
+        out_dir (str): Directory to save clustering results.
+        alignment-type (int): How to compute the alignment:
+            - 0: 3di alignment  (for structure-only / backbone-only)
+            - 1: TM alignment
+            - 2: 3Di+AA [2]
+
+        tmscore_threshold (float): TM-score threshold for clustering.
+        c (float, optional): Fraction of aligned residues required for a match. Defaults to 0.8.
+        s (float, optional): Sensitivity level. Defaults to 4.0.
+        cluster_reassign (bool, optional): Reassign clusters to correct criteria violations. Defaults to False.
+
+    Returns:
+        int: Number of unique clusters.
+    """
+    if len(pdbs) == 0:
+        return 0
+
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    Path(temp_dir).mkdir(parents=True, exist_ok=True)
+
+    # Copy over PDB files to output directory
+    pdb_dir = f"{out_dir}/designable_pdbs"
+    Path(pdb_dir).mkdir(parents=True, exist_ok=True)
+    for pdb in pdbs:
+        shutil.copy(pdb, pdb_dir)
+
+    # Run Foldseek clustering
+    command = ["foldseek", "easy-cluster",
+               "--alignment-type", str(alignment_type),
+               *pdbs, f"{out_dir}/foldseek", temp_dir,
+               "-c", str(c),
+               "--tmscore-threshold", str(tmscore_threshold),
+               "-s", str(s)]
+
+    if cluster_reassign:
+        command.append("--cluster-reassign")
+
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Foldseek clustering failed with error: {e}")
+        return np.nan
+
+    # Read number of unique clusters
+    tsv_path = f"{out_dir}/foldseek_cluster.tsv"
+    df = pd.read_csv(tsv_path, sep='\t', header=None, names=['representative', 'member'])
+    num_unique_clusters = df['representative'].nunique()
+
+    return num_unique_clusters
+
+
+def get_core_surface_mask(coords: TensorType["b n 37 3", float],
+                          atom_mask: TensorType["b n 37", float],
+                          ):
+    """
+    Get a mask for core and surface residues based on the coordinates of a protein, possibly batched.
+
+    Core is fined as residues with at least 20CB atoms within 10A, and surface is defined as residues with at most 15CB atoms within 10A.
+
+    Adapted from FlowPacker: https://gitlab.com/mjslee0921/flowpacker/-/blob/main/sampler_pdb.py?ref_type=heads#L126
+    """
+    cb_idx = rc.atom_order["CB"]
+    cb_exists = atom_mask[:, :, cb_idx]
+    cb = coords[:, :, cb_idx, :]
+
+    cb_dist = torch.cdist(cb, cb)
+    cb_exists_2d = cb_exists.unsqueeze(-1) * cb_exists.unsqueeze(-2)
+    cb_exists_2d = torch.where(torch.eye(cb_exists_2d.shape[-1], device=cb.device).bool(), 0, cb_exists_2d)  # remove diagonal
+
+    cb_dist_w10 = ((cb_dist < 10) * cb_exists_2d).sum(-1)
+    core = cb_dist_w10 >= 20
+    surface = cb_dist_w10 <= 15
+
+    return core, surface

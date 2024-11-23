@@ -17,25 +17,25 @@ minimpnn:
   use_time_cond: false
   use_gvp: false
   use_gcp: false
-  use_residue_transformer: true
+  use_residue_transformer: false
   n_channel: 128
   n_layers: 3
   k_neighbors: 48
   noise_cond_mult: 4
 
-  model_type: "graph_transformer"
+  model_type: "sidechain"
   augment_eps: 0.0
   dropout_p: 0.1
   dec_edge_up: true
   aggregation: "sum"
   return_embedding: "last"
-  
-  graph_transformer: 
+
+  graph_transformer:
     nns: [8,16,32,64]
     layers_per_nn: 4
     hidden_dim: 32
     input_dim: 37
-    num_heads: 2 
+    num_heads: 2
     dim_key: 3
     out_dim: ${model.denoiser.minimpnn.n_channel}
     dim_pos_enc: 16
@@ -129,6 +129,24 @@ seq_head:
   in_channels: ${model.denoiser.minimpnn.n_channel}
   n_aatype: ${model.n_aatype}
 
+backbone_encoder:
+  hidden_size: ${model.denoiser.scn_diffusion_module.hidden_size}
+  pos_encoding: ${model.denoiser.pos_encoding}
+
+  # h_V conditioning
+  c_h_V: ${denoiser.minimpnn.n_channel}
+
+  # QK normalization
+  qk_rmsnorm: true
+
+  # Blocks
+  depth: 4
+  num_heads: 8
+  mlp_dropout: 0.0
+  mlp_ratio: 4.0
+  inf: ${model.inf}
+
+
 scn_diffusion_module:
   hidden_size: 256
 
@@ -136,41 +154,62 @@ scn_diffusion_module:
   interpolant: ${model.denoiser.interpolant}
   use_self_conditioning: true
   self_cond_p: 0.5
-  training_batch_size_mult: 16  # batch size multiplier for diffusion module
+  training_batch_size_mult: 8  # batch size multiplier for diffusion module
   translation_scale: ${data.translation_scale}
 
-  dit:
+  scn_denoiser:
     num_atoms_in: ${model.num_atoms_in}
     use_self_conditioning: ${model.denoiser.scn_diffusion_module.use_self_conditioning}
     n_aatype: ${model.n_aatype}
     self_cond_p: ${model.denoiser.scn_diffusion_module.self_cond_p}
-    pos_encoding: ${model.denoiser.pos_encoding}
 
-    # h_V conditioning
-    c_h_V: ${denoiser.minimpnn.n_channel}
-
-    # QK normalization
-    qk_rmsnorm: true
+    c_h_V: ${denoiser.minimpnn.n_channel}  # mpnn node conditioning
 
     # Blocks
     depth: 4
     hidden_size: ${model.denoiser.scn_diffusion_module.hidden_size}
-    num_heads: 8
     mlp_dropout: 0.0
     mlp_ratio: 4.0
-    inf: ${model.inf}
 
-  autoguidance: ${model.denoiser.autoguidance}
+  confidence_module: ${model.denoiser.confidence_module}
 
-# Autoguidance for sidechain diffusion module
-autoguidance:
+
+# Confidence module
+confidence_module:
   enabled: false
-  subsample_train_iter_mult: 16  # train with roughly 1/K of the training iterations
+  subsample_train_iter_mult: 4  # train with roughly 1/K of the training iterations
 
-  # Config for guiding model; overrides config for scn_diffusion_module DiT
-  dit:
-    depth: 3
-    hidden_size: 192
-    num_heads: 6
-    mlp_dropout: 0.0
-    mlp_ratio: 4.0
+  # Sidechain diffusion parameters
+  scn_diffusion:
+    num_steps: 50
+    timestep_schedule:
+      num_steps: ${..num_steps}
+      mode: "linear"
+      t_start: 0.0
+      t_end: 1.0
+    noise_schedule:
+      name: "step_scale"
+      c: 1.5
+    churn_cfg:
+      s_churn: 0
+      s_noise: 1.0
+      s_t_min: 0.01
+      s_t_max: 50.0
+      num_steps: ${..num_steps}
+
+  # Model
+  c_h_V: ${denoiser.minimpnn.n_channel}
+  hidden_size: 128
+
+  sce_bins:
+    min_bin: 0.0
+    max_bin: 4.0
+    n_bins: 33
+
+  structure_encoder:
+    n_aatype: ${model.n_aatype}
+    n_channel: ${denoiser.minimpnn.n_channel}
+    n_layers: 2
+    k_neighbors: ${denoiser.minimpnn.k_neighbors}
+    dropout_p: 0.1
+    use_ESV_in: true

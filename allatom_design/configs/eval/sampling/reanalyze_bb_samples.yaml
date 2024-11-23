@@ -1,0 +1,24 @@
+# Wandb configuration
+project: "allatom_design"  # Wandb project name
+wandb_id: "richardshuai"  # Wandb username
+group: "debug" # Wandb group name
+no_wandb: false
+
+orig_out_dir: ""
+exp_name: "reanalyze_baseline"
+out_dir: null  # null to save in the original sampling directory under reanalyze_bb_samples/${exp_name}
+
+# Foldseek clustering analysis
+clustering:
+  sctm_cutoffs: [0.7, 0.8]
+  foldseek_opts:
+    alignment_type: 0  # 0 for structure-only
+    tmscore_threshold: 0.5
+    c: 0.0
+    s: 7.5
+    cluster_reassign: true
+
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

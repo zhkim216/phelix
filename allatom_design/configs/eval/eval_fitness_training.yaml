@@ -45,11 +45,6 @@ scn_diffusion:
     s_t_max: 50.0
     num_steps: ${scn_diffusion.num_steps}
 
-  # Autoguidance
-  autoguidance_cfg:
-    use_autoguidance: false
-    w: 1.0
-
 # Co-design self-consistency eval options
 num_codes_sc_batches: 1
 

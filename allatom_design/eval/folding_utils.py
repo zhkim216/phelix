@@ -293,7 +293,8 @@ def run_omegafold(sequences_list: List[str],
     of_inputs = omegafold_inputs(sequences_list, num_pseudo_msa, mask_rate, num_recycle, deterministic, device)
     of_outputs = defaultdict(list)
 
-    for (of_input, of_aux), residue_index in zip(of_inputs, residue_index_list):
+    for (of_input, of_aux), residue_index in tqdm(zip(of_inputs, residue_index_list), total=len(residue_index_list),
+                                                  desc="Running OmegaFold", leave=False):
         # TODO: like ESMFold, omegafold seems to ignore discontiguous residues
         output = omegafold_model(of_input, predict_with_confidence=True, fwd_cfg=forward_config)
 

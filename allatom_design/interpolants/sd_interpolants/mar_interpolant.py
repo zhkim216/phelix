@@ -20,12 +20,15 @@ class MAR(SDInterpolant):
 
         # Training noise distribution
         self.training_noise_schedule = cfg.training_noise_schedule
-        assert self.training_noise_schedule in ["uniform_t", "constant_t", "uniform_squared_t"], f"Unknown timestep schedule: {self.timestep_schedule}"
+        assert self.training_noise_schedule in ["uniform_t", "constant_t",
+                                                "uniform_squared_t", "uniform_cubed_t",
+                                                "uniform_cosine_t", "uniform_sqrt_t", "uniform_cbrt_t"], f"Unknown timestep schedule: {self.timestep_schedule}"
 
         self.training_noise_cfg = cfg.training_noise_cfg[self.training_noise_schedule]
 
         # Additional training tasks
         self.full_noise_p = getattr(cfg, "full_noise_p", 0.0)  # randomly set full_noise_p timesteps to full noise
+        self.drop_scn_p = getattr(cfg, "drop_scn_p", 0.0)  # randomly set all sidechain atoms to zero
 
 
     @torch.compiler.disable
@@ -41,14 +44,21 @@ class MAR(SDInterpolant):
             t = self.sample_timestep(x1.shape[0], device=x1.device)
 
         # Get noisy samples
-        xt, aatype_noised, mlm_mask = self.noise_samples(x1, batch["aatype"], t, batch["seq_mask"])
+        xt, aatype_noised, seq_mlm_mask = self.noise_samples(x1, batch["aatype"], t, batch["seq_mask"])
+
+        # During training, randomly drop sidechains from unmasked aatypes
+        if self.training:
+            xt, scn_mlm_mask = self.drop_sidechains(xt, seq_mlm_mask)
+        else:
+            scn_mlm_mask = seq_mlm_mask.clone()
 
         # Construct outputs
         outputs = {}
         outputs["t"] = t  # [b]
         outputs["x_noised"] = xt  # [b n a 3]
         outputs["aatype_noised"] = aatype_noised  # [b n]
-        outputs["seq_mlm_mask"] = mlm_mask  # [b n]
+        outputs["seq_mlm_mask"] = seq_mlm_mask  # [b n]
+        outputs["scn_mlm_mask"] = scn_mlm_mask  # [b n]
 
         return outputs
 
@@ -60,15 +70,26 @@ class MAR(SDInterpolant):
         - uniform_t: sample time from uniform distribution
         - constant_t: sample time from constant distribution
         """
-        if self.training_noise_schedule == "uniform_t":
-            t_min, t_max = self.training_noise_cfg.t_min, self.training_noise_cfg.t_max
-            t = torch.rand(n, device=device) * (t_max - t_min) + t_min
-        elif self.training_noise_schedule == "constant_t":
+        if self.training_noise_schedule == "constant_t":
             t = torch.ones(n, device=device) * self.training_noise_cfg.t
-        elif self.training_noise_schedule == "uniform_squared_t":
+        elif self.training_noise_schedule.startswith("uniform"):
+            # sample time from uniform distribution
             t_min, t_max = self.training_noise_cfg.t_min, self.training_noise_cfg.t_max
             t = torch.rand(n, device=device) * (t_max - t_min) + t_min
-            t = t ** 2
+
+            # apply transformation to t
+            if self.training_noise_schedule == "uniform_t":
+                t = t
+            elif self.training_noise_schedule == "uniform_squared_t":
+                t = t ** 2
+            elif self.training_noise_schedule == "uniform_cubed_t":
+                t = t ** 3
+            elif self.training_noise_schedule == "uniform_cosine_t":
+                t = 1 - torch.cos(t * np.pi / 2)
+            elif self.training_noise_schedule == "uniform_sqrt_t":
+                t = t ** 0.5
+            elif self.training_noise_schedule == "uniform_cbrt_t":
+                t = t ** (1/3)
 
         if self.full_noise_p > 0:
             # randomly set full_noise_p timesteps to full noise
@@ -103,15 +124,44 @@ class MAR(SDInterpolant):
         mlm_mask = (mlm_mask * seq_mask).float()  # mask out residues that are not in the sequence
         x_noised = x.clone()
 
-        # Mask sidechains
+        # Mask sidechains based on mlm_mask
         x_noised[..., rc.non_bb_idxs, :] = x[..., rc.non_bb_idxs, :] * rearrange(mlm_mask, "b n -> b n 1 1").float()
 
-        # Mask sequence
+        # Mask sequence based on mlm_mask
         aatype_noised = torch.where(mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
         aatype_noised = aatype_noised * seq_mask  # set pad residues back to 0
         aatype_noised = aatype_noised.long()
 
+        # Occasionally zero out all sidechain atoms
+        scn_mask = torch.ones(B, device=x.device)
+        if self.drop_scn_p > 0:
+            scn_mask = (torch.rand(B, device=x.device) > self.drop_scn_p).float()
+            x_noised[..., rc.non_bb_idxs, :] = x_noised[..., rc.non_bb_idxs, :] * rearrange(scn_mask, "b -> b 1 1 1")
+
         return x_noised, aatype_noised, mlm_mask
+
+
+    def drop_sidechains(self,
+                        x: TensorType["b n a 3"],
+                        seq_mlm_mask: TensorType["b n"],
+                        ) -> Tuple[TensorType["b n a 3", float],
+                                   TensorType["b n", int]]:
+        """
+        Randomly drop out sidechains of unmasked aatypes.
+        """
+        # Sample probability of dropping sidechains (TODO: we can try different schedules for this)
+        drop_scn_t = torch.rand(x.shape[0], device=x.device)  # choose probability of dropping from uniform
+
+        # Create sidechain mlm mask
+        scn_mlm_mask = torch.rand_like(seq_mlm_mask) < rearrange(drop_scn_t, "b -> b 1")  # [b n]
+        scn_mlm_mask = scn_mlm_mask * seq_mlm_mask  # sidechains should be dropped where aatype is masked
+
+        # Noise sidechains
+        x_noised = x.clone()
+        x_noised[..., rc.non_bb_idxs, :] = x_noised[..., rc.non_bb_idxs, :] * rearrange(scn_mlm_mask, "b n -> b n 1 1").float()
+
+        return x_noised, scn_mlm_mask
+
 
     def corrector_step(self,
                    f: Callable,
@@ -133,7 +183,7 @@ class MAR(SDInterpolant):
         selected_positions = torch.cat([
             batch_indices[torch.randperm(len(batch_indices))[:K[i]]]
             for i, batch_indices in enumerate(unmasked_by_example)])
-        
+
         # Create indices for remasking
         batch_indices = torch.arange(b, device=xt.device).repeat_interleave(K)
 
@@ -141,17 +191,52 @@ class MAR(SDInterpolant):
         mlm_mask[batch_indices, selected_positions] = 0
         aux_inputs['seq_mlm_mask'] = mlm_mask
         unmasked_prev = aux_inputs['seq_mlm_mask'].clone()
-        aatype_t_noised = torch.where(mlm_mask.bool(), aatype_t, rc.restype_order_with_x["X"]) 
-        
+        aatype_t_noised = torch.where(mlm_mask.bool(), aatype_t, rc.restype_order_with_x["X"])
+
         # Noise sidechain
         xt_noised = xt.clone()
         xt_noised[..., rc.non_bb_idxs, :] = xt_noised[..., rc.non_bb_idxs, :] * rearrange(mlm_mask, "b n -> b n 1 1").float()
-        
+
         # Run sequence denoiser
         x1_pred, aatype_pred, aux_preds = f(xt_noised, aatype_t_noised, t=t)
-        
+
         # Add to auxiliary outputs
         aux_preds["x1_pred"] = x1_pred
         aux_preds["aatype_pred"] = aatype_pred
-        
-        return x1_pred, aatype_pred, aux_preds, unmasked_prev 
+
+        return x1_pred, aatype_pred, aux_preds, unmasked_prev
+
+
+    def remask_K(self,
+                 xt: TensorType["b n a 3", float],
+                 aatype_t: TensorType["b n", int],
+                 mlm_mask: TensorType["b n"],
+                 K: TensorType["b", int]) -> Tuple[TensorType["b n a 3", float],
+                                                   TensorType["b n", int],
+                                                   TensorType["b n", float]]:
+        """
+        Mask out K residues chosen from unmasked residues in mlm_mask.
+        """
+        # Get tokens to remask
+        B, N = aatype_t.shape
+        unmasked_positions = torch.nonzero(mlm_mask, as_tuple=False)
+        unmasked_by_example = [unmasked_positions[unmasked_positions[:, 0] == i, 1] for i in range(B)]
+
+        # Randomly select K positions for each batch
+        selected_positions = torch.cat([
+            batch_indices[torch.randperm(len(batch_indices))[:K[i]]]
+            for i, batch_indices in enumerate(unmasked_by_example)])
+
+        # Create indices for remasking
+        batch_indices = torch.arange(B, device=xt.device).repeat_interleave(K)
+
+        # Noise sequence by setting selected positions to 0 in mlm_mask
+        mlm_mask = mlm_mask.clone()
+        mlm_mask[batch_indices, selected_positions] = 0
+        aatype_t_noised = torch.where(mlm_mask.bool(), aatype_t, rc.restype_order_with_x["X"])
+
+        # Noise sidechains and sidechain confidence
+        xt_noised = xt.clone()
+        xt_noised[..., rc.non_bb_idxs, :] = xt_noised[..., rc.non_bb_idxs, :] * rearrange(mlm_mask, "b n -> b n 1 1").float()
+
+        return xt_noised, aatype_t_noised, mlm_mask

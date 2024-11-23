@@ -84,31 +84,30 @@ def main(cfg: DictConfig):
             continue
 
         for dataset_name in cfg.datasets:
-        
+
             cfg.data.pdb_path = f"{cfg.dataset_path}/{dataset_name}"
             cfg.data = scoring_utils.update_data_cfg(cfg.data)
             dataset = FitDataset(cfg.data)
             val_dataloader = DataLoader(dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True, shuffle=False, drop_last=False)
-            
+
             # Load denoiser model
             lit_sd_model = LitSeqDenoiser.load_from_checkpoint(sd_ckpt).eval()
-            
+
             # Set up sidechain diffusion inputs
             t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
-            
+
             # create sidechain diffusion noise schedule
             noise_schedule = NoiseSchedule(cfg.scn_diffusion.noise_schedule)
-            
+
             # create sidechain diffusion churn config
             churn_cfg = dict(cfg.scn_diffusion.churn_cfg)
             scd_inputs = {"num_steps": cfg.scn_diffusion.num_steps,
                           "timesteps": None,  # filled in based on batch size
                           "noise_schedule": noise_schedule,
                           "churn_cfg": churn_cfg,
-                          "autoguidance_cfg": dict(cfg.scn_diffusion.autoguidance_cfg),
                           "return_scn_diffusion_aux": False
                           }
-            
+
             ### BEGIN EVAL ###
             metrics = {}
             scores_all = []
@@ -118,14 +117,14 @@ def main(cfg: DictConfig):
             if cfg.data.group_by_exp:
                 scores_exp = {}
                 labels_exp = {}
-                
+
             for batch in tqdm(val_dataloader, desc="Evaluating fitness", leave=False):
                 pdb_key, mutations, labels, experiment, pdb_data = batch['pdb_key'], batch["mut"], batch["label"], batch["experiment"], batch["pdb_data"]
                 x, aatype, seq_mask, residue_index, chain_index = pdb_data["x"].to(device), pdb_data["aatype"].to(device), pdb_data["seq_mask"].to(device), pdb_data["residue_index"].to(device), pdb_data["chain_index"].to(device)
                 scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
 
                 scores = scoring_utils.score_seq(lit_sd_model,
-                                                 x,   
+                                                 x,
                                                  aatype,
                                                  seq_mask,
                                                  residue_index,
@@ -133,7 +132,7 @@ def main(cfg: DictConfig):
                                                  mutations,
                                                  scd_inputs,
                                                  cfg.data.scoring_method).cpu().tolist()
-   
+
                 scores_all += scores
                 labels_all += labels
 
@@ -151,13 +150,13 @@ def main(cfg: DictConfig):
             metrics[f'{dataset_name}_pearson_r'], metrics[f'{dataset_name}_spearman_r'] = abs(pearsonr(scores_all, labels_all).correlation), abs(spearmanr(scores_all, labels_all).correlation)
             print(f"Epoch Pearson R All: {metrics[f'{dataset_name}_pearson_r'] }")
             print(f"Epoch Spearman Rho All: {metrics[f'{dataset_name}_spearman_r'] }")
-            
-            #group scores and labels by experiment for detailed scoring        
+
+            #group scores and labels by experiment for detailed scoring
             if cfg.data.group_by_exp:
                 metrics[f'{dataset_name}_pearson_r_avg'], metrics[f'{dataset_name}_spearman_r_avg'] = scoring_utils.get_avg_metrics(scores_exp, labels_exp)
                 print(f"Epoch Pearson R Avg: {metrics[f'{dataset_name}_pearson_r_avg'] }")
                 print(f"Epoch Spearman Rho Avg: {metrics[f'{dataset_name}_spearman_r_avg'] }")
-            
+
             # Log metrics to wandb
             if not cfg.no_wandb:
                 # Get global step

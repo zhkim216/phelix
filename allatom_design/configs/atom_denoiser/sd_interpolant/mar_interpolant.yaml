@@ -1,0 +1,18 @@
+name: mar
+
+# Training noise distribution
+training_noise_schedule: "constant_t"
+
+training_noise_cfg:
+  uniform_t:
+    t_min: 0.0
+    t_max: 1.0
+  constant_t:
+    t: 0.0
+  uniform_squared_t:
+    t_min: 0.0
+    t_max: 1.0
+
+# Additional training tasks
+full_noise_p: 0.0  # probability of using full noise during training
+drop_scn_p: 0.0  # probability of setting all sidechains to 0 during training

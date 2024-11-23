@@ -70,18 +70,17 @@ class SeqDenoiser(nn.Module):
         interpolant_out = self.interpolant(batch, t)
         batch["x_noised"] = interpolant_out["x_noised"]
         batch["aatype_noised"] = interpolant_out["aatype_noised"]
-        batch['seq_mlm_mask'] = interpolant_out["seq_mlm_mask"]
-        batch['scn_mlm_mask'] = interpolant_out.get("scn_mlm_mask", None) #None if running just seq_des
+        batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]  # 1 for unmasked aatype
+        batch["scn_mlm_mask"] = interpolant_out["scn_mlm_mask"]  # 1 for unmasked sidechains
 
         # During training, keep track of certain additional features
         aux_inputs = {
             "x": batch["x"],  # ground truth coordinates
             "aatype": batch["aatype"],  # ground truth aatype
-            "ghost_atom_mask": batch["ghost_atom_mask"],
-            "missing_atom_mask": batch["missing_atom_mask"],
+            "atom_mask": batch["atom_mask"],
             "t_scd": batch.get("t_scd", None),  # scalar; fix t_scd (sidechain diffusion time) if provided, usually for eval
-            "seq_mlm_mask": batch['seq_mlm_mask'],
-            "scn_mlm_mask": batch['seq_mlm_mask'],
+            "seq_mlm_mask": batch["seq_mlm_mask"],
+            "scn_mlm_mask": batch["scn_mlm_mask"],
         }
 
         # Denoise coords
@@ -113,11 +112,19 @@ class SeqDenoiser(nn.Module):
 
         # Denoise coords
         seq_logits, _, _ = self.denoiser.seq_design_module(x,
+<<<<<<< HEAD
                                                           aatype, 
                                                           seq_mask, 
                                                           residue_index, 
                                                           chain_index
                                                         )
+=======
+                                                          aatype,
+                                                          seq_mask,
+                                                          residue_index,
+                                                          chain_index,
+                                                    )
+>>>>>>> origin/rshuai/scn-diffusion-improvements
 
         return seq_logits
 
@@ -139,23 +146,30 @@ class SeqDenoiser(nn.Module):
                        aatype: TensorType["b n", int],
                        seq_mask: TensorType["b n", float],
                        residue_index: TensorType["b n", int],
+                       chain_index: TensorType["b n", int],
                        scd_inputs: Dict[str, Any],
                        **sampling_kwargs) -> Tuple[TensorType["b n", int],
                                                    Dict[str, torch.Tensor]]:
         """
         Given backbone and sequence, denoise sidechain atoms (sidechain packing).
         """
-        # Fix sequence time to 1 with a single pass
-        t_seq = torch.tensor([1.0, 1.0]).to(x.device)[None].expand(x.shape[0], -1)  # [B, 2]
+        # Sequence time goes to 1 with a single pass; we start at 0 since we only pass in sequence info to sidechain diffusion
+        t_seq = torch.tensor([0.0, 1.0]).to(x.device)[None].expand(x.shape[0], -1)  # [B, 2]
         timesteps = t_seq
-        target_dims = (t_seq.shape[1], *aatype.shape)
 
         # Override aatype with the input aatype during sequence denoising
+        target_dims = (t_seq.shape[1], *aatype.shape)
         aatype_override = aatype.unsqueeze(0).expand(*target_dims)
         aatype_override_mask = torch.ones_like(aatype)
         aatype_override_mask = aatype_override_mask.unsqueeze(0).expand(*target_dims).long()  # view not clone to save a bit of memory
 
-        return self.sample(x, seq_mask, residue_index, timesteps,
+        # Override aatype with the input aatype during sidechain diffusion also
+        scd_inputs["aatype_override"] = aatype
+
+        return self.sample(x, seq_mask, residue_index, chain_index, timesteps,
+                           temperature=0.0,  # does not matter for sidechain packing
+                           num_corrector_steps=0,  # does not matter for sidechain packing
+                           corrector_step_ratio=0.0,  # does not matter for sidechain packing
                            aatype_decoding_order_mode="random",  # does not matter for sidechain packing
                            aatype_override=aatype_override, aatype_override_mask=aatype_override_mask,
                            scd_inputs=scd_inputs,
@@ -311,6 +325,28 @@ class SeqDenoiser(nn.Module):
         return xt, aatype_t, aux
 
 
+    def get_sidechain_likelihoods(self,
+                                  num_steps: int,
+                                  x: TensorType["b n a 3", float],
+                                  aatype: TensorType["b n", int],
+                                  seq_mask: TensorType["b n", float],
+                                  residue_index: TensorType["b n", int],
+                                  chain_index: TensorType["b n", int],
+                                  cond_labels: Dict[str, TensorType["b", int]],
+                                  atom_mask: TensorType["b n a", float],  # handles ghost and missing atoms
+                                  scd_inputs: Dict[str, Any] = {}  # sidechain diffusion inputs
+                                  ):
+        aux_inputs = {}
+        # Add sidechain diffusion inputs
+        aux_inputs["scd"] = scd_inputs
+        aux_inputs["seq_mlm_mask"] = seq_mask.clone()  # sidechain pack with all residues unmasked  # TODO: we can also score sidechains with masked sequence
+        aux_inputs["atom_mask"] = atom_mask  # 1 for valid atoms
+
+        likelihood_aux = self.denoiser.get_sidechain_likelihoods(num_steps, x, aatype, residue_index, chain_index, seq_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs)
+
+        return likelihood_aux
+
+
     @staticmethod
     def save_samples_to_pdb(samples: Dict[str, TensorType["b ..."]],
                             filenames: List[str],
@@ -322,6 +358,7 @@ class SeqDenoiser(nn.Module):
         - seq_mask: Tensor["b n", float]
         - residue_index: Tensor["b n", int]
         - pred_aatype: Tensor["b n", int]
+        - psce: Tensor["b n 33", float]
 
         Args:
         - bb_only_samples: whether the samples come from a backbone-only model
@@ -334,12 +371,20 @@ class SeqDenoiser(nn.Module):
         # Create atom mask, including backbone atoms even for unknown aatype
         atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=aatype.device)[aatype] * seq_mask[..., None]
 
+        # Set b-factors to predicted Sidechain Error (PSCE)
+        b_factors = torch.zeros_like(atom_mask, dtype=torch.float32)
+        b_factors[..., rc.non_bb_idxs] = samples["psce"]
+
         feats = {
             "aatype": aatype,
             "atom_positions": final_atom37_positions,
             "atom_mask": atom_mask,
             "residue_index": residue_index,
             "chain_index": torch.zeros_like(residue_index),  # TODO: support multiple chains
+<<<<<<< HEAD
+=======
+            "b_factors": b_factors,
+>>>>>>> origin/rshuai/scn-diffusion-improvements
         }
 
         feats = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in feats.items()}  # move to cpu
@@ -425,6 +470,40 @@ class SeqDenoiser(nn.Module):
                 traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
                 write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
 
+
+    @staticmethod
+    def save_sidechain_likelihood_traj(likelihood_aux: Dict[str, Any],
+                                    aatype: TensorType["b n", int],
+                                    seq_mask: TensorType["b n", float],
+                                    residue_index: TensorType["b n", int],
+                                    chain_index: TensorType["b n", int],
+                                    save_traj_mask: List[bool],
+                                    save_diff_traj_steps: List[int],
+                                    filenames: List[str],
+                                    traj_conect: bool,
+                                    align_models_to_idx: Optional[int] = None):
+        """
+
+        """
+        B = seq_mask.shape[0]
+        device = seq_mask.device
+        for i in range(B):
+            if save_traj_mask[i]:
+                x_traj = likelihood_aux["likelihood_xt_traj"][i, save_diff_traj_steps]
+                S_scd, N, A, _ = x_traj.shape
+                aatype_traj = aatype[i][None].expand(S_scd, -1)
+                atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * seq_mask[i, :, None]  # [S_scd, N, A]
+
+                traj_feats = {
+                    "aatype": aatype_traj,
+                    "atom_positions": x_traj,
+                    "atom_mask": atom_mask,
+                    "residue_index": residue_index[i].unsqueeze(0).expand(S_scd, -1),
+                    "chain_index": chain_index[i].unsqueeze(0).expand(S_scd, -1),
+                    "b_factors": None
+                }
+                traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
+                write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
 
 
 def get_denoiser(cfg: DictConfig,
