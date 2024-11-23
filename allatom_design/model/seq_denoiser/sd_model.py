@@ -111,12 +111,11 @@ class SeqDenoiser(nn.Module):
         """
 
         # Denoise coords
-        seq_logits, _, _ = self.denoiser.seq_design_module(x,
-                                                          aatype,
-                                                          seq_mask,
-                                                          residue_index,
-                                                          chain_index,
-                                                    )
+        seq_logits, _ = self.denoiser.seq_design_module(x,
+                                                        aatype,
+                                                        seq_mask,
+                                                        residue_index,
+                                                        chain_index)
 
         return seq_logits
 

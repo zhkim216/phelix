@@ -1,4 +1,7 @@
 
+from typing import Dict
+
+import torch
 import torch.nn as nn
 from einops import rearrange
 from omegaconf import DictConfig
@@ -7,9 +10,9 @@ from torchtyping import TensorType
 import allatom_design.data.residue_constants as rc
 from allatom_design.data.data import atom37_to_atom14, cat_bb_scn
 from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import (
-    DecLayer, EncLayer, ProteinFeatures, SidechainProteinFeatures, gather_nodes, cat_neighbors_nodes)
+    DecLayer, EncLayer, ProteinFeatures, SidechainProteinFeatures,
+    cat_neighbors_nodes, gather_nodes)
 from openfold.model.primitives import Linear
-import torch
 
 
 class SidechainConfidenceModule(nn.Module):
@@ -19,7 +22,12 @@ class SidechainConfidenceModule(nn.Module):
         """
         super().__init__()
         self.cfg = cfg
+
+        # Encode input structure
         self.structure_encoder = ConfidenceEncoder(cfg.structure_encoder)
+
+        # Embed local sidechain coords into node embeddings
+        self.sidechain_encoder = Linear(len(rc.non_bb_idxs) * 3, cfg.c_h_V, bias=False)
 
         # Final MLP to predict PSCE
         self.sce_bins_cfg = cfg.sce_bins
@@ -32,19 +40,18 @@ class SidechainConfidenceModule(nn.Module):
 
 
     def forward(self,
-                x1_scn_pred: TensorType["b n 33 3", float],  # scn pred output, absolute coordinates
-                h_V: TensorType["b n h", float],
-                h_ESV: TensorType["b n k h", float],
+                x1_scn_local_pred: TensorType["b n 33 3", float],  # scn pred output, local coordinates
+                mpnn_feature_dict: Dict[str, TensorType["b ..."]],
                 aatype: TensorType["b n", int],
-                x_bb: TensorType["b n 4 3", float],  # already noised
                 seq_mask: TensorType["b n", float],
                 residue_index: TensorType["b n", int],
                 chain_index: TensorType["b n", int],
                 ) -> TensorType["b n 33 n_bins", float]:
-        X = cat_bb_scn(x_bb, x1_scn_pred)
+        # Structure encoder without using predicted sidechain coordinates
+        h_V = self.structure_encoder(mpnn_feature_dict, seq_mask, residue_index, chain_index)
 
-        # Structure encoder
-        h_V = self.structure_encoder(h_V, h_ESV, X, aatype, seq_mask, residue_index, chain_index)
+        # Embed local sidechain coordinates into node embeddings
+        h_V = h_V + self.sidechain_encoder(rearrange(x1_scn_local_pred, "b n a x -> b n (a x)"))
 
         # MLP on node embeddings for PSCE prediction
         psce_logits = self.mlp(h_V)
@@ -89,7 +96,6 @@ class ConfidenceEncoder(nn.Module):
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
         self.decoder_in = self.hidden_dim * 4
-        self.use_ESV_in = cfg.use_ESV_in
 
         # Structure encoder
         self.sidechain_features = SidechainProteinFeatures(autoregressive=False,
@@ -115,32 +121,31 @@ class ConfidenceEncoder(nn.Module):
 
 
     def forward(self,
-                h_V_in: TensorType["b n h", float],
-                h_ESV_in: TensorType["b n k 4h", float],
-                X: TensorType["b n 37 3", float],
-                S: TensorType["b n", int],
+                mpnn_feature_dict: Dict[str, TensorType["b ..."]],
                 seq_mask: TensorType["b n", float],
                 residue_index: TensorType["b n", int],
                 chain_index: TensorType["b n", int],
                 ) -> TensorType["b n h", float]:
-        X, atom14_mask = atom37_to_atom14(S, X)
+        X, atom14_mask = mpnn_feature_dict["X"], mpnn_feature_dict["atom14_mask"]
+        S = mpnn_feature_dict["S"]  # noised aatype
 
-        # Extract edge embeddings from rollout
-        E, E_idx, X = self.features(X, seq_mask, residue_index, chain_index)  # TODO: make sure E_idx is the same
+        # Prepare node and edge embeddings
+        E, E_idx, _ = self.features(X, seq_mask, residue_index, chain_index)
+        assert (E_idx == mpnn_feature_dict["E_idx"]).all(), "E_idx mismatch between original MPNN graph and confidence structure encoder"
+
         h_E = self.W_e(E)
         h_S = self.W_s(S)
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
 
-        # extract sidechain features
+        # extract sidechain features from local sidechains
         E2, _ = self.sidechain_features(X, residue_index, chain_index, E_idx, atom14_mask)
         h_E2 = self.W_e2(E2)
         h_ES = torch.cat([h_ES, h_E2], dim = -1)
 
         # Make input node and edge embeddings
-        h_V = h_V_in
+        h_V = mpnn_feature_dict["h_V"]  # initialize to node embeddings from MPNN
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
-        if self.use_ESV_in:
-            h_ESV = h_ESV + h_ESV_in
+        h_ESV = h_ESV + mpnn_feature_dict["h_ESV"]  # add MPNN edge embeddings
 
         mask = rearrange(seq_mask, "b n -> b n 1 1").expand_as(h_ESV)
         for layer in self.decoder_layers:

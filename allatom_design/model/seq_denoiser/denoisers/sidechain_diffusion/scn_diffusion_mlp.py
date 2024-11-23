@@ -54,10 +54,8 @@ class SidechainDiffusionModule(nn.Module):
 
 
     def sidechain_diffusion(self,
-                            h_V: TensorType["b n h", float],
-                            h_ESV: TensorType["b n h", float],
+                            mpnn_feature_dict: Dict[str, TensorType["b ..."]],
                             aatype: TensorType["b n", int],
-                            x_bb: TensorType["b n a_bb 3", float],
                             seq_mask: TensorType["b n", float],
                             residue_index: TensorType["b n", int],
                             chain_index: TensorType["b n", int],
@@ -65,6 +63,7 @@ class SidechainDiffusionModule(nn.Module):
                             is_sampling: bool,
                             ) -> Tuple[TensorType["b n a 3", float],
                                        Dict[str, TensorType["b ...", float]]]:
+        h_V = mpnn_feature_dict["h_V"]
         B, N, _ = h_V.shape
         diffusion_aux = defaultdict(lambda: None)
 
@@ -119,15 +118,14 @@ class SidechainDiffusionModule(nn.Module):
                 with torch.no_grad():
                     self.eval()
                     # use unbatched inputs
-                    x1_scn_local_rollout = self.mini_rollout(h_V, h_ESV, aatype, seq_mask)  # in local frmae
+                    x1_scn_local_rollout = self.mini_rollout(h_V, aatype, seq_mask)  # in local frmae
                     self.train()
 
                 # Run confidence module
+                mpnn_feature_dict_in = {k: v.detach() for k, v in mpnn_feature_dict.items()}
                 psce_logits, psce = self.confidence_module(x1_scn_local_rollout.detach(),
-                                                           h_V.detach(),
-                                                           h_ESV.detach(),
+                                                           mpnn_feature_dict_in,
                                                            aatype.detach(),
-                                                           x_bb.detach(),
                                                            seq_mask.detach(),
                                                            residue_index.detach(),
                                                            chain_index.detach())
@@ -136,7 +134,7 @@ class SidechainDiffusionModule(nn.Module):
                     "psce": psce,
                     "sce_bins_cfg": self.confidence_module.sce_bins_cfg,
                     "scn_pred_rollout": x1_scn_local_rollout,  # compute loss in local frame
-                    "scn_target": x_scn_gt,
+                    "scn_target": x_scn_local_gt,
                 }
 
             # Outputs
@@ -198,10 +196,8 @@ class SidechainDiffusionModule(nn.Module):
             # Compute confidence using local scn coordinates
             if self.use_confidence_module:
                 _, psce = self.confidence_module(xt_scn_local,
-                                                 h_V,
-                                                 h_ESV,
+                                                 mpnn_feature_dict,
                                                  aatype,
-                                                 x_bb,
                                                  seq_mask,
                                                  residue_index,
                                                  chain_index)
@@ -210,6 +206,7 @@ class SidechainDiffusionModule(nn.Module):
                 diffusion_aux["psce"] = torch.zeros((B, N, A), device=xt_scn_local.device)
 
             # Transform denoised sidechains back to global coordinates
+            x_bb = mpnn_feature_dict["X"][..., rc.atom14_bb_idxs, :]
             atom_mask = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)  # assume all atoms are present  # TODO: we should pass in true atom mask here to account for missing backbone
             atom_mask_bb, atom_mask_scn = atom_mask[..., rc.bb_idxs], atom_mask[..., rc.non_bb_idxs]
             x1_scn, _ = transform_sidechain_frame(xt_scn_local, x_bb,
@@ -235,7 +232,6 @@ class SidechainDiffusionModule(nn.Module):
 
     def mini_rollout(self,
                      h_V: TensorType["b n h", float],
-                     h_ESV: TensorType["b n h", float],
                      aatype: TensorType["b n", int],
                      seq_mask: TensorType["b n", float]) -> TensorType["b n 33 3", float]:
         B, N, _ = h_V.shape

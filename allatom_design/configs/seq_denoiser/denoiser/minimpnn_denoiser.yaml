@@ -212,4 +212,3 @@ confidence_module:
     n_layers: 2
     k_neighbors: ${denoiser.minimpnn.k_neighbors}
     dropout_p: 0.1
-    use_ESV_in: true
