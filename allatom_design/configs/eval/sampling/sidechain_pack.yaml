@@ -5,7 +5,7 @@ out_dir: null  # null to save in the model run directory
 exp_name: test  # sampling experiment name
 overwrite_out_dir: true  # if true, delete existing output directory
 seed: 0
-batch_size: 16
+batch_size: 64
 
 # Data options for overriding denoiser config (null values default to denoiser config)
 data:
@@ -17,12 +17,13 @@ data:
     n_random_subset: null
 
 # Sidechain packing run parameters
-num_pdbs: null  # number of structures to pack sidechains for, null for all
+num_pdbs: 64  # number of structures to pack sidechains for, null for all
 num_samples_per_pdb: 1  # number of trajectories to run per structure
 subset_length_range: [32, 256]
-n_traj: 1  # number of trajectories to randomly save
-limit_diff_traj_steps: 10  # limit the number of steps we save in the sidechain diffusion trajectory (evenly spaced)
+n_traj: 0  # number of trajectories to randomly save
+limit_diff_traj_steps: 20  # limit the number of steps we save in the sidechain diffusion trajectory (evenly spaced)
 traj_conect: false
+likelihood_num_steps: 50
 
 # Sidechain diffusion parameters
 scn_diffusion:
@@ -41,11 +42,6 @@ scn_diffusion:
     s_t_min: 0.01
     s_t_max: 50.0
     num_steps: ${scn_diffusion.num_steps}
-
-  # Autoguidance
-  autoguidance_cfg:
-    use_autoguidance: false
-    w: 1.0
 
 
 hydra:

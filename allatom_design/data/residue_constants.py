@@ -574,6 +574,7 @@ atom_types = [
 atom_order = {atom_type: i for i, atom_type in enumerate(atom_types)}
 atom_type_num = len(atom_types)  # := 37.
 bb_atoms = ["N", "CA", "C", "O"]
+bb_atom_order = {atom_type: i for i, atom_type in enumerate(bb_atoms)}
 num_bb_atoms = len(bb_atoms)
 bb_idxs = [atom_order[atom_type] for atom_type in bb_atoms]  # := [0, 1, 2, 4].
 non_bb_idxs = [i for i in range(atom_type_num) if i not in bb_idxs]  # := [3, 5, ..., 36]
@@ -1245,12 +1246,28 @@ def _make_restype_to_atom37_idx():
         restype_to_atom37_idx.append([(atom_order[name] if name != "" else -1) for name in atom_names])
 
     restype_to_atom37_idx = np.array(restype_to_atom37_idx, dtype=np.int64)
-    return restype_to_atom37_idx 
+    return restype_to_atom37_idx
+
+
+def _make_restype_atom37_to_atom14():
+    restype_atom37_to_atom14 = []
+
+    for rt in restypes_with_x:
+        atom_names = restype_name_to_atom14_names[restype_1to3_with_X[rt]]
+        atom_name_to_idx14 = {name: i for i, name in enumerate(atom_names)}
+        restype_atom37_to_atom14.append(
+            [
+                (atom_name_to_idx14[name] if name in atom_name_to_idx14 else 0)
+                for name in atom_types
+            ]
+        )
+    return np.array(restype_atom37_to_atom14, dtype=np.int32)
 
 RESTYPE_ATOM14_TO_ATOM37 = _make_restype_atom14_to_atom37()
 RESTYPE_ATOM14_MASK_WITH_X = _make_restype_atom14_mask_with_x()
 RESTYPE_TO_ATOM37_IDX = _make_restype_to_atom37_idx()
 RESTYPE_TO_NUM_ATOMS = np.sum(RESTYPE_ATOM14_MASK_WITH_X, axis = 1)
+RESTYPE_ATOM37_TO_ATOM14 = _make_restype_atom37_to_atom14()
 
 """"
 Constant for determining interface residues

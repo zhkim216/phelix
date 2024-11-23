@@ -8,6 +8,7 @@ import torch
 from einops import rearrange
 from torch.utils import data
 from torch.utils.data import DataLoader
+from torchtyping import TensorType
 from tqdm import tqdm
 from torchtyping import TensorType
 import multiprocessing
@@ -15,8 +16,9 @@ from multiprocessing import Pool
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (center_random_augmentation, load_feats_from_pdb,
-                                      make_fixed_size_1d)
+from allatom_design.data.data import (center_random_augmentation,
+                                      load_feats_from_pdb, make_fixed_size_1d, transform_sidechain_frame)
+
 
 FEATURES_LONG = ("residue_index", "chain_index", "aatype")
 
@@ -38,7 +40,9 @@ class ADDataset(data.Dataset):
         se3_augment: bool = True,
         translation_scale: float = 1.0,
         overwrite_cache: bool = False,
-        subset_length_range: Optional[int] = None
+        subset_length_range: Optional[int] = None,
+        afdb_res_plddt_cutoff: float = 0.0,
+        **kwargs
     ):
         """
         Args:
@@ -53,6 +57,7 @@ class ADDataset(data.Dataset):
         - translation_scale: Scale of translation augmentation (when using raw coords or coords feats)
         - overwrite_cache: If True, overwrite the dataset cache. Useful if the dataset features have been updated.
         - subset_length_range: List with with [min, max] length of proteins to subset form training data
+        - afdb_res_plddt_cutoff: If > 0, for AFDB dataset, cut out any residues with PLDDT < cutoff
         """
         self.pdb_path = pdb_path
         self.fixed_size = fixed_size
@@ -64,7 +69,11 @@ class ADDataset(data.Dataset):
         self.translation_scale = translation_scale
         self.overwrite_cache = overwrite_cache
         self.subset_length_range = subset_length_range
+<<<<<<< HEAD
         self.cluster_sample = True #cluster_sample
+=======
+        self.afdb_res_plddt_cutoff = afdb_res_plddt_cutoff
+>>>>>>> origin/rshuai/scn-diffusion-improvements
 
         # Read in PDB keys
         self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
@@ -84,6 +93,9 @@ class ADDataset(data.Dataset):
         # Load designability info
         self._load_designability_info()
 
+        # Get dataset source label
+        self.dataset_source_label = self._get_dataset_source_label()
+
         # Subsetting and overfitting
         if overfit > 0 and phase == "train":
             # Overfit on a subset of the data
@@ -92,11 +104,11 @@ class ADDataset(data.Dataset):
             self.pdb_keys = np.random.choice(self.pdb_keys, overfit, replace=False).repeat(n_data // overfit)
 
         if short_epoch:
-            self.pdb_keys = np.random.choice(self.pdb_keys, 500, replace=False)
+            self.pdb_keys = np.random.choice(self.pdb_keys, min(500, len(self.pdb_keys)), replace=False)
 
         if n_random_subset is not None:
             self.pdb_keys = np.random.choice(self.pdb_keys, min(n_random_subset, len(self.pdb_keys)), replace=False)
-        
+
         if subset_length_range is not None:
             self.subset_to_length_range(*self.subset_length_range)
 
@@ -159,6 +171,9 @@ class ADDataset(data.Dataset):
         data_file = self._get_data_file(pdb_key)
         data = torch.load(data_file, weights_only=True)
 
+        # Remove any residues with PLDDT < cutoff
+        data = self._remove_low_plddt_residues(data)
+
         example = {}
 
         # Use raw coordinates
@@ -185,6 +200,7 @@ class ADDataset(data.Dataset):
         example["aatype"] = data["aatype"]  # not one-hot encoded
         example["ghost_atom_mask"] = data["ghost_atom_mask"]
         example["missing_atom_mask"] = data["missing_atom_mask"]
+        example["atom_mask"] = atom_mask
         example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
         example['interface_residue_mask'] = data['interface_residue_mask']
         example['chain_ids'] = data['chain_ids']
@@ -193,12 +209,20 @@ class ADDataset(data.Dataset):
         cond_labels_in = {}
 
         # Add designability info
+        cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
         if self.designability_csv:
             cond_labels_in["designability"] = self.pdb_to_designability[pdb_key[:4]]
 
+<<<<<<< HEAD
         # Calculate cropping, handled differently for multimers
         multimer_crop_mask = None
         start_idx = None
+=======
+        # Add dataset source label
+        cond_labels_in["dataset_source"] = cl.TOKEN_TO_ID["dataset_source"][self.dataset_source_label]
+
+        # Calculate random cropping start index
+>>>>>>> origin/rshuai/scn-diffusion-improvements
         orig_size = example["x"].shape[0]
         extra_len = orig_size - self.fixed_size
         if extra_len > 0:
@@ -246,6 +270,38 @@ class ADDataset(data.Dataset):
         data_file = f"{self.pdb_path}/cached_examples/{pdb_key}.pt"
         return data_file
 
+<<<<<<< HEAD
+=======
+
+    def _get_pdb_data_file(self, pdb_key: str) -> str:
+        if self.pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
+            pdb_data_file = f"{self.pdb_path}/pdb_store/{pdb_key}"
+        elif self.pdb_path.endswith("afdb"):  # AFDB augmentation dataset
+            pdb_data_file = f"{self.pdb_path}/foldseek_cluster_reps/{pdb_key}.cif"
+        elif self.pdb_path.endswith("qfit-test-set/rcsb-pdb"):
+            pdb_data_file = f"{self.pdb_path}/all/{pdb_key}.pdb1"  # qfit dataset, use only pdb1s for now
+        elif self.pdb_path.endswith("rcsb_test_cases"):
+            pdb_data_file = f"{self.pdb_path}/pdbs/{pdb_key}.pdb"
+        else:
+            assert False, f"Unknown dataset: {self.pdb_path}"
+        return pdb_data_file
+
+
+    def _get_dataset_source_label(self) -> str:
+        if self.pdb_path.endswith("ingraham_cath_dataset"):
+            dataset_source_label = "EXPERIMENTAL"
+        elif self.pdb_path.endswith("afdb"):
+            dataset_source_label = "SYNTHETIC"
+        elif self.pdb_path.endswith("qfit-test-set/rcsb-pdb"):
+            dataset_source_label = "EXPERIMENTAL"
+        elif self.pdb_path.endswith("rcsb_test_cases"):
+            dataset_source_label = "EXPERIMENTAL"
+        else:
+            assert False, f"Unknown dataset: {self.pdb_path}"
+        return dataset_source_label
+
+
+>>>>>>> origin/rshuai/scn-diffusion-improvements
     def _cache_examples(self):
         """
         Reads in PDB files and caches the examples to disk.
@@ -309,7 +365,21 @@ class ADDataset(data.Dataset):
                 pdb_keys.append(pdb_key)
 
         self.pdb_keys = np.array(pdb_keys)
-        
+
+
+    def _remove_low_plddt_residues(self, data: Dict[str, TensorType["n ..."]]) -> Dict[str, TensorType["n ..."]]:
+        """
+        If data comes from the afdb dataset, remove residues with plddt lower than self.afdb_res_plddt_cutoff.
+        """
+        if not self.pdb_path.endswith("afdb"):
+            return data
+
+        plddt_mask = data["b_factors"][:, 1] >= self.afdb_res_plddt_cutoff  # filter by C-alpha pLDDT
+        for k, v in data.items():
+            data[k] = v[plddt_mask]
+        return data
+
+
     @staticmethod
     def index_into_batch(batch: Dict[str, torch.Tensor], idxs: List) -> Dict[str, torch.Tensor]:
         """
@@ -357,12 +427,19 @@ def compute_scale_factors(train_dataloader: DataLoader,
         scn_mask = mask[..., rc.non_bb_idxs, :]
 
         ### Center sidechain on CA
-        x_scn = x_scn - x[..., 1:2, :]
-        scn_missing_atom_mask = batch["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
-        x_scn = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn)  # fill missing atoms with zeroes
-        scn_ghost_atom_mask = batch["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
-        x_scn = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn)  # fill ghost atoms with zeroes
+        # x_scn = x_scn - x[..., 1:2, :]
+        # scn_missing_atom_mask = batch["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
+        # x_scn = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn)  # fill missing atoms with zeroes
+        # scn_ghost_atom_mask = batch["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
+        # x_scn = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn)  # fill ghost atoms with zeroes
 
+        ### Transform sidechains to local coordinates
+        x_scn, bb_frames_exists = transform_sidechain_frame(x_scn,
+                                                            x[..., rc.bb_idxs, :],
+                                                            batch["atom_mask"][..., rc.non_bb_idxs],
+                                                            batch["atom_mask"][..., rc.bb_idxs],
+                                                            to_local=True)
+        scn_mask = scn_mask * rearrange(bb_frames_exists, "b n -> b n 1 1")  # mask out sidechain atoms that don't have a frame
         x_scn = x_scn[scn_mask.bool()]
 
         xs_scn.append(x_scn)

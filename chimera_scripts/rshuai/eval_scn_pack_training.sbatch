@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a10_aasd0_eval_scn_pack
+#SBATCH --job-name=a10_aasd7_eval_scn_pack
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -27,7 +27,7 @@ PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Model name to evaluate
-MODEL_NAME=a10_aasd0
+MODEL_NAME=a10_aasd7
 
 EXP_NAME=${MODEL_NAME}_eval_scn_pack
 GROUP=chimera_a10
@@ -44,7 +44,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scn_pack_training.py \
     group=${GROUP} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
-    start_epoch=0 \
+    start_step=0 \
     eval_every_n_ckpts=1 \
     batch_size=64 \
     data.pdb_path=${PDB_PATH} \

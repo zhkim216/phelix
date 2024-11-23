@@ -18,6 +18,7 @@ train:
 
 # Some trainer options
 trainer:
+  strategy: ddp_find_unused_parameters_true  # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
   max_epochs: 100000
   accumulate_grad_batches: 1
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
@@ -52,7 +53,7 @@ defaults:
 
 model:
   task: "allatom_seq_des"  # "seq_des", "allatom_seq_des"
-  override_sigma_data: [9.6, 0.66]  # override sigma data for [backbone, sidechain]
+  override_sigma_data: [9.6, 0.64]  # override sigma data for [backbone, sidechain]
   num_atoms_in: 37
   n_aatype: 21
   eps: 1.0e-8
@@ -65,10 +66,12 @@ eval:
 
 loss:
   task: ${model.task}
+  inf: ${model.inf}
   loss_weights:
     scn:
       mse_loss: 1.0
     seq_loss: 1.0
+    psce_loss: 1.0
 
   # loss configs
   seq_loss:
@@ -86,9 +89,9 @@ optim:
     factor: 2
     warmup_steps: 4000
   adam_inv_sqrt:
-    ref_lr: 1.0e-2
-    ref_steps: 70000
-    warmup_steps: 1000
+    ref_lr: 1.0e-3
+    ref_steps: 50000
+    warmup_steps: 4000
 
 logging:
   log_dir: ${out_dir}
@@ -96,8 +99,8 @@ logging:
   wandb_watch_freq: 5000  # Log gradients every n steps
 
 checkpointing:
-  save_latest_every_n_epochs: 50  # Save the latest model every n epochs (if validation set is being checked)
-  save_ema_every_n_epochs: 5  # Save the EMA model every n epochs
+  save_latest_every_n_steps: 50000  # Save the full model every n steps
+  save_ema_every_n_steps: 20000  # Save the EMA model every n steps
   save_top_k: 1
 
 hydra:

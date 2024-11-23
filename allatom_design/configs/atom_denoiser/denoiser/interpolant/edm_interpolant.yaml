@@ -3,7 +3,7 @@ name: edm
 # Noise schedule
 rho: 7
 s_min: 0.001
-s_max: 80
+s_max: 40
 
 # Training noise distribution
 training_noise_schedule: "lognormal"

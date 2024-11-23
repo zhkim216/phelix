@@ -12,7 +12,7 @@ from allatom_design.data import protein
 from allatom_design.data import residue_constants as rc
 from openfold.utils.feats import atom14_to_atom37
 from pathlib import Path
-from openfold.utils.rigid_utils import Rigid
+from openfold.utils.rigid_utils import Rigid, Rotation
 import subprocess
 from typing import Tuple, Union
 import math
@@ -252,6 +252,25 @@ def torch_rmsd_weighted(a: TensorType["b n x", float],
     return weighted_rmsd
 
 
+def atom37_to_torsions_rad(aatype: TensorType["b n", int],
+                           coords: TensorType["b n 37 3", float],
+                           atom_mask: TensorType["b n 37", float]
+                           ) -> Tuple[TensorType["b n 7"], TensorType["b n 7"]]:
+    """
+    Uses OpenFold's atom37_to_torsion_angles to convert atom37 coordinates to torsion angles in radians.
+    """
+    feats = data_transforms.atom37_to_torsion_angles("")({"aatype": aatype, "all_atom_positions": coords, "all_atom_mask": atom_mask})
+
+    sin_angles, cos_angles = feats["torsion_angles_sin_cos"][..., 0], feats["torsion_angles_sin_cos"][..., 1]
+    torsions_deg = torch.atan2(sin_angles, cos_angles)
+
+    alt_sin_angles, alt_cos_angles = feats["alt_torsion_angles_sin_cos"][..., 0], feats["alt_torsion_angles_sin_cos"][..., 1]
+    alt_torsions_deg = torch.atan2(alt_sin_angles, alt_cos_angles)
+
+    torsion_angles_mask = feats["torsion_angles_mask"]
+    return torsions_deg, alt_torsions_deg, torsion_angles_mask
+
+
 def tm_score(a: TensorType["b n a 3"],
              b: TensorType["b n a 3"],
              mask: TensorType["b n a"]
@@ -437,19 +456,19 @@ def atom37_to_atom14(aatype, all_atom_pos):
     no_batch_dims = len(aatype.shape) - 1
 
     atom14_mask = batched_gather(
-        atom37_mask, 
-        residx_atom14_to_atom37, 
+        atom37_mask,
+        residx_atom14_to_atom37,
         dim=no_batch_dims + 1,
         no_batch_dims=no_batch_dims + 1,
     ).to(all_atom_pos.dtype)
 
     # create a mask for known groundtruth positions
-    atom14_mask *= get_rc_tensor(rc.RESTYPE_ATOM14_MASK_WITH_X, aatype) 
+    atom14_mask *= get_rc_tensor(rc.RESTYPE_ATOM14_MASK_WITH_X, aatype)
 
     # gather the groundtruth positions
     atom14_positions = batched_gather(
-        all_atom_pos, 
-        residx_atom14_to_atom37, 
+        all_atom_pos,
+        residx_atom14_to_atom37,
         dim=no_batch_dims + 1,
         no_batch_dims=no_batch_dims + 1,
     )
@@ -485,27 +504,27 @@ def pack(unpacked_rep, tgt_shape, mask):
     return unpacked_rep[mask].reshape(tgt_shape)
 
 def gather_pos_enc(
-        ids_topk, 
+        ids_topk,
         positional_enc,
         return_zero = False
     ):
 
     ids_topk_expanded = ids_topk.unsqueeze(2).expand(-1, -1, positional_enc.shape[-1])
     positional_enc_topk = torch.gather(
-        positional_enc, dim=1, 
+        positional_enc, dim=1,
         index=ids_topk_expanded
     ).float()
-    
+
     return positional_enc_topk if not return_zero else torch.zeros_like(ids_topk_expanded)
 
 def get_graph_transformer_inputs(
-    X, 
-    atom14_mask, 
+    X,
+    atom14_mask,
     aatype_noised,
-    seq_mask, 
+    seq_mask,
     chain_encoding,
     max_nn,
-    pos_enc, 
+    pos_enc,
     attn_bias
 ):
     #get one hot encoding of atom identities
@@ -513,7 +532,7 @@ def get_graph_transformer_inputs(
     atom_indices_packed = atom_indices[atom_indices != -1].flatten()
     q = F.one_hot(atom_indices_packed, num_classes=len(rc.atom_types)).float()
     tot_num_atoms = len(atom_indices_packed)
-    
+
     #packing X and getting packed mask
     atoms14_mask_no_pad = atom14_mask * seq_mask[:,:, None]
     atom14_mask_packed_no_pad = (atom14_mask[seq_mask == 1] == 1)
@@ -523,7 +542,7 @@ def get_graph_transformer_inputs(
             tgt_shape = (-1, 3),
             mask = atom14_mask_packed_no_pad
         )
-    
+
     num_atoms_per_example = atoms14_mask_no_pad.sum(dim =(1,2)).long()
     num_residues_per_example = seq_mask.sum(dim = -1).long()
     num_atoms_per_residue = atom14_mask_packed_no_pad.sum(dim = -1).long().to(X.device)
@@ -531,7 +550,7 @@ def get_graph_transformer_inputs(
     batch_residue_start_idx = torch.cat((torch.tensor([0], device=q.device), num_residues_per_example[:-1])).cumsum(dim=0)
     ids_topk = torch.zeros((tot_num_atoms, max_nn), dtype=torch.long, device=q.device)
     positional_enc_topk = torch.zeros((tot_num_atoms, max_nn, 137), dtype=q.dtype, device=q.device) if (pos_enc or attn_bias) else None
-    
+
     # Process each batch example
     for atom_start_idx, residue_start_idx, na, nr in zip(batch_atom_start_idx, batch_residue_start_idx, num_atoms_per_example, num_residues_per_example):
         # Extract packed_X and compute ids_topk
@@ -539,7 +558,7 @@ def get_graph_transformer_inputs(
         start_r, end_r = int(residue_start_idx), int(residue_start_idx + nr)
         packed_X_i = unmasked_packed_X[start_a: end_a, :]
         ids_topk_i = extract_ids_topk(packed_X_i, num_nn = max_nn)
-        
+
         if (pos_enc or attn_bias):
             num_atoms_per_residue_i = num_atoms_per_residue[start_r: end_r]
             chain_encoding_i = chain_encoding_packed_no_pad[start_r: end_r]
@@ -551,7 +570,7 @@ def get_graph_transformer_inputs(
             atom_chain_enc_i = torch.repeat_interleave(
                 chain_encoding_i,
                 num_atoms_per_residue_i
-            )  
+            )
 
             same_res = torch.eq(atom_residue_idx_i.unsqueeze(0), atom_residue_idx_i.unsqueeze(1))
             same_chain = torch.eq(atom_chain_enc_i.unsqueeze(0), atom_chain_enc_i.unsqueeze(1))
@@ -570,18 +589,18 @@ def get_graph_transformer_inputs(
 
         # fill ids_topk and positional_enc_topk for entire batch with current example
         ids_topk[start_a: end_a, :] = ids_topk_i + start_a + 1
-        
+
     return q, ids_topk, unmasked_packed_X, num_atoms_per_residue, positional_enc_topk, tot_num_atoms
 
-def aggregate( 
-    h_A, 
+def aggregate(
+    h_A,
     num_atoms_per_residue,
     hidden_dim,
     aggregation_mode
 ):
     # Calculate the total number of residues
     num_residues = num_atoms_per_residue.size(0)
-    
+
     # Generate residue indices that map each atom to its corresponding residue
     residue_indices = (
         torch.arange(num_residues, device=h_A.device)
@@ -589,20 +608,20 @@ def aggregate(
         .unsqueeze(-1)
         .expand_as(h_A)
     )
-    
+
     # Initialize the aggregated residue tensor
     h_R = torch.zeros(num_residues, hidden_dim, dtype=h_A.dtype, device=h_A.device)
-    
+
     # Aggregate atom features to residue-level using scatter_reduce
     h_R.scatter_reduce(src=h_A, dim=0, index=residue_indices, reduce=aggregation_mode)
-    
+
     return h_R
 
 ### GVP AND GCP UTILS
 
 def nan_to_num(ts, val=0.0):
     """
-    Replaces nans in tensor with a fixed value.    
+    Replaces nans in tensor with a fixed value.
     """
     val = torch.tensor(val, dtype=ts.dtype, device=ts.device)
     return torch.where(~torch.isfinite(ts), val, ts)
@@ -649,7 +668,7 @@ def sidechains(X):
     bisector = normalize(c + n)
     perp = normalize(torch.cross(c, n, dim=-1))
     vec = -bisector * math.sqrt(1 / 3) - perp * math.sqrt(2 / 3)
-    return vec 
+    return vec
 
 def dihedrals(X, eps=1e-7):
     X = torch.flatten(X[:, :, :3], 1, 2)
@@ -670,20 +689,20 @@ def dihedrals(X, eps=1e-7):
     D = torch.sign(torch.sum(u_2 * n_1, -1)) * torch.acos(cosD)
 
     # This scheme will remove phi[0], psi[-1], omega[-1]
-    D = F.pad(D, [1, 2]) 
+    D = F.pad(D, [1, 2])
     D = torch.reshape(D, [bsz, -1, 3])
     # Lift angle representations to the circle
     D_features = torch.cat([torch.cos(D), torch.sin(D)], -1)
     return D_features
 
-def positional_embeddings(edge_index, 
+def positional_embeddings(edge_index,
                            num_embeddings=None,
                            num_positional_embeddings=16,
                            period_range=[2, 1000]):
     # From https://github.com/jingraham/neurips19-graph-protein-design
     num_embeddings = num_embeddings or num_positional_embeddings
     d = edge_index[0] - edge_index[1]
- 
+
     frequency = torch.exp(
         torch.arange(0, num_embeddings, 2, dtype=torch.float32,
             device=edge_index.device)
@@ -711,7 +730,7 @@ def dist(X, E_idx, padding_mask):
 def rotate(v, R):
     """
     Rotates a vector by a rotation matrix.
-    
+
     Args:
         v: 3D vector, tensor of shape (length x batch_size x channels x 3)
         R: rotation matrix, tensor of shape (length x batch_size x 3 x 3)
@@ -768,3 +787,65 @@ def cat_neighbors_nodes(h_nodes, h_neighbors, E_idx):
     h_nodes = gather_nodes(h_nodes, E_idx)
     h_nn = torch.cat([h_neighbors, h_nodes], -1)
     return h_nn
+
+
+
+def backbone_coords_to_frames(x_bb: TensorType["... 4 3", float],
+                              atom_mask: TensorType["... 4", float],
+                              eps=1e-8):
+    """
+    Convert backbone coordinates to local frames (rotation + translation) for each residue.
+    """
+    base_atom_names = ["C", "CA", "N"]
+    rigid_group_base_atom37_idx = torch.tensor([rc.bb_atom_order[atom] for atom in base_atom_names])
+    base_atom_pos = x_bb[..., rigid_group_base_atom37_idx, :]
+    gt_frames = Rigid.from_3_points(
+            p_neg_x_axis=base_atom_pos[..., 0, :],
+            origin=base_atom_pos[..., 1, :],
+            p_xy_plane=base_atom_pos[..., 2, :],
+            eps=eps,
+    )
+    gt_exists = torch.min(atom_mask[..., rigid_group_base_atom37_idx], dim=-1)[0]
+
+    rots = torch.eye(3, dtype=x_bb.dtype, device=x_bb.device)
+    rots = torch.tile(rots, (*x_bb.shape[:-2], 1, 1))
+    rots[..., 0, 0] = -1
+    rots[..., 2, 2] = -1
+
+    rots = Rotation(rot_mats=rots)
+    gt_frames = gt_frames.compose(Rigid(rots, None))
+
+    gt_frames_tensor = gt_frames.to_tensor_4x4()
+
+    return gt_frames_tensor, gt_exists
+
+
+def transform_sidechain_frame(x_scn: TensorType["b n 33 3", float],
+                              x_bb: TensorType["b n 4 3", float],
+                              atom_mask_scn: TensorType["b n 33", float],
+                              atom_mask_bb: TensorType["b n 4", float],
+                              to_local: bool) -> Tuple[
+                                  TensorType["b n 33 3", float],
+                                  TensorType["b n", float]
+                              ]:
+    """
+    Transform sidechain coordinates based on the backbone frame.
+    If to_local, transform from global to local frame. Otherwise, transform from local to global frame.
+    """
+    bb_frames, bb_frames_exists = backbone_coords_to_frames(x_bb, atom_mask_bb)
+    T = Rigid.from_tensor_4x4(bb_frames[..., None, :, :])
+
+    if to_local:
+        # Transform from global to local frame, ghost atom value is at 0
+        x_scn = T.invert_apply(x_scn)
+        ghost_atom_value = 0
+    else:
+        # Transform from local to global frame, ghost atom value is at CA
+        x_scn = T.apply(x_scn)
+        ca_idx = rc.bb_atom_order["CA"]
+        ghost_atom_value = x_bb[..., ca_idx:ca_idx + 1, :]
+
+    x_scn = torch.where(atom_mask_scn[..., None].bool(), x_scn, ghost_atom_value)  # "zero out" ghost atoms and missing atoms
+    x_scn = torch.where(bb_frames_exists[..., None, None].bool(), x_scn, ghost_atom_value)  # "zero out" sidechain atoms where backbone frame does not exist
+
+    return x_scn, bb_frames_exists

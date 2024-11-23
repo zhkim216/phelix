@@ -37,6 +37,7 @@ class AllAtomModel():
     def sample(self,
                lengths: TensorType["b", int],
                residue_index: TensorType["b n", int],
+               chain_index: TensorType["b n", int],
                timesteps: Tuple[TensorType["S+1", float]],  # joint timesteps (T_ad, T_sd); same for all batch elements
                ad_sampling_inputs: Dict[str, Any],
                sd_sampling_inputs: Dict[str, Any],
@@ -63,7 +64,7 @@ class AllAtomModel():
         aux["mlm_mask"] = mlm_mask
 
         # Initialize trajectories
-        xt_traj, aatype_t_traj = [], []
+        xt_traj, aatype_t_traj, aatype_pred_traj = [], [], []
         aux_preds_ad_traj, aux_preds_sd_traj = [], []
 
         S = timesteps[0].shape[0] - 1  # number of sampling steps
@@ -90,13 +91,14 @@ class AllAtomModel():
                 x=xt,
                 seq_mask=seq_mask,
                 residue_index=residue_index,
+                chain_index=chain_index,
                 cond_labels=cond_labels,
                 **sd_sampling_inputs
             )
 
             # Set up partial diffusion for next backbone diffusion
             T_next_ad, T_next_sd = T_next
-            S_bb = ad_sampling_inputs["timesteps"][0].shape[1] - 1  # number of backbone sampling steps
+            S_bb = ad_sampling_inputs["timesteps"].shape[1] - 1  # number of backbone sampling steps
             partial_diff_inputs = {"x_bb_in": x1_bb, "num_steps_partial": math.ceil(((1 - T_next_ad) * S_bb).item())}
             ad_sampling_inputs["partial_diff_inputs"] = partial_diff_inputs
 
@@ -106,13 +108,15 @@ class AllAtomModel():
             xt_scn = xt[..., rc.non_bb_idxs, :]
 
             # Save auxiliary outputs
-            xt_traj.append(cat_bb_scn(x1_bb, xt_scn).cpu())
+            xt_traj.append(cat_bb_scn(x1_bb, xt_scn).cpu())  # TODO: rename this to x1 traj?
             aatype_t_traj.append(aatype_t.cpu())
+            aatype_pred_traj.append(aatype_pred.cpu())
             aux_preds_ad_traj.append(aux_preds_ad)
             aux_preds_sd_traj.append(aux_preds_sd)
 
         # preprocess trajectories
         aux["xt_traj"] = torch.stack(xt_traj, dim=1)  # [B, S, N, A, X]
+        aux["aatype_pred_traj"] = torch.stack(aatype_pred_traj, dim=1)  # [B, S, N]
         aux["aatype_t_traj"] = torch.stack(aatype_t_traj, dim=1)  # [B, S, N]
 
         # preprocess aux trajectories
@@ -136,6 +140,7 @@ class AllAtomModel():
         cond_labels: Dict[str, TensorType["b", int]] = {},
         noise_schedule: Optional[NoiseSchedule] = None,
         churn_cfg: Optional[Dict[str, float]] = None,
+        autoguidance_cfg: Optional[Dict[str, Any]] = None,  # autoguidance config
         partial_diff_inputs: Dict[str, Any] = {},
         ):
         """
@@ -157,6 +162,7 @@ class AllAtomModel():
             "timesteps": timesteps,
             "churn_cfg": churn_cfg,
             "noise_schedule": noise_schedule,
+            "autoguidance_cfg": autoguidance_cfg,
             # overrides
             "xt_override": xt_override,
             "xt_override_mask": xt_override_mask,
@@ -176,21 +182,30 @@ class AllAtomModel():
                    x: TensorType["b n a 3", float],
                    seq_mask: TensorType["b n", float],
                    residue_index: TensorType["b n", int],
+                   chain_index: TensorType["b n", int],
                    timesteps: Tuple[TensorType["b s+1", float]],
                    aatype_decoding_order_mode: str,
+                   num_corrector_steps: int,
+                   corrector_step_ratio: TensorType["1", float],
                    cond_labels: Dict[str, TensorType["b", int]],
                    aatype_override: Optional[TensorType["s+1 b n", int]] = None,  # for fixed-sequence sampling, e.g. in sidechain packing
                    aatype_override_mask: Optional[TensorType["s+1 b n", int]] = None,
                    scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
                    ):
+        """
+        scd_inputs should contain the following keys:
+        - num_steps: int
+        - timesteps: TensorType["b S_scd+1", float]
+        - churn_cfg: Dict[str, Any]
+        - noise_schedule: Dict[str, Any]
+        """
+        aux, aux_inputs = {}, {}
+        S_seq = timesteps.shape[1] - 1
         B, N, A, _ = x.shape
-        S_seq = timesteps[0].shape[-1] - 1
-
-        aux, aux_inputs_seq = {}, {}
 
         # Set up backbone input
         x0 = x.clone()
-        x0[..., rc.non_bb_idxs, :] = 0.0  # zero out non-backbone atoms
+        x0[..., rc.non_bb_idxs, :] = 0.0  # zero out sidechain atoms
 
         # Handle default overrides
         # TODO: handle xt overrides, especially important for conditioning on known sequence/sidechain atoms? or maybe we want to do this directly in aatype/x input
@@ -200,14 +215,15 @@ class AllAtomModel():
             aatype_override_mask = torch.zeros((S_seq + 1, B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
 
         # Add sidechain diffusion inputs
-        aux_inputs_seq["scd"] = scd_inputs
+        aux_inputs["scd"] = scd_inputs
 
         # Sample aatype prior
         aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()  # TODO: make seq prior use MASK rather than UNK
 
         # Get residue decoding order
         aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps)
-        aux_inputs_seq["lengths"] = seq_mask.sum(dim=-1)
+        aux_inputs["lengths"] = seq_mask.sum(dim=-1)
+        aux_inputs["seq_mlm_mask"] = torch.zeros_like(seq_mask).float()  # start with all masked tokens
 
         # Initialize trajectories
         xt_traj = []
@@ -217,25 +233,55 @@ class AllAtomModel():
 
         # Run denoising steps
         seq_denoiser_fn = partial(self.sd_model.denoiser,
-                                  residue_index=residue_index,
-                                  seq_mask=seq_mask,
-                                  cond_labels_in=cond_labels,
-                                  aux_inputs=aux_inputs_seq,
-                                  is_sampling=True)
+                              residue_index=residue_index,
+                              chain_encoding=chain_index,
+                              seq_mask=seq_mask,
+                              cond_labels_in=cond_labels,
+                              aux_inputs=aux_inputs,
+                              is_sampling=True)
 
         xt = x0
         aatype_t = aatype_noised
+        unmasked_prev = torch.zeros_like(seq_mask, dtype=torch.bool)
+
+        # Run unmasking steps
+        unmasking_fn = partial(sampling_utils.unmask,
+                               aatype_decoding_order=aatype_decoding_order,
+                               aatype_decoding_order_mode=aatype_decoding_order_mode,
+                               seq_mask=seq_mask,
+                               aux_inputs=aux_inputs)
+
+        timesteps_K = torch.ceil(timesteps * aux_inputs["lengths"][:,None]).long()
         for i in tqdm(range(S_seq), leave=False, desc="Sampling..."):
             # get current and next timesteps
-            t = timesteps[:, i]
-            t_next = timesteps[:, i + 1]
+            t, t_next = timesteps[:, i], timesteps[:, i + 1]
 
-            aatype_t = aatype_t * (1 - aatype_override_mask[i]) + aatype_override[i] * aatype_override_mask[i]  # override aatype for inputs
-            xt, aatype_t, aux_preds = self.sd_model.interpolant.denoising_step(seq_denoiser_fn,
-                                                                               xt, aatype_t,
-                                                                               t=t, t_next=t_next,
-                                                                               aatype_decoding_order=aatype_decoding_order,
-                                                                               aux_inputs=aux_inputs_seq)
+            # get next K residues to unmask
+            K_next = timesteps_K[:, i + 1]
+
+            # override aatype for inputs
+            aatype_t = aatype_t * (1 - aatype_override_mask[i]) + aatype_override[i] * aatype_override_mask[i]
+
+            # Run sequence denoiser
+            x1_pred, aatype_pred, aux_preds = seq_denoiser_fn(xt, aatype_t, t=t)
+
+            # Unmask according to timestep and decoding order
+            xt, aatype_t, unmasked_prev = unmasking_fn(xt, aatype_t, x1_pred,
+                                                       aatype_pred, aux_preds,
+                                                       unmasked_prev, K_next)
+            if i > 1:
+                for j in range(num_corrector_steps):
+                    # corrector step where we mask and denoise equally
+                    K_corrector = torch.ceil(K_next * corrector_step_ratio).long()
+                    x1_pred, aatype_pred, aux_preds, unmasked_prev = self.interpolant.corrector_step(seq_denoiser_fn,
+                                                                                      xt, aatype_t, K_corrector,
+                                                                                      unmasked_prev,
+                                                                                      t=t, aux_inputs=aux_inputs)
+                    # Unmask according to timestep and decoding order
+                    xt, aatype_t, unmasked_prev = unmasking_fn(xt, aatype_t, x1_pred,
+                                                              aatype_pred, aux_preds,
+                                                              unmasked_prev, K_corrector)
+
             aatype_t = aatype_t * (1 - aatype_override_mask[i + 1]) + aatype_override[i + 1] * aatype_override_mask[i + 1]  # override aatype for outputs  # TODO: should we override self-cond input too?
 
             if getattr(self.sd_model.denoiser, "use_self_conditioning_seq", False):
@@ -245,10 +291,11 @@ class AllAtomModel():
             # Save trajectory outputs
             xt_traj.append(xt.cpu())
             aatype_t_traj.append(aatype_t.cpu())
-            aatype_pred_traj.append(aux_preds["aatype_pred"].cpu())
+            aatype_pred_traj.append(aatype_pred.cpu())
             seq_logits_traj.append(aux_preds["seq_logits"].cpu())
 
-            scn_diffusion_aux_traj.append({k: v.cpu() for k, v in aux_preds["scn_diffusion_aux"].items()})
+            if scd_inputs.get("return_scn_diffusion_aux", False):
+                scn_diffusion_aux_traj.append({k: v.cpu() for k, v in aux_preds["scn_diffusion_aux"].items()})
 
         aux["xt_traj"] = torch.stack(xt_traj, dim=1)
         aux["aatype_t_traj"] = torch.stack(aatype_t_traj, dim=1)
@@ -258,8 +305,8 @@ class AllAtomModel():
         aux["seq_mask"] = seq_mask
 
         # preprocess diffusion aux traj
-        aux["scn_diffusion_aux_traj"] = stack_aux_traj(aux["scn_diffusion_aux_traj"])  # values are shape (B, S_seq, S_scd, N, A, 3)
-
+        if scd_inputs.get("return_scn_diffusion_aux", False):
+            aux["scn_diffusion_aux_traj"] = stack_aux_traj(scn_diffusion_aux_traj, dim=1)  # values are shape (B, S, S_scd, N, A, 3)
         return xt, aatype_t, aux
 
 

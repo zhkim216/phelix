@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a10_aasd5
+#SBATCH --job-name=b8_aasd0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,8 +21,8 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=a10_aasd5
-GROUP=chimera_a10
+EXP_NAME=b8_aasd0
+GROUP=chimera_b8
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
@@ -38,17 +38,18 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.fixed_size=256 \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
+    data.subset_length_range=[16,9999] \
     train.batch_size=64 \
     train.compile_model=true \
     model.task=allatom_seq_des \
-    interpolant.training_noise_schedule=uniform_squared_t \
+    interpolant.training_noise_schedule=uniform_sqrt_t \
     denoiser=minimpnn_denoiser \
-    denoiser.minimpnn.augment_eps=0.2 \
+    denoiser.minimpnn.model_type=sidechain \
+    denoiser.minimpnn.augment_eps=0.0 \
     denoiser.scn_diffusion_module.training_batch_size_mult=8 \
-    denoiser.autoguidance.enabled=true \
     optim.optimizer=noam \
-    checkpointing.save_latest_every_n_epochs=20 \
-    checkpointing.save_ema_every_n_epochs=5 \
-    trainer.check_val_every_n_epoch=20 \
+    checkpointing.save_latest_every_n_steps=5000 \
+    checkpointing.save_ema_every_n_steps=1500 \
+    trainer.check_val_every_n_epoch=10 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
