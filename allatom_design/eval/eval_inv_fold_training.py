@@ -90,9 +90,12 @@ def main(cfg: DictConfig):
     dataset = None  # we will load the dataset based on the model config
 
     pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints")
+    print(sd_ckpts)
     for sd_ckpt in pbar:
         match = pattern.search(Path(sd_ckpt).name)
-        global_step, epoch = int(match.group(1)), int(match.group(2))
+        epoch = int(match.group(1))
+        global_step = torch.load(sd_ckpt).get('global_step')
+
         pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
 
         # Skip if global_step is before start_step
@@ -161,6 +164,8 @@ def main(cfg: DictConfig):
                         num_corrector_steps=cfg.num_corrector_steps,
                         corrector_step_ratio=cfg.corrector_step_ratio,
                         cond_labels=cond_labels_in,
+                        aatype_override=torch.zeros((S+1, x.shape[0], x.shape[1])),
+                        aatype_override_mask=seq_mask,
                         scd_inputs=scd_inputs,
                     )
 

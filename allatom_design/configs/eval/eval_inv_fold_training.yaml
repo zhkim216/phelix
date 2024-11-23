@@ -26,7 +26,7 @@ data:
     designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
     n_random_subset: null
 
-subset_length_range: [64, 256]  # only evaluate on sequences within this length range
+subset_length_range: [64,256] # only evaluate on sequences within this length range
 
 # Inverse folding options
 temperature: 0.1
