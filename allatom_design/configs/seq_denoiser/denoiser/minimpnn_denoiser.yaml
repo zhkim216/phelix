@@ -181,7 +181,7 @@ confidence_module:
 
   # Sidechain diffusion parameters
   scn_diffusion:
-    num_steps: 50
+    num_steps: 20
     timestep_schedule:
       num_steps: ${..num_steps}
       mode: "linear"
