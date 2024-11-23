@@ -64,7 +64,8 @@ def apply_mutation_batched(x: TensorType["b n a 3", float],
     # Mask the amino acid type
     aatype_masked = aatype.clone()
     aatype_masked = torch.where(seq_mlm_mask.bool(), aatype, rc.restype_order_with_x["X"]) #is this okay? it sets padded positions to X as well lol
-    
+    aatype_masked = torch.where(seq_mask.bool(), aatype_masked, 0) #fixed this^ by repadding with 0, which is also weird cause thats alanine lol 
+
     return x_masked, seq_mlm_mask, aatype_masked, mut_positions, mut_res_idxs, wt_res_idxs, wt_example_mask
 
 def mutate_whole_seq(model,
@@ -74,7 +75,6 @@ def mutate_whole_seq(model,
                      seq_mask: TensorType["b n", int], 
                      residue_index: TensorType["b n", int],
                      chain_index: TensorType["b n", int],
-                     confidence: TensorType["b n", float],
                      scd_inputs: Dict,
                      max_number_muts: int,
                     ) -> Tuple[TensorType["b n a 3", float],
@@ -97,7 +97,6 @@ def mutate_whole_seq(model,
                           residue_index=residue_index,
                           seq_mask=seq_mask,
                           chain_encoding=chain_index,
-                          confidence=confidence,
                           aux_inputs=aux_inputs,
                           t=torch.ones_like(seq_mask),
                           is_sampling=True)
@@ -140,7 +139,6 @@ def score_seq(model,
               seq_mask: TensorType["b n", int], 
               residue_index: TensorType["b n", int],
               chain_index: TensorType["b n", int],
-              confidence: TensorType["b n", float], 
               mutations: List[List[str]],
               scd_inputs: Dict,
               method: str
@@ -159,7 +157,6 @@ def score_seq(model,
             seq_mask=seq_mask,
             residue_index=residue_index,
             chain_index=chain_index,
-            confidence=confidence            
         )
     
         scores = logits[torch.arange(len(logits)), mut_positions, mut_res_idxs] - logits[torch.arange(len(logits)), mut_positions, wt_res_idxs] 
@@ -180,7 +177,6 @@ def score_seq(model,
                                                                                                         seq_mask=seq_mask, 
                                                                                                         residue_index=residue_index,
                                                                                                         chain_index=chain_index,
-                                                                                                        confidence=confidence,
                                                                                                         scd_inputs=scd_inputs,
                                                                                                         max_number_muts=max_number_muts
                                                                                                         )
@@ -204,7 +200,6 @@ def score_seq(model,
                 seq_mask=seq_mask,
                 residue_index=residue_index,
                 chain_index=chain_index,
-                confidence=confidence            
             )
 
             scores[:, mut_num] = logits[torch.arange(len(logits)), mut_positions[:, mut_num], mut_res_idxs[:, mut_num]] - logits[torch.arange(len(logits)), mut_positions[:, mut_num], wt_res_idxs[:, mut_num]] 
@@ -230,7 +225,6 @@ def score_seq(model,
                                              seq_mask=seq_mask, 
                                              residue_index=residue_index,
                                              chain_index=chain_index,
-                                             confidence=confidence,
                                              scd_inputs=scd_inputs)
         
         for i in range(max_length):
@@ -261,7 +255,6 @@ def score_seq(model,
                 seq_mask=seq_mask[:, :max_length],
                 residue_index=residue_index[:, :max_length],
                 chain_index=chain_index[:, :max_length],
-                confidence=confidence[:, :max_length]
             )
 
             mut_logits = model.model.score(
@@ -271,7 +264,6 @@ def score_seq(model,
                 seq_mask=seq_mask[:, :max_length],
                 residue_index=residue_index[:, :max_length],
                 chain_index=chain_index[:, :max_length],
-                confidence=confidence[:, :max_length]           
             )
 
             pseudo_ppl_logits[:, i, :] = logits[:, i, :]
