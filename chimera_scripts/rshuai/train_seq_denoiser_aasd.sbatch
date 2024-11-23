@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b8_aasd2
+#SBATCH --job-name=b8_aasd4
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b8_aasd2
+EXP_NAME=b8_aasd4
 GROUP=chimera_b8
 
 # Dataset paths
@@ -47,6 +47,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.minimpnn.model_type=sidechain \
     denoiser.minimpnn.augment_eps=0.0 \
     denoiser.scn_diffusion_module.training_batch_size_mult=8 \
+    denoiser.confidence_module.enabled=true \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=5000 \
     checkpointing.save_ema_every_n_steps=1500 \

@@ -50,7 +50,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
                            ]:
 
         # 1. Sequence design
-        seq_logits, node_embs, edge_embs, x_bb = self.seq_design_module(
+        seq_logits, mpnn_feature_dict = self.seq_design_module(
             x_noised,
             aatype_noised,
             seq_mask,
@@ -72,10 +72,8 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         x1_pred = None
         if self.use_scn_diffusion:
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
-                node_embs,
-                edge_embs,
+                mpnn_feature_dict,
                 aatype_pred,
-                x_bb,
                 seq_mask=seq_mask,
                 residue_index=residue_index,
                 chain_index=chain_encoding,
@@ -87,6 +85,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
             if is_sampling:
                 # store the predicted sidechain coordinates with known backbone
+                x_bb = mpnn_feature_dict["X"][..., rc.atom14_bb_idxs, :]
                 x1_pred = cat_bb_scn(x_bb, x1_scn_pred)
 
 

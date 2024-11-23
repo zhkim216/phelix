@@ -138,9 +138,6 @@ class FaMPNN(nn.Module):
         # Prepare node and edge embeddings
         E, E_idx, X = self.features(X, seq_mask, residue_index, chain_encoding)
 
-        #save noised version of X_bb with augment eps for sidechain packing
-        X_bb = X[:,:,rc.atom14_bb_idxs, :]
-
         #h_V is size [B,N,H]
         h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
         h_E = self.W_e(E)
@@ -258,7 +255,8 @@ class FaMPNN(nn.Module):
         else:
             raise ValueError(f'Incorrect return embedding type specified: {self.return_embedding}, must be one of: encoder, decoder, gnn, or last!')
 
-        return logits, h_V_out, h_ESV, X_bb
+        mpnn_feature_dict = {"h_V": h_V_out, "h_ESV": h_ESV, "X": X, "atom14_mask": atom14_mask, "E_idx": E_idx, "S": S}
+        return logits, mpnn_feature_dict
 
 
 class ProteinFeatures(nn.Module):
