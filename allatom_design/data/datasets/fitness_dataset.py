@@ -53,7 +53,7 @@ class FitDataset(ADDataset):
 
             # Cache the data
             pdb_data_file = f"{self.pdb_path}/pdbs/{pdb_key}.pdb"
-            example = load_feats_from_pdb(pdb_data_file, chain_residx_gap=None)
+            example = load_feats_from_pdb(pdb_data_file, chain_ids_override=None, max_conformers=1)
             torch.save(example, f"{cache_dir}/{pdb_key}.pt")
 
     def parse_mutation_csv(self, csv_path):
@@ -96,7 +96,7 @@ class FitDataset(ADDataset):
         example["ghost_atom_mask"] = data["ghost_atom_mask"]
         example["missing_atom_mask"] = data["missing_atom_mask"]
         example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
-        example['res_b_factors'] = data['res_b_factors']
+        example['chain_ids'] = data['chain_ids']
 
         # Construct conditioning inputs
         cond_labels_in = {}

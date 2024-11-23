@@ -69,11 +69,8 @@ class ADDataset(data.Dataset):
         self.translation_scale = translation_scale
         self.overwrite_cache = overwrite_cache
         self.subset_length_range = subset_length_range
-<<<<<<< HEAD
         self.cluster_sample = True #cluster_sample
-=======
         self.afdb_res_plddt_cutoff = afdb_res_plddt_cutoff
->>>>>>> origin/rshuai/scn-diffusion-improvements
 
         # Read in PDB keys
         self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
@@ -210,19 +207,17 @@ class ADDataset(data.Dataset):
 
         # Add designability info
         cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
-        if self.designability_csv:
+        if self.designability_csv and self.pdb_path.endswith("ingraham_cath_dataset"):
             cond_labels_in["designability"] = self.pdb_to_designability[pdb_key[:4]]
 
-<<<<<<< HEAD
         # Calculate cropping, handled differently for multimers
         multimer_crop_mask = None
         start_idx = None
-=======
+
         # Add dataset source label
         cond_labels_in["dataset_source"] = cl.TOKEN_TO_ID["dataset_source"][self.dataset_source_label]
 
         # Calculate random cropping start index
->>>>>>> origin/rshuai/scn-diffusion-improvements
         orig_size = example["x"].shape[0]
         extra_len = orig_size - self.fixed_size
         if extra_len > 0:
@@ -270,38 +265,24 @@ class ADDataset(data.Dataset):
         data_file = f"{self.pdb_path}/cached_examples/{pdb_key}.pt"
         return data_file
 
-<<<<<<< HEAD
-=======
-
-    def _get_pdb_data_file(self, pdb_key: str) -> str:
-        if self.pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
-            pdb_data_file = f"{self.pdb_path}/pdb_store/{pdb_key}"
-        elif self.pdb_path.endswith("afdb"):  # AFDB augmentation dataset
-            pdb_data_file = f"{self.pdb_path}/foldseek_cluster_reps/{pdb_key}.cif"
-        elif self.pdb_path.endswith("qfit-test-set/rcsb-pdb"):
-            pdb_data_file = f"{self.pdb_path}/all/{pdb_key}.pdb1"  # qfit dataset, use only pdb1s for now
-        elif self.pdb_path.endswith("rcsb_test_cases"):
-            pdb_data_file = f"{self.pdb_path}/pdbs/{pdb_key}.pdb"
-        else:
-            assert False, f"Unknown dataset: {self.pdb_path}"
-        return pdb_data_file
-
-
     def _get_dataset_source_label(self) -> str:
         if self.pdb_path.endswith("ingraham_cath_dataset"):
             dataset_source_label = "EXPERIMENTAL"
         elif self.pdb_path.endswith("afdb"):
             dataset_source_label = "SYNTHETIC"
+        elif self.pdb_path.endswith("af3_pdb"):
+            dataset_source_label = "EXPERIMENTAL"
         elif self.pdb_path.endswith("qfit-test-set/rcsb-pdb"):
             dataset_source_label = "EXPERIMENTAL"
         elif self.pdb_path.endswith("rcsb_test_cases"):
+            dataset_source_label = "EXPERIMENTAL"
+        elif self.pdb_path.endswith("casp13") or self.pdb_path.endswith("casp14") or self.pdb_path.endswith("casp15"):
             dataset_source_label = "EXPERIMENTAL"
         else:
             assert False, f"Unknown dataset: {self.pdb_path}"
         return dataset_source_label
 
 
->>>>>>> origin/rshuai/scn-diffusion-improvements
     def _cache_examples(self):
         """
         Reads in PDB files and caches the examples to disk.

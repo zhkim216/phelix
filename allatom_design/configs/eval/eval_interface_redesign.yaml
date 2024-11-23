@@ -1,0 +1,53 @@
+# Wandb configuration
+project: "allatom_design"  # Wandb project name
+wandb_id: "richardshuai"  # Wandb username
+exp_name: null # Wandb exp name
+group: "debug" # Wandb group name
+
+# Run settings
+no_wandb: false  # Disable wandb logging
+seed: 0
+batch_size: 64
+num_workers: 10
+
+# Denoiser options
+checkpoint_path: null
+
+# Inverse folding options
+aatype_decoding_order_mode: "greedy"
+num_corrector_steps: 0
+corrector_step_ratio: 0.5
+num_steps_list: [1, 20, 100]  # number of denoising steps for inverse folding
+positions: null
+timestep_schedule:
+  num_steps: null  # will be filled in by num_steps_list
+  mode: "linear"
+  t_start: 0.0
+  t_end: 1.0
+
+scn_diffusion:
+  # Sidechain diffusion parameters
+  num_steps: 50
+  timestep_schedule:
+    num_steps: ${scn_diffusion.num_steps}
+    mode: "linear"
+    t_start: 0.0
+    t_end: 1.0
+  noise_schedule:
+    name: "step_scale"
+    c: 1.4
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${scn_diffusion.num_steps}
+
+  # Autoguidance
+  autoguidance_cfg:
+    use_autoguidance: false
+    w: 1.0
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
