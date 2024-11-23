@@ -7,7 +7,7 @@ group: "debug" # Wandb group name
 # Run settings
 no_wandb: false  # Disable wandb logging
 seed: 0
-start_epoch: 0  # start evaluation after this epoch, 0 or null to start from the beginning
+start_step: 0  # start evaluation after this epoch, 0 or null to start from the beginning
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 batch_size: 64
 num_workers: 10
@@ -29,6 +29,7 @@ data:
 subset_length_range: [64, 256]  # only evaluate on sequences within this length range
 
 # Inverse folding options
+temperature: 0.1
 aatype_decoding_order_mode: "greedy"
 num_corrector_steps: 0
 corrector_step_ratio: 0.5
@@ -56,11 +57,6 @@ scn_diffusion:
     s_t_min: 0.01
     s_t_max: 50.0
     num_steps: ${scn_diffusion.num_steps}
-
-  # Autoguidance
-  autoguidance_cfg:
-    use_autoguidance: false
-    w: 1.0
 
 # Co-design self-consistency eval options
 num_codes_sc_batches: 1

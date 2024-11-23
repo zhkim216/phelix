@@ -36,9 +36,6 @@ def get_decoding_order(mode: str,
             chunks = torch.split(indices, chunk_sizes.tolist())
             chunks = [chunks[i] for i in torch.randperm(len(chunks))]
             res_decoding_order[i, :lengths[i]] = torch.cat(chunks)
-    elif mode == "random_bidirectional":
-        indices = get_random_bidirectional(seq_mask)
-        res_decoding_order = torch.argsort(indices, dim=-1)
     else:
         res_decoding_order = torch.where(seq_mask.bool(), torch.rand_like(seq_mask), 1.0e6)  # decode padded positions last
         res_decoding_order = res_decoding_order.argsort(dim=-1)
@@ -51,7 +48,7 @@ def get_confidence_decoding_order(mode: str,
                                   unmasked_prev: TensorType["b n", int]) -> TensorType["b n", int]:
     """
     Use sequence probabilities to decide a confidence based sampling order
-    """        
+    """
     if mode == 'greedy':
         confidence, _ = torch.max(seq_probs, dim = -1)
         confidence = torch.where(seq_mask == 0, -1e6, confidence) #padded tokens sent to end of order
@@ -62,58 +59,47 @@ def get_confidence_decoding_order(mode: str,
 
     return confidence_decoding_order
 
-def unmask(xt,
-           aatype_t,
-           x1_pred, 
-           aatype_pred,
-           aux_preds,
-           unmasked_prev,
-           K,
-           aatype_decoding_order,
-           aatype_decoding_order_mode,
-           seq_mask, 
-           aux_inputs) -> Tuple[TensorType["b n a 3", float],
-                      TensorType["b n", int],
-                      TensorType["b n", int]]:
-    
-    if aatype_decoding_order_mode in ['greedy']: 
+
+def update_mlm_mask(mlm_mask: TensorType["b n", float],
+                    aatype_decoding_order: TensorType["b n", int],
+                    aatype_decoding_order_mode: str,
+                    K: TensorType["b", int],
+                    seq_mask: TensorType["b n", float],
+                    seq_probs: TensorType["b n k", float],
+                    ) -> TensorType["b n", float]:
+    """
+    Update mlm_mask so that K total residues are unmasked.
+    """
+    mlm_mask_prev = mlm_mask.clone()
+    if aatype_decoding_order_mode in ['greedy']:
         aatype_decoding_order = get_confidence_decoding_order(mode=aatype_decoding_order_mode,
-                                                              seq_mask=seq_mask, 
-                                                              seq_probs=aux_preds['seq_probs'],
-                                                              unmasked_prev=unmasked_prev)
+                                                              seq_probs=seq_probs,
+                                                              seq_mask=seq_mask,
+                                                              unmasked_prev=mlm_mask_prev)
 
     ## using decoding order to decide positions to unmask
-    num_unmasked = torch.sum(unmasked_prev, dim = -1)[:,None]
-    residues_to_unmask = (aatype_decoding_order >= num_unmasked) & (aatype_decoding_order < K[:,None])
-    aatype_t = torch.where(residues_to_unmask, aatype_pred, aatype_t) 
-    unmasked_residues = residues_to_unmask + unmasked_prev
-    aux_inputs['seq_mlm_mask'] = unmasked_residues.clone() # just being safe now, but can prob change this
-    unmasked_prev = unmasked_residues.clone() # just being safe now, but can prob change this
-    
-    ## Repack sidechains of all unmasked residues, if using an aasd model
-    if x1_pred is not None:
-        xt = torch.where(unmasked_residues[..., None, None] ==  1, x1_pred, xt)
+    residues_to_unmask = (~mlm_mask_prev.bool()) & (aatype_decoding_order < K[:,None])
+    mlm_mask = residues_to_unmask + mlm_mask_prev
+    return mlm_mask
 
-    return xt, aatype_t, unmasked_prev
 
-def get_random_bidirectional(seq_mask: TensorType["b n", float]) -> TensorType["b n", int]:
+def unmask(curr: TensorType["b n ..."],
+           pred: TensorType["b n ..."],
+           mlm_mask_prev: TensorType["b n", float],
+           mlm_mask: TensorType["b n", float]) -> TensorType["b n ..."]:
     """
-    Start from a random position and decode residues randomly in both directions.
+    Update curr based on pred and newly unmasked residues.
     """
-    B, N = seq_mask.shape
-    p = torch.rand((B, ), device=seq_mask.device)  # choose percentage of residues to generate to the left; uniform
-    p = torch.stack([p, 1 - p], dim=1)
+    residues_to_unmask = mlm_mask - mlm_mask_prev
 
-    partition_flags = torch.multinomial(p, num_samples=N, replacement=True) + 1  # 1=generate to the left, 2=generate to the right
-    partition_flags = partition_flags * seq_mask.long()  # mask out residues that are not in the sequence
-    partition_flags[:, 0] = 0  # the first residue is not a shift
+    # Expand to data dims
+    n_data_dims = len(curr.shape) - 2
+    residues_to_unmask = residues_to_unmask.view(residues_to_unmask.shape + (1,) * n_data_dims)
 
-    start_idx = (partition_flags == 1).sum(dim=1)  # we start based on the number of residues to the left
-    counts = torch.where(partition_flags == 1, torch.cumsum(-1 * (partition_flags == 1), dim=1), partition_flags)
-    counts = torch.where(partition_flags == 2, torch.cumsum(partition_flags == 2, dim=1), counts)
+    # Unmask residues
+    curr = torch.where(residues_to_unmask.bool(), pred, curr)
 
-    indices = (counts + start_idx[..., None]) * seq_mask.long() # add shifts to start index
-    return indices
+    return curr
 
 
 def get_timesteps_from_schedule(mode: str,
@@ -141,6 +127,9 @@ def get_timesteps_from_schedule(mode: str,
     elif mode == "last_only":
         timesteps = torch.zeros_like(timesteps)
         timesteps[-1] = 1.0
+    elif mode == "first_only":
+        timesteps = torch.ones_like(timesteps)
+        timesteps[0] = 0.0
     else:
         raise NotImplementedError(f"timestep schedule mode {mode} not implemented")
 

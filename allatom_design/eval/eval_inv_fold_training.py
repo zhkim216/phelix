@@ -83,7 +83,7 @@ def main(cfg: DictConfig):
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     # Get checkpoints from denoiser training run
-    pattern = re.compile(r"sd-epoch\d+\.ckpt$")  # only consider ckpts of form sd-epochXXXX.ckpt
+    pattern = re.compile(r"sd-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form sd-step{step}-epoch{epoch}.ckpt
     sd_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
     sd_ckpts = natsorted([ckpt for ckpt in sd_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
 
@@ -91,10 +91,12 @@ def main(cfg: DictConfig):
 
     pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints")
     for sd_ckpt in pbar:
-        # Skip if epoch is before start_epoch
-        epoch = int(Path(sd_ckpt).stem.replace("sd-epoch", ""))
-        pbar.set_postfix_str(f"Epoch: {epoch}")
-        if (cfg.start_epoch is not None) and (epoch < cfg.start_epoch):
+        match = pattern.search(Path(sd_ckpt).name)
+        global_step, epoch = int(match.group(1)), int(match.group(2))
+        pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
+
+        # Skip if global_step is before start_step
+        if (cfg.start_step is not None) and (global_step < cfg.start_step):
             continue
 
         # Load denoiser model and dataset
@@ -120,7 +122,6 @@ def main(cfg: DictConfig):
                       "timesteps": None,  # filled in based on batch size
                       "noise_schedule": noise_schedule,
                       "churn_cfg": churn_cfg,
-                      "autoguidance_cfg": dict(cfg.scn_diffusion.autoguidance_cfg),
                       "return_scn_diffusion_aux": False
                       }
 
@@ -155,6 +156,7 @@ def main(cfg: DictConfig):
                         residue_index=residue_index,
                         chain_index=chain_index,
                         timesteps=timesteps,
+                        temperature=cfg.temperature,
                         aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
                         num_corrector_steps=cfg.num_corrector_steps,
                         corrector_step_ratio=cfg.corrector_step_ratio,
@@ -255,8 +257,10 @@ def main(cfg: DictConfig):
                         residue_index=residue_index,
                         chain_index=chain_index,
                         timesteps=timesteps,
+                        temperature=cfg.temperature,
                         aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
                         num_corrector_steps=cfg.num_corrector_steps,
+                        corrector_step_ratio=cfg.corrector_step_ratio,
                         cond_labels=cond_labels_in,
                         scd_inputs=scd_inputs,
                     )
@@ -296,8 +300,6 @@ def main(cfg: DictConfig):
 
         # Log metrics to wandb
         if not cfg.no_wandb:
-            # Get global step
-            global_step = torch.load(sd_ckpt, map_location="cpu")["global_step"]
             metrics["trainer/global_step"] = global_step
             metrics["trainer/epoch"] = epoch
 
