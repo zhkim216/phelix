@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=eval_fitness
+#SBATCH --job-name=eval_interface_redesign
 #SBATCH -p gpu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -9,6 +9,8 @@
 #SBATCH --output=/scratch/hielab/talal/slurm_log_files/job_%j.out
 #SBATCH --error=/scratch/hielab/talal/slurm_log_files/job_%j.err
 #
+## Write batch script to logs
+scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 # Set base directories
 BASE_DIR=/home/talal/allatom-design
@@ -27,8 +29,7 @@ export TORCH_HOME=/scratch/hielab/talal/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/talal/cache/omegafold/omegafold.pt
 
 # Model to evaluate
-MODEL_NAME=b8_aasd3
-DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
+CHECKPOINT_PATH=/scratch/hielab/talal/allatom_design/allatom_design/aasd_gvp_pdb/checkpoints/sd-epoch59.ckpt
 
 # Wandb settings / experiment name
 WANDB_ID=talal-widatalla
@@ -41,17 +42,21 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
-    denoiser_train_dir=${DENOISER_TRAIN_DIR} \
+    no_wandb=true \
+    checkpoint_path=${CHECKPOINT_PATH}\
     num_workers=${SLURM_CPUS_ON_NODE} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
-    start_step=0 \
+    start_epoch=50 \
+    aatype_decoding_order_mode=greedy \
+    corrector_step_ratio=0.5 \
+    num_corrector_steps=0 \
+    num_steps_list=[5] \
     eval_every_n_ckpts=1 \
-    batch_size=64 \
+    batch_size=4 \
     run_seq_recovery=true \
     run_codes_sc=false \
-    no_wandb=true \
     num_codes_sc_batches=1 \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
+    subset_length_range=[64,256] \
     hydra.run.dir=${HYDRA_DIR}

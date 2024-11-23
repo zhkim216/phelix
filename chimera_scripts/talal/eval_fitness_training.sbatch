@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=eval_fitness
-#SBATCH -p gpu
+#SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=23:59:00
+#SBATCH --time=97:59:00
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/talal/slurm_log_files/job_%j.out
@@ -25,12 +25,12 @@ export TORCH_HOME=/scratch/hielab/talal/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/talal/cache/omegafold/omegafold.pt
 
 # Model to evaluate
-MODEL_NAME=aasd_sidechain_pdb_0.3
+#MODEL_NAME=aasd_sidechain_pdb_0.3
 DENOISER_TRAIN_DIR=/scratch/hielab/talal/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
+#EXP_NAME=${MODEL_NAME}_fitness
 WANDB_ID=talal-widatalla
-EXP_NAME=${MODEL_NAME}_fitness
 GROUP=fitness_eval
 
 # Run training script
@@ -38,13 +38,13 @@ cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_fitness_training.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
-    no_wandb=true \
+    no_wandb=false \
     group=${GROUP} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     start_epoch=0 \
-    eval_every_n_ckpts=4 \
+    eval_every_n_ckpts=1 \
     batch_size=8\
-    datasets=[skempi_ppi] \
+    datasets=[skempi_ppi,fireprot,fireprot_homologue_free,g6,cr6261_h1,cr6261_h9,megascale,megascale_test,s669,skempi] \
     hydra.run.dir=${HYDRA_DIR} \
     data.overwrite_cache=false \

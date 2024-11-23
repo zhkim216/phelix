@@ -8,6 +8,7 @@ from omegaconf import DictConfig
 
 def get_decoding_order(mode: str,
                        seq_mask: TensorType["b n", float],
+                       mlm_mask_prev: TensorType["b n", int],
                        **kwargs) -> TensorType["b n", int]:
     """
     Get the order in which residues should be decoded, from 0 to N-1.
@@ -24,7 +25,8 @@ def get_decoding_order(mode: str,
 
     if mode == "autoregressive":
         res_decoding_order = torch.arange(N, device=seq_mask.device).expand(B, N)
-        res_decoding_order = torch.where(seq_mask.bool(), res_decoding_order, 1.0e6)  # decode padded positions last
+        res_decoding_order = torch.where(seq_mask.bool(), res_decoding_order, 1.0e6)  # move padded positions to end of order
+        res_decoding_order = torch.where(mlm_mask_prev.bool(), res_decoding_order, 1.0e6) # move already unmaksed positions to end of order
     elif mode == "random_spans":
         timesteps = kwargs["timesteps"]
         lengths = seq_mask.sum(dim=-1).long()
@@ -45,14 +47,14 @@ def get_decoding_order(mode: str,
 def get_confidence_decoding_order(mode: str,
                                   seq_probs: TensorType["b n", float],
                                   seq_mask: TensorType["b n", float],
-                                  unmasked_prev: TensorType["b n", int]) -> TensorType["b n", int]:
+                                  mlm_mask_prev: TensorType["b n", int]) -> TensorType["b n", int]:
     """
     Use sequence probabilities to decide a confidence based sampling order
     """
     if mode == 'greedy':
         confidence, _ = torch.max(seq_probs, dim = -1)
         confidence = torch.where(seq_mask == 0, -1e6, confidence) #padded tokens sent to end of order
-        confidence = torch.where(unmasked_prev == 1, 1e6, confidence) #previously unmasked tokens sent to beginning of order
+        confidence = torch.where(mlm_mask_prev == 1, 1e6, confidence) #previously unmasked tokens sent to beginning of order
         confidence_decoding_order = torch.argsort(torch.argsort(confidence, dim = -1, descending = True)) #update decoding order based on confidence
     else:
         raise ValueError(f'Confidence mode {mode} has not been implemented yet!')
@@ -75,7 +77,7 @@ def update_mlm_mask(mlm_mask: TensorType["b n", float],
         aatype_decoding_order = get_confidence_decoding_order(mode=aatype_decoding_order_mode,
                                                               seq_probs=seq_probs,
                                                               seq_mask=seq_mask,
-                                                              unmasked_prev=mlm_mask_prev)
+                                                              mlm_mask_prev=mlm_mask_prev)
 
     ## using decoding order to decide positions to unmask
     residues_to_unmask = (~mlm_mask_prev.bool()) & (aatype_decoding_order < K[:,None])
