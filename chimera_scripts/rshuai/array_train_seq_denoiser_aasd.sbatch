@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=b8_aasd4_noise_schedule
+#SBATCH --job-name=b9_aasd0_mpnn_nchannel
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=36:00:00
-#SBATCH --array=0-4%5
+#SBATCH --array=0-1%2
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -24,28 +24,26 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-# Define arrays for psigma_mean and psigma_std
-psigma_mean_values=(1.0 1.0 1.5 2.0 2.0)
-psigma_std_values=(1.5 1.0 1.2 1.0 1.2)
+# Define array for n_channel
+n_channel_values=(196 256)
 
 # Calculate indices
-total_jobs=${#psigma_mean_values[@]}
+total_jobs=${#n_channel_values[@]}
 
 psigma_idx=$SLURM_ARRAY_TASK_ID
 
-# Get the current psigma_mean and psigma_std based on index
-PSIGMA_MEAN=${psigma_mean_values[$psigma_idx]}
-PSIGMA_STD=${psigma_std_values[$psigma_idx]}
+# Get the current n_channel based on index
+N_CHANNEL=${n_channel_values[$psigma_idx]}
 
-# Set experiment name and group, including psigma_mean and psigma_std
-EXP_NAME=b8_aasd4_mean${PSIGMA_MEAN}_std${PSIGMA_STD}
-GROUP=chimera_b8
+# Set experiment name and group, including n_channel
+EXP_NAME=b9_aasd0_mpnn_nchannel${N_CHANNEL}
+GROUP=chimera_b9
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
-# Run training script with the selected psigma_mean and psigma_std
+# Run training script with the selected n_channel
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
@@ -64,11 +62,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.minimpnn.model_type=sidechain \
     denoiser.minimpnn.augment_eps=0.3 \
     denoiser.scn_diffusion_module.training_batch_size_mult=8 \
+    denoiser.minimpnn.n_channel=${N_CHANNEL} \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=5000 \
     checkpointing.save_ema_every_n_steps=1500 \
     trainer.check_val_every_n_epoch=10 \
-    denoiser.interpolant.training_noise_cfg.lognormal.psigma_mean=${PSIGMA_MEAN} \
-    denoiser.interpolant.training_noise_cfg.lognormal.psigma_std=${PSIGMA_STD} \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
