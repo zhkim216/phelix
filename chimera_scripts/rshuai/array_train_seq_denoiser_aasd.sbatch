@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b9_aasd4_mlp_dropout
+#SBATCH --job-name=b9_aasd5_mlp_ratio
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,26 +24,26 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-# Define array for mlp_dropout
-mlp_dropout_values=(0.1 0.2)
+# Define array for mlp_ratio
+mlp_ratio_values=(1.0 2.0)
 
 # Calculate indices
-total_jobs=${#mlp_dropout_values[@]}
+total_jobs=${#mlp_ratio_values[@]}
 
-mlp_dropout_idx=$SLURM_ARRAY_TASK_ID
+mlp_ratio_idx=$SLURM_ARRAY_TASK_ID
 
-# Get the current mlp_dropout based on index
-MLP_DROPOUT=${mlp_dropout_values[$mlp_dropout_idx]}
+# Get the current mlp_ratio based on index
+MLP_RATIO=${mlp_ratio_values[$mlp_ratio_idx]}
 
-# Set experiment name and group, including mlp_dropout
-EXP_NAME=b9_aasd4_mlp_dropout${MLP_DROPOUT}
+# Set experiment name and group, including mlp_ratio
+EXP_NAME=b9_aasd5_mlp_ratio${MLP_RATIO}
 GROUP=chimera_b9
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
-# Run training script with the selected mlp_dropout
+# Run training script with the selected mlp_ratio
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
@@ -64,8 +64,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.scn_diffusion_module.training_batch_size_mult=8 \
     denoiser.scn_diffusion_module.hidden_size=256 \
     denoiser.scn_diffusion_module.scn_denoiser.depth=4 \
-    denoiser.scn_diffusion_module.scn_denoiser.mlp_dropout=${MLP_DROPOUT} \
-    denoiser.scn_diffusion_module.scn_denoiser.mlp_ratio=4.0 \
+    denoiser.scn_diffusion_module.scn_denoiser.mlp_dropout=0.0 \
+    denoiser.scn_diffusion_module.scn_denoiser.mlp_ratio=${MLP_RATIO} \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=5000 \
     checkpointing.save_ema_every_n_steps=1500 \
