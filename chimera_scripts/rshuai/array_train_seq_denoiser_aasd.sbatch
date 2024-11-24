@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=b9_aasd3_depth
+#SBATCH --job-name=b9_aasd4_mlp_dropout
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=36:00:00
-#SBATCH --array=0-2%3
+#SBATCH --array=0-1%2
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -24,26 +24,26 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-# Define array for depth
-depth_values=(2 3 6)
+# Define array for mlp_dropout
+mlp_dropout_values=(0.1 0.2)
 
 # Calculate indices
-total_jobs=${#depth_values[@]}
+total_jobs=${#mlp_dropout_values[@]}
 
-depth_idx=$SLURM_ARRAY_TASK_ID
+mlp_dropout_idx=$SLURM_ARRAY_TASK_ID
 
-# Get the current depth based on index
-DEPTH=${depth_values[$depth_idx]}
+# Get the current mlp_dropout based on index
+MLP_DROPOUT=${mlp_dropout_values[$mlp_dropout_idx]}
 
-# Set experiment name and group, including depth
-EXP_NAME=b9_aasd3_depth${DEPTH}
+# Set experiment name and group, including mlp_dropout
+EXP_NAME=b9_aasd4_mlp_dropout${MLP_DROPOUT}
 GROUP=chimera_b9
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
-# Run training script with the selected depth
+# Run training script with the selected mlp_dropout
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
@@ -63,8 +63,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.minimpnn.augment_eps=0.3 \
     denoiser.scn_diffusion_module.training_batch_size_mult=8 \
     denoiser.scn_diffusion_module.hidden_size=256 \
-    denoiser.scn_diffusion_module.scn_denoiser.depth=${DEPTH} \
-    denoiser.scn_diffusion_module.scn_denoiser.mlp_dropout=0.0 \
+    denoiser.scn_diffusion_module.scn_denoiser.depth=4 \
+    denoiser.scn_diffusion_module.scn_denoiser.mlp_dropout=${MLP_DROPOUT} \
     denoiser.scn_diffusion_module.scn_denoiser.mlp_ratio=4.0 \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=5000 \
