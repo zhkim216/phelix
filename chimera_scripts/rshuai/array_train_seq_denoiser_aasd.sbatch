@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b9_aasd2_hidden_size
+#SBATCH --job-name=b9_aasd3_depth
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,26 +24,26 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-# Define array for hidden_size
-hidden_size_values=(128 196 384)
+# Define array for depth
+depth_values=(2 3 6)
 
 # Calculate indices
-total_jobs=${#hidden_size_values[@]}
+total_jobs=${#depth_values[@]}
 
-hidden_size_idx=$SLURM_ARRAY_TASK_ID
+depth_idx=$SLURM_ARRAY_TASK_ID
 
-# Get the current hidden_size based on index
-HIDDEN_SIZE=${hidden_size_values[$hidden_size_idx]}
+# Get the current depth based on index
+DEPTH=${depth_values[$depth_idx]}
 
-# Set experiment name and group, including hidden_size
-EXP_NAME=b9_aasd2_hidden_size${HIDDEN_SIZE}
+# Set experiment name and group, including depth
+EXP_NAME=b9_aasd3_depth${DEPTH}
 GROUP=chimera_b9
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
-# Run training script with the selected hidden_size
+# Run training script with the selected depth
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
@@ -62,8 +62,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.minimpnn.model_type=sidechain \
     denoiser.minimpnn.augment_eps=0.3 \
     denoiser.scn_diffusion_module.training_batch_size_mult=8 \
-    denoiser.scn_diffusion_module.hidden_size=${HIDDEN_SIZE} \
-    denoiser.scn_diffusion_module.scn_denoiser.depth=4 \
+    denoiser.scn_diffusion_module.hidden_size=256 \
+    denoiser.scn_diffusion_module.scn_denoiser.depth=${DEPTH} \
     denoiser.scn_diffusion_module.scn_denoiser.mlp_dropout=0.0 \
     denoiser.scn_diffusion_module.scn_denoiser.mlp_ratio=4.0 \
     optim.optimizer=noam \
