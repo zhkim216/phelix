@@ -145,6 +145,7 @@ class ConfidenceEncoder(nn.Module):
         # Make input node and edge embeddings
         h_V = mpnn_feature_dict["h_V"]  # initialize to node embeddings from MPNN
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
+        # h_ESV = torch.zeros_like(h_ESV)  # DEBUG: ablate encoding of original structure
         h_ESV = h_ESV + mpnn_feature_dict["h_ESV"]  # add MPNN edge embeddings
 
         mask = rearrange(seq_mask, "b n -> b n 1 1").expand_as(h_ESV)
