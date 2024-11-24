@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=b8_aasd1_noise_schedule
+#SBATCH --job-name=b8_aasd4_noise_schedule
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=36:00:00
-#SBATCH --array=0-7%8
+#SBATCH --array=0-4%5
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -25,8 +25,8 @@ WANDB_ID=richardshuai
 cd $BASE_DIR
 
 # Define arrays for psigma_mean and psigma_std
-psigma_mean_values=(-1.2 1.0 1.0 1.5 1.5 2.0 2.0 2.5)
-psigma_std_values=(1.2 1.5 1.0 1.0 1.2 1.0 1.2 1.2)
+psigma_mean_values=(1.0 1.0 1.5 2.0 2.0)
+psigma_std_values=(1.5 1.0 1.2 1.0 1.2)
 
 # Calculate indices
 total_jobs=${#psigma_mean_values[@]}
@@ -38,7 +38,7 @@ PSIGMA_MEAN=${psigma_mean_values[$psigma_idx]}
 PSIGMA_STD=${psigma_std_values[$psigma_idx]}
 
 # Set experiment name and group, including psigma_mean and psigma_std
-EXP_NAME=b8_aasd1_mean${PSIGMA_MEAN}_std${PSIGMA_STD}
+EXP_NAME=b8_aasd4_mean${PSIGMA_MEAN}_std${PSIGMA_STD}
 GROUP=chimera_b8
 
 # Dataset paths
@@ -62,7 +62,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     interpolant.training_noise_schedule=uniform_sqrt_t \
     denoiser=minimpnn_denoiser \
     denoiser.minimpnn.model_type=sidechain \
-    denoiser.minimpnn.augment_eps=0.0 \
+    denoiser.minimpnn.augment_eps=0.3 \
     denoiser.scn_diffusion_module.training_batch_size_mult=8 \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=5000 \
