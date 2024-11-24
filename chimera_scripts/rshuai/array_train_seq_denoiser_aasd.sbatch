@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b9_aasd0_mpnn_nchannel
+#SBATCH --job-name=b9_aasd1_training_batch_size_mult
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,26 +24,26 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-# Define array for n_channel
-n_channel_values=(196 256)
+# Define array for training_batch_size_mult
+training_batch_size_mult_values=(2 4)
 
 # Calculate indices
-total_jobs=${#n_channel_values[@]}
+total_jobs=${#training_batch_size_mult_values[@]}
 
 psigma_idx=$SLURM_ARRAY_TASK_ID
 
-# Get the current n_channel based on index
-N_CHANNEL=${n_channel_values[$psigma_idx]}
+# Get the current training_batch_size_mult based on index
+TRAINING_BATCH_SIZE_MULT=${training_batch_size_mult_values[$psigma_idx]}
 
-# Set experiment name and group, including n_channel
-EXP_NAME=b9_aasd0_mpnn_nchannel${N_CHANNEL}
+# Set experiment name and group, including training_batch_size_mult
+EXP_NAME=b9_aasd1_training_batch_size_mult${TRAINING_BATCH_SIZE_MULT}
 GROUP=chimera_b9
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
-# Run training script with the selected n_channel
+# Run training script with the selected training_batch_size_mult
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
@@ -61,8 +61,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser=minimpnn_denoiser \
     denoiser.minimpnn.model_type=sidechain \
     denoiser.minimpnn.augment_eps=0.3 \
-    denoiser.scn_diffusion_module.training_batch_size_mult=8 \
-    denoiser.minimpnn.n_channel=${N_CHANNEL} \
+    denoiser.scn_diffusion_module.training_batch_size_mult=${TRAINING_BATCH_SIZE_MULT} \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=5000 \
     checkpointing.save_ema_every_n_steps=1500 \
