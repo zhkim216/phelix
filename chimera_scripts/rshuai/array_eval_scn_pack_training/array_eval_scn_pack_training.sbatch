@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=b8_aasd1_scn_pack
+#SBATCH --job-name=scn_pack_eval
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#SBATCH --array=0-7%4
+#SBATCH --array=0-17%5
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -29,21 +29,30 @@ DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmf
 
 # Define models array
 models=(
-  b8_aasd1_mean2.5_std1.2
-  b8_aasd1_mean2.0_std1.2
-  b8_aasd1_mean1.0_std1.0
-  b8_aasd1_mean1.5_std1.2
-  b8_aasd1_mean1.5_std1.0
-  b8_aasd1_mean2.0_std1.0
-  b8_aasd1_mean-1.2_std1.2
-  b8_aasd1_mean1.0_std1.5
+b9_aasd5_mlp_ratio2.0
+b9_aasd4_mlp_dropout0.1
+b9_aasd5_mlp_ratio1.0
+b9_aasd4_mlp_dropout0.2
+b9_aasd3_depth6
+b9_aasd3_depth2
+b9_aasd2_hidden_size128
+b9_aasd3_depth3
+b9_aasd2_hidden_size196
+b9_aasd2_hidden_size384
+b9_aasd2_hidden_size196
+b9_aasd2_hidden_size128
+b9_aasd2_hidden_size384
+b9_aasd1_training_batch_size_mult2
+b9_aasd1_training_batch_size_mult4
+b9_aasd0_mpnn_nchannel256
+b9_aasd0_mpnn_nchannel196
 )
 
 # Get model name from array
 MODEL_NAME=${models[$SLURM_ARRAY_TASK_ID]}
 
 EXP_NAME=${MODEL_NAME}_eval_scn_pack
-GROUP=b8_aasd1_scn_pack
+GROUP=b9_aasd_sweep
 
 # Set HF transformers cache
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
