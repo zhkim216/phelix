@@ -150,10 +150,10 @@ class MAR(SDInterpolant):
         Randomly drop out sidechains of unmasked aatypes.
         """
         # Sample probability of dropping sidechains (TODO: we can try different schedules for this)
-        drop_scn_t = torch.rand(x.shape[0], device=x.device)  # choose probability of dropping from uniform
+        keep_scn_t = torch.rand(x.shape[0], device=x.device)  # choose probability of keeping from uniform
 
         # Create sidechain mlm mask
-        scn_mlm_mask = torch.rand_like(seq_mlm_mask) < rearrange(drop_scn_t, "b -> b 1")  # [b n]
+        scn_mlm_mask = torch.rand_like(seq_mlm_mask) < rearrange(keep_scn_t, "b -> b 1")  # [b n]
         scn_mlm_mask = scn_mlm_mask * seq_mlm_mask  # sidechains should be dropped where aatype is masked
 
         # Noise sidechains
