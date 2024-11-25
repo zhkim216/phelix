@@ -13,6 +13,7 @@ from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import (
     DecLayer, EncLayer, ProteinFeatures, SidechainProteinFeatures,
     cat_neighbors_nodes, gather_nodes)
 from openfold.model.primitives import Linear
+import torch.nn.functional as F
 
 
 class SidechainConfidenceModule(nn.Module):
@@ -22,12 +23,20 @@ class SidechainConfidenceModule(nn.Module):
         """
         super().__init__()
         self.cfg = cfg
+        self.embed_rbf = cfg.embed_rbf
+        self.num_rbf = cfg.num_rbf
 
         # Encode input structure
         self.structure_encoder = ConfidenceEncoder(cfg.structure_encoder)
 
+        # Embed aatype into node embeddings
+        self.aatype_embedder = Linear(cfg.n_aatype, cfg.c_h_V, bias=False)
+
         # Embed local sidechain coords into node embeddings
-        self.sidechain_encoder = Linear(len(rc.non_bb_idxs) * 3, cfg.c_h_V, bias=False)
+        if self.embed_rbf:
+            self.sidechain_encoder = Linear(len(rc.non_bb_idxs) * cfg.num_rbf, cfg.c_h_V, bias=False)
+        else:
+            self.sidechain_encoder = Linear(len(rc.non_bb_idxs) * 3, cfg.c_h_V, bias=False)
 
         # Final MLP to predict PSCE
         self.sce_bins_cfg = cfg.sce_bins
@@ -37,6 +46,18 @@ class SidechainConfidenceModule(nn.Module):
             nn.SiLU(),
             Linear(cfg.hidden_size, len(rc.non_bb_idxs) * self.n_bins, bias=False, init="final")  # 33 sidechain atoms * n_bins
         )
+
+
+    def _get_scn_rbf(self, x1_scn_local_pred: TensorType["b n 33 3", float]) -> TensorType["b n 33 n_rbf", float]:
+        D = x1_scn_local_pred.norm(dim=-1)  # distance from CA
+        device = D.device
+        D_min, D_max, D_count = 1., 7., self.num_rbf
+        D_mu = torch.linspace(D_min, D_max, D_count, device=device)
+        D_mu = D_mu.view([1,1,1,-1])
+        D_sigma = (D_max - D_min) / D_count
+        D_expand = torch.unsqueeze(D, -1)
+        RBF = torch.exp(-((D_expand - D_mu) / D_sigma)**2)
+        return RBF
 
 
     def forward(self,
@@ -50,8 +71,15 @@ class SidechainConfidenceModule(nn.Module):
         # Structure encoder without using predicted sidechain coordinates
         h_V = self.structure_encoder(mpnn_feature_dict, seq_mask, residue_index, chain_index)
 
+        # Embed aatype into node embeddings
+        h_V = h_V + self.aatype_embedder(F.one_hot(aatype, num_classes=self.cfg.n_aatype).float())
+
         # Embed local sidechain coordinates into node embeddings
-        h_V = h_V + self.sidechain_encoder(rearrange(x1_scn_local_pred, "b n a x -> b n (a x)"))
+        if self.embed_rbf:
+            scn_rbfs = self._get_scn_rbf(x1_scn_local_pred)
+            h_V = h_V + self.sidechain_encoder(rearrange(scn_rbfs, "b n a r -> b n (a r)"))
+        else:
+            h_V = h_V + self.sidechain_encoder(rearrange(x1_scn_local_pred, "b n a x -> b n (a x)"))
 
         # MLP on node embeddings for PSCE prediction
         psce_logits = self.mlp(h_V)
@@ -96,6 +124,7 @@ class ConfidenceEncoder(nn.Module):
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
         self.decoder_in = self.hidden_dim * 4
+        self.ablate_reencoding = cfg.ablate_reencoding
 
         # Structure encoder
         self.sidechain_features = SidechainProteinFeatures(autoregressive=False,
@@ -145,7 +174,8 @@ class ConfidenceEncoder(nn.Module):
         # Make input node and edge embeddings
         h_V = mpnn_feature_dict["h_V"]  # initialize to node embeddings from MPNN
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
-        # h_ESV = torch.zeros_like(h_ESV)  # DEBUG: ablate encoding of original structure
+        if self.ablate_reencoding:
+            h_ESV = torch.zeros_like(h_ESV)  # DEBUG: ablate encoding of original structure
         h_ESV = h_ESV + mpnn_feature_dict["h_ESV"]  # add MPNN edge embeddings
 
         mask = rearrange(seq_mask, "b n -> b n 1 1").expand_as(h_ESV)

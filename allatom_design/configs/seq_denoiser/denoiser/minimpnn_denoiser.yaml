@@ -200,6 +200,9 @@ confidence_module:
   # Model
   c_h_V: ${denoiser.minimpnn.n_channel}
   hidden_size: 128
+  n_aatype: ${model.n_aatype}
+  embed_rbf: false
+  num_rbf: 25
 
   sce_bins:
     min_bin: 0.0
@@ -212,3 +215,4 @@ confidence_module:
     n_layers: 2
     k_neighbors: ${denoiser.minimpnn.k_neighbors}
     dropout_p: 0.1
+    ablate_reencoding: false
