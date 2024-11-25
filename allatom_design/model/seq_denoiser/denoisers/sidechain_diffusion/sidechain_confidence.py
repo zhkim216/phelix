@@ -23,8 +23,6 @@ class SidechainConfidenceModule(nn.Module):
         """
         super().__init__()
         self.cfg = cfg
-        self.embed_rbf = cfg.embed_rbf
-        self.num_rbf = cfg.num_rbf
 
         # Encode input structure
         self.structure_encoder = ConfidenceEncoder(cfg.structure_encoder)
@@ -33,10 +31,7 @@ class SidechainConfidenceModule(nn.Module):
         self.aatype_embedder = Linear(cfg.n_aatype, cfg.c_h_V, bias=False)
 
         # Embed local sidechain coords into node embeddings
-        if self.embed_rbf:
-            self.sidechain_encoder = Linear(len(rc.non_bb_idxs) * cfg.num_rbf, cfg.c_h_V, bias=False)
-        else:
-            self.sidechain_encoder = Linear(len(rc.non_bb_idxs) * 3, cfg.c_h_V, bias=False)
+        self.sidechain_encoder = Linear(len(rc.non_bb_idxs) * 3, cfg.c_h_V, bias=False)
 
         # Final MLP to predict PSCE
         self.sce_bins_cfg = cfg.sce_bins
@@ -46,18 +41,6 @@ class SidechainConfidenceModule(nn.Module):
             nn.SiLU(),
             Linear(cfg.hidden_size, len(rc.non_bb_idxs) * self.n_bins, bias=False, init="final")  # 33 sidechain atoms * n_bins
         )
-
-
-    def _get_scn_rbf(self, x1_scn_local_pred: TensorType["b n 33 3", float]) -> TensorType["b n 33 n_rbf", float]:
-        D = x1_scn_local_pred.norm(dim=-1)  # distance from CA
-        device = D.device
-        D_min, D_max, D_count = 1., 7., self.num_rbf
-        D_mu = torch.linspace(D_min, D_max, D_count, device=device)
-        D_mu = D_mu.view([1,1,1,-1])
-        D_sigma = (D_max - D_min) / D_count
-        D_expand = torch.unsqueeze(D, -1)
-        RBF = torch.exp(-((D_expand - D_mu) / D_sigma)**2)
-        return RBF
 
 
     def forward(self,
@@ -75,11 +58,7 @@ class SidechainConfidenceModule(nn.Module):
         h_V = h_V + self.aatype_embedder(F.one_hot(aatype, num_classes=self.cfg.n_aatype).float())
 
         # Embed local sidechain coordinates into node embeddings
-        if self.embed_rbf:
-            scn_rbfs = self._get_scn_rbf(x1_scn_local_pred)
-            h_V = h_V + self.sidechain_encoder(rearrange(scn_rbfs, "b n a r -> b n (a r)"))
-        else:
-            h_V = h_V + self.sidechain_encoder(rearrange(x1_scn_local_pred, "b n a x -> b n (a x)"))
+        h_V = h_V + self.sidechain_encoder(rearrange(x1_scn_local_pred, "b n a x -> b n (a x)"))
 
         # MLP on node embeddings for PSCE prediction
         psce_logits = self.mlp(h_V)
@@ -124,7 +103,6 @@ class ConfidenceEncoder(nn.Module):
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
         self.decoder_in = self.hidden_dim * 4
-        self.ablate_reencoding = cfg.ablate_reencoding
 
         # Structure encoder
         self.sidechain_features = SidechainProteinFeatures(autoregressive=False,
@@ -155,28 +133,11 @@ class ConfidenceEncoder(nn.Module):
                 residue_index: TensorType["b n", int],
                 chain_index: TensorType["b n", int],
                 ) -> TensorType["b n h", float]:
-        X, atom14_mask = mpnn_feature_dict["X"], mpnn_feature_dict["atom14_mask"]
-        S = mpnn_feature_dict["S"]  # noised aatype
 
-        # Prepare node and edge embeddings
-        E, E_idx, _ = self.features(X, seq_mask, residue_index, chain_index)
-        assert (E_idx == mpnn_feature_dict["E_idx"]).all(), "E_idx mismatch between original MPNN graph and confidence structure encoder"
-
-        h_E = self.W_e(E)
-        h_S = self.W_s(S)
-        h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
-
-        # extract sidechain features from local sidechains
-        E2, _ = self.sidechain_features(X, residue_index, chain_index, E_idx, atom14_mask)
-        h_E2 = self.W_e2(E2)
-        h_ES = torch.cat([h_ES, h_E2], dim = -1)
-
-        # Make input node and edge embeddings
-        h_V = mpnn_feature_dict["h_V"]  # initialize to node embeddings from MPNN
-        h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
-        if self.ablate_reencoding:
-            h_ESV = torch.zeros_like(h_ESV)  # DEBUG: ablate encoding of original structure
-        h_ESV = h_ESV + mpnn_feature_dict["h_ESV"]  # add MPNN edge embeddings
+        # Initialize with input node and edge embeddings from MPNN
+        h_V = mpnn_feature_dict["h_V"]
+        h_ESV = mpnn_feature_dict["h_ESV"]
+        E_idx = mpnn_feature_dict["E_idx"]
 
         mask = rearrange(seq_mask, "b n -> b n 1 1").expand_as(h_ESV)
         for layer in self.decoder_layers:
