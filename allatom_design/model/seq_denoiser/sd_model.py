@@ -255,7 +255,7 @@ class SeqDenoiser(nn.Module):
         num_partial = torch.min(torch.stack((aatype_override_mask.sum(dim=-1), scn_override_mask.sum(dim=-1))), dim = 0).values.long()
         timesteps_K = torch.ceil(timesteps * (aux_inputs["lengths"][:, None] - num_partial[:,None])).long()
         timesteps_K += num_partial[:,None]
-        print(timesteps_K)
+        
         for i in tqdm(range(S), leave=False, desc="Sampling..."):
             # get current and next timesteps
             t, t_next = timesteps[:, i], timesteps[:, i + 1]
