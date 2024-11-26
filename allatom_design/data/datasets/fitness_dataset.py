@@ -13,7 +13,7 @@ import os
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (center_random_augmentation, load_feats_from_pdb,
+from allatom_design.data.data import (load_feats_from_pdb,
                                       make_fixed_size_1d)
 from allatom_design.data.datasets.ad_dataset import ADDataset
 
@@ -117,11 +117,9 @@ class FitDataset(ADDataset):
 
         # Construct conditioning inputs
         cond_labels_in = {}
-
-        # Calculate random cropping start index
-        orig_size = example["x"].shape[0]
-        extra_len = orig_size - self.fixed_size
-        assert extra_len <= 0, "Increase fixed size, cropping is not allowed for fitness evals!"
+        cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
+        cond_labels_in["dataset_source"] = cl.DEFAULT_TOKEN_ID["dataset_source"]
+        cond_labels_in["crop_aug"] = cl.DEFAULT_TOKEN_ID['crop_aug']
 
         # Make fixed size example
         fixed_size_example = {}
