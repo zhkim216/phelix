@@ -8,6 +8,8 @@ from torchtyping import TensorType
 import allatom_design.data.protein as protein
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import torch_rmsd_weighted
+from allatom_design.data.protein import PDB_CHAIN_IDS
+
 
 
 def write_batched_to_pdb(
@@ -70,14 +72,14 @@ def write_to_pdb(
         atom_mask = atom_mask * bb_mask
     else:
         assert mode == "aa", f"Invalid pdb writing mode: {mode}"
-
+        
     prot = protein.Protein(
         aatype=aatype.numpy(),
         atom_positions=atom_positions.numpy(),
         atom_mask=atom_mask.numpy(),
         residue_index=residue_index.numpy(),
         chain_index=chain_index.numpy(),
-        chain_ids=torch.sort(torch.unique(chain_index)).values.tolist(),
+        chain_ids=[PDB_CHAIN_IDS[idx] for idx in torch.sort(torch.unique(chain_index)).values.tolist()], 
         b_factors=b_factors.numpy()
     )
 

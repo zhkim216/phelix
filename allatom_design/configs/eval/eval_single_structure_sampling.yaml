@@ -1,6 +1,6 @@
 # Wandb configuration
 project: "allatom_design"  # Wandb project name
-wandb_id: "richardshuai"  # Wandb username
+wandb_id: "talal-widatalla"  # Wandb username
 exp_name: null # Wandb exp name
 group: "debug" # Wandb group name
 
@@ -8,7 +8,7 @@ group: "debug" # Wandb group name
 no_wandb: false  # Disable wandb logging
 seed: 0
 batch_size: 64
-num_workers: 10
+num_workers: 8
 
 # Denoiser options
 checkpoint_path: null
@@ -17,7 +17,13 @@ checkpoint_path: null
 aatype_decoding_order_mode: "greedy"
 num_corrector_steps: 0
 corrector_step_ratio: 0.5
-num_steps_list: [1, 20, 100]  # number of denoising steps for inverse folding
+num_steps: 20
+num_samples: 128
+temperature: 0.1
+pdb_path: null
+fixed_pos: null
+sample_pdb_out_dir: "samples"
+predicted_pdb_out_dir: "preds"
 positions: null
 timestep_schedule:
   num_steps: null  # will be filled in by num_steps_list
@@ -43,10 +49,24 @@ scn_diffusion:
     s_t_max: 50.0
     num_steps: ${scn_diffusion.num_steps}
 
-  # Autoguidance
-  autoguidance_cfg:
-    use_autoguidance: false
-    w: 1.0
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: "omegafold"  # ["esmfold", "af2", "omegafold"]
+  af2:
+    data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
+    num_models: 1  # only 1 model is currently supported
+    sample_models: true  # randomly sample models from the ensemble
+    num_recycles: 3
+    use_multimer: false
+  esmfold:
+    max_tokens_per_batch: 1024
+  omegafold:
+    num_pseudo_msa: 15
+    mask_rate: 0.12
+    num_recycle: 2  # performance saturates after around 10 recycles
+    deterministic: true
+    subbatch_size: null
+    cache_file: /media/scratch/huang_lab/cache/omegafold/omegafold.pt
 
 hydra:
   run:

@@ -34,8 +34,25 @@ class FitDataset(ADDataset):
         # Cache coordinates for faster loading
         self._cache_examples()
 
+        # For efficiency set fixed suze to max length in fitness dataset
+        self.fixed_size = self._get_max_len()
+
     def __len__(self):
         return len(self.mutation_data)
+    
+    def _get_max_len(self):
+        """
+        Reads in cached PDB files and returns max length of all examples.
+        This is only done for eval and test datasets where we do no cropping.
+        """
+        max_len = 0
+        for pdb_key in tqdm(self.pdb_keys, desc=f"Getting max length in evaluation dataset", leave=False):
+            data_file = self._get_data_file(pdb_key)
+            example = torch.load(data_file, weights_only=True)
+            seq_len = example["seq_mask"].sum().item()
+            max_len = seq_len if (seq_len > max_len) else max_len
+
+        return max_len
 
     def _cache_examples(self):
         """

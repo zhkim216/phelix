@@ -16,7 +16,10 @@ from openfold.utils.rigid_utils import Rigid, Rotation
 import subprocess
 from typing import Tuple, Union
 import math
+import allatom_design.data.conditioning_labels as cl
 
+
+FEATURES_LONG = ("residue_index", "chain_index", "aatype")
 
 def load_feats_from_pdb(pdb, chain_ids_override: str = None, max_conformers: int = 1):
     """
@@ -849,3 +852,53 @@ def transform_sidechain_frame(x_scn: TensorType["b n 33 3", float],
     x_scn = torch.where(bb_frames_exists[..., None, None].bool(), x_scn, ghost_atom_value)  # "zero out" sidechain atoms where backbone frame does not exist
 
     return x_scn, bb_frames_exists
+
+def process_single_pdb(data):
+    example = {}
+    
+    # Use raw coordinates
+    x = data["all_atom_positions"]  # [n, a, 3]
+    atom_mask = data["all_atom_mask"]  # [n, a]
+    seq_mask = data["seq_mask"]  # [n]
+    x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
+    
+    # per-channel mask for x, used for loss.
+    # We only mask out missing atoms from PDB files, not ghost atoms.
+    x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
+    
+    # Construct example
+    example["x"] = x * atom_mask[..., None]
+    example["seq_mask"] = seq_mask
+    example["x_mask"] = x_mask
+    example["residue_index"] = data["residue_index"]
+    example["chain_index"] = data["chain_index"]
+    example["aatype"] = data["aatype"]  # not one-hot encoded
+    example["ghost_atom_mask"] = data["ghost_atom_mask"]
+    example["missing_atom_mask"] = data["missing_atom_mask"]
+    example["atom_mask"] = atom_mask
+    example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
+    example['interface_residue_mask'] = data['interface_residue_mask']
+    example['chain_ids'] = data['chain_ids']
+    
+    # Construct conditioning inputs
+    cond_labels_in = {}
+    
+    # Add designability info
+    cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
+    
+    # Add dataset source and crop aug label, set to experimental and uncropped by default
+    cond_labels_in["dataset_source"] = cl.DEFAULT_TOKEN["dataset_source"]
+    cond_labels_in["crop_aug"] = cl.DEFAULT_TOKEN["crop_aug"]
+
+    # Convert data types
+    example_out = {}
+
+    for k, v in example.items():
+        if k in FEATURES_LONG:
+            example_out[k] = v.long()
+        else:
+            example_out[k] = v.float()
+    
+    # Add conditioning labels
+    example_out["cond_labels_in"] = cond_labels_in
+    return example_out
