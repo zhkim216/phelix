@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=b4_aasd0_schedule
+#SBATCH --job-name=b8_aasd6_inv_fold
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#SBATCH --array=0-59%10
+#SBATCH --array=0-11%6
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -21,7 +21,7 @@ conda activate rshuai_allatom_design
 BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
 
-# Model params
+# Model parameters
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Dataset paths
@@ -34,59 +34,57 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Sweep parameters
-num_steps_values=(1 10 20 100 200)
-models=(
-  b3_aasd5
-  b4_aasd0_uniform_sqrt_t
-  b4_aasd0_uniform_cbrt_t
-  b4_aasd0_uniform_t
-  b4_aasd0_uniform_cosine_t
-  b4_aasd0_uniform_cubed_t
-)
-ckpts=(
-  sd-step200000-epoch600.ckpt
-  sd-step300000-epoch900.ckpt
-)
+num_steps_values=(1 10 20 100)
+aatype_decoding_order_modes=(random greedy greedy_psce)
 
 # Calculate indices
-num_models=${#models[@]}          # Should be 6
-num_ckpts=${#ckpts[@]}            # Should be 2
-num_num_steps=${#num_steps_values[@]}  # Should be 5
+num_num_steps=${#num_steps_values[@]}                    # 4
+num_aatype_modes=${#aatype_decoding_order_modes[@]}      # 3
 
-total_jobs=$(( num_models * num_ckpts * num_num_steps ))  # Should be 60
+total_jobs=$(( num_num_steps * num_aatype_modes ))        # 12
 
-model_idx=$(( SLURM_ARRAY_TASK_ID / (num_ckpts * num_num_steps) ))
-rem=$(( SLURM_ARRAY_TASK_ID % (num_ckpts * num_num_steps) ))
-ckpt_idx=$(( rem / num_num_steps ))
-num_steps_idx=$(( rem % num_num_steps ))
+# Ensure the SLURM_ARRAY_TASK_ID is within the range
+if (( SLURM_ARRAY_TASK_ID >= total_jobs )); then
+  echo "Error: SLURM_ARRAY_TASK_ID (${SLURM_ARRAY_TASK_ID}) exceeds total_jobs (${total_jobs})"
+  exit 1
+fi
 
-# Assign variables
-MODEL_NAME=${models[$model_idx]}
-CKPT=${ckpts[$ckpt_idx]}
+# Determine indices for num_steps and aatype_decoding_order_mode
+num_steps_idx=$(( SLURM_ARRAY_TASK_ID / num_aatype_modes ))          # 0-3
+aatype_decoding_order_mode_idx=$(( SLURM_ARRAY_TASK_ID % num_aatype_modes ))  # 0-2
+
+# Assign variables based on indices
 NUM_STEPS=${num_steps_values[$num_steps_idx]}
+AATYPE_DECODING_ORDER_MODE=${aatype_decoding_order_modes[$aatype_decoding_order_mode_idx]}
 
-# Denoiser checkpoint
+# Fixed model and checkpoint
+MODEL_NAME="b8_aasd6"
+CKPT="sd-step100000-epoch300.ckpt"
+
+# Denoiser checkpoint path
 SD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/${CKPT}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_sd_${CKPT}_S${NUM_STEPS}
-GROUP=b4_aasd0_schedule
+EXP_NAME=${MODEL_NAME}_sd_${CKPT}_S${NUM_STEPS}_${AATYPE_DECODING_ORDER_MODE}
+GROUP=chimera_b8_aasd6_inv_fold
 
 # Run inverse folding script
-cd ${BASE_DIR}
+cd ${BASE_DIR} || { echo "Base directory not found: ${BASE_DIR}"; exit 1; }
+
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/inverse_fold.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
     sd_ckpt=${SD_CKPT} \
-    num_workers=${SLURM_CPUS_ON_NODE} \
+    num_workers=${SLURM_CPUS_PER_TASK} \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     temperature=0.0 \
     timestep_schedule.num_steps=${NUM_STEPS} \
+    aatype_decoding_order_mode=${AATYPE_DECODING_ORDER_MODE} \
     num_pdbs=300 \
     num_seqs_per_pdb=1 \
     batch_size=64 \
