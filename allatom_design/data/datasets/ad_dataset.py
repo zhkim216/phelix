@@ -22,7 +22,6 @@ from allatom_design.data.data import (center_random_augmentation,
 
 FEATURES_LONG = ("residue_index", "chain_index", "aatype")
 
-
 class ADDataset(data.Dataset):
     """
     Dataset used for the atom denoiser and sequence denoiser.
@@ -41,7 +40,9 @@ class ADDataset(data.Dataset):
         translation_scale: float = 1.0,
         overwrite_cache: bool = False,
         subset_length_range: Optional[int] = None,
+        cluster_sample: bool = True,
         afdb_res_plddt_cutoff: float = 0.0,
+        spatial_crop_ratio: float = 0.5,
         **kwargs
     ):
         """
@@ -69,8 +70,10 @@ class ADDataset(data.Dataset):
         self.translation_scale = translation_scale
         self.overwrite_cache = overwrite_cache
         self.subset_length_range = subset_length_range
-        self.cluster_sample = True #cluster_sample
         self.afdb_res_plddt_cutoff = afdb_res_plddt_cutoff
+        self.cluster_sample = cluster_sample
+        self.spatial_crop_ratio = spatial_crop_ratio
+
 
         # Read in PDB keys
         self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
@@ -86,6 +89,10 @@ class ADDataset(data.Dataset):
 
         # Cache coordinates for faster loading
         self._cache_examples()
+
+        # For efficiency set fixed size to max length in the eval or test dataset
+        if self.phase in ['eval','test']:
+            self.fixed_size = self._get_max_len()
 
         # Load designability info
         self._load_designability_info()
@@ -210,19 +217,33 @@ class ADDataset(data.Dataset):
         if self.designability_csv and self.pdb_path.endswith("ingraham_cath_dataset"):
             cond_labels_in["designability"] = self.pdb_to_designability[pdb_key[:4]]
 
+        # Add dataset source label
+        cond_labels_in["dataset_source"] = cl.TOKEN_TO_ID["dataset_source"][self.dataset_source_label]
+        cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]
+
+        #Disable cropping for specified datasets
+        if self.phase not in ['eval','test']:
+            example, cond_labels_in = self._crop_examples(example, cond_labels_in)
+
+        # Add pdb_key
+        example["pdb_key"] = pdb_key
+
+        # Add conditioning labels
+        example["cond_labels_in"] = cond_labels_in
+
+        return example
+    
+    def _crop_examples(self, example, cond_labels_in):
         # Calculate cropping, handled differently for multimers
         multimer_crop_mask = None
         start_idx = None
-
-        # Add dataset source label
-        cond_labels_in["dataset_source"] = cl.TOKEN_TO_ID["dataset_source"][self.dataset_source_label]
 
         # Calculate random cropping start index
         orig_size = example["x"].shape[0]
         extra_len = orig_size - self.fixed_size
         if extra_len > 0:
             if len(example['chain_ids']) > 1:
-                if torch.rand(1) < 0.5: #50:50 ratio of spatial and contiguous cropping
+                if torch.rand(1) > self.spatial_crop_ratio: 
                     chain_1_len, chain_2_len = torch.sum(example['chain_index'] == 0), torch.sum(example['chain_index'] == 1)
                     multimer_crop_mask = self._multimer_contiguous_crop(chain_1_len, chain_2_len)
                 else:
@@ -230,8 +251,6 @@ class ADDataset(data.Dataset):
             else:
                 start_idx = np.random.choice(np.arange(extra_len + 1))
             cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["CROPPED"]
-        else:
-            cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]
 
         # Make fixed size example
         fixed_size_example = {}
@@ -246,15 +265,9 @@ class ADDataset(data.Dataset):
                 example_out[k] = v.long()
             else:
                 example_out[k] = v.float()
-
-        # Add pdb_key
-        example_out["pdb_key"] = pdb_key
-
-        # Add conditioning labels
-        example_out["cond_labels_in"] = cond_labels_in
-
+        
         return example_out
-    
+
     def _cluster_sample_pdb_keys(self):
         self.pdb_keys = [random.choice(list(group)) for _, group in groupby(sorted(self.pdb_keys), key=lambda x: x.rsplit('_', 1)[-1])]
 
@@ -306,8 +319,21 @@ class ADDataset(data.Dataset):
                 pass
 
         print("Caching completed.")
- 
 
+    def _get_max_len(self):
+        """
+        Reads in cached PDB files and returns max length of all examples.
+        This is only done for eval and test datasets where we do no cropping.
+        """
+        max_len = 0
+        for pdb_key in tqdm(self.pdb_keys, desc=f"Getting max length in evaluation dataset", leave=False):
+            data_file = self._get_data_file(pdb_key)
+            example = torch.load(data_file, weights_only=True)
+            seq_len = example["seq_mask"].sum().item()
+            max_len = seq_len if (seq_len > max_len) else max_len
+
+        return max_len
+ 
     def _load_designability_info(self) -> None:
         """
         If designability info is provided, load it into a mapping from pdb key to designability (0 or 1).
@@ -328,20 +354,6 @@ class ADDataset(data.Dataset):
             data_file = self._get_data_file(pdb_key)
             example = torch.load(data_file, weights_only=True)
             seq_len = example["seq_mask"].sum().item()
-            if min_len <= seq_len <= max_len:
-                pdb_keys.append(pdb_key)
-
-        self.pdb_keys = np.array(pdb_keys)
-
-    def subset_to_length_range(self, min_len: int, max_len: int):
-        """
-        Subsets the dataset to only include proteins with sequence length in [min_len, max_len].
-        """
-        pdb_keys = []
-        for pdb_key in tqdm(self.pdb_keys, desc=f"Subsetting to length range [{min_len}, {max_len}]", leave=False):
-            data_file = self._get_data_file(pdb_key)
-            latent = torch.load(data_file, weights_only=True)
-            seq_len = latent["seq_mask"].sum().item()
             if min_len <= seq_len <= max_len:
                 pdb_keys.append(pdb_key)
 
@@ -475,3 +487,4 @@ def process_pdb_key(args):
     
     example = load_feats_from_pdb(pdb_data_file, chain_ids_override=chain_ids_override, max_conformers=1)
     torch.save(example, out_file)
+

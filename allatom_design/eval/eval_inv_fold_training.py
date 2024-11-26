@@ -143,7 +143,7 @@ def main(cfg: DictConfig):
                 Path(seq_recovery_dir).mkdir(parents=True, exist_ok=True)
                 seq_rec_df_S = defaultdict(list)
                 for batch in tqdm(val_dataloader, desc="Evaluating sequence recovery on validation set", leave=False):
-                    x, seq_mask, residue_index, chain_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
+                    x, aatype, seq_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
                     timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
 
                     # Define sidechain diffusion timesteps
@@ -154,6 +154,7 @@ def main(cfg: DictConfig):
 
                     x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
                         x,
+                        aatype=aatype,
                         seq_mask=seq_mask,
                         residue_index=residue_index,
                         chain_index=chain_index,
@@ -243,7 +244,7 @@ def main(cfg: DictConfig):
                 for bi, batch in enumerate(val_dataloader):
                     if bi >= cfg.num_codes_sc_batches:
                         break
-                    x, seq_mask, residue_index, chain_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
+                    x, aatype, seq_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
 
                     B = x.shape[0]
                     cond_labels_in = create_cond_labels_input(B, {"designability": "DESIGNABLE"}, device)
@@ -256,6 +257,7 @@ def main(cfg: DictConfig):
                     # Generate samples
                     x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
                         x,
+                        aatype=aatype,
                         seq_mask=seq_mask,
                         residue_index=residue_index,
                         chain_index=chain_index,
