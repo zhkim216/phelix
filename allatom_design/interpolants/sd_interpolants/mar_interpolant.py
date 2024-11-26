@@ -210,6 +210,7 @@ class MAR(SDInterpolant):
     def remask_K(self,
                  xt: TensorType["b n a 3", float],
                  aatype_t: TensorType["b n", int],
+                 psce_t: TensorType["b n 33", float],
                  mlm_mask: TensorType["b n"],
                  K: TensorType["b", int]) -> Tuple[TensorType["b n a 3", float],
                                                    TensorType["b n", int],
@@ -238,5 +239,6 @@ class MAR(SDInterpolant):
         # Noise sidechains and sidechain confidence
         xt_noised = xt.clone()
         xt_noised[..., rc.non_bb_idxs, :] = xt_noised[..., rc.non_bb_idxs, :] * rearrange(mlm_mask, "b n -> b n 1 1").float()
+        psce_t_noised = psce_t * rearrange(mlm_mask, "b n -> b n 1")
 
-        return xt_noised, aatype_t_noised, mlm_mask
+        return xt_noised, aatype_t_noised, psce_t_noised, mlm_mask

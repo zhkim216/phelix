@@ -154,7 +154,7 @@ scn_diffusion_module:
   interpolant: ${model.denoiser.interpolant}
   use_self_conditioning: true
   self_cond_p: 0.5
-  training_batch_size_mult: 8  # batch size multiplier for diffusion module
+  training_batch_size_mult: 2  # batch size multiplier for diffusion module
   translation_scale: ${data.translation_scale}
 
   scn_denoiser:
