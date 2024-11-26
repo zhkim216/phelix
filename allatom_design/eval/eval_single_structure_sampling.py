@@ -15,6 +15,7 @@ from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 from allatom_design.data.data import load_feats_from_pdb, process_single_pdb
 from allatom_design.eval.folding_utils import get_struct_pred_model
+import allatom_design.data.conditioning_labels as cl
 
 @hydra.main(config_path="../configs/eval", config_name="eval_single_structure_sampling", version_base="1.3.2")
 def main(cfg: DictConfig):
@@ -91,7 +92,11 @@ def main(cfg: DictConfig):
         scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
         
         # Define conditioning labels when we inverse fold
-        cond_labels_in = {"crop_aug": torch.Tensor([0]*B).to(device)}  # we only provide whether cropping was appli
+        cond_labels_in = {
+            "crop_aug": torch.Tensor([cl.DEFAULT_TOKEN_ID['crop_aug']]*B).to(device),
+            "dataset_source": torch.Tensor([cl.DEFAULT_TOKEN_ID['dataset_source']]*B).to(device),
+            "designability": torch.Tensor([cl.PLACEHOLDER_TOKEN_ID]*B).to(device)
+        } 
         
         x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
             x,

@@ -74,7 +74,6 @@ class ADDataset(data.Dataset):
         self.cluster_sample = cluster_sample
         self.spatial_crop_ratio = spatial_crop_ratio
 
-
         # Read in PDB keys
         self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
 
@@ -222,35 +221,10 @@ class ADDataset(data.Dataset):
         cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]
 
         #Disable cropping for specified datasets
-        if self.phase not in ['eval','test']:
-            example, cond_labels_in = self._crop_examples(example, cond_labels_in)
-
-        # Add pdb_key
-        example["pdb_key"] = pdb_key
-
-        # Add conditioning labels
-        example["cond_labels_in"] = cond_labels_in
-
-        return example
-    
-    def _crop_examples(self, example, cond_labels_in):
-        # Calculate cropping, handled differently for multimers
-        multimer_crop_mask = None
         start_idx = None
-
-        # Calculate random cropping start index
-        orig_size = example["x"].shape[0]
-        extra_len = orig_size - self.fixed_size
-        if extra_len > 0:
-            if len(example['chain_ids']) > 1:
-                if torch.rand(1) > self.spatial_crop_ratio: 
-                    chain_1_len, chain_2_len = torch.sum(example['chain_index'] == 0), torch.sum(example['chain_index'] == 1)
-                    multimer_crop_mask = self._multimer_contiguous_crop(chain_1_len, chain_2_len)
-                else:
-                    multimer_crop_mask = self._multimer_spatial_crop(example['x'], example['interface_residue_mask'])
-            else:
-                start_idx = np.random.choice(np.arange(extra_len + 1))
-            cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["CROPPED"]
+        multimer_crop_mask = None
+        if self.phase not in ['eval','test']:
+            multimer_crop_mask, start_idx, cond_labels_in = self._crop_examples(example, cond_labels_in, multimer_crop_mask, start_idx)
 
         # Make fixed size example
         fixed_size_example = {}
@@ -265,8 +239,31 @@ class ADDataset(data.Dataset):
                 example_out[k] = v.long()
             else:
                 example_out[k] = v.float()
+
+        # Add pdb_key
+        example["pdb_key"] = pdb_key
+
+        # Add conditioning labels
+        example["cond_labels_in"] = cond_labels_in
+
+        return example
+    
+    def _crop_examples(self, example, cond_labels_in, multimer_crop_mask, start_idx):
+        # Calculate random cropping start index
+        orig_size = example["x"].shape[0]
+        extra_len = orig_size - self.fixed_size
+        if extra_len > 0:
+            if len(example['chain_ids']) > 1:
+                if torch.rand(1) > self.spatial_crop_ratio: 
+                    chain_1_len, chain_2_len = torch.sum(example['chain_index'] == 0), torch.sum(example['chain_index'] == 1)
+                    multimer_crop_mask = self._multimer_contiguous_crop(chain_1_len, chain_2_len)
+                else:
+                    multimer_crop_mask = self._multimer_spatial_crop(example['x'], example['interface_residue_mask'])
+            else:
+                start_idx = np.random.choice(np.arange(extra_len + 1))
+            cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["CROPPED"]
         
-        return example_out
+        return multimer_crop_mask, start_idx, cond_labels_in
 
     def _cluster_sample_pdb_keys(self):
         self.pdb_keys = [random.choice(list(group)) for _, group in groupby(sorted(self.pdb_keys), key=lambda x: x.rsplit('_', 1)[-1])]
