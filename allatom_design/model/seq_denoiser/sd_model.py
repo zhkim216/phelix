@@ -252,7 +252,7 @@ class SeqDenoiser(nn.Module):
             raise ValueError('Sequence and sidechains at differing mask rates is currently only supported with full sequence and partial sidechain')
 
         #to allow for scn packing, we set timesteps using the minimum of the two masking schedules
-        num_partial = torch.min(torch.stack((aatype_override_mask.sum(dim=-1), scn_override_mask.sum(dim=-1))), dim = -1).values.long()
+        num_partial = torch.min(torch.stack((aatype_override_mask.sum(dim=-1), scn_override_mask.sum(dim=-1))), dim = 0).values.long()
         timesteps_K = torch.ceil(timesteps * (aux_inputs["lengths"][:, None] - num_partial[:,None])).long()
         timesteps_K += num_partial[:,None]
         print(timesteps_K)
