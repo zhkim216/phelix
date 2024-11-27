@@ -50,6 +50,7 @@ minimpnn:
     edge_hidden_dim_vector: 1
     rotate_out: true
     graph_embedding:
+      mpnn_n_channel: ${model.denoiser.minimpnn.n_channel}
       top_k_neighbors: ${model.denoiser.minimpnn.k_neighbors}
       num_positional_embeddings: 16
       n_aatype: ${model.n_aatype}
@@ -181,7 +182,7 @@ confidence_module:
 
   # Model
   c_h_V: ${denoiser.minimpnn.n_channel}
-  hidden_size: 128
+  hidden_size: ${denoiser.minimpnn.n_channel}
   n_aatype: ${model.n_aatype}
 
   sce_bins:

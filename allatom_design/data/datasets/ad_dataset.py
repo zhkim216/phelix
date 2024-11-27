@@ -81,7 +81,7 @@ class ADDataset(data.Dataset):
 
         with open(self.pdb_keys_file) as f:
             self.pdb_keys = np.array(f.read().split("\n")[:-1])
-        
+
         if self.cluster_sample:
             if not pdb_path.endswith("af3_pdb"):
                 print('Cluster sampling disabled for non AF3 dataset')
@@ -126,7 +126,7 @@ class ADDataset(data.Dataset):
         return data
 
     def _multimer_contiguous_crop(self, chain_1_len: int, chain_2_len: int) -> TensorType["n", bool]:
-        
+
         #init crop masks w/ all false
         total_len = chain_1_len + chain_2_len
         crop_mask = torch.full((total_len,), False)
@@ -150,7 +150,7 @@ class ADDataset(data.Dataset):
         return crop_mask
 
     def _multimer_spatial_crop(self, x: TensorType["n a 3", bool], interface_residue_mask: TensorType["n", bool]):
-        
+
         total_len = x.shape[0]
         crop_mask = torch.full((total_len,), False)  # Initialize crop mask with all False
         x_ca = x[:, 1, :]  # Get C-alpha positions of all residues
@@ -216,7 +216,7 @@ class ADDataset(data.Dataset):
         # Add designability info
         cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
         if self.designability_csv and self.pdb_path.endswith("ingraham_cath_dataset"):
-            cond_labels_in["designability"] = self.pdb_to_designability[pdb_key[:4]]
+            cond_labels_in["designability"] = self.pdb_to_designability[pdb_key]
 
         # Add dataset source label
         cond_labels_in["dataset_source"] = cl.TOKEN_TO_ID["dataset_source"][self.dataset_source_label]
@@ -249,14 +249,14 @@ class ADDataset(data.Dataset):
         example_out["cond_labels_in"] = cond_labels_in
 
         return example_out
-    
+
     def _crop_examples(self, example, cond_labels_in, multimer_crop_mask, start_idx):
         # Calculate random cropping start index
         orig_size = example["x"].shape[0]
         extra_len = orig_size - self.fixed_size
         if extra_len > 0:
             if len(example['chain_ids']) > 1:
-                if torch.rand(1) > self.spatial_crop_ratio: 
+                if torch.rand(1) > self.spatial_crop_ratio:
                     chain_1_len, chain_2_len = torch.sum(example['chain_index'] == 0), torch.sum(example['chain_index'] == 1)
                     multimer_crop_mask = self._multimer_contiguous_crop(chain_1_len, chain_2_len)
                 else:
@@ -264,7 +264,7 @@ class ADDataset(data.Dataset):
             else:
                 start_idx = np.random.choice(np.arange(extra_len + 1))
             cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["CROPPED"]
-        
+
         return multimer_crop_mask, start_idx, cond_labels_in
 
     def _cluster_sample_pdb_keys(self):
@@ -332,7 +332,7 @@ class ADDataset(data.Dataset):
             max_len = seq_len if (seq_len > max_len) else max_len
 
         return int(max_len)
- 
+
     def _load_designability_info(self) -> None:
         """
         If designability info is provided, load it into a mapping from pdb key to designability (0 or 1).
@@ -457,7 +457,7 @@ def get_pdb_data_file(pdb_path, phase, pdb_key: str) -> str:
     if pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
         pdb_data_file = f"{pdb_path}/pdb_store/{pdb_key}"
     elif pdb_path.endswith("af3_pdb"):
-        pdb_data_file = f"{pdb_path}/{phase}_mmcifs/{pdb_key[1:3]}/{pdb_key[:4]}-assembly1.cif" #just use first assembly for now 
+        pdb_data_file = f"{pdb_path}/{phase}_mmcifs/{pdb_key[1:3]}/{pdb_key[:4]}-assembly1.cif" #just use first assembly for now
     elif pdb_path.endswith("afdb"):  # AFDB augmentation dataset
         pdb_data_file = f"{pdb_path}/foldseek_cluster_reps/{pdb_key}.cif"
     elif pdb_path.endswith("qfit-test-set/rcsb-pdb"):
@@ -476,14 +476,14 @@ def process_pdb_key(args):
     out_file = f"{cache_dir}/{pdb_key}.pt"
     if Path(out_file).exists() and not overwrite_cache:
         return  # Skip caching if file exists and overwrite_cache is False
-    
+
     pdb_data_file = get_pdb_data_file(pdb_path, phase, pdb_key)  # Ensure this function can work independently
 
     #specific to multimeric af3 dataset
     chain_ids_override = None
     if pdb_path.endswith("af3_pdb"):
-        chain_ids_override = pdb_key.split('_')[1] 
-    
+        chain_ids_override = pdb_key.split('_')[1]
+
     example = load_feats_from_pdb(pdb_data_file, chain_ids_override=chain_ids_override, max_conformers=1)
     torch.save(example, out_file)
 
