@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b10_aasd0
+#SBATCH --job-name=b11_aasd0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,12 +21,14 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b10_aasd0
+EXP_NAME=b11_aasd0
 GROUP=chimera_b10
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+# PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
+# DESIGNABILITY_CSV=null
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
@@ -44,7 +46,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     model.task=allatom_seq_des \
     interpolant.training_noise_schedule=uniform_sqrt_t \
     denoiser=minimpnn_denoiser \
-    denoiser.minimpnn.model_type=sidechain \
     denoiser.minimpnn.augment_eps=0.0 \
     denoiser.minimpnn.n_layers=4 \
     denoiser.confidence_module.enabled=true \
