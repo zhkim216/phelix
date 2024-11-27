@@ -129,24 +129,6 @@ seq_head:
   in_channels: ${model.denoiser.minimpnn.n_channel}
   n_aatype: ${model.n_aatype}
 
-backbone_encoder:
-  hidden_size: ${model.denoiser.scn_diffusion_module.hidden_size}
-  pos_encoding: ${model.denoiser.pos_encoding}
-
-  # h_V conditioning
-  c_h_V: ${denoiser.minimpnn.n_channel}
-
-  # QK normalization
-  qk_rmsnorm: true
-
-  # Blocks
-  depth: 4
-  num_heads: 8
-  mlp_dropout: 0.0
-  mlp_ratio: 4.0
-  inf: ${model.inf}
-
-
 scn_diffusion_module:
   hidden_size: 256
 
