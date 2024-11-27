@@ -43,6 +43,7 @@ class ADDataset(data.Dataset):
         cluster_sample: bool = True,
         afdb_res_plddt_cutoff: float = 0.0,
         spatial_crop_ratio: float = 0.5,
+        evaluation_mode: bool = False,
         **kwargs
     ):
         """
@@ -73,6 +74,7 @@ class ADDataset(data.Dataset):
         self.afdb_res_plddt_cutoff = afdb_res_plddt_cutoff
         self.cluster_sample = cluster_sample
         self.spatial_crop_ratio = spatial_crop_ratio
+        self.evaluation_mode = evaluation_mode
 
         # Read in PDB keys
         self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
@@ -90,7 +92,7 @@ class ADDataset(data.Dataset):
         self._cache_examples()
 
         # For efficiency set fixed size to max length in the eval or test dataset
-        if self.phase in ['eval','test']:
+        if self.evaluation_mode:
             self.fixed_size = self._get_max_len()
 
         # Load designability info
@@ -223,7 +225,7 @@ class ADDataset(data.Dataset):
         #Disable cropping for specified datasets
         start_idx = None
         multimer_crop_mask = None
-        if self.phase not in ['eval','test']:
+        if not self.evaluation_mode:
             multimer_crop_mask, start_idx, cond_labels_in = self._crop_examples(example, cond_labels_in, multimer_crop_mask, start_idx)
 
         # Make fixed size example
@@ -241,12 +243,12 @@ class ADDataset(data.Dataset):
                 example_out[k] = v.float()
 
         # Add pdb_key
-        example["pdb_key"] = pdb_key
+        example_out["pdb_key"] = pdb_key
 
         # Add conditioning labels
-        example["cond_labels_in"] = cond_labels_in
+        example_out["cond_labels_in"] = cond_labels_in
 
-        return example
+        return example_out
     
     def _crop_examples(self, example, cond_labels_in, multimer_crop_mask, start_idx):
         # Calculate random cropping start index
@@ -329,7 +331,7 @@ class ADDataset(data.Dataset):
             seq_len = example["seq_mask"].sum().item()
             max_len = seq_len if (seq_len > max_len) else max_len
 
-        return max_len
+        return int(max_len)
  
     def _load_designability_info(self) -> None:
         """

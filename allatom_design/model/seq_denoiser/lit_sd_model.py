@@ -45,7 +45,6 @@ class LitSeqDenoiser(L.LightningModule):
     def forward(self, batch, **kwargs):
         return self.model(batch, **kwargs)
 
-
     def on_train_start(self):
         # Initialize EMA trackers at the start of training
         self.ema_tracker.reset()

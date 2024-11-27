@@ -12,6 +12,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from allatom_design.data.datasets.fitness_dataset import FitDataset
+from allatom_design.data.data import trim_to_max_len
 from allatom_design.eval import scoring_utils, sampling_utils, multichain_scoring_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
@@ -119,7 +120,8 @@ def main(cfg: DictConfig):
                 labels_exp = {}
 
             for batch in tqdm(val_dataloader, desc="Evaluating fitness", leave=False):
-                pdb_key, mutations, labels, experiment, pdb_data = batch['pdb_key'], batch["mut"], batch["label"], batch["experiment"], batch["pdb_data"]
+                mutations, labels, experiment, pdb_data = batch["mut"], batch["label"], batch["experiment"], batch["pdb_data"]
+                pdb_data = trim_to_max_len(pdb_data)
                 x, aatype, seq_mask, residue_index, chain_index = pdb_data["x"].to(device), pdb_data["aatype"].to(device), pdb_data["seq_mask"].to(device), pdb_data["residue_index"].to(device), pdb_data["chain_index"].to(device)
                 scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
 

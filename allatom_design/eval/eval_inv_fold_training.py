@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
+from allatom_design.data.data import trim_to_max_len
 from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.datasets.ad_dataset import ADDataset
 from allatom_design.eval import eval_metrics, sampling_utils
@@ -108,7 +109,7 @@ def main(cfg: DictConfig):
 
         if dataset is None:
             # Load dataset based on model config
-            dataset = ADDataset(phase="eval", **lit_sd_model.cfg.data)
+            dataset = ADDataset(phase="eval", evalutation_mode = True, **lit_sd_model.cfg.data)
             val_dataloader = DataLoader(dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True, shuffle=False, drop_last=False)
             dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
 
@@ -143,6 +144,7 @@ def main(cfg: DictConfig):
                 Path(seq_recovery_dir).mkdir(parents=True, exist_ok=True)
                 seq_rec_df_S = defaultdict(list)
                 for batch in tqdm(val_dataloader, desc="Evaluating sequence recovery on validation set", leave=False):
+                    batch = trim_to_max_len(batch)
                     x, aatype, seq_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
                     timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
 
@@ -166,6 +168,7 @@ def main(cfg: DictConfig):
                         cond_labels=cond_labels_in,
                         scd_inputs=scd_inputs,
                     )
+
                     
                     samples = {"x_denoised": x_denoised,
                             "seq_mask": seq_mask,
@@ -244,6 +247,8 @@ def main(cfg: DictConfig):
                 for bi, batch in enumerate(val_dataloader):
                     if bi >= cfg.num_codes_sc_batches:
                         break
+
+                    batch = trim_to_max_len(batch)
                     x, aatype, seq_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
 
                     B = x.shape[0]
