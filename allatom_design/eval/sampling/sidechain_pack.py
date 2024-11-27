@@ -135,6 +135,7 @@ def main(cfg: DictConfig):
         samples = {"x_denoised": x_denoised,
                    "seq_mask": seq_mask,
                    "residue_index": residue_index,
+                   "chain_index": chain_index,
                    "pred_aatype": aatype_denoised,
                    "aatype_pred_traj": aux["aatype_pred_traj"],
                    "aatype_t_traj": aux["aatype_t_traj"],

@@ -206,6 +206,10 @@ class SeqDenoiser(nn.Module):
         aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()
         aatype_noised = torch.where(aatype_override_mask == 1, aatype, aatype_noised)
 
+        # Override aatype in sidechain diffusion as well
+        scd_inputs["aatype_override"] = aatype_noised
+        scd_inputs["aatype_override_mask"] = aatype_override_mask
+
         # Add sidechain diffusion inputs
         aux_inputs["scd"] = scd_inputs
 

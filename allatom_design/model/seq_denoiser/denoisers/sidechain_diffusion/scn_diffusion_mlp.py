@@ -159,7 +159,8 @@ class SidechainDiffusionModule(nn.Module):
             churn_cfg = scd_aux_inputs["churn_cfg"]
             noise_schedule = scd_aux_inputs["noise_schedule"]
             return_scn_diffusion_aux = scd_aux_inputs.get("return_scn_diffusion_aux", False)
-            aatype = scd_aux_inputs.get("aatype_override", aatype)  # use aatype_override for sidechain diffusion instead
+            aatype_override_mask = scd_aux_inputs["aatype_override_mask"]
+            aatype = torch.where(aatype_override_mask.bool(), scd_aux_inputs["aatype_override"], aatype)
 
             denoiser_fn = partial(self.scn_denoiser, aatype=aatype,
                                   h_V=h_V, seq_mask=seq_mask)
