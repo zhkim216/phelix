@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
+from allatom_design.data.data import trim_to_max_len
 from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.datasets.ad_dataset import ADDataset
 from allatom_design.eval import eval_metrics, sampling_utils
@@ -92,7 +93,9 @@ def main(cfg: DictConfig):
     pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints")
     for sd_ckpt in pbar:
         match = pattern.search(Path(sd_ckpt).name)
-        global_step, epoch = int(match.group(1)), int(match.group(2))
+        epoch = int(match.group(1))
+        global_step = torch.load(sd_ckpt).get('global_step')
+
         pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
 
         # Skip if global_step is before start_step
@@ -106,7 +109,7 @@ def main(cfg: DictConfig):
 
         if dataset is None:
             # Load dataset based on model config
-            dataset = ADDataset(phase="eval", **lit_sd_model.cfg.data)
+            dataset = ADDataset(phase="eval", evalutation_mode = True, **lit_sd_model.cfg.data)
             val_dataloader = DataLoader(dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True, shuffle=False, drop_last=False)
             dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
 
@@ -141,7 +144,8 @@ def main(cfg: DictConfig):
                 Path(seq_recovery_dir).mkdir(parents=True, exist_ok=True)
                 seq_rec_df_S = defaultdict(list)
                 for batch in tqdm(val_dataloader, desc="Evaluating sequence recovery on validation set", leave=False):
-                    x, seq_mask, residue_index, chain_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
+                    batch = trim_to_max_len(batch)
+                    x, aatype, seq_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
                     timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
 
                     # Define sidechain diffusion timesteps
@@ -152,6 +156,7 @@ def main(cfg: DictConfig):
 
                     x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
                         x,
+                        aatype=aatype,
                         seq_mask=seq_mask,
                         residue_index=residue_index,
                         chain_index=chain_index,
@@ -164,12 +169,14 @@ def main(cfg: DictConfig):
                         scd_inputs=scd_inputs,
                     )
 
+                    
                     samples = {"x_denoised": x_denoised,
                             "seq_mask": seq_mask,
                             "residue_index": residue_index,
                             "pred_aatype": aatype_denoised,
                             "aatype_pred_traj": aux["aatype_pred_traj"],
                             "aatype_t_traj": aux["aatype_t_traj"],
+                            "psce": torch.zeros((x.shape[0], x.shape[1], 33))
                     }
 
                     # Update info for sequence recovery eval
@@ -240,7 +247,9 @@ def main(cfg: DictConfig):
                 for bi, batch in enumerate(val_dataloader):
                     if bi >= cfg.num_codes_sc_batches:
                         break
-                    x, seq_mask, residue_index, chain_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
+
+                    batch = trim_to_max_len(batch)
+                    x, aatype, seq_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
 
                     B = x.shape[0]
                     cond_labels_in = create_cond_labels_input(B, {"designability": "DESIGNABLE"}, device)
@@ -253,6 +262,7 @@ def main(cfg: DictConfig):
                     # Generate samples
                     x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
                         x,
+                        aatype=aatype,
                         seq_mask=seq_mask,
                         residue_index=residue_index,
                         chain_index=chain_index,
@@ -270,6 +280,7 @@ def main(cfg: DictConfig):
                         "seq_mask": seq_mask.cpu(),
                         "residue_index": residue_index,
                         "pred_aatype": aatype_denoised.cpu(),
+                        "psce": torch.zeros((x.shape[0], x.shape[1], 33))
                     }
 
                     # Save samples

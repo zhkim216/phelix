@@ -97,7 +97,6 @@ class SeqDenoiser(nn.Module):
     def score(self,
               x,
               aatype,
-              seq_mlm_mask,
               seq_mask,
               residue_index,
               chain_index
@@ -149,26 +148,25 @@ class SeqDenoiser(nn.Module):
         timesteps = t_seq
 
         # Override aatype with the input aatype during sequence denoising
-        target_dims = (t_seq.shape[1], *aatype.shape)
-        aatype_override = aatype.unsqueeze(0).expand(*target_dims)
-        aatype_override_mask = torch.ones_like(aatype)
-        aatype_override_mask = aatype_override_mask.unsqueeze(0).expand(*target_dims).long()  # view not clone to save a bit of memory
+        aatype_override_mask = seq_mask.clone()
 
-        # Override aatype with the input aatype during sidechain diffusion also
-        scd_inputs["aatype_override"] = aatype
+        #Set sidechain to fully masked
+        scn_override_mask = torch.zeros_like(seq_mask)
 
-        return self.sample(x, seq_mask, residue_index, chain_index, timesteps,
+        return self.sample(x, aatype, seq_mask, residue_index, chain_index, timesteps,
                            temperature=0.0,  # does not matter for sidechain packing
                            num_corrector_steps=0,  # does not matter for sidechain packing
                            corrector_step_ratio=0.0,  # does not matter for sidechain packing
                            aatype_decoding_order_mode="random",  # does not matter for sidechain packing
-                           aatype_override=aatype_override, aatype_override_mask=aatype_override_mask,
+                           aatype_override_mask=aatype_override_mask,
+                           scn_override_mask=scn_override_mask,
                            scd_inputs=scd_inputs,
                            **sampling_kwargs)
 
 
     def sample(self,
                x: TensorType["b n a 3", float],
+               aatype: TensorType["b n", int],
                seq_mask: TensorType["b n", float],
                residue_index: TensorType["b n", int],
                chain_index:  TensorType["b n", int],
@@ -178,8 +176,8 @@ class SeqDenoiser(nn.Module):
                num_corrector_steps: int,
                corrector_step_ratio: float,
                cond_labels: Dict[str, TensorType["b", int]],
-               aatype_override: Optional[TensorType["s+1 b n", int]] = None,  # for fixed-sequence sampling, e.g. in sidechain packing
-               aatype_override_mask: Optional[TensorType["s+1 b n", int]] = None,
+               scn_override_mask: Optional[TensorType["b n", int]] = None,
+               aatype_override_mask: Optional[TensorType["b n", int]] = None,
                scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
                ):
         """
@@ -193,28 +191,29 @@ class SeqDenoiser(nn.Module):
         S = timesteps.shape[1] - 1
         B, N, A, _ = x.shape
 
-        # Set up backbone input
-        x0 = x.clone()
-        x0[..., rc.non_bb_idxs, :] = 0.0  # zero out sidechain atoms
-
         # Handle default overrides
-        # TODO: handle xt overrides, especially important for conditioning on known sequence/sidechain atoms? or maybe we want to do this directly in aatype/x input
-        if aatype_override is None:
-            # dummy values
-            aatype_override = torch.full((S + 1, B, N), fill_value=rc.restype_order_with_x["X"], device=residue_index.device)
-            aatype_override_mask = torch.zeros((S + 1, B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
+        if aatype_override_mask is None:
+            aatype_override_mask = torch.zeros((B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
+
+        if scn_override_mask is None:
+            scn_override_mask = torch.zeros((B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
+
+        # Set up structure input dependent on structure mask
+        x0 = x.clone()
+        x0[:,:,rc.non_bb_idxs,:] =  x0[:,:,rc.non_bb_idxs,:] * scn_override_mask[:,:,None,None]
+
+        # Sample aatype prior dependency on aatype mask
+        aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()
+        aatype_noised = torch.where(aatype_override_mask == 1, aatype, aatype_noised)
 
         # Add sidechain diffusion inputs
         aux_inputs["scd"] = scd_inputs
 
-        # Sample aatype prior
-        aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()  # TODO: make seq prior use MASK rather than UNK
-
         # Get residue decoding order
-        aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps)
+        seq_mlm_mask = torch.zeros_like(seq_mask).float()  + aatype_override_mask # start with all masked tokens, other than partial seq
+        scd_mlm_mask = torch.zeros_like(seq_mask).float()  + scn_override_mask # start with all masked tokens, other than partial scn
+        aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps, mlm_mask_prev=seq_mlm_mask)
         aux_inputs["lengths"] = seq_mask.sum(dim=-1)
-        seq_mlm_mask = torch.zeros_like(seq_mask).float()  # start with all masked tokens
-        scd_mlm_mask = torch.zeros_like(seq_mask).float()  # start with all masked tokens
         aux_inputs["temperature"] = temperature
 
         # Initialize trajectories
@@ -243,17 +242,24 @@ class SeqDenoiser(nn.Module):
         aatype_t = aatype_noised
         psce_t = torch.zeros((B, N, len(rc.non_bb_idxs)), device=x.device)
 
-        # Run unmasking steps
-        timesteps_K = torch.ceil(timesteps * aux_inputs["lengths"][:, None]).long()
+        # use sequence and scn masks to determine timesteps
+        if torch.any((aatype_override_mask - scn_override_mask) < 0):
+            raise ValueError('Sidechain cannot be defined at any positions where sequence is undefined')
+
+        if torch.any((aatype_override_mask - scn_override_mask) < 0) and torch.any((seq_mask - aatype_override_mask) > 0):
+            raise ValueError('Sequence and sidechains at differing mask rates is currently only supported with full sequence and partial sidechain')
+
+        #to allow for scn packing, we set timesteps using the minimum of the two masking schedules
+        num_partial = torch.min(torch.stack((aatype_override_mask.sum(dim=-1), scn_override_mask.sum(dim=-1))), dim = 0).values.long()
+        timesteps_K = torch.ceil(timesteps * (aux_inputs["lengths"][:, None] - num_partial[:,None])).long()
+        timesteps_K += num_partial[:,None]
+
         for i in tqdm(range(S), leave=False, desc="Sampling..."):
             # get current and next timesteps
             t, t_next = timesteps[:, i], timesteps[:, i + 1]
 
             # get next K residues to unmask
             K_next = timesteps_K[:, i + 1]
-
-            # override aatype for inputs
-            aatype_t = aatype_t * (1 - aatype_override_mask[i]) + aatype_override[i] * aatype_override_mask[i]
 
             # Run sequence denoiser
             x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)  # seq_mlm_mask in aux_inputs is updated by denoiser
@@ -293,8 +299,6 @@ class SeqDenoiser(nn.Module):
                 aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
                 xt = sampling_utils.unmask(xt, x1_pred, scd_mlm_mask_prev, scd_mlm_mask)
                 psce_t = sampling_utils.unmask(psce_t, aux_preds["psce"], scd_mlm_mask_prev, scd_mlm_mask)
-
-            aatype_t = aatype_t * (1 - aatype_override_mask[i + 1]) + aatype_override[i + 1] * aatype_override_mask[i + 1]  # override aatype for outputs
 
             # Save trajectory outputs
             xt_traj.append(xt.cpu())
@@ -366,6 +370,7 @@ class SeqDenoiser(nn.Module):
         residue_index = samples["residue_index"]
         seq_mask = samples["seq_mask"]
         aatype = samples["pred_aatype"]
+        chain_index = samples["chain_index"]
 
         # Create atom mask, including backbone atoms even for unknown aatype
         atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=aatype.device)[aatype] * seq_mask[..., None]
@@ -379,8 +384,8 @@ class SeqDenoiser(nn.Module):
             "atom_positions": final_atom37_positions,
             "atom_mask": atom_mask,
             "residue_index": residue_index,
-            "chain_index": torch.zeros_like(residue_index),  # TODO: support multiple chains
-            "b_factors": b_factors,
+            "chain_index": chain_index,
+            "b_factors":b_factors
         }
 
         feats = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in feats.items()}  # move to cpu
@@ -461,8 +466,7 @@ class SeqDenoiser(nn.Module):
                     "atom_positions": x_traj,
                     "atom_mask": atom_mask,
                     "residue_index": residue_index[i].unsqueeze(0).expand(aatype_traj.shape[0], -1),
-                    "chain_index": chain_index[i].unsqueeze(0).expand(aatype_traj.shape[0], -1),
-                    "b_factors": None
+                    "chain_index": chain_index[i].unsqueeze(0).expand(aatype_traj.shape[0], -1)
                 }
                 traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
                 write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)

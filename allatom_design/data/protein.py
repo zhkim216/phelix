@@ -20,7 +20,7 @@ import io
 from typing import Any, Mapping, Optional, Union
 
 import numpy as np
-from Bio.PDB import MMCIFParser, PDBParser, Structure
+from Bio.PDB import MMCIFParser, PDBParser, Structure, PDBList
 from Bio.PDB.Atom import DisorderedAtom
 
 from allatom_design.data import residue_constants
@@ -56,10 +56,11 @@ class Protein:
     # belongs to.
     chain_index: np.ndarray  # [num_res]
 
-    # B-factors, or temperature factors, of each residue (in sq. angstroms units),
-    # representing the displacement of the residue from its ground truth mean
-    # value.
-    b_factors: np.ndarray  # [num_res, num_atom_type]
+    #alphabetic IDs of chains contained in the protein example
+    chain_ids: list #[num_chains]
+
+    #uncertainty in electron density, or predicted error in atom coordinates
+    b_factors: np.ndarray
 
     def __post_init__(self):
         if len(np.unique(self.chain_index)) > PDB_MAX_CHAINS:
@@ -69,7 +70,7 @@ class Protein:
             )
 
 
-def read_pdb(pdb_file: Union[str, Structure.Structure], chain_id: Optional[str] = None, max_conformers: int = 1) -> Protein:
+def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Optional[str] = None, max_conformers: int = 1) -> Protein:
     """Takes a PDB string and constructs a Protein object.
     WARNING: All non-standard residue types will be converted into UNK. All
       non-standard atoms will be ignored.
@@ -103,12 +104,17 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_id: Optional[str] 
     aatype = []
     atom_mask = []
     residue_index = []
-    chain_ids = []
     b_factors = []
+    residue_chain_ids = []
+    chain_ids = []
 
     for chain in model:
-        if chain_id is not None and chain.id != chain_id:
+        if chain_ids_override is not None and chain.id not in chain_ids:
             continue
+        
+        if chain.id not in chain_ids:
+            chain_ids.append(chain.id)
+
         for res in chain:
             if res.id[2] != " ":
                 # raise ValueError(
@@ -169,21 +175,25 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_id: Optional[str] 
             atom_positions.append(pos)
             atom_mask.append(mask)
             residue_index.append(res.id[1])
-            chain_ids.append(chain.id)
             b_factors.append(res_b_factors)
+            residue_chain_ids.append(chain.id)
+
+    # If specified, override chain ids with provided override, else use chain ids discovered from parsing PDB
+    if chain_ids_override is not None:
+        chain_ids = chain_ids_override
 
     # Chain IDs are usually characters so map these to ints.
-    unique_chain_ids = np.unique(chain_ids)
-    chain_id_mapping = {cid: n for n, cid in enumerate(unique_chain_ids)}
-    chain_index = np.array([chain_id_mapping[cid] for cid in chain_ids])
-
+    chain_id_mapping = {cid: n for n, cid in enumerate(chain_ids)}
+    chain_ids_numeric = [n for _, n in chain_id_mapping.items()]
+    chain_index = np.array([chain_id_mapping[cid] for cid in residue_chain_ids])
     return Protein(
         atom_positions=np.array(atom_positions),
         atom_mask=np.array(atom_mask),
         aatype=np.array(aatype),
         residue_index=np.array(residue_index),
         chain_index=chain_index,
-        b_factors=np.array(b_factors),
+        chain_ids=chain_ids_numeric,
+        b_factors=b_factors
     )
 
 

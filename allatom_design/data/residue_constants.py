@@ -1269,6 +1269,12 @@ RESTYPE_TO_ATOM37_IDX = _make_restype_to_atom37_idx()
 RESTYPE_TO_NUM_ATOMS = np.sum(RESTYPE_ATOM14_MASK_WITH_X, axis = 1)
 RESTYPE_ATOM37_TO_ATOM14 = _make_restype_atom37_to_atom14()
 
+""""
+Constant for determining interface residues
+"""
+
+interface_cutoff = 15 #Angstroms, from AF3
+
 """
 Constants for positoinal encoding
 """

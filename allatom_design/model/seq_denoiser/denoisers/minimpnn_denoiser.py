@@ -52,9 +52,9 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         # 1. Sequence design
         seq_logits, mpnn_feature_dict = self.seq_design_module(
             x_noised,
-            aatype_noised,
-            seq_mask,
-            residue_index,
+            aatype_noised, 
+            seq_mask, 
+            residue_index, 
             chain_encoding)
 
         aatype_pred, seq_probs = self.sample_aatype(seq_logits, aux_inputs, is_sampling)
@@ -133,7 +133,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
                                   aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
                                   ):
         # 1. MiniMPNN on ground truth aatype for sequence embeddings
-        _, h_V, h_ESV, _ = self.seq_design_module(x, aatype, None, seq_mask, residue_index, chain_index, aux_inputs["seq_mlm_mask"])
+        _, h_V, _, _ = self.seq_design_module(x, aatype, seq_mask, residue_index, chain_index)
 
         # 2. Get sidechain likelihoods
         x1_scn, x_bb = x[..., rc.non_bb_idxs, :], x[..., rc.bb_idxs, :]

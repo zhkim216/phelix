@@ -12,7 +12,8 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from allatom_design.data.datasets.fitness_dataset import FitDataset
-from allatom_design.eval import scoring_utils, sampling_utils
+from allatom_design.data.data import trim_to_max_len
+from allatom_design.eval import scoring_utils, sampling_utils, multichain_scoring_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
@@ -80,7 +81,8 @@ def main(cfg: DictConfig):
         epoch = int(Path(sd_ckpt).stem.replace("sd-epoch", ""))
         pbar.set_postfix_str(f"Epoch: {epoch}")
         if (cfg.start_epoch is not None) and (epoch < cfg.start_epoch):
-                continue
+            print('feck')
+            continue
 
         for dataset_name in cfg.datasets:
 
@@ -118,8 +120,9 @@ def main(cfg: DictConfig):
                 labels_exp = {}
 
             for batch in tqdm(val_dataloader, desc="Evaluating fitness", leave=False):
-                pdb_key, mutations, labels, experiment, pdb_data = batch['pdb_key'], batch["mut"], batch["label"], batch["experiment"], batch["pdb_data"]
-                x, aatype, seq_mask, residue_index, chain_index, confidence = pdb_data["x"].to(device), pdb_data["aatype"].to(device), pdb_data["seq_mask"].to(device), pdb_data["residue_index"].to(device), pdb_data["chain_index"].to(device), pdb_data["res_b_factors"].to(device)
+                mutations, labels, experiment, pdb_data = batch["mut"], batch["label"], batch["experiment"], batch["pdb_data"]
+                pdb_data = trim_to_max_len(pdb_data)
+                x, aatype, seq_mask, residue_index, chain_index = pdb_data["x"].to(device), pdb_data["aatype"].to(device), pdb_data["seq_mask"].to(device), pdb_data["residue_index"].to(device), pdb_data["chain_index"].to(device)
                 scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
 
                 scores = scoring_utils.score_seq(lit_sd_model,
@@ -128,7 +131,6 @@ def main(cfg: DictConfig):
                                                  seq_mask,
                                                  residue_index,
                                                  chain_index,
-                                                 confidence,
                                                  mutations,
                                                  scd_inputs,
                                                  cfg.data.scoring_method).cpu().tolist()

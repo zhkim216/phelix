@@ -1,39 +1,30 @@
 # Wandb configuration
 project: "allatom_design"  # Wandb project name
-wandb_id: "richardshuai"  # Wandb username
+wandb_id: "talal-widatalla"  # Wandb username
 exp_name: null # Wandb exp name
 group: "debug" # Wandb group name
 
 # Run settings
 no_wandb: false  # Disable wandb logging
 seed: 0
-start_step: 0  # start evaluation after this epoch, 0 or null to start from the beginning
-eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 batch_size: 64
-num_workers: 10
-
-# Evals to run
-run_seq_recovery: true  # compute sequence recovery
-run_codes_sc: true  # run self-consistency eval with inverse-folded sequences
+num_workers: 8
 
 # Denoiser options
-denoiser_train_dir:
-out_dir: ${denoiser_train_dir}/eval_inv_fold_training
-
-# Data options for overriding denoiser config (null values default to denoiser config)
-data:
-    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
-    n_random_subset: null
-
-subset_length_range: [64,256] # only evaluate on sequences within this length range
+checkpoint_path: null
 
 # Inverse folding options
-temperature: 0.1
 aatype_decoding_order_mode: "greedy"
 num_corrector_steps: 0
 corrector_step_ratio: 0.5
-num_steps_list: [1, 20, 100]  # number of denoising steps for inverse folding
+num_steps: 20
+num_samples: 128
+temperature: 0.1
+pdb_path: null
+fixed_pos: null
+sample_pdb_out_dir: "samples"
+predicted_pdb_out_dir: "preds"
+positions: null
 timestep_schedule:
   num_steps: null  # will be filled in by num_steps_list
   mode: "linear"
@@ -58,12 +49,9 @@ scn_diffusion:
     s_t_max: 50.0
     num_steps: ${scn_diffusion.num_steps}
 
-# Co-design self-consistency eval options
-num_codes_sc_batches: 1
-
 # Structure prediction model args
 struct_pred_cfg:
-  model_name: "esmfold"  # ["esmfold", "af2", "omegafold"]
+  model_name: "omegafold"  # ["esmfold", "af2", "omegafold"]
   af2:
     data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
     num_models: 1  # only 1 model is currently supported
