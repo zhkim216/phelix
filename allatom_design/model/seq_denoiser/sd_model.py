@@ -250,7 +250,7 @@ class SeqDenoiser(nn.Module):
         if torch.any((aatype_override_mask - scn_override_mask) < 0):
             raise ValueError('Sidechain cannot be defined at any positions where sequence is undefined')
 
-        if torch.any((aatype_override_mask - scn_override_mask) < 0) and torch.any((seq_mask - aatype_override_mask) > 0):
+        if torch.any((aatype_override_mask - scn_override_mask) > 0) and torch.any((seq_mask - aatype_override_mask) > 0):
             raise ValueError('Sequence and sidechains at differing mask rates is currently only supported with full sequence and partial sidechain')
 
         #to allow for scn packing, we set timesteps using the minimum of the two masking schedules
