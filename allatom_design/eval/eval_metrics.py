@@ -246,7 +246,7 @@ def run_self_consistency_eval(pdbs: List[str],
     Path(ca_aligned_preds_dir).mkdir(parents=True, exist_ok=True)
     for pdb in tqdm(pdbs, desc="Computing metrics", leave=False):
         # Load in sampled structure
-        sampled_pdb_feats = data.load_feats_from_pdb(pdb, chain_residx_gap=None)
+        sampled_pdb_feats = data.load_feats_from_pdb(pdb)
 
         # Retrieve structure predictions
         struct_preds = sc_info[pdb]["struct_preds"]
@@ -284,7 +284,7 @@ def run_self_consistency_eval(pdbs: List[str],
 
 def load_sequence_and_residx_from_pdbs(pdbs: List[str]) -> Tuple[List[str],
                                                                  List[TensorType["n_s", int]]]:
-    examples = [load_feats_from_pdb(pdb, chain_residx_gap=None) for pdb in pdbs]
+    examples = [load_feats_from_pdb(pdb) for pdb in pdbs]
     aatypes = [example["aatype"] for example in examples]
     sequences_list = ["".join([rc.restypes[x] for x in aatype]) for aatype in aatypes]
     residue_index_list = [example["residue_index"] for example in examples]

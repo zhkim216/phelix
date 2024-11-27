@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
-
+from itertools import groupby
+import random
 import numpy as np
 import pandas as pd
 import torch
@@ -9,6 +10,9 @@ from torch.utils import data
 from torch.utils.data import DataLoader
 from torchtyping import TensorType
 from tqdm import tqdm
+from torchtyping import TensorType
+import multiprocessing
+from multiprocessing import Pool
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
@@ -17,7 +21,6 @@ from allatom_design.data.data import (center_random_augmentation,
 
 
 FEATURES_LONG = ("residue_index", "chain_index", "aatype")
-
 
 class ADDataset(data.Dataset):
     """
@@ -37,7 +40,10 @@ class ADDataset(data.Dataset):
         translation_scale: float = 1.0,
         overwrite_cache: bool = False,
         subset_length_range: Optional[int] = None,
+        cluster_sample: bool = True,
         afdb_res_plddt_cutoff: float = 0.0,
+        spatial_crop_ratio: float = 0.5,
+        evaluation_mode: bool = False,
         **kwargs
     ):
         """
@@ -66,15 +72,28 @@ class ADDataset(data.Dataset):
         self.overwrite_cache = overwrite_cache
         self.subset_length_range = subset_length_range
         self.afdb_res_plddt_cutoff = afdb_res_plddt_cutoff
+        self.cluster_sample = cluster_sample
+        self.spatial_crop_ratio = spatial_crop_ratio
+        self.evaluation_mode = evaluation_mode
 
         # Read in PDB keys
         self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
 
         with open(self.pdb_keys_file) as f:
             self.pdb_keys = np.array(f.read().split("\n")[:-1])
+        
+        if self.cluster_sample:
+            if not pdb_path.endswith("af3_pdb"):
+                print('Cluster sampling disabled for non AF3 dataset')
+            else:
+                self._cluster_sample_pdb_keys()
 
         # Cache coordinates for faster loading
         self._cache_examples()
+
+        # For efficiency set fixed size to max length in the eval or test dataset
+        if self.evaluation_mode:
+            self.fixed_size = self._get_max_len()
 
         # Load designability info
         self._load_designability_info()
@@ -101,12 +120,57 @@ class ADDataset(data.Dataset):
     def __len__(self):
         return len(self.pdb_keys)
 
-
     def __getitem__(self, idx):
         pdb_key = self.pdb_keys[idx]
         data = self.get_item(pdb_key)
         return data
 
+    def _multimer_contiguous_crop(self, chain_1_len: int, chain_2_len: int) -> TensorType["n", bool]:
+        
+        #init crop masks w/ all false
+        total_len = chain_1_len + chain_2_len
+        crop_mask = torch.full((total_len,), False)
+
+        #determine crop sizes
+        chain_1_crop_max = min(chain_1_len, self.fixed_size)
+        chain_1_crop_min = min(chain_1_len, max(0, self.fixed_size - chain_2_len))
+        chain_1_crop = torch.randint(chain_1_crop_min, chain_1_crop_max + 1, (1,))
+        chain_2_crop = self.fixed_size - chain_1_crop
+
+        #use crop sizes to sample crop indices
+        chain_1_crop_start = torch.randint(0, total_len - self.fixed_size, (1,))
+        chain_1_crop_end = chain_1_crop_start + chain_1_crop
+        crop_mask[chain_1_crop_start: chain_1_crop_end] = True
+
+        #if chain 2 is inlcuded, add its residues to the mask
+        if chain_2_crop > 0:
+            chain_2_crop_start = torch.randint(chain_1_crop_end, total_len - chain_2_crop, (1,))
+            crop_mask[chain_2_crop_start: chain_2_crop_start + chain_2_crop] = True
+
+        return crop_mask
+
+    def _multimer_spatial_crop(self, x: TensorType["n a 3", bool], interface_residue_mask: TensorType["n", bool]):
+        
+        total_len = x.shape[0]
+        crop_mask = torch.full((total_len,), False)  # Initialize crop mask with all False
+        x_ca = x[:, 1, :]  # Get C-alpha positions of all residues
+        interface_residue_idxs = torch.nonzero(interface_residue_mask).squeeze()
+
+        # Choose a random interface residue index
+        chosen_interface_residue_idx = torch.randint(0, len(interface_residue_idxs), (1,))
+        chosen_interface_residue_ca_pos = x[chosen_interface_residue_idx, 1, :]
+
+        # Calculate distances to the chosen residue's C-alpha position
+        d_interface = x_ca - chosen_interface_residue_ca_pos
+        d_interface = torch.sqrt(torch.sum(d_interface ** 2, dim=1))  # Euclidean distance
+
+        # Find the indices of the closest `self.fixed_size` residues
+        closest_residue_indices = torch.topk(-d_interface, k=self.fixed_size).indices
+
+        # Set the corresponding positions in `crop_mask` to True
+        crop_mask[closest_residue_indices] = True
+
+        return crop_mask
 
     def get_item(self, pdb_key):
         data_file = self._get_data_file(pdb_key)
@@ -143,33 +207,32 @@ class ADDataset(data.Dataset):
         example["missing_atom_mask"] = data["missing_atom_mask"]
         example["atom_mask"] = atom_mask
         example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
-        example['res_b_factors'] = data['res_b_factors']
+        example['interface_residue_mask'] = data['interface_residue_mask']
+        example['chain_ids'] = data['chain_ids']
+
         # Construct conditioning inputs
         cond_labels_in = {}
 
         # Add designability info
         cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
-        if self.designability_csv:
-            cond_labels_in["designability"] = self.pdb_to_designability[pdb_key]
+        if self.designability_csv and self.pdb_path.endswith("ingraham_cath_dataset"):
+            cond_labels_in["designability"] = self.pdb_to_designability[pdb_key[:4]]
 
         # Add dataset source label
         cond_labels_in["dataset_source"] = cl.TOKEN_TO_ID["dataset_source"][self.dataset_source_label]
+        cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]
 
-        # Calculate random cropping start index
-        orig_size = example["x"].shape[0]
-        extra_len = orig_size - self.fixed_size
-        if extra_len > 0:
-            start_idx = np.random.choice(np.arange(extra_len + 1))
-            cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["CROPPED"]
-        else:
-            start_idx = None
-            cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]
+        #Disable cropping for specified datasets
+        start_idx = None
+        multimer_crop_mask = None
+        if not self.evaluation_mode:
+            multimer_crop_mask, start_idx, cond_labels_in = self._crop_examples(example, cond_labels_in, multimer_crop_mask, start_idx)
 
         # Make fixed size example
         fixed_size_example = {}
 
         for k, v in example.items():
-            fixed_size_example[k] = make_fixed_size_1d(v, fixed_size=self.fixed_size, start_idx=start_idx)
+            fixed_size_example[k] = make_fixed_size_1d(v, fixed_size=self.fixed_size, start_idx=start_idx, multimer_crop_mask=multimer_crop_mask)
 
         # Convert data types
         example_out = {}
@@ -186,7 +249,26 @@ class ADDataset(data.Dataset):
         example_out["cond_labels_in"] = cond_labels_in
 
         return example_out
+    
+    def _crop_examples(self, example, cond_labels_in, multimer_crop_mask, start_idx):
+        # Calculate random cropping start index
+        orig_size = example["x"].shape[0]
+        extra_len = orig_size - self.fixed_size
+        if extra_len > 0:
+            if len(example['chain_ids']) > 1:
+                if torch.rand(1) > self.spatial_crop_ratio: 
+                    chain_1_len, chain_2_len = torch.sum(example['chain_index'] == 0), torch.sum(example['chain_index'] == 1)
+                    multimer_crop_mask = self._multimer_contiguous_crop(chain_1_len, chain_2_len)
+                else:
+                    multimer_crop_mask = self._multimer_spatial_crop(example['x'], example['interface_residue_mask'])
+            else:
+                start_idx = np.random.choice(np.arange(extra_len + 1))
+            cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["CROPPED"]
+        
+        return multimer_crop_mask, start_idx, cond_labels_in
 
+    def _cluster_sample_pdb_keys(self):
+        self.pdb_keys = [random.choice(list(group)) for _, group in groupby(sorted(self.pdb_keys), key=lambda x: x.rsplit('_', 1)[-1])]
 
     def _get_data_file(self, pdb_key: str) -> str:
         """
@@ -195,29 +277,18 @@ class ADDataset(data.Dataset):
         data_file = f"{self.pdb_path}/cached_examples/{pdb_key}.pt"
         return data_file
 
-
-    def _get_pdb_data_file(self, pdb_key: str) -> str:
-        if self.pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
-            pdb_data_file = f"{self.pdb_path}/pdb_store/{pdb_key}"
-        elif self.pdb_path.endswith("afdb"):  # AFDB augmentation dataset
-            pdb_data_file = f"{self.pdb_path}/foldseek_cluster_reps/{pdb_key}.cif"
-        elif self.pdb_path.endswith("qfit-test-set/rcsb-pdb"):
-            pdb_data_file = f"{self.pdb_path}/all/{pdb_key}.pdb1"  # qfit dataset, use only pdb1s for now
-        elif self.pdb_path.endswith("rcsb_test_cases"):
-            pdb_data_file = f"{self.pdb_path}/pdbs/{pdb_key}.pdb"
-        else:
-            assert False, f"Unknown dataset: {self.pdb_path}"
-        return pdb_data_file
-
-
     def _get_dataset_source_label(self) -> str:
         if self.pdb_path.endswith("ingraham_cath_dataset"):
             dataset_source_label = "EXPERIMENTAL"
         elif self.pdb_path.endswith("afdb"):
             dataset_source_label = "SYNTHETIC"
+        elif self.pdb_path.endswith("af3_pdb"):
+            dataset_source_label = "EXPERIMENTAL"
         elif self.pdb_path.endswith("qfit-test-set/rcsb-pdb"):
             dataset_source_label = "EXPERIMENTAL"
         elif self.pdb_path.endswith("rcsb_test_cases"):
+            dataset_source_label = "EXPERIMENTAL"
+        elif self.pdb_path.endswith("casp13") or self.pdb_path.endswith("casp14") or self.pdb_path.endswith("casp15"):
             dataset_source_label = "EXPERIMENTAL"
         else:
             assert False, f"Unknown dataset: {self.pdb_path}"
@@ -230,21 +301,38 @@ class ADDataset(data.Dataset):
         Cached files are stored in cached_examples/ in the pdb_path.
         """
         cache_dir = f"{self.pdb_path}/cached_examples"
-
         Path(cache_dir).mkdir(parents=True, exist_ok=True)
         print(f"Caching examples to {cache_dir}...")
-        for pdb_key in tqdm(self.pdb_keys):
-            # Skip if file already exists in cache
-            out_file = f"{cache_dir}/{pdb_key}.pt"
-            if Path(out_file).exists() and not self.overwrite_cache:
-                continue
 
-            # Cache the data
-            pdb_data_file = self._get_pdb_data_file(pdb_key)
-            example = load_feats_from_pdb(pdb_data_file, chain_residx_gap=None)
-            torch.save(example, f"{cache_dir}/{pdb_key}.pt")
+        # Define the number of workers based on CPU count or set manually
+        num_workers = 8
+        print(f"Using {num_workers} Workers!")
 
+        # Prepare arguments as tuples (pdb_key, cache_dir, overwrite_cache) for process_pdb_key
+        task_args = [(pdb_key, cache_dir, self.overwrite_cache, self.pdb_path, self.phase) for pdb_key in self.pdb_keys]
 
+        # Use a Pool for parallel processing
+        with Pool(processes=num_workers) as pool:
+            # Use tqdm to display progress
+            for _ in tqdm(pool.imap_unordered(process_pdb_key, task_args), total=len(task_args), desc="Caching PDBs"):
+                pass
+
+        print("Caching completed.")
+
+    def _get_max_len(self):
+        """
+        Reads in cached PDB files and returns max length of all examples.
+        This is only done for eval and test datasets where we do no cropping.
+        """
+        max_len = 0
+        for pdb_key in tqdm(self.pdb_keys, desc=f"Getting max length in evaluation dataset", leave=False):
+            data_file = self._get_data_file(pdb_key)
+            example = torch.load(data_file, weights_only=True)
+            seq_len = example["seq_mask"].sum().item()
+            max_len = seq_len if (seq_len > max_len) else max_len
+
+        return int(max_len)
+ 
     def _load_designability_info(self) -> None:
         """
         If designability info is provided, load it into a mapping from pdb key to designability (0 or 1).
@@ -265,20 +353,6 @@ class ADDataset(data.Dataset):
             data_file = self._get_data_file(pdb_key)
             example = torch.load(data_file, weights_only=True)
             seq_len = example["seq_mask"].sum().item()
-            if min_len <= seq_len <= max_len:
-                pdb_keys.append(pdb_key)
-
-        self.pdb_keys = np.array(pdb_keys)
-
-    def subset_to_length_range(self, min_len: int, max_len: int):
-        """
-        Subsets the dataset to only include proteins with sequence length in [min_len, max_len].
-        """
-        pdb_keys = []
-        for pdb_key in tqdm(self.pdb_keys, desc=f"Subsetting to length range [{min_len}, {max_len}]", leave=False):
-            data_file = self._get_data_file(pdb_key)
-            latent = torch.load(data_file, weights_only=True)
-            seq_len = latent["seq_mask"].sum().item()
             if min_len <= seq_len <= max_len:
                 pdb_keys.append(pdb_key)
 
@@ -378,3 +452,38 @@ def compute_scale_factors(train_dataloader: DataLoader,
     mean_scn, std_scn = xs_scn.mean().item(), xs_scn.std().item()
 
     return {"bb": (mean_bb, std_bb), "scn": (mean_scn, std_scn)}
+
+def get_pdb_data_file(pdb_path, phase, pdb_key: str) -> str:
+    if pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
+        pdb_data_file = f"{pdb_path}/pdb_store/{pdb_key}"
+    elif pdb_path.endswith("af3_pdb"):
+        pdb_data_file = f"{pdb_path}/{phase}_mmcifs/{pdb_key[1:3]}/{pdb_key[:4]}-assembly1.cif" #just use first assembly for now 
+    elif pdb_path.endswith("afdb"):  # AFDB augmentation dataset
+        pdb_data_file = f"{pdb_path}/foldseek_cluster_reps/{pdb_key}.cif"
+    elif pdb_path.endswith("qfit-test-set/rcsb-pdb"):
+        pdb_data_file = f"{pdb_path}/all/{pdb_key}.pdb1"  # qfit dataset, use only pdb1s for now
+    elif pdb_path.endswith("rcsb_test_cases"):
+        pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
+    elif pdb_path.endswith("casp13") or pdb_path.endswith("casp14") or pdb_path.endswith("casp15"):
+        pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
+    else:
+        assert False, f"Unknown dataset: {pdb_path}"
+    return pdb_data_file
+
+# Modify process_pdb_key to be standalone if necessary (multiprocessing does not work well with methods)
+def process_pdb_key(args):
+    pdb_key, cache_dir, overwrite_cache, pdb_path, phase = args
+    out_file = f"{cache_dir}/{pdb_key}.pt"
+    if Path(out_file).exists() and not overwrite_cache:
+        return  # Skip caching if file exists and overwrite_cache is False
+    
+    pdb_data_file = get_pdb_data_file(pdb_path, phase, pdb_key)  # Ensure this function can work independently
+
+    #specific to multimeric af3 dataset
+    chain_ids_override = None
+    if pdb_path.endswith("af3_pdb"):
+        chain_ids_override = pdb_key.split('_')[1] 
+    
+    example = load_feats_from_pdb(pdb_data_file, chain_ids_override=chain_ids_override, max_conformers=1)
+    torch.save(example, out_file)
+

@@ -13,7 +13,7 @@ import os
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (center_random_augmentation, load_feats_from_pdb,
+from allatom_design.data.data import (load_feats_from_pdb,
                                       make_fixed_size_1d)
 from allatom_design.data.datasets.ad_dataset import ADDataset
 
@@ -34,8 +34,25 @@ class FitDataset(ADDataset):
         # Cache coordinates for faster loading
         self._cache_examples()
 
+        # For efficiency set fixed suze to max length in fitness dataset
+        self.fixed_size = self._get_max_len()
+
     def __len__(self):
         return len(self.mutation_data)
+    
+    def _get_max_len(self):
+        """
+        Reads in cached PDB files and returns max length of all examples.
+        This is only done for eval and test datasets where we do no cropping.
+        """
+        max_len = 0
+        for pdb_key in tqdm(self.pdb_keys, desc=f"Getting max length in evaluation dataset", leave=False):
+            data_file = self._get_data_file(pdb_key)
+            example = torch.load(data_file, weights_only=True)
+            seq_len = example["seq_mask"].sum().item()
+            max_len = seq_len if (seq_len > max_len) else max_len
+
+        return max_len
 
     def _cache_examples(self):
         """
@@ -53,7 +70,7 @@ class FitDataset(ADDataset):
 
             # Cache the data
             pdb_data_file = f"{self.pdb_path}/pdbs/{pdb_key}.pdb"
-            example = load_feats_from_pdb(pdb_data_file, chain_residx_gap=None)
+            example = load_feats_from_pdb(pdb_data_file, chain_ids_override=None, max_conformers=1)
             torch.save(example, f"{cache_dir}/{pdb_key}.pt")
 
     def parse_mutation_csv(self, csv_path):
@@ -96,26 +113,19 @@ class FitDataset(ADDataset):
         example["ghost_atom_mask"] = data["ghost_atom_mask"]
         example["missing_atom_mask"] = data["missing_atom_mask"]
         example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
-        example['res_b_factors'] = data['res_b_factors']
+        example['chain_ids'] = data['chain_ids']
 
         # Construct conditioning inputs
         cond_labels_in = {}
-
-        # Calculate random cropping start index
-        orig_size = example["x"].shape[0]
-        extra_len = orig_size - self.fixed_size
-        if extra_len > 0:
-            start_idx = np.random.choice(np.arange(extra_len + 1))
-            cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["CROPPED"]
-        else:
-            start_idx = None
-            cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]
+        cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
+        cond_labels_in["dataset_source"] = cl.DEFAULT_TOKEN_ID["dataset_source"]
+        cond_labels_in["crop_aug"] = cl.DEFAULT_TOKEN_ID['crop_aug']
 
         # Make fixed size example
         fixed_size_example = {}
 
         for k, v in example.items():
-            fixed_size_example[k] = make_fixed_size_1d(v, fixed_size=self.fixed_size, start_idx=start_idx)
+            fixed_size_example[k] = make_fixed_size_1d(v, fixed_size=self.fixed_size, start_idx=None)
 
         # Convert data types
         example_out = {}
