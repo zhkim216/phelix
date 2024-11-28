@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=b12_aasd0
+#SBATCH --job-name=b12_aasd1
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=1
-#SBATCH --cpus-per-task=8
+#SBATCH --gpus-per-node=2
+#SBATCH --cpus-per-task=16
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -21,13 +21,13 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b12_aasd0
+EXP_NAME=b12_aasd1
 GROUP=chimera_b12
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
+# PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 # DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
-# PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
+PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
 DESIGNABILITY_CSV=null
 
 # Run training script
@@ -41,18 +41,19 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
     data.subset_length_range=[16,9999] \
-    train.batch_size=64 \
+    train.batch_size=32 \
     train.compile_model=true \
     model.task=allatom_seq_des \
     interpolant.training_noise_schedule=uniform_sqrt_t \
     denoiser=minimpnn_denoiser \
-    denoiser.minimpnn.augment_eps=0.0 \
-    denoiser.minimpnn.n_layers=4 \
+    denoiser.minimpnn.augment_eps=0.3 \
+    denoiser.minimpnn.use_gvp=true \
+    denoiser.scn_diffusion_module.training_batch_size_mult=8 \
     denoiser.confidence_module.enabled=true \
     denoiser.confidence_module.structure_encoder.n_layers=3 \
     optim.optimizer=noam \
-    checkpointing.save_latest_every_n_steps=5000 \
-    checkpointing.save_ema_every_n_steps=1500 \
-    trainer.check_val_every_n_epoch=10 \
+    checkpointing.save_latest_every_n_steps=20000 \
+    checkpointing.save_ema_every_n_steps=10000 \
+    trainer.check_val_every_n_epoch=5 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
