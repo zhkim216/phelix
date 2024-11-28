@@ -144,6 +144,7 @@ class SeqDenoiser(nn.Module):
                        missing_atom_mask: TensorType["b n 37", float],  # 1 where atoms are missing
                        residue_index: TensorType["b n", int],
                        chain_index: TensorType["b n", int],
+                       cond_labels: Dict[str, TensorType["b", int]],
                        scd_inputs: Dict[str, Any],
                        **sampling_kwargs) -> Tuple[TensorType["b n", int],
                                                    Dict[str, torch.Tensor]]:
@@ -160,7 +161,9 @@ class SeqDenoiser(nn.Module):
         #Set sidechain to fully masked
         scn_override_mask = torch.zeros_like(seq_mask)
 
-        return self.sample(x, aatype, seq_mask, missing_atom_mask, residue_index, chain_index, timesteps,
+        return self.sample(x, aatype, seq_mask, missing_atom_mask, residue_index, chain_index,
+                           cond_labels=cond_labels,
+                           timesteps=timesteps,
                            temperature=0.0,  # does not matter for sidechain packing
                            num_corrector_steps=0,  # does not matter for sidechain packing
                            corrector_step_ratio=0.0,  # does not matter for sidechain packing
@@ -178,12 +181,13 @@ class SeqDenoiser(nn.Module):
                missing_atom_mask: TensorType["b n a 3", float],  # 1 where atoms are missing
                residue_index: TensorType["b n", int],
                chain_index:  TensorType["b n", int],
+               cond_labels: Dict[str, TensorType["b", int]],
                timesteps: TensorType["b s+1", float],  # timesteps for t_seq
                temperature: float,  # 0.0 for argmax / greedy sampling
                aatype_decoding_order_mode: str,
                num_corrector_steps: int,
                corrector_step_ratio: float,
-               cond_labels: Dict[str, TensorType["b", int]],
+               seq_only: bool = False,  # only sample sequence
                scn_override_mask: Optional[TensorType["b n", int]] = None,
                aatype_override_mask: Optional[TensorType["b n", int]] = None,
                scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
@@ -283,7 +287,7 @@ class SeqDenoiser(nn.Module):
                                           K=K_next, aatype_pred=aatype_pred,
                                           seq_probs=aux_preds["seq_probs"],
                                           psce=aux_preds["scn_diffusion_aux"]["psce"])
-            scn_mlm_mask = seq_mlm_mask.clone()
+            scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else torch.zeros_like(seq_mlm_mask)
 
             # Unmask sequence, sidechains, and sidechain confidence
             aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
@@ -295,7 +299,7 @@ class SeqDenoiser(nn.Module):
                 # Mask out K_corrector residues
                 K_corrector = torch.ceil(K_next * corrector_step_ratio).long()
                 xt, aatype_t, psce_t, seq_mlm_mask = self.interpolant.remask_K(xt, aatype_t, psce_t, seq_mlm_mask, K_corrector)
-                scn_mlm_mask = seq_mlm_mask.clone()
+                scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else torch.zeros_like(seq_mlm_mask)
 
                 # Denoise back to K_next
                 x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t, scn_mlm_mask=scn_mlm_mask)
@@ -306,7 +310,7 @@ class SeqDenoiser(nn.Module):
                                               K=K_next, aatype_pred=aatype_pred,
                                               seq_probs=aux_preds["seq_probs"],
                                               psce=aux_preds["scn_diffusion_aux"]["psce"])
-                scn_mlm_mask = seq_mlm_mask.clone()
+                scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else torch.zeros_like(seq_mlm_mask)
 
                 # Unmask sequence and sidechains
                 aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
