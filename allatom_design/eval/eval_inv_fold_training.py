@@ -145,7 +145,7 @@ def main(cfg: DictConfig):
                 seq_rec_df_S = defaultdict(list)
                 for batch in tqdm(val_dataloader, desc="Evaluating sequence recovery on validation set", leave=False):
                     batch = trim_to_max_len(batch)
-                    x, aatype, seq_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
+                    x, aatype, seq_mask, missing_atom_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["missing_atom_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
                     timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
 
                     # Define sidechain diffusion timesteps
@@ -158,6 +158,7 @@ def main(cfg: DictConfig):
                         x,
                         aatype=aatype,
                         seq_mask=seq_mask,
+                        missing_atom_mask=missing_atom_mask,
                         residue_index=residue_index,
                         chain_index=chain_index,
                         timesteps=timesteps,
@@ -169,7 +170,7 @@ def main(cfg: DictConfig):
                         scd_inputs=scd_inputs,
                     )
 
-                    
+
                     samples = {"x_denoised": x_denoised,
                             "seq_mask": seq_mask,
                             "residue_index": residue_index,
@@ -249,7 +250,7 @@ def main(cfg: DictConfig):
                         break
 
                     batch = trim_to_max_len(batch)
-                    x, aatype, seq_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
+                    x, aatype, seq_mask, missing_atom_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["missing_atom_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
 
                     B = x.shape[0]
                     cond_labels_in = create_cond_labels_input(B, {"designability": "DESIGNABLE"}, device)
@@ -262,8 +263,9 @@ def main(cfg: DictConfig):
                     # Generate samples
                     x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
                         x,
-                        aatype=aatype,
+                        aatype=torch.zeros_like(aatype),
                         seq_mask=seq_mask,
+                        missing_atom_mask=missing_atom_mask,
                         residue_index=residue_index,
                         chain_index=chain_index,
                         timesteps=timesteps,
@@ -278,9 +280,11 @@ def main(cfg: DictConfig):
                     samples = {
                         "x_denoised": x_denoised,
                         "seq_mask": seq_mask.cpu(),
+                        "missing_atom_mask": missing_atom_mask.cpu(),
                         "residue_index": residue_index,
+                        "chain_index": chain_index,
                         "pred_aatype": aatype_denoised.cpu(),
-                        "psce": torch.zeros((x.shape[0], x.shape[1], 33))
+                        "psce": aux["psce"]
                     }
 
                     # Save samples

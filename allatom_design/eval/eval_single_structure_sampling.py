@@ -46,13 +46,13 @@ def main(cfg: DictConfig):
 
     # Load denoiser model
     lit_sd_model = LitSeqDenoiser.load_from_checkpoint(cfg.checkpoint_path).eval()
-    
+
     # Set up sidechain diffusion inputs
     t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
-    
+
     # create sidechain diffusion noise schedule
     noise_schedule = NoiseSchedule(cfg.scn_diffusion.noise_schedule)
-    
+
     # create sidechain diffusion churn config
     churn_cfg = dict(cfg.scn_diffusion.churn_cfg)
     scd_inputs = {"num_steps": cfg.scn_diffusion.num_steps,
@@ -66,11 +66,11 @@ def main(cfg: DictConfig):
     #load input PDB
     data = load_feats_from_pdb(cfg.pdb_path)
     batch = process_single_pdb(data)
-    x, aatype, seq_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
-    
+    x, aatype, seq_mask, missing_atom_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["missing_atom_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
+
     #repeat batch objects along new batch dimension
     B = cfg.batch_size
-    x_batched, aatype_batched, seq_mask_batched, residue_index_batched, chain_index_batched = x[None,...].repeat(B,1,1,1), aatype[None,...].repeat(B,1), seq_mask[None,...].repeat(B,1), residue_index[None, ...].repeat(B,1), chain_index[None,...].repeat(B,1)
+    x_batched, aatype_batched, seq_mask_batched, missing_atom_mask_batched, residue_index_batched, chain_index_batched = x[None,...].repeat(B,1,1,1), aatype[None,...].repeat(B,1), seq_mask[None,...].repeat(B,1), missing_atom_mask[None,...].repeat(B,1), residue_index[None, ...].repeat(B,1), chain_index[None,...].repeat(B,1)
 
     #handle partial sequence and sidechain conditioning
     aatype_override_mask, scn_override_mask = None, None
@@ -84,24 +84,25 @@ def main(cfg: DictConfig):
 
     num_batches = cfg.num_samples // B + 1
     for i, batch in tqdm(enumerate(range(num_batches))):
-        x, aatype, seq_mask, residue_index, chain_index = x_batched.clone(), aatype_batched.clone(), seq_mask_batched.clone(), residue_index_batched.clone(), chain_index_batched.clone()
+        x, aatype, seq_mask, missing_atom_mask, residue_index, chain_index = x_batched.clone(), aatype_batched.clone(), seq_mask_batched.clone(), missing_atom_mask_batched.clone(), residue_index_batched.clone(), chain_index_batched.clone()
 
         timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
-        
+
         # Define sidechain diffusion timesteps
         scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
-        
+
         # Define conditioning labels when we inverse fold
         cond_labels_in = {
             "crop_aug": torch.Tensor([cl.DEFAULT_TOKEN_ID['crop_aug']]*B).to(device),
             "dataset_source": torch.Tensor([cl.DEFAULT_TOKEN_ID['dataset_source']]*B).to(device),
             "designability": torch.Tensor([cl.PLACEHOLDER_TOKEN_ID]*B).to(device)
-        } 
-        
+        }
+
         x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
             x,
-            seq_mask=seq_mask,
             aatype=aatype,
+            seq_mask=seq_mask,
+            missing_atom_mask=missing_atom_mask,
             residue_index=residue_index,
             chain_index=chain_index,
             timesteps=timesteps,
@@ -116,24 +117,26 @@ def main(cfg: DictConfig):
         )
 
         print(aatype_denoised)
-        
+
         samples = {"x_denoised": x_denoised,
                 "seq_mask": seq_mask,
+                "missing_atom_mask": missing_atom_mask,
                 "residue_index": residue_index,
+                "chain_index": chain_index,
                 "pred_aatype": aatype_denoised,
                 "aatype_pred_traj": aux["aatype_pred_traj"],
                 "aatype_t_traj": aux["aatype_t_traj"],
                 "chain_index": chain_index, #save with same chain index as input
-                "psce": torch.zeros((x.shape[0], x.shape[1], 33)).to(device)
+                "psce": aux["psce"]
         }
 
         pdbs = [f"{cfg.sample_pdb_out_dir}/batch_{i}_sample_{j}.pdb" for j in range(B)]
         SeqDenoiser.save_samples_to_pdb(samples, pdbs)
 
-        ###predict structure to evaluate sc-RMSD and confidence 
+        ###predict structure to evaluate sc-RMSD and confidence
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
-        codes_sc_info = eval_metrics.run_self_consistency_eval( #TODO: Add confidence, plddt, and seq_id 
+        codes_sc_info = eval_metrics.run_self_consistency_eval( #TODO: Add confidence, plddt, and seq_id
             pdbs,
             None, None,  # no MPNN model for co-design eval
             struct_pred_model,

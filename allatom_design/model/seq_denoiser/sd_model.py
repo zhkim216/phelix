@@ -9,11 +9,12 @@ from torchtyping import TensorType
 from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import cat_bb_scn, stack_aux_traj
+from allatom_design.data.data import cat_bb_scn, get_rc_tensor, stack_aux_traj
 from allatom_design.data.pdb_utils import *
 from allatom_design.eval import sampling_utils
+from allatom_design.interpolants.sd_interpolants.double_mar_interpolant import \
+    DOUBLE_MAR
 from allatom_design.interpolants.sd_interpolants.mar_interpolant import MAR
-from allatom_design.interpolants.sd_interpolants.double_mar_interpolant import DOUBLE_MAR
 from allatom_design.interpolants.sd_interpolants.sd_interpolant import \
     SDInterpolant
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
@@ -77,7 +78,7 @@ class SeqDenoiser(nn.Module):
         aux_inputs = {
             "x": batch["x"],  # ground truth coordinates
             "aatype": batch["aatype"],  # ground truth aatype
-            "atom_mask": batch["atom_mask"],
+            "atom_mask": batch["atom_mask"],  # ground truth atom mask; includes missing, ghost, and pad atoms
             "t_scd": batch.get("t_scd", None),  # scalar; fix t_scd (sidechain diffusion time) if provided, usually for eval
             "seq_mlm_mask": batch["seq_mlm_mask"],
             "scn_mlm_mask": batch["scn_mlm_mask"],
@@ -85,7 +86,9 @@ class SeqDenoiser(nn.Module):
 
         # Denoise coords
         _, _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"], None,
-                                        batch["residue_index"], batch['chain_index'], batch["seq_mask"],
+                                        batch["residue_index"], batch['chain_index'],
+                                        batch["seq_mask"], batch["missing_atom_mask"],
+                                        batch["scn_mlm_mask"],
                                         cond_labels_in=batch["cond_labels_in"],
                                         aux_inputs=aux_inputs)
 
@@ -108,11 +111,14 @@ class SeqDenoiser(nn.Module):
         - seq_mask: TensorType["b n", float]
         - cond_labels_in: Dict[str, TensorType["b", int]]
         """
-
         # Denoise coords
+        # TODO: whenever score() is called, we need to pass in the atom_mask_noised [b n 37] that specifies missing / ghost / masked sidechain atoms
+        # the line of code below assumes all atoms are present and no sidechains are masked; i left it commented so it'll break and remind us to fix it
+        # atom_mask_noised = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)
         seq_logits, _ = self.denoiser.seq_design_module(x,
                                                         aatype,
                                                         seq_mask,
+                                                        atom_mask_noised,
                                                         residue_index,
                                                         chain_index)
 
@@ -135,6 +141,7 @@ class SeqDenoiser(nn.Module):
                        x: TensorType["b n a 3", float],
                        aatype: TensorType["b n", int],
                        seq_mask: TensorType["b n", float],
+                       missing_atom_mask: TensorType["b n 37", float],  # 1 where atoms are missing
                        residue_index: TensorType["b n", int],
                        chain_index: TensorType["b n", int],
                        scd_inputs: Dict[str, Any],
@@ -153,7 +160,7 @@ class SeqDenoiser(nn.Module):
         #Set sidechain to fully masked
         scn_override_mask = torch.zeros_like(seq_mask)
 
-        return self.sample(x, aatype, seq_mask, residue_index, chain_index, timesteps,
+        return self.sample(x, aatype, seq_mask, missing_atom_mask, residue_index, chain_index, timesteps,
                            temperature=0.0,  # does not matter for sidechain packing
                            num_corrector_steps=0,  # does not matter for sidechain packing
                            corrector_step_ratio=0.0,  # does not matter for sidechain packing
@@ -168,6 +175,7 @@ class SeqDenoiser(nn.Module):
                x: TensorType["b n a 3", float],
                aatype: TensorType["b n", int],
                seq_mask: TensorType["b n", float],
+               missing_atom_mask: TensorType["b n a 3", float],  # 1 where atoms are missing
                residue_index: TensorType["b n", int],
                chain_index:  TensorType["b n", int],
                timesteps: TensorType["b s+1", float],  # timesteps for t_seq
@@ -214,8 +222,8 @@ class SeqDenoiser(nn.Module):
         aux_inputs["scd"] = scd_inputs
 
         # Get residue decoding order
-        seq_mlm_mask = torch.zeros_like(seq_mask).float()  + aatype_override_mask # start with all masked tokens, other than partial seq
-        scd_mlm_mask = torch.zeros_like(seq_mask).float()  + scn_override_mask # start with all masked tokens, other than partial scn
+        seq_mlm_mask = torch.zeros_like(seq_mask).float() + aatype_override_mask # start with all masked tokens, other than partial seq
+        scd_mlm_mask = torch.zeros_like(seq_mask).float() + scn_override_mask # start with all masked tokens, other than partial scn
         aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps, mlm_mask_prev=seq_mlm_mask)
         aux_inputs["lengths"] = seq_mask.sum(dim=-1)
         aux_inputs["temperature"] = temperature
@@ -237,6 +245,7 @@ class SeqDenoiser(nn.Module):
         denoiser_fn = partial(self.denoiser,
                               residue_index=residue_index,
                               seq_mask=seq_mask,
+                              missing_atom_mask=missing_atom_mask,
                               chain_encoding=chain_index,
                               cond_labels_in=cond_labels,
                               aux_inputs=aux_inputs,
@@ -266,7 +275,7 @@ class SeqDenoiser(nn.Module):
             K_next = timesteps_K[:, i + 1]
 
             # Run sequence denoiser
-            x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)  # seq_mlm_mask in aux_inputs is updated by denoiser
+            x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t, scn_mlm_mask=scd_mlm_mask)
 
             # Update mask
             seq_mlm_mask_prev, scd_mlm_mask_prev = seq_mlm_mask.clone(), scd_mlm_mask.clone()
@@ -289,7 +298,7 @@ class SeqDenoiser(nn.Module):
                 scd_mlm_mask = seq_mlm_mask.clone()
 
                 # Denoise back to K_next
-                x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t)
+                x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t, scn_mlm_mask=scd_mlm_mask)
 
                 # Update mask
                 seq_mlm_mask_prev, scd_mlm_mask_prev = seq_mlm_mask.clone(), scd_mlm_mask.clone()
@@ -327,8 +336,6 @@ class SeqDenoiser(nn.Module):
         if scd_inputs.get("return_scn_diffusion_aux", False):
             aux["scn_diffusion_aux_traj"] = stack_aux_traj(scn_diffusion_aux_traj, dim=1)  # values are shape (B, S, S_scd, N, A, 3)
 
-        # override output aatype if we're overriding aatype in sidechain diffusion
-        aatype_t = scd_inputs.get("aatype_override", aatype_t)
         return xt, aatype_t, aux
 
 
@@ -378,6 +385,7 @@ class SeqDenoiser(nn.Module):
 
         # Create atom mask, including backbone atoms even for unknown aatype
         atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=aatype.device)[aatype] * seq_mask[..., None]
+        atom_mask = atom_mask * (1 - samples["missing_atom_mask"])  # mask out missing atoms
 
         # Set b-factors to predicted Sidechain Error (PSCE)
         b_factors = torch.zeros_like(atom_mask, dtype=torch.float32)

@@ -109,7 +109,7 @@ def main(cfg: DictConfig):
         batch_i = ADDataset.index_into_batch(examples, idxs)
         x, aatype = batch_i["x"].to(device), batch_i["aatype"].to(device)
         scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
-        seq_mask = batch_i["seq_mask"].to(device)
+        seq_mask, missing_atom_mask = batch_i["seq_mask"].to(device), batch_i["missing_atom_mask"].to(device)
         residue_index, chain_index = batch_i["residue_index"].to(device), batch_i["chain_index"].to(device)
         cond_labels_in = {"crop_aug": batch_i["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
 
@@ -117,6 +117,7 @@ def main(cfg: DictConfig):
             x,
             aatype,
             seq_mask=seq_mask,
+            missing_atom_mask=missing_atom_mask,
             residue_index=residue_index,
             chain_index=chain_index,
             cond_labels=cond_labels_in,
@@ -134,6 +135,7 @@ def main(cfg: DictConfig):
 
         samples = {"x_denoised": x_denoised,
                    "seq_mask": seq_mask,
+                   "missing_atom_mask": missing_atom_mask,
                    "residue_index": residue_index,
                    "chain_index": chain_index,
                    "pred_aatype": aatype_denoised,
