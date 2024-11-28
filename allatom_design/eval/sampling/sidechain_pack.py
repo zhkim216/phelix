@@ -226,6 +226,11 @@ def main(cfg: DictConfig):
     scn_metrics = {}
     seq_mask = sample_info["seq_mask"]
 
+    # Average RMSD per protein over proteins
+    scn_rmsd_avg = sample_info["scn_rmsd_per_pos"].sum(dim=-1) / seq_mask.sum(dim=-1)
+    scn_metrics["scn_rmsd_avg"] = scn_rmsd_avg.mean().item()
+    print(f"Average RMSD per protein: {scn_metrics['scn_rmsd_avg']:.3f}")
+
     # Average RMSD over all residues
     scn_rmsd_avg_all = (sample_info["scn_rmsd_per_pos"] * seq_mask).sum() / seq_mask.sum()
     scn_metrics["scn_rmsd_avg_all"] = scn_rmsd_avg_all.item()
