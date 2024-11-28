@@ -306,13 +306,13 @@ class SidechainDiffusionModule(nn.Module):
         S_scd = num_steps
 
         # Only pack residues that are unmasked
-        scd_mlm_mask = aux_inputs["seq_mlm_mask"]
+        scn_mlm_mask = aux_inputs["seq_mlm_mask"]
 
         denoiser_fn = partial(self.scn_denoiser, aatype=aatype, x_bb=x_bb,
-                              h_V=h_V, seq_mask=seq_mask, scd_mlm_mask=scd_mlm_mask,
+                              h_V=h_V, seq_mask=seq_mask, scn_mlm_mask=scn_mlm_mask,
                               residue_index=residue_index, chain_index=chain_index)
 
-        x1_mask = scn_atom_mask * rearrange(scd_mlm_mask, "b n -> b n 1 1")
+        x1_mask = scn_atom_mask * rearrange(scn_mlm_mask, "b n -> b n 1 1")
 
         likelihood_aux = self.scn_interpolant.get_likelihoods(denoiser_fn, x1_scn, x1_mask, S_scd)
 
