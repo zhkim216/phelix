@@ -105,6 +105,7 @@ def main(cfg: DictConfig):
             missing_atom_mask=missing_atom_mask,
             residue_index=residue_index,
             chain_index=chain_index,
+            cond_labels=cond_labels_in,
             timesteps=timesteps,
             temperature=cfg.temperature,
             aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
@@ -112,7 +113,6 @@ def main(cfg: DictConfig):
             corrector_step_ratio=cfg.corrector_step_ratio,
             aatype_override_mask=aatype_override_mask,
             scn_override_mask=scn_override_mask,
-            cond_labels=cond_labels_in,
             scd_inputs=scd_inputs,
         )
 
