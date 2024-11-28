@@ -223,7 +223,7 @@ class SeqDenoiser(nn.Module):
 
         # Get residue decoding order
         seq_mlm_mask = torch.zeros_like(seq_mask).float() + aatype_override_mask # start with all masked tokens, other than partial seq
-        scd_mlm_mask = torch.zeros_like(seq_mask).float() + scn_override_mask # start with all masked tokens, other than partial scn
+        scn_mlm_mask = torch.zeros_like(seq_mask).float() + scn_override_mask # start with all masked tokens, other than partial scn
         aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps, mlm_mask_prev=seq_mlm_mask)
         aux_inputs["lengths"] = seq_mask.sum(dim=-1)
         aux_inputs["temperature"] = temperature
@@ -275,43 +275,43 @@ class SeqDenoiser(nn.Module):
             K_next = timesteps_K[:, i + 1]
 
             # Run sequence denoiser
-            x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t, scn_mlm_mask=scd_mlm_mask)
+            x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t, scn_mlm_mask=scn_mlm_mask)
 
             # Update mask
-            seq_mlm_mask_prev, scd_mlm_mask_prev = seq_mlm_mask.clone(), scd_mlm_mask.clone()
+            seq_mlm_mask_prev, scn_mlm_mask_prev = seq_mlm_mask.clone(), scn_mlm_mask.clone()
             seq_mlm_mask = mask_update_fn(seq_mlm_mask,
                                           K=K_next, aatype_pred=aatype_pred,
                                           seq_probs=aux_preds["seq_probs"],
                                           psce=aux_preds["scn_diffusion_aux"]["psce"])
-            scd_mlm_mask = seq_mlm_mask.clone()
+            scn_mlm_mask = seq_mlm_mask.clone()
 
             # Unmask sequence, sidechains, and sidechain confidence
             aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
-            xt = sampling_utils.unmask(xt, x1_pred, scd_mlm_mask_prev, scd_mlm_mask)
-            psce_t = sampling_utils.unmask(psce_t, aux_preds["scn_diffusion_aux"]["psce"], scd_mlm_mask_prev, scd_mlm_mask)
+            xt = sampling_utils.unmask(xt, x1_pred, scn_mlm_mask_prev, scn_mlm_mask)
+            psce_t = sampling_utils.unmask(psce_t, aux_preds["scn_diffusion_aux"]["psce"], scn_mlm_mask_prev, scn_mlm_mask)
 
             for j in range(num_corrector_steps):
                 # Corrector step where we mask and denoise equally
                 # Mask out K_corrector residues
                 K_corrector = torch.ceil(K_next * corrector_step_ratio).long()
                 xt, aatype_t, psce_t, seq_mlm_mask = self.interpolant.remask_K(xt, aatype_t, psce_t, seq_mlm_mask, K_corrector)
-                scd_mlm_mask = seq_mlm_mask.clone()
+                scn_mlm_mask = seq_mlm_mask.clone()
 
                 # Denoise back to K_next
-                x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t, scn_mlm_mask=scd_mlm_mask)
+                x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=t, scn_mlm_mask=scn_mlm_mask)
 
                 # Update mask
-                seq_mlm_mask_prev, scd_mlm_mask_prev = seq_mlm_mask.clone(), scd_mlm_mask.clone()
+                seq_mlm_mask_prev, scn_mlm_mask_prev = seq_mlm_mask.clone(), scn_mlm_mask.clone()
                 seq_mlm_mask = mask_update_fn(seq_mlm_mask,
                                               K=K_next, aatype_pred=aatype_pred,
                                               seq_probs=aux_preds["seq_probs"],
                                               psce=aux_preds["scn_diffusion_aux"]["psce"])
-                scd_mlm_mask = seq_mlm_mask.clone()
+                scn_mlm_mask = seq_mlm_mask.clone()
 
                 # Unmask sequence and sidechains
                 aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
-                xt = sampling_utils.unmask(xt, x1_pred, scd_mlm_mask_prev, scd_mlm_mask)
-                psce_t = sampling_utils.unmask(psce_t, aux_preds["psce"], scd_mlm_mask_prev, scd_mlm_mask)
+                xt = sampling_utils.unmask(xt, x1_pred, scn_mlm_mask_prev, scn_mlm_mask)
+                psce_t = sampling_utils.unmask(psce_t, aux_preds["psce"], scn_mlm_mask_prev, scn_mlm_mask)
 
             # Save trajectory outputs
             xt_traj.append(xt.cpu())
