@@ -1,27 +1,26 @@
 from typing import Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
 import allatom_design.data.residue_constants as rc
-
-from allatom_design.data.data import (
-    atom37_to_atom14,
-    unpack,
-    get_graph_transformer_inputs,
-    aggregate,
-    gather_edges,
-    gather_nodes,
-    cat_neighbors_nodes
-)
-
-from allatom_design.model.seq_denoiser.denoisers.seq_design.graph_transformer import GraphTransformer
-from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_modules import GVPEncoder
-from allatom_design.model.seq_denoiser.denoisers.seq_design.gcp_net.gcp_net import GCPNet
-from allatom_design.model.seq_denoiser.denoisers.seq_design.residue_transformer import ResidueTransformer
+from allatom_design.data.data import (aggregate, atom37_to_atom14,
+                                      cat_neighbors_nodes, gather_edges,
+                                      gather_nodes,
+                                      get_graph_transformer_inputs, unpack)
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gcp_net.gcp_net import \
+    GCPNet
+from allatom_design.model.seq_denoiser.denoisers.seq_design.graph_transformer import \
+    GraphTransformer
+from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_modules import \
+    GVPEncoder
+from allatom_design.model.seq_denoiser.denoisers.seq_design.residue_transformer import \
+    ResidueTransformer
 
 
 class FaMPNN(nn.Module):
@@ -125,6 +124,7 @@ class FaMPNN(nn.Module):
         denoised_coords: TensorType["b n a x", float],
         aatype_noised: TensorType["b n", int], #will have UNK tokens where masking occurs
         seq_mask: TensorType["b n", float],
+        atom_mask_noised: TensorType["b n a", float],  # denotes missing, ghost, and masked atoms
         residue_index: TensorType["b n", int],
         chain_encoding: TensorType["b n", int],
     ):
@@ -133,7 +133,8 @@ class FaMPNN(nn.Module):
         S = aatype_noised
 
         #prepare inputs for protein mpnn
-        X, atom14_mask = atom37_to_atom14(aatype_noised, denoised_coords)
+        X, atom14_mask = atom37_to_atom14(aatype_noised, denoised_coords, atom37_mask=atom_mask_noised)
+        X = torch.where(atom14_mask[..., None].bool(), X, X[..., 1:2, :])  # replace missing/ghost/masked atoms with CA
 
         # Prepare node and edge embeddings
         E, E_idx, X = self.features(X, seq_mask, residue_index, chain_encoding)

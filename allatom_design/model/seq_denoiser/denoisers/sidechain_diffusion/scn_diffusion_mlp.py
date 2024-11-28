@@ -74,17 +74,19 @@ class SidechainDiffusionModule(nn.Module):
 
             # Get ground truth sidechains for diffusion
             x_scn_gt = aux_inputs["x"][..., rc.non_bb_idxs, :]
+            atom_mask_gt = aux_inputs["atom_mask"]  # use ground truth atom mask for ghost / missing atoms
 
             # Transform sidechains from ground truth to local frame
-            x_scn_local_gt, _ = transform_sidechain_frame(x_scn_gt,
-                                                          aux_inputs["x"][..., rc.bb_idxs, :],
-                                                          aux_inputs["atom_mask"][..., rc.non_bb_idxs],
-                                                          aux_inputs["atom_mask"][..., rc.bb_idxs],
-                                                          to_local=True)
+            x_scn_local_gt, bb_frames_exists = transform_sidechain_frame(x_scn_gt,
+                                                                         aux_inputs["x"][..., rc.bb_idxs, :],
+                                                                         atom_mask_gt[..., rc.non_bb_idxs],
+                                                                         atom_mask_gt[..., rc.bb_idxs],
+                                                                         to_local=True)
 
             # Repeat inputs for batch multiplier
             M = self.cfg.training_batch_size_mult
             x_scn_local_gt_batched = repeat(x_scn_local_gt, "b n a x -> (m b) n a x", m=M, b=B)
+            bb_frames_exists_batched = repeat(bb_frames_exists, "b n -> (m b) n", m=M, b=B)
             h_V_batched = repeat(h_V, "b n h -> (m b) n h", m=M, b=B)
             aatype_batched = repeat(aatype, "b n -> (m b) n", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
@@ -135,6 +137,7 @@ class SidechainDiffusionModule(nn.Module):
                     "sce_bins_cfg": self.confidence_module.sce_bins_cfg,
                     "scn_pred_rollout": x1_scn_local_rollout,  # compute loss in local frame
                     "scn_target": x_scn_local_gt,
+                    "bb_frames_exists": bb_frames_exists,
                 }
 
             # Outputs
@@ -144,6 +147,7 @@ class SidechainDiffusionModule(nn.Module):
             diffusion_aux["scn_pred"] = x1_scn_local_batched
             diffusion_aux["scn_target"] = x_scn_local_gt_batched
             diffusion_aux["loss_weight_t"] = loss_weight_t_batched
+            diffusion_aux["bb_frames_exists"] = bb_frames_exists_batched  # don't compute loss if bb frame doesn't exist
 
         else:
             # === Sampling === #
@@ -208,10 +212,10 @@ class SidechainDiffusionModule(nn.Module):
 
             # Transform denoised sidechains back to global coordinates
             x_bb = mpnn_feature_dict["X"][..., rc.atom14_bb_idxs, :]
-            atom_mask = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)  # assume all atoms are present  # TODO: we should pass in true atom mask here to account for missing backbone
-            atom_mask_bb, atom_mask_scn = atom_mask[..., rc.bb_idxs], atom_mask[..., rc.non_bb_idxs]
+            atom_mask_bb = mpnn_feature_dict["atom14_mask"][..., rc.atom14_bb_idxs]  # 0 denotes missing backbone atoms in input backbone
+            atom_mask_scn = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)[..., rc.non_bb_idxs]  # all atoms are present for the packed aatype, since we sampled them
             x1_scn, _ = transform_sidechain_frame(xt_scn_local, x_bb,
-                                                  atom_mask_scn, atom_mask_bb, to_local=False)
+                                                  atom_mask_scn, atom_mask_bb, to_local=False)  # if backbone frame doesn't exist, we predict all sidechain atoms at CA
             diffusion_aux["scn_pred"] = x1_scn
 
             # Finalize trajectory outputs
