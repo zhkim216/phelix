@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=b9_aasd5_mlp_ratio
+#SBATCH --job-name=b12_aasd3_lr
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=1
-#SBATCH --cpus-per-task=8
-#SBATCH --time=36:00:00
-#SBATCH --array=0-1%2
+#SBATCH --gpus-per-node=2
+#SBATCH --cpus-per-task=16
+#SBATCH --time=24:00:00
+#SBATCH --array=0-5%3
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -24,26 +24,31 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-# Define array for mlp_ratio
-mlp_ratio_values=(1.0 2.0)
+# Define arrays for ref_lr and ref_steps
+ref_lr_values=(3.0e-3 1.0e-3)
+ref_steps_values=(100000 50000 10000)
 
 # Calculate indices
-total_jobs=${#mlp_ratio_values[@]}
+num_ref_lr=${#ref_lr_values[@]}        # Should be 2
+num_ref_steps=${#ref_steps_values[@]}  # Should be 3
+total_jobs=$((num_ref_lr * num_ref_steps))  # Should be 6
 
-mlp_ratio_idx=$SLURM_ARRAY_TASK_ID
+ref_lr_idx=$(( SLURM_ARRAY_TASK_ID / num_ref_steps ))
+ref_steps_idx=$(( SLURM_ARRAY_TASK_ID % num_ref_steps ))
 
-# Get the current mlp_ratio based on index
-MLP_RATIO=${mlp_ratio_values[$mlp_ratio_idx]}
+# Get the current ref_lr and ref_steps based on indices
+REF_LR=${ref_lr_values[$ref_lr_idx]}
+REF_STEPS=${ref_steps_values[$ref_steps_idx]}
 
-# Set experiment name and group, including mlp_ratio
-EXP_NAME=b9_aasd5_mlp_ratio${MLP_RATIO}
-GROUP=chimera_b9
+# Set experiment name and group, including ref_lr and ref_steps
+EXP_NAME=b12_aasd3_lr${REF_LR}_steps${REF_STEPS}
+GROUP=chimera_b12
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
+DESIGNABILITY_CSV=null
 
-# Run training script with the selected mlp_ratio
+# Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
@@ -54,21 +59,20 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
     data.subset_length_range=[16,9999] \
-    train.batch_size=64 \
+    train.batch_size=16 \
     train.compile_model=true \
     model.task=allatom_seq_des \
     interpolant.training_noise_schedule=uniform_sqrt_t \
     denoiser=minimpnn_denoiser \
-    denoiser.minimpnn.model_type=sidechain \
     denoiser.minimpnn.augment_eps=0.3 \
+    denoiser.minimpnn.use_gvp=true \
+    denoiser.minimpnn.n_layers=4 \
     denoiser.scn_diffusion_module.training_batch_size_mult=8 \
-    denoiser.scn_diffusion_module.hidden_size=256 \
-    denoiser.scn_diffusion_module.scn_denoiser.depth=4 \
-    denoiser.scn_diffusion_module.scn_denoiser.mlp_dropout=0.0 \
-    denoiser.scn_diffusion_module.scn_denoiser.mlp_ratio=${MLP_RATIO} \
+    denoiser.confidence_module.enabled=true \
+    denoiser.confidence_module.structure_encoder.n_layers=3 \
     optim.optimizer=noam \
-    checkpointing.save_latest_every_n_steps=5000 \
-    checkpointing.save_ema_every_n_steps=1500 \
-    trainer.check_val_every_n_epoch=10 \
+    checkpointing.save_latest_every_n_steps=20000 \
+    checkpointing.save_ema_every_n_steps=10000 \
+    trainer.check_val_every_n_epoch=5 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
