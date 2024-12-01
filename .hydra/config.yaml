@@ -1,0 +1,29 @@
+project: allatom_design
+wandb_id: talal-widatalla
+exp_name: aasd_gvp_pdb_eval_scn_pack
+group: chimera_a10
+no_wandb: false
+seed: 0
+start_step: 0
+eval_every_n_ckpts: 1
+batch_size: 64
+num_workers: 8
+denoiser_train_dir: /scratch/hielab/talal/allatom_design/allatom_design/aasd_gvp_pdb
+out_dir: ${denoiser_train_dir}/eval_scn_pack_training
+data:
+  pdb_path: /scratch/hielab/talal/datasets/casp15
+  designability_csv: ''
+  n_random_subset: null
+subset_length_range:
+- 64
+- 256
+scn_diffusion:
+  num_steps_list:
+  - 1
+  - 20
+  - 100
+  timestep_schedule:
+    num_steps: null
+    mode: linear
+    t_start: 0.0
+    t_end: 1.0
