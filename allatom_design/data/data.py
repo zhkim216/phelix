@@ -155,11 +155,11 @@ def make_fixed_size_1d(data: TensorType["n ..."], fixed_size: int, start_idx: in
         new_data = torch.cat([data, torch.zeros(pad_size, *extra_shape)], 0)
     return new_data
 
-def trim_to_max_len(example):
-    max_len = int(max(torch.sum(example['seq_mask'], dim=-1)))
+def trim_to_max_len(batch: TensorType["b n ..."]):
+    max_len = int(max(torch.sum(batch['seq_mask'], dim=-1)))
 
     trimmed_example = {}
-    for k, v in example.items():
+    for k, v in batch.items():
 
         #features which aren't trimmed
         if k in ['pdb_key','cond_labels_in','chain_ids']:
@@ -168,6 +168,23 @@ def trim_to_max_len(example):
             trimmed_example[k] = v[:,:max_len,...]
 
     return trimmed_example
+
+
+def pad_to_max_len(batch: TensorType["b n ..."], max_len: int):
+    """
+    Inverse of trim_to_max_len; pads a batch to a fixed length.
+    """
+    padded_example = {}
+    for k, v in batch.items():
+        # features which aren't padded
+        if k in ['pdb_key', 'cond_labels_in', 'chain_ids']:
+            padded_example[k] = v
+        else:
+            B, N, *extra_shape = v.shape
+            padding = torch.zeros((B, max_len - N, *extra_shape), device=v.device, dtype=v.dtype)
+            padded_example[k] = torch.cat([v, padding], dim=1)
+    return padded_example
+
 
 def dgram_from_positions(
     pos: torch.Tensor,

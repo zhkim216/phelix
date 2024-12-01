@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import trim_to_max_len
+from allatom_design.data.data import trim_to_max_len, pad_to_max_len
 from allatom_design.data.datasets.ad_dataset import ADDataset
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
@@ -137,12 +137,8 @@ def main(cfg: DictConfig):
 
                 # Store sample info
                 seq_mask, aatype = seq_mask.cpu(), aatype.cpu()
-                sample_info["pdb"] += batch["pdb_key"]
-                sample_info["seq_mask"].append(seq_mask)
-                sample_info["aatype"].append(aatype)
                 core_mask, surface_mask = eval_metrics.get_core_surface_mask(x.cpu(), batch["atom_mask"].cpu())
-                sample_info["core_mask"].append(core_mask)
-                sample_info["surface_mask"].append(surface_mask)
+                sample_info_i = {"pdb_key": batch["pdb_key"], "seq_mask": seq_mask, "aatype": aatype, "core_mask": core_mask, "surface_mask": surface_mask}
 
                 # Compute sidechain RMSD per residue
                 atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK)[aatype] * seq_mask[..., None]
@@ -152,9 +148,16 @@ def main(cfg: DictConfig):
                                                                      atom_mask, aatype=aatype,
                                                                      metrics_to_compute=["scn_rmsd_per_pos", "chi_metrics_per_pos"])
                 for k, v in scn_info.items():
+                    sample_info_i[k] = v
+
+                # Pad sample_info for this batch back to max length
+                sample_info_i = pad_to_max_len(sample_info_i, max_len=dataset.fixed_size)
+
+                # Append sample info for this batch
+                for k, v in sample_info_i.items():
                     sample_info[k].append(v)
 
-            sample_info = {k: torch.cat(v, dim=0) if k != "pdb" else v for k, v in sample_info.items()}
+            sample_info = {k: torch.cat(v, dim=0) if k != "pdb_key" else v for k, v in sample_info.items()}
 
             ### Compute sidechain metrics ###
             # Get average RMSD over all residues

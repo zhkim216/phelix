@@ -160,11 +160,11 @@ scn_diffusion_module:
 # Confidence module
 confidence_module:
   enabled: false
-  subsample_train_iter_mult: 4  # train with roughly 1/K of the training iterations
+  subsample_train_iter_mult: 8  # train with roughly 1/K of the training iterations
 
   # Sidechain diffusion parameters
   scn_diffusion:
-    num_steps: 20
+    num_steps: 50
     timestep_schedule:
       num_steps: ${..num_steps}
       mode: "linear"
