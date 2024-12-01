@@ -61,9 +61,13 @@ def main(cfg: DictConfig):
         x_sample = sample_batch["x"]
 
         # Compute metrics
-        scn_info, _ = eval_metrics.compute_structure_metrics(x[None], x_sample[None], # add batch dim
-                                                             atom_mask[None], aatype=aatype[None],
-                                                             metrics_to_compute=["scn_rmsd_per_pos", "chi_metrics_per_pos", "sce"])
+        try:
+            scn_info, _ = eval_metrics.compute_structure_metrics(x[None], x_sample[None], # add batch dim
+                                                                 atom_mask[None], aatype=aatype[None],
+                                                                 metrics_to_compute=["scn_rmsd_per_pos", "chi_metrics_per_pos", "sce"])
+        except Exception as e:
+            print(f"Error computing metrics for {Path(gt_pdb).stem}: {e}, skipping...")
+            continue
 
         # Compute RMSD per protein
         rmsd_i = (scn_info["scn_rmsd_per_pos"].squeeze() * seq_mask).sum() / seq_mask.sum()
