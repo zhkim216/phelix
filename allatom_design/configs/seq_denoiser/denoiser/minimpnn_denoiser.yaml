@@ -193,6 +193,6 @@ confidence_module:
   structure_encoder:
     n_aatype: ${model.n_aatype}
     n_channel: ${denoiser.minimpnn.n_channel}
-    n_layers: 2
+    n_layers: 3
     k_neighbors: ${denoiser.minimpnn.k_neighbors}
     dropout_p: 0.1

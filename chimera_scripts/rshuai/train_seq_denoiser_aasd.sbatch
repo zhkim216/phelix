@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=b13_aasd0
+#SBATCH --job-name=b14_aasd0
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=1
-#SBATCH --cpus-per-task=8
+#SBATCH --gpus-per-node=2
+#SBATCH --cpus-per-task=16
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -21,13 +21,13 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b13_aasd0
-GROUP=chimera_b13
+EXP_NAME=b14_aasd0
+GROUP=chimera_b14
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
+# PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 # DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
-# PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
+PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
 DESIGNABILITY_CSV=null
 
 # Run training script
@@ -48,12 +48,11 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser=minimpnn_denoiser \
     denoiser.minimpnn.augment_eps=0.0 \
     denoiser.minimpnn.use_gvp=true \
-    denoiser.minimpnn.n_layers=3 \
+    denoiser.minimpnn.n_layers=4 \
     denoiser.confidence_module.enabled=true \
-    denoiser.confidence_module.structure_encoder.n_layers=3 \
     optim.optimizer=noam \
-    checkpointing.save_latest_every_n_steps=5000 \
-    checkpointing.save_ema_every_n_steps=1500 \
-    trainer.check_val_every_n_epoch=10 \
+    checkpointing.save_latest_every_n_steps=20000 \
+    checkpointing.save_ema_every_n_steps=10000 \
+    trainer.check_val_every_n_epoch=5 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
