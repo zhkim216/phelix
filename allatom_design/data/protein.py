@@ -109,7 +109,8 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
     chain_ids = []
 
     for chain in model:
-        if chain_ids_override is not None and chain.id not in chain_ids:
+        insertion_code_offset = 0
+        if chain_ids_override is not None and chain.id not in chain_ids_override:
             continue
         
         if chain.id not in chain_ids:
@@ -117,13 +118,9 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
 
         for res in chain:
             if res.id[2] != " ":
-                # raise ValueError(
-                #     f"PDB contains an insertion code at chain {chain.id} and residue "
-                #     f"index {res.id[1]}. These are not supported at the moment."
-                # )
-                # TODO: Handle insertion codes.
-                # print(f"WARNING: PDB {pdb_file} contains an insertion code at chain {chain.id} and residue index {res.id[1]}. These aren't supported at the moment.")
-                pass
+                insertion_code_offset +=1
+                print(f'Insertion code detected, increased residue index offset to {insertion_code_offset}')
+
             if res.id[0] != " ":
                 if res.resname in residue_constants.ncaa_mapping.keys(): #allow all ncaas to get classified as 'X'
                     pass
@@ -174,7 +171,7 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
             aatype.append(restype_idx)
             atom_positions.append(pos)
             atom_mask.append(mask)
-            residue_index.append(res.id[1])
+            residue_index.append(res.id[1] + insertion_code_offset)
             b_factors.append(res_b_factors)
             residue_chain_ids.append(chain.id)
 

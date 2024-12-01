@@ -114,9 +114,9 @@ def main(cfg: DictConfig):
             cond_labels=cond_labels_in,
             scd_inputs=scd_inputs,
         )
-
-        print(aatype_denoised)
         
+        print(chain_index)
+
         samples = {"x_denoised": x_denoised,
                 "seq_mask": seq_mask,
                 "residue_index": residue_index,
