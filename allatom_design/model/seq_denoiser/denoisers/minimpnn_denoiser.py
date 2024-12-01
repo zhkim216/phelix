@@ -54,7 +54,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         atom_mask_noised = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_noised)  # 0 for ghost atoms; X only has backbone atoms
         atom_mask_noised = atom_mask_noised * seq_mask.unsqueeze(-1)  # mask out padding
         atom_mask_noised = atom_mask_noised * (1 - missing_atom_mask)  # mask out missing atoms
-        atom_mask_noised[..., rc.non_bb_idxs] = atom_mask_noised[..., rc.non_bb_idxs] * scn_mlm_mask.unsqueeze(-1)  # mask out masked sidechain atoms
+        # atom_mask_noised[..., rc.non_bb_idxs] = atom_mask_noised[..., rc.non_bb_idxs] * scn_mlm_mask.unsqueeze(-1)  # mask out masked sidechain atoms  # DEBUG
 
         # 1. Sequence design
         seq_logits, mpnn_feature_dict = self.seq_design_module(
