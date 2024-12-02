@@ -97,7 +97,7 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
     models = list(structure.get_models())
     if len(models) != 1:
         print(f"Only single model PDBs are supported. Found {len(models)} models, but using first model by default.")
-        
+
     model = models[0]
 
     atom_positions = []
@@ -109,9 +109,9 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
     chain_ids = []
 
     for chain in model:
-        if chain_ids_override is not None and chain.id not in chain_ids:
+        if (chain_ids_override is not None) and (chain.id not in chain_ids_override):
             continue
-        
+
         if chain.id not in chain_ids:
             chain_ids.append(chain.id)
 
