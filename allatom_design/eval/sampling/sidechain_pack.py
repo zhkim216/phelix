@@ -116,8 +116,10 @@ def main(cfg: DictConfig):
         residue_index, chain_index = batch_i["residue_index"].to(device), batch_i["chain_index"].to(device)
         cond_labels_in = {"crop_aug": batch_i["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
 
+        x_in = x.clone()
+        x_in[..., rc.non_bb_idxs, :] = 0  # shouldn't be necessary, but just to be safe
         x_denoised, aatype_denoised, aux = lit_sd_model.model.sidechain_pack(
-            x,
+            x_in,
             aatype,
             seq_mask=seq_mask,
             missing_atom_mask=missing_atom_mask,
