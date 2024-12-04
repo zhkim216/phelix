@@ -65,15 +65,15 @@ def load_feats_from_pdb(pdb, chain_ids_override: str = None, max_conformers: int
 def get_interface_residue_mask(x, chain_index):
     # Extract C-alpha atoms' positions
     x_ca = x[:, 1, :]
-    
+
     # Calculate pairwise Euclidean distances between C-alpha atoms
     d_ca = x_ca[None, :, :] - x_ca[:,  None, :]
     d_ca = torch.sqrt(torch.sum(d_ca ** 2, dim=2))
-    
+
     # Create a mask for residues within the same chain
     same_chain_mask = torch.eq(chain_index[:, None], chain_index[None, :])
     d_ca[same_chain_mask] = np.inf  # Set distances within the same chain to infinity
-    
+
     # Apply cutoff to get interface residues
     within_cutoff = d_ca < rc.interface_cutoff
     interface_residue_mask = torch.any(within_cutoff, dim=1).to(dtype=torch.bool)
@@ -83,23 +83,23 @@ def check_valid_interface(x, atom_mask, chain_index):
     num_residues, num_atoms_per_residue, _ = x.shape
     x_flat = x.reshape(-1, 3)
     atom_mask_flat = atom_mask.reshape(-1)
-    
+
     # Create residue index mapping
     residue_index = torch.arange(num_residues, device=x.device).repeat_interleave(num_atoms_per_residue)
-    
+
     # Mask to filter valid atoms
     valid_mask = atom_mask_flat.bool()
     x_valid = x_flat[valid_mask]
     residue_index_valid = residue_index[valid_mask]
     chain_index_valid = chain_index[residue_index_valid]
-    
+
     # Calculate pairwise distances only for valid atoms
     d_valid = torch.cdist(x_valid, x_valid, p=2)
-    
+
     # Mask out same-chain residues
     same_chain_mask = chain_index_valid[:, None] == chain_index_valid[None, :]
     d_valid[same_chain_mask] = float('inf')
-    
+
     # Check if any inter-chain distance is below the threshold
     return torch.any(d_valid < 5.01)
 
@@ -155,12 +155,12 @@ def make_fixed_size_1d(data: TensorType["n ..."], fixed_size: int, start_idx: in
         new_data = torch.cat([data, torch.zeros(pad_size, *extra_shape)], 0)
     return new_data
 
-def trim_to_max_len(example):
-    max_len = int(max(torch.sum(example['seq_mask'], dim=-1)))
+def trim_to_max_len(batch: TensorType["b n ..."]):
+    max_len = int(max(torch.sum(batch['seq_mask'], dim=-1)))
 
     trimmed_example = {}
-    for k, v in example.items():
-        
+    for k, v in batch.items():
+
         #features which aren't trimmed
         if k in ['pdb_key','cond_labels_in','chain_ids']:
             trimmed_example[k] = v
@@ -168,6 +168,23 @@ def trim_to_max_len(example):
             trimmed_example[k] = v[:,:max_len,...]
 
     return trimmed_example
+
+
+def pad_to_max_len(batch: TensorType["b n ..."], max_len: int):
+    """
+    Inverse of trim_to_max_len; pads a batch to a fixed length.
+    """
+    padded_example = {}
+    for k, v in batch.items():
+        # features which aren't padded
+        if k in ['pdb_key', 'cond_labels_in', 'chain_ids']:
+            padded_example[k] = v
+        else:
+            B, N, *extra_shape = v.shape
+            padding = torch.zeros((B, max_len - N, *extra_shape), device=v.device, dtype=v.dtype)
+            padded_example[k] = torch.cat([v, padding], dim=1)
+    return padded_example
+
 
 def dgram_from_positions(
     pos: torch.Tensor,
@@ -871,17 +888,17 @@ def transform_sidechain_frame(x_scn: TensorType["b n 33 3", float],
 
 def process_single_pdb(data):
     example = {}
-    
+
     # Use raw coordinates
     x = data["all_atom_positions"]  # [n, a, 3]
     atom_mask = data["all_atom_mask"]  # [n, a]
     seq_mask = data["seq_mask"]  # [n]
     x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
-    
+
     # per-channel mask for x, used for loss.
     # We only mask out missing atoms from PDB files, not ghost atoms.
     x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
-    
+
     # Construct example
     example["x"] = x * atom_mask[..., None]
     example["seq_mask"] = seq_mask
@@ -895,13 +912,13 @@ def process_single_pdb(data):
     example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
     example['interface_residue_mask'] = data['interface_residue_mask']
     example['chain_ids'] = data['chain_ids']
-    
+
     # Construct conditioning inputs
     cond_labels_in = {}
-    
+
     # Add designability info
     cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
-    
+
     # Add dataset source and crop aug label, set to experimental and uncropped by default
     cond_labels_in["dataset_source"] = cl.DEFAULT_TOKEN["dataset_source"]
     cond_labels_in["crop_aug"] = cl.DEFAULT_TOKEN["crop_aug"]
@@ -914,7 +931,7 @@ def process_single_pdb(data):
             example_out[k] = v.long()
         else:
             example_out[k] = v.float()
-    
+
     # Add conditioning labels
     example_out["cond_labels_in"] = cond_labels_in
     return example_out

@@ -59,8 +59,8 @@ def main(cfg: DictConfig):
         'sample_number': np.repeat(np.arange(num_pdbs), seq_length),
         'seq_mask': sample_info["seq_mask"].flatten(),
         'aatype': sample_info["aatype"].flatten(),
-        'npa': sample_info["npa"].flatten(),
-        'res_num_atoms': sample_info["res_num_atoms"].flatten(),
+        # 'npa': sample_info["npa"].flatten(),
+        # 'res_num_atoms': sample_info["res_num_atoms"].flatten(),
         'seq_logits_aatype': sample_info["seq_logits"][torch.arange(num_pdbs).unsqueeze(1), torch.arange(seq_length), sample_info["aatype"]].flatten(),
         'seq_probs_aatype': seq_probs[torch.arange(num_pdbs).unsqueeze(1), torch.arange(seq_length), sample_info["aatype"]].flatten(),
     })
@@ -102,19 +102,19 @@ def main(cfg: DictConfig):
     # plt.close()
 
     # plot sce vs psce
-    plt.figure()
+    plt.figure(figsize=(8, 8))
     sce_atom_mask = sample_info["atom_mask"][..., rc.non_bb_idxs]
     sce = sample_info["sce"][sce_atom_mask.bool()].cpu()
     psce = sample_info["psce"][sce_atom_mask.bool()].cpu()
     # subsample sce / psce to 10K
     idxs = np.random.choice(len(sce), 10000, replace=False)
-    plt.scatter(sce[idxs], psce[idxs], alpha=0.5, s=1)
+    plt.scatter(sce[idxs], psce[idxs], alpha=0.2, s=2)
     plt.title(f"sce vs psce\nSpearman's rho = {spearmanr(sce, psce)[0]:.4f}")
     plt.xlabel("sce")
     plt.ylabel("psce")
     plt.ylim(-0.1, 5)
     plt.xlim(-0.1, 5)
-    plt.savefig(f"{cfg.out_dir}/sce_vs_psce.png")
+    plt.savefig(f"{cfg.out_dir}/sce_vs_psce.png", dpi=300)
     plt.close()
 
     # plot sce vs psce, averaged per residue
@@ -125,15 +125,15 @@ def main(cfg: DictConfig):
 
     sce_avg_res = sce_avg_res[n_atoms_per_res > 0]
     psce_avg_res = psce_avg_res[n_atoms_per_res > 0]
-    plt.figure()
+    plt.figure(figsize=(8, 8))
     idxs = np.random.choice(len(sce_avg_res), 10000, replace=False)
-    plt.scatter(sce_avg_res[idxs], psce_avg_res[idxs], alpha=0.5, s=1)
+    plt.scatter(sce_avg_res[idxs], psce_avg_res[idxs], alpha=0.2, s=2)
     plt.title(f"sce vs psce, averaged per residue\nSpearman's rho = {spearmanr(sce_avg_res, psce_avg_res)[0]:.4f}")
     plt.xlabel("sce")
     plt.ylabel("psce")
     plt.ylim(-0.1, 5)
     plt.xlim(-0.1, 5)
-    plt.savefig(f"{cfg.out_dir}/sce_vs_psce_avg_res.png")
+    plt.savefig(f"{cfg.out_dir}/sce_vs_psce_avg_res.png", dpi=300)
     plt.close()
 
     # plot sce vs psce, averaged per residue for each residue type

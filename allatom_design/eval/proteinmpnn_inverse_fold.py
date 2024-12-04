@@ -27,8 +27,11 @@ from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 
 
-@hydra.main(config_path="../../configs/eval/sampling", config_name="inverse_fold", version_base="1.3.2")
+@hydra.main(config_path="../configs/eval", config_name="proteinmpnn_inverse_fold", version_base="1.3.2")
 def main(cfg: DictConfig):
+    """
+    Evaluate ProteinMPNN self-consistency metrics for comparison to our MPNN model.
+    """
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
     # Set seeds

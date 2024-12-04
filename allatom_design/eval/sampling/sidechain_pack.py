@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.conditioning_labels import create_cond_labels_input
+from allatom_design.data.data import pad_to_max_len, trim_to_max_len
 from allatom_design.data.datasets.ad_dataset import ADDataset
 from allatom_design.data.pdb_utils import write_batched_to_pdb
 from allatom_design.eval import eval_metrics, sampling_utils
@@ -73,7 +74,7 @@ def main(cfg: DictConfig):
         # For debugging with overfitting models, we sidechain pack on the training set
         dataset = ADDataset(phase="train", **lit_sd_model.cfg.data)
     else:
-        dataset = ADDataset(phase="eval", **lit_sd_model.cfg.data)
+        dataset = ADDataset(phase="eval", evaluation_mode = True, **lit_sd_model.cfg.data)
 
     dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
     num_pdbs = cfg.num_pdbs if cfg.num_pdbs is not None else len(dataset)
@@ -107,34 +108,32 @@ def main(cfg: DictConfig):
     for bi in pbar:
         idxs = example_indices[bi:bi + cfg.batch_size]
         batch_i = ADDataset.index_into_batch(examples, idxs)
+        batch_i = trim_to_max_len(batch_i)
+
         x, aatype = batch_i["x"].to(device), batch_i["aatype"].to(device)
         scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
-        seq_mask = batch_i["seq_mask"].to(device)
+        seq_mask, missing_atom_mask = batch_i["seq_mask"].to(device), batch_i["missing_atom_mask"].to(device)
         residue_index, chain_index = batch_i["residue_index"].to(device), batch_i["chain_index"].to(device)
         cond_labels_in = {"crop_aug": batch_i["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
 
+        x_in = x.clone()
+        x_in[..., rc.non_bb_idxs, :] = 0  # shouldn't be necessary, but just to be safe
         x_denoised, aatype_denoised, aux = lit_sd_model.model.sidechain_pack(
-            x,
+            x_in,
             aatype,
             seq_mask=seq_mask,
+            missing_atom_mask=missing_atom_mask,
             residue_index=residue_index,
             chain_index=chain_index,
             cond_labels=cond_labels_in,
             scd_inputs=scd_inputs,
         )
 
-        # likelihood_aux = lit_sd_model.model.get_sidechain_likelihoods(cfg.likelihood_num_steps,
-        #                                                               x, aatype,
-        #                                                               seq_mask=seq_mask,
-        #                                                               residue_index=residue_index,
-        #                                                               chain_index=chain_index,
-        #                                                               cond_labels=cond_labels_in,
-        #                                                               atom_mask=batch_i["atom_mask"].to(device),
-        #                                                               scd_inputs=scd_inputs)
-
         samples = {"x_denoised": x_denoised,
                    "seq_mask": seq_mask,
+                   "missing_atom_mask": missing_atom_mask,
                    "residue_index": residue_index,
+                   "chain_index": chain_index,
                    "pred_aatype": aatype_denoised,
                    "aatype_pred_traj": aux["aatype_pred_traj"],
                    "aatype_t_traj": aux["aatype_t_traj"],
@@ -143,16 +142,10 @@ def main(cfg: DictConfig):
 
         # Store sample info
         seq_mask, aatype = seq_mask.cpu(), aatype.cpu()
-        sample_info["pdb"] += batch_i["pdb_key"]
-        sample_info["seq_mask"].append(seq_mask)
-        sample_info["atom_mask"].append(batch_i["atom_mask"].cpu())
-        sample_info["aatype"].append(aatype)
-        sample_info["seq_logits"].append(aux["seq_logits_traj"].squeeze(1))
-        sample_info["psce"].append(aux["psce"])
         core_mask, surface_mask = eval_metrics.get_core_surface_mask(x.cpu(), batch_i["atom_mask"].cpu())
-        sample_info["core_mask"].append(core_mask)
-        sample_info["surface_mask"].append(surface_mask)
-        # [sample_info[k].append(v.cpu()) for k, v in likelihood_aux.items()]
+        sample_info_i = {"pdb_key": batch_i["pdb_key"], "seq_mask": seq_mask, "aatype": aatype, "core_mask": core_mask, "surface_mask": surface_mask,
+                         "seq_logits": aux["seq_logits_traj"].squeeze(1), "psce": aux["psce"]}
+
 
         # Sidechain RMSD per residue
         atom_mask = batch_i["atom_mask"]
@@ -163,6 +156,13 @@ def main(cfg: DictConfig):
                                                                                                   "chi_metrics_per_pos",
                                                                                                   "sce"])
         for k, v in scn_info.items():
+            sample_info_i[k] = v
+
+        # Pad sample_info for this batch back to max length
+        sample_info_i = pad_to_max_len(sample_info_i, max_len=dataset.fixed_size)
+
+        # Append sample info for this batch
+        for k, v in sample_info_i.items():
             sample_info[k].append(v)
 
         # Save samples
@@ -212,7 +212,7 @@ def main(cfg: DictConfig):
         #                                            traj_conect=cfg.traj_conect)
 
 
-    sample_info = {k: torch.cat(v, dim=0) if k != "pdb" else v for k, v in sample_info.items()}  # concatenate all samples as final output
+    sample_info = {k: torch.cat(v, dim=0) if k != "pdb_key" else v for k, v in sample_info.items()}  # concatenate all samples as final output
 
     del lit_sd_model  # free up memory; we don't need denoiser anymore
 
@@ -224,6 +224,11 @@ def main(cfg: DictConfig):
     ### Compute sidechain metrics ###
     scn_metrics = {}
     seq_mask = sample_info["seq_mask"]
+
+    # Average RMSD per protein over proteins
+    scn_rmsd_avg = sample_info["scn_rmsd_per_pos"].sum(dim=-1) / seq_mask.sum(dim=-1)
+    scn_metrics["scn_rmsd_avg"] = scn_rmsd_avg.mean().item()
+    print(f"Average RMSD per protein: {scn_metrics['scn_rmsd_avg']:.3f}")
 
     # Average RMSD over all residues
     scn_rmsd_avg_all = (sample_info["scn_rmsd_per_pos"] * seq_mask).sum() / seq_mask.sum()

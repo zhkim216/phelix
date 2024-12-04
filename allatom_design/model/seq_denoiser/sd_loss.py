@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
 from omegaconf import DictConfig
-from scipy.stats import spearmanr
+from scipy.stats import spearmanr, pearsonr
 from torchtyping import TensorType
 
 from allatom_design.data import residue_constants as rc
@@ -78,6 +78,9 @@ class SDLoss(nn.Module):
             M = scn_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
             mask = repeat(batch["x_mask"][..., rc.non_bb_idxs, :], "b n a x -> (m b) n a x", m=M)
 
+            ## mask out loss wherever the backbone frame doesn't exist
+            mask = mask * scn_diff_outputs["bb_frames_exists"][..., None, None]
+
             ## loss weight based on EDM loss
             loss_weight_scn = scn_diff_outputs["loss_weight_t"]
 
@@ -100,6 +103,8 @@ class SDLoss(nn.Module):
                 # Construct residue-level mask
                 new_scn_mask = (1 - outputs["scn_mlm_mask"])  # only compute confidence loss over masked sidechains
                 new_scn_mask = new_scn_mask * (1 - batch["seq_unk_mask"])  # mask out true unk tokens
+                new_scn_mask = new_scn_mask * batch["seq_mask"]  # mask out padding
+                new_scn_mask = new_scn_mask * confidence_outputs["bb_frames_exists"]  # mask out residues with missing backbone frames
 
                 # Compute PSCE confidence loss
                 psce_mask = rearrange(new_scn_mask, "b n -> b n 1") * scn_atom_mask  # mask out ghost and missing sidechain atoms
@@ -117,7 +122,9 @@ class SDLoss(nn.Module):
                 psce = confidence_outputs["psce"]
                 sce = torch.norm(scn_pred_rollout - scn_target, dim=-1)
                 rho = spearmanr(psce[psce_mask.bool()].detach().cpu(), sce[psce_mask.bool()].detach().cpu())[0]
+                pearson_r = pearsonr(psce[psce_mask.bool()].detach().cpu(), sce[psce_mask.bool()].detach().cpu())[0]
                 aux_monitor["rollout/sce_vs_psce_rho"] = rho
+                aux_monitor["rollout/sce_vs_psce_pearson_r"] = pearson_r
 
 
         # Aggregate losses
