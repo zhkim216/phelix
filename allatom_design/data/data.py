@@ -461,9 +461,12 @@ def batched_gather(data, inds, dim=0, no_batch_dims=0):
     ranges.extend(remaining_dims)
     return data[ranges]
 
-def atom37_to_atom14(aatype, all_atom_pos):
+def atom37_to_atom14(aatype: TensorType["... n", int],
+                     all_atom_pos: TensorType["... n 37 3", float],
+                     atom37_mask: Optional[TensorType["... n 37", float]] = None):
     """Convert Atom37 positions to Atom14 positions."""
-    atom37_mask = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)
+    if atom37_mask is None:
+        atom37_mask = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)
 
     residx_atom14_to_atom37 = get_rc_tensor(
         rc.RESTYPE_ATOM14_TO_ATOM37, aatype

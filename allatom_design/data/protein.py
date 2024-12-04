@@ -110,7 +110,7 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
 
     for chain in model:
         insertion_code_offset = 0
-        if chain_ids_override is not None and chain.id not in chain_ids_override:
+        if (chain_ids_override is not None) and (chain.id not in chain_ids_override):
             continue
         
         if chain.id not in chain_ids:

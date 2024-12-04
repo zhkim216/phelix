@@ -54,10 +54,8 @@ class SidechainDiffusionModule(nn.Module):
 
 
     def sidechain_diffusion(self,
-                            h_V: TensorType["b n h", float],
-                            h_ESV: TensorType["b n h", float],
+                            mpnn_feature_dict: Dict[str, TensorType["b ..."]],
                             aatype: TensorType["b n", int],
-                            x_bb: TensorType["b n a_bb 3", float],
                             seq_mask: TensorType["b n", float],
                             residue_index: TensorType["b n", int],
                             chain_index: TensorType["b n", int],
@@ -65,6 +63,7 @@ class SidechainDiffusionModule(nn.Module):
                             is_sampling: bool,
                             ) -> Tuple[TensorType["b n a 3", float],
                                        Dict[str, TensorType["b ...", float]]]:
+        h_V = mpnn_feature_dict["h_V"]
         B, N, _ = h_V.shape
         diffusion_aux = defaultdict(lambda: None)
 
@@ -75,17 +74,19 @@ class SidechainDiffusionModule(nn.Module):
 
             # Get ground truth sidechains for diffusion
             x_scn_gt = aux_inputs["x"][..., rc.non_bb_idxs, :]
+            atom_mask_gt = aux_inputs["atom_mask"]  # use ground truth atom mask for ghost / missing atoms
 
             # Transform sidechains from ground truth to local frame
-            x_scn_local_gt, _ = transform_sidechain_frame(x_scn_gt,
-                                                          aux_inputs["x"][..., rc.bb_idxs, :],
-                                                          aux_inputs["atom_mask"][..., rc.non_bb_idxs],
-                                                          aux_inputs["atom_mask"][..., rc.bb_idxs],
-                                                          to_local=True)
+            x_scn_local_gt, bb_frames_exists = transform_sidechain_frame(x_scn_gt,
+                                                                         aux_inputs["x"][..., rc.bb_idxs, :],
+                                                                         atom_mask_gt[..., rc.non_bb_idxs],
+                                                                         atom_mask_gt[..., rc.bb_idxs],
+                                                                         to_local=True)
 
             # Repeat inputs for batch multiplier
             M = self.cfg.training_batch_size_mult
             x_scn_local_gt_batched = repeat(x_scn_local_gt, "b n a x -> (m b) n a x", m=M, b=B)
+            bb_frames_exists_batched = repeat(bb_frames_exists, "b n -> (m b) n", m=M, b=B)
             h_V_batched = repeat(h_V, "b n h -> (m b) n h", m=M, b=B)
             aatype_batched = repeat(aatype, "b n -> (m b) n", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
@@ -115,44 +116,18 @@ class SidechainDiffusionModule(nn.Module):
             # Train confidence module
             diffusion_aux["confidence_aux"] = None
             if self.use_confidence_module and (np.random.uniform() < self.confidence_module_train_p):
-                # Use unbatched inputs
-                conf_cfg = self.cfg.confidence_module
-
+                # Run mini rollout
                 with torch.no_grad():
                     self.eval()
-
-                    # Create sidechain diffusion inputs
-
-                    # create timesteps
-                    B = h_V.shape[0]
-                    t_scd = sampling_utils.get_timesteps_from_schedule(**conf_cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
-                    t_scd = t_scd[None].expand(B, -1).to(h_V.device)  # expand to batch size
-
-                    # create noise schedule
-                    noise_schedule = NoiseSchedule(conf_cfg.scn_diffusion.noise_schedule)
-
-                    # create churn config
-                    churn_cfg = dict(conf_cfg.scn_diffusion.churn_cfg)
-                    scd_inputs = {"num_steps": conf_cfg.scn_diffusion.num_steps,
-                                  "timesteps": t_scd,
-                                  "noise_schedule": noise_schedule,
-                                  "churn_cfg": churn_cfg,
-                                  }
-
-                    # Run diffusion mini rollout
-                    rollout_aux_inputs = {"scd": scd_inputs}
-                    x1_scn_rollout, _ = self.sidechain_diffusion(h_V, h_ESV, aatype, x_bb,
-                                                                 seq_mask, residue_index, chain_index,
-                                                                 aux_inputs=rollout_aux_inputs,
-                                                                 is_sampling=True)
-
+                    # use unbatched inputs
+                    x1_scn_local_rollout = self.mini_rollout(h_V, aatype, seq_mask)  # in local frmae
                     self.train()
 
-                psce_logits, psce = self.confidence_module(x1_scn_rollout.detach(),
-                                                           h_V.detach(),
-                                                           h_ESV.detach(),
+                # Run confidence module
+                mpnn_feature_dict_in = {k: v.detach() for k, v in mpnn_feature_dict.items()}
+                psce_logits, psce = self.confidence_module(x1_scn_local_rollout.detach(),
+                                                           mpnn_feature_dict_in,
                                                            aatype.detach(),
-                                                           x_bb.detach(),
                                                            seq_mask.detach(),
                                                            residue_index.detach(),
                                                            chain_index.detach())
@@ -160,8 +135,9 @@ class SidechainDiffusionModule(nn.Module):
                     "psce_logits": psce_logits,
                     "psce": psce,
                     "sce_bins_cfg": self.confidence_module.sce_bins_cfg,
-                    "scn_pred_rollout": x1_scn_rollout - x_bb[..., 1:2, :],  # for computing loss, center sidechains on input backbone to sidechain diffusion
-                    "scn_target": x_scn_gt,
+                    "scn_pred_rollout": x1_scn_local_rollout,  # compute loss in local frame
+                    "scn_target": x_scn_local_gt,
+                    "bb_frames_exists": bb_frames_exists,
                 }
 
             # Outputs
@@ -171,6 +147,7 @@ class SidechainDiffusionModule(nn.Module):
             diffusion_aux["scn_pred"] = x1_scn_local_batched
             diffusion_aux["scn_target"] = x_scn_local_gt_batched
             diffusion_aux["loss_weight_t"] = loss_weight_t_batched
+            diffusion_aux["bb_frames_exists"] = bb_frames_exists_batched  # don't compute loss if bb frame doesn't exist
 
         else:
             # === Sampling === #
@@ -186,7 +163,8 @@ class SidechainDiffusionModule(nn.Module):
             churn_cfg = scd_aux_inputs["churn_cfg"]
             noise_schedule = scd_aux_inputs["noise_schedule"]
             return_scn_diffusion_aux = scd_aux_inputs.get("return_scn_diffusion_aux", False)
-            aatype = scd_aux_inputs.get("aatype_override", aatype)  # use aatype_override for sidechain diffusion instead
+            aatype_override_mask = scd_aux_inputs["aatype_override_mask"]
+            aatype = torch.where(aatype_override_mask.bool(), scd_aux_inputs["aatype_override"], aatype)
 
             denoiser_fn = partial(self.scn_denoiser, aatype=aatype,
                                   h_V=h_V, seq_mask=seq_mask)
@@ -220,27 +198,25 @@ class SidechainDiffusionModule(nn.Module):
                     x1_scn_traj.append(aux_preds["x1_pred"].cpu())
 
             # Finalize outputs
-
-            # Transform denoised sidechains back to global coordinates
-            atom_mask = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)  # assume all atoms are present  # TODO: we should pass in true atom mask here to account for missing backbone
-            atom_mask_bb, atom_mask_scn = atom_mask[..., rc.bb_idxs], atom_mask[..., rc.non_bb_idxs]
-            x1_scn, _ = transform_sidechain_frame(xt_scn_local, x_bb,
-                                                  atom_mask_scn, atom_mask_bb, to_local=False)
-            diffusion_aux["scn_pred"] = x1_scn
-
-            # Compute confidence
+            # Compute confidence using local scn coordinates
             if self.use_confidence_module:
-                _, psce = self.confidence_module(x1_scn,
-                                                 h_V,
-                                                 h_ESV,
+                _, psce = self.confidence_module(xt_scn_local,
+                                                 mpnn_feature_dict,
                                                  aatype,
-                                                 x_bb,
                                                  seq_mask,
                                                  residue_index,
                                                  chain_index)
                 diffusion_aux["psce"] = psce
             else:
                 diffusion_aux["psce"] = torch.zeros((B, N, A), device=xt_scn_local.device)
+
+            # Transform denoised sidechains back to global coordinates
+            x_bb = mpnn_feature_dict["X"][..., rc.atom14_bb_idxs, :]
+            atom_mask_bb = mpnn_feature_dict["atom14_mask"][..., rc.atom14_bb_idxs]  # 0 denotes missing backbone atoms in input backbone
+            atom_mask_scn = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)[..., rc.non_bb_idxs]  # all atoms are present for the packed aatype, since we sampled them
+            x1_scn, _ = transform_sidechain_frame(xt_scn_local, x_bb,
+                                                  atom_mask_scn, atom_mask_bb, to_local=False)  # if backbone frame doesn't exist, we predict all sidechain atoms at CA
+            diffusion_aux["scn_pred"] = x1_scn
 
             # Finalize trajectory outputs
             if return_scn_diffusion_aux:
@@ -257,6 +233,55 @@ class SidechainDiffusionModule(nn.Module):
                 diffusion_aux["x1_scn_traj"] = x1_scn_traj
 
         return x1_scn, diffusion_aux
+
+
+    def mini_rollout(self,
+                     h_V: TensorType["b n h", float],
+                     aatype: TensorType["b n", int],
+                     seq_mask: TensorType["b n", float]) -> TensorType["b n 33 3", float]:
+        B, N, _ = h_V.shape
+        A = len(rc.non_bb_idxs)
+
+        # Create sidechain diffusion inputs
+        conf_cfg = self.cfg.confidence_module
+
+        # create timesteps
+        S_scd = conf_cfg.scn_diffusion.num_steps
+        timesteps = sampling_utils.get_timesteps_from_schedule(**conf_cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
+        timesteps = timesteps[None].expand(B, -1).to(h_V.device)  # expand to batch size
+
+        # create noise schedule
+        noise_schedule = NoiseSchedule(conf_cfg.scn_diffusion.noise_schedule)
+
+        # create churn config
+        churn_cfg = dict(conf_cfg.scn_diffusion.churn_cfg)
+
+        # Sample sidechains from prior
+        x0_scn_local = self.scn_interpolant.sample_prior((B, N, A, 3), h_V.device)
+
+        # Run integration steps
+        denoiser_fn = partial(self.scn_denoiser, aatype=aatype,
+                              h_V=h_V, seq_mask=seq_mask)
+
+        xt_scn_local = x0_scn_local
+        for i in range(S_scd):
+            t = timesteps[:, i]
+            t_next = timesteps[:, i + 1]
+            xt_scn_local, t = self.scn_interpolant.churn(xt_scn_local, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
+            xt_scn_local, aux_preds = self.scn_interpolant.euler_step(denoiser_fn,
+                                                                        xt_scn_local,
+                                                                        t=t, t_next=t_next,
+                                                                        noise_schedule=noise_schedule,
+                                                                        autoguidance_cfg=None,
+                                                                        cfg_cfg=None)
+            if self.use_self_conditioning:
+                # Apply self-conditioning
+                denoiser_fn = partial(denoiser_fn, x_scn_self_cond=aux_preds["x1_pred"])
+
+        x1_scn_local = xt_scn_local
+
+        # Return sidechains in local frame
+        return x1_scn_local
 
 
     def get_likelihoods(self,
@@ -281,13 +306,13 @@ class SidechainDiffusionModule(nn.Module):
         S_scd = num_steps
 
         # Only pack residues that are unmasked
-        scd_mlm_mask = aux_inputs["seq_mlm_mask"]
+        scn_mlm_mask = aux_inputs["seq_mlm_mask"]
 
         denoiser_fn = partial(self.scn_denoiser, aatype=aatype, x_bb=x_bb,
-                              h_V=h_V, seq_mask=seq_mask, scd_mlm_mask=scd_mlm_mask,
+                              h_V=h_V, seq_mask=seq_mask, scn_mlm_mask=scn_mlm_mask,
                               residue_index=residue_index, chain_index=chain_index)
 
-        x1_mask = scn_atom_mask * rearrange(scd_mlm_mask, "b n -> b n 1 1")
+        x1_mask = scn_atom_mask * rearrange(scn_mlm_mask, "b n -> b n 1 1")
 
         likelihood_aux = self.scn_interpolant.get_likelihoods(denoiser_fn, x1_scn, x1_mask, S_scd)
 

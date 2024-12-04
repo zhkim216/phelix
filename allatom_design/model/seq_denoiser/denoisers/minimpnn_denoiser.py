@@ -6,7 +6,7 @@ from omegaconf import DictConfig
 from torchtyping import TensorType
 
 import allatom_design.data.residue_constants as rc
-from allatom_design.data.data import cat_bb_scn
+from allatom_design.data.data import cat_bb_scn, get_rc_tensor
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import \
@@ -41,6 +41,8 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
                 residue_index: TensorType["b n", int],
                 chain_encoding: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
+                missing_atom_mask: TensorType["b n a", float],  # 1 denotes missing atoms
+                scn_mlm_mask: TensorType["b n", float],  # denotes masked sidechains
                 cond_labels_in: Dict[str, TensorType["b", int]] = {},
                 aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
                 is_sampling: bool = False,
@@ -48,13 +50,19 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
                            TensorType["b n", int],  # aatype pred
                            Dict[str, TensorType["b ..."]]  # aux_preds
                            ]:
+        # Construct atom_mask_noised: 0 for missing / ghost / masked / pad atoms, 1 otherwise
+        atom_mask_noised = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_noised)  # 0 for ghost atoms; X only has backbone atoms
+        atom_mask_noised = atom_mask_noised * seq_mask.unsqueeze(-1)  # mask out padding
+        atom_mask_noised = atom_mask_noised * (1 - missing_atom_mask)  # mask out missing atoms
+        atom_mask_noised[..., rc.non_bb_idxs] = atom_mask_noised[..., rc.non_bb_idxs] * scn_mlm_mask.unsqueeze(-1)  # mask out masked sidechain atoms
 
         # 1. Sequence design
-        seq_logits, node_embs, edge_embs, x_bb = self.seq_design_module(
+        seq_logits, mpnn_feature_dict = self.seq_design_module(
             x_noised,
-            aatype_noised, 
-            seq_mask, 
-            residue_index, 
+            aatype_noised,
+            seq_mask,
+            atom_mask_noised,
+            residue_index,
             chain_encoding)
 
         aatype_pred, seq_probs = self.sample_aatype(seq_logits, aux_inputs, is_sampling)
@@ -72,10 +80,8 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         x1_pred = None
         if self.use_scn_diffusion:
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
-                node_embs,
-                edge_embs,
+                mpnn_feature_dict,
                 aatype_pred,
-                x_bb,
                 seq_mask=seq_mask,
                 residue_index=residue_index,
                 chain_index=chain_encoding,
@@ -87,6 +93,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
             if is_sampling:
                 # store the predicted sidechain coordinates with known backbone
+                x_bb = mpnn_feature_dict["X"][..., rc.atom14_bb_idxs, :]
                 x1_pred = cat_bb_scn(x_bb, x1_scn_pred)
 
 
