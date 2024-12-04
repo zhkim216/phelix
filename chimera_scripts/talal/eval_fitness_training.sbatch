@@ -25,11 +25,11 @@ export TORCH_HOME=/scratch/hielab/talal/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/talal/cache/omegafold/omegafold.pt
 
 # Model to evaluate
-#MODEL_NAME=aasd_sidechain_pdb_0.3
+MODEL_NAME=b12_aasd6
 DENOISER_TRAIN_DIR=/scratch/hielab/talal/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
-#EXP_NAME=${MODEL_NAME}_fitness
+EXP_NAME=${MODEL_NAME}_fitness
 WANDB_ID=talal-widatalla
 GROUP=fitness_eval
 
@@ -39,12 +39,13 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_fitness_training.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     no_wandb=false \
+    checkpoint_override=/scratch/hielab/rshuai/allatom_design/allatom_design/b12_aasd6/checkpoints/sd-step580000-epoch345.ckpt \
     group=${GROUP} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     start_epoch=0 \
     eval_every_n_ckpts=1 \
     batch_size=8\
-    datasets=[skempi_ppi,fireprot,fireprot_homologue_free,g6,cr6261_h1,cr6261_h9,megascale,megascale_test,s669,skempi] \
+    datasets=[megascale_test,s669,skempi] \
     hydra.run.dir=${HYDRA_DIR} \
     data.overwrite_cache=false \

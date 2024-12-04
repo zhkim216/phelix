@@ -68,21 +68,26 @@ def main(cfg: DictConfig):
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Get checkpoints from denoiser training run
-    pattern = re.compile(r"sd-epoch\d+\.ckpt$")  # only consider ckpts of form sd-epochXXXX.ckpt
-    sd_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
-    sd_ckpts = natsorted([ckpt for ckpt in sd_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
-
-    pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints")
+    # If we passed in a single checkpoint, only eval the provided checkpoint
+    if cfg.checkpoint_override is not None:
+        sd_ckpt = cfg.checkpoint_override
+        pbar = tqdm([sd_ckpt], desc="Evaluating sinlge checkpoint")
+    else:
+        # Get checkpoints from denoiser training run
+        pattern = re.compile(r"sd-epoch\d+\.ckpt$")  # only consider ckpts of form sd-epochXXXX.ckpt
+        sd_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
+        sd_ckpts = natsorted([ckpt for ckpt in sd_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
+        pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints")
 
     for sd_ckpt in pbar:
 
         # Skip if epoch is before start_epoch
-        epoch = int(Path(sd_ckpt).stem.replace("sd-epoch", ""))
-        pbar.set_postfix_str(f"Epoch: {epoch}")
-        if (cfg.start_epoch is not None) and (epoch < cfg.start_epoch):
-            print('feck')
-            continue
+        if cfg.checkpoint_override is None:
+            epoch = int(Path(sd_ckpt).stem.replace("sd-epoch", ""))
+            pbar.set_postfix_str(f"Epoch: {epoch}")
+        
+            if (cfg.start_epoch is not None) and (epoch < cfg.start_epoch):
+                continue
 
         for dataset_name in cfg.datasets:
 
@@ -122,7 +127,7 @@ def main(cfg: DictConfig):
             for batch in tqdm(val_dataloader, desc="Evaluating fitness", leave=False):
                 mutations, labels, experiment, pdb_data = batch["mut"], batch["label"], batch["experiment"], batch["pdb_data"]
                 pdb_data = trim_to_max_len(pdb_data)
-                x, aatype, seq_mask, residue_index, chain_index = pdb_data["x"].to(device), pdb_data["aatype"].to(device), pdb_data["seq_mask"].to(device), pdb_data["residue_index"].to(device), pdb_data["chain_index"].to(device)
+                x, aatype, seq_mask, residue_index, chain_index, missing_atom_mask = pdb_data["x"].to(device), pdb_data["aatype"].to(device), pdb_data["seq_mask"].to(device), pdb_data["residue_index"].to(device), pdb_data["chain_index"].to(device), pdb_data['missing_atom_mask'].to(device)
                 scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
 
                 scores = scoring_utils.score_seq(lit_sd_model,
@@ -130,6 +135,7 @@ def main(cfg: DictConfig):
                                                  aatype,
                                                  seq_mask,
                                                  residue_index,
+                                                 missing_atom_mask,
                                                  chain_index,
                                                  mutations,
                                                  scd_inputs,
@@ -164,7 +170,9 @@ def main(cfg: DictConfig):
                 # Get global step
                 global_step = torch.load(sd_ckpt, map_location="cpu")["global_step"]
                 metrics["trainer/global_step"] = global_step
-                metrics["trainer/epoch"] = epoch
+                if not cfg.checkpoint_override:
+                    metrics["trainer/epoch"] = epoch
+                    
                 wandb.log(metrics, step=global_step)
 
 if __name__ == "__main__":

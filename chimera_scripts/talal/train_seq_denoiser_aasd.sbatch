@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=aasd_gvp_pdb_single_pack_long
-#SBATCH -p gpu_batch
+#SBATCH --job-name=mlm_pdb
+#SBATCH -p gpu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=60:00:00
+#SBATCH --time=23:59:00
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/talal/slurm_log_files/job_%j.out
@@ -19,7 +19,7 @@ OUT_DIR=/scratch/hielab/talal/allatom_design
 WANDB_ID=talal-widatalla
 cd $BASE_DIR
 
-EXP_NAME=aasd_gvp_pdb_single_pack_long
+EXP_NAME=mlm_pdb
 GROUP=chimera_a8
 
 # Dataset paths
@@ -33,7 +33,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     cuda=true \
     group=${GROUP} \
     num_workers=${SLURM_CPUS_ON_NODE} \
-    no_wandb=true \
+    no_wandb=false \
     data.fixed_size=256 \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=false \
@@ -41,18 +41,18 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     train.batch_size=32 \
     train.compile_model=true \
     trainer.max_epochs=200 \
-    model.task=allatom_seq_des \
+    model.task=seq_des \
     interpolant=mar_interpolant \
     interpolant.training_noise_schedule=uniform_squared_t \
     denoiser=minimpnn_denoiser \
-    denoiser.minimpnn.model_type=sidechain \
+    denoiser.minimpnn.model_type=baseline \
     denoiser.minimpnn.use_residue_transformer=false \
-    denoiser.minimpnn.use_gvp=true \
-    denoiser.minimpnn.augment_eps=0 \
+    denoiser.minimpnn.use_gvp=false \
+    denoiser.minimpnn.augment_eps=0\
     denoiser.minimpnn.return_embedding=last \
     denoiser.minimpnn.gvp.rotate_out=false \
     denoiser.minimpnn.residue_transformer.condition_on_seq=false \
-    denoiser.minimpnn.residue_transformer.edge_attn_bias=true \
+    denoiser.minimpnn.residue_transformer.edge_attn_bias=false \
     denoiser.scn_diffusion_module.training_batch_size_mult=4 \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=50000 \

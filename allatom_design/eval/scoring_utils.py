@@ -18,6 +18,7 @@ import os
 def apply_mutation_batched(x: TensorType["b n a 3", float], 
                    aatype: TensorType["b n", int], 
                    seq_mask: TensorType["b n", int],  
+                   missing_atom_mask: TensorType["b n a", int],
                    mutations: List[List[str]]
                    ) -> Tuple[TensorType["b n a 3", float],
                               TensorType["b n", int],
@@ -60,13 +61,14 @@ def apply_mutation_batched(x: TensorType["b n a 3", float],
     # Mask the sidechains at the mutated positions in x
     x_masked = x.clone()
     x_masked[..., rc.non_bb_idxs, :] = x[..., rc.non_bb_idxs, :] * rearrange(seq_mlm_mask, "b n -> b n 1 1").float()    
-    
+    missing_atom_mask[:, :, rc.non_bb_idxs] *= rearrange(seq_mlm_mask, "b n -> b n 1").float()
+
     # Mask the amino acid type
     aatype_masked = aatype.clone()
     aatype_masked = torch.where(seq_mlm_mask.bool(), aatype, rc.restype_order_with_x["X"]) #is this okay? it sets padded positions to X as well lol
     aatype_masked = torch.where(seq_mask.bool(), aatype_masked, 0) #fixed this^ by repadding with 0, which is also weird cause thats alanine lol 
 
-    return x_masked, seq_mlm_mask, aatype_masked, mut_positions, mut_res_idxs, wt_res_idxs, wt_example_mask
+    return x_masked, seq_mlm_mask, missing_atom_mask, aatype_masked, mut_positions, mut_res_idxs, wt_res_idxs, wt_example_mask
 
 def mutate_whole_seq(model,
                      x: TensorType["b n a 3", float], 
@@ -74,6 +76,7 @@ def mutate_whole_seq(model,
                      mutation_list: List[List[str]],
                      seq_mask: TensorType["b n", int], 
                      residue_index: TensorType["b n", int],
+                     missing_atom_mask: TensorType["b n a", float],
                      chain_index: TensorType["b n", int],
                      scd_inputs: Dict,
                      max_number_muts: int,
@@ -92,14 +95,6 @@ def mutate_whole_seq(model,
                   "seq_mlm_mask": seq_mask.clone(),
                   "scn_mlm_mask": seq_mask.clone()}
 
-
-    denoiser_fn = partial(model.model.denoiser,
-                          residue_index=residue_index,
-                          seq_mask=seq_mask,
-                          chain_encoding=chain_index,
-                          aux_inputs=aux_inputs,
-                          t=torch.ones_like(seq_mask),
-                          is_sampling=True)
 
     #mutation_list is nested list as there may be more than one mutation per sequence
     for i in range(b):
@@ -126,10 +121,29 @@ def mutate_whole_seq(model,
             mut_res_idxs[i, mut_num] = rc.restype_order_with_x[mut_res]
             wt_res_idxs[i, mut_num] = rc.restype_order_with_x[wt_res]
 
-    #pack sidechain of mutated residues if we are using an aasd model
+    #teacher force mutated sequence
+    aux_inputs['scd']["aatype_override"] = aatype_mut
+    aux_inputs['scd']["aatype_override_mask"] = seq_mask.clone()
+
+    #zero out sidechains of mutated residues we want to pack
     x_mut[:, :, rc.non_bb_idxs, :] = x[:, :, rc.non_bb_idxs, :]  * rearrange(aux_inputs['scn_mlm_mask'], "b n -> b n 1 1").float()
-    x1_mut_pred, _, _ = denoiser_fn(x_mut, aatype_mut)
-    x_mut = torch.where(aux_inputs['scn_mlm_mask'][:,:,None,None] == 1, x1_mut_pred, x_mut)
+    missing_atom_mask[:, :, rc.non_bb_idxs] *= rearrange(aux_inputs['scn_mlm_mask'], "b n -> b n 1").float()
+
+    #run model
+    x1_mut_pred, _, _ = model.model.denoiser(x_mut, 
+                                            aatype_mut,
+                                            residue_index=residue_index,
+                                            seq_mask=seq_mask,
+                                            chain_encoding=chain_index,
+                                            missing_atom_mask=missing_atom_mask,
+                                            scn_mlm_mask = aux_inputs['scn_mlm_mask'],
+                                            aux_inputs=aux_inputs,
+                                            t=torch.ones_like(seq_mask),
+                                            is_sampling=True
+                                        )
+    
+    #update structure with newly packed residues
+    x_mut[torch.arange(b).unsqueeze(1), mut_positions,...] = x1_mut_pred[torch.arange(b).unsqueeze(1), mut_positions,...]
 
     return aatype_mut, x_mut, mut_positions, mut_res_idxs, wt_res_idxs, wt_example_mask, padded_mutations_mask
 
@@ -138,6 +152,7 @@ def score_seq(model,
               aatype: TensorType["b n", int], 
               seq_mask: TensorType["b n", int], 
               residue_index: TensorType["b n", int],
+              missing_atom_mask: TensorType["b n a", float],
               chain_index: TensorType["b n", int],
               mutations: List[List[str]],
               scd_inputs: Dict,
@@ -147,13 +162,13 @@ def score_seq(model,
     B = x.shape[0]
 
     if method == 'single':
-        x_masked, seq_mlm_mask, aatype_masked, mut_positions, mut_res_idxs, wt_res_idxs, wt_example_mask = apply_mutation_batched(x, aatype, seq_mask, mutations)
+        x_masked, seq_mlm_mask, missing_atom_mask, aatype_masked, mut_positions, mut_res_idxs, wt_res_idxs, wt_example_mask = apply_mutation_batched(x, aatype, seq_mask, missing_atom_mask, mutations)
 
         #score examples
         logits = model.model.score(
             x_masked,
             aatype_masked,
-            seq_mlm_mask=seq_mlm_mask,
+            missing_atom_mask=missing_atom_mask,
             seq_mask=seq_mask,
             residue_index=residue_index,
             chain_index=chain_index,
@@ -176,6 +191,7 @@ def score_seq(model,
                                                                                                         mutation_list=mutations, 
                                                                                                         seq_mask=seq_mask, 
                                                                                                         residue_index=residue_index,
+                                                                                                        missing_atom_mask=missing_atom_mask,
                                                                                                         chain_index=chain_index,
                                                                                                         scd_inputs=scd_inputs,
                                                                                                         max_number_muts=max_number_muts
@@ -191,13 +207,14 @@ def score_seq(model,
             #mask sidechain at position
             x_masked = x.clone()
             x_masked[..., rc.non_bb_idxs, :] = x[..., rc.non_bb_idxs, :] * rearrange(seq_mlm_mask, "b n -> b n 1 1").float()    
+            missing_atom_mask[..., rc.non_bb_idxs] *=  rearrange(seq_mlm_mask, "b n -> b n 1").float()    
             
             #score examples
             logits = model.model.score(
                 x_masked,
                 aatype_masked,
-                seq_mlm_mask=seq_mlm_mask,
                 seq_mask=seq_mask,
+                missing_atom_mask=missing_atom_mask,
                 residue_index=residue_index,
                 chain_index=chain_index,
             )
@@ -223,6 +240,7 @@ def score_seq(model,
                                              aatype=aatype, 
                                              mutation_list=mutations, 
                                              seq_mask=seq_mask, 
+                                             missing_atom_mask=missing_atom_mask,
                                              residue_index=residue_index,
                                              chain_index=chain_index,
                                              scd_inputs=scd_inputs)
@@ -251,7 +269,6 @@ def score_seq(model,
             logits = model.model.score(
                 x_masked[:, :max_length, ...],
                 aatype_masked[:, :max_length],
-                seq_mlm_mask=seq_mlm_mask[:, :max_length],
                 seq_mask=seq_mask[:, :max_length],
                 residue_index=residue_index[:, :max_length],
                 chain_index=chain_index[:, :max_length],
@@ -260,7 +277,6 @@ def score_seq(model,
             mut_logits = model.model.score(
                 x_mut_masked[:, :max_length, ...],
                 aatype_mut_masked[:, :max_length],
-                seq_mlm_mask=seq_mlm_mask[:, :max_length],
                 seq_mask=seq_mask[:, :max_length],
                 residue_index=residue_index[:, :max_length],
                 chain_index=chain_index[:, :max_length],

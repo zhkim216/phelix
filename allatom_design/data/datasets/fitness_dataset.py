@@ -46,13 +46,14 @@ class FitDataset(ADDataset):
         This is only done for eval and test datasets where we do no cropping.
         """
         max_len = 0
-        for pdb_key in tqdm(self.pdb_keys, desc=f"Getting max length in evaluation dataset", leave=False):
+        pdb_keys = [data[0] for data in self.mutation_data]
+        for pdb_key in tqdm(pdb_keys, desc=f"Getting max length in evaluation dataset", leave=False):
             data_file = self._get_data_file(pdb_key)
             example = torch.load(data_file, weights_only=True)
             seq_len = example["seq_mask"].sum().item()
             max_len = seq_len if (seq_len > max_len) else max_len
 
-        return max_len
+        return int(max_len)
 
     def _cache_examples(self):
         """
