@@ -150,10 +150,10 @@ class MAR(SDInterpolant):
         Randomly drop out sidechains of unmasked aatypes.
         """
         # Sample probability of dropping sidechains (TODO: we can try different schedules for this)
-        drop_scn_t = torch.rand(x.shape[0], device=x.device)  # choose probability of dropping from uniform
+        keep_scn_t = torch.rand(x.shape[0], device=x.device)  # choose probability of keeping from uniform
 
         # Create sidechain mlm mask
-        scn_mlm_mask = torch.rand_like(seq_mlm_mask) < rearrange(drop_scn_t, "b -> b 1")  # [b n]
+        scn_mlm_mask = torch.rand_like(seq_mlm_mask) < rearrange(keep_scn_t, "b -> b 1")  # [b n]
         scn_mlm_mask = scn_mlm_mask * seq_mlm_mask  # sidechains should be dropped where aatype is masked
 
         # Noise sidechains
@@ -210,6 +210,7 @@ class MAR(SDInterpolant):
     def remask_K(self,
                  xt: TensorType["b n a 3", float],
                  aatype_t: TensorType["b n", int],
+                 psce_t: TensorType["b n 33", float],
                  mlm_mask: TensorType["b n"],
                  K: TensorType["b", int]) -> Tuple[TensorType["b n a 3", float],
                                                    TensorType["b n", int],
@@ -238,5 +239,6 @@ class MAR(SDInterpolant):
         # Noise sidechains and sidechain confidence
         xt_noised = xt.clone()
         xt_noised[..., rc.non_bb_idxs, :] = xt_noised[..., rc.non_bb_idxs, :] * rearrange(mlm_mask, "b n -> b n 1 1").float()
+        psce_t_noised = psce_t * rearrange(mlm_mask, "b n -> b n 1")
 
-        return xt_noised, aatype_t_noised, mlm_mask
+        return xt_noised, aatype_t_noised, psce_t_noised, mlm_mask

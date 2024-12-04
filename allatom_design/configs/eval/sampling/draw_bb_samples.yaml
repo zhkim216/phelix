@@ -92,7 +92,7 @@ mpnn:
 
 # Structure prediction model args
 struct_pred_cfg:
-  model_name: "omegafold"  # ["esmfold", "af2", "omegafold"]
+  model_name: "esmfold"  # ["esmfold", "af2", "omegafold"]
   af2:
     data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
     num_models: 1  # only 1 model is currently supported

@@ -1,0 +1,12 @@
+gt_pdb_dir:
+sample_pdb_dir:
+
+out_dir: null  # null to save in the sample pdb directory
+exp_name: test  # sampling experiment name
+overwrite_out_dir: true  # if true, delete existing output directory
+seed: 0
+
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

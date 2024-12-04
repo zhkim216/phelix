@@ -831,7 +831,7 @@ def foldseek_cluster(pdbs: List[str],
 
 def get_core_surface_mask(coords: TensorType["b n 37 3", float],
                           atom_mask: TensorType["b n 37", float],
-                          ):
+                          ) -> Tuple[TensorType["b n", bool], TensorType["b n", bool]]:
     """
     Get a mask for core and surface residues based on the coordinates of a protein, possibly batched.
 
@@ -839,6 +839,13 @@ def get_core_surface_mask(coords: TensorType["b n 37 3", float],
 
     Adapted from FlowPacker: https://gitlab.com/mjslee0921/flowpacker/-/blob/main/sampler_pdb.py?ref_type=heads#L126
     """
+    input_coords_shape = coords.shape
+    if (len(input_coords_shape) == 3) and (len(atom_mask.shape) == 2):
+        # expand to batch dimension
+        coords = coords.unsqueeze(0)
+        atom_mask = atom_mask.unsqueeze(0)
+
+    assert len(coords.shape) == 4 and len(atom_mask.shape) == 3
     cb_idx = rc.atom_order["CB"]
     cb_exists = atom_mask[:, :, cb_idx]
     cb = coords[:, :, cb_idx, :]
@@ -850,5 +857,10 @@ def get_core_surface_mask(coords: TensorType["b n 37 3", float],
     cb_dist_w10 = ((cb_dist < 10) * cb_exists_2d).sum(-1)
     core = cb_dist_w10 >= 20
     surface = cb_dist_w10 <= 15
+
+    if len(input_coords_shape) == 3:
+        # remove batch dimension if input was not batched
+        core = core.squeeze(0)
+        surface = surface.squeeze(0)
 
     return core, surface

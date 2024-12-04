@@ -50,6 +50,7 @@ minimpnn:
     edge_hidden_dim_vector: 1
     rotate_out: false
     graph_embedding:
+      mpnn_n_channel: ${model.denoiser.minimpnn.n_channel}
       top_k_neighbors: ${model.denoiser.minimpnn.k_neighbors}
       num_positional_embeddings: 16
       n_aatype: ${model.n_aatype}
@@ -129,24 +130,6 @@ seq_head:
   in_channels: ${model.denoiser.minimpnn.n_channel}
   n_aatype: ${model.n_aatype}
 
-backbone_encoder:
-  hidden_size: ${model.denoiser.scn_diffusion_module.hidden_size}
-  pos_encoding: ${model.denoiser.pos_encoding}
-
-  # h_V conditioning
-  c_h_V: ${denoiser.minimpnn.n_channel}
-
-  # QK normalization
-  qk_rmsnorm: true
-
-  # Blocks
-  depth: 4
-  num_heads: 8
-  mlp_dropout: 0.0
-  mlp_ratio: 4.0
-  inf: ${model.inf}
-
-
 scn_diffusion_module:
   hidden_size: 256
 
@@ -177,7 +160,7 @@ scn_diffusion_module:
 # Confidence module
 confidence_module:
   enabled: false
-  subsample_train_iter_mult: 4  # train with roughly 1/K of the training iterations
+  subsample_train_iter_mult: 8  # train with roughly 1/K of the training iterations
 
   # Sidechain diffusion parameters
   scn_diffusion:
@@ -199,7 +182,8 @@ confidence_module:
 
   # Model
   c_h_V: ${denoiser.minimpnn.n_channel}
-  hidden_size: 128
+  hidden_size: ${denoiser.minimpnn.n_channel}
+  n_aatype: ${model.n_aatype}
 
   sce_bins:
     min_bin: 0.0
@@ -209,7 +193,6 @@ confidence_module:
   structure_encoder:
     n_aatype: ${model.n_aatype}
     n_channel: ${denoiser.minimpnn.n_channel}
-    n_layers: 2
+    n_layers: 3
     k_neighbors: ${denoiser.minimpnn.k_neighbors}
     dropout_p: 0.1
-    use_ESV_in: true
