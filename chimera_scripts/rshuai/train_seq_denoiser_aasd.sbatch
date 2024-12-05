@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b15_aasd1
+#SBATCH --job-name=b15_aasd2
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b15_aasd1
+EXP_NAME=b15_aasd2
 GROUP=chimera_b15
 
 # Dataset paths
@@ -47,11 +47,12 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     interpolant.training_noise_schedule=uniform_sqrt_t \
     denoiser=minimpnn_denoiser \
     denoiser.minimpnn.augment_eps=0.3 \
-    denoiser.minimpnn.use_gvp=false \
-    denoiser.minimpnn.n_layers=5 \
+    denoiser.minimpnn.use_gvp=true \
+    denoiser.minimpnn.n_layers=4 \
+    denoiser.minimpnn.gvp.num_encoder_layers=3 \
     denoiser.confidence_module.enabled=true \
-    denoiser.confidence_module.sce_bins.max_bin=5.0 \
-    denoiser.confidence_module.sce_bins.n_bins=41 \
+    denoiser.confidence_module.sce_bins.max_bin=4.0 \
+    denoiser.confidence_module.sce_bins.n_bins=17 \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=20000 \
     checkpointing.save_ema_every_n_steps=10000 \
