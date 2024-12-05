@@ -392,7 +392,7 @@ class SeqDenoiser(nn.Module):
 
         # Set b-factors to predicted Sidechain Error (PSCE)
         b_factors = torch.zeros_like(atom_mask, dtype=torch.float32)
-        b_factors[..., rc.non_bb_idxs] = samples["psce"]
+        b_factors[..., rc.non_bb_idxs] = samples["psce"].cpu()
 
         feats = {
             "aatype": aatype,

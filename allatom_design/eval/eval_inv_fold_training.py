@@ -88,8 +88,6 @@ def main(cfg: DictConfig):
     sd_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
     sd_ckpts = natsorted([ckpt for ckpt in sd_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
 
-    dataset = None  # we will load the dataset based on the model config
-
     pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints")
     for sd_ckpt in pbar:
         match = pattern.search(Path(sd_ckpt).name)
@@ -107,11 +105,10 @@ def main(cfg: DictConfig):
         with open_dict(lit_sd_model.cfg.data):
             lit_sd_model.cfg.data.update({k: v for k, v in cfg.data.items() if v is not None})  # override data config where specified
 
-        if dataset is None:
-            # Load dataset based on model config
-            dataset = ADDataset(phase="eval", evalutation_mode = True, **lit_sd_model.cfg.data)
-            val_dataloader = DataLoader(dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True, shuffle=False, drop_last=False)
-            dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
+        # Load dataset based on model config
+        dataset = ADDataset(phase="eval", evaluation_mode= True, **lit_sd_model.cfg.data)
+        val_dataloader = DataLoader(dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True, shuffle=False, drop_last=False)
+        dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
 
         # Set up sidechain diffusion inputs
         t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
@@ -288,7 +285,7 @@ def main(cfg: DictConfig):
                     }
 
                     # Save samples
-                    filenames = [f"{sampled_pdbs_dir}/epoch_{epoch}_S{S}_batch_{bi}_sample_{i}.pdb" for i in range(B)]
+                    filenames = [f"{sampled_pdbs_dir}/epoch_{epoch}_S{S}_batch_{bi}_sample_{idx}.pdb" for i in range(B)]
                     SeqDenoiser.save_samples_to_pdb(samples, filenames)
                     pdbs.extend(filenames)
 
@@ -303,6 +300,7 @@ def main(cfg: DictConfig):
                     out_dir=codes_sc_dir,
                     eval_codesign=True,
                     temp_dir=f"{cfg.out_dir}/tmp")
+            
 
                 # Aggregate results
                 codes_metrics = defaultdict(list)
