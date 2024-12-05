@@ -19,6 +19,8 @@ from omegafold import pipeline as of_pipeline
 from omegafold.utils.torch_utils import recursive_to
 import argparse
 from allatom_design.data import residue_constants as rc
+import numpy as np
+from colabdesign.af.alphafold.common import protein
 
 
 def run_esmfold(sequence_list: List[str],
@@ -217,6 +219,22 @@ def create_batched_seq_dataset(all_sequences: List[str],
 
     yield collate_fn(batch_examples)
 
+def save_best_model(af_model, filename):    
+    aux = af_model._tmp["best"]["aux"]["all"]
+    plddts = np.mean(af_model._tmp["best"]["aux"]["all"]['plddt'], axis = -1)
+    best_model_idx = np.argmax(plddts)
+    p = {k:aux[k][best_model_idx] for k in ["aatype","residue_index","atom_positions","atom_mask"]}
+    p["b_factors"] = 100 * p["atom_mask"] * aux["plddt"][best_model_idx][...,None]
+
+    def to_pdb_str(x, n=None):
+      p_str = protein.to_pdb(protein.Protein(**x))
+      p_str = "\n".join(p_str.splitlines()[1:-2])
+      return p_str
+
+    p_str = to_pdb_str(p) + "\nEND\n"
+    with open(filename, 'w') as f:
+        f.write(p_str)
+
 
 def run_af2(sequences_list: List[str],
             pdbs: List[str],  # used for extracting residue index. TODO remove dependence on pdb file
@@ -225,6 +243,7 @@ def run_af2(sequences_list: List[str],
             num_models: int,
             sample_models: bool,
             num_recycles: int,
+            save_best: bool,
             rm_template_interchain: bool = False,
             chains: Optional[str] = None,
             homooligomer: bool = False,
@@ -246,16 +265,21 @@ def run_af2(sequences_list: List[str],
         af_model.restart()
         af_model.set_opt("template", rm_ic=rm_template_interchain)
         af_model.predict(seq=seq,
-                         num_models=num_models,
+                         num_models=num_models if save_best else 1, #default to 1 model unless we are saving only the best
                          sample_models=sample_models,
                          num_recycles=num_recycles,
                          verbose=False)
 
-        af_model._save_results(save_best=True, verbose=False)
-        af_model.save_current_pdb(output_pdb)
-        output_files.append(output_pdb)
+        af_model._save_results(save_best=save_best, best_metric='plddt', verbose=False)
 
-    preds = [data.load_feats_from_pdb(pdb, chain_residx_gap=None) for pdb in output_files]
+        if save_best:
+            save_best_model(af_model, output_pdb)
+        else:
+            af_model.save_current_pdb(output_pdb)
+
+        output_files.append(output_pdb)
+        
+    preds = [data.load_feats_from_pdb(pdb) for pdb in output_files]
 
     # Preprocess plddt-CA
     plddts = [pred["b_factors"][:, 1] for pred in preds]
