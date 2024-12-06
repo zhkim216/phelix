@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=b15_aasd3
+#SBATCH --job-name=b14_aasd5
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=2
-#SBATCH --cpus-per-task=16
+#SBATCH --gpus-per-node=4
+#SBATCH --cpus-per-task=32
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b15_aasd3
+EXP_NAME=b14_aasd5
 GROUP=chimera_b14
 
 # Dataset paths
@@ -41,13 +41,13 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
     data.subset_length_range=[16,9999] \
-    train.batch_size=64 \
+    train.batch_size=32 \
     train.compile_model=true \
     model.task=allatom_seq_des \
     interpolant.training_noise_schedule=uniform_sqrt_t \
     denoiser=minimpnn_denoiser \
-    denoiser.minimpnn.augment_eps=0.3 \
-    denoiser.minimpnn.use_gvp=false \
+    denoiser.minimpnn.augment_eps=0.0 \
+    denoiser.minimpnn.use_gvp=true \
     denoiser.minimpnn.n_layers=4 \
     denoiser.minimpnn.n_channel=160 \
     denoiser.confidence_module.enabled=true \
