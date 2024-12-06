@@ -60,7 +60,7 @@ minimpnn:
       edge_hidden_dim_scalar: ${model.denoiser.minimpnn.gvp.edge_hidden_dim_scalar}
       edge_hidden_dim_vector: ${model.denoiser.minimpnn.gvp.edge_hidden_dim_vector}
     dropout: ${model.denoiser.minimpnn.dropout_p}
-    num_encoder_layers: 3
+    num_encoder_layers: ${model.denoiser.minimpnn.n_layers}
 
   gcp:
     h_hidden_dim: ${model.denoiser.minimpnn.n_channel}
