@@ -9,8 +9,6 @@
 #SBATCH --output=/scratch/hielab/talal/slurm_log_files/job_%j.out
 #SBATCH --error=/scratch/hielab/talal/slurm_log_files/job_%j.err
 #
-## Write batch script to logs
-scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 # Set base directories
 BASE_DIR=/home/talal/allatom-design
@@ -19,26 +17,25 @@ HYDRA_DIR=/scratch/hielab/hydra_outputs
 # Model params
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
-# Dataset paths
-PDB_PATH=/scratch/hielab/talal/datasets/casp14
-DESIGNABILITY_CSV=/scratch/hielab/talal/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
-
 # Set cache directories
 export HF_HOME=/scratch/hielab/talal/cache/huggingface
 export TORCH_HOME=/scratch/hielab/talal/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/talal/cache/omegafold/omegafold.pt
 
 # Model to evaluate
-CHECKPOINT_PATH=/scratch/hielab/talal/allatom_design/allatom_design/aasd_gvp_pdb/checkpoints/sd-epoch59.ckpt
+CHECKPOINT_PATH=/scratch/hielab/talal/allatom_design/allatom_design/aasd_gvp_pdb_0.3_single_pack/checkpoints/sd-epoch53-step365040-val_loss1.2307.ckpt
+
+# PDB to sample from 
+PDB_PATH=/home/talal/protein-dpo/data/af_pdbs/6cfg.pdb
 
 # Wandb settings / experiment name
 WANDB_ID=talal-widatalla
-EXP_NAME=${MODEL_NAME}_eval_inv_fold
+EXP_NAME=${MODEL_NAME}_eval_sample
 GROUP=chimera_a7
 
 # Run training script
 cd ${BASE_DIR}
-WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_single_structure_sampling.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
@@ -47,16 +44,14 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     num_workers=${SLURM_CPUS_ON_NODE} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
-    start_epoch=50 \
     aatype_decoding_order_mode=greedy \
     corrector_step_ratio=0.5 \
     num_corrector_steps=0 \
-    num_steps_list=[5] \
-    eval_every_n_ckpts=1 \
-    batch_size=4 \
-    run_seq_recovery=true \
-    run_codes_sc=false \
-    num_codes_sc_batches=1 \
-    data.pdb_path=${PDB_PATH} \
-    subset_length_range=[64,256] \
-    hydra.run.dir=${HYDRA_DIR}
+    temperature=1.0 \
+    fixed_pos=[0,1,2,3,4,5,6,7,8,9,10] \
+    num_steps=5 \
+    batch_size=2 \
+    num_samples=2 \
+    pdb_path=${PDB_PATH} \
+    hydra.run.dir=${HYDRA_DIR} \
+    struct_pred_cfg.model_name=esmfold \

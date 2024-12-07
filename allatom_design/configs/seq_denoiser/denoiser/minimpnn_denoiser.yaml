@@ -48,7 +48,7 @@ minimpnn:
     node_hidden_dim_vector: 16
     edge_hidden_dim_scalar: 512
     edge_hidden_dim_vector: 1
-    rotate_out: true
+    rotate_out: false
     graph_embedding:
       mpnn_n_channel: ${model.denoiser.minimpnn.n_channel}
       top_k_neighbors: ${model.denoiser.minimpnn.k_neighbors}

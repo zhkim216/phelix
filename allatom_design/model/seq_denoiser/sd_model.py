@@ -101,6 +101,7 @@ class SeqDenoiser(nn.Module):
               x,
               aatype,
               seq_mask,
+              missing_atom_mask,
               residue_index,
               chain_index
         ) -> TensorType["b n"]:
@@ -112,15 +113,13 @@ class SeqDenoiser(nn.Module):
         - cond_labels_in: Dict[str, TensorType["b", int]]
         """
         # Denoise coords
-        # TODO: whenever score() is called, we need to pass in the atom_mask_noised [b n 37] that specifies missing / ghost / masked sidechain atoms
-        # the line of code below assumes all atoms are present and no sidechains are masked; i left it commented so it'll break and remind us to fix it
-        # atom_mask_noised = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)
-        seq_logits, _ = self.denoiser.seq_design_module(x,
-                                                        aatype,
-                                                        seq_mask,
-                                                        atom_mask_noised,
-                                                        residue_index,
-                                                        chain_index)
+        seq_logits, _ = self.denoiser.seq_design_module(
+                                        x,
+                                        aatype,
+                                        seq_mask,
+                                        missing_atom_mask,
+                                        residue_index,
+                                        chain_index)
 
         return seq_logits
 
@@ -393,7 +392,7 @@ class SeqDenoiser(nn.Module):
 
         # Set b-factors to predicted Sidechain Error (PSCE)
         b_factors = torch.zeros_like(atom_mask, dtype=torch.float32)
-        b_factors[..., rc.non_bb_idxs] = samples["psce"]
+        b_factors[..., rc.non_bb_idxs] = samples["psce"].cpu()
 
         feats = {
             "aatype": aatype,

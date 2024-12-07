@@ -52,7 +52,7 @@ def main(cfg: DictConfig):
     _, train_dataloader = init_dataloader(phase="train", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
     _, val_dataloader = init_dataloader(phase="eval", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
     val_dataloaders = [val_dataloader]
-
+    
     # Init wandb
     local_rank = os.environ.get("LOCAL_RANK", None)
     print(f"Local rank: {local_rank}")
