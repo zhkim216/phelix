@@ -1,0 +1,163 @@
+import glob
+import os
+import pickle
+import shutil
+from collections import defaultdict
+from functools import partial
+from pathlib import Path
+
+import hydra
+import lightning as L
+import numpy as np
+import torch
+import wandb
+import yaml
+from Bio import SeqIO
+from Bio.PDB import PDBIO, PDBParser
+from natsort import natsorted
+from omegaconf import DictConfig, OmegaConf
+
+import allatom_design.data.residue_constants as rc
+from allatom_design.data.data import load_feats_from_pdb
+from allatom_design.data.pdb_utils import write_to_pdb
+from allatom_design.eval import eval_metrics
+from allatom_design.eval.folding_utils import get_struct_pred_model
+from allatom_design.eval.proteinmpnn_utils import load_mpnn
+
+
+@hydra.main(config_path="../configs/eval", config_name="inverse_fold_benchmarking", version_base="1.3.2")
+def main(cfg: DictConfig):
+    """
+    Evaluate self-consistency metrics using other sequence design models for benchmarking.
+    If input_fasta_dir is null, use ProteinMPNN to generate sequences. Otherwise, read in sequences from input_fasta_dir.
+    """
+    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+
+    # Set seeds
+    L.seed_everything(cfg.seed)
+    torch.backends.cudnn.deterministic = True  # nonrandom CUDNN convolution algo, maybe slower
+    torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
+
+    # Create out dirs and preserve config
+    if cfg.overwrite_out_dir and Path(cfg.out_dir).exists():
+        # Delete existing out_dir
+        print(f"Deleting pre-existing out_dir: {cfg.out_dir}")
+        shutil.rmtree(cfg.out_dir)
+
+    Path(cfg.out_dir).mkdir(parents=True, exist_ok=True)
+    with open(Path(cfg.out_dir, "config.yaml"), "w") as f:
+        yaml.safe_dump(cfg_dict, f)
+
+    ### CALCULATE STRUCTURE METRICS ###
+    all_metrics = defaultdict(dict)
+    pdbs = natsorted(glob.glob(f"{cfg.sample_dir}/*.pdb"))[:10]
+
+    # Copy over original samples
+    shutil.copytree(cfg.sample_dir, f"{cfg.out_dir}/samples")
+
+    # Set up models (in eval mode)
+    device = torch.device("cuda" if cfg.cuda else "cpu")
+    torch.set_grad_enabled(False)
+    struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
+    use_mpnn = not cfg.input_fasta_dir
+    if use_mpnn:
+        mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
+        mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)  # override base mpnn config with mpnn.overrides
+        mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
+    else:
+        mpnn_model, mpnn_cfg = None, None  # no MPNN
+
+        # Read in fastas and thread sequences onto input backbones
+        designs_dir = f"{cfg.out_dir}/designs"
+        Path(designs_dir).mkdir(parents=True, exist_ok=True)
+
+        design_pdbs = []
+        for pdb_path in pdbs:
+            stem = Path(pdb_path).stem
+            fasta_path = f"{cfg.input_fasta_dir}/{stem}.fasta"
+            assert Path(fasta_path).exists(), f"No corresponding FASTA found for {pdb_path} at {fasta_path}"
+            out_pdb_path = f"{designs_dir}/{stem}.pdb"
+            thread_sequence_onto_backbone(pdb_path, fasta_path, out_pdb_path)
+            design_pdbs.append(out_pdb_path)
+        pdbs = design_pdbs  # use designed pdbs for evaluation
+
+    # Run self-consistency evaluation
+    mpnn_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
+                                                          mpnn_model, mpnn_cfg,
+                                                          struct_pred_model,
+                                                          device,
+                                                          out_dir=cfg.out_dir,
+                                                          eval_codesign=(not use_mpnn),
+                                                          temp_dir=f"{cfg.out_dir}/tmp")
+    for pdb, v in mpnn_sc_info.items():
+        all_metrics[pdb]["mpnn_sc_info"] = v
+
+    ### SAVE METRICS ###
+    # Save all metrics to pickle file
+    with open(f"{cfg.out_dir}/all_metrics.pkl", "wb") as f:
+        pickle.dump(all_metrics, f)
+
+    # Summarize metrics
+    metrics = {}
+    mpnn_metrics = defaultdict(list)
+    for pdb in all_metrics:
+        mpnn_sc_info = all_metrics[pdb]["mpnn_sc_info"]
+        for k, v in mpnn_sc_info["sc_metrics"].items():
+            mpnn_metrics[k].append(v.item())
+
+    for k, v in mpnn_metrics.items():
+        metrics[f"codes_{k}"] = np.mean(v)
+
+
+    # Set up wandb logging
+    if not cfg.no_wandb:
+        # Create wandb dir
+        wandb_dir = str(Path(cfg.out_dir))
+        Path(wandb_dir, "wandb").mkdir(parents=True, exist_ok=True)
+
+        # Set wandb cache directory
+        wandb_cache_dir = str(Path(cfg.out_dir, "cache", "wandb"))
+        os.environ["WANDB_CACHE_DIR"] = wandb_cache_dir
+
+        wandb.init(
+            project=cfg.project,
+            entity=cfg.wandb_id,
+            name=cfg.exp_name,
+            group=cfg.group,
+            config=cfg_dict,
+            dir=wandb_dir,
+        )
+
+        # Log metrics
+        wandb.log(metrics)
+
+        wandb.finish()
+
+
+def thread_sequence_onto_backbone(pdb_path, fasta_path, output_pdb_path):
+    """
+    Given a PDB and a corresponding FASTA with a single sequence,
+    thread the sequence onto the backbone of the PDB and save the new PDB.
+    """
+    # Read the FASTA
+    records = list(SeqIO.parse(str(fasta_path), "fasta"))
+    assert len(records) == 1, f"Expected exactly one sequence in {fasta_path}, found {len(records)}"
+    seq = str(records[0].seq)
+
+    example = load_feats_from_pdb(pdb_path)
+
+    aatype = torch.tensor([rc.restype_order[x] for x in seq])
+    example["aatype"] = aatype
+
+    write_to_pdb(aatype, example["all_atom_positions"],
+                example["all_atom_mask"],
+                example["residue_index"].long(),
+                example["chain_index"].long(),
+                example["b_factors"],
+                filename=output_pdb_path,
+                mode="bb")
+
+
+
+if __name__ == "__main__":
+    main()
