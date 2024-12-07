@@ -183,10 +183,7 @@ def run_self_consistency_eval(pdbs: List[str],
             af2_preds, filenames = run_af2(sequences_list=sequences_list,
                                            pdbs=pdbs,
                                            af_model=struct_pred_model["af_model"],
-                                          out_dir=preds_dir, **struct_pred_cfg.af2)
-            
-            print('af2_preds')
-            print(af2_preds)
+                                           out_dir=preds_dir, **struct_pred_cfg.af2)
 
             # Add to sc_info
             for i, pdb in enumerate(pdbs):

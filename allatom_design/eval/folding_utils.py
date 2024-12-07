@@ -219,7 +219,7 @@ def create_batched_seq_dataset(all_sequences: List[str],
 
     yield collate_fn(batch_examples)
 
-def save_best_model(af_model, filename):    
+def save_best_model(af_model, filename):
     aux = af_model._tmp["best"]["aux"]["all"]
     plddts = np.mean(af_model._tmp["best"]["aux"]["all"]['plddt'], axis = -1)
     best_model_idx = np.argmax(plddts)
@@ -278,7 +278,7 @@ def run_af2(sequences_list: List[str],
             af_model.save_current_pdb(output_pdb)
 
         output_files.append(output_pdb)
-        
+
     preds = [data.load_feats_from_pdb(pdb) for pdb in output_files]
 
     # Preprocess plddt-CA
@@ -291,7 +291,7 @@ def run_af2(sequences_list: List[str],
         "plddts": plddts,
         "seq_mask": [pred["seq_mask"] for pred in preds],
         "aatype": [pred["aatype"] for pred in preds],
-        "residue_index": [pred["residue_index"] for pred in preds],
+        "residue_index": [pred["residue_index"].long() for pred in preds],
         "avg_plddt": avg_plddts,
         "atom_mask": [pred["all_atom_mask"] for pred in preds],
     }
