@@ -1,4 +1,5 @@
 .vscode
+.hydra/
 out_dir
 cutlass
 

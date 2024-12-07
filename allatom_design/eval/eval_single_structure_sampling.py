@@ -116,8 +116,6 @@ def main(cfg: DictConfig):
             scd_inputs=scd_inputs,
         )
 
-        print(aatype_denoised)
-
         samples = {"x_denoised": x_denoised,
                 "seq_mask": seq_mask,
                 "missing_atom_mask": missing_atom_mask,

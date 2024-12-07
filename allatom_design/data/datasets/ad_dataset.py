@@ -290,6 +290,8 @@ class ADDataset(data.Dataset):
             dataset_source_label = "EXPERIMENTAL"
         elif self.pdb_path.endswith("casp13") or self.pdb_path.endswith("casp14") or self.pdb_path.endswith("casp15"):
             dataset_source_label = "EXPERIMENTAL"
+        elif self.pdb_path.endswith("denovo100") or self.pdb_path.endswith("denovo200") or self.pdb_path.endswith("denovo300") or self.pdb_path.endswith("denovo400") or self.pdb_path.endswith("denovo500"):
+            dataset_source_label = "EXPERIMENTAL"
         else:
             assert False, f"Unknown dataset: {self.pdb_path}"
         return dataset_source_label
@@ -465,6 +467,8 @@ def get_pdb_data_file(pdb_path, phase, pdb_key: str) -> str:
     elif pdb_path.endswith("rcsb_test_cases"):
         pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
     elif pdb_path.endswith("casp13") or pdb_path.endswith("casp14") or pdb_path.endswith("casp15"):
+        pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
+    elif pdb_path.endswith("denovo100") or pdb_path.endswith("denovo200") or pdb_path.endswith("denovo300") or pdb_path.endswith("denovo400") or pdb_path.endswith("denovo500"):
         pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
     else:
         assert False, f"Unknown dataset: {pdb_path}"

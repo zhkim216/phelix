@@ -15,6 +15,7 @@ num_workers: 10
 # Denoiser options
 denoiser_train_dir:
 out_dir: ${denoiser_train_dir}/eval_fitness_training
+checkpoint_override: null
 
 # Data options for overriding denoiser config (null values default to denoiser config)
 dataset_path: /scratch/hielab/talal/datasets
