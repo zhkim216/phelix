@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=b15_aasd4
+#SBATCH --job-name=b16_aasd0
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=32
+#SBATCH --gpus-per-node=2
+#SBATCH --cpus-per-task=16
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -21,8 +21,8 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b15_aasd4
-GROUP=chimera_b15
+EXP_NAME=b16_aasd0
+GROUP=chimera_b16
 
 # Dataset paths
 # PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
@@ -48,7 +48,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser=minimpnn_denoiser \
     denoiser.minimpnn.augment_eps=0.3 \
     denoiser.minimpnn.use_gvp=true \
-    denoiser.minimpnn.n_layers=5 \
+    denoiser.minimpnn.n_layers=4 \
     denoiser.minimpnn.n_channel=128 \
     denoiser.confidence_module.enabled=true \
     optim.optimizer=noam \
