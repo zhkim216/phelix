@@ -225,12 +225,18 @@ def main(cfg: DictConfig):
     if cfg.run_codes_sc:
         codes_metrics = defaultdict(list)
         for pdb in all_metrics:
+            # Gather per-pdb metrics
             codes_sc_info = all_metrics[pdb]["codes_sc_info"]
             for k, v in codes_sc_info["sc_metrics"].items():
                 codes_metrics[k].append(v.item())
 
+            struct_preds = codes_sc_info["struct_preds"]
+            codes_metrics["avg_plddt"].append(struct_preds["avg_plddt"].item())
+
+        # Average over all pdbs
         for k, v in codes_metrics.items():
             metrics[f"codes_{k}"] = np.mean(v)
+
 
     metrics["med_seq_acc"] = np.median(seq_rec_metrics["seq_acc"])
 
