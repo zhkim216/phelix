@@ -391,7 +391,7 @@ class SeqDenoiser(nn.Module):
         atom_mask = atom_mask * (1 - samples["missing_atom_mask"])  # mask out missing atoms
 
         # Set b-factors to predicted Sidechain Error (PSCE)
-        b_factors = torch.zeros_like(atom_mask, dtype=torch.float32)
+        b_factors = torch.zeros_like(atom_mask, dtype=torch.float32).cpu()
         b_factors[..., rc.non_bb_idxs] = samples["psce"].cpu()
 
         feats = {
