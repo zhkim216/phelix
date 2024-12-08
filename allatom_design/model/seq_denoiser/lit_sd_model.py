@@ -61,8 +61,9 @@ class LitSeqDenoiser(L.LightningModule):
 
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
-        # Update EMA tracker
-        self.ema_tracker.update(t=self.trainer.global_step)
+        if (batch_idx + 1) % self.trainer.accumulate_grad_batches == 0:
+            # Update EMA tracker
+            self.ema_tracker.update(t=self.trainer.global_step)
 
 
     def validation_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
@@ -72,7 +73,7 @@ class LitSeqDenoiser(L.LightningModule):
         outputs = self(batch)
         _, aux = self.loss(outputs, batch, return_aux=True)
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
-        
+
         # eval seq design over discrete sequence noise
         if self.model.task in ['seq_des', 'allatom_seq_des']:
             aux_t = defaultdict(list)
