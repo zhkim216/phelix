@@ -285,7 +285,7 @@ def main(cfg: DictConfig):
                     }
 
                     # Save samples
-                    filenames = [f"{sampled_pdbs_dir}/epoch_{epoch}_S{S}_batch_{bi}_sample_{idx}.pdb" for i in range(B)]
+                    filenames = [f"{sampled_pdbs_dir}/epoch_{epoch}_S{S}_batch_{bi}_sample_{i}.pdb" for i in range(B)]
                     SeqDenoiser.save_samples_to_pdb(samples, filenames)
                     pdbs.extend(filenames)
 
@@ -300,7 +300,7 @@ def main(cfg: DictConfig):
                     out_dir=codes_sc_dir,
                     eval_codesign=True,
                     temp_dir=f"{cfg.out_dir}/tmp")
-            
+
 
                 # Aggregate results
                 codes_metrics = defaultdict(list)
