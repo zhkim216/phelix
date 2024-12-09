@@ -232,6 +232,10 @@ def main(cfg: DictConfig):
                 cfg.timestep_schedule.num_steps = S
                 t_seq = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
 
+                # We set the seed for the same batch each time
+                g = torch.Generator()
+                g.manual_seed(cfg.seed)
+
                 val_dataloader = DataLoader(
                     dataset,
                     batch_size=cfg.batch_size,
@@ -239,6 +243,7 @@ def main(cfg: DictConfig):
                     pin_memory=True,
                     shuffle=True,
                     drop_last=False,
+                    generator=g
                 )
 
                 pdbs = []
