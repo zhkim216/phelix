@@ -50,7 +50,7 @@ def main(cfg: DictConfig):
 
     ### CALCULATE STRUCTURE METRICS ###
     all_metrics = defaultdict(dict)
-    pdbs = natsorted(glob.glob(f"{cfg.sample_dir}/*.pdb"))[:10]
+    pdbs = natsorted(glob.glob(f"{cfg.sample_dir}/*.pdb"))[::-1]  # DEBUG
 
     # Copy over original samples
     shutil.copytree(cfg.sample_dir, f"{cfg.out_dir}/samples")
@@ -82,32 +82,46 @@ def main(cfg: DictConfig):
         pdbs = design_pdbs  # use designed pdbs for evaluation
 
     # Run self-consistency evaluation
-    mpnn_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
-                                                          mpnn_model, mpnn_cfg,
-                                                          struct_pred_model,
-                                                          device,
-                                                          out_dir=cfg.out_dir,
-                                                          eval_codesign=(not use_mpnn),
-                                                          temp_dir=f"{cfg.out_dir}/tmp")
-    for pdb, v in mpnn_sc_info.items():
-        all_metrics[pdb]["mpnn_sc_info"] = v
+    sc_output = eval_metrics.run_self_consistency_eval(pdbs,
+                                                       mpnn_model, mpnn_cfg,
+                                                       struct_pred_model,
+                                                       device,
+                                                       out_dir=cfg.out_dir,
+                                                       eval_codesign=(not use_mpnn),
+                                                       temp_dir=f"{cfg.out_dir}/tmp")
+    for pdb, v in sc_output.items():
+        all_metrics[pdb]["sc_info"] = v
 
     ### SAVE METRICS ###
     # Save all metrics to pickle file
     with open(f"{cfg.out_dir}/all_metrics.pkl", "wb") as f:
         pickle.dump(all_metrics, f)
 
-    # Summarize metrics
-    metrics = {}
-    mpnn_metrics = defaultdict(list)
+    # Stratify by sequence length
     for pdb in all_metrics:
-        mpnn_sc_info = all_metrics[pdb]["mpnn_sc_info"]
-        for k, v in mpnn_sc_info["sc_metrics"].items():
-            mpnn_metrics[k].append(v.item())
+        all_metrics[pdb]["length"] = len(all_metrics[pdb]["sc_info"]["sample_seq"])
+    unique_lengths = set([all_metrics[pdb]["length"] for pdb in all_metrics])
 
-    for k, v in mpnn_metrics.items():
-        metrics[f"codes_{k}"] = np.mean(v)
+    L_to_metrics = {}
+    for length in unique_lengths:
+        # Store metrics for each pdb in this length group
+        pdbs_l = [pdb for pdb in all_metrics if all_metrics[pdb]["length"] == length]
+        metrics_l = {}
+        sc_metrics_l = defaultdict(list)
+        for pdb in pdbs_l:
+            sc_info = all_metrics[pdb]["sc_info"]
+            for k, v in sc_info["sc_metrics"].items():
+                sc_metrics_l[k].append(v.item())
 
+            struct_preds = sc_info["struct_preds"]
+            sc_metrics_l["avg_plddt"].append(struct_preds["avg_plddt"].item())
+
+        # Aggregate self-consistency metrics for this length group
+        for k, v in sc_metrics_l.items():
+            metrics_l[f"{k}_mean"] = np.mean(v)
+            metrics_l[f"{k}_med"] = np.median(v)
+
+        L_to_metrics[length] = metrics_l
 
     # Set up wandb logging
     if not cfg.no_wandb:
@@ -129,8 +143,10 @@ def main(cfg: DictConfig):
         )
 
         # Log metrics
-        wandb.log(metrics)
-
+        for length in sorted(list(unique_lengths)):
+            metrics_l = L_to_metrics[length]
+            metrics_l["length"] = length
+            wandb.log(metrics_l)
         wandb.finish()
 
 
