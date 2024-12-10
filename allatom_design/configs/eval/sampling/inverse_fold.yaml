@@ -71,6 +71,7 @@ struct_pred_cfg:
     data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
     num_models: 1  # only 1 model is currently supported
     sample_models: true  # randomly sample models from the ensemble
+    save_best: false
     num_recycles: 3
     use_multimer: false
   esmfold:

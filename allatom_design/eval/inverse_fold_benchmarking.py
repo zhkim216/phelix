@@ -50,7 +50,7 @@ def main(cfg: DictConfig):
 
     ### CALCULATE STRUCTURE METRICS ###
     all_metrics = defaultdict(dict)
-    pdbs = natsorted(glob.glob(f"{cfg.sample_dir}/*.pdb"))[::-1]  # DEBUG
+    pdbs = natsorted(glob.glob(f"{cfg.sample_dir}/*.pdb"))
 
     # Copy over original samples
     shutil.copytree(cfg.sample_dir, f"{cfg.out_dir}/samples")
@@ -99,7 +99,7 @@ def main(cfg: DictConfig):
 
     # Stratify by sequence length
     for pdb in all_metrics:
-        all_metrics[pdb]["length"] = len(all_metrics[pdb]["sc_info"]["sample_seq"])
+        all_metrics[pdb]["length"] = all_metrics[pdb]["sc_info"]["struct_preds"]["pred_coords"].shape[1]
     unique_lengths = set([all_metrics[pdb]["length"] for pdb in all_metrics])
 
     L_to_metrics = {}

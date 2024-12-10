@@ -87,6 +87,7 @@ def run_esmfold(sequence_list: List[str],
 
 def run_esmfold_batched(sequences_list: List[str],
                         residue_index_list: List[TensorType["n_s", int]],
+                        chain_index_list: List[TensorType["n_s", int]],
                         model: EsmForProteinFolding,
                         tokenizer: EsmTokenizer,
                         max_tokens_per_batch: int = 1024,
@@ -107,7 +108,7 @@ def run_esmfold_batched(sequences_list: List[str],
     esm_outputs = defaultdict(list)
     original_ids = []
 
-    dataset = create_batched_seq_dataset(sequences_list, residue_index_list, max_tokens_per_batch=max_tokens_per_batch)
+    dataset = create_batched_seq_dataset(sequences_list, residue_index_list, chain_index_list, max_tokens_per_batch=max_tokens_per_batch)
     for batch in dataset:
         # Set up inputs
         inputs = tokenizer(
@@ -117,7 +118,11 @@ def run_esmfold_batched(sequences_list: List[str],
             add_special_tokens=False,
         ).to(model.device)
 
-        inputs["position_ids"] = batch["residue_index"].to(model.device)
+        # Add residue index gap of 1000 for chain separation
+        residue_index = batch["residue_index"]
+        residue_index = residue_index + (1000 * batch["chain_index"])
+
+        inputs["position_ids"] = residue_index.to(model.device)
 
         # Run model
         with torch.no_grad():
@@ -128,6 +133,7 @@ def run_esmfold_batched(sequences_list: List[str],
         pred_coords_atom14 = outputs["positions"][-1]  # positions is shape (l, b, n, 14, 3)
         pred_coords_atom37 = data.atom14_aatype_to_atom37(pred_coords_atom14, outputs["aatype"])
         plddts = outputs["plddt"][:, :, 1] * seq_mask  # get pLDDT for CA atoms
+        plddts = plddts * 100
         avg_plddt = (plddts * seq_mask).sum(dim=-1) / seq_mask.sum(dim=-1).clamp(min=1e-3)
 
         aatype, seq_mask = outputs.aatype.cpu(), seq_mask.cpu()
@@ -139,7 +145,7 @@ def run_esmfold_batched(sequences_list: List[str],
             "plddts": plddts,
             "seq_mask": seq_mask,
             "aatype": aatype,
-            "residue_index": batch["residue_index"],
+            "residue_index": residue_index,
             "avg_plddt": avg_plddt[..., None],  # add sequence dimension for consistency
             "atom_mask": atom_mask,    # add atom mask based on input aatypes for convenience
         }
@@ -169,6 +175,7 @@ def run_esmfold_batched(sequences_list: List[str],
 
 def create_batched_seq_dataset(all_sequences: List[str],
                                all_residue_indices: List[TensorType["n_s", int]],
+                               all_chain_indices: List[TensorType["n_s", int]],
                                max_tokens_per_batch: int = 1024,
                                ) -> Generator[dict, None, None]:
     """
@@ -178,7 +185,7 @@ def create_batched_seq_dataset(all_sequences: List[str],
     """
     # Sort by sequence length
     B = len(all_sequences)
-    examples = [(seq, residx, id) for seq, residx, id in zip(all_sequences, all_residue_indices, range(B))]
+    examples = [(seq, residx, chain_idx, id) for seq, residx, chain_idx, id in zip(all_sequences, all_residue_indices, all_chain_indices, range(B))]
     examples = sorted(examples, key=lambda x: len(x[0]))
 
     # Define collator
@@ -189,15 +196,17 @@ def create_batched_seq_dataset(all_sequences: List[str],
         - residue_index: (b n) residue index
         - id: (b) unique identifier for each sequence
         """
-        batch = {"sequence": [], "residue_index": [], "id": []}
+        batch = {"sequence": [], "residue_index": [], "id": [], "chain_index": []}
 
-        N = max(len(seq) for seq, _, _ in examples)
-        for seq, residx, id in examples:
+        N = max(len(seq) for seq, _, _, _ in examples)
+        for seq, residx, chain_idx, id in examples:
             batch["sequence"].append(seq)
             batch["residue_index"].append(data.make_fixed_size_1d(residx, fixed_size=N, start_idx=None))
+            batch["chain_index"].append(data.make_fixed_size_1d(chain_idx, fixed_size=N, start_idx=None))
             batch["id"].append(id)
 
         batch["residue_index"] = torch.stack(batch["residue_index"], dim=0).to(torch.long)
+        batch["chain_index"] = torch.stack(batch["chain_index"], dim=0).to(torch.long)
         return batch
 
     # Yield batches
@@ -206,14 +215,14 @@ def create_batched_seq_dataset(all_sequences: List[str],
     total_tokens = sum(len(seq) for seq in all_sequences)
     pbar = tqdm(total=total_tokens, desc="Number of ESMFold tokens processed", leave=False)
 
-    for seq, residx, id in examples:
+    for seq, residx, chain_idx, id in examples:
         # If adding this sequence would exceed the token limit, yield the current batch
         if num_tokens + len(seq) > max_tokens_per_batch and num_tokens > 0:
             yield collate_fn(batch_examples)
             batch_examples, num_tokens = [], 0
 
         # Add this sequence to the current batch
-        batch_examples.append((seq, residx, id))
+        batch_examples.append((seq, residx, chain_idx, id))
         num_tokens += len(seq)
         pbar.update(len(seq))
 
@@ -310,6 +319,7 @@ def run_omegafold(sequences_list: List[str],
                   deterministic: bool = True,
                   subbatch_size: Optional[int] = None,
                   **kwargs):
+    raise NotImplementedError("Multichain support is not implemented yet.")
     forward_config = argparse.Namespace(
         subbatch_size=subbatch_size,
         num_recycle=num_recycle,
