@@ -37,7 +37,7 @@ struct_pred_cfg:
     num_recycles: 3
     use_multimer: false
   esmfold:
-    max_tokens_per_batch: 1024
+    max_tokens_per_batch: 512
   omegafold:
     num_pseudo_msa: 15
     mask_rate: 0.12

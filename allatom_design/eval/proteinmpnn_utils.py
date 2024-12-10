@@ -436,6 +436,7 @@ def run_mpnn(model: ProteinMPNN,
 
             B = out_dict["generated_sequences"].shape[0]
             out_dict["residue_index"] = feature_dict["R_idx"].expand((B, -1)).long().cpu()
+            out_dict["chain_index"] = feature_dict["chain_labels"].expand((B, -1)).long().cpu()
 
             pdb_to_out_dict[pdb] = out_dict
 

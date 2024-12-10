@@ -111,7 +111,7 @@ def run_self_consistency_eval(pdbs: List[str],
         # For backbone eval, run structure prediction on MPNN sequences for each PDB
         for pdb in tqdm(pdbs, desc=f"Running {struct_model_name}", leave=False):
             mpnn_preds = sc_info[pdb]["mpnn_preds"]
-            sequences_list, residue_index_list = mpnn_preds["mpnn_seqs"], mpnn_preds["residue_index"]
+            sequences_list, residue_index_list, chain_index_list = mpnn_preds["mpnn_seqs"], mpnn_preds["residue_index"], mpnn_preds["chain_index"]
 
             if struct_model_name == "af2":
                 # === Run AlphaFold2 === #
@@ -128,6 +128,7 @@ def run_self_consistency_eval(pdbs: List[str],
                 # === Run ESMFold === #
                 esm_preds = run_esmfold_batched(sequences_list=sequences_list,
                                                 residue_index_list=residue_index_list,
+                                                chain_index_list=chain_index_list,
                                                 model=struct_pred_model["esmfold"],
                                                 tokenizer=struct_pred_model["tokenizer"],
                                                 max_tokens_per_batch=struct_pred_cfg.esmfold.max_tokens_per_batch,
@@ -177,7 +178,7 @@ def run_self_consistency_eval(pdbs: List[str],
 
     else:
         # For allatom/co-design eval, run ESMFold on sequences directly from PDBs
-        sequences_list, residue_index_list = load_sequence_and_residx_from_pdbs(pdbs)
+        sequences_list, residue_index_list, chain_index_list = load_sequence_and_residx_from_pdbs(pdbs)
         if struct_model_name == "af2":
             # === Run AlphaFold2 === #
             af2_preds, filenames = run_af2(sequences_list=sequences_list,
@@ -194,6 +195,7 @@ def run_self_consistency_eval(pdbs: List[str],
             # === Run ESMFold === #
             esm_preds = run_esmfold_batched(sequences_list=sequences_list,
                                             residue_index_list=residue_index_list,
+                                            chain_index_list=chain_index_list,
                                             model=struct_pred_model["esmfold"],
                                             tokenizer=struct_pred_model["tokenizer"],
                                             max_tokens_per_batch=struct_pred_cfg.esmfold.max_tokens_per_batch)
@@ -283,12 +285,14 @@ def run_self_consistency_eval(pdbs: List[str],
 
 
 def load_sequence_and_residx_from_pdbs(pdbs: List[str]) -> Tuple[List[str],
+                                                                 List[TensorType["n_s", int]],
                                                                  List[TensorType["n_s", int]]]:
     examples = [load_feats_from_pdb(pdb) for pdb in pdbs]
     aatypes = [example["aatype"] for example in examples]
     sequences_list = ["".join([rc.restypes[x] for x in aatype]) for aatype in aatypes]
     residue_index_list = [example["residue_index"] for example in examples]
-    return sequences_list, residue_index_list
+    chain_index_list = [example["chain_index"] for example in examples]
+    return sequences_list, residue_index_list, chain_index_list
 
 
 def compute_pairwise_tm_score(coords_list: List[TensorType["n 37 3"]],
