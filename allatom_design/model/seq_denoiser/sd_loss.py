@@ -1,11 +1,12 @@
 import logging
+import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
 from omegaconf import DictConfig
-from scipy.stats import spearmanr, pearsonr
+from scipy.stats import pearsonr, spearmanr
 from torchtyping import TensorType
 
 from allatom_design.data import residue_constants as rc
@@ -87,7 +88,8 @@ class SDLoss(nn.Module):
             # Compute sidechain MSE loss
             aux["scn/mse_loss"] = masked_mse(scn_pred,
                                              scn_target,
-                                             mask=mask)
+                                             mask=mask,
+                                             per_token_avg=self.cfg.mse_loss.per_token_avg,)
             aux_monitor["scn/unweighted_mse_loss"] = aux["scn/mse_loss"].mean().detach().clone()
             aux["scn/mse_loss"] = aux["scn/mse_loss"] * loss_weight_scn  # apply time step loss weight
 
@@ -157,24 +159,21 @@ class SDLoss(nn.Module):
 
 def masked_mse(x: TensorType["b ...", float],
                y: TensorType["b ...", float],
-               mask: TensorType["b ...", float]
+               mask: TensorType["b ...", float],
+               per_token_avg: bool = True,
                ) -> TensorType["b", float]:
 
     data_dims = tuple(range(1, len(x.shape)))
     mse = (x - y).pow(2) * mask
-    mse = mse.sum(data_dims) / mask.sum(data_dims).clamp(min=1e-6)
-    return mse
+    if per_token_avg:
+        # average loss per token
+        loss = mse.sum(data_dims) / mask.sum(data_dims).clamp(min=1e-6)
+    else:
+        # divide by constant N to get loss on roughly the same scale as per_token_avg
+        N = math.prod(mse.shape[1:])
+        loss = mse.sum(data_dims) / N
 
-
-def masked_mse(x: TensorType["b ...", float],
-               y: TensorType["b ...", float],
-               mask: TensorType["b ...", float]
-               ) -> TensorType["b", float]:
-
-    data_dims = tuple(range(1, len(x.shape)))
-    mse = (x - y).pow(2) * mask
-    mse = mse.sum(data_dims) / mask.sum(data_dims).clamp(min=1e-6)
-    return mse
+    return loss
 
 
 def masked_cross_entropy(logits: TensorType["b n k", float],
