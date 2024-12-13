@@ -79,6 +79,8 @@ loss:
     n_aatype: ${model.n_aatype}
     per_token_avg: false
 
+  mse_loss:
+    per_token_avg: true
 
 optim:
   optimizer: "noam"
