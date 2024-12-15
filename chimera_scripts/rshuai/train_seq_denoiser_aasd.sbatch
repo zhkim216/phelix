@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b17_aasd8
+#SBATCH --job-name=b17_aasd9
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b17_aasd8
+EXP_NAME=b17_aasd9
 GROUP=chimera_b17
 
 # Dataset paths
@@ -42,7 +42,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.designability_csv=${DESIGNABILITY_CSV} \
     data.subset_length_range=[16,9999] \
     train.batch_size=8 \
-    trainer.accumulate_grad_batches=2 \
+    trainer.accumulate_grad_batches=4 \
     train.compile_model=true \
     model.task=allatom_seq_des \
     interpolant.training_noise_schedule=uniform_sqrt_t \
@@ -53,9 +53,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.minimpnn.n_channel=128 \
     denoiser.confidence_module.enabled=true \
     optim.optimizer=noam \
-    loss.mse_loss.per_token_avg=false \
     checkpointing.save_latest_every_n_steps=20000 \
-    checkpointing.save_ema_every_n_steps=10000 \
+    checkpointing.save_ema_every_n_steps=5000 \
     trainer.check_val_every_n_epoch=5 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
