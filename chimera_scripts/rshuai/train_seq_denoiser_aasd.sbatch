@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b17_aasd9
+#SBATCH --job-name=b17_aasd10
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=b17_aasd9
+EXP_NAME=b17_aasd10
 GROUP=chimera_b17
 
 # Dataset paths
@@ -42,7 +42,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.designability_csv=${DESIGNABILITY_CSV} \
     data.subset_length_range=[16,9999] \
     train.batch_size=8 \
-    trainer.accumulate_grad_batches=4 \
+    trainer.accumulate_grad_batches=1 \
     train.compile_model=true \
     model.task=allatom_seq_des \
     interpolant.training_noise_schedule=uniform_sqrt_t \
