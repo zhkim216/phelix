@@ -135,16 +135,13 @@ def main(cfg: DictConfig):
                    "residue_index": residue_index,
                    "chain_index": chain_index,
                    "pred_aatype": aatype_denoised,
-                   "aatype_pred_traj": aux["aatype_pred_traj"],
-                   "aatype_t_traj": aux["aatype_t_traj"],
                    "psce": aux["psce"],
                    }
 
         # Store sample info
         seq_mask, aatype = seq_mask.cpu(), aatype.cpu()
         core_mask, surface_mask = eval_metrics.get_core_surface_mask(x.cpu(), batch_i["atom_mask"].cpu())
-        sample_info_i = {"pdb_key": batch_i["pdb_key"], "seq_mask": seq_mask, "aatype": aatype, "core_mask": core_mask, "surface_mask": surface_mask,
-                         "seq_logits": aux["seq_logits_traj"].squeeze(1), "psce": aux["psce"]}
+        sample_info_i = {"pdb_key": batch_i["pdb_key"], "seq_mask": seq_mask, "aatype": aatype, "core_mask": core_mask, "surface_mask": surface_mask, "psce": aux["psce"]}
 
 
         # Sidechain RMSD per residue

@@ -17,10 +17,10 @@ Adapted from original code by alexechu.
 """
 import dataclasses
 import io
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Tuple, Union
 
 import numpy as np
-from Bio.PDB import MMCIFParser, PDBParser, Structure, PDBList
+from Bio.PDB import MMCIFParser, PDBList, PDBParser, Structure
 from Bio.PDB.Atom import DisorderedAtom
 
 from allatom_design.data import residue_constants
@@ -62,6 +62,9 @@ class Protein:
     #uncertainty in electron density, or predicted error in atom coordinates
     b_factors: np.ndarray
 
+    # keep track of the offset due to detected insertion codes
+    insertion_code_offsets: np.ndarray = None # [num_res]
+
     def __post_init__(self):
         if len(np.unique(self.chain_index)) > PDB_MAX_CHAINS:
             raise ValueError(
@@ -70,7 +73,7 @@ class Protein:
             )
 
 
-def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Optional[str] = None, max_conformers: int = 1) -> Protein:
+def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Optional[str] = None, max_conformers: int = 1) -> Tuple[Protein, Dict[str, int]]:
     """Takes a PDB string and constructs a Protein object.
     WARNING: All non-standard residue types will be converted into UNK. All
       non-standard atoms will be ignored.
@@ -83,7 +86,8 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
       max_conformers: Handle disordered atoms, max number of altlocs to store
 
     Returns:
-      A new `Protein` parsed from the pdb contents.
+      - A new `Protein` parsed from the pdb contents.
+      - A dictionary that maps from chain letter to chain ID
     """
     if isinstance(pdb_file, str):
         if pdb_file.endswith(".cif"):
@@ -107,6 +111,7 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
     b_factors = []
     residue_chain_ids = []
     chain_ids = []
+    insertion_code_offsets = []
 
     for chain in model:
         insertion_code_offset = 0
@@ -174,6 +179,7 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
             residue_index.append(res.id[1] + insertion_code_offset)
             b_factors.append(res_b_factors)
             residue_chain_ids.append(chain.id)
+            insertion_code_offsets.append(insertion_code_offset)
 
     # If specified, override chain ids with provided override, else use chain ids discovered from parsing PDB
     if chain_ids_override is not None:
@@ -190,8 +196,9 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
         residue_index=np.array(residue_index),
         chain_index=chain_index,
         chain_ids=chain_ids_numeric,
-        b_factors=b_factors
-    )
+        b_factors=b_factors,
+        insertion_code_offsets=insertion_code_offsets,
+    ), chain_id_mapping
 
 
 def _chain_end(atom_index, end_resname, chain_name, residue_index) -> str:

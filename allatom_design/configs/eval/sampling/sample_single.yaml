@@ -1,30 +1,24 @@
-# Wandb configuration
-project: "allatom_design"  # Wandb project name
-wandb_id: "talal-widatalla"  # Wandb username
-exp_name: null # Wandb exp name
-group: "debug" # Wandb group name
-
 # Run settings
-no_wandb: false  # Disable wandb logging
 seed: 0
 batch_size: 64
 num_workers: 8
 
-# Denoiser options
+# Inputs
 checkpoint_path: null
+pdb_path: null
+fixed_pos_seq: # comma-separated, chain + residue index specification, e.g. "A1-100,B1-100"
+fixed_pos_scn: # null for no provided sidechains, otherwise should be subset of fixed_pos_seq, e.g. "A1-100"
+out_dir: null
+run_self_consistency_eval: false
 
 # Inverse folding options
-aatype_decoding_order_mode: "greedy"
+aatype_decoding_order_mode: "random"
 num_corrector_steps: 0
 corrector_step_ratio: 0.5
 num_steps: 20
-num_samples: 128
+num_samples: 16
 temperature: 0.1
-pdb_path: null
-fixed_pos: null
-sample_pdb_out_dir: "samples"
-predicted_pdb_out_dir: "preds"
-positions: null
+repack_last: true  # after design, repack the final sequence obtained
 timestep_schedule:
   num_steps: null  # will be filled in by num_steps_list
   mode: "linear"
@@ -41,7 +35,7 @@ scn_diffusion:
     t_end: 1.0
   noise_schedule:
     name: "step_scale"
-    c: 1.4
+    c: 1.5
   churn_cfg:
     s_churn: 0
     s_noise: 1.0
@@ -51,7 +45,7 @@ scn_diffusion:
 
 # Structure prediction model args
 struct_pred_cfg:
-  model_name: "omegafold"  # ["esmfold", "af2", "omegafold"]
+  model_name: "esmfold"  # ["esmfold", "af2", "omegafold"]
   af2:
     data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
     num_models: 1  # only 1 model is currently supported

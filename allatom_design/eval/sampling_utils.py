@@ -110,6 +110,7 @@ def unmask(curr: TensorType["b n ..."],
     Update curr based on pred and newly unmasked residues.
     """
     residues_to_unmask = mlm_mask - mlm_mask_prev
+    assert residues_to_unmask.min() == 0, "Trying to mask residues that are already masked"
 
     # Expand to data dims
     n_data_dims = len(curr.shape) - 2

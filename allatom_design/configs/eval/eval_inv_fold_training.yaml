@@ -50,7 +50,7 @@ scn_diffusion:
     t_end: 1.0
   noise_schedule:
     name: "step_scale"
-    c: 1.4
+    c: 1.5
   churn_cfg:
     s_churn: 0
     s_noise: 1.0
