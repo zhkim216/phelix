@@ -28,7 +28,7 @@ def load_feats_from_pdb(pdb, chain_ids_override: str = None, max_conformers: int
     - max_conformers: Handle disordered atoms, max number of altlocs to store. If > 1, returns coords with shape [seqlen, num_atoms, max_conformers, 3]
     """
     feats = {}
-    protein_obj = protein.read_pdb(pdb, chain_ids_override=chain_ids_override, max_conformers=max_conformers)
+    protein_obj, chain_id_mapping = protein.read_pdb(pdb, chain_ids_override=chain_ids_override, max_conformers=max_conformers)
     for k, v in vars(protein_obj).items():
         feats[k] = torch.Tensor(v)
 
@@ -59,6 +59,9 @@ def load_feats_from_pdb(pdb, chain_ids_override: str = None, max_conformers: int
     feats["ghost_atom_mask"] = ghost_atom_mask  # [n, a] or [n, c, a]
     feats["missing_atom_mask"] = missing_atom_mask  # [n, a] or [n, c, a]
     feats["interface_residue_mask"] = get_interface_residue_mask(feats['all_atom_positions'], feats['chain_index'])
+
+    # Mapping from chain letter to chain index
+    feats["chain_id_mapping"] = chain_id_mapping
 
     return feats
 
