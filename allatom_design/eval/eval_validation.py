@@ -187,7 +187,7 @@ def main(cfg: DictConfig):
     # Get average RMSD over all residues
     seq_mask = sample_info["seq_mask"]
     metrics[f"{metric_prefix}/scn_rmsd_avg"] = (sample_info["scn_rmsd_per_pos"] * seq_mask).sum() / seq_mask.sum()  # average over all residues in the dataset
-    metrics[f"{metric_prefix}/scn_rmsd_avg"] = metrics[f"S_scd{S_scd}/scn_rmsd_avg"].item()
+    metrics[f"{metric_prefix}/scn_rmsd_avg"] = metrics[f"{metric_prefix}/scn_rmsd_avg"].item()
 
     # Get average RMSD per residue
     for aa_idx, aa in enumerate(rc.restypes_with_x):
@@ -222,6 +222,8 @@ def main(cfg: DictConfig):
     metrics = {f"scn_pack/{k}": v for k, v in metrics.items()}
     if not cfg.no_wandb:
         wandb.log(metrics, step=0)
+
+    wandb.finish()
 
 
 if __name__ == "__main__":
