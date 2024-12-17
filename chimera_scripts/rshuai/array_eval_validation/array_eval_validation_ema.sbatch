@@ -4,7 +4,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#SBATCH --array=0-57%10
+#SBATCH --array=0-28%10
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
@@ -27,7 +27,7 @@ MODEL_NAME=b17_aasd9
 CKPT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/post_hoc_ema_ckpts
 
 # Define EMA steps to sweep over
-EMA_STEPS=( $(seq 0.01 0.005 0.295) )
+EMA_STEPS=( $(seq 0.01 0.01 0.295) )
 ema_step=${EMA_STEPS[${SLURM_ARRAY_TASK_ID}]}
 ema_step=$(printf "%.3f" "$ema_step")
 SD_CKPT="${CKPT_DIR}/ema-step200000-std${ema_step}.ckpt"

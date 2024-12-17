@@ -18,7 +18,7 @@ batch_size: 64
 data:
     designability_csv: null
     pdb_path: null
-    subset_length_range: [16, 1024]
+    subset_length_range: [64, 1024]
 
 trainer:
   strategy: ddp_find_unused_parameters_true  # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
