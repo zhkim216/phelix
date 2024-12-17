@@ -54,13 +54,6 @@ struct_pred_cfg:
     use_multimer: false
   esmfold:
     max_tokens_per_batch: 1024
-  omegafold:
-    num_pseudo_msa: 15
-    mask_rate: 0.12
-    num_recycle: 2  # performance saturates after around 10 recycles
-    deterministic: true
-    subbatch_size: null
-    cache_file: /media/scratch/huang_lab/cache/omegafold/omegafold.pt
 
 hydra:
   run:
