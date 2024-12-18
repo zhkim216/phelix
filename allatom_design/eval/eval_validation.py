@@ -221,7 +221,7 @@ def main(cfg: DictConfig):
     # Log metrics to wandb
     metrics = {f"scn_pack/{k}": v for k, v in metrics.items()}
     if not cfg.no_wandb:
-        wandb.log(metrics, step=0)
+        wandb.log(metrics, step=1)
 
     wandb.finish()
 
