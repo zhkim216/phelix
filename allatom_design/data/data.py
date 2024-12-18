@@ -173,7 +173,7 @@ def trim_to_max_len(batch: TensorType["b n ..."]):
     return trimmed_example
 
 
-def pad_to_max_len(batch: TensorType["b n ..."], max_len: int):
+def pad_to_max_len(batch: Dict[str, TensorType["b n ..."]], max_len: int):
     """
     Inverse of trim_to_max_len; pads a batch to a fixed length.
     """
