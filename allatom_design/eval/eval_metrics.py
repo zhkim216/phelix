@@ -1,6 +1,7 @@
 import math
 import shutil
 import subprocess
+import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -651,6 +652,8 @@ def run_tm_align_coords_batch(a: TensorType["b n 3", float],
     Path(temp_dir).mkdir(parents=True, exist_ok=True)
     B, N, _ = a.shape
 
+    unique_id = uuid.uuid4().hex  # unique ID for this batch
+
     # Make sure tensors are on cpu to avoid CUDA issues in threads
     a = a.cpu()
     b = b.cpu()
@@ -671,11 +674,11 @@ def run_tm_align_coords_batch(a: TensorType["b n 3", float],
             "residue_index": torch.arange(N, dtype=torch.int64).unsqueeze(0).expand(B, -1),
             "chain_index": torch.zeros((B, N), dtype=torch.int64),
             "b_factors": None,
-            "filenames": [f"{temp_dir}/{prefix}_{i}.pdb" for i in range(B)],
+            "filenames": [f"{temp_dir}/{prefix}_{unique_id}_{i}.pdb" for i in range(B)],
         }
         write_batched_to_pdb(**feats)
 
-    pdb_pairs = [(f"{temp_dir}/a_{i}.pdb", f"{temp_dir}/b_{i}.pdb") for i in range(B)]
+    pdb_pairs = [(f"{temp_dir}/a_{unique_id}_{i}.pdb", f"{temp_dir}/b_{unique_id}_{i}.pdb") for i in range(B)]
 
     # Run TM-align in parallel
     with ThreadPoolExecutor() as executor:
