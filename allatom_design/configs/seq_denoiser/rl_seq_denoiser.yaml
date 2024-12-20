@@ -1,0 +1,109 @@
+# Wandb configuration
+project: "allatom_design"  # Wandb project name
+wandb_id: "rshuai"  # Wandb username
+exp_name: null # Wandb exp name
+group: "debug" # Wandb group name
+
+# Run settings
+no_wandb: false # Disable wandb logging
+overfit: -1 # Number of examples to overfit to, -1 to disable
+cuda: True
+num_workers: 10 # Dataloader num workers
+out_dir: "out_dir/rl_seq_denoiser"  # Output path for trained models
+
+ckpt_path:
+
+train:
+  seed: 0
+  batch_size: 8
+  compile_model: false  # Compile the model before running, speeds up training a lot
+
+# Some trainer options
+trainer:
+  strategy: ddp_find_unused_parameters_true  # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
+  max_epochs: 100000
+  accumulate_grad_batches: 1
+  detect_anomaly: false  # Slower; enable for debugging nans in gradients
+  gradient_clip_val: 0.0
+  precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
+  check_val_every_n_epoch: 50  # How often to run validation
+
+
+# Data options
+data:
+    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
+    designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+    fixed_size: 128
+    overfit: ${overfit}
+    short_epoch: false
+    n_random_subset: null
+    subset_length_range: null
+    se3_augment: true  # randomly rotate and translate data
+    translation_scale: 1.0  # scale of the translation augmentation
+    overwrite_cache: false  # overwrite the cached dataset
+
+# Model options
+defaults:
+  - _self_
+
+
+model:
+  num_atoms_in: 37
+  n_aatype: 21
+  eps: 1.0e-8
+  inf: 1.0e9
+
+eval:
+  eval_timesteps: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]  # Timesteps to evaluate at
+
+loss:
+  inf: ${model.inf}
+  loss_weights:
+    scn:
+      mse_loss: 1.0
+    seq_loss: 1.0
+    psce_loss: 1.0
+
+  # loss configs
+  seq_loss:
+    label_smoothing: 0.1
+    n_aatype: ${model.n_aatype}
+    per_token_avg: false
+
+  mse_loss:
+    per_token_avg: true
+
+optim:
+  optimizer: "noam"
+  adamw:
+    lr: 1.0e-4
+    warmup_steps: 1000
+  noam:
+    factor: 2
+    warmup_steps: 4000
+  adam_inv_sqrt:
+    ref_lr: 1.0e-3
+    ref_steps: 50000
+    warmup_steps: 4000
+
+logging:
+  log_dir: ${out_dir}
+  log_every_n_steps: 500
+  wandb_watch_freq: 5000  # Log gradients every n steps
+
+checkpointing:
+  save_latest_every_n_steps: 50000  # Save the full model every n steps
+  save_ema_every_n_steps: 20000  # Save the EMA model every n steps
+  save_top_k: 1
+
+
+# ESMFold model args
+struct_pred_cfg:
+  model_name: "esmfold"  # ["esmfold", "af2", "omegafold"]
+  esmfold:
+    max_tokens_per_batch: 1024
+
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

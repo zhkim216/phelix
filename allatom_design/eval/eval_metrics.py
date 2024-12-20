@@ -66,6 +66,7 @@ def run_self_consistency_eval(pdbs: List[str],
                               out_dir: str,
                               eval_codesign: bool = False,
                               temp_dir: Optional[str] = None,
+                              override_metrics_to_compute: Optional[List[str]] = None,
                               ) -> Dict[str, Dict[str, TensorType]]:
     """
     Run self-consistency evaluation on a list of PDBs (MPNN -> struct_pred -> eval metrics).
@@ -244,6 +245,9 @@ def run_self_consistency_eval(pdbs: List[str],
         metrics_to_compute = ["sc_ca_rmsd", "sc_ca_tm"]
     else:
         metrics_to_compute = ["sc_ca_rmsd", "sc_ca_tm", "sc_aa_rmsd"]
+
+    if override_metrics_to_compute is not None:
+        metrics_to_compute = override_metrics_to_compute
 
     Path(ca_aligned_preds_dir).mkdir(parents=True, exist_ok=True)
     for pdb in tqdm(pdbs, desc="Computing metrics", leave=False):

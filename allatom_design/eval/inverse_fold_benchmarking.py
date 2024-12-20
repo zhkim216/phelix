@@ -74,7 +74,7 @@ def main(cfg: DictConfig):
         design_pdbs = []
         for pdb_path in pdbs:
             stem = Path(pdb_path).stem
-            fasta_path = f"{cfg.input_fasta_dir}/{stem}.fasta"
+            fasta_path = find_sample_fasta(cfg.input_fasta_dir, stem)
             assert Path(fasta_path).exists(), f"No corresponding FASTA found for {pdb_path} at {fasta_path}"
             out_pdb_path = f"{designs_dir}/{stem}.pdb"
             thread_sequence_onto_backbone(pdb_path, fasta_path, out_pdb_path)
@@ -173,6 +173,25 @@ def thread_sequence_onto_backbone(pdb_path, fasta_path, output_pdb_path):
                 filename=output_pdb_path,
                 mode="bb")
 
+
+def find_sample_fasta(sample_dir: str, pdb_key: str) -> str:
+    # Look for an exact match first
+    exact_match = f"{sample_dir}/{pdb_key}.fasta"
+    if Path(exact_match).exists():
+        return exact_match
+
+    # Otherwise, search for a file matching {pdb_key}*.fasta
+    pattern = f"{sample_dir}/{pdb_key}*.fasta"
+    matched_fastas = glob.glob(pattern)
+
+    if len(matched_fastas) == 1:
+        return matched_fastas[0]
+    elif len(matched_fastas) == 0:
+        raise FileNotFoundError(f"No sample PDB file found for key '{pdb_key}' in '{sample_dir}'.")
+    else:
+        raise ValueError(
+            f"Multiple sample PDB files found for key '{pdb_key}' in '{sample_dir}': {matched_fastas}"
+        )
 
 
 if __name__ == "__main__":
