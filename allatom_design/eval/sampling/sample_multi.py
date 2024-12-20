@@ -2,6 +2,7 @@ import glob
 import math
 import os
 import re
+import fcntl
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List
@@ -66,11 +67,7 @@ def main(cfg: DictConfig):
         pred_out_dir = f"{out_dir}/preds"  # directory for structure predictions (if running folding)
         Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
-
-        # Initialize the self_consistency_metrics.csv file
         self_consistency_path = f"{out_dir}/self_consistency_metrics.csv"
-        open(self_consistency_path, "w").close()  # create or empty the file
-        self_consistency_metrics_written = False  # track if header written
 
     # Setup sidechain diffusion inputs
     t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)
@@ -95,7 +92,19 @@ def main(cfg: DictConfig):
         if len(pdb_files) == 0:
             raise ValueError(f"No PDB files found in directory {cfg.pdb_dir}")
 
-    print(f"Evaluating with num denoising steps S={cfg.num_steps}")
+    # Parallelization
+    if cfg.array_id is not None:
+        # Determine chunk size
+        array_id = cfg.array_id
+        num_arrays = cfg.num_arrays
+        chunk_size = math.ceil(len(pdb_files) / num_arrays)
+
+        start_idx = array_id * chunk_size
+        end_idx = min(start_idx + chunk_size, len(pdb_files))
+        pdb_files = pdb_files[start_idx:end_idx]
+
+    ### SAMPLING ###
+    print(f"Evaluating with num denoising steps S={cfg.num_steps} on {len(pdb_files)} PDBs (array_id={cfg.array_id})")
     cfg.timestep_schedule.num_steps = cfg.num_steps
     t_seq = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
 
@@ -210,12 +219,20 @@ def main(cfg: DictConfig):
 
             out_df = pd.DataFrame(codes_metrics)
 
-            # Append to CSV
-            if not self_consistency_metrics_written:
-                out_df.to_csv(self_consistency_path, mode='a', index=False, header=True)
-                self_consistency_metrics_written = True
-            else:
-                out_df.to_csv(self_consistency_path, mode='a', index=False, header=False)
+            # Safely append to CSV using a file lock
+            with open(self_consistency_path, "a+") as f:
+                # Acquire exclusive lock
+                fcntl.flock(f, fcntl.LOCK_EX)
+
+                # Check if file is empty
+                f.seek(0, os.SEEK_END)
+                file_empty = (f.tell() == 0)
+
+                # Write DataFrame
+                out_df.to_csv(f, index=False, header=file_empty)
+
+                # Release lock
+                fcntl.flock(f, fcntl.LOCK_UN)
 
         pbar.update(B)
 
