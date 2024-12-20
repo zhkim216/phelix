@@ -206,7 +206,7 @@ def main(cfg: DictConfig):
                 out_dir=pred_out_dir,
                 eval_codesign=True,
                 temp_dir=f"{pred_out_dir}/tmp",
-                override_metrics_to_compute=["sc_ca_rmsd", "sc_aa_rmsd"]
+                override_metrics_to_compute=["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]
             )
 
             # Aggregate results
