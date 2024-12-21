@@ -179,9 +179,11 @@ def main(cfg: DictConfig):
 
         # Save outputs
         # Save to PDB
-        pdb_keys = [f"{Path(pdb_file).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_file in enumerate(pdb_batch_files)]
+        pdb_names = [Path(pdb_file).stem for pdb_file in pdb_batch_files]
+        pdb_keys = [f"{pdb_name}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(pdb_names)]
         pdbs = [f"{sample_out_dir}/{pdb_key}.pdb" for pdb_key in pdb_keys]
         fastas = [f"{fasta_out_dir}/{pdb_key}.fasta" for pdb_key in pdb_keys]
+        pred_seqs = []
         SeqDenoiser.save_samples_to_pdb(samples, pdbs)
 
         for j, pdb_file in enumerate(pdb_batch_files):
@@ -190,6 +192,7 @@ def main(cfg: DictConfig):
             pred_aatype_i = samples["pred_aatype"][j].cpu()
             pred_aatype_i = pred_aatype_i[seq_mask_i.bool()]
             pred_seq_i = "".join(rc.restypes[a] for a in pred_aatype_i)
+            pred_seqs.append(pred_seq_i)
 
             # Save fasta
             fasta_out = fastas[j]
@@ -198,7 +201,7 @@ def main(cfg: DictConfig):
 
         # Run self-consistency evaluation
         if cfg.run_self_consistency_eval:
-            codes_sc_info = eval_metrics.run_self_consistency_eval(
+            sc_info = eval_metrics.run_self_consistency_eval(
                 pdbs,
                 None, None,  # no MPNN model for co-design eval
                 struct_pred_model,
@@ -210,14 +213,16 @@ def main(cfg: DictConfig):
             )
 
             # Aggregate results
-            codes_metrics = defaultdict(list)
-            for pdb in pdbs:
-                codes_metrics["pdb_key"].append(Path(pdb).stem)
+            sc_metrics = defaultdict(list)
+            for j, pdb in enumerate(pdbs):
+                sc_metrics["pdb_name"].append(Path(pdb).stem)
+                sc_metrics["pdb_key"].append(pdb_names[j])
 
-                for k, v in codes_sc_info[pdb]["sc_metrics"].items():
-                    codes_metrics[f"{k}"].append(v.item())
+                for k, v in sc_info[pdb]["sc_metrics"].items():
+                    sc_metrics[f"{k}"].append(v.item())
 
-            out_df = pd.DataFrame(codes_metrics)
+            sc_metrics["pred_seq"].extend(pred_seqs)
+            out_df = pd.DataFrame(sc_metrics)
 
             # Safely append to CSV using a file lock
             with open(self_consistency_path, "a+") as f:

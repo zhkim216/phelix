@@ -25,35 +25,32 @@ def main(cfg: DictConfig):
         if col not in df.columns:
             raise ValueError(f"Column '{col}' not found in {cfg.csv_path}")
 
-    # Extract the base PDB key by removing the "_sampleX" part
-    df["base_pdb_key"] = df["pdb_key"].str.replace(r"_sample\d+$", "", regex=True)
-
-    # Subsample to N unique base PDB keys if there are more than N
-    unique_bases = df["base_pdb_key"].unique()
+    # Subsample to N unique PDB keys if there are more than N
+    unique_bases = df["pdb_key"].unique()
     if len(unique_bases) > cfg.subsample_n:
         unique_bases = unique_bases[:cfg.subsample_n]
-    df = df[df["base_pdb_key"].isin(unique_bases)]
+    df = df[df["pdb_key"].isin(unique_bases)]
 
-    # Sort by base_pdb_key
-    df = df.sort_values("base_pdb_key")
+    # Sort by pdb_key
+    df = df.sort_values("pdb_key")
 
     # Compute range and min values before clipping
-    df_range = df.groupby("base_pdb_key").agg(
+    df_range = df.groupby("pdb_key").agg(
         sc_ca_rmsd_range=("sc_ca_rmsd", lambda x: x.max() - x.min()),
         sc_aa_rmsd_range=("sc_aa_rmsd", lambda x: x.max() - x.min())
     ).reset_index()
 
-    df_min = df.groupby("base_pdb_key").agg(
+    df_min = df.groupby("pdb_key").agg(
         min_sc_ca_rmsd=("sc_ca_rmsd", "min"),
         min_sc_aa_rmsd=("sc_aa_rmsd", "min")
     ).reset_index()
 
     # Melt range and min dataframes
-    df_range_melt = df_range.melt(id_vars=["base_pdb_key"],
+    df_range_melt = df_range.melt(id_vars=["pdb_key"],
                                   value_vars=["sc_ca_rmsd_range", "sc_aa_rmsd_range"],
                                   var_name="metric", value_name="range_value")
 
-    df_min_melt = df_min.melt(id_vars=["base_pdb_key"],
+    df_min_melt = df_min.melt(id_vars=["pdb_key"],
                               value_vars=["min_sc_ca_rmsd", "min_sc_aa_rmsd"],
                               var_name="metric", value_name="min_value")
 
@@ -70,7 +67,7 @@ def main(cfg: DictConfig):
 
     # Plot sc_ca_rmsd clipped
     fig_ca, ax_ca = plt.subplots(figsize=(12, 6))
-    sns.stripplot(data=df, x="base_pdb_key", y="sc_ca_rmsd_clipped", ax=ax_ca, size=5)
+    sns.stripplot(data=df, x="pdb_key", y="sc_ca_rmsd_clipped", ax=ax_ca, size=5)
     plt.xticks(rotation=90)
     plt.xlabel("Base PDB Key")
     plt.ylabel("sc_ca_rmsd (Å)")
@@ -84,7 +81,7 @@ def main(cfg: DictConfig):
 
     # Plot sc_aa_rmsd clipped
     fig_aa, ax_aa = plt.subplots(figsize=(12, 6))
-    sns.stripplot(data=df, x="base_pdb_key", y="sc_aa_rmsd_clipped", ax=ax_aa, size=5)
+    sns.stripplot(data=df, x="pdb_key", y="sc_aa_rmsd_clipped", ax=ax_aa, size=5)
     plt.xticks(rotation=90)
     plt.xlabel("Base PDB Key")
     plt.ylabel("sc_aa_rmsd (Å)")
@@ -98,7 +95,7 @@ def main(cfg: DictConfig):
 
     # Plot the ranges clipped
     fig_range, ax_range = plt.subplots(figsize=(12, 6))
-    sns.stripplot(data=df_range_melt, x="base_pdb_key", y="range_value_clipped", hue="metric", ax=ax_range, size=5)
+    sns.stripplot(data=df_range_melt, x="pdb_key", y="range_value_clipped", hue="metric", ax=ax_range, size=5)
     plt.xticks(rotation=90)
     plt.xlabel("Base PDB Key")
     plt.ylabel("Range (max - min) (Å)")
@@ -113,7 +110,7 @@ def main(cfg: DictConfig):
 
     # Plot the min values clipped
     fig_min, ax_min = plt.subplots(figsize=(12, 6))
-    sns.stripplot(data=df_min_melt, x="base_pdb_key", y="min_value_clipped", hue="metric", ax=ax_min, size=5)
+    sns.stripplot(data=df_min_melt, x="pdb_key", y="min_value_clipped", hue="metric", ax=ax_min, size=5)
     plt.xticks(rotation=90)
     plt.xlabel("Base PDB Key")
     plt.ylabel("Min RMSD (Å)")

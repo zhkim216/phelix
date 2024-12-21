@@ -12,6 +12,8 @@ num_workers: 10 # Dataloader num workers
 out_dir: "out_dir/rl_seq_denoiser"  # Output path for trained models
 
 ckpt_path:
+train_pdb_path: "/media/scratch/huang_lab/allatom_design/allatom_design/b17_aasd9/sample_multi/ingraham_cath_L50_150_S50_T0.5"
+val_pdb_path: "/media/scratch/huang_lab/allatom_design/allatom_design/b17_aasd9/sample_multi/ingraham_cath_L50_150_S50_T0.5_val"
 
 train:
   seed: 0
@@ -31,9 +33,8 @@ trainer:
 
 # Data options
 data:
-    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
-    fixed_size: 128
+    metric: "sc_aa_rmsd"
+    min_margin: 1
     overfit: ${overfit}
     short_epoch: false
     n_random_subset: null
@@ -45,7 +46,6 @@ data:
 # Model options
 defaults:
   - _self_
-
 
 model:
   num_atoms_in: 37
@@ -63,6 +63,8 @@ loss:
       mse_loss: 1.0
     seq_loss: 1.0
     psce_loss: 1.0
+    dpo:
+      seq_loss: 1.0
 
   # loss configs
   seq_loss:
