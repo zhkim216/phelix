@@ -48,6 +48,7 @@ class RLSDLoss(nn.Module):
         """
         aux = {}  # losses
         aux_monitor = {}  # monitor other metrics that do not contribute to the loss
+
         if eval_seq:
             # compute sequence loss from sequence design module
             seq_lengths = batch["seq_mask"].sum(-1).long()
@@ -122,7 +123,8 @@ class RLSDLoss(nn.Module):
                 aux_monitor["rollout/sce_vs_psce_pearson_r"] = pearson_r
 
         # Compute DPO losses
-        print("TEST")
+        dpo_seq_loss = compute_dpo_loss(outputs["seq_logits"], outputs_ref["seq_logits"], batch["aatype"], batch["seq_mask"], self.cfg.dpo)
+        aux["dpo/seq_loss"] = dpo_seq_loss
 
         # Aggregate losses
         total_loss = 0
@@ -151,3 +153,30 @@ class RLSDLoss(nn.Module):
             return total_loss, aux
 
         return total_loss
+
+
+def compute_dpo_loss(logits_policy: TensorType["b n k", float],
+                     logits_ref: TensorType["b n k", float],
+                     target: TensorType["b n", int],
+                     seq_mask: TensorType["b n", float],
+                     dpo_loss_cfg: DictConfig,
+                     ) -> TensorType["b", float]:
+    target_oh = F.one_hot(target, num_classes=logits_policy.shape[-1]).float()
+
+    # Compute log-likelihood for current policy and reference
+    logprobs_policy = F.log_softmax(logits_policy, dim=-1)
+    ll = (logprobs_policy * target_oh).sum(-1)
+    ll = (ll * seq_mask).sum(-1)  # sum over sequence length
+
+    logprobs_ref = F.log_softmax(logits_ref, dim=-1)
+    ll_ref = (logprobs_ref * target_oh).sum(-1)
+    ll_ref = (ll_ref * seq_mask).sum(-1)  # sum over sequence length
+
+    # Separate log-likelihoods by winner and loser of each pair
+    ll_w, ll_l = ll[::2], ll[1::2]
+    ll_ref_w, ll_ref_l = ll_ref[::2], ll_ref[1::2]
+
+    # Compute DPO loss
+    beta = dpo_loss_cfg.beta
+    dpo_loss = -torch.log(nn.functional.sigmoid(beta * (ll_w - ll_ref_w - ll_l + ll_ref_l)))
+    return dpo_loss

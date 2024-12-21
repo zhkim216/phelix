@@ -1,4 +1,5 @@
 import itertools
+import random
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Optional
@@ -77,7 +78,7 @@ class RLSDDataset(data.Dataset):
 
         # Set fixed size to max length
         # self.fixed_size = self._get_max_len()  # TODO: switch over to use length from CSV
-        self.fixed_size = 150
+        self.fixed_size = 150  # DEBUG
 
         ### Construct paired dataset ###
         self.paired_dataset = self._construct_paired_dataset()
@@ -86,14 +87,14 @@ class RLSDDataset(data.Dataset):
         if overfit > 0:
             # Overfit on a subset of the data
             n_data = len(self.paired_dataset)
-            np.random.seed(0)  # convenient for reproducibility of overfitting dataset
-            self.paired_dataset = np.random.choice(self.paired_dataset, overfit, replace=False).repeat(n_data // overfit)
+            subset = random.sample(self.paired_dataset, overfit)
+            self.paired_dataset = subset * (n_data // overfit)
 
         if short_epoch:
-            self.paired_dataset = np.random.choice(self.paired_dataset, min(500, len(self.paired_dataset)), replace=False)
+            self.paired_dataset = random.sample(self.paired_dataset, min(500, len(self.paired_dataset)))
 
         if n_random_subset is not None:
-            self.paired_dataset = np.random.choice(self.paired_dataset, min(n_random_subset, len(self.paired_dataset)), replace=False)
+            self.paired_dataset = random.sample(self.paired_dataset, min(n_random_subset, len(self.paired_dataset)))
 
 
     def __getitem__(self, idx):
