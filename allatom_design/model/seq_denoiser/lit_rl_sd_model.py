@@ -13,11 +13,12 @@ from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import LinearLR, LRScheduler
 from torchtyping import TensorType
 
+from allatom_design.data import residue_constants as rc
 from allatom_design.eval.folding_utils import (get_struct_pred_model,
                                                run_esmfold_batched)
 from allatom_design.model.phema import PowerFunctionEMA
 from allatom_design.model.seq_denoiser.rl_sd_loss import RLSDLoss
-from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
+from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser, get_interpolant
 
 
 class LitRLSeqDenoiser(L.LightningModule):
@@ -30,6 +31,7 @@ class LitRLSeqDenoiser(L.LightningModule):
         self.base_cfg = base_cfg
         self.struct_pred_cfg = cfg.struct_pred_cfg
         self.model = SeqDenoiser(base_cfg.model)
+        self.interpolant = get_interpolant(base_cfg.interpolant)
 
         if cfg.train.compile_model:
             print(f"Using torch.compile to optimize model performance...")
@@ -67,8 +69,32 @@ class LitRLSeqDenoiser(L.LightningModule):
 
 
     def forward(self, batch, **kwargs):
-        outputs = self.model(batch, **kwargs)
-        outputs_ref = self.ref_model(batch, **kwargs)
+        t = kwargs.get("t", None)  # used if running evals
+
+        # Apply interpolant to the batch
+        interpolant_out = self.interpolant(batch, t)
+        interpolant_out["seq_mlm_mask"][1::2] = interpolant_out["seq_mlm_mask"][::2]  # set paired examples to have the same mask
+        interpolant_out["scn_mlm_mask"] = interpolant_out["seq_mlm_mask"].clone()  # for rl finetuning, we never randomly dropout sidechains
+
+        ## apply masks to input coordinates and aatype
+        x, aatype = batch["x"], batch["aatype"]
+        x_noised, aatype_noised = x.clone(), aatype.clone()
+        seq_mlm_mask = interpolant_out["seq_mlm_mask"]
+
+        aatype_noised = torch.where(seq_mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
+        aatype_noised = aatype_noised * batch["seq_mask"]  # set pad residues back to 0
+        aatype_noised = aatype_noised.long()
+
+        x_noised[..., rc.non_bb_idxs, :] = x[..., rc.non_bb_idxs, :] * rearrange(seq_mlm_mask, "b n -> b n 1 1").float()  # mask out sidechains
+
+        batch["x_noised"] = x_noised
+        batch["aatype_noised"] = aatype_noised
+        batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]  # 1 for unmasked aatype
+        batch["scn_mlm_mask"] = interpolant_out["scn_mlm_mask"]  # 1 for unmasked sidechains
+
+        # Run models
+        outputs = self.model(batch, skip_interpolant=True, **kwargs)
+        outputs_ref = self.ref_model(batch, skip_interpolant=True, **kwargs)
         return outputs, outputs_ref
 
 
@@ -162,7 +188,7 @@ class LitRLSeqDenoiser(L.LightningModule):
 
         for t_scd in self.cfg.eval.eval_timesteps:
             batch["t_scd"] = t_scd
-            outputs = self(batch, t=t_seq)
+            outputs, outputs_ref = self(batch, t=t_seq)
             _, aux = self.loss(outputs, outputs_ref, batch, eval_seq = False, eval_total = False, return_aux=True)
             aux = {k: v for k, v in aux.items() if "scn/" in k}  # trim aux to sidechain diffusion metrics
             aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss

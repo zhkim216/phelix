@@ -28,11 +28,6 @@ def main(cfg: DictConfig):
     """
     Script for finetuning a sequence denoiser model with RL.
     """
-    # Load from checkpoint
-    print(f"Finetuning from checkpoint: {cfg.ckpt_path}")
-    lit_base_model = LitSeqDenoiser.load_from_checkpoint(cfg.ckpt_path)
-    base_cfg = lit_base_model.cfg
-
     # Resolve config
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
@@ -107,6 +102,12 @@ def main(cfg: DictConfig):
         yaml.safe_dump(OmegaConf.to_container(cfg, resolve=False), f)
 
     # Set up model
+    # load base model from checkpoint
+    print(f"Finetuning from checkpoint: {cfg.ckpt_path}")
+    lit_base_model = LitSeqDenoiser.load_from_checkpoint(cfg.ckpt_path, map_location="cpu")
+    base_cfg = lit_base_model.cfg
+
+    # Set up RL model
     lit_model = LitRLSeqDenoiser(cfg, base_cfg)
     lit_model.load_base_model(lit_base_model.model)
 
