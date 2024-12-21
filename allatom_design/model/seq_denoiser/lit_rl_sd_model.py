@@ -1,3 +1,4 @@
+import copy
 import itertools
 from collections import defaultdict
 from typing import Any, Dict
@@ -12,11 +13,11 @@ from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import LinearLR, LRScheduler
 from torchtyping import TensorType
 
-from allatom_design.eval.folding_utils import get_struct_pred_model
+from allatom_design.eval.folding_utils import (get_struct_pred_model,
+                                               run_esmfold_batched)
 from allatom_design.model.phema import PowerFunctionEMA
 from allatom_design.model.seq_denoiser.rl_sd_loss import RLSDLoss
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
-from allatom_design.eval.folding_utils import run_esmfold_batched
 
 
 class LitRLSeqDenoiser(L.LightningModule):
@@ -51,17 +52,25 @@ class LitRLSeqDenoiser(L.LightningModule):
             # Model is compiled, so uncompile it
             base_model = base_model._orig_mod
 
-        self.model = base_model
+        # Set and freeze the reference model
+        self.ref_model = copy.deepcopy(base_model).eval()
+        for param in self.ref_model.parameters():
+            param.requires_grad = False
 
+        # Initialize the model with the reference model's weights
+        self.model.load_state_dict(self.ref_model.state_dict())
 
-    def setup(self, stage: str):
-        if stage == "fit":
-            # At start of training, load in ESMFold
-            self.esmfold = get_struct_pred_model(self.struct_pred_cfg, device=self.device)
+    # def setup(self, stage: str):
+    #     if stage == "fit":
+    #         # At start of training, load in ESMFold
+    #         self.esmfold = get_struct_pred_model(self.struct_pred_cfg, device=self.device)
 
 
     def forward(self, batch, **kwargs):
-        return self.model(batch, **kwargs)
+        outputs = self.model(batch, **kwargs)
+        outputs_ref = self.ref_model(batch, **kwargs)
+        return outputs, outputs_ref
+
 
     def on_train_start(self):
         # Initialize EMA trackers at the start of training
@@ -106,8 +115,8 @@ class LitRLSeqDenoiser(L.LightningModule):
 
 
     def training_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int):
-        outputs = self(batch)
-        loss, aux = self.loss(outputs, batch, return_aux=True)
+        outputs, outputs_ref = self(batch)
+        loss, aux = self.loss(outputs, outputs_ref, batch, return_aux=True)
 
         # Logging
         self._log(batch, outputs, aux, batch_idx, phase="train")
@@ -125,8 +134,8 @@ class LitRLSeqDenoiser(L.LightningModule):
         # Lightning automatically disables grads + sets model to eval mode
         phase_suffix = ""
 
-        outputs = self(batch)
-        _, aux = self.loss(outputs, batch, return_aux=True)
+        outputs, outputs_ref = self(batch)
+        _, aux = self.loss(outputs, outputs_ref, batch, return_aux=True)
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
 
         # eval seq design over discrete sequence noise
@@ -134,8 +143,8 @@ class LitRLSeqDenoiser(L.LightningModule):
         for eval_t in self.cfg.eval.eval_timesteps:
             B = batch["seq_mask"].shape[0]
             t_seq = torch.full((B, ), fill_value=eval_t).to(self.device)
-            outputs = self(batch, t=t_seq)
-            _, aux = self.loss(outputs, batch, eval_total = False, return_aux=True)
+            outputs, outputs_ref = self(batch, t=t_seq)
+            _, aux = self.loss(outputs, outputs_ref, batch, eval_total = False, return_aux=True)
             aux = {k: v for k, v in aux.items() if "seq" in k}  # trim aux to sequence metrics
             self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_t{eval_t}")
 
@@ -154,7 +163,7 @@ class LitRLSeqDenoiser(L.LightningModule):
         for t_scd in self.cfg.eval.eval_timesteps:
             batch["t_scd"] = t_scd
             outputs = self(batch, t=t_seq)
-            _, aux = self.loss(outputs, batch, eval_seq = False, eval_total = False, return_aux=True)
+            _, aux = self.loss(outputs, outputs_ref, batch, eval_seq = False, eval_total = False, return_aux=True)
             aux = {k: v for k, v in aux.items() if "scn/" in k}  # trim aux to sidechain diffusion metrics
             aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
             self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix="/scn_diff",
@@ -224,6 +233,14 @@ class LitRLSeqDenoiser(L.LightningModule):
             if total_norm_key in grad_norms:
                 total_norm = grad_norms[total_norm_key]
                 self.log_dict({f"total_l{norm_type}_grad_norm": total_norm})
+
+
+    def on_save_checkpoint(self, checkpoint: Dict[str, Any]):
+        # Remove any ref_model parameters from the checkpoint
+        state_dict = checkpoint["state_dict"]
+        keys_to_remove = [k for k in state_dict.keys() if k.startswith("ref_model.")]
+        for k in keys_to_remove:
+            del state_dict[k]
 
 
 class NoamLR(LRScheduler):

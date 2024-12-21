@@ -15,11 +15,12 @@ from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 
-import allatom_design.data.datasets.ad_dataset as ad_dataset
-from allatom_design.checkpoint_utils import EMATrackerCheckpoint, get_cfg_from_ckpt
-from allatom_design.data.datasets.ad_dataset import ADDataset
-from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
+import allatom_design.data.datasets.rl_sd_dataset as rl_sd_dataset
+from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
+                                             get_cfg_from_ckpt)
+from allatom_design.data.datasets.rl_sd_dataset import RLSDDataset, contrastive_collate_fn
 from allatom_design.model.seq_denoiser.lit_rl_sd_model import LitRLSeqDenoiser
+from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
 
 @hydra.main(config_path="configs/seq_denoiser", config_name="rl_seq_denoiser", version_base="1.3.2")
@@ -51,8 +52,8 @@ def main(cfg: DictConfig):
     # Set up dataloaders
     init_dataloader = partial(get_dataloader, num_workers=cfg.num_workers, cuda=cfg.cuda)
 
-    _, train_dataloader = init_dataloader(phase="train", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
-    _, val_dataloader = init_dataloader(phase="eval", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
+    _, train_dataloader = init_dataloader(pdb_path=cfg.train_pdb_path, data_cfg=cfg.data, batch_size=cfg.train.batch_size, shuffle=True)
+    _, val_dataloader = init_dataloader(pdb_path=cfg.val_pdb_path, data_cfg=cfg.data, batch_size=cfg.train.batch_size, shuffle=False)
     val_dataloaders = [val_dataloader]
 
     # Init wandb
@@ -146,18 +147,20 @@ def main(cfg: DictConfig):
     trainer.fit(model=lit_model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloaders)
 
 
-def get_dataloader(phase: str,
+def get_dataloader(pdb_path: str,
                    data_cfg: DictConfig,
                    batch_size: int,
                    num_workers: int,
-                   cuda: bool) -> Tuple[ADDataset, DataLoader]:
-    dataset = ADDataset(phase=phase, **data_cfg)
+                   cuda: bool,
+                   shuffle: bool) -> Tuple[RLSDDataset, DataLoader]:
+    dataset = RLSDDataset(pdb_path, **data_cfg)
     dataloader = DataLoader(dataset,
                             batch_size=batch_size,
                             num_workers=num_workers,
                             pin_memory=cuda,
-                            shuffle=(phase == "train"),
-                            drop_last=True
+                            shuffle=shuffle,
+                            drop_last=True,
+                            collate_fn=contrastive_collate_fn
                             )
     return dataset, dataloader
 

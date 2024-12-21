@@ -333,8 +333,6 @@ class ADDataset(data.Dataset):
             seq_len = example["seq_mask"].sum().item()
             max_len = seq_len if (seq_len > max_len) else max_len
 
-        # Write these pdb_keys
-
         return int(max_len)
 
     def _load_designability_info(self) -> None:
@@ -360,7 +358,7 @@ class ADDataset(data.Dataset):
             if min_len <= seq_len <= max_len:
                 pdb_keys.append(pdb_key)
 
-        # Write these pdb_keys to a file
+        # Write these pdb_keys to a file for future reference
         pdb_keys_len_file = f"{self.pdb_path}/{self.phase}_pdb_keys_L{min_len}_{max_len}.list"
         with open(pdb_keys_len_file, "w") as f:
             for pdb_key in pdb_keys:

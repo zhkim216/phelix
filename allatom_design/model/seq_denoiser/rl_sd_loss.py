@@ -31,10 +31,10 @@ class RLSDLoss(nn.Module):
             else:
                 self.loss_weights[k] = cfg.loss_weights[k]
 
-        self.loss_keys = {"seq_loss", "scn/mse_loss", "psce_loss"}
+        self.loss_keys = {"seq_loss", "scn/mse_loss", "psce_loss", "dpo/seq_loss"}
 
 
-    def forward(self, outputs, batch, eval_pack = True, eval_seq = True, eval_total = True, return_aux: bool = False):
+    def forward(self, outputs, outputs_ref, batch, eval_pack = True, eval_seq = True, eval_total = True, return_aux: bool = False):
         """
         Compute losses for the atom denoiser.
         If computing seq_loss, expects outputs to contain:
@@ -121,6 +121,8 @@ class RLSDLoss(nn.Module):
                 aux_monitor["rollout/sce_vs_psce_rho"] = rho
                 aux_monitor["rollout/sce_vs_psce_pearson_r"] = pearson_r
 
+        # Compute DPO losses
+        print("TEST")
 
         # Aggregate losses
         total_loss = 0

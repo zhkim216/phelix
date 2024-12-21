@@ -54,7 +54,7 @@ class SeqDenoiser(nn.Module):
 
     def forward(self,
                 batch: Dict[str, TensorType["b ..."]],
-                t: Optional[TensorType["b", float]] = None,  # (t_bb, t_scn) if multimodal
+                t: Optional[TensorType["b", float]] = None,
                 ) -> Dict[str, TensorType["b ..."]]:
         """
         batch should contain:
