@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c0_aasd0
+#SBATCH --job-name=c0_aasd2
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=c0_aasd0
+EXP_NAME=c0_aasd2
 GROUP=chimera_c0
 
 # Dataset paths
@@ -52,7 +52,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.minimpnn.n_layers=5 \
     denoiser.minimpnn.n_channel=128 \
     denoiser.confidence_module.enabled=true \
-    denoiser.scn_diffusion_module.scn_denoiser.mlp_dropout=0.1 \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=20000 \
     checkpointing.save_ema_every_n_steps=5000 \
