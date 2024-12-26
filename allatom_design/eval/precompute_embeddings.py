@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import hydra
 import torch
 from omegaconf import DictConfig, OmegaConf
@@ -16,7 +18,8 @@ def main(cfg: DictConfig):
         with open(file_path) as f:
             pdbs.extend(f.read().split("\n")[:-1])
 
-    pdb_paths = [f"{cfg.pdbs_dir}/{pdb}.pdb" for pdb in pdbs]
+    pdbs_dir = Path(cfg.pdbs_dir)
+    pdb_paths = [str(pdbs_dir / f"{pdb}.pdb") for pdb in pdbs]
 
     mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
     mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)
