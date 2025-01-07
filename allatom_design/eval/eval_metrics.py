@@ -1,6 +1,7 @@
 import math
 import shutil
 import subprocess
+import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -66,6 +67,7 @@ def run_self_consistency_eval(pdbs: List[str],
                               out_dir: str,
                               eval_codesign: bool = False,
                               temp_dir: Optional[str] = None,
+                              override_metrics_to_compute: Optional[List[str]] = None,
                               ) -> Dict[str, Dict[str, TensorType]]:
     """
     Run self-consistency evaluation on a list of PDBs (MPNN -> struct_pred -> eval metrics).
@@ -244,6 +246,9 @@ def run_self_consistency_eval(pdbs: List[str],
         metrics_to_compute = ["sc_ca_rmsd", "sc_ca_tm"]
     else:
         metrics_to_compute = ["sc_ca_rmsd", "sc_ca_tm", "sc_aa_rmsd"]
+
+    if override_metrics_to_compute is not None:
+        metrics_to_compute = override_metrics_to_compute
 
     Path(ca_aligned_preds_dir).mkdir(parents=True, exist_ok=True)
     for pdb in tqdm(pdbs, desc="Computing metrics", leave=False):
@@ -647,6 +652,8 @@ def run_tm_align_coords_batch(a: TensorType["b n 3", float],
     Path(temp_dir).mkdir(parents=True, exist_ok=True)
     B, N, _ = a.shape
 
+    unique_id = uuid.uuid4().hex  # unique ID for this batch
+
     # Make sure tensors are on cpu to avoid CUDA issues in threads
     a = a.cpu()
     b = b.cpu()
@@ -667,11 +674,11 @@ def run_tm_align_coords_batch(a: TensorType["b n 3", float],
             "residue_index": torch.arange(N, dtype=torch.int64).unsqueeze(0).expand(B, -1),
             "chain_index": torch.zeros((B, N), dtype=torch.int64),
             "b_factors": None,
-            "filenames": [f"{temp_dir}/{prefix}_{i}.pdb" for i in range(B)],
+            "filenames": [f"{temp_dir}/{prefix}_{unique_id}_{i}.pdb" for i in range(B)],
         }
         write_batched_to_pdb(**feats)
 
-    pdb_pairs = [(f"{temp_dir}/a_{i}.pdb", f"{temp_dir}/b_{i}.pdb") for i in range(B)]
+    pdb_pairs = [(f"{temp_dir}/a_{unique_id}_{i}.pdb", f"{temp_dir}/b_{unique_id}_{i}.pdb") for i in range(B)]
 
     # Run TM-align in parallel
     with ThreadPoolExecutor() as executor:

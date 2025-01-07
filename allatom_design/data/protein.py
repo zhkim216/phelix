@@ -17,6 +17,7 @@ Adapted from original code by alexechu.
 """
 import dataclasses
 import io
+from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple, Union
 
 import numpy as np
@@ -124,7 +125,7 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Opti
         for res in chain:
             if res.id[2] != " ":
                 insertion_code_offset +=1
-                print(f'Insertion code detected, increased residue index offset to {insertion_code_offset}')
+                print(f'Insertion code detected, increased residue index offset to {insertion_code_offset} for pdb {Path(pdb_file).name}')
 
             if res.id[0] != " ":
                 if res.resname in residue_constants.ncaa_mapping.keys(): #allow all ncaas to get classified as 'X'

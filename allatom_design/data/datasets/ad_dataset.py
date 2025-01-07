@@ -358,6 +358,12 @@ class ADDataset(data.Dataset):
             if min_len <= seq_len <= max_len:
                 pdb_keys.append(pdb_key)
 
+        # Write these pdb_keys to a file for future reference
+        pdb_keys_len_file = f"{self.pdb_path}/{self.phase}_pdb_keys_L{min_len}_{max_len}.list"
+        with open(pdb_keys_len_file, "w") as f:
+            for pdb_key in pdb_keys:
+                f.write(f"{pdb_key}\n")
+
         self.pdb_keys = np.array(pdb_keys)
 
 

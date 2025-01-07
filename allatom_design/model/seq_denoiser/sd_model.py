@@ -54,7 +54,8 @@ class SeqDenoiser(nn.Module):
 
     def forward(self,
                 batch: Dict[str, TensorType["b ..."]],
-                t: Optional[TensorType["b", float]] = None,  # (t_bb, t_scn) if multimodal
+                t: Optional[TensorType["b", float]] = None,
+                skip_interpolant: bool = False  # for dpo-finetuning, interpolant is applied to the batch outside of the model
                 ) -> Dict[str, TensorType["b ..."]]:
         """
         batch should contain:
@@ -68,11 +69,12 @@ class SeqDenoiser(nn.Module):
         outputs = {}
 
         # Apply interpolant to noise the inputs
-        interpolant_out = self.interpolant(batch, t)
-        batch["x_noised"] = interpolant_out["x_noised"]
-        batch["aatype_noised"] = interpolant_out["aatype_noised"]
-        batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]  # 1 for unmasked aatype
-        batch["scn_mlm_mask"] = interpolant_out["scn_mlm_mask"]  # 1 for unmasked sidechains
+        if not skip_interpolant:
+            interpolant_out = self.interpolant(batch, t)
+            batch["x_noised"] = interpolant_out["x_noised"]
+            batch["aatype_noised"] = interpolant_out["aatype_noised"]
+            batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]  # 1 for unmasked aatype
+            batch["scn_mlm_mask"] = interpolant_out["scn_mlm_mask"]  # 1 for unmasked sidechains
 
         # During training, keep track of certain additional features
         aux_inputs = {

@@ -2,12 +2,14 @@ import glob
 import math
 import os
 import re
+import fcntl
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List
 
 import hydra
 import lightning as L
+import numpy as np
 import pandas as pd
 import torch
 import yaml
@@ -20,7 +22,8 @@ import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (load_feats_from_pdb, pad_to_max_len,
                                       process_single_pdb)
-from allatom_design.eval import sampling_utils
+from allatom_design.eval import eval_metrics, sampling_utils
+from allatom_design.eval.folding_utils import get_struct_pred_model
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
@@ -59,6 +62,13 @@ def main(cfg: DictConfig):
     # Load denoiser model
     lit_sd_model = LitSeqDenoiser.load_from_checkpoint(cfg.checkpoint_path).eval()
 
+    # Load structure prediction model
+    if cfg.run_self_consistency_eval:
+        pred_out_dir = f"{out_dir}/preds"  # directory for structure predictions (if running folding)
+        Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
+        struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
+        self_consistency_path = f"{out_dir}/self_consistency_metrics.csv"
+
     # Setup sidechain diffusion inputs
     t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)
     noise_schedule = NoiseSchedule(cfg.scn_diffusion.noise_schedule)
@@ -71,17 +81,39 @@ def main(cfg: DictConfig):
         "return_scn_diffusion_aux": False
     }
 
-    pdb_files = natsorted(list(glob.glob(f"{cfg.pdb_dir}/*.pdb")))
-    if len(pdb_files) == 0:
-        raise ValueError(f"No PDB files found in directory {cfg.pdb_dir}")
+    if cfg.pdb_key_list is not None:
+        # Get PDBs with keys in the list
+        with open(cfg.pdb_key_list, "r") as f:
+            pdb_keys = f.read().splitlines()
+        pdb_files = [f"{cfg.pdb_dir}/{key}" for key in pdb_keys]
+    else:
+        # Get all PDBs with .pdb extension in the directory
+        pdb_files = natsorted(list(glob.glob(f"{cfg.pdb_dir}/*.pdb")))
+        if len(pdb_files) == 0:
+            raise ValueError(f"No PDB files found in directory {cfg.pdb_dir}")
 
-    print(f"Evaluating with num denoising steps S={cfg.num_steps}")
+    # Parallelization
+    if cfg.array_id is not None:
+        # Determine chunk size
+        array_id = cfg.array_id
+        num_arrays = cfg.num_arrays
+        chunk_size = math.ceil(len(pdb_files) / num_arrays)
+
+        start_idx = array_id * chunk_size
+        end_idx = min(start_idx + chunk_size, len(pdb_files))
+        pdb_files = pdb_files[start_idx:end_idx]
+
+    ### SAMPLING ###
+    print(f"Evaluating with num denoising steps S={cfg.num_steps} on {len(pdb_files)} PDBs (array_id={cfg.array_id})")
     cfg.timestep_schedule.num_steps = cfg.num_steps
     t_seq = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
 
     # Process PDBs in batches of size B
-    for i in range(0, len(pdb_files), cfg.batch_size):
-        pdb_batch_files = pdb_files[i:i+cfg.batch_size]
+    pdb_files_repeated = np.repeat(pdb_files, cfg.num_seqs_per_pdb)
+
+    pbar = tqdm(total=len(pdb_files_repeated))
+    for i in range(0, len(pdb_files_repeated), cfg.batch_size):
+        pdb_batch_files = pdb_files_repeated[i:i+cfg.batch_size]
         B = len(pdb_batch_files)
 
         # Load and process all PDBs in this batch
@@ -147,22 +179,69 @@ def main(cfg: DictConfig):
 
         # Save outputs
         # Save to PDB
-        pdb_keys = [Path(pdb_file).stem for pdb_file in pdb_batch_files]
-        pdb_filenames = [f"{sample_out_dir}/{pdb_key}.pdb" for pdb_key in pdb_keys]
-        fasta_filenames = [f"{fasta_out_dir}/{pdb_key}.fasta" for pdb_key in pdb_keys]
-        SeqDenoiser.save_samples_to_pdb(samples, pdb_filenames)
+        pdb_names = [Path(pdb_file).stem for pdb_file in pdb_batch_files]
+        pdb_keys = [f"{pdb_name}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(pdb_names)]
+        pdbs = [f"{sample_out_dir}/{pdb_key}.pdb" for pdb_key in pdb_keys]
+        fastas = [f"{fasta_out_dir}/{pdb_key}.fasta" for pdb_key in pdb_keys]
+        pred_seqs = []
+        SeqDenoiser.save_samples_to_pdb(samples, pdbs)
 
-        for idx, pdb_file in enumerate(pdb_batch_files):
+        for j, pdb_file in enumerate(pdb_batch_files):
             # Extract the sequence
-            seq_mask_i = samples["seq_mask"][idx].cpu()
-            pred_aatype_i = samples["pred_aatype"][idx].cpu()
+            seq_mask_i = samples["seq_mask"][j].cpu()
+            pred_aatype_i = samples["pred_aatype"][j].cpu()
             pred_aatype_i = pred_aatype_i[seq_mask_i.bool()]
             pred_seq_i = "".join(rc.restypes[a] for a in pred_aatype_i)
+            pred_seqs.append(pred_seq_i)
 
             # Save fasta
-            fasta_out = fasta_filenames[idx]
+            fasta_out = fastas[j]
             with open(fasta_out, "w") as f:
-                f.write(f">{pdb_keys[idx]}\n{pred_seq_i}\n")
+                f.write(f">{pdb_keys[j]}\n{pred_seq_i}\n")
+
+        # Run self-consistency evaluation
+        if cfg.run_self_consistency_eval:
+            sc_info = eval_metrics.run_self_consistency_eval(
+                pdbs,
+                None, None,  # no MPNN model for co-design eval
+                struct_pred_model,
+                device,
+                out_dir=pred_out_dir,
+                eval_codesign=True,
+                temp_dir=f"{pred_out_dir}/tmp",
+                override_metrics_to_compute=["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]
+            )
+
+            # Aggregate results
+            sc_metrics = defaultdict(list)
+            for j, pdb in enumerate(pdbs):
+                sc_metrics["pdb_name"].append(Path(pdb).stem)
+                sc_metrics["pdb_key"].append(pdb_names[j])
+
+                for k, v in sc_info[pdb]["sc_metrics"].items():
+                    sc_metrics[f"{k}"].append(v.item())
+
+            sc_metrics["pred_seq"].extend(pred_seqs)
+            out_df = pd.DataFrame(sc_metrics)
+
+            # Safely append to CSV using a file lock
+            with open(self_consistency_path, "a+") as f:
+                # Acquire exclusive lock
+                fcntl.flock(f, fcntl.LOCK_EX)
+
+                # Check if file is empty
+                f.seek(0, os.SEEK_END)
+                file_empty = (f.tell() == 0)
+
+                # Write DataFrame
+                out_df.to_csv(f, index=False, header=file_empty)
+
+                # Release lock
+                fcntl.flock(f, fcntl.LOCK_UN)
+
+        pbar.update(B)
+
+    pbar.close()
 
 
 if __name__ == "__main__":
