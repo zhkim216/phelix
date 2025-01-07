@@ -5,7 +5,7 @@ import re
 import fcntl
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import hydra
 import lightning as L
@@ -28,6 +28,7 @@ from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
+from allatom_design.eval.sampling.sample_single import parse_fixed_positions
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="sample_multi", version_base="1.3.2")
@@ -103,6 +104,13 @@ def main(cfg: DictConfig):
         end_idx = min(start_idx + chunk_size, len(pdb_files))
         pdb_files = pdb_files[start_idx:end_idx]
 
+    # Read in fixed positions
+    if cfg.fixed_pos_csv is not None:
+        fixed_pos_df = pd.read_csv(cfg.fixed_pos_csv, names=["fixed_pos_seq", "fixed_pos_scn"], index_col=0)
+        fixed_pos_df = fixed_pos_df.fillna("")
+    else:
+        fixed_pos_df = pd.DataFrame(columns=["fixed_pos_seq", "fixed_pos_scn"])
+
     ### SAMPLING ###
     print(f"Evaluating with num denoising steps S={cfg.num_steps} on {len(pdb_files)} PDBs (array_id={cfg.array_id})")
     cfg.timestep_schedule.num_steps = cfg.num_steps
@@ -118,10 +126,16 @@ def main(cfg: DictConfig):
 
         # Load and process all PDBs in this batch
         batch_list = []
+        batch_chain_id_mapping = []
         for pdb_file in pdb_batch_files:
             data = load_feats_from_pdb(pdb_file)
             single = process_single_pdb(data)
             batch_list.append(single)
+
+            # store chain ID mapping for parsing fixed positions
+            batch_chain_id_mapping.append(data["chain_id_mapping"])
+
+        pdb_names = [Path(pdb_file).stem for pdb_file in pdb_batch_files]
 
         # Create a batch dictionary from batch_list by stacking
         model_input_keys = ["x", "aatype", "seq_mask", "missing_atom_mask", "residue_index", "chain_index"]
@@ -145,6 +159,8 @@ def main(cfg: DictConfig):
             "designability": torch.Tensor([cl.PLACEHOLDER_TOKEN_ID]*B).to(device)
         }
 
+        aatype_override_mask, scn_override_mask = get_override_masks(batch, pdb_names, batch_chain_id_mapping, fixed_pos_df, verbose=cfg.fixed_pos_verbose)
+
         # Run sampling
         x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
             batch["x"],
@@ -160,8 +176,8 @@ def main(cfg: DictConfig):
             corrector_step_ratio=cfg.corrector_step_ratio,
             temperature=cfg.temperature,
             repack_last=cfg.repack_last,
-            aatype_override_mask=None,
-            scn_override_mask=None,
+            aatype_override_mask=aatype_override_mask,
+            scn_override_mask=scn_override_mask,
             scd_inputs=scd_inputs,
         )
 
@@ -179,7 +195,6 @@ def main(cfg: DictConfig):
 
         # Save outputs
         # Save to PDB
-        pdb_names = [Path(pdb_file).stem for pdb_file in pdb_batch_files]
         pdb_keys = [f"{pdb_name}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(pdb_names)]
         pdbs = [f"{sample_out_dir}/{pdb_key}.pdb" for pdb_key in pdb_keys]
         fastas = [f"{fasta_out_dir}/{pdb_key}.fasta" for pdb_key in pdb_keys]
@@ -242,6 +257,59 @@ def main(cfg: DictConfig):
         pbar.update(B)
 
     pbar.close()
+
+
+def get_override_masks(batch: Dict[str, TensorType["b ..."]],
+                       pdb_names: List[str],
+                       batch_chain_id_mapping: List[Dict[str, int]],  # maps chain letter to chain index
+                       fixed_pos_df: pd.DataFrame,
+                       verbose: bool = False) -> Tuple[Optional[TensorType["b n", int]],
+                                                       Optional[TensorType["b n", int]]]:
+    aatype_override_mask, scn_override_mask = torch.zeros_like(batch["residue_index"]), torch.zeros_like(batch["residue_index"])
+
+    for i, pdb_name in enumerate(pdb_names):
+        if pdb_name not in fixed_pos_df.index:
+            if verbose:
+                print(f"No fixed positions found for {pdb_name}")
+            continue
+        # Get fixed positions from df
+        row = fixed_pos_df.loc[pdb_name]
+        fixed_pos_seq, fixed_pos_scn = row["fixed_pos_seq"], row["fixed_pos_scn"]
+
+        example = {k: v[i] for k, v in batch.items()}
+        chain_id_mapping = batch_chain_id_mapping[i]
+
+        if fixed_pos_seq:
+            # sequence override
+            if verbose:
+                print(f"{pdb_name}: Fixing sequence at positions {fixed_pos_seq}")
+            abs_fixed_pos_seq = parse_fixed_positions(fixed_pos_seq, chain_id_mapping, example["residue_index"], example["chain_index"])
+            aatype_override_mask[i, abs_fixed_pos_seq] = 1
+
+            # print fixed sequence
+            if verbose:
+                fixed_seq_viz = "".join([rc.restypes[example["aatype"][j]] if aatype_override_mask[i, j] else "-" for j in range(aatype_override_mask.shape[1])])
+                print(f"Fixed sequence: {fixed_seq_viz}")
+        else:
+            if verbose:
+                print("No fixed sequence positions specified.")
+
+        if fixed_pos_scn:
+            # sidechain override
+            if verbose:
+                print(f"{pdb_name}: Fixing sidechains at positions {fixed_pos_scn}")
+            abs_fixed_pos_scn = parse_fixed_positions(fixed_pos_scn, chain_id_mapping, example["residue_index"], example["chain_index"])
+            scn_override_mask[i, abs_fixed_pos_scn] = 1
+
+            # print fixed sidechains
+            if verbose:
+                fixed_scn_viz = "".join([rc.restypes[example["aatype"][j]] if scn_override_mask[i, j] else "-" for j in range(scn_override_mask.shape[1])])
+                print(f"Fixed sidechains: {fixed_scn_viz}")
+        else:
+            if verbose:
+                print("No fixed sidechain positions specified.")
+
+    return aatype_override_mask, scn_override_mask
 
 
 if __name__ == "__main__":
