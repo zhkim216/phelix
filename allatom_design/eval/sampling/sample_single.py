@@ -1,7 +1,7 @@
 import math
 import os
 import re
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from pathlib import Path
 from typing import Dict, List
 
@@ -122,6 +122,32 @@ def main(cfg: DictConfig):
     else:
         print("No fixed sidechain positions specified.")
 
+    if cfg.pos_restrict_aatype is not None:
+        # restrict aatype at certain positions
+        print(f"Restricting aatype sampling at some positions: {cfg.pos_restrict_aatype}")
+        pos_restrict_aatype = OrderedDict(cfg.pos_restrict_aatype)  # ensure mapping is preserved
+        abs_restrict_pos = parse_fixed_positions(",".join(pos_restrict_aatype.keys()), data["chain_id_mapping"], batch["residue_index"], batch["chain_index"])
+
+        B, N = model_inputs["seq_mask"].shape
+        K = len(rc.restype_order_with_x)
+
+        restrict_pos_mask = torch.zeros((B, N), dtype=torch.float32, device=device)
+        allowed_aatype_mask = torch.zeros((B, N, K), dtype=torch.long, device=device)
+
+        for abs_pos, allowed_aatypes in zip(abs_restrict_pos, pos_restrict_aatype.values()):
+            # restrict aatypes at this position
+            restrict_pos_mask[:, abs_pos] = 1.0
+
+            # first, disallow all aatypes
+            allowed_aatype_mask[:, abs_pos, :] = 0.0
+
+            # only allow the specified aatypes
+            for letter in allowed_aatypes:
+                allowed_aatype_mask[:, abs_pos, rc.restype_order[letter]] = 1.0
+
+        restrict_pos_aatype = (restrict_pos_mask, allowed_aatype_mask)
+
+
     # Sampling loop
     print(f"Evaluating with num denoising steps S={cfg.num_steps}")
     cfg.timestep_schedule.num_steps = cfg.num_steps
@@ -159,6 +185,7 @@ def main(cfg: DictConfig):
             repack_last=cfg.repack_last,
             aatype_override_mask=aatype_override_mask,
             scn_override_mask=scn_override_mask,
+            restrict_pos_aatype=restrict_pos_aatype,
             scd_inputs=scd_inputs,
         )
 
