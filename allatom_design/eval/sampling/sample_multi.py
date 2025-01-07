@@ -108,6 +108,7 @@ def main(cfg: DictConfig):
     if cfg.fixed_pos_csv is not None:
         fixed_pos_df = pd.read_csv(cfg.fixed_pos_csv, names=["fixed_pos_seq", "fixed_pos_scn"], index_col=0)
         fixed_pos_df = fixed_pos_df.fillna("")
+        fixed_pos_df.index = fixed_pos_df.index.str.replace(".pdb", "")  # remove extension from index if present
     else:
         fixed_pos_df = pd.DataFrame(columns=["fixed_pos_seq", "fixed_pos_scn"])
 
