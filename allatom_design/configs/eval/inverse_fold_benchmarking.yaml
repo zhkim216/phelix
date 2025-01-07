@@ -7,6 +7,7 @@ exp_name: "denovo_pmpnn_if"
 
 # Sampling run settings
 sample_dir: /media/scratch/datasets/denovo/pdbs
+pdb_key_list: null
 input_fasta_dir: false  # use sequences in input fastas for self-consistency eval, rather than using ProteinMPNN
 num_workers: 10
 out_dir: /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/proteinmpnn_inverse_fold

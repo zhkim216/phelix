@@ -50,7 +50,15 @@ def main(cfg: DictConfig):
 
     ### CALCULATE STRUCTURE METRICS ###
     all_metrics = defaultdict(dict)
-    pdbs = natsorted(glob.glob(f"{cfg.sample_dir}/*.pdb"))
+
+    if cfg.pdb_key_list is not None:
+        # Get PDBs with keys in the list
+        with open(cfg.pdb_key_list, "r") as f:
+            pdb_keys = f.read().splitlines()
+        pdbs = [f"{cfg.sample_dir}/{key}" for key in pdb_keys]
+    else:
+        # Get all PDBs in the sample directory
+        pdbs = natsorted(glob.glob(f"{cfg.sample_dir}/*.pdb"))
 
     # Copy over original samples
     shutil.copytree(cfg.sample_dir, f"{cfg.out_dir}/samples")
@@ -180,8 +188,8 @@ def find_sample_fasta(sample_dir: str, pdb_key: str) -> str:
     if Path(exact_match).exists():
         return exact_match
 
-    # Otherwise, search for a file matching {pdb_key}*.fasta
-    pattern = f"{sample_dir}/{pdb_key}*.fasta"
+    # Otherwise, search for a file matching {pdb_key}_*.fasta
+    pattern = f"{sample_dir}/{pdb_key}_*.fasta"
     matched_fastas = glob.glob(pattern)
 
     if len(matched_fastas) == 1:
