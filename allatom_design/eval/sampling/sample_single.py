@@ -80,6 +80,20 @@ def main(cfg: DictConfig):
     data = load_feats_from_pdb(cfg.pdb_path)
     batch = process_single_pdb(data)
 
+    # Override sequence from PDB at certain positions and adds to fixed_pos_seq
+    if cfg.pos_seq_override is not None:
+        print(f"Overriding sequence at certain positions and conditioning on them: {cfg.pos_seq_override}")
+        pos_seq_override = OrderedDict(cfg.pos_seq_override)  # ensure mapping is preserved
+        abs_pos_override = parse_fixed_positions(",".join(pos_seq_override.keys()), data["chain_id_mapping"], batch["residue_index"], batch["chain_index"])
+
+        for pos, aa in zip(abs_pos_override, pos_seq_override.values()):
+            # change aatype at this position
+            batch["aatype"][pos] = rc.restype_order[aa]
+
+        # Add to fixed_pos_seq
+        cfg.fixed_pos_seq = f"{cfg.fixed_pos_seq}," if cfg.fixed_pos_seq is not None else ""
+        cfg.fixed_pos_seq += ",".join(pos_seq_override.keys())
+
     # Move inputs to device
     model_input_keys = ["x", "aatype", "seq_mask", "missing_atom_mask", "residue_index", "chain_index"]
     model_inputs = {k: batch[k].to(device) for k in model_input_keys}
@@ -116,6 +130,10 @@ def main(cfg: DictConfig):
         scn_override_mask = torch.zeros_like(model_inputs["seq_mask"])
         scn_override_mask[:, abs_fixed_pos_scn] = 1
 
+        if cfg.pos_seq_override is not None:
+            # ensure that we're not fixing sidechains when we override the PDB sequence
+            assert scn_override_mask[:, abs_pos_override].sum() == 0, "Cannot fix sidechains at positions where the sequence from the PDB is overridden."
+
         # print fixed sidechains
         fixed_scn_viz = "".join([rc.restypes[batch["aatype"][i]] if scn_override_mask[0, i] else "-" for i in range(scn_override_mask.shape[1])])
         print(f"Fixed sidechains: {fixed_scn_viz}")
@@ -146,6 +164,8 @@ def main(cfg: DictConfig):
                 allowed_aatype_mask[:, abs_pos, rc.restype_order[letter]] = 1.0
 
         restrict_pos_aatype = (restrict_pos_mask, allowed_aatype_mask)
+    else:
+        restrict_pos_aatype = None
 
 
     # Sampling loop
