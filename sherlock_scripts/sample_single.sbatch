@@ -36,10 +36,10 @@ MODEL_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/b12_aasd6/checkpo
 # Run eval script
 cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/sample_single.py \
-    checkpoint_path=${MODEL_CKPT} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     hydra.run.dir=${HYDRA_DIR} \
+    checkpoint_path=${MODEL_CKPT} \
     batch_size=16 \
     pdb_path=/scratch/users/rshuai/datasets/rcsb_test_cases/pdbs/1TIM.pdb \
     fixed_pos_seq=\'A1-100,B1-100\' \
