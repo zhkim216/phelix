@@ -8,6 +8,7 @@ checkpoint_path: null
 pdb_path: null
 fixed_pos_seq: # comma-separated, chain + residue index specification, e.g. "A1-100,B1-100"
 fixed_pos_scn: # null for no provided sidechains, otherwise should be subset of fixed_pos_seq, e.g. "A1-100"
+pos_restrict_aatype:   # dictionary mapping from "chain + residue index" to "allowed aatypes in 1-letter code format", e.g. {"A26": "AVG", "A27": "VG"}
 out_dir: null
 run_self_consistency_eval: false
 
