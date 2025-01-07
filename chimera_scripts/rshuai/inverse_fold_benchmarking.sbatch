@@ -8,14 +8,15 @@
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
-#SBATCH --array=0-7
+#SBATCH --array=0-1
 
-MODELS=("esm3" "esm_if1" "lmdesign" "proteinmpnn")
-MODEL_ID=$((SLURM_ARRAY_TASK_ID % 4))
+#MODELS=("esm3" "esm_if1" "lmdesign" "proteinmpnn")
+MODELS=("c0_aasd2_ema-step300000-std0.010")
+MODEL_ID=$((SLURM_ARRAY_TASK_ID % 1))
 MODEL_NAME=${MODELS[$MODEL_ID]}
 
 # Determine if we are running the original or esmfold variant
-if [ ${SLURM_ARRAY_TASK_ID} -lt 4 ]; then
+if [ ${SLURM_ARRAY_TASK_ID} -lt 1 ]; then
     # Original run
     EXP_NAME=${MODEL_NAME}
     ESMFOLD_FLAG=""
