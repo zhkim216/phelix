@@ -6,6 +6,8 @@ exp_name: test  # sampling experiment name
 overwrite_out_dir: true  # if true, delete existing output directory
 seed: 0
 
+skip_pdb_keys:
+
 
 hydra:
   run:
