@@ -235,6 +235,8 @@ class SeqDenoiser(nn.Module):
                repack_last: bool = False,  # repack last step after sampling the sequence
                scn_override_mask: Optional[TensorType["b n", int]] = None,
                aatype_override_mask: Optional[TensorType["b n", int]] = None,
+               restrict_pos_aatype: Optional[Tuple[TensorType["b n", float],
+                                                   TensorType["b n k", int]]] = None,  # restrict aatype sampling at certain positions
                scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
                ):
         """
@@ -254,6 +256,9 @@ class SeqDenoiser(nn.Module):
 
         if scn_override_mask is None:
             scn_override_mask = torch.zeros((B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
+
+        # Handle aatype restrictions
+        aux_inputs["restrict_pos_aatype"] = restrict_pos_aatype
 
         # Set up structure input dependent on structure mask
         x0 = x.clone()

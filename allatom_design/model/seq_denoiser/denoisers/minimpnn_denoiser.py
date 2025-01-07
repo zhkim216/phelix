@@ -117,6 +117,16 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         if not is_sampling:
             return seq_logits.argmax(dim=-1), F.softmax(seq_logits, dim=-1)
 
+        # Handle aatype restrictions
+        seq_logits[..., rc.restype_order_with_x["X"]] = -1e9  # do not sample mask/unknowns
+        restrict_pos_aatype = aux_inputs.get("restrict_pos_aatype", None)
+        if restrict_pos_aatype is not None:
+            restrict_pos_mask, allowed_aatype_mask = restrict_pos_aatype  # (B, N), (B, N, K)
+            restrict_pos_mask = restrict_pos_mask.unsqueeze(-1).expand_as(seq_logits)
+            disallowed_positions = (restrict_pos_mask == 1.0) & (allowed_aatype_mask == 0.0)  # only allow specified aatypes
+            seq_logits[disallowed_positions] = -1e9
+
+        # Handle temperature scaling
         tau = aux_inputs.get("temperature", 1.0)
         B, N = seq_logits.shape[:2]
         if tau == 0.0:
@@ -124,7 +134,6 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
             seq_probs = F.softmax(seq_logits, dim=-1)  # don't scale for confidence sampling
         else:
             scaled_logits = seq_logits / tau
-            scaled_logits[..., rc.restype_order_with_x["X"]] = -1e9  # do not sample mask/unknowns
             seq_probs = F.softmax(scaled_logits, dim=-1)
             aatype_pred = torch.multinomial(seq_probs.view(B * N, -1), num_samples=1).view(B, N)
         return aatype_pred, seq_probs
