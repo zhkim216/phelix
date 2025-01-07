@@ -51,6 +51,10 @@ def main(cfg: DictConfig):
     for gt_pdb in tqdm(gt_pdbs, desc="Computing metrics for each pdb..."):
         pdb_key = Path(gt_pdb).stem
 
+        if cfg.skip_pdb_keys and pdb_key in cfg.skip_pdb_keys:
+            print(f"Skipping {pdb_key}...")
+            continue
+
         # Load in ground truth data
         gt_data = load_feats_from_pdb(gt_pdb)
         gt_batch = process_single_pdb(gt_data)
