@@ -11,6 +11,7 @@ num_arrays: 1   # Number of total arrays. If array_id is null, this can remain 1
 checkpoint_path: null
 pdb_dir: null
 pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files. Should include extension.
+presort_by_length: false  # sort pdbs by sequence length (longest first). Can be helpful for efficiency.
 out_dir: null
 run_self_consistency_eval: false
 

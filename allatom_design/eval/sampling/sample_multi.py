@@ -1,8 +1,7 @@
+import fcntl
 import glob
 import math
 import os
-import re
-import fcntl
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -13,6 +12,7 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
+from joblib import Parallel, delayed
 from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
@@ -24,11 +24,11 @@ from allatom_design.data.data import (load_feats_from_pdb, pad_to_max_len,
                                       process_single_pdb)
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.eval.folding_utils import get_struct_pred_model
+from allatom_design.eval.sampling.sample_single import parse_fixed_positions
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
-from allatom_design.eval.sampling.sample_single import parse_fixed_positions
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="sample_multi", version_base="1.3.2")
@@ -82,6 +82,15 @@ def main(cfg: DictConfig):
         "return_scn_diffusion_aux": False
     }
 
+    # Read in fixed positions
+    if cfg.fixed_pos_csv is not None:
+        fixed_pos_df = pd.read_csv(cfg.fixed_pos_csv, names=["fixed_pos_seq", "fixed_pos_scn"], index_col=0)
+        fixed_pos_df = fixed_pos_df.fillna("")
+        fixed_pos_df.index = fixed_pos_df.index.str.replace(".pdb", "")  # remove extension from index if present
+    else:
+        fixed_pos_df = pd.DataFrame(columns=["fixed_pos_seq", "fixed_pos_scn"])
+
+    ### Load in PDB files ###
     if cfg.pdb_key_list is not None:
         # Get PDBs with keys in the list
         with open(cfg.pdb_key_list, "r") as f:
@@ -104,16 +113,18 @@ def main(cfg: DictConfig):
         end_idx = min(start_idx + chunk_size, len(pdb_files))
         pdb_files = pdb_files[start_idx:end_idx]
 
-    # Read in fixed positions
-    if cfg.fixed_pos_csv is not None:
-        fixed_pos_df = pd.read_csv(cfg.fixed_pos_csv, names=["fixed_pos_seq", "fixed_pos_scn"], index_col=0)
-        fixed_pos_df = fixed_pos_df.fillna("")
-        fixed_pos_df.index = fixed_pos_df.index.str.replace(".pdb", "")  # remove extension from index if present
-    else:
-        fixed_pos_df = pd.DataFrame(columns=["fixed_pos_seq", "fixed_pos_scn"])
+    # If specified, pre-sort by length (descending)
+    if cfg.presort_by_length:
+        # determine lengths
+        results = Parallel(n_jobs=-1)(delayed(get_length)(f) for f in tqdm(pdb_files, desc="Loading PDBs to determine lengths"))
+        pdb_to_length = dict(results)
+
+        # sort by length, longest first
+        pdb_files = sorted(pdb_files, key=lambda x: pdb_to_length[x], reverse=True)
 
     ### SAMPLING ###
-    print(f"Evaluating with num denoising steps S={cfg.num_steps} on {len(pdb_files)} PDBs (array_id={cfg.array_id})")
+    print(f"Sampling with num denoising steps S={cfg.num_steps} on {len(pdb_files)} PDBs (array_id={cfg.array_id})")
+
     cfg.timestep_schedule.num_steps = cfg.num_steps
     t_seq = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
 
@@ -258,6 +269,11 @@ def main(cfg: DictConfig):
         pbar.update(B)
 
     pbar.close()
+
+
+def get_length(pdb_file: str) -> Tuple[str, int]:
+    data = load_feats_from_pdb(pdb_file)
+    return pdb_file, len(data["aatype"])
 
 
 def get_override_masks(batch: Dict[str, TensorType["b ..."]],
