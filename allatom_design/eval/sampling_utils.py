@@ -48,7 +48,7 @@ def get_decoding_order(mode: str,
 
 def get_confidence_decoding_order(mode: str,
                                   aatype_pred: TensorType["b n", int],
-                                  seq_probs: TensorType["b n", float],
+                                  scaled_seq_probs: TensorType["b n", float],
                                   psce: TensorType["b n 33", float],
                                   seq_mask: TensorType["b n", float],
                                   mlm_mask_prev: TensorType["b n", int]) -> TensorType["b n", int]:
@@ -56,7 +56,7 @@ def get_confidence_decoding_order(mode: str,
     Use sequence probabilities to decide a confidence based sampling order
     """
     if mode == 'greedy':
-        confidence, _ = torch.max(seq_probs, dim = -1)
+        confidence, _ = torch.max(scaled_seq_probs, dim = -1)
         confidence = torch.where(seq_mask == 0, -1e6, confidence) #padded tokens sent to end of order
         confidence = torch.where(mlm_mask_prev == 1, 1e6, confidence) #previously unmasked tokens sent to beginning of order
         confidence_decoding_order = torch.argsort(torch.argsort(confidence, dim = -1, descending = True)) #update decoding order based on confidence
@@ -81,7 +81,7 @@ def update_mlm_mask(mlm_mask: TensorType["b n", float],
                     K: TensorType["b", int],
                     aatype_pred: TensorType["b n", int],
                     seq_mask: TensorType["b n", float],
-                    seq_probs: TensorType["b n k", float],
+                    scaled_seq_probs: TensorType["b n k", float],
                     psce: TensorType["b n 33", float]
                     ) -> TensorType["b n", float]:
     """
@@ -91,7 +91,7 @@ def update_mlm_mask(mlm_mask: TensorType["b n", float],
     if aatype_decoding_order_mode in ['greedy', "greedy_psce"]:
         aatype_decoding_order = get_confidence_decoding_order(mode=aatype_decoding_order_mode,
                                                               aatype_pred=aatype_pred,
-                                                              seq_probs=seq_probs,
+                                                              scaled_seq_probs=scaled_seq_probs,
                                                               psce=psce,
                                                               seq_mask=seq_mask,
                                                               mlm_mask_prev=mlm_mask_prev)

@@ -65,12 +65,13 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
             residue_index,
             chain_encoding)
 
-        aatype_pred, seq_probs = self.sample_aatype(seq_logits, aux_inputs, is_sampling)
+        aatype_pred, scaled_seq_probs = self.sample_aatype(seq_logits, aux_inputs, is_sampling)
 
         # Outputs
         aux_preds = {
             "seq_logits": seq_logits,
-            "seq_probs": seq_probs,
+            "seq_probs": F.softmax(seq_logits, dim=-1),
+            "scaled_seq_probs": scaled_seq_probs,
             'seq_mask': seq_mask,
             'seq_mlm_mask': aux_inputs.get("seq_mlm_mask", None),  # used during training
             'scn_mlm_mask': aux_inputs.get('scn_mlm_mask', None)  # used during training
@@ -112,7 +113,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
         Returns:
         - aatype_pred: Tensor["b n", int]
-        - seq_probs: Tensor["b n k", float]
+        - scaled_seq_probs: Tensor["b n k", float]: seq_probs scaled by temperature and sampling modifications
         """
         if not is_sampling:
             return seq_logits.argmax(dim=-1), F.softmax(seq_logits, dim=-1)
@@ -131,12 +132,12 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         B, N = seq_logits.shape[:2]
         if tau == 0.0:
             aatype_pred = seq_logits.argmax(dim=-1)
-            seq_probs = F.softmax(seq_logits, dim=-1)  # don't scale for confidence sampling
+            scaled_seq_probs = F.softmax(seq_logits, dim=-1)  # don't scale for argmax sampling
         else:
             scaled_logits = seq_logits / tau
-            seq_probs = F.softmax(scaled_logits, dim=-1)
-            aatype_pred = torch.multinomial(seq_probs.view(B * N, -1), num_samples=1).view(B, N)
-        return aatype_pred, seq_probs
+            scaled_seq_probs = F.softmax(scaled_logits, dim=-1)
+            aatype_pred = torch.multinomial(scaled_seq_probs.view(B * N, -1), num_samples=1).view(B, N)
+        return aatype_pred, scaled_seq_probs
 
 
     def get_sidechain_likelihoods(self,
