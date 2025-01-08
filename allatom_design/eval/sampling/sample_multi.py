@@ -2,6 +2,7 @@ import fcntl
 import glob
 import math
 import os
+import pickle
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -48,9 +49,11 @@ def main(cfg: DictConfig):
     out_dir = cfg.out_dir  # base output directory
     sample_out_dir = f"{out_dir}/samples"
     fasta_out_dir = f"{out_dir}/fastas"  # directory for sequences in FASTA format
+    sample_pkl_dir = f"{out_dir}/sample_pkls"  # directory for pkls containing various sample info
 
     Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
     Path(fasta_out_dir).mkdir(parents=True, exist_ok=True)
+    Path(sample_pkl_dir).mkdir(parents=True, exist_ok=True)
 
     # Preserve config
     with open(Path(out_dir, "config.yaml"), "w") as f:
@@ -200,9 +203,8 @@ def main(cfg: DictConfig):
             "residue_index": batch["residue_index"],
             "chain_index": batch["chain_index"],
             "pred_aatype": aatype_denoised,
-            "aatype_pred_traj": aux["aatype_pred_traj"],
-            "aatype_t_traj": aux["aatype_t_traj"],
-            "psce": aux["psce"]
+            "psce": aux["psce"],
+            "seq_probs": aux["seq_probs"],
         }
 
         # Save outputs
@@ -225,6 +227,12 @@ def main(cfg: DictConfig):
             fasta_out = fastas[j]
             with open(fasta_out, "w") as f:
                 f.write(f">{pdb_keys[j]}\n{pred_seq_i}\n")
+
+        # Save samples as pkl
+        for i in range(B):
+            sample_i = {k: v[i].cpu().numpy() for k, v in samples.items()}
+            with open(f"{sample_pkl_dir}/{pdb_keys[i]}.pkl", "wb") as f:
+                pickle.dump(sample_i, f)
 
         # Run self-consistency evaluation
         if cfg.run_self_consistency_eval:

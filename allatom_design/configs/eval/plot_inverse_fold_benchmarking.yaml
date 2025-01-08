@@ -1,0 +1,22 @@
+seed: 0
+out_dir: /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/plots
+overwrite_out_dir: true
+
+# Input paths
+input_pkl_files:
+  - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/c0_aasd2_ema-step300000-std0.010/all_metrics.pkl
+  - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/proteinmpnn/all_metrics.pkl
+  - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/esm3/all_metrics.pkl
+  - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/esm_if1/all_metrics.pkl
+  - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/lmdesign/all_metrics.pkl
+
+model_names:
+  - FAMPNN
+  - ProteinMPNN
+  - ESM3
+  - ESM-IF1
+  - LM-Design
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

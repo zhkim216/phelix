@@ -309,7 +309,8 @@ class SeqDenoiser(nn.Module):
 
         xt = x0
         aatype_t = aatype_noised
-        psce_t = torch.zeros((B, N, len(rc.non_bb_idxs)), device=x.device)
+        seq_probs_t = torch.zeros((B, N, len(rc.restypes_with_x)), device=x.device)  # keep track of unscaled sequence probabilities as we decode
+        psce_t = torch.zeros((B, N, len(rc.non_bb_idxs)), device=x.device)  # keep track of sidechain confidence as we decode
 
         # Handle differences in provided sequence and sidechain masks
         if torch.any((aatype_override_mask - scn_override_mask) < 0):
@@ -337,13 +338,14 @@ class SeqDenoiser(nn.Module):
             seq_mlm_mask_prev, scn_mlm_mask_prev = seq_mlm_mask.clone(), scn_mlm_mask.clone()
             seq_mlm_mask = mask_update_fn(seq_mlm_mask,
                                           K=K_next, aatype_pred=aatype_pred,
-                                          seq_probs=aux_preds["seq_probs"],
+                                          scaled_seq_probs=aux_preds["scaled_seq_probs"],
                                           psce=aux_preds["scn_diffusion_aux"]["psce"])
             scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else torch.zeros_like(seq_mlm_mask)
 
             # Unmask sequence, sidechains, and sidechain confidence
             aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
             xt = sampling_utils.unmask(xt, x1_pred, scn_mlm_mask_prev, scn_mlm_mask)
+            seq_probs_t = sampling_utils.unmask(seq_probs_t, aux_preds["seq_probs"], seq_mlm_mask_prev, seq_mlm_mask)
             psce_t = sampling_utils.unmask(psce_t, aux_preds["scn_diffusion_aux"]["psce"], scn_mlm_mask_prev, scn_mlm_mask)
 
             for j in range(num_corrector_steps):
@@ -360,13 +362,14 @@ class SeqDenoiser(nn.Module):
                 seq_mlm_mask_prev, scn_mlm_mask_prev = seq_mlm_mask.clone(), scn_mlm_mask.clone()
                 seq_mlm_mask = mask_update_fn(seq_mlm_mask,
                                               K=K_next, aatype_pred=aatype_pred,
-                                              seq_probs=aux_preds["seq_probs"],
+                                              scaled_seq_probs=aux_preds["scaled_seq_probs"],
                                               psce=aux_preds["scn_diffusion_aux"]["psce"])
                 scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else torch.zeros_like(seq_mlm_mask)
 
                 # Unmask sequence and sidechains
                 aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
                 xt = sampling_utils.unmask(xt, x1_pred, scn_mlm_mask_prev, scn_mlm_mask)
+                seq_probs_t = sampling_utils.unmask(seq_probs_t, aux_preds["seq_probs"], seq_mlm_mask_prev, seq_mlm_mask)
                 psce_t = sampling_utils.unmask(psce_t, aux_preds["psce"], scn_mlm_mask_prev, scn_mlm_mask)
 
             # Save trajectory outputs
@@ -391,6 +394,7 @@ class SeqDenoiser(nn.Module):
         aux["xt_traj"] = torch.stack(xt_traj, dim=1)
         aux["aatype_t_traj"] = torch.stack(aatype_t_traj, dim=1)
         aux["aatype_pred_traj"] = torch.stack(aatype_pred_traj, dim=1)
+        aux["seq_probs"] = seq_probs_t
         aux["psce"] = psce_t
         aux["psce_t_traj"] = torch.stack(psce_t_traj, dim=1)
         aux["seq_logits_traj"] = torch.stack(seq_logits_traj, dim=1)
