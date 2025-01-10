@@ -7,15 +7,18 @@ from pathlib import Path
 
 import hydra
 import lightning as L
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import yaml
 from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
+from scipy.stats import spearmanr
 from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import load_feats_from_pdb, process_single_pdb, get_rc_tensor
+from allatom_design.data.data import (get_rc_tensor, load_feats_from_pdb,
+                                      process_single_pdb)
 from allatom_design.eval import eval_metrics
 
 
@@ -45,6 +48,7 @@ def main(cfg: DictConfig):
         yaml.safe_dump(cfg_dict, f)
 
     # Compute metrics for each protein
+    all_sample_info = defaultdict(list)  # stores sample info for all proteins
     metrics_per_prot = defaultdict(list)
 
     gt_pdbs = natsorted(glob.glob(f"{cfg.gt_pdb_dir}/*.pdb"))
@@ -91,6 +95,14 @@ def main(cfg: DictConfig):
             except Exception as e:
                 print(f"Error computing metrics for {Path(gt_pdb).stem}: {e}, skipping...")
                 continue
+
+        # For FAMPNN, extract b-factors as pSCE
+        all_sample_info["psce"].append(sample_data["b_factors"][:, rc.non_bb_idxs])
+        all_sample_info["sce"].append(scn_info["sce"][0])
+        all_sample_info["atom_mask"].append(sample_batch["atom_mask"])
+        all_sample_info["aatype"].append(sample_batch["aatype"])
+        all_sample_info["scn_rmsd_per_pos"].append(scn_info["scn_rmsd_per_pos"][0])
+
 
         # Compute RMSD per protein
         rmsd_i = (scn_info["scn_rmsd_per_pos"].squeeze(0) * seq_mask).sum() / seq_mask.sum()
@@ -140,6 +152,163 @@ def main(cfg: DictConfig):
     # Save metrics as pickle
     with open(Path(cfg.out_dir, "avg_metrics.pkl"), "wb") as f:
         pickle.dump(avg_metrics, f)
+
+    ### Plots ###
+    for k, v in all_sample_info.items():
+        all_sample_info[k] = torch.cat(v, dim=0)
+
+    # Plot RMSD per residue type
+    rmsd_per_restype = {}
+
+    scn_atom_mask = all_sample_info["atom_mask"][:, rc.non_bb_idxs]
+    for aa_idx, aa in enumerate(rc.restypes_with_x):
+        if aa == "X" or aa == "G" or aa == "A":
+            continue
+        aatype_mask = all_sample_info["aatype"] == aa_idx
+        rmsds_i = all_sample_info["scn_rmsd_per_pos"][aatype_mask]
+
+        print(f"Average RMSD for {aa}: {rmsds_i.mean().item():.3f} Å")
+        rmsd_per_restype[aa] = rmsds_i
+
+    # Create a box plot with each residue type on the x-axis, sorted by median RMSD
+    residues = list(rmsd_per_restype.keys())
+    medians = [rmsd_per_restype[res].median().item() for res in residues]
+    sorted_residues = [res for _, res in sorted(zip(medians, residues), key=lambda x: x[0])]
+    sorted_data = [rmsd_per_restype[res].cpu().numpy() for res in sorted_residues]
+
+    plt.figure(figsize=(6, 3.5))
+
+    # Compute overall min/max for setting y-ticks at 0.5 increments
+    all_rmsd_values = np.concatenate(sorted_data)
+    y_min = np.floor(all_rmsd_values.min() * 2) / 2
+    y_max = np.ceil(all_rmsd_values.max() * 2) / 2
+
+    plt.boxplot(
+        sorted_data,
+        patch_artist=True,
+        showfliers=False,  # get rid of outliers
+        boxprops=dict(color='black', facecolor='white'),
+        medianprops=dict(color='goldenrod', linewidth=2),
+        whiskerprops=dict(color='black'),
+        capprops=dict(color='black'),
+        flierprops=dict(color='black', markeredgecolor='black', markersize=3)
+    )
+
+    plt.xticks(range(1, len(sorted_residues) + 1), sorted_residues, ha='center', fontsize=10)
+    plt.xlabel("Residue type", fontsize=12)
+    plt.ylabel("RMSD (Å)", fontsize=12)
+
+    # Set y-ticks in increments of 0.5
+    plt.yticks(np.arange(y_min, y_max + 0.5, 0.5), fontsize=10)
+
+    # Add grid lines with alpha=0.5
+    plt.grid(True, alpha=0.5)
+
+    plt.ylim(-0.1, 5.5)
+
+    plt.tight_layout()
+    plt.savefig(f"{cfg.out_dir}/rmsd_per_residue_type_boxplot.png", dpi=300)
+    plt.savefig(f"{cfg.out_dir}/rmsd_per_residue_type_boxplot.pdf", dpi=300)
+    plt.close()
+
+
+    # Get pSCE correlations
+    if cfg.plot_psce:
+        # Get pSCE correlations
+
+        ### Get correlation per residue ###
+        scn_atom_mask = all_sample_info["atom_mask"][:, rc.non_bb_idxs]
+        sce_per_res = (all_sample_info["sce"] * scn_atom_mask).nansum(dim=1) / scn_atom_mask.sum(dim=1)
+        psce_per_res = (all_sample_info["psce"] * scn_atom_mask).sum(dim=1) / scn_atom_mask.sum(dim=1)
+
+        # get rid of glycines
+        nan_mask = torch.isnan(sce_per_res)
+        sce_per_res = sce_per_res[~nan_mask]
+        psce_per_res = psce_per_res[~nan_mask]
+
+        # subsample to 5k points
+        idxs = np.random.choice(len(sce_per_res), 5000, replace=False)
+        sce_per_res_sub = sce_per_res[idxs]
+        psce_per_res_sub = psce_per_res[idxs]
+
+        plt.figure(figsize=(5, 5))
+        plt.scatter(sce_per_res_sub, psce_per_res_sub, s=0.7, color='#1f77b4', alpha=1.0)  # same blue
+
+        # Dark dashed line for y=x
+        max_val_res = float(max(sce_per_res.max().item(), psce_per_res.max().item()))
+        plt.plot([0, max_val_res], [0, max_val_res], 'k--', linewidth=1.5)
+
+        # Horizontal gold dashed line at y=4.0625
+        plt.axhline(4.0625, color='goldenrod', linestyle='-', linewidth=1)
+
+        # Spearman correlation
+        spearman_corr_res, _ = spearmanr(sce_per_res.cpu().numpy(), psce_per_res.cpu().numpy())
+        plt.text(
+            0.05, 0.95,
+            r"Spearman $\rho$: {0:.3f}".format(spearman_corr_res),
+            transform=plt.gca().transAxes,
+            fontsize=12,
+            verticalalignment='top',
+            color="black"
+        )
+
+        # Change labels and title
+        plt.xlabel("Sidechain error ($\\mathrm{\\AA}$)", fontsize=12)
+        plt.ylabel("Predicted sidechain error ($\\mathrm{\\AA}$)", fontsize=12)
+        plt.title("Confidence per residue")  # Reflecting per-residue
+
+        plt.xlim(0, 4.5)
+        plt.ylim(0, 4.5)
+
+        # Save as both PNG and PDF
+        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_res.png", dpi=300)
+        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_res.pdf", dpi=300)
+        plt.close()
+
+        ### Get correlation per atom ###
+        sce = all_sample_info["sce"][scn_atom_mask.bool()].flatten()
+        psce = all_sample_info["psce"][scn_atom_mask.bool()].flatten()
+
+        # subsample to 5k points
+        idxs = np.random.choice(len(sce), 5000, replace=False)
+        sce_sub = sce[idxs]
+        psce_sub = psce[idxs]
+
+        plt.figure(figsize=(5, 5))
+        plt.scatter(sce_sub, psce_sub, s=0.7, color='#1f77b4')  # same blue
+
+        # Dark dashed line for y=x
+        max_val_atom = float(max(sce.max().item(), psce.max().item()))
+        plt.plot([0, max_val_atom], [0, max_val_atom], 'k--', linewidth=1.5)
+
+        # Horizontal gold dashed line at y=4.0625
+        plt.axhline(4.0625, color='goldenrod', linestyle='-', linewidth=1)
+
+        # Spearman correlation
+        spearman_corr_atom, _ = spearmanr(sce.cpu().numpy(), psce.cpu().numpy())
+        plt.text(
+            0.05, 0.95,
+            r"Spearman $\rho$: {0:.3f}".format(spearman_corr_atom),
+            transform=plt.gca().transAxes,
+            fontsize=12,
+            verticalalignment='top',
+            color="black"
+        )
+
+        # Change labels and title
+        plt.xlabel("Sidechain error ($\\mathrm{\\AA}$)", fontsize=12)
+        plt.ylabel("Predicted sidechain error ($\\mathrm{\\AA}$)", fontsize=12)
+        plt.title("Confidence per atom", fontsize=12)  # Reflecting per-atom
+
+        plt.xlim(0, 4.5)
+        plt.ylim(0, 4.5)
+
+        # Save as both PNG and PDF
+        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_atom.png", dpi=300)
+        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_atom.pdf", dpi=300)
+        plt.close()
+
+    print("TEST")
 
 
 def find_sample_pdb(sample_dir: str, pdb_key: str) -> str:

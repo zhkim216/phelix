@@ -143,9 +143,9 @@ def main(cfg: DictConfig):
         core_mask, surface_mask = eval_metrics.get_core_surface_mask(x.cpu(), batch_i["atom_mask"].cpu())
         sample_info_i = {"pdb_key": batch_i["pdb_key"], "seq_mask": seq_mask, "aatype": aatype, "core_mask": core_mask, "surface_mask": surface_mask, "psce": aux["psce"]}
 
-
         # Sidechain RMSD per residue
         atom_mask = batch_i["atom_mask"]
+        atom_mask[:, rc.atom_order["OXT"]] = 0  # remove OXT atoms from atom_mask
         scn_info, ca_aligned_coords1 = eval_metrics.compute_structure_metrics(x.cpu(), x_denoised.cpu(),
                                                                               atom_mask, aatype=aatype,
                                                                               metrics_to_compute=["scn_rmsd_per_pos",

@@ -48,237 +48,236 @@ def main(cfg: DictConfig):
             "Length of input_pkl_files must match length of model_names."
     )
 
-    # # Extract metrics from pickle
-    # model_dfs = {model_name: {} for model_name in cfg.line_plots.model_names}
-    # for model_name, pkl_file in zip(cfg.line_plots.model_names, cfg.line_plots.input_pkl_files):
-    #     with open(pkl_file, "rb") as f:
-    #         metrics = pickle.load(f)
+    # Extract metrics from pickle
+    model_dfs = {model_name: {} for model_name in cfg.line_plots.model_names}
+    for model_name, pkl_file in zip(cfg.line_plots.model_names, cfg.line_plots.input_pkl_files):
+        with open(pkl_file, "rb") as f:
+            metrics = pickle.load(f)
 
-    #     # Extract metrics
-    #     model_dfs[model_name]["pdb_name"] = [Path(x).stem for x in metrics.keys()]
-    #     model_dfs[model_name]["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
-    #     model_dfs[model_name]["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
-    #     model_dfs[model_name]["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
+        # Extract metrics
+        model_dfs[model_name]["pdb_name"] = [Path(x).stem for x in metrics.keys()]
+        model_dfs[model_name]["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
+        model_dfs[model_name]["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
+        model_dfs[model_name]["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
 
-    # # Mapping from model name to dataframe
-    # model_dfs = {model_name: pd.DataFrame(model_dfs[model_name]) for model_name in cfg.line_plots.model_names}
+    # Mapping from model name to dataframe
+    model_dfs = {model_name: pd.DataFrame(model_dfs[model_name]) for model_name in cfg.line_plots.model_names}
 
-    # # Box and whisker plots
-    # create_box_and_whisker_plots(model_dfs, Path(cfg.out_dir))
+    # Box and whisker plots
+    create_box_and_whisker_plots(model_dfs, Path(cfg.out_dir))
 
-    # # Line plots of median
-    # plot_sc_medians_line(
-    #     model_dfs,
-    #     metric="sc_ca_rmsd",
-    #     x_label="Length",
-    #     y_label="Median scRMSD",
-    #     x_ticks=[100, 200, 300, 400, 500],
-    #     save_file=f"{cfg.out_dir}/sc_ca_rmsd_med.pdf"
-    # )
+    # Line plots of median
+    plot_sc_medians_line(
+        model_dfs,
+        metric="sc_ca_rmsd",
+        x_label="Length",
+        y_label="Median scRMSD",
+        x_ticks=[100, 200, 300, 400, 500],
+        save_file=f"{cfg.out_dir}/sc_ca_rmsd_med.pdf"
+    )
 
-    # plot_sc_medians_line(
-    #     model_dfs,
-    #     metric="sc_tm",
-    #     x_label="Length",
-    #     y_label="Median scTM",
-    #     x_ticks=[100, 200, 300, 400, 500],
-    #     save_file=f"{cfg.out_dir}/sc_ca_tm_med.pdf"
-    # )
+    plot_sc_medians_line(
+        model_dfs,
+        metric="sc_tm",
+        x_label="Length",
+        y_label="Median scTM",
+        x_ticks=[100, 200, 300, 400, 500],
+        save_file=f"{cfg.out_dir}/sc_ca_tm_med.pdf"
+    )
 
-    # # Iterative sampling plots
-    # assert len(cfg.iterative_sampling_plots.input_pkl_files) == len(cfg.iterative_sampling_plots.model_names), (
-    #     "Length of iterative_sampling_plots input_pkl_files must match length of model_names."
-    # )
+    # Iterative sampling plots
+    assert len(cfg.iterative_sampling_plots.input_pkl_files) == len(cfg.iterative_sampling_plots.model_names), (
+        "Length of iterative_sampling_plots input_pkl_files must match length of model_names."
+    )
 
-    # # Extract metrics from pickle files
-    # iter_sampling_dfs = {model_name: {} for model_name in cfg.iterative_sampling_plots.model_names}
-    # for model_name, pkl_file in zip(cfg.iterative_sampling_plots.model_names, cfg.iterative_sampling_plots.input_pkl_files):
-    #     with open(pkl_file, "rb") as f:
-    #         metrics = pickle.load(f)
+    # Extract metrics from pickle files
+    iter_sampling_dfs = {model_name: {} for model_name in cfg.iterative_sampling_plots.model_names}
+    for model_name, pkl_file in zip(cfg.iterative_sampling_plots.model_names, cfg.iterative_sampling_plots.input_pkl_files):
+        with open(pkl_file, "rb") as f:
+            metrics = pickle.load(f)
 
-    #     # Extract metrics
-    #     iter_sampling_dfs[model_name]["pdb_name"] = [Path(x).stem for x in metrics.keys()]
-    #     iter_sampling_dfs[model_name]["length"] = [
-    #         len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()
-    #     ]
-    #     iter_sampling_dfs[model_name]["sc_ca_rmsd"] = [
-    #         metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()
-    #     ]
-    #     iter_sampling_dfs[model_name]["sc_tm"] = [
-    #         metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()
-    #     ]
+        # Extract metrics
+        iter_sampling_dfs[model_name]["pdb_name"] = [Path(x).stem for x in metrics.keys()]
+        iter_sampling_dfs[model_name]["length"] = [
+            len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()
+        ]
+        iter_sampling_dfs[model_name]["sc_ca_rmsd"] = [
+            metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()
+        ]
+        iter_sampling_dfs[model_name]["sc_tm"] = [
+            metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()
+        ]
 
-    # # Convert to DataFrame
-    # iter_sampling_dfs = {model_name: pd.DataFrame(iter_sampling_dfs[model_name]) for model_name in cfg.iterative_sampling_plots.model_names}
+    # Convert to DataFrame
+    iter_sampling_dfs = {model_name: pd.DataFrame(iter_sampling_dfs[model_name]) for model_name in cfg.iterative_sampling_plots.model_names}
 
-    # # Plot rmsd threshold vs success for all lengths
-    # for length in [100, 200, 300, 400, 500]:
-    #     plot_rmsd_threshold_vs_success(
-    #         model_dfs=iter_sampling_dfs,
-    #         length_filter=length,
-    #         metric="sc_ca_rmsd",
-    #         x_label="scRMSD Threshold",
-    #         y_label="Number of Samples Below Threshold",
-    #         n_thresholds=50,
-    #         threshold_min=cfg.iterative_sampling_plots.threshold_rmsd_min,
-    #         threshold_max=cfg.iterative_sampling_plots.threshold_rmsd_max,
-    #         save_file=f"{cfg.out_dir}/iterative_sampling_success_curve_L{length}.pdf"
-    #     )
+    # Plot rmsd threshold vs success for all lengths
+    for length in [100, 200, 300, 400, 500]:
+        plot_rmsd_threshold_vs_success(
+            model_dfs=iter_sampling_dfs,
+            length_filter=length,
+            metric="sc_ca_rmsd",
+            x_label="scRMSD Threshold",
+            y_label="Number of Samples Below Threshold",
+            n_thresholds=50,
+            threshold_min=cfg.iterative_sampling_plots.threshold_rmsd_min,
+            threshold_max=cfg.iterative_sampling_plots.threshold_rmsd_max,
+            save_file=f"{cfg.out_dir}/iterative_sampling_success_curve_L{length}.pdf"
+        )
 
-    # # Plot overall success rate
-    # plot_rmsd_threshold_vs_success(
-    #     model_dfs=iter_sampling_dfs,
-    #     length_filter=None,
-    #     metric="sc_ca_rmsd",
-    #     x_label="scRMSD Threshold",
-    #     y_label="Success rate (%)",
-    #     n_thresholds=50,
-    #     threshold_min=cfg.iterative_sampling_plots.threshold_rmsd_min,
-    #     threshold_max=cfg.iterative_sampling_plots.threshold_rmsd_max,
-    #     save_file=f"{cfg.out_dir}/iterative_sampling_success_curve_overall.pdf"
-    # )
+    # Plot overall success rate
+    plot_rmsd_threshold_vs_success(
+        model_dfs=iter_sampling_dfs,
+        length_filter=None,
+        metric="sc_ca_rmsd",
+        x_label="scRMSD Threshold",
+        y_label="Success rate (%)",
+        n_thresholds=50,
+        threshold_min=cfg.iterative_sampling_plots.threshold_rmsd_min,
+        threshold_max=cfg.iterative_sampling_plots.threshold_rmsd_max,
+        save_file=f"{cfg.out_dir}/iterative_sampling_success_curve_overall.pdf"
+    )
 
-    # plot_fraction_below_threshold(
-    #     model_dfs=iter_sampling_dfs,
-    #     thresholds=[2.0, 5.0],     # or just [2.0] for a single threshold
-    #     length_filter=500,
-    #     metric="sc_ca_rmsd",
-    #     save_file=f"{cfg.out_dir}/fraction_below_threshold.pdf"
-    # )
+    plot_fraction_below_threshold(
+        model_dfs=iter_sampling_dfs,
+        thresholds=[2.0, 5.0],     # or just [2.0] for a single threshold
+        length_filter=500,
+        metric="sc_ca_rmsd",
+        save_file=f"{cfg.out_dir}/fraction_below_threshold.pdf"
+    )
 
     # TODO: plot this for scTM
 
-    # Confidence plots
-    confidence_df = {}
-    with open(cfg.confidence_plots.input_pkl_file, "rb") as f:
-        metrics = pickle.load(f)
+    # # Confidence plots
+    # confidence_df = {}
+    # with open(cfg.confidence_plots.input_pkl_file, "rb") as f:
+    #     metrics = pickle.load(f)
 
-    confidence_df["pdb_name"] = [Path(x).stem for x in metrics.keys()]
-    confidence_df["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
-    confidence_df["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
-    confidence_df["sc_aa_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_aa_rmsd"].item() for x in metrics.keys()]
-    confidence_df["diff"] = confidence_df["sc_aa_rmsd"] - confidence_df["sc_ca_rmsd"]
-    confidence_df["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
-    confidence_df = pd.DataFrame(confidence_df)
-    confidence_df = confidence_df.set_index("pdb_name")
+    # confidence_df["pdb_name"] = [Path(x).stem for x in metrics.keys()]
+    # confidence_df["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
+    # confidence_df["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
+    # confidence_df["sc_aa_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_aa_rmsd"].item() for x in metrics.keys()]
+    # confidence_df["diff"] = confidence_df["sc_aa_rmsd"] - confidence_df["sc_ca_rmsd"]
+    # confidence_df["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
+    # confidence_df = pd.DataFrame(confidence_df)
+    # confidence_df = confidence_df.set_index("pdb_name")
 
-    for pkl_file in glob.glob(f"{cfg.confidence_plots.sample_pkl_dir}/*.pkl"):
-        pdb_name = Path(pkl_file).stem.replace("_sample0", "")
-        with open(pkl_file, "rb") as f:
-            sample_info = pickle.load(f)
+    # for pkl_file in glob.glob(f"{cfg.confidence_plots.sample_pkl_dir}/*.pkl"):
+    #     pdb_name = Path(pkl_file).stem.replace("_sample0", "")
+    #     with open(pkl_file, "rb") as f:
+    #         sample_info = pickle.load(f)
 
-        # Sequence confidence: get perplexities
-        aatype = sample_info["pred_aatype"]
-        N = aatype.shape[0]
-        probs = sample_info["seq_probs"][np.arange(N), aatype]  # select probs for predicted aatype
-        log_probs = np.log(probs)
-        ppl = np.exp(-np.mean(log_probs))
-        confidence_df.loc[pdb_name, "ppl"] = ppl
+    #     # Sequence confidence: get perplexities
+    #     aatype = sample_info["pred_aatype"]
+    #     N = aatype.shape[0]
+    #     probs = sample_info["seq_probs"][np.arange(N), aatype]  # select probs for predicted aatype
+    #     log_probs = np.log(probs)
+    #     ppl = np.exp(-np.mean(log_probs))
+    #     confidence_df.loc[pdb_name, "ppl"] = ppl
 
-        # Sidechain confidence: get average pSCE
-        atom_mask = rc.STANDARD_ATOM_MASK_WITH_X[aatype][:, rc.non_bb_idxs]  # assume all atom types for a given aatype are present
-        avg_psce = (sample_info["psce"] * atom_mask).sum(axis=-1) / atom_mask.sum(axis=-1)
-        confidence_df.loc[pdb_name, "avg_psce"] = np.nanmean(avg_psce)  # nanmean to ignore glycines
-
-
-    for length in [100, 200, 300, 400, 500]:
-        # sc_ca_rmsd vs ppl
-        plot_sc_correlation(
-            df=confidence_df,
-            x_col="sc_ca_rmsd",
-            y_col="ppl",
-            length_filter=length,
-            cutoff=None,
-            x_label="scRMSD",
-            y_label="Perplexity",
-            save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_ppl_L{length}.pdf"
-        )
-
-        # sc_ca_rmsd vs avg_psce
-        plot_sc_correlation(
-            df=confidence_df,
-            x_col="sc_ca_rmsd",
-            y_col="avg_psce",
-            length_filter=length,
-            cutoff=None,
-            x_label="scRMSD",
-            y_label="avg_psce",
-            save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_avg_psce_L{length}.pdf"
-        )
-
-        plot_sc_correlation(
-            df=confidence_df,
-            x_col="sc_aa_rmsd",
-            y_col="avg_psce",
-            length_filter=length,
-            cutoff=2,
-            x_label="scRMSD",
-            y_label="avg_psce",
-            save_file=f"{cfg.out_dir}/sc_aa_rmsd_vs_avg_psce_L{length}.pdf"
-        )
-
-        plot_sc_correlation(
-            df=confidence_df,
-            x_col="diff",
-            y_col="avg_psce",
-            length_filter=length,
-            cutoff=2,
-            x_label="scRMSD",
-            y_label="avg_psce",
-            save_file=f"{cfg.out_dir}/diff_vs_avg_psce_L{length}.pdf"
-        )
+    #     # Sidechain confidence: get average pSCE
+    #     atom_mask = rc.STANDARD_ATOM_MASK_WITH_X[aatype][:, rc.non_bb_idxs]  # assume all atom types for a given aatype are present
+    #     avg_psce = (sample_info["psce"] * atom_mask).sum(axis=-1) / atom_mask.sum(axis=-1)
+    #     confidence_df.loc[pdb_name, "avg_psce"] = np.nanmean(avg_psce)  # nanmean to ignore glycines
 
 
-    # Plot overall sc correlations
-    plot_sc_correlation(
-        df=confidence_df,
-        x_col="sc_ca_rmsd",
-        y_col="ppl",
-        length_filter=None,
-        cutoff=None,
-        x_label="scRMSD",
-        y_label="Perplexity",
-        save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_ppl_overall.pdf"
-    )
+    # for length in [100, 200, 300, 400, 500]:
+    #     # sc_ca_rmsd vs ppl
+    #     plot_sc_correlation(
+    #         df=confidence_df,
+    #         x_col="sc_ca_rmsd",
+    #         y_col="ppl",
+    #         length_filter=length,
+    #         cutoff=None,
+    #         x_label="scRMSD",
+    #         y_label="Perplexity",
+    #         save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_ppl_L{length}.pdf"
+    #     )
 
-    plot_sc_correlation(
-        df=confidence_df,
-        x_col="sc_ca_rmsd",
-        y_col="avg_psce",
-        length_filter=None,
-        cutoff=None,
-        x_label="scRMSD",
-        y_label="avg_psce",
-        save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_avg_psce_overall.pdf"
-    )
+    #     # sc_ca_rmsd vs avg_psce
+    #     plot_sc_correlation(
+    #         df=confidence_df,
+    #         x_col="sc_ca_rmsd",
+    #         y_col="avg_psce",
+    #         length_filter=length,
+    #         cutoff=None,
+    #         x_label="scRMSD",
+    #         y_label="avg_psce",
+    #         save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_avg_psce_L{length}.pdf"
+    #     )
+
+    #     plot_sc_correlation(
+    #         df=confidence_df,
+    #         x_col="sc_aa_rmsd",
+    #         y_col="avg_psce",
+    #         length_filter=length,
+    #         cutoff=2,
+    #         x_label="scRMSD",
+    #         y_label="avg_psce",
+    #         save_file=f"{cfg.out_dir}/sc_aa_rmsd_vs_avg_psce_L{length}.pdf"
+    #     )
+
+    #     plot_sc_correlation(
+    #         df=confidence_df,
+    #         x_col="diff",
+    #         y_col="avg_psce",
+    #         length_filter=length,
+    #         cutoff=2,
+    #         x_label="scRMSD",
+    #         y_label="avg_psce",
+    #         save_file=f"{cfg.out_dir}/diff_vs_avg_psce_L{length}.pdf"
+    #     )
+
+
+    # # Plot overall sc correlations
+    # plot_sc_correlation(
+    #     df=confidence_df,
+    #     x_col="sc_ca_rmsd",
+    #     y_col="ppl",
+    #     length_filter=None,
+    #     cutoff=None,
+    #     x_label="scRMSD",
+    #     y_label="Perplexity",
+    #     save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_ppl_overall.pdf"
+    # )
+
+    # plot_sc_correlation(
+    #     df=confidence_df,
+    #     x_col="sc_ca_rmsd",
+    #     y_col="avg_psce",
+    #     length_filter=None,
+    #     cutoff=None,
+    #     x_label="scRMSD",
+    #     y_label="avg_psce",
+    #     save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_avg_psce_overall.pdf"
+    # )
+
+    # # Example: success = sc_ca_rmsd <= 3.0, top fraction by 'ppl' (smaller is better, so bigger_is_better=False)
+    # plot_success_rate_by_confidence(
+    #     df=confidence_df,
+    #     conf_col="ppl",
+    #     sc_rmsd_threshold=2.0,
+    #     length_filter=500,        # All lengths
+    #     bigger_is_better=False,    # If smaller ppl is "better"
+    #     n_points=20,               # 20 points => [5%, 10%, 15%, ... 100%]
+    #     x_label="Top X% by perplexity (lowest to highest)",
+    #     y_label="Success Rate (%)",
+    #     save_file=f"{cfg.out_dir}/success_vs_ppl_all_lengths.pdf"
+    # )
+
+    # plot_success_rate_by_confidence(
+    #     df=confidence_df,
+    #     conf_col="avg_psce",
+    #     sc_rmsd_threshold=2.0,
+    #     length_filter=None,
+    #     bigger_is_better=False,      # If higher avg_psce is "better"
+    #     n_points=10,                # 10 points => [10%, 20%, ... 100%]
+    #     x_label="Top X% by avg_psce",
+    #     y_label="Success Rate (%)",
+    #     save_file=f"{cfg.out_dir}/success_vs_avg_psce_overall.pdf"
+    # )
 
     print("DONE")
-
-    # Example: success = sc_ca_rmsd <= 3.0, top fraction by 'ppl' (smaller is better, so bigger_is_better=False)
-    plot_success_rate_by_confidence(
-        df=confidence_df,
-        conf_col="ppl",
-        sc_rmsd_threshold=2.0,
-        length_filter=500,        # All lengths
-        bigger_is_better=False,    # If smaller ppl is "better"
-        n_points=20,               # 20 points => [5%, 10%, 15%, ... 100%]
-        x_label="Top X% by perplexity (lowest to highest)",
-        y_label="Success Rate (%)",
-        save_file=f"{cfg.out_dir}/success_vs_ppl_all_lengths.pdf"
-    )
-
-    plot_success_rate_by_confidence(
-        df=confidence_df,
-        conf_col="avg_psce",
-        sc_rmsd_threshold=2.0,
-        length_filter=None,
-        bigger_is_better=False,      # If higher avg_psce is "better"
-        n_points=10,                # 10 points => [10%, 20%, ... 100%]
-        x_label="Top X% by avg_psce",
-        y_label="Success Rate (%)",
-        save_file=f"{cfg.out_dir}/success_vs_avg_psce_overall.pdf"
-    )
-
 
 
 
