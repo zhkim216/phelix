@@ -1,18 +1,25 @@
 
+import glob
 import pickle
+import re
 import shutil
 from collections import defaultdict
 from pathlib import Path
+from typing import Optional
 
 import hydra
 import lightning as L
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
 import yaml
 from omegaconf import DictConfig, OmegaConf
-import numpy as np
+from scipy.stats import spearmanr
+
+from allatom_design.data import residue_constants as rc
 
 
 @hydra.main(config_path="../configs/eval", config_name="plot_inverse_fold_benchmarking", version_base="1.3.2")
@@ -37,60 +44,242 @@ def main(cfg: DictConfig):
     with open(Path(cfg.out_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
-    assert len(cfg.input_pkl_files) == len(cfg.model_names), (
+    assert len(cfg.line_plots.input_pkl_files) == len(cfg.line_plots.model_names), (
             "Length of input_pkl_files must match length of model_names."
     )
 
-    # Extract metrics from pickle
-    model_dfs = {model_name: {} for model_name in cfg.model_names}
-    for model_name, pkl_file in zip(cfg.model_names, cfg.input_pkl_files):
+    # # Extract metrics from pickle
+    # model_dfs = {model_name: {} for model_name in cfg.line_plots.model_names}
+    # for model_name, pkl_file in zip(cfg.line_plots.model_names, cfg.line_plots.input_pkl_files):
+    #     with open(pkl_file, "rb") as f:
+    #         metrics = pickle.load(f)
+
+    #     # Extract metrics
+    #     model_dfs[model_name]["pdb_name"] = [Path(x).stem for x in metrics.keys()]
+    #     model_dfs[model_name]["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
+    #     model_dfs[model_name]["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
+    #     model_dfs[model_name]["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
+
+    # # Mapping from model name to dataframe
+    # model_dfs = {model_name: pd.DataFrame(model_dfs[model_name]) for model_name in cfg.line_plots.model_names}
+
+    # # Box and whisker plots
+    # create_box_and_whisker_plots(model_dfs, Path(cfg.out_dir))
+
+    # # Line plots of median
+    # plot_sc_medians_line(
+    #     model_dfs,
+    #     metric="sc_ca_rmsd",
+    #     x_label="Length",
+    #     y_label="Median scRMSD",
+    #     x_ticks=[100, 200, 300, 400, 500],
+    #     save_file=f"{cfg.out_dir}/sc_ca_rmsd_med.pdf"
+    # )
+
+    # plot_sc_medians_line(
+    #     model_dfs,
+    #     metric="sc_tm",
+    #     x_label="Length",
+    #     y_label="Median scTM",
+    #     x_ticks=[100, 200, 300, 400, 500],
+    #     save_file=f"{cfg.out_dir}/sc_ca_tm_med.pdf"
+    # )
+
+    # # Iterative sampling plots
+    # assert len(cfg.iterative_sampling_plots.input_pkl_files) == len(cfg.iterative_sampling_plots.model_names), (
+    #     "Length of iterative_sampling_plots input_pkl_files must match length of model_names."
+    # )
+
+    # # Extract metrics from pickle files
+    # iter_sampling_dfs = {model_name: {} for model_name in cfg.iterative_sampling_plots.model_names}
+    # for model_name, pkl_file in zip(cfg.iterative_sampling_plots.model_names, cfg.iterative_sampling_plots.input_pkl_files):
+    #     with open(pkl_file, "rb") as f:
+    #         metrics = pickle.load(f)
+
+    #     # Extract metrics
+    #     iter_sampling_dfs[model_name]["pdb_name"] = [Path(x).stem for x in metrics.keys()]
+    #     iter_sampling_dfs[model_name]["length"] = [
+    #         len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()
+    #     ]
+    #     iter_sampling_dfs[model_name]["sc_ca_rmsd"] = [
+    #         metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()
+    #     ]
+    #     iter_sampling_dfs[model_name]["sc_tm"] = [
+    #         metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()
+    #     ]
+
+    # # Convert to DataFrame
+    # iter_sampling_dfs = {model_name: pd.DataFrame(iter_sampling_dfs[model_name]) for model_name in cfg.iterative_sampling_plots.model_names}
+
+    # # Plot rmsd threshold vs success for all lengths
+    # for length in [100, 200, 300, 400, 500]:
+    #     plot_rmsd_threshold_vs_success(
+    #         model_dfs=iter_sampling_dfs,
+    #         length_filter=length,
+    #         metric="sc_ca_rmsd",
+    #         x_label="scRMSD Threshold",
+    #         y_label="Number of Samples Below Threshold",
+    #         n_thresholds=50,
+    #         threshold_min=cfg.iterative_sampling_plots.threshold_rmsd_min,
+    #         threshold_max=cfg.iterative_sampling_plots.threshold_rmsd_max,
+    #         save_file=f"{cfg.out_dir}/iterative_sampling_success_curve_L{length}.pdf"
+    #     )
+
+    # # Plot overall success rate
+    # plot_rmsd_threshold_vs_success(
+    #     model_dfs=iter_sampling_dfs,
+    #     length_filter=None,
+    #     metric="sc_ca_rmsd",
+    #     x_label="scRMSD Threshold",
+    #     y_label="Success rate (%)",
+    #     n_thresholds=50,
+    #     threshold_min=cfg.iterative_sampling_plots.threshold_rmsd_min,
+    #     threshold_max=cfg.iterative_sampling_plots.threshold_rmsd_max,
+    #     save_file=f"{cfg.out_dir}/iterative_sampling_success_curve_overall.pdf"
+    # )
+
+    # plot_fraction_below_threshold(
+    #     model_dfs=iter_sampling_dfs,
+    #     thresholds=[2.0, 5.0],     # or just [2.0] for a single threshold
+    #     length_filter=500,
+    #     metric="sc_ca_rmsd",
+    #     save_file=f"{cfg.out_dir}/fraction_below_threshold.pdf"
+    # )
+
+    # TODO: plot this for scTM
+
+    # Confidence plots
+    confidence_df = {}
+    with open(cfg.confidence_plots.input_pkl_file, "rb") as f:
+        metrics = pickle.load(f)
+
+    confidence_df["pdb_name"] = [Path(x).stem for x in metrics.keys()]
+    confidence_df["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
+    confidence_df["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
+    confidence_df["sc_aa_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_aa_rmsd"].item() for x in metrics.keys()]
+    confidence_df["diff"] = confidence_df["sc_aa_rmsd"] - confidence_df["sc_ca_rmsd"]
+    confidence_df["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
+    confidence_df = pd.DataFrame(confidence_df)
+    confidence_df = confidence_df.set_index("pdb_name")
+
+    for pkl_file in glob.glob(f"{cfg.confidence_plots.sample_pkl_dir}/*.pkl"):
+        pdb_name = Path(pkl_file).stem.replace("_sample0", "")
         with open(pkl_file, "rb") as f:
-            metrics = pickle.load(f)
+            sample_info = pickle.load(f)
 
-        # Extract metrics
-        model_dfs[model_name]["pdb_name"] = [Path(x).stem for x in metrics.keys()]
-        model_dfs[model_name]["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
-        model_dfs[model_name]["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
-        model_dfs[model_name]["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
+        # Sequence confidence: get perplexities
+        aatype = sample_info["pred_aatype"]
+        N = aatype.shape[0]
+        probs = sample_info["seq_probs"][np.arange(N), aatype]  # select probs for predicted aatype
+        log_probs = np.log(probs)
+        ppl = np.exp(-np.mean(log_probs))
+        confidence_df.loc[pdb_name, "ppl"] = ppl
 
-    # Mapping from model name to dataframe
-    model_dfs = {model_name: pd.DataFrame(model_dfs[model_name]) for model_name in cfg.model_names}
+        # Sidechain confidence: get average pSCE
+        atom_mask = rc.STANDARD_ATOM_MASK_WITH_X[aatype][:, rc.non_bb_idxs]  # assume all atom types for a given aatype are present
+        avg_psce = (sample_info["psce"] * atom_mask).sum(axis=-1) / atom_mask.sum(axis=-1)
+        confidence_df.loc[pdb_name, "avg_psce"] = np.nanmean(avg_psce)  # nanmean to ignore glycines
 
-    # Box and whisker plots
-    create_box_and_whisker_plots(model_dfs, Path(cfg.out_dir))
 
-    # Line plots of median
-    plot_sc_medians_line(
-        model_dfs,
-        metric="sc_ca_rmsd",
-        x_label="Length",
-        y_label="Median scRMSD",
-        x_ticks=[100, 200, 300, 400, 500],
-        save_file=f"{cfg.out_dir}/sc_ca_rmsd_med.pdf"
-    )
-
-    plot_sc_medians_line(
-        model_dfs,
-        metric="sc_tm",
-        x_label="Length",
-        y_label="Median scTM",
-        x_ticks=[100, 200, 300, 400, 500],
-        save_file=f"{cfg.out_dir}/sc_ca_tm_med.pdf"
-    )
-
-    # Plot success rate vs scRMSD threshold
-    for length in [400, 500]:
-        plot_rmsd_threshold_vs_success(
-            model_dfs=model_dfs,
+    for length in [100, 200, 300, 400, 500]:
+        # sc_ca_rmsd vs ppl
+        plot_sc_correlation(
+            df=confidence_df,
+            x_col="sc_ca_rmsd",
+            y_col="ppl",
             length_filter=length,
-            metric="sc_ca_rmsd",
-            x_label="scRMSD Threshold",
-            y_label="Number of samples below threshold",
-            n_thresholds=50,
-            threshold_min=0,
-            threshold_max=5,
-            save_file=f"{cfg.out_dir}/L{length}_sc_rmsd_success_curve.pdf"
+            cutoff=None,
+            x_label="scRMSD",
+            y_label="Perplexity",
+            save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_ppl_L{length}.pdf"
         )
+
+        # sc_ca_rmsd vs avg_psce
+        plot_sc_correlation(
+            df=confidence_df,
+            x_col="sc_ca_rmsd",
+            y_col="avg_psce",
+            length_filter=length,
+            cutoff=None,
+            x_label="scRMSD",
+            y_label="avg_psce",
+            save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_avg_psce_L{length}.pdf"
+        )
+
+        plot_sc_correlation(
+            df=confidence_df,
+            x_col="sc_aa_rmsd",
+            y_col="avg_psce",
+            length_filter=length,
+            cutoff=2,
+            x_label="scRMSD",
+            y_label="avg_psce",
+            save_file=f"{cfg.out_dir}/sc_aa_rmsd_vs_avg_psce_L{length}.pdf"
+        )
+
+        plot_sc_correlation(
+            df=confidence_df,
+            x_col="diff",
+            y_col="avg_psce",
+            length_filter=length,
+            cutoff=2,
+            x_label="scRMSD",
+            y_label="avg_psce",
+            save_file=f"{cfg.out_dir}/diff_vs_avg_psce_L{length}.pdf"
+        )
+
+
+    # Plot overall sc correlations
+    plot_sc_correlation(
+        df=confidence_df,
+        x_col="sc_ca_rmsd",
+        y_col="ppl",
+        length_filter=None,
+        cutoff=None,
+        x_label="scRMSD",
+        y_label="Perplexity",
+        save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_ppl_overall.pdf"
+    )
+
+    plot_sc_correlation(
+        df=confidence_df,
+        x_col="sc_ca_rmsd",
+        y_col="avg_psce",
+        length_filter=None,
+        cutoff=None,
+        x_label="scRMSD",
+        y_label="avg_psce",
+        save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_avg_psce_overall.pdf"
+    )
+
+    print("DONE")
+
+    # Example: success = sc_ca_rmsd <= 3.0, top fraction by 'ppl' (smaller is better, so bigger_is_better=False)
+    plot_success_rate_by_confidence(
+        df=confidence_df,
+        conf_col="ppl",
+        sc_rmsd_threshold=2.0,
+        length_filter=500,        # All lengths
+        bigger_is_better=False,    # If smaller ppl is "better"
+        n_points=20,               # 20 points => [5%, 10%, 15%, ... 100%]
+        x_label="Top X% by perplexity (lowest to highest)",
+        y_label="Success Rate (%)",
+        save_file=f"{cfg.out_dir}/success_vs_ppl_all_lengths.pdf"
+    )
+
+    plot_success_rate_by_confidence(
+        df=confidence_df,
+        conf_col="avg_psce",
+        sc_rmsd_threshold=2.0,
+        length_filter=None,
+        bigger_is_better=False,      # If higher avg_psce is "better"
+        n_points=10,                # 10 points => [10%, 20%, ... 100%]
+        x_label="Top X% by avg_psce",
+        y_label="Success Rate (%)",
+        save_file=f"{cfg.out_dir}/success_vs_avg_psce_overall.pdf"
+    )
+
+
 
 
 def create_box_and_whisker_plots(model_dfs: dict, out_dir: Path):
@@ -233,47 +422,19 @@ def plot_sc_medians_line(
 
 def plot_rmsd_threshold_vs_success(
     model_dfs,
-    length_filter=500,
+    length_filter: Optional[int] = 500,
     metric="sc_ca_rmsd",
-    x_label="scRMSD threshold",
-    y_label="Designability success rate",
-    n_thresholds=100,
+    x_label="scRMSD Threshold",
+    y_label="Number of Samples Below Threshold",
+    n_thresholds=50,
     threshold_min=None,
     threshold_max=None,
     save_file=None
 ):
     """
-    Plots a curve for each model:
-      - x-axis: RMSD threshold
-      - y-axis: number of samples (or fraction) below that threshold
-
-    Only uses rows where length == length_filter.
-
-    Args:
-        model_dfs (dict):
-            {model_name: pd.DataFrame}, each DF has columns:
-            ["pdb_name", "length", "sc_ca_rmsd", "sc_tm"] at minimum.
-        length_filter (int):
-            Only use rows where `length == length_filter`.
-            Default is 500, but can be changed if needed.
-        metric (str):
-            Column name for the scRMSD metric to use, e.g. "sc_ca_rmsd".
-        x_label (str):
-            Label for the RMSD threshold axis.
-        y_label (str):
-            Label for the success rate (or number of samples) axis.
-        n_thresholds (int):
-            How many threshold points to sample between min and max scRMSD.
-        threshold_min (float or None):
-            If provided, use this as the lower bound for RMSD thresholds.
-            Otherwise, use the min in the data.
-        threshold_max (float or None):
-            If provided, use this as the upper bound for RMSD thresholds.
-            Otherwise, use the max in the data.
-        save_file (str or Path):
-            If provided, the plot is saved (PDF & PNG).
+    Plots the success rate of each model at different scRMSD thresholds.
     """
-    # 1) Combine all model data
+    # Combine all model data
     combined_list = []
     for model_name, df in model_dfs.items():
         temp = df.copy()
@@ -281,13 +442,16 @@ def plot_rmsd_threshold_vs_success(
         combined_list.append(temp)
     combined_df = pd.concat(combined_list, ignore_index=True)
 
-    # 2) Filter to only rows where length == length_filter
-    filtered_df = combined_df[combined_df["length"] == length_filter].copy()
-    if filtered_df.empty:
-        print(f"No samples found for length={length_filter}. Nothing to plot.")
-        return
+    # Filter to only rows where length == length_filter
+    if length_filter is not None:
+        filtered_df = combined_df[combined_df["length"] == length_filter].copy()
+        if filtered_df.empty:
+            print(f"No samples found for length={length_filter}. Nothing to plot.")
+            return
+    else:
+        filtered_df = combined_df.copy()
 
-    # 3) Determine range of thresholds for the chosen metric
+    # Determine the threshold range
     data_min = filtered_df[metric].min()
     data_max = filtered_df[metric].max()
 
@@ -296,52 +460,39 @@ def plot_rmsd_threshold_vs_success(
     if threshold_max is None:
         threshold_max = data_max
 
-    # Ensure threshold_min <= threshold_max (simple safety check)
     threshold_min = min(threshold_min, threshold_max)
     threshold_max = max(threshold_min, threshold_max)
-
     thresholds = np.linspace(threshold_min, threshold_max, n_thresholds)
 
-    # 4) Create the plot
-    plt.figure(figsize=(6, 4))
+    # Handle colormap
+    # colors = ["gold", "yellow", "green", "cyan", "slateblue", "violet"]
+    # cmap = mcolors.LinearSegmentedColormap.from_list("my_cmap", colors, N=256)
+    cmap = mcolors.ListedColormap(plt.cm.viridis(np.linspace(0,1,256)))
 
-    # For each model, compute how many samples fall below each threshold
-    for model_name in filtered_df["model"].unique():
+    # Plot
+    plt.figure(figsize=(12, 8))
+
+    for model_idx, model_name in enumerate(model_dfs.keys()):
+        # Get the corresponding color from the custom colormap
+        curve_color = cmap(model_idx / len(model_dfs))
+
+        # Compute how many samples fall below each threshold
         sub_df = filtered_df[filtered_df["model"] == model_name]
-        if sub_df.empty:
-            continue
-
         sub_rmsds = sub_df[metric].values
-        total_samples = len(sub_rmsds)  # needed if you want fraction
         y_values = []
-
         for thr in thresholds:
-            count_below = (sub_rmsds <= thr).sum()
+            pct_below = (sub_rmsds <= thr).sum() / len(sub_rmsds) * 100
+            y_values.append(pct_below)
 
-            # Option 1: Count of samples below threshold
-            y_values.append(count_below)
+        # Plot the curve
+        plt.plot(thresholds, y_values, label=model_name, markersize=3, color=curve_color)
 
-            # Option 2 (if desired): fraction of samples below threshold
-            # fraction_below = count_below / total_samples
-            # y_values.append(fraction_below)
-
-        plt.plot(
-            thresholds,
-            y_values,
-            label=model_name,
-            marker="o",
-            markersize=3
-        )
-
-    # 5) Label axes, add grid
     plt.xlabel(x_label, fontsize=12)
     plt.ylabel(y_label, fontsize=12)
     plt.grid(color='gray', linestyle='-', linewidth=0.5)
-
-    # 6) Add legend
     plt.legend(loc="best", fontsize=9)
 
-    # 7) Save if requested (PDF & PNG)
+    # Save if requested
     if save_file:
         outpath = Path(save_file)
         plt.savefig(outpath, dpi=300, transparent=True, bbox_inches="tight")
@@ -349,6 +500,281 @@ def plot_rmsd_threshold_vs_success(
 
     plt.tight_layout()
     plt.show()
+
+
+def plot_sc_correlation(
+    df: pd.DataFrame,
+    x_col: str,
+    y_col: str,                 # e.g. "avg_log_prob", "avg_psce", or "avg_seq_entropy"
+    length_filter: Optional[int] = None,
+    cutoff: Optional[float] = None,
+    x_label: str = "scRMSD",
+    y_label: Optional[str] = None,
+    save_file: Optional[str] = None
+):
+    """
+    Scatter plot of scRMSD vs. an arbitrary y_col, e.g. avg_log_prob or avg_psce.
+    Optionally filters rows by:
+      - length_filter: Only includes rows where df['length'] == length_filter (if provided).
+      - cutoff:        Only includes rows where df['sc_ca_rmsd'] <= cutoff (if provided).
+
+    Title contains Spearman correlation coefficient (rho) and p-value.
+
+    Args:
+        df (pd.DataFrame): Must have columns ['sc_ca_rmsd', y_col, 'length'] as needed.
+        y_col (str): Name of the column on the y-axis (e.g., "avg_log_prob", "avg_psce").
+        length_filter (Optional[int]): If provided, only plot rows where df['length'] == this value.
+        cutoff (Optional[float]): If provided, only plot rows where df['sc_ca_rmsd'] <= cutoff.
+        x_label (str): Label for the x-axis. Defaults to "scRMSD".
+        y_label (Optional[str]): Label for the y-axis. If None, defaults to y_col.
+        save_file (Optional[str]): If provided, saves plot (PDF & PNG) to this path.
+    """
+    # 1) Filter the DataFrame
+    filtered = df.copy()
+    if length_filter is not None:
+        filtered = filtered[filtered["length"] == length_filter]
+
+    if cutoff is not None:
+        filtered = filtered[filtered[x_col] <= cutoff]
+
+    if filtered.empty:
+        print(
+            f"No data available for length_filter={length_filter} "
+            f"and cutoff={cutoff} on {y_col}."
+        )
+        return
+
+    # 2) Create the scatter plot
+    plt.figure(figsize=(6, 5))
+    sns.scatterplot(
+        data=filtered,
+        x=x_col,
+        y=y_col,
+        alpha=0.6
+    )
+
+    # 3) Calculate Spearman correlation
+    rho, pval = spearmanr(filtered["sc_ca_rmsd"], filtered[y_col])
+
+    # 4) Set the plot title, x-/y-axis labels, grid
+    y_axis_label = y_label if y_label else y_col
+    plt.title(f"{x_label} vs {y_axis_label} (Spearmanr={rho:.3f}, p={pval:.1e})")
+    plt.xlabel(x_label)
+    plt.ylabel(y_axis_label)
+    plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.7)
+
+    # 5) Save plot if desired
+    if save_file:
+        outpath = Path(save_file)
+        plt.savefig(outpath, dpi=300, transparent=True, bbox_inches="tight")
+        plt.savefig(outpath.with_suffix(".png"), dpi=300, transparent=True, bbox_inches="tight")
+    plt.close()
+
+
+
+def plot_fraction_below_threshold(
+    model_dfs,
+    thresholds=[1.0, 2.0, 3.0],
+    length_filter: Optional[int] = 500,
+    metric="sc_ca_rmsd",
+    x_label="Step Count",
+    y_label="Fraction Below Threshold",
+    save_file=None
+):
+    """
+    Plots fraction of samples below each threshold for different step counts.
+    Assumes model names contain '(X steps)', e.g. 'FAMPNN (10 steps)'.
+
+    Args:
+        model_dfs (dict):
+            {model_name: pd.DataFrame}, each DF has columns like:
+            ["pdb_name", "length", "sc_ca_rmsd", "sc_tm"].
+        thresholds (list[float]):
+            One or more thresholds to show. Each threshold results in one curve.
+        length_filter (int):
+            Only include rows where 'length' == length_filter.
+        metric (str):
+            Column name to analyze, e.g. "sc_ca_rmsd".
+        x_label (str):
+            X-axis label. Defaults to "Step Count".
+        y_label (str):
+            Y-axis label. Defaults to "Fraction Below Threshold".
+        save_file (str or Path):
+            If provided, saves the figure as both PDF and PNG.
+    """
+    # --------------------------
+    # 1. Aggregate data across all models
+    # --------------------------
+    import pandas as pd
+
+    df_list = []
+    for model_name, df in model_dfs.items():
+        temp = df.copy()
+        temp["model"] = model_name
+        df_list.append(temp)
+    combined_df = pd.concat(df_list, ignore_index=True)
+
+    # Filter by length
+    if length_filter is not None:
+        combined_df = combined_df[combined_df["length"] == length_filter]
+
+    if combined_df.empty:
+        print(f"No samples found for length={length_filter}. Nothing to plot.")
+        return
+
+    # --------------------------
+    # 2. Parse step count from model name, group data by step count
+    # --------------------------
+    # Example model name: "FAMPNN (10 steps)"
+    # We'll store (step_count -> list of sc_ca_rmsd values)
+    step_dict = {}  # {step_count (int): [rmsd_vals]}
+
+    for model_name in combined_df["model"].unique():
+        # Get rows matching this model name
+        sub_df = combined_df[combined_df["model"] == model_name]
+
+        # Attempt to parse steps from model_name
+        match = re.search(r"^(\d+)\s*steps?$", model_name)
+        if match:
+            steps = int(match.group(1))
+        else:
+            # If no match, default to 0
+            steps = 0
+
+        # Collect metric values
+        step_dict.setdefault(steps, []).extend(sub_df[metric].values.tolist())
+
+    # --------------------------
+    # 3. For each threshold, compute fraction of samples below threshold
+    # --------------------------
+    # We'll have one line (x=step_count, y=fraction) per threshold
+    # Sort step_dict keys so we plot in ascending order of steps
+    sorted_steps = sorted(step_dict.keys())
+
+    # fraction_data[threshold] = list of fraction_below across step counts
+    fraction_data = {thr: [] for thr in thresholds}
+
+    for step_count in sorted_steps:
+        vals = np.array(step_dict[step_count])
+        n_total = len(vals)
+
+        for thr in thresholds:
+            frac_below = (vals < thr).sum() / n_total if n_total > 0 else 0.0
+            fraction_data[thr].append(frac_below)
+
+    # --------------------------
+    # 4. Plot results
+    # --------------------------
+    plt.figure(figsize=(5, 4))
+
+    for thr in thresholds:
+        plt.plot(
+            sorted_steps,
+            fraction_data[thr],
+            marker='o',
+            linewidth=2,
+            label=f"Threshold = {thr} Å"
+        )
+
+    plt.xlabel(x_label, fontsize=12)
+    plt.ylabel(y_label, fontsize=12)
+    plt.xscale("log")
+    plt.title(f"Fraction Below Threshold vs Steps (L={length_filter})", fontsize=12)
+    plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.8)
+    plt.legend(loc="best", fontsize=10)
+
+    # Save figure if requested
+    if save_file:
+        out_path = Path(save_file)
+        plt.savefig(out_path, dpi=300, transparent=True, bbox_inches="tight")
+        plt.savefig(out_path.with_suffix(".png"), dpi=300, transparent=True, bbox_inches="tight")
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_success_rate_by_confidence(
+    df: pd.DataFrame,
+    conf_col: str,
+    sc_rmsd_col: str = "sc_ca_rmsd",
+    sc_rmsd_threshold: float = 2.0,
+    length_filter: Optional[int] = None,
+    bigger_is_better: bool = False,
+    n_points: int = 10,
+    x_label: str = "Top X% (Confidence Rank)",
+    y_label: str = "Success Rate (%)",
+    save_file: Optional[str] = None
+):
+    """
+    Plots success rate vs. top fraction/percentile of data sorted by `conf_col`.
+
+    Success is defined as df[sc_rmsd_col] <= sc_rmsd_threshold.
+
+    E.g., if bigger_is_better=True, then "top 10%" means the 10% with the largest conf_col values.
+          if bigger_is_better=False, then "top 10%" means the 10% with the smallest conf_col values.
+
+    Args:
+        df (pd.DataFrame): Must have columns [conf_col, sc_rmsd_col, 'length'] if length_filter is used.
+        conf_col (str): The column name of the confidence measure (e.g., 'ppl' or 'avg_psce').
+        sc_rmsd_col (str): The column name for scRMSD. Defaults to "sc_ca_rmsd".
+        sc_rmsd_threshold (float): scRMSD <= this value is considered a "success".
+        length_filter (Optional[int]): If provided, only use rows where df['length'] == length_filter.
+        bigger_is_better (bool): If True, sort by conf_col descending; else ascending.
+        n_points (int): Number of percentile points to evaluate (e.g. 10 => [10%, 20%, ... 100%]).
+        x_label (str): Label for the x-axis.
+        y_label (str): Label for the y-axis.
+        save_file (Optional[str]): If provided, saves the plot (PDF & PNG) to this path.
+    """
+    # 1) Filter data by length if requested
+    data = df.copy()
+    if length_filter is not None:
+        data = data[data["length"] == length_filter]
+
+    if data.empty:
+        print(f"No data after applying length_filter={length_filter}.")
+        return
+
+    # 2) Determine which entries are successes
+    data["success"] = (data[sc_rmsd_col] <= sc_rmsd_threshold)
+
+    # 3) Sort data by confidence measure
+    #    If bigger_is_better, we sort descending. Otherwise ascending.
+    data = data.sort_values(conf_col, ascending=not bigger_is_better).reset_index(drop=True)
+
+    # 4) We'll evaluate top X% (X in {1,2,...,100} or spaced by n_points)
+    #    For example, if n_points=10, we check [10%, 20%, 30%, ..., 100%]
+    percentiles = np.linspace(1, 100, n_points, dtype=int)
+
+    x_vals = []
+    y_vals = []
+    N = len(data)
+
+    for p in percentiles:
+        top_count = int(np.ceil(N * (p / 100.0)))
+        subset = data.iloc[:top_count]  # top X% by conf_col
+        success_rate = 100.0 * subset["success"].mean()  # success rate in %
+        x_vals.append(p)
+        y_vals.append(success_rate)
+
+    # 5) Create the plot
+    plt.figure(figsize=(6, 5))
+    plt.plot(x_vals, y_vals, marker="o")
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    plt.ylim(0, 100)
+    plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.7)
+
+    plt.title(
+        f"Success vs. {conf_col}\n"
+        f"scRMSD <= {sc_rmsd_threshold}, length={length_filter if length_filter else 'ALL'}"
+    )
+
+    # 6) Save if requested
+    if save_file:
+        outpath = Path(save_file)
+        plt.savefig(outpath, dpi=300, transparent=True, bbox_inches="tight")
+        plt.savefig(outpath.with_suffix(".png"), dpi=300, transparent=True, bbox_inches="tight")
+    plt.close()
 
 
 if __name__ == "__main__":

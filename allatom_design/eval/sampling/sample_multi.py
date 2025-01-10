@@ -189,6 +189,7 @@ def main(cfg: DictConfig):
             aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
             num_corrector_steps=cfg.num_corrector_steps,
             corrector_step_ratio=cfg.corrector_step_ratio,
+            seq_only=cfg.seq_only,
             temperature=cfg.temperature,
             repack_last=cfg.repack_last,
             aatype_override_mask=aatype_override_mask,
