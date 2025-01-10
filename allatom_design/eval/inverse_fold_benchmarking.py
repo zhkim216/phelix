@@ -67,26 +67,33 @@ def main(cfg: DictConfig):
     device = torch.device("cuda" if cfg.cuda else "cpu")
     torch.set_grad_enabled(False)
     struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
-    use_mpnn = not cfg.input_fasta_dir
+
+    use_input_pdbs = cfg.input_pdb_dir is not None
+    use_mpnn = not (cfg.input_fasta_dir or cfg.input_pdb_dir)
     if use_mpnn:
+        # If no input fasta or pdb dir, use MPNN to generate sequences
         mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
         mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)  # override base mpnn config with mpnn.overrides
         mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
     else:
         mpnn_model, mpnn_cfg = None, None  # no MPNN
-
-        # Read in fastas and thread sequences onto input backbones
         designs_dir = f"{cfg.out_dir}/designs"
         Path(designs_dir).mkdir(parents=True, exist_ok=True)
-
         design_pdbs = []
+
         for pdb_path in pdbs:
             stem = Path(pdb_path).stem
-            fasta_path = find_sample_fasta(cfg.input_fasta_dir, stem)
-            assert Path(fasta_path).exists(), f"No corresponding FASTA found for {pdb_path} at {fasta_path}"
             out_pdb_path = f"{designs_dir}/{stem}.pdb"
-            thread_sequence_onto_backbone(pdb_path, fasta_path, out_pdb_path)
             design_pdbs.append(out_pdb_path)
+            if use_input_pdbs:
+                # load in input pdbs with sequences already on them
+                sample_pdb_path = find_sample_pdb(cfg.input_pdb_dir, stem)
+                shutil.copy(sample_pdb_path, out_pdb_path)
+            else:
+                # thread sequence onto backbone
+                fasta_path = find_sample_fasta(cfg.input_fasta_dir, stem)
+                assert Path(fasta_path).exists(), f"No corresponding FASTA found for {pdb_path} at {fasta_path}"
+                thread_sequence_onto_backbone(pdb_path, fasta_path, out_pdb_path)
         pdbs = design_pdbs  # use designed pdbs for evaluation
 
     # Run self-consistency evaluation
@@ -199,6 +206,26 @@ def find_sample_fasta(sample_dir: str, pdb_key: str) -> str:
     else:
         raise ValueError(
             f"Multiple sample PDB files found for key '{pdb_key}' in '{sample_dir}': {matched_fastas}"
+        )
+
+
+def find_sample_pdb(sample_dir: str, pdb_key: str) -> str:
+    # Look for an exact match first
+    exact_match = f"{sample_dir}/{pdb_key}.pdb"
+    if Path(exact_match).exists():
+        return exact_match
+
+    # Otherwise, search for a file matching {pdb_key}_*.pdb
+    pattern = f"{sample_dir}/{pdb_key}_*.pdb"
+    matched_pdbs = glob.glob(pattern)
+
+    if len(matched_pdbs) == 1:
+        return matched_pdbs[0]
+    elif len(matched_pdbs) == 0:
+        raise FileNotFoundError(f"No sample PDB file found for key '{pdb_key}' in '{sample_dir}'.")
+    else:
+        raise ValueError(
+            f"Multiple sample PDB files found for key '{pdb_key}' in '{sample_dir}': {matched_pdbs}"
         )
 
 
