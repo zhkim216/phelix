@@ -6,10 +6,11 @@
 #SBATCH --time=96:00:00
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
-#SBATCH --array=0-9%2
+#SBATCH --array=0-6%1
 
 # Define the list of FASTA directories to evaluate
-FASTAS=("S1_c0_aasd2" "S10_c0_aasd2" "S20_c0_aasd2" "S50_c0_aasd2" "S100_c0_aasd2" "S500_c0_aasd2" "esm3" "esm_if1" "lmdesign" "proteinmpnn")
+# FASTAS=("esm3" "esm_if1" "lmdesign" "proteinmpnn")
+FASTAS=("S1_c0_aasd2" "S10_c0_aasd2" "S100_c0_aasd2" "S300_c0_aasd2" "S500_c0_aasd2" "S100_c0_aasd2_seq_only" "S100_c0_aasd4")
 FASTA_NAME=${FASTAS[$SLURM_ARRAY_TASK_ID]}
 
 # Load modules and conda environment
@@ -33,10 +34,12 @@ GROUP=denovo500_if_benchmarking
 cd ${BASE_DIR}
 
 # Set input FASTA directory and output directory based on the current FASTA
-INPUT_FASTA_DIR="/scratch/hielab/rshuai/allatom_design/allatom_design/sc_evals/fastas/${FASTA_NAME}"
+# INPUT_FASTA_DIR="/scratch/hielab/rshuai/allatom_design/allatom_design/sc_evals/fastas/${FASTA_NAME}"
+INPUT_PDB_DIR="/scratch/hielab/rshuai/allatom_design/allatom_design/sc_evals/input_pdbs/${FASTA_NAME}"
 OUT_DIR="/scratch/hielab/rshuai/allatom_design/allatom_design/sc_evals/outputs/${FASTA_NAME}"
 
 # Run inverse folding benchmarking for the current FASTA
+    # input_fasta_dir=${INPUT_FASTA_DIR} \
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/inverse_fold_benchmarking.py \
     wandb_id=${WANDB_ID} \
     exp_name=${FASTA_NAME} \
@@ -46,6 +49,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/inverse_fold_benchmarking.py
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     sample_dir=/scratch/hielab/rshuai/datasets/denovo500/pdbs \
-    input_fasta_dir=${INPUT_FASTA_DIR} \
     hydra.run.dir=${HYDRA_DIR} \
+    input_pdb_dir=${INPUT_PDB_DIR} \
     out_dir=${OUT_DIR}
