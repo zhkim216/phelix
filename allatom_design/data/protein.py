@@ -295,7 +295,7 @@ def to_pdb(prot: Protein, conect=False, model_idx: int = 1) -> str:
                 f"{res_name_3:>3} {chain_ids[chain_index[i]]:>1}"
                 f"{residue_index[i]:>4}{insertion_code:>1}   "
                 f"{pos[0]:>8.3f}{pos[1]:>8.3f}{pos[2]:>8.3f}"
-                f"{occupancy:>6.2f}{b_factor:>6.2f}          "
+                f"{occupancy:>6.2f}{b_factor:>6.3f}          "
                 f"{element:>2}{charge:>2}"
             )
             pdb_lines.append(atom_line)
