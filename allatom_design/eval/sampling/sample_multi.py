@@ -192,6 +192,7 @@ def main(cfg: DictConfig):
             seq_only=cfg.seq_only,
             temperature=cfg.temperature,
             repack_last=cfg.repack_last,
+            repack_every_step=cfg.repack_every_step,
             aatype_override_mask=aatype_override_mask,
             scn_override_mask=scn_override_mask,
             scd_inputs=scd_inputs,
