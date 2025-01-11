@@ -9,8 +9,9 @@
 #SBATCH --array=0-6%1
 
 # Define the list of FASTA directories to evaluate
-# FASTAS=("esm3" "esm_if1" "lmdesign" "proteinmpnn")
-FASTAS=("S1_c0_aasd2" "S10_c0_aasd2" "S100_c0_aasd2" "S300_c0_aasd2" "S500_c0_aasd2" "S100_c0_aasd2_seq_only" "S100_c0_aasd4")
+# FASTAS=("esm3" "esm_if1" "lmdesign")
+# FASTAS=(" "proteinmpnn")
+FASTAS=("S1_c0_aasd2" "S10_c0_aasd2" "S100_c0_aasd2" "S300_c0_aasd2" "S500_c0_aasd2" "S100_seq_only_c0_aasd2" "S100_c0_aasd4")
 FASTA_NAME=${FASTAS[$SLURM_ARRAY_TASK_ID]}
 
 # Load modules and conda environment

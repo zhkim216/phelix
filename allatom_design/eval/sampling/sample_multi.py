@@ -230,10 +230,13 @@ def main(cfg: DictConfig):
                 f.write(f">{pdb_keys[j]}\n{pred_seq_i}\n")
 
         # Save samples as pkl
-        for i in range(B):
-            sample_i = {k: v[i].cpu().numpy() for k, v in samples.items()}
-            with open(f"{sample_pkl_dir}/{pdb_keys[i]}.pkl", "wb") as f:
-                pickle.dump(sample_i, f)
+        for j in range(B):
+            sample_j = {k: v[j].cpu().numpy() for k, v in samples.items()}
+            # crop to the actual sequence length
+            seq_mask_j = sample_j["seq_mask"]
+            sample_j = {k: v[seq_mask_j.astype(bool)] for k, v in sample_j.items()}
+            with open(f"{sample_pkl_dir}/{pdb_keys[j]}.pkl", "wb") as f:
+                pickle.dump(sample_j, f)
 
         # Run self-consistency evaluation
         if cfg.run_self_consistency_eval:
