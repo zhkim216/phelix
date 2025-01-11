@@ -235,6 +235,7 @@ class SeqDenoiser(nn.Module):
                corrector_step_ratio: float,
                seq_only: bool = False,  # only sample sequence
                repack_last: bool = False,  # repack last step after sampling the sequence
+               repack_every_step: bool = False,  # repack after every step
                scn_override_mask: Optional[TensorType["b n", int]] = None,
                aatype_override_mask: Optional[TensorType["b n", int]] = None,
                restrict_pos_aatype: Optional[Tuple[TensorType["b n", float],
@@ -318,7 +319,8 @@ class SeqDenoiser(nn.Module):
 
         if torch.any((aatype_override_mask - scn_override_mask) > 0):
             # If we have more sequence than sidechains, pack all sidechains to catch up to aatype_override_mask
-            xt, _, _ = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index, cond_labels, scn_override_mask, aatype_override_mask, scd_inputs)
+            xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index, cond_labels, scn_override_mask, aatype_override_mask, scd_inputs)
+            psce_t = aux_preds_pack["psce"]  # reflect confidence in packed sidechains
             scn_mlm_mask = seq_mlm_mask.clone()
 
         # Get timesteps based on the number of unmasked residues
@@ -347,6 +349,15 @@ class SeqDenoiser(nn.Module):
             xt = sampling_utils.unmask(xt, x1_pred, scn_mlm_mask_prev, scn_mlm_mask)
             seq_probs_t = sampling_utils.unmask(seq_probs_t, aux_preds["seq_probs"], seq_mlm_mask_prev, seq_mlm_mask)
             psce_t = sampling_utils.unmask(psce_t, aux_preds["scn_diffusion_aux"]["psce"], scn_mlm_mask_prev, scn_mlm_mask)
+
+            if repack_every_step:
+                # Repack the structure after every step (ignore the provided sidechains)
+                xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index, cond_labels,
+                                                            scn_override_mask,  # start from the provided sidechains
+                                                            seq_mlm_mask,  # pack to the currently known sequence
+                                                            scd_inputs)
+                psce_t = aux_preds_pack["psce"]
+                scn_mlm_mask = seq_mlm_mask.clone()
 
             for j in range(num_corrector_steps):
                 # Corrector step where we mask and denoise equally
