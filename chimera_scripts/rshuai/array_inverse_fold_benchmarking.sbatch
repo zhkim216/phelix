@@ -6,13 +6,19 @@
 #SBATCH --time=96:00:00
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
-#SBATCH --array=0-6%1
+#SBATCH --array=0-2
 
 # Define the list of FASTA directories to evaluate
 # FASTAS=("esm3" "esm_if1" "lmdesign")
 # FASTAS=(" "proteinmpnn")
-FASTAS=("S1_c0_aasd2" "S10_c0_aasd2" "S100_c0_aasd2" "S300_c0_aasd2" "S500_c0_aasd2" "S100_seq_only_c0_aasd2" "S100_c0_aasd4")
+# FASTAS=("S1_c0_aasd2" "S10_c0_aasd2" "S100_c0_aasd2" "S300_c0_aasd2" "S500_c0_aasd2" "S100_seq_only_c0_aasd2" "S100_c0_aasd4")
+FASTAS=("S100_psce0.3_c0_aasd2" "S100_psce0.5_c0_aasd2" "S100_psce1.0_c0_aasd2")
 FASTA_NAME=${FASTAS[$SLURM_ARRAY_TASK_ID]}
+
+if [ -z "${FASTA_NAME}" ]; then
+  echo "Error: FASTA_NAME is empty."
+  exit 1
+fi
 
 # Load modules and conda environment
 source ~/.rshuai_bash_profile
