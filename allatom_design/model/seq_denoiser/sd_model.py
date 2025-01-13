@@ -236,6 +236,7 @@ class SeqDenoiser(nn.Module):
                seq_only: bool = False,  # only sample sequence
                repack_last: bool = False,  # repack last step after sampling the sequence
                repack_every_step: bool = False,  # repack after every step
+               psce_threshold: Optional[float] = None,  # during design, only keep sidechains with psce below threshold; None to keep all
                scn_override_mask: Optional[TensorType["b n", int]] = None,
                aatype_override_mask: Optional[TensorType["b n", int]] = None,
                restrict_pos_aatype: Optional[Tuple[TensorType["b n", float],
@@ -358,6 +359,19 @@ class SeqDenoiser(nn.Module):
                                                             scd_inputs)
                 psce_t = aux_preds_pack["psce"]
                 scn_mlm_mask = seq_mlm_mask.clone()
+
+            if (psce_threshold is not None) and (i != S - 1):
+                # Re-mask sidechains with low confidence, but only if we are not at the last step
+
+                # get mask based on per-residue confidence
+                atom_mask_scn = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_t)[..., rc.non_bb_idxs]
+                psce_t_per_res = (psce_t * atom_mask_scn).sum(dim=-1) / atom_mask_scn.sum(dim=-1).clamp(min=1)  # average confidence per residue
+                scn_mlm_mask = scn_mlm_mask * (psce_t_per_res <= psce_threshold).float()
+
+                # apply mask
+                xt[..., rc.non_bb_idxs, :] = xt[..., rc.non_bb_idxs, :] * rearrange(scn_mlm_mask, "b n -> b n 1 1").float()
+                psce_t = psce_t * rearrange(scn_mlm_mask, "b n -> b n 1")
+
 
             for j in range(num_corrector_steps):
                 # Corrector step where we mask and denoise equally
