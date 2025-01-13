@@ -6,7 +6,7 @@
 #SBATCH --time=96:00:00
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
-#SBATCH --array=0
+#SBATCH --array=0-2
 
 # Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
@@ -28,13 +28,18 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Array values for num_steps
 # NUM_STEPS_ARRAY=(1 10 100 300 500)
-NUM_STEPS_ARRAY=(100)
-NUM_STEPS=${NUM_STEPS_ARRAY[$SLURM_ARRAY_TASK_ID]}
+# NUM_STEPS_ARRAY=(100)
+# NUM_STEPS=${NUM_STEPS_ARRAY[$SLURM_ARRAY_TASK_ID]}
+NUM_STEPS=100
+PSCE_THRESHOLD_ARRAY=(0.3 0.5 1.0)
+PSCE_THRESHOLD=${PSCE_THRESHOLD_ARRAY[$SLURM_ARRAY_TASK_ID]}
 
 # Set paths
 MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c0_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.010.ckpt
 # MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c0_aasd4/post_hoc_ema_ckpts/ema-step300000-std0.250.ckpt
-OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c0_aasd2/sample_multi/ema-step300000-std0.010/denovo500_S${NUM_STEPS}_repack_every_step
+# OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c0_aasd2/sample_multi/ema-step300000-std0.010/denovo500_S${NUM_STEPS}_repack_every_step
+OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c0_aasd2/sample_multi/ema-step300000-std0.010/denovo500_S${NUM_STEPS}_psce${PSCE_THRESHOLD}
+
 # OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c0_aasd4/sample_multi/ema-step300000-std0.250/denovo500_S${NUM_STEPS}
 
 PDB_DIR=/scratch/hielab/rshuai/datasets/denovo500/pdbs
@@ -49,5 +54,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/sample_multi.py \
     pdb_dir=${PDB_DIR} \
     out_dir=${OUT_DIR} \
     num_steps=${NUM_STEPS} \
+    psce_threshold=${PSCE_THRESHOLD} \
     repack_every_step=true \
     temperature=0.1
