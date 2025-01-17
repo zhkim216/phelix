@@ -117,7 +117,33 @@ def main(cfg: DictConfig):
         cond_labels_in = {"crop_aug": batch_i["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
 
         x_in = x.clone()
-        x_in[..., rc.non_bb_idxs, :] = 0  # shouldn't be necessary, but just to be safe
+
+        # Handle partial context packing for benchmarking
+        aatype_override_mask = seq_mask.clone()  # by default, pack with whole sequence
+        scn_override_mask = torch.zeros_like(seq_mask)  # by default, pack with whole sequence
+        seq_mask_packed = seq_mask.clone()  # denotes the residues that we've actually packed
+
+        # If specified in config, pack with partial sequence
+        assert (cfg.partial_t_seq is None) or (cfg.partial_t_scn is None), "Packing with partial sequence and partial sidechain simultaneously is not yet supported."
+        if cfg.partial_t_seq is not None:
+            # randomly mask out a portion of the sequence
+            lengths = seq_mask.sum(dim=-1).long()
+            num_to_mask = torch.floor(lengths * (1 - cfg.partial_t_seq)).long()
+            aatype_override_mask = seq_mask.clone()
+            for i in range(len(lengths)):
+                mask_indices = torch.randperm(lengths[i])[:num_to_mask[i]]
+                aatype_override_mask[i, mask_indices] = 0
+            seq_mask_packed = aatype_override_mask.clone()  # denotes the residues that we've actually packed
+        elif cfg.partial_t_scn is not None:
+            # randomly mask out a portion of sidechains
+            lengths = seq_mask.sum(dim=-1).long()
+            num_to_mask = torch.floor(lengths * (1 - cfg.partial_t_scn)).long()
+            scn_override_mask = seq_mask.clone()
+            for i in range(len(lengths)):
+                mask_indices = torch.randperm(lengths[i])[:num_to_mask[i]]
+                scn_override_mask[i, mask_indices] = 0
+            seq_mask_packed = (scn_override_mask == 0) * seq_mask  # denotes the residues that we've actually packed
+
         x_denoised, aatype_denoised, aux = lit_sd_model.model.sidechain_pack(
             x_in,
             aatype,
@@ -126,6 +152,8 @@ def main(cfg: DictConfig):
             residue_index=residue_index,
             chain_index=chain_index,
             cond_labels=cond_labels_in,
+            aatype_override_mask=aatype_override_mask,
+            scn_override_mask=scn_override_mask,
             scd_inputs=scd_inputs,
         )
 
@@ -141,7 +169,8 @@ def main(cfg: DictConfig):
         # Store sample info
         seq_mask, aatype = seq_mask.cpu(), aatype.cpu()
         core_mask, surface_mask = eval_metrics.get_core_surface_mask(x.cpu(), batch_i["atom_mask"].cpu())
-        sample_info_i = {"pdb_key": batch_i["pdb_key"], "seq_mask": seq_mask, "aatype": aatype, "core_mask": core_mask, "surface_mask": surface_mask, "psce": aux["psce"]}
+        sample_info_i = {"pdb_key": batch_i["pdb_key"], "seq_mask": seq_mask, "aatype": aatype, "core_mask": core_mask, "surface_mask": surface_mask, "psce": aux["psce"],
+                         "seq_mask_packed": seq_mask_packed.cpu()}
 
         # Sidechain RMSD per residue
         atom_mask = batch_i["atom_mask"]
@@ -202,12 +231,6 @@ def main(cfg: DictConfig):
         save_trajs_fn(x_traj_key="xt_scn_traj", aatype_traj_key=None,  # uses aatype_t traj
                       filenames=[f"{traj_out_dir}/xt_scn_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)])
 
-        # save likelihood traj
-        # SeqDenoiser.save_sidechain_likelihood_traj(likelihood_aux, aatype, seq_mask, batch_i["residue_index"], batch_i["chain_index"],
-        #                                            save_traj_mask=save_traj_mask, save_diff_traj_steps=save_sd_traj_steps,
-        #                                            filenames=[f"{traj_out_dir}/likelihood_traj_{pdb_key}_{bi + i}.pdb" for i, pdb_key in enumerate(pdb_keys)],
-        #                                            traj_conect=cfg.traj_conect)
-
 
     sample_info = {k: torch.cat(v, dim=0) if k != "pdb_key" else v for k, v in sample_info.items()}  # concatenate all samples as final output
 
@@ -220,28 +243,28 @@ def main(cfg: DictConfig):
 
     ### Compute sidechain metrics ###
     scn_metrics = {}
-    seq_mask = sample_info["seq_mask"]
+    seq_mask_packed = sample_info["seq_mask_packed"]  # only compute over residues that we've packed
 
     # Average RMSD per protein over proteins
-    scn_rmsd_avg = sample_info["scn_rmsd_per_pos"].sum(dim=-1) / seq_mask.sum(dim=-1)
+    scn_rmsd_avg = (sample_info["scn_rmsd_per_pos"] * seq_mask_packed).sum(dim=-1) / seq_mask_packed.sum(dim=-1)
     scn_metrics["scn_rmsd_avg"] = scn_rmsd_avg.mean().item()
     print(f"Average RMSD per protein: {scn_metrics['scn_rmsd_avg']:.3f}")
 
     # Average RMSD over all residues
-    scn_rmsd_avg_all = (sample_info["scn_rmsd_per_pos"] * seq_mask).sum() / seq_mask.sum()
+    scn_rmsd_avg_all = (sample_info["scn_rmsd_per_pos"] * seq_mask_packed).sum() / seq_mask_packed.sum()
     scn_metrics["scn_rmsd_avg_all"] = scn_rmsd_avg_all.item()
 
     # Average RMSD over all core and surface residues
     for key in ["core", "surface"]:
         mask = sample_info[f"{key}_mask"]
-        scn_rmsd_avg = (sample_info["scn_rmsd_per_pos"][mask] * seq_mask[mask]).sum() / seq_mask[mask].sum()
+        scn_rmsd_avg = (sample_info["scn_rmsd_per_pos"][mask] * seq_mask_packed[mask]).sum() / seq_mask_packed[mask].sum()
         scn_metrics[f"scn_rmsd_avg_{key}"] = scn_rmsd_avg.item()
 
     # Get average RMSD per residue
     for aa_idx, aa in enumerate(rc.restypes_with_x):
         aatype_mask = sample_info["aatype"] == aa_idx
         rmsd_i = sample_info["scn_rmsd_per_pos"][aatype_mask]
-        rmsd_avg_i = (rmsd_i * seq_mask[aatype_mask]).sum() / seq_mask[aatype_mask].sum()
+        rmsd_avg_i = (rmsd_i * seq_mask_packed[aatype_mask]).sum() / seq_mask_packed[aatype_mask].sum()
 
         print(f"Average RMSD for {aa}: {rmsd_avg_i:.3f} Å")
         scn_metrics[f"scn_rmsd_avg_{aa}"] = rmsd_avg_i.item()
@@ -275,100 +298,6 @@ def main(cfg: DictConfig):
     # Save metrics as csv with pandas
     metrics_df = pd.DataFrame(scn_metrics, index=[0])
     metrics_df.to_csv(f"{cfg.out_dir}/scn_metrics.csv", index=False)
-
-    # plot_rmsd_vs_npa(sample_info, cfg.out_dir)
-    # plot_rmsd_vs_npa_per_residue(sample_info, cfg.out_dir)
-    # plot_per_protein_rmsd_vs_npa(sample_info, cfg.out_dir)
-
-
-def plot_rmsd_vs_npa(sample_info, out_dir: str):
-    scn_rmsd_per_pos = sample_info["scn_rmsd_per_pos"]
-    npa = sample_info["npa"]
-    res_num_atoms = sample_info["res_num_atoms"]
-
-    valid_mask = (res_num_atoms > 0) & torch.isfinite(npa)
-    valid_rmsd = scn_rmsd_per_pos[valid_mask]
-    valid_npa = npa[valid_mask]
-    rho, _ = spearmanr(valid_npa.cpu().numpy(), valid_rmsd.cpu().numpy())
-
-    plt.figure(figsize=(8, 6))
-    plt.scatter(valid_npa.cpu(), valid_rmsd.cpu(), alpha=0.5)
-    plt.xlabel('Nats per Atom (npa)')
-    plt.ylabel('RMSD per Position')
-    plt.title(f'Scatter Plot of RMSD vs Nats per Atom\nSpearman r = {rho:.3f}')
-    plt.grid(True)
-    plt.xlim([0, 50])
-    plt.tight_layout()
-    plt.savefig(f"{out_dir}/scn_rmsd_vs_npa.png")
-    plt.close()
-
-def plot_rmsd_vs_npa_per_residue(sample_info, out_dir: str):
-    scn_rmsd_per_pos = sample_info["scn_rmsd_per_pos"]
-    npa = sample_info["npa"]
-    res_num_atoms = sample_info["res_num_atoms"]
-    aatype = sample_info["aatype"]
-    seq_mask = sample_info["seq_mask"]
-
-    valid_mask = (res_num_atoms > 0) & torch.isfinite(npa) & (seq_mask > 0)
-    valid_rmsd = scn_rmsd_per_pos[valid_mask]
-    valid_npa = npa[valid_mask]
-    valid_aatype = aatype[valid_mask]
-
-    residue_types = rc.restypes_with_x
-    output_dir = Path(f"{out_dir}/scn_rmsd_vs_npa_per_residue")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    for aa_idx, aa in enumerate(residue_types):
-        residue_mask = (valid_aatype == aa_idx)
-        rmsd_i = valid_rmsd[residue_mask]
-        npa_i = valid_npa[residue_mask]
-        if len(rmsd_i) == 0:
-            continue
-        rho, _ = spearmanr(npa_i.cpu().numpy(), rmsd_i.cpu().numpy())
-        plt.figure(figsize=(8, 6))
-        plt.scatter(npa_i.cpu(), rmsd_i.cpu(), alpha=0.5)
-        plt.title(f'Residue: {aa}\nSpearman r = {rho:.3f}')
-        plt.xlabel('Nats per Atom (npa)')
-        plt.ylabel('RMSD per Position')
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(output_dir / f'scn_rmsd_vs_npa_{aa}.png')
-        plt.close()
-
-
-def plot_per_protein_rmsd_vs_npa(sample_info, out_dir: str):
-    scn_rmsd_per_pos = sample_info["scn_rmsd_per_pos"]
-    npa = sample_info["npa"]
-    res_num_atoms = sample_info["res_num_atoms"]
-    seq_mask = sample_info["seq_mask"]
-
-    # valid_mask = (res_num_atoms > 0) & torch.isfinite(npa) & (seq_mask > 0)
-    valid_mask = (res_num_atoms > 1) & torch.isfinite(npa) & (seq_mask > 0)  # excludes alanine
-    num_valid_residues = valid_mask.sum(dim=1)
-    valid_protein_mask = num_valid_residues > 0
-
-    avg_rmsd_per_protein = torch.zeros_like(num_valid_residues, dtype=torch.float)
-    avg_npa_per_protein = torch.zeros_like(num_valid_residues, dtype=torch.float)
-
-    sum_rmsd_per_protein = (scn_rmsd_per_pos * valid_mask.float()).sum(dim=1)
-    sum_npa_per_protein = (torch.where(valid_mask.bool(), npa, 0)).sum(dim=1)
-
-    avg_rmsd_per_protein[valid_protein_mask] = sum_rmsd_per_protein[valid_protein_mask] / num_valid_residues[valid_protein_mask]
-    avg_npa_per_protein[valid_protein_mask] = sum_npa_per_protein[valid_protein_mask] / num_valid_residues[valid_protein_mask]
-
-    rho, _ = spearmanr(avg_npa_per_protein[valid_protein_mask].cpu().numpy(), avg_rmsd_per_protein[valid_protein_mask].cpu().numpy())
-    plt.figure(figsize=(8, 6))
-    plt.scatter(avg_npa_per_protein[valid_protein_mask].cpu(), avg_rmsd_per_protein[valid_protein_mask].cpu(), alpha=0.6, edgecolors="none", s=75, c="forestgreen")
-    plt.xlabel('Likelihood of corrupted sidechains per protein (nats per atom)')
-    plt.ylabel('Sidechain RMSD')
-    plt.title(f'Sidechain RMSD vs. corruption likelihood \nSpearman $\\rho$ = {rho:.3f}')
-    plt.grid(False)
-    plt.xticks(fontsize=12)
-    plt.yticks(fontsize=12)
-    plt.tight_layout()
-    plt.savefig(f"{out_dir}/per_protein_rmsd_vs_npa.pdf", dpi=300, bbox_inches='tight')
-    plt.close()
-
 
 
 if __name__ == "__main__":

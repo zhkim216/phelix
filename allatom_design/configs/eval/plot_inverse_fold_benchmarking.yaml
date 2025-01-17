@@ -51,6 +51,32 @@ confidence_plots:
   model_name: FAMPNN (100 steps)
 
 
+partial_seq_packing_plots:
+  input_seq_csvs:
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tseq_0.1/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tseq_0.2/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tseq_0.3/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tseq_0.4/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tseq_0.5/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tseq_0.6/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tseq_0.7/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tseq_0.8/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tseq_0.9/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tseq_1.0/scn_metrics.csv
+
+  input_scn_csvs:
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tscn_0.1/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tscn_0.2/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tscn_0.3/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tscn_0.4/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tscn_0.5/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tscn_0.6/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tscn_0.7/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tscn_0.8/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tscn_0.9/scn_metrics.csv
+    - /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd4/sidechain_pack/ema-step300000-std0.250/casp13_14_15_tscn_1.0/scn_metrics.csv
+
+
 hydra:
   run:
     dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

@@ -288,7 +288,7 @@ class ADDataset(data.Dataset):
             dataset_source_label = "EXPERIMENTAL"
         elif self.pdb_path.endswith("rcsb_test_cases"):
             dataset_source_label = "EXPERIMENTAL"
-        elif self.pdb_path.endswith("casp13") or self.pdb_path.endswith("casp14") or self.pdb_path.endswith("casp15"):
+        elif Path(self.pdb_path).stem.startswith("casp"):
             dataset_source_label = "EXPERIMENTAL"
         elif self.pdb_path.endswith("denovo100") or self.pdb_path.endswith("denovo200") or self.pdb_path.endswith("denovo300") or self.pdb_path.endswith("denovo400") or self.pdb_path.endswith("denovo500"):
             dataset_source_label = "EXPERIMENTAL"
@@ -313,11 +313,14 @@ class ADDataset(data.Dataset):
         # Prepare arguments as tuples (pdb_key, cache_dir, overwrite_cache) for process_pdb_key
         task_args = [(pdb_key, cache_dir, self.overwrite_cache, self.pdb_path, self.phase) for pdb_key in self.pdb_keys]
 
+        # DEBUG
+        [process_pdb_key(arg) for arg in task_args]
+
         # Use a Pool for parallel processing
-        with Pool(processes=num_workers) as pool:
-            # Use tqdm to display progress
-            for _ in tqdm(pool.imap_unordered(process_pdb_key, task_args), total=len(task_args), desc="Caching PDBs"):
-                pass
+        # with Pool(processes=num_workers) as pool:
+        #     # Use tqdm to display progress
+        #     for _ in tqdm(pool.imap_unordered(process_pdb_key, task_args), total=len(task_args), desc="Caching PDBs"):
+        #         pass
 
         print("Caching completed.")
 
@@ -472,7 +475,7 @@ def get_pdb_data_file(pdb_path, phase, pdb_key: str) -> str:
         pdb_data_file = f"{pdb_path}/all/{pdb_key}.pdb1"  # qfit dataset, use only pdb1s for now
     elif pdb_path.endswith("rcsb_test_cases"):
         pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
-    elif pdb_path.endswith("casp13") or pdb_path.endswith("casp14") or pdb_path.endswith("casp15"):
+    elif Path(pdb_path).stem.startswith("casp"):
         pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
     elif pdb_path.endswith("denovo100") or pdb_path.endswith("denovo200") or pdb_path.endswith("denovo300") or pdb_path.endswith("denovo400") or pdb_path.endswith("denovo500"):
         pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
