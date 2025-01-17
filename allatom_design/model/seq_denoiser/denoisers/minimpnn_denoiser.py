@@ -63,7 +63,8 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
             seq_mask,
             atom_mask_noised,
             residue_index,
-            chain_encoding)
+            chain_encoding,
+            noise_labels=aux_inputs.get("noise_labels", None))
 
         aatype_pred, scaled_seq_probs = self.sample_aatype(seq_logits, aux_inputs, is_sampling)
 
