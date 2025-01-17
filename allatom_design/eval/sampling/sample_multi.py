@@ -89,7 +89,7 @@ def main(cfg: DictConfig):
     if cfg.fixed_pos_csv is not None:
         fixed_pos_df = pd.read_csv(cfg.fixed_pos_csv, names=["fixed_pos_seq", "fixed_pos_scn"], index_col=0)
         fixed_pos_df = fixed_pos_df.fillna("")
-        fixed_pos_df.index = fixed_pos_df.index.str.replace(".pdb", "")  # remove extension from index if present
+        fixed_pos_df.index = fixed_pos_df.index.str.replace(".pdb", "").replace(".cif", "")  # remove extension from index if present
     else:
         fixed_pos_df = pd.DataFrame(columns=["fixed_pos_seq", "fixed_pos_scn"])
 
@@ -98,7 +98,7 @@ def main(cfg: DictConfig):
         # Get PDBs with keys in the list
         with open(cfg.pdb_key_list, "r") as f:
             pdb_keys = f.read().splitlines()
-        pdb_files = [f"{cfg.pdb_dir}/{key}" for key in pdb_keys]
+        pdb_files = [f"{cfg.pdb_dir}/{key}{cfg.pdb_key_ext}" for key in pdb_keys]
     else:
         # Get all PDBs with .pdb extension in the directory
         pdb_files = natsorted(list(glob.glob(f"{cfg.pdb_dir}/*.pdb")))
@@ -143,12 +143,16 @@ def main(cfg: DictConfig):
         batch_list = []
         batch_chain_id_mapping = []
         for pdb_file in pdb_batch_files:
-            data = load_feats_from_pdb(pdb_file)
-            single = process_single_pdb(data)
-            batch_list.append(single)
+            if not cfg.from_cache:
+                data = load_feats_from_pdb(pdb_file)
+                single = process_single_pdb(data)
+            else:
+                data = torch.load(pdb_file)
+                single = process_single_pdb(data)
 
+            batch_list.append(single)
             # store chain ID mapping for parsing fixed positions
-            batch_chain_id_mapping.append(data["chain_id_mapping"])
+            batch_chain_id_mapping.append(data.get("chain_id_mapping", None))
 
         pdb_names = [Path(pdb_file).stem for pdb_file in pdb_batch_files]
 

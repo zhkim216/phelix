@@ -207,8 +207,9 @@ class ADDataset(data.Dataset):
         example["missing_atom_mask"] = data["missing_atom_mask"]
         example["atom_mask"] = atom_mask
         example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
-        example['interface_residue_mask'] = data['interface_residue_mask']
-        example['chain_ids'] = data['chain_ids']
+        if not self.evaluation_mode:
+            example['interface_residue_mask'] = data['interface_residue_mask']
+            example['chain_ids'] = data['chain_ids']
 
         # Construct conditioning inputs
         cond_labels_in = {}
@@ -255,7 +256,7 @@ class ADDataset(data.Dataset):
         orig_size = example["x"].shape[0]
         extra_len = orig_size - self.fixed_size
         if extra_len > 0:
-            if len(example['chain_ids']) > 1:
+            if example['chain_ids'] is not None and len(example['chain_ids']) > 1:
                 if torch.rand(1) > self.spatial_crop_ratio:
                     chain_1_len, chain_2_len = torch.sum(example['chain_index'] == 0), torch.sum(example['chain_index'] == 1)
                     multimer_crop_mask = self._multimer_contiguous_crop(chain_1_len, chain_2_len)
@@ -313,14 +314,11 @@ class ADDataset(data.Dataset):
         # Prepare arguments as tuples (pdb_key, cache_dir, overwrite_cache) for process_pdb_key
         task_args = [(pdb_key, cache_dir, self.overwrite_cache, self.pdb_path, self.phase) for pdb_key in self.pdb_keys]
 
-        # DEBUG
-        [process_pdb_key(arg) for arg in task_args]
-
         # Use a Pool for parallel processing
-        # with Pool(processes=num_workers) as pool:
-        #     # Use tqdm to display progress
-        #     for _ in tqdm(pool.imap_unordered(process_pdb_key, task_args), total=len(task_args), desc="Caching PDBs"):
-        #         pass
+        with Pool(processes=num_workers) as pool:
+            # Use tqdm to display progress
+            for _ in tqdm(pool.imap_unordered(process_pdb_key, task_args), total=len(task_args), desc="Caching PDBs"):
+                pass
 
         print("Caching completed.")
 
