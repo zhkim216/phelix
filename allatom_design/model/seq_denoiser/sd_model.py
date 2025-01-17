@@ -318,14 +318,28 @@ class SeqDenoiser(nn.Module):
         if torch.any((aatype_override_mask - scn_override_mask) < 0):
             raise ValueError('Sidechain cannot be fixed at any positions where sequence is not fixed')
 
-        if torch.any((aatype_override_mask - scn_override_mask) > 0):
+        if torch.any((aatype_override_mask - scn_override_mask) > 0) and not seq_only:
             # If we have more sequence than sidechains, pack all sidechains to catch up to aatype_override_mask
             xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index, cond_labels, scn_override_mask, aatype_override_mask, scd_inputs)
             psce_t = aux_preds_pack["psce"]  # reflect confidence in packed sidechains
             scn_mlm_mask = seq_mlm_mask.clone()
 
+            if psce_threshold is not None:
+                # Re-mask sidechains with low confidence, but only if we are not at the last step
+
+                # get mask based on per-residue confidence
+                atom_mask_scn = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_t)[..., rc.non_bb_idxs]
+                psce_t_per_res = (psce_t * atom_mask_scn).sum(dim=-1) / atom_mask_scn.sum(dim=-1).clamp(min=1)  # average confidence per residue
+                print(f"Number before thresholding: {scn_mlm_mask.sum(dim=-1)[0]}")
+                scn_mlm_mask = scn_mlm_mask * (psce_t_per_res <= psce_threshold).float()
+                print(f"Number after thresholding: {scn_mlm_mask.sum(dim=-1)[0]}")
+
+                # apply mask
+                xt[..., rc.non_bb_idxs, :] = xt[..., rc.non_bb_idxs, :] * rearrange(scn_mlm_mask, "b n -> b n 1 1").float()
+                psce_t = psce_t * rearrange(scn_mlm_mask, "b n -> b n 1")
+
         # Get timesteps based on the number of unmasked residues
-        assert (seq_mlm_mask == scn_mlm_mask).all(), "Expecting sequence and sidechain masks to be the same before sampling starts."
+        # assert (seq_mlm_mask == scn_mlm_mask).all(), "Expecting sequence and sidechain masks to be the same before sampling starts."
         num_partial = seq_mlm_mask.sum(dim=-1).long()
         timesteps_K = torch.ceil(timesteps * (aux_inputs["lengths"][:, None] - num_partial[:,None])).long()  # timestep schedule is defined relative to masked residues
         timesteps_K += num_partial[:,None]
@@ -343,7 +357,7 @@ class SeqDenoiser(nn.Module):
                                           K=K_next, aatype_pred=aatype_pred,
                                           scaled_seq_probs=aux_preds["scaled_seq_probs"],
                                           psce=aux_preds["scn_diffusion_aux"]["psce"])
-            scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else torch.zeros_like(seq_mlm_mask)
+            scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else torch.zeros_like(seq_mlm_mask)  # TODO: handle the case of user-provided sidechains
 
             # Unmask sequence, sidechains, and sidechain confidence
             aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
@@ -351,7 +365,7 @@ class SeqDenoiser(nn.Module):
             seq_probs_t = sampling_utils.unmask(seq_probs_t, aux_preds["seq_probs"], seq_mlm_mask_prev, seq_mlm_mask)
             psce_t = sampling_utils.unmask(psce_t, aux_preds["scn_diffusion_aux"]["psce"], scn_mlm_mask_prev, scn_mlm_mask)
 
-            if repack_every_step:
+            if repack_every_step and not seq_only:
                 # Repack the structure after every step (ignore the provided sidechains)
                 xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index, cond_labels,
                                                             scn_override_mask,  # start from the provided sidechains
@@ -366,7 +380,9 @@ class SeqDenoiser(nn.Module):
                 # get mask based on per-residue confidence
                 atom_mask_scn = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_t)[..., rc.non_bb_idxs]
                 psce_t_per_res = (psce_t * atom_mask_scn).sum(dim=-1) / atom_mask_scn.sum(dim=-1).clamp(min=1)  # average confidence per residue
+                print(f"Number before thresholding: {scn_mlm_mask.sum(dim=-1)[0]}")
                 scn_mlm_mask = scn_mlm_mask * (psce_t_per_res <= psce_threshold).float()
+                print(f"Number after thresholding: {scn_mlm_mask.sum(dim=-1)[0]}")
 
                 # apply mask
                 xt[..., rc.non_bb_idxs, :] = xt[..., rc.non_bb_idxs, :] * rearrange(scn_mlm_mask, "b n -> b n 1 1").float()

@@ -20,6 +20,7 @@ from omegaconf import DictConfig, OmegaConf
 from scipy.stats import spearmanr
 
 from allatom_design.data import residue_constants as rc
+from allatom_design.data.data import transform_sidechain_frame
 
 
 @hydra.main(config_path="../configs/eval", config_name="plot_inverse_fold_benchmarking", version_base="1.3.2")
@@ -48,44 +49,44 @@ def main(cfg: DictConfig):
             "Length of input_pkl_files must match length of model_names."
     )
 
-    # Extract metrics from pickle
-    model_dfs = {model_name: {} for model_name in cfg.line_plots.model_names}
-    for model_name, pkl_file in zip(cfg.line_plots.model_names, cfg.line_plots.input_pkl_files):
-        with open(pkl_file, "rb") as f:
-            metrics = pickle.load(f)
+    # # Extract metrics from pickle
+    # model_dfs = {model_name: {} for model_name in cfg.line_plots.model_names}
+    # for model_name, pkl_file in zip(cfg.line_plots.model_names, cfg.line_plots.input_pkl_files):
+    #     with open(pkl_file, "rb") as f:
+    #         metrics = pickle.load(f)
 
-        # Extract metrics
-        model_dfs[model_name]["pdb_name"] = [Path(x).stem for x in metrics.keys()]
-        model_dfs[model_name]["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
-        model_dfs[model_name]["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
-        model_dfs[model_name]["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
+    #     # Extract metrics
+    #     model_dfs[model_name]["pdb_name"] = [Path(x).stem for x in metrics.keys()]
+    #     model_dfs[model_name]["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
+    #     model_dfs[model_name]["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
+    #     model_dfs[model_name]["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
 
-    # Mapping from model name to dataframe
-    model_dfs = {model_name: pd.DataFrame(model_dfs[model_name]) for model_name in cfg.line_plots.model_names}
+    # # Mapping from model name to dataframe
+    # model_dfs = {model_name: pd.DataFrame(model_dfs[model_name]) for model_name in cfg.line_plots.model_names}
 
-    # Box and whisker plots
-    create_box_and_whisker_plots(model_dfs, Path(cfg.out_dir))
+    # # Box and whisker plots
+    # create_box_and_whisker_plots(model_dfs, Path(cfg.out_dir))
 
-    # Line plots of median
-    plot_sc_medians_line(
-        model_dfs,
-        metric="sc_ca_rmsd",
-        x_label="Length",
-        y_label="Median scRMSD",
-        x_ticks=[100, 200, 300, 400, 500],
-        save_file=f"{cfg.out_dir}/sc_ca_rmsd_med.pdf"
-    )
+    # # Line plots of median
+    # plot_sc_medians_line(
+    #     model_dfs,
+    #     metric="sc_ca_rmsd",
+    #     x_label="Length",
+    #     y_label="Median scRMSD",
+    #     x_ticks=[100, 200, 300, 400, 500],
+    #     save_file=f"{cfg.out_dir}/sc_ca_rmsd_med.pdf"
+    # )
 
-    plot_sc_medians_line(
-        model_dfs,
-        metric="sc_tm",
-        x_label="Length",
-        y_label="Median scTM",
-        x_ticks=[100, 200, 300, 400, 500],
-        save_file=f"{cfg.out_dir}/sc_ca_tm_med.pdf"
-    )
+    # plot_sc_medians_line(
+    #     model_dfs,
+    #     metric="sc_tm",
+    #     x_label="Length",
+    #     y_label="Median scTM",
+    #     x_ticks=[100, 200, 300, 400, 500],
+    #     save_file=f"{cfg.out_dir}/sc_ca_tm_med.pdf"
+    # )
 
-    # Iterative sampling plots
+    #################################### Iterative sampling plots ####################################
     assert len(cfg.iterative_sampling_plots.input_pkl_files) == len(cfg.iterative_sampling_plots.model_names), (
         "Length of iterative_sampling_plots input_pkl_files must match length of model_names."
     )
@@ -148,134 +149,245 @@ def main(cfg: DictConfig):
 
     # TODO: plot this for scTM
 
-    # # Confidence plots
-    # confidence_df = {}
-    # with open(cfg.confidence_plots.input_pkl_file, "rb") as f:
-    #     metrics = pickle.load(f)
+    # Confidence plots
+    confidence_df = {}
+    with open(cfg.confidence_plots.input_pkl_file, "rb") as f:
+        metrics = pickle.load(f)
 
-    # confidence_df["pdb_name"] = [Path(x).stem for x in metrics.keys()]
-    # confidence_df["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
-    # confidence_df["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
-    # confidence_df["sc_aa_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_aa_rmsd"].item() for x in metrics.keys()]
-    # confidence_df["diff"] = confidence_df["sc_aa_rmsd"] - confidence_df["sc_ca_rmsd"]
-    # confidence_df["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
-    # confidence_df = pd.DataFrame(confidence_df)
-    # confidence_df = confidence_df.set_index("pdb_name")
+    confidence_df["pdb_name"] = [Path(x).stem for x in metrics.keys()]
+    confidence_df["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
+    confidence_df["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
+    confidence_df["sc_aa_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_aa_rmsd"].item() for x in metrics.keys()]
+    confidence_df["diff"] = np.array(confidence_df["sc_aa_rmsd"]) - np.array(confidence_df["sc_ca_rmsd"])
+    confidence_df["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
+    confidence_df = pd.DataFrame(confidence_df)
+    confidence_df = confidence_df.set_index("pdb_name")
 
-    # for pkl_file in glob.glob(f"{cfg.confidence_plots.sample_pkl_dir}/*.pkl"):
-    #     pdb_name = Path(pkl_file).stem.replace("_sample0", "")
-    #     with open(pkl_file, "rb") as f:
-    #         sample_info = pickle.load(f)
+    # structure info
+    atom_masks = {Path(x).stem: metrics[x]["sc_info"]["struct_preds"]["atom_mask"][0] for x in metrics.keys()}
+    pred_coords = {Path(x).stem: metrics[x]["sc_info"]["struct_preds"]["pred_coords"][0] for x in metrics.keys()}
+    sample_coords = {}
 
-    #     # Sequence confidence: get perplexities
-    #     aatype = sample_info["pred_aatype"]
-    #     N = aatype.shape[0]
-    #     probs = sample_info["seq_probs"][np.arange(N), aatype]  # select probs for predicted aatype
-    #     log_probs = np.log(probs)
-    #     ppl = np.exp(-np.mean(log_probs))
-    #     confidence_df.loc[pdb_name, "ppl"] = ppl
+    for pkl_file in glob.glob(f"{cfg.confidence_plots.sample_pkl_dir}/*.pkl"):
+        pdb_name = Path(pkl_file).stem.replace("_sample0", "")
+        with open(pkl_file, "rb") as f:
+            sample_info = pickle.load(f)
 
-    #     # Sidechain confidence: get average pSCE
-    #     atom_mask = rc.STANDARD_ATOM_MASK_WITH_X[aatype][:, rc.non_bb_idxs]  # assume all atom types for a given aatype are present
-    #     avg_psce = (sample_info["psce"] * atom_mask).sum(axis=-1) / atom_mask.sum(axis=-1)
-    #     confidence_df.loc[pdb_name, "avg_psce"] = np.nanmean(avg_psce)  # nanmean to ignore glycines
+        # Sequence confidence: get perplexities
+        aatype = sample_info["pred_aatype"]
+        N = aatype.shape[0]
+        probs = sample_info["seq_probs"][np.arange(N), aatype]  # select probs for predicted aatype
+        log_probs = np.log(probs)
+        ppl = np.exp(-np.mean(log_probs))
+        confidence_df.loc[pdb_name, "ppl"] = ppl
+
+        # Sidechain confidence: get average pSCE
+        atom_mask = rc.STANDARD_ATOM_MASK_WITH_X[aatype][:, rc.non_bb_idxs]  # assume all atom types for a given aatype are present
+        avg_psce = (sample_info["psce"] * atom_mask).sum(axis=-1) / atom_mask.sum(axis=-1)
+        confidence_df.loc[pdb_name, "avg_psce"] = np.nanmean(avg_psce)  # nanmean to ignore glycines
+        confidence_df.loc[pdb_name, "max_avg_psce"] = np.nanmax(avg_psce)
+
+        # Store sample coords
+        sample_coords[pdb_name] = torch.tensor(sample_info["x_denoised"])
+
+    # Align each sidechain in its local frame and compute aligned sidechain RMSD
+    aligned_scn_rmsds = {}
+    for pdb_name in sample_coords.keys():
+        atom_mask_scn, atom_mask_bb = atom_masks[pdb_name][:, rc.non_bb_idxs], atom_masks[pdb_name][:, rc.bb_idxs]
+
+        # Get predicted sidechains in local frame
+        pred = pred_coords[pdb_name]
+        pred_scn, pred_bb = pred[None, :, rc.non_bb_idxs], pred[None, :, rc.bb_idxs]
+        pred_scn_local, _ = transform_sidechain_frame(pred_scn, pred_bb, atom_mask_scn, atom_mask_bb, to_local=True)
+
+        # Get sample sidechains in local frame
+        sample = sample_coords[pdb_name]
+        sample_scn, sample_bb = sample[None, :, rc.non_bb_idxs], sample[None, :, rc.bb_idxs]
+        sample_scn_local, _ = transform_sidechain_frame(sample_scn, sample_bb, atom_mask_scn, atom_mask_bb, to_local=True)
+
+        # Get aligned RMSD
+        pred_scn_local, sample_scn_local = pred_scn_local.squeeze(0), sample_scn_local.squeeze(0)
+        aligned_scn_rmsds[pdb_name] = (((pred_scn_local - sample_scn_local) * atom_mask_scn[..., None]) ** 2).sum(dim=(-1, -2)) / atom_mask_scn.sum(dim=-1).clamp(min=1)
+        aligned_scn_rmsds[pdb_name] = aligned_scn_rmsds[pdb_name].sqrt().mean().item()
+
+    # Plot aligned sidechain RMSD vs scRMSD
+    confidence_df["aligned_scn_rmsd"] = [aligned_scn_rmsds[x] for x in confidence_df.index]
+    plot_sc_correlation(
+        df=confidence_df,
+        x_col="sc_ca_rmsd",
+        y_col="aligned_scn_rmsd",
+        length_filter=None,
+        cutoff=None,
+        x_label="scRMSD",
+        y_label="Aligned sidechain RMSD",
+        save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_aligned_scn_rmsd.pdf"
+    )
+
+    # Plot max_avg_psce vs. scRMSD
+    subset_df = confidence_df[confidence_df["sc_ca_rmsd"] < 5.0]
+    plot_sc_correlation(
+        df=subset_df,
+        x_col="sc_ca_rmsd",
+        y_col="avg_psce",
+        length_filter=None,
+        cutoff=None,
+        x_label="scRMSD",
+        y_label="avg_psce",
+        save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_avg_psce.pdf"
+    )
+
+    # Plot aligned sidechain RMSD vs. avg_psce
+    subset_df = confidence_df[confidence_df["sc_ca_rmsd"] < 2.0]
+    plot_sc_correlation(
+        df=subset_df,
+        x_col="aligned_scn_rmsd",
+        y_col="avg_psce",
+        length_filter=None,
+        cutoff=None,
+        x_label="Aligned sidechain RMSD",
+        y_label="avg_psce",
+        save_file=f"{cfg.out_dir}/aligned_scn_rmsd_vs_avg_psce_cutoff_2A.pdf"
+    )
 
 
-    # for length in [100, 200, 300, 400, 500]:
-    #     # sc_ca_rmsd vs ppl
-    #     plot_sc_correlation(
-    #         df=confidence_df,
-    #         x_col="sc_ca_rmsd",
-    #         y_col="ppl",
-    #         length_filter=length,
-    #         cutoff=None,
-    #         x_label="scRMSD",
-    #         y_label="Perplexity",
-    #         save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_ppl_L{length}.pdf"
-    #     )
 
-    #     # sc_ca_rmsd vs avg_psce
-    #     plot_sc_correlation(
-    #         df=confidence_df,
-    #         x_col="sc_ca_rmsd",
-    #         y_col="avg_psce",
-    #         length_filter=length,
-    #         cutoff=None,
-    #         x_label="scRMSD",
-    #         y_label="avg_psce",
-    #         save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_avg_psce_L{length}.pdf"
-    #     )
+    for length in [100, 200, 300, 400, 500]:
+        # sc_ca_rmsd vs ppl
+        plot_sc_correlation(
+            df=confidence_df,
+            x_col="sc_ca_rmsd",
+            y_col="ppl",
+            length_filter=length,
+            cutoff=None,
+            x_label="scRMSD",
+            y_label="Perplexity",
+            save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_ppl_L{length}.pdf"
+        )
 
-    #     plot_sc_correlation(
-    #         df=confidence_df,
-    #         x_col="sc_aa_rmsd",
-    #         y_col="avg_psce",
-    #         length_filter=length,
-    #         cutoff=2,
-    #         x_label="scRMSD",
-    #         y_label="avg_psce",
-    #         save_file=f"{cfg.out_dir}/sc_aa_rmsd_vs_avg_psce_L{length}.pdf"
-    #     )
+        # sc_ca_rmsd vs avg_psce
+        plot_sc_correlation(
+            df=confidence_df,
+            x_col="sc_ca_rmsd",
+            y_col="avg_psce",
+            length_filter=length,
+            cutoff=2,
+            x_label="scRMSD",
+            y_label="avg_psce",
+            save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_avg_psce_L{length}.pdf"
+        )
 
-    #     plot_sc_correlation(
-    #         df=confidence_df,
-    #         x_col="diff",
-    #         y_col="avg_psce",
-    #         length_filter=length,
-    #         cutoff=2,
-    #         x_label="scRMSD",
-    #         y_label="avg_psce",
-    #         save_file=f"{cfg.out_dir}/diff_vs_avg_psce_L{length}.pdf"
-    #     )
+        plot_sc_correlation(
+            df=confidence_df,
+            x_col="sc_aa_rmsd",
+            y_col="avg_psce",
+            length_filter=length,
+            cutoff=2,
+            x_label="scRMSD",
+            y_label="avg_psce",
+            save_file=f"{cfg.out_dir}/sc_aa_rmsd_vs_avg_psce_L{length}.pdf"
+        )
 
 
-    # # Plot overall sc correlations
-    # plot_sc_correlation(
-    #     df=confidence_df,
-    #     x_col="sc_ca_rmsd",
-    #     y_col="ppl",
-    #     length_filter=None,
-    #     cutoff=None,
-    #     x_label="scRMSD",
-    #     y_label="Perplexity",
-    #     save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_ppl_overall.pdf"
-    # )
+    # Plot overall sc correlations
+    plot_sc_correlation(
+        df=confidence_df,
+        x_col="sc_ca_rmsd",
+        y_col="ppl",
+        length_filter=None,
+        cutoff=None,
+        x_label="scRMSD",
+        y_label="Perplexity",
+        save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_ppl_overall.pdf"
+    )
 
-    # plot_sc_correlation(
-    #     df=confidence_df,
-    #     x_col="sc_ca_rmsd",
-    #     y_col="avg_psce",
-    #     length_filter=None,
-    #     cutoff=None,
-    #     x_label="scRMSD",
-    #     y_label="avg_psce",
-    #     save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_avg_psce_overall.pdf"
-    # )
+    plot_sc_correlation(
+        df=confidence_df,
+        x_col="sc_ca_rmsd",
+        y_col="avg_psce",
+        length_filter=None,
+        cutoff=2,
+        x_label="scRMSD",
+        y_label="avg_psce",
+        save_file=f"{cfg.out_dir}/sc_ca_rmsd_vs_avg_psce_overall.pdf"
+    )
 
-    # # Example: success = sc_ca_rmsd <= 3.0, top fraction by 'ppl' (smaller is better, so bigger_is_better=False)
-    # plot_success_rate_by_confidence(
-    #     df=confidence_df,
-    #     conf_col="ppl",
-    #     sc_rmsd_threshold=2.0,
-    #     length_filter=500,        # All lengths
-    #     bigger_is_better=False,    # If smaller ppl is "better"
-    #     n_points=20,               # 20 points => [5%, 10%, 15%, ... 100%]
-    #     x_label="Top X% by perplexity (lowest to highest)",
-    #     y_label="Success Rate (%)",
-    #     save_file=f"{cfg.out_dir}/success_vs_ppl_all_lengths.pdf"
-    # )
+    plot_sc_correlation(
+        df=confidence_df,
+        x_col="sc_aa_rmsd",
+        y_col="avg_psce",
+        length_filter=None,
+        cutoff=10,
+        x_label="scRMSD",
+        y_label="avg_psce",
+        save_file=f"{cfg.out_dir}/sc_aa_rmsd_vs_avg_psce_overall.pdf"
+    )
 
-    # plot_success_rate_by_confidence(
-    #     df=confidence_df,
-    #     conf_col="avg_psce",
-    #     sc_rmsd_threshold=2.0,
-    #     length_filter=None,
-    #     bigger_is_better=False,      # If higher avg_psce is "better"
-    #     n_points=10,                # 10 points => [10%, 20%, ... 100%]
-    #     x_label="Top X% by avg_psce",
-    #     y_label="Success Rate (%)",
-    #     save_file=f"{cfg.out_dir}/success_vs_avg_psce_overall.pdf"
-    # )
+    # Plot difference between sc_aa_rmsd and sc_ca_rmsd, subsetting to sc_ca_rmsd < 2.0
+    df_subset = confidence_df[confidence_df["sc_ca_rmsd"] < 1.0]
+    plot_sc_correlation(
+        df=df_subset,
+        x_col="diff",
+        y_col="avg_psce",
+        length_filter=None,
+        cutoff=None,
+        x_label="scRMSD",
+        y_label="avg_psce",
+        save_file=f"{cfg.out_dir}/diff_vs_avg_psce_1A_cutoff.pdf"
+    )
+
+
+    # Example: success = sc_ca_rmsd <= 3.0, top fraction by 'ppl' (smaller is better, so bigger_is_better=False)
+    plot_success_rate_by_confidence(
+        df=confidence_df,
+        conf_col="ppl",
+        sc_rmsd_threshold=2.0,
+        length_filter=500,        # All lengths
+        bigger_is_better=False,    # If smaller ppl is "better"
+        n_points=20,               # 20 points => [5%, 10%, 15%, ... 100%]
+        x_label="Top X% by perplexity (lowest to highest)",
+        y_label="Success Rate (%)",
+        save_file=f"{cfg.out_dir}/success_vs_ppl_all_lengths.pdf"
+    )
+
+    plot_success_rate_by_confidence(
+        df=confidence_df,
+        conf_col="avg_psce",
+        sc_rmsd_threshold=2.0,
+        length_filter=None,
+        bigger_is_better=False,      # If higher avg_psce is "better"
+        n_points=10,                # 10 points => [10%, 20%, ... 100%]
+        x_label="Top X% by avg_psce",
+        y_label="Success Rate (%)",
+        save_file=f"{cfg.out_dir}/success_vs_avg_psce_overall.pdf"
+    )
+
+    #################################### Partial sequence packing plots ####################################
+    partial_seq_df = {}
+    for input_csv in cfg.partial_seq_packing_plots.input_seq_csvs:
+        tseq_val = float(Path(input_csv).parent.name.split("_")[-1])
+        partial_seq_df[tseq_val] = pd.read_csv(input_csv).loc[0, "scn_rmsd_avg_all"]
+    partial_seq_df = pd.DataFrame(partial_seq_df.items(), columns=["tseq", "scn_rmsd_avg_all"])
+
+    partial_scn_df = {}
+    partial_scn_df[0.0] = partial_seq_df[partial_seq_df["tseq"] == 1.0].iloc[0, 1]
+    for input_csv in cfg.partial_seq_packing_plots.input_scn_csvs:
+        tscn_val = float(Path(input_csv).parent.name.split("_")[-1])
+        partial_scn_df[tscn_val] = pd.read_csv(input_csv).loc[0, "scn_rmsd_avg_all"]
+
+    partial_scn_df = pd.DataFrame(partial_scn_df.items(), columns=["tscn", "scn_rmsd_avg_all"])
+
+    plt.figure(figsize=(6, 4))
+    plt.plot(partial_seq_df["tseq"] * 100, partial_seq_df["scn_rmsd_avg_all"], marker="o", color="black", linewidth=2, label="Partial sequence")
+    plt.plot(partial_scn_df["tscn"] * 100, partial_scn_df["scn_rmsd_avg_all"], marker="o", color="#1f77b4", linewidth=2, label="Partial sidechain, with full sequence")
+    plt.legend()
+    plt.xlabel("Partial context given (%)", fontsize=12)
+    plt.ylabel("Average packing RMSD\n" r"over known sequence ($\AA$)", fontsize=12)
+    plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.7)
+    plt.xticks(np.arange(0, 101, 10))
+    plt.tight_layout()
+    plt.savefig(f"{cfg.out_dir}/packing_vs_partial_seq.pdf", dpi=300, bbox_inches="tight")
+    plt.savefig(f"{cfg.out_dir}/packing_vs_partial_seq.png", dpi=300, bbox_inches="tight")
+    plt.close("all")
 
     print("DONE")
 
@@ -553,7 +665,7 @@ def plot_sc_correlation(
     )
 
     # 3) Calculate Spearman correlation
-    rho, pval = spearmanr(filtered["sc_ca_rmsd"], filtered[y_col])
+    rho, pval = spearmanr(filtered[x_col], filtered[y_col])
 
     # 4) Set the plot title, x-/y-axis labels, grid
     y_axis_label = y_label if y_label else y_col
