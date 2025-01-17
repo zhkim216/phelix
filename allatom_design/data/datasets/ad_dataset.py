@@ -1,7 +1,10 @@
+import multiprocessing
+import random
+from itertools import groupby
+from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
-from itertools import groupby
-import random
+
 import numpy as np
 import pandas as pd
 import torch
@@ -10,15 +13,13 @@ from torch.utils import data
 from torch.utils.data import DataLoader
 from torchtyping import TensorType
 from tqdm import tqdm
-from torchtyping import TensorType
-import multiprocessing
-from multiprocessing import Pool
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (center_random_augmentation,
-                                      load_feats_from_pdb, make_fixed_size_1d, transform_sidechain_frame)
-
+                                      load_feats_from_pdb, make_fixed_size_1d,
+                                      transform_sidechain_frame)
+from allatom_design.data.pdb_utils import write_to_pdb
 
 FEATURES_LONG = ("residue_index", "chain_index", "aatype")
 
@@ -498,3 +499,41 @@ def process_pdb_key(args):
     example = load_feats_from_pdb(pdb_data_file, chain_ids_override=chain_ids_override, max_conformers=1)
     torch.save(example, out_file)
 
+
+def cached_example_to_pdb(pt_file: str, out_pdb_file: str, mode: str = "aa", conect: bool = False):
+    """
+    Load a cached PyTorch file (pt_file) with the expected keys:
+      - "aatype"
+      - "all_atom_positions"
+      - "all_atom_mask"
+      - "residue_index"
+      - "chain_index"
+      - optionally "b_factors"
+
+    Write the structure to 'out_pdb_file' as a PDB file.
+    """
+    # Load the .pt file
+    data = torch.load(pt_file, weights_only=True)
+
+    # Extract required fields
+    aatype = data["aatype"]  # shape [n]
+    atom_positions = data["all_atom_positions"]  # shape [n, 37, 3]
+    atom_mask = data["all_atom_mask"]  # shape [n, 37]
+    residue_index = data["residue_index"]  # shape [n]
+    chain_index = data["chain_index"]      # shape [n]
+
+    # b_factors might not exist
+    b_factors = data.get("b_factors", None)
+
+    # Call the write_to_pdb function
+    write_to_pdb(
+        aatype=aatype,
+        atom_positions=atom_positions,
+        atom_mask=atom_mask,
+        residue_index=residue_index,
+        chain_index=chain_index,
+        b_factors=b_factors,
+        filename=out_pdb_file,
+        mode=mode,
+        conect=conect,
+    )

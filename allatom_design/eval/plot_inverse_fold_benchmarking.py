@@ -168,6 +168,7 @@ def main(cfg: DictConfig):
     pred_coords = {Path(x).stem: metrics[x]["sc_info"]["struct_preds"]["pred_coords"][0] for x in metrics.keys()}
     sample_coords = {}
 
+    psce_per_res_dict = {}
     for pkl_file in glob.glob(f"{cfg.confidence_plots.sample_pkl_dir}/*.pkl"):
         pdb_name = Path(pkl_file).stem.replace("_sample0", "")
         with open(pkl_file, "rb") as f:
@@ -184,6 +185,7 @@ def main(cfg: DictConfig):
         # Sidechain confidence: get average pSCE
         atom_mask = rc.STANDARD_ATOM_MASK_WITH_X[aatype][:, rc.non_bb_idxs]  # assume all atom types for a given aatype are present
         avg_psce = (sample_info["psce"] * atom_mask).sum(axis=-1) / atom_mask.sum(axis=-1)
+        psce_per_res_dict[pdb_name] = avg_psce
         confidence_df.loc[pdb_name, "avg_psce"] = np.nanmean(avg_psce)  # nanmean to ignore glycines
         confidence_df.loc[pdb_name, "max_avg_psce"] = np.nanmax(avg_psce)
 
@@ -192,6 +194,7 @@ def main(cfg: DictConfig):
 
     # Align each sidechain in its local frame and compute aligned sidechain RMSD
     aligned_scn_rmsds = {}
+    aligned_scn_rmsds_per_res = {}
     for pdb_name in sample_coords.keys():
         atom_mask_scn, atom_mask_bb = atom_masks[pdb_name][:, rc.non_bb_idxs], atom_masks[pdb_name][:, rc.bb_idxs]
 
@@ -207,8 +210,9 @@ def main(cfg: DictConfig):
 
         # Get aligned RMSD
         pred_scn_local, sample_scn_local = pred_scn_local.squeeze(0), sample_scn_local.squeeze(0)
-        aligned_scn_rmsds[pdb_name] = (((pred_scn_local - sample_scn_local) * atom_mask_scn[..., None]) ** 2).sum(dim=(-1, -2)) / atom_mask_scn.sum(dim=-1).clamp(min=1)
-        aligned_scn_rmsds[pdb_name] = aligned_scn_rmsds[pdb_name].sqrt().mean().item()
+        aligned_scn_rmsds_per_res[pdb_name] = ((atom_mask_scn[..., None] * (pred_scn_local - sample_scn_local) ** 2).sum(dim=(-1, -2)) / atom_mask_scn.sum(dim=-1).clamp(min=1)).sqrt()
+        aligned_scn_rmsds[pdb_name] = aligned_scn_rmsds_per_res[pdb_name].mean().item()
+
 
     # Plot aligned sidechain RMSD vs scRMSD
     confidence_df["aligned_scn_rmsd"] = [aligned_scn_rmsds[x] for x in confidence_df.index]
@@ -237,11 +241,12 @@ def main(cfg: DictConfig):
     )
 
     # Plot aligned sidechain RMSD vs. avg_psce
-    subset_df = confidence_df[confidence_df["sc_ca_rmsd"] < 2.0]
+    subset_df = confidence_df[confidence_df["sc_ca_rmsd"] < 5.0]
     plot_sc_correlation(
         df=subset_df,
         x_col="aligned_scn_rmsd",
         y_col="avg_psce",
+        hue_col="sc_ca_rmsd",
         length_filter=None,
         cutoff=None,
         x_label="Aligned sidechain RMSD",
@@ -249,7 +254,30 @@ def main(cfg: DictConfig):
         save_file=f"{cfg.out_dir}/aligned_scn_rmsd_vs_avg_psce_cutoff_2A.pdf"
     )
 
+    # Plot aligned sidechain RMSD vs. avg psce
+    subset_df = confidence_df[confidence_df["sc_ca_rmsd"] < 5.0]
+    plt.figure()
+    plt.scatter(subset_df["aligned_scn_rmsd"], subset_df["avg_psce"], c=subset_df["sc_ca_rmsd"], cmap="viridis", s=10)
+    # Spearman correlation
+    spearman_corr_res, _ = spearmanr(subset_df["aligned_scn_rmsd"], subset_df["avg_psce"])
+    plt.text(
+        0.05, 0.95,
+        r"Spearman $\rho$: {0:.3f}".format(spearman_corr_res),
+        transform=plt.gca().transAxes,
+        fontsize=12,
+        verticalalignment='top',
+        color="black"
+    )
 
+    # Dark dashed line for y=x
+    max_val = float(max(subset_df["aligned_scn_rmsd"].max().item(), subset_df["avg_psce"].max().item()))
+    plt.plot([0, max_val], [0, max_val], 'k--', linewidth=1.5)
+    plt.xlabel("Aligned sidechain RMSD")
+    plt.ylabel("avg_psce")
+    plt.colorbar(label="scRMSD")
+    plt.savefig(f"{cfg.out_dir}/aligned_scn_rmsd_vs_avg_psce_cutoff_5A.pdf", dpi=300)
+    plt.savefig(f"{cfg.out_dir}/aligned_scn_rmsd_vs_avg_psce_cutoff_5A.png", dpi=300)
+    plt.close()
 
     for length in [100, 200, 300, 400, 500]:
         # sc_ca_rmsd vs ppl
@@ -617,6 +645,7 @@ def plot_sc_correlation(
     df: pd.DataFrame,
     x_col: str,
     y_col: str,                 # e.g. "avg_log_prob", "avg_psce", or "avg_seq_entropy"
+    hue_col: Optional[str] = None,    # Column name for color-coding points
     length_filter: Optional[int] = None,
     cutoff: Optional[float] = None,
     x_label: str = "scRMSD",
@@ -661,6 +690,7 @@ def plot_sc_correlation(
         data=filtered,
         x=x_col,
         y=y_col,
+        hue=hue_col,
         alpha=0.6
     )
 
