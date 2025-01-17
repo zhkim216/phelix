@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 import torch
@@ -39,9 +39,11 @@ class FaMPNN(nn.Module):
         self.num_encoder_layers = cfg.n_layers
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
+        self.per_residue_eps = cfg.get("per_residue_eps", False)
         self.augment_eps = cfg.augment_eps
         self.no_aatype_pred = getattr(cfg, "no_aatype_pred", False)
-        self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors, augment_eps=self.augment_eps)
+        self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors,
+                                        per_residue_eps=self.per_residue_eps, augment_eps=self.augment_eps)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
         self.W_s = nn.Embedding(self.n_aatype, self.hidden_dim)
         self.dropout = nn.Dropout(cfg.dropout_p)
@@ -72,8 +74,7 @@ class FaMPNN(nn.Module):
             self.sidechain_features = SidechainProteinFeatures(autoregressive = self.autoregressive,
                                                               node_features = self.node_features,
                                                               edge_features = self.edge_features,
-                                                              top_k=self.k_neighbors,
-                                                              augment_eps=self.augment_eps,)
+                                                              top_k=self.k_neighbors)
             self.W_e2 = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
 
         if self.model_type in ['graph_transformer']:
@@ -127,6 +128,7 @@ class FaMPNN(nn.Module):
         atom_mask_noised: TensorType["b n a", float],  # denotes missing, ghost, and masked atoms
         residue_index: TensorType["b n", int],
         chain_encoding: TensorType["b n", int],
+        noise_labels: Optional[Union[float, TensorType["b n"]]] = None,
     ):
 
         B, N, _, _ = denoised_coords.shape
@@ -137,11 +139,15 @@ class FaMPNN(nn.Module):
         X = torch.where(atom14_mask[..., None].bool(), X, X[..., 1:2, :])  # replace missing/ghost/masked atoms with CA
 
         # Prepare node and edge embeddings
-        E, E_idx, X = self.features(X, seq_mask, residue_index, chain_encoding)
+        E, E_idx, X, noise_labels = self.features(X, seq_mask, residue_index, chain_encoding, noise_labels)
 
         #h_V is size [B,N,H]
         h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
         h_E = self.W_e(E)
+
+        if self.per_residue_eps and (self.augment_eps > 0):
+            # add noise label to 128th dimension of h_V
+            h_V[..., -1] = h_V[..., -1] + noise_labels
 
         # Encoder is unmasked self-attention
         mask_attend = gather_nodes(seq_mask.unsqueeze(-1), E_idx).squeeze(-1)
@@ -151,7 +157,6 @@ class FaMPNN(nn.Module):
 
         #keep copy of node embeddings from encoder
         h_V_enc = h_V.clone()
-
 
         #implementation of causal mask if training autoregressively, otherwise mask is fully true
         mask_size = E_idx.shape[1]
@@ -262,12 +267,13 @@ class FaMPNN(nn.Module):
 
 class ProteinFeatures(nn.Module):
     def __init__(self, edge_features, node_features, num_positional_embeddings=16,
-        num_rbf=16, top_k=30, augment_eps=0., num_chain_embeddings=16):
+        num_rbf=16, top_k=30, per_residue_eps=False, augment_eps=0., num_chain_embeddings=16):
         """ Extract protein features """
         super(ProteinFeatures, self).__init__()
         self.edge_features = edge_features
         self.node_features = node_features
         self.top_k = top_k
+        self.per_residue_eps = per_residue_eps
         self.augment_eps = augment_eps
         self.num_rbf = num_rbf
         self.num_positional_embeddings = num_positional_embeddings
@@ -303,8 +309,26 @@ class ProteinFeatures(nn.Module):
         RBF_A_B = self._rbf(D_A_B_neighbors)
         return RBF_A_B
 
-    def forward(self, X, mask, residue_idx, chain_labels):
-        if self.training and self.augment_eps > 0:
+    def forward(self, X, mask, residue_idx, chain_labels,
+                noise_labels: Optional[Union[float, TensorType["b n"]]]):
+        if self.per_residue_eps:
+            # per-residue noise, based on pseudocode from Cho et al.
+            if self.training and self.augment_eps > 0:
+                # Training: randomly sample noise labels
+                r = torch.randn_like(X)  # random vector for each atom (this might differ from Cho et al.)
+                n = r / torch.norm(r, dim=-1, keepdim=True)
+                s = torch.randn_like(mask) * self.augment_eps  # per-residue noise label
+                noise = n * rearrange(s, "b n -> b n 1 1")
+                noise_labels = torch.abs(s)  # DISCREPANCY: noise labels should be positive
+                X = X + noise
+            elif (noise_labels is None) or (self.augment_eps == 0):
+                # Inference: assume 0 noise if not provided
+                noise_labels = torch.zeros_like(mask)
+            elif isinstance(noise_labels, float):
+                # Inference: constant noise label for every residue
+                noise_labels = torch.ones_like(mask) * noise_labels
+        elif self.training and self.augment_eps > 0:
+            # training: add randomly sampled noise to input
             X = X + self.augment_eps * torch.randn_like(X)
 
         b = X[:,:,1,:] - X[:,:,0,:]
@@ -355,18 +379,17 @@ class ProteinFeatures(nn.Module):
         E = torch.cat((E_positional, RBF_all), -1)
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
-        return E, E_idx, X
+        return E, E_idx, X, noise_labels
 
 class SidechainProteinFeatures(nn.Module):
     def __init__(self, autoregressive, edge_features, node_features, num_positional_embeddings=16,
-        num_rbf=16, top_k=30, augment_eps=0.,):
+        num_rbf=16, top_k=30):
         """ Extract protein features """
         super(SidechainProteinFeatures, self).__init__()
         self.autoregressive = autoregressive
         self.edge_features = edge_features
         self.node_features = node_features
         self.top_k = top_k
-        self.augment_eps = augment_eps
         self.num_rbf = num_rbf
         self.num_positional_embeddings = num_positional_embeddings
         self.zero_ghost_atoms = False

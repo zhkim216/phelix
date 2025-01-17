@@ -25,6 +25,7 @@ minimpnn:
 
   model_type: "sidechain"
   augment_eps: 0.0
+  per_residue_eps: false
   dropout_p: 0.1
   dec_edge_up: true
   aggregation: "sum"
