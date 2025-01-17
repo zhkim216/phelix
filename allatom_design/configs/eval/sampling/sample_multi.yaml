@@ -12,7 +12,6 @@ checkpoint_path: null
 pdb_dir: null
 pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
 pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
-from_cache: false  # true if loading pdbs from cached .pt files
 presort_by_length: false  # sort pdbs by sequence length (longest first). Can be helpful for efficiency.
 out_dir: null
 run_self_consistency_eval: false

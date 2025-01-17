@@ -143,16 +143,12 @@ def main(cfg: DictConfig):
         batch_list = []
         batch_chain_id_mapping = []
         for pdb_file in pdb_batch_files:
-            if not cfg.from_cache:
-                data = load_feats_from_pdb(pdb_file)
-                single = process_single_pdb(data)
-            else:
-                data = torch.load(pdb_file)
-                single = process_single_pdb(data)
-
+            data = load_feats_from_pdb(pdb_file)
+            single = process_single_pdb(data)
             batch_list.append(single)
+
             # store chain ID mapping for parsing fixed positions
-            batch_chain_id_mapping.append(data.get("chain_id_mapping", None))
+            batch_chain_id_mapping.append(data["chain_id_mapping"])
 
         pdb_names = [Path(pdb_file).stem for pdb_file in pdb_batch_files]
 
