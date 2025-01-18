@@ -156,7 +156,6 @@ def main(cfg: DictConfig):
             scn_override_mask=scn_override_mask,
             scd_inputs=scd_inputs,
         )
-
         samples = {"x_denoised": x_denoised,
                    "seq_mask": seq_mask,
                    "missing_atom_mask": missing_atom_mask,
