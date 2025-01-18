@@ -10,6 +10,7 @@ sample_dir: /media/scratch/datasets/denovo500/pdbs
 pdb_key_list: null
 input_fasta_dir: null  # use sequences in input fastas for self-consistency eval, rather than using ProteinMPNN
 input_pdb_dir: null  # use structures in input pdbs for self-consistency eval, rather than using ProteinMPNN or fastas
+skip_pdbs: null  # stem of pdb files to skip
 num_workers: 10
 out_dir: /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/proteinmpnn_inverse_fold
 overwrite_out_dir: true  # if true, delete existing output directory
