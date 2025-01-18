@@ -103,7 +103,6 @@ def main(cfg: DictConfig):
         all_sample_info["aatype"].append(sample_batch["aatype"])
         all_sample_info["scn_rmsd_per_pos"].append(scn_info["scn_rmsd_per_pos"][0])
 
-
         # Compute RMSD per protein
         rmsd_i = (scn_info["scn_rmsd_per_pos"].squeeze(0) * seq_mask).sum() / seq_mask.sum()
         metrics_per_prot["rmsd"].append(rmsd_i.item())
@@ -232,14 +231,14 @@ def main(cfg: DictConfig):
         psce_per_res_sub = psce_per_res[idxs]
 
         plt.figure(figsize=(5, 5))
-        plt.scatter(sce_per_res_sub, psce_per_res_sub, s=0.7, color='#1f77b4', alpha=1.0)  # same blue
+        plt.scatter(sce_per_res_sub, psce_per_res_sub, s=0.4, color='#1f77b4', alpha=1.0)  # same blue
 
         # Dark dashed line for y=x
         max_val_res = float(max(sce_per_res.max().item(), psce_per_res.max().item()))
         plt.plot([0, max_val_res], [0, max_val_res], 'k--', linewidth=1.5)
 
         # Horizontal gold dashed line at y=4.0625
-        plt.axhline(4.0625, color='goldenrod', linestyle='-', linewidth=1)
+        # plt.axhline(4.0625, color='goldenrod', linestyle='-', linewidth=1)
 
         # Spearman correlation
         spearman_corr_res, _ = spearmanr(sce_per_res.cpu().numpy(), psce_per_res.cpu().numpy())
@@ -259,11 +258,28 @@ def main(cfg: DictConfig):
 
         plt.xlim(0, 4.5)
         plt.ylim(0, 4.5)
+        plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.3)
 
         # Save as both PNG and PDF
         plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_res.png", dpi=300)
-        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_res.pdf", dpi=300)
+        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_res.pdf", dpi=300, transparent=True)
         plt.close()
+
+        # Plot the same but between 0 and 1
+        plt.figure(figsize=(5, 5))
+        plt.scatter(sce_per_res_sub, psce_per_res_sub, s=0.4, color='#1f77b4', alpha=1.0)  # same blue
+        plt.plot([0, 1], [0, 1], 'k--', linewidth=1.5)
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+        plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.3)
+
+        plt.xlabel("Sidechain error", fontsize=12)
+        plt.ylabel("Predicted sidechain error", fontsize=12)
+        plt.title("Confidence per residue")  # Reflecting per-residue
+        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_res_01.png", dpi=300)
+        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_res_01.pdf", dpi=300, transparent=True)
+        plt.close("all")
+
 
         ### Get correlation per atom ###
         sce = all_sample_info["sce"][scn_atom_mask.bool()].flatten()
@@ -275,14 +291,14 @@ def main(cfg: DictConfig):
         psce_sub = psce[idxs]
 
         plt.figure(figsize=(5, 5))
-        plt.scatter(sce_sub, psce_sub, s=0.7, color='#1f77b4')  # same blue
+        plt.scatter(sce_sub, psce_sub, s=0.4, color='#1f77b4')  # same blue
 
         # Dark dashed line for y=x
         max_val_atom = float(max(sce.max().item(), psce.max().item()))
         plt.plot([0, max_val_atom], [0, max_val_atom], 'k--', linewidth=1.5)
 
         # Horizontal gold dashed line at y=4.0625
-        plt.axhline(4.0625, color='goldenrod', linestyle='-', linewidth=1)
+        # plt.axhline(4.0625, color='goldenrod', linestyle='-', linewidth=1)
 
         # Spearman correlation
         spearman_corr_atom, _ = spearmanr(sce.cpu().numpy(), psce.cpu().numpy())
@@ -302,11 +318,27 @@ def main(cfg: DictConfig):
 
         plt.xlim(0, 4.5)
         plt.ylim(0, 4.5)
+        plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.3)
 
         # Save as both PNG and PDF
         plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_atom.png", dpi=300)
-        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_atom.pdf", dpi=300)
+        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_atom.pdf", dpi=300, transparent=True)
         plt.close()
+
+        # Plot the same but between 0 and 1
+        plt.figure(figsize=(5, 5))
+        plt.scatter(sce_sub, psce_sub, s=0.4, color='#1f77b4')  # same blue
+        plt.plot([0, 1], [0, 1], 'k--', linewidth=1.5)
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+        plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.3)
+
+        plt.xlabel("Sidechain error", fontsize=12)
+        plt.ylabel("Predicted sidechain error", fontsize=12)
+        plt.title("Confidence per atom")  # Reflecting per-atom
+        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_atom_01.png", dpi=300)
+        plt.savefig(f"{cfg.out_dir}/sce_vs_psce_per_atom_01.pdf", dpi=300, transparent=True)
+        plt.close("all")
 
     print("TEST")
 

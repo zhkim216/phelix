@@ -19,19 +19,40 @@ line_plots:
     - ESM-IF1
     - LM-Design
 
+psce_sweep:
+  input_pkl_files:
+  - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/val_S100_psce0.1_c0_aasd2/all_metrics.pkl
+  - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/val_S100_psce0.2_c0_aasd2/all_metrics.pkl
+  - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/val_S100_psce0.3_c0_aasd2/all_metrics.pkl
+  - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/val_S100_psce0.5_c0_aasd2/all_metrics.pkl
+  - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/val_S100_psce1.0_c0_aasd2/all_metrics.pkl
+
+  model_names:
+    - 0.1
+    - 0.2
+    - 0.3
+    - 0.5
+    - 1.0
+
 iterative_sampling_plots:
   threshold_rmsd_min: 0
   threshold_rmsd_max: 5
   input_pkl_files:
-    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S1_c0_aasd2/all_metrics.pkl
-    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S10_c0_aasd2/all_metrics.pkl
-    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S20_c0_aasd2/all_metrics.pkl
-    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S50_c0_aasd2/all_metrics.pkl
-    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_c0_aasd2/all_metrics.pkl
-    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S200_c0_aasd2/all_metrics.pkl
-    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S300_c0_aasd2/all_metrics.pkl
-    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S500_c0_aasd2/all_metrics.pkl
-    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/proteinmpnn/all_metrics.pkl
+    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S1_c0_aasd2/all_metrics.pkl
+    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S10_c0_aasd2/all_metrics.pkl
+    # # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S20_c0_aasd2/all_metrics.pkl
+    # # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S50_c0_aasd2/all_metrics.pkl
+    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_c0_aasd2/all_metrics.pkl
+    # # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S200_c0_aasd2/all_metrics.pkl
+    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S300_c0_aasd2/all_metrics.pkl
+    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S500_c0_aasd2/all_metrics.pkl
+    # # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/proteinmpnn/all_metrics.pkl
+    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S1_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
+    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S10_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
+    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
+    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S300_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
+    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S500_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
+
 
   model_names:
     - 1 step
@@ -45,8 +66,8 @@ iterative_sampling_plots:
     # - ProteinMPNN
 
 confidence_plots:
-  input_pkl_file: /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_c0_aasd2/all_metrics.pkl
-  sample_pkl_dir: /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/sample_multi/ema-step300000-std0.010/denovo500_S100/sample_pkls
+  input_pkl_file: /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
+  sample_pkl_dir: /media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/sample_multi/ema-step300000-std0.010/denovo500_S100_psce0.3_no_repack_every_step/sample_pkls
 
   model_name: FAMPNN (100 steps)
 
