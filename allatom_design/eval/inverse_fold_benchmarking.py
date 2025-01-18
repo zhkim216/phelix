@@ -97,6 +97,9 @@ def main(cfg: DictConfig):
         pdbs = design_pdbs  # use designed pdbs for evaluation
 
     # Run self-consistency evaluation
+    if cfg.skip_pdbs:
+        pdbs = [pdb for pdb in pdbs if Path(pdb).stem not in cfg.skip_pdbs]
+    pdbs = pdbs[::-1]  # DEBUG
     sc_output = eval_metrics.run_self_consistency_eval(pdbs,
                                                        mpnn_model, mpnn_cfg,
                                                        struct_pred_model,
