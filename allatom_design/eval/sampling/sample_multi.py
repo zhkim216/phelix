@@ -194,6 +194,7 @@ def main(cfg: DictConfig):
             repack_last=cfg.repack_last,
             repack_every_step=cfg.repack_every_step,
             psce_threshold=cfg.psce_threshold,
+            noise_labels=cfg.noise_labels,
             aatype_override_mask=aatype_override_mask,
             scn_override_mask=scn_override_mask,
             scd_inputs=scd_inputs,

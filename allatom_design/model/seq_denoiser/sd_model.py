@@ -1,6 +1,6 @@
 import copy
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -241,6 +241,7 @@ class SeqDenoiser(nn.Module):
                aatype_override_mask: Optional[TensorType["b n", int]] = None,
                restrict_pos_aatype: Optional[Tuple[TensorType["b n", float],
                                                    TensorType["b n k", int]]] = None,  # restrict aatype sampling at certain positions
+               noise_labels: Optional[Union[float, TensorType["b n"]]] = None,  # per-residue noise label
                scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
                ):
         """
@@ -263,6 +264,9 @@ class SeqDenoiser(nn.Module):
 
         # Handle aatype restrictions
         aux_inputs["restrict_pos_aatype"] = restrict_pos_aatype
+
+        # Add in noise label
+        aux_inputs["noise_labels"] = noise_labels
 
         # Set up structure input dependent on structure mask
         x0 = x.clone()
