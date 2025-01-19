@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c0_aasd3
+#SBATCH --job-name=c2_aasd0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
@@ -21,8 +21,8 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=c0_aasd3
-GROUP=chimera_c0
+EXP_NAME=c2_aasd0
+GROUP=chimera_c2
 
 # Dataset paths
 # PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
@@ -37,21 +37,21 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     group=${GROUP} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
-    data.fixed_size=1024 \
+    data.fixed_size=512 \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
     data.subset_length_range=[16,9999] \
-    train.batch_size=8 \
-    trainer.accumulate_grad_batches=4 \
+    train.batch_size=32 \
+    trainer.accumulate_grad_batches=1 \
     train.compile_model=true \
     model.task=allatom_seq_des \
     interpolant.training_noise_schedule=uniform_sqrt_t \
     denoiser=minimpnn_denoiser \
     denoiser.minimpnn.augment_eps=0.3 \
-    denoiser.minimpnn.use_gvp=true \
+    denoiser.minimpnn.per_residue_eps=true \
+    denoiser.minimpnn.use_gvp=false \
     denoiser.minimpnn.n_layers=5 \
     denoiser.minimpnn.n_channel=128 \
-    denoiser.scn_diffusion_module.scn_denoiser.depth=6 \
     denoiser.confidence_module.enabled=true \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=20000 \
