@@ -229,7 +229,7 @@ def main(cfg: DictConfig):
             seq_mask_i = samples["seq_mask"][j].cpu()
             pred_aatype_i = samples["pred_aatype"][j].cpu()
             pred_aatype_i = pred_aatype_i[seq_mask_i.bool()]
-            pred_seq_i = "".join(rc.restypes[a] for a in pred_aatype_i)
+            pred_seq_i = "".join(rc.restypes_with_x[a] for a in pred_aatype_i)
             pred_seqs.append(pred_seq_i)
 
             # Save fasta
@@ -325,7 +325,7 @@ def get_override_masks(batch: Dict[str, TensorType["b ..."]],
 
             # print fixed sequence
             if verbose:
-                fixed_seq_viz = "".join([rc.restypes[example["aatype"][j]] if aatype_override_mask[i, j] else "-" for j in range(aatype_override_mask.shape[1])])
+                fixed_seq_viz = "".join([rc.restypes_with_x[example["aatype"][j]] if aatype_override_mask[i, j] else "-" for j in range(aatype_override_mask.shape[1])])
                 print(f"Fixed sequence: {fixed_seq_viz}")
         else:
             if verbose:
@@ -340,7 +340,7 @@ def get_override_masks(batch: Dict[str, TensorType["b ..."]],
 
             # print fixed sidechains
             if verbose:
-                fixed_scn_viz = "".join([rc.restypes[example["aatype"][j]] if scn_override_mask[i, j] else "-" for j in range(scn_override_mask.shape[1])])
+                fixed_scn_viz = "".join([rc.restypes_with_x[example["aatype"][j]] if scn_override_mask[i, j] else "-" for j in range(scn_override_mask.shape[1])])
                 print(f"Fixed sidechains: {fixed_scn_viz}")
         else:
             if verbose:

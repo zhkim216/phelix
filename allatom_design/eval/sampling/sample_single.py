@@ -118,7 +118,7 @@ def main(cfg: DictConfig):
         aatype_override_mask[:, abs_fixed_pos_seq] = 1
 
         # print fixed sequence
-        fixed_seq_viz = "".join([rc.restypes[batch["aatype"][i]] if aatype_override_mask[0, i] else "-" for i in range(aatype_override_mask.shape[1])])
+        fixed_seq_viz = "".join([rc.restypes_with_x[batch["aatype"][i]] if aatype_override_mask[0, i] else "-" for i in range(aatype_override_mask.shape[1])])
         print(f"Fixed sequence: {fixed_seq_viz}")
     else:
         print("No fixed sequence positions specified.")
@@ -135,7 +135,7 @@ def main(cfg: DictConfig):
             assert scn_override_mask[:, abs_pos_override].sum() == 0, "Cannot fix sidechains at positions where the sequence from the PDB is overridden."
 
         # print fixed sidechains
-        fixed_scn_viz = "".join([rc.restypes[batch["aatype"][i]] if scn_override_mask[0, i] else "-" for i in range(scn_override_mask.shape[1])])
+        fixed_scn_viz = "".join([rc.restypes_with_x[batch["aatype"][i]] if scn_override_mask[0, i] else "-" for i in range(scn_override_mask.shape[1])])
         print(f"Fixed sidechains: {fixed_scn_viz}")
     else:
         print("No fixed sidechain positions specified.")
