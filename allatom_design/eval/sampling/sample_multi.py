@@ -89,7 +89,7 @@ def main(cfg: DictConfig):
     if cfg.fixed_pos_csv is not None:
         fixed_pos_df = pd.read_csv(cfg.fixed_pos_csv, names=["fixed_pos_seq", "fixed_pos_scn"], index_col=0)
         fixed_pos_df = fixed_pos_df.fillna("")
-        fixed_pos_df.index = fixed_pos_df.index.str.replace(".pdb", "").replace(".cif", "")  # remove extension from index if present
+        fixed_pos_df.index = fixed_pos_df.index.str.replace(".pdb", "").str.replace(".cif", "")  # remove extension from index if present
     else:
         fixed_pos_df = pd.DataFrame(columns=["fixed_pos_seq", "fixed_pos_scn"])
 
@@ -153,7 +153,7 @@ def main(cfg: DictConfig):
         pdb_names = [Path(pdb_file).stem for pdb_file in pdb_batch_files]
 
         # Create a batch dictionary from batch_list by stacking
-        model_input_keys = ["x", "aatype", "seq_mask", "missing_atom_mask", "residue_index", "chain_index"]
+        model_input_keys = ["x", "aatype", "seq_mask", "missing_atom_mask", "residue_index", "chain_index", "interface_residue_mask"]
         max_len = max(b["x"].shape[0] for b in batch_list)  # determine the max_len (max number of residues across the batch)
         batch_list = [pad_to_max_len({k: b[k].unsqueeze(0) for k in model_input_keys}, max_len)for b in batch_list]  # pad each batch to max length
         batch = {k: torch.cat([b[k] for b in batch_list], dim=0) for k in model_input_keys}  # stack the padded batches
@@ -209,6 +209,11 @@ def main(cfg: DictConfig):
             "pred_aatype": aatype_denoised,
             "psce": aux["psce"],
             "seq_probs": aux["seq_probs"],
+            # save other useful info
+            "original_aatype": batch["aatype"],
+            "interface_residue_mask": batch["interface_residue_mask"],
+            "aatype_override_mask": aatype_override_mask,
+            "scn_override_mask": scn_override_mask,
         }
 
         # Save outputs

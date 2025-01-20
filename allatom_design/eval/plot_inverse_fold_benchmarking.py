@@ -50,42 +50,72 @@ def main(cfg: DictConfig):
             "Length of input_pkl_files must match length of model_names."
     )
 
-    # # Extract metrics from pickle
-    # model_dfs = {model_name: {} for model_name in cfg.line_plots.model_names}
-    # for model_name, pkl_file in zip(cfg.line_plots.model_names, cfg.line_plots.input_pkl_files):
-    #     with open(pkl_file, "rb") as f:
-    #         metrics = pickle.load(f)
+    # Extract metrics from pickle
+    model_dfs = {model_name: {} for model_name in cfg.line_plots.model_names}
+    for model_name, pkl_file in zip(cfg.line_plots.model_names, cfg.line_plots.input_pkl_files):
+        with open(pkl_file, "rb") as f:
+            metrics = pickle.load(f)
+        model_dfs[model_name]["pdb_name"] = [Path(x).stem for x in metrics.keys()]
+        model_dfs[model_name]["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
+        model_dfs[model_name]["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
+        model_dfs[model_name]["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
 
-    #     # Extract metrics
-    #     model_dfs[model_name]["pdb_name"] = [Path(x).stem for x in metrics.keys()]
-    #     model_dfs[model_name]["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
-    #     model_dfs[model_name]["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
-    #     model_dfs[model_name]["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
+    model_dfs = {model_name: pd.DataFrame(model_dfs[model_name]) for model_name in cfg.line_plots.model_names}
 
-    # # Mapping from model name to dataframe
-    # model_dfs = {model_name: pd.DataFrame(model_dfs[model_name]) for model_name in cfg.line_plots.model_names}
+    # Combine dataframes
+    df_list = []
+    for model_name, df in model_dfs.items():
+        temp = df.copy()
+        temp["model"] = model_name
+        df_list.append(temp)
 
-    # # Box and whisker plots
-    # create_box_and_whisker_plots(model_dfs, Path(cfg.out_dir))
+    combined_df = pd.concat(df_list, ignore_index=True)
 
-    # # Line plots of median
-    # plot_sc_medians_line(
-    #     model_dfs,
-    #     metric="sc_ca_rmsd",
-    #     x_label="Length",
-    #     y_label="Median scRMSD",
-    #     x_ticks=[100, 200, 300, 400, 500],
-    #     save_file=f"{cfg.out_dir}/sc_ca_rmsd_med.pdf"
-    # )
+    figsize = (4, 3)
+    # colors = ["#CDCDCD", "#8C8C8C", "#5BA4CF", "#22688F", "#0D3D56"]
+    # colors = ["#000000", "#CDCDCD", "#8C8C8C", "#5BA4CF", "#22688F"]
+    colors = ["#005B96", "#CCCCCC", "#999999", "#555555", "#222222"]  # increasing darkness
+    # colors = ["#0D3D56", "#22688F", "#5BA4CF", "#8C8C8C", "#CDCDCD"]
 
-    # plot_sc_medians_line(
-    #     model_dfs,
-    #     metric="sc_tm",
-    #     x_label="Length",
-    #     y_label="Median scTM",
-    #     x_ticks=[100, 200, 300, 400, 500],
-    #     save_file=f"{cfg.out_dir}/sc_ca_tm_med.pdf"
-    # )
+    # median sc_ca_rmsd line plot
+    grouped = combined_df.groupby(["model", "length"], as_index=False)["sc_ca_rmsd"].median().rename(columns={"sc_ca_rmsd": "median_val"})
+    grouped = grouped.sort_values(["model", "length"])
+
+    plt.figure(figsize=figsize)
+    for i, model_name in enumerate(cfg.line_plots.model_names):
+        sub_df = grouped[grouped["model"] == model_name]
+        plt.plot(sub_df["length"], sub_df["median_val"], label=model_name,
+                 marker='o',markersize=4,
+                 color=colors[i % len(colors)])
+    plt.xlabel("Length", fontsize=12)
+    plt.ylabel("Median scRMSD", fontsize=12)
+    plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.3)
+    plt.xticks([100, 200, 300, 400, 500])
+    plt.legend(loc="best", fontsize=9)
+    plt.tight_layout()
+    plt.savefig(f"{cfg.out_dir}/sc_ca_rmsd_med.pdf", dpi=300, transparent=True, bbox_inches="tight")
+    plt.savefig(f"{cfg.out_dir}/sc_ca_rmsd_med.png", dpi=300, bbox_inches="tight")
+    plt.close("all")
+
+    # median sc_tm line plot
+    grouped = combined_df.groupby(["model", "length"], as_index=False)["sc_tm"].median().rename(columns={"sc_tm": "median_val"})
+    grouped = grouped.sort_values(["model", "length"])
+
+    plt.figure(figsize=figsize)
+    for i, model_name in enumerate(cfg.line_plots.model_names):
+        sub_df = grouped[grouped["model"] == model_name]
+        plt.plot(sub_df["length"], sub_df["median_val"], label=model_name,
+                 marker='o', markersize=3,
+                 color=colors[i % len(colors)], alpha=0.8,)
+    plt.xlabel("Length", fontsize=12)
+    plt.ylabel("Median scTM", fontsize=12)
+    plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.3)
+    plt.xticks([100, 200, 300, 400, 500])
+    plt.legend(loc="best", )
+    plt.tight_layout()
+    plt.savefig(f"{cfg.out_dir}/sc_ca_tm_med.pdf", dpi=300, transparent=True, bbox_inches="tight")
+    plt.savefig(f"{cfg.out_dir}/sc_ca_tm_med.png", dpi=300, bbox_inches="tight")
+    plt.close("all")
 
     # #################################### PSCE sweep over validation set ####################################
     # model_dfs = {model_name: {} for model_name in cfg.psce_sweep.model_names}
@@ -147,42 +177,60 @@ def main(cfg: DictConfig):
     # Convert to DataFrame
     iter_sampling_dfs = {model_name: pd.DataFrame(iter_sampling_dfs[model_name]) for model_name in cfg.iterative_sampling_plots.model_names}
 
-    # Plot rmsd threshold vs success for all lengths
-    for length in [100, 200, 300, 400, 500]:
-        plot_rmsd_threshold_vs_success(
-            model_dfs=iter_sampling_dfs,
-            length_filter=length,
-            metric="sc_ca_rmsd",
-            x_label="scRMSD Threshold",
-            y_label="Number of Samples Below Threshold",
-            n_thresholds=50,
-            threshold_min=cfg.iterative_sampling_plots.threshold_rmsd_min,
-            threshold_max=cfg.iterative_sampling_plots.threshold_rmsd_max,
-            save_file=f"{cfg.out_dir}/iterative_sampling_success_curve_L{length}.pdf"
-        )
+    # different shades of blue, keeping the middle color (#005B96) the same,
+    # but making lighter blues lighter and darker blues darker for more contrast
+    colors = ["#A9D6F3", "#66ADD9", "#005B96", "#00397A", "#001E47"]
+    figsize = (4, 3)
 
-    # Plot overall success rate
-    plot_rmsd_threshold_vs_success(
-        model_dfs=iter_sampling_dfs,
-        length_filter=None,
-        metric="sc_ca_rmsd",
-        x_label="scRMSD Threshold",
-        y_label="Success rate (%)",
-        n_thresholds=50,
-        threshold_min=cfg.iterative_sampling_plots.threshold_rmsd_min,
-        threshold_max=cfg.iterative_sampling_plots.threshold_rmsd_max,
-        save_file=f"{cfg.out_dir}/iterative_sampling_success_curve_overall.pdf"
+    # Extract the names in the original order
+    model_order = cfg.iterative_sampling_plots.model_names
+
+    # 1) Median sc_ca_rmsd bar plot
+    sc_ca_rmsd_medians = [
+        iter_sampling_dfs[m]["sc_ca_rmsd"].median() for m in model_order
+    ]
+
+    plt.figure(figsize=figsize)
+    plt.bar(
+        range(len(model_order)),
+        sc_ca_rmsd_medians,
+        color=[colors[i % len(colors)] for i in range(len(model_order))],
+        alpha=0.8,
+        edgecolor="black",
+        zorder=2
     )
+    plt.ylabel("Median scRMSD", fontsize=12)
+    plt.xticks(range(len(model_order)), model_order, rotation=45)
+    plt.yticks(range(7))
+    plt.grid(axis='y', linestyle='-', linewidth=0.5, alpha=0.3, color='gray', zorder=0)
+    plt.ylim(0, 6.5)
+    plt.tight_layout()
+    plt.savefig(f"{cfg.out_dir}/iter_sampling_sc_ca_rmsd_median.pdf", dpi=300, transparent=True, bbox_inches="tight")
+    plt.savefig(f"{cfg.out_dir}/iter_sampling_sc_ca_rmsd_median.png", dpi=300, bbox_inches="tight")
+    plt.close("all")
 
-    plot_fraction_below_threshold(
-        model_dfs=iter_sampling_dfs,
-        thresholds=[2.0, 5.0],     # or just [2.0] for a single threshold
-        length_filter=500,
-        metric="sc_ca_rmsd",
-        save_file=f"{cfg.out_dir}/fraction_below_threshold.pdf"
+    # 3) Median sc_tm bar plot
+    sc_tm_medians = [
+        iter_sampling_dfs[m]["sc_tm"].median() for m in model_order
+    ]
+
+    plt.figure(figsize=figsize)
+    plt.bar(
+        range(len(model_order)),
+        sc_tm_medians,
+        color=[colors[i % len(colors)] for i in range(len(model_order))],
+        alpha=0.8,
+        edgecolor="black",
+        zorder=2
     )
+    plt.ylabel("Median scTM", fontsize=12)
+    plt.xticks(range(len(model_order)), model_order, rotation=45)
+    plt.grid(axis='y', linestyle='-', linewidth=0.5, alpha=0.3, color='gray', zorder=0)
+    plt.tight_layout()
+    plt.savefig(f"{cfg.out_dir}/iter_sampling_sc_tm_median.pdf", dpi=300, transparent=True, bbox_inches="tight")
+    plt.savefig(f"{cfg.out_dir}/iter_sampling_sc_tm_median.png", dpi=300, bbox_inches="tight")
+    plt.close("all")
 
-    # TODO: plot this for scTM
 
     # Confidence plots
     confidence_df = {}
@@ -223,6 +271,10 @@ def main(cfg: DictConfig):
         psce_per_res_dict[pdb_name] = avg_psce
         confidence_df.loc[pdb_name, "avg_psce"] = np.nanmean(avg_psce)  # nanmean to ignore glycines
         confidence_df.loc[pdb_name, "max_avg_psce"] = np.nanmax(avg_psce)
+
+        if pdb_name == "L200_26":
+            x = sample_info["x_denoised"]
+            y = sample_info["pred_aatype"]
 
         # Store sample coords
         sample_coords[pdb_name] = torch.tensor(sample_info["x_denoised"])
@@ -281,6 +333,47 @@ def main(cfg: DictConfig):
     plt.close()
 
 
+    # Highlight L200_24 as an orange star (if it exists in the subset)
+    subset_df = confidence_df[confidence_df["sc_ca_rmsd"] < 5.0]
+    plt.figure(figsize=(5, 5))
+    sc = plt.scatter(subset_df["aligned_scn_rmsd"], subset_df["avg_psce"],
+                     c=subset_df["sc_ca_rmsd"], cmap="viridis", s=10, alpha=0.8)
+
+    if "L200_24" in subset_df.index:
+        plt.scatter(
+            subset_df.loc["L200_24", "aligned_scn_rmsd"],
+            subset_df.loc["L200_24", "avg_psce"],
+            marker="*",
+            color="orange",
+            s=100
+        )
+
+    # Spearman correlation
+    spearman_corr_res, _ = spearmanr(subset_df["aligned_scn_rmsd"], subset_df["avg_psce"])
+    plt.text(
+        0.05, 0.95,
+        r"Spearman $\rho$: {0:.3f}".format(spearman_corr_res),
+        transform=plt.gca().transAxes,
+        fontsize=12,
+        verticalalignment='top',
+        color="black"
+    )
+    max_val = float(max(subset_df["aligned_scn_rmsd"].max().item(), subset_df["avg_psce"].max().item()))
+    plt.plot([0, max_val], [0, max_val], 'k--', linewidth=1.5)
+    plt.xlabel("Aligned sidechain RMSD ($\\mathrm{\\AA}$)", fontsize=12)
+    plt.ylabel("Predicted sidechain error ($\\mathrm{\\AA}$)", fontsize=12)
+    plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.3)
+    plt.ylim(0, 1.2)
+    plt.xlim(0, 1.2)
+    divider = make_axes_locatable(plt.gca())
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    plt.colorbar(sc, cax=cax, label="scRMSD")
+    plt.savefig(f"{cfg.out_dir}/aligned_scn_rmsd_vs_avg_psce_cutoff_5A_star.pdf", dpi=300)
+    plt.savefig(f"{cfg.out_dir}/aligned_scn_rmsd_vs_avg_psce_cutoff_5A_star.png", dpi=300)
+    plt.close()
+
+
+
     #################################### Partial sequence packing plots ####################################
     partial_seq_df = {}
     for input_csv in cfg.partial_seq_packing_plots.input_seq_csvs:
@@ -289,7 +382,7 @@ def main(cfg: DictConfig):
     partial_seq_df = pd.DataFrame(partial_seq_df.items(), columns=["tseq", "scn_rmsd_avg_all"])
 
     partial_scn_df = {}
-    partial_scn_df[0.0] = partial_seq_df[partial_seq_df["tseq"] == 1.0].iloc[0, 1]
+    no_context = partial_scn_df[0.0] = partial_seq_df[partial_seq_df["tseq"] == 1.0].iloc[0, 1]
     for input_csv in cfg.partial_seq_packing_plots.input_scn_csvs:
         tscn_val = float(Path(input_csv).parent.name.split("_")[-1])
         partial_scn_df[tscn_val] = pd.read_csv(input_csv).loc[0, "scn_rmsd_avg_all"]
@@ -297,15 +390,16 @@ def main(cfg: DictConfig):
     partial_scn_df = pd.DataFrame(partial_scn_df.items(), columns=["tscn", "scn_rmsd_avg_all"])
 
     plt.figure(figsize=(6, 4))
-    plt.plot(partial_seq_df["tseq"] * 100, partial_seq_df["scn_rmsd_avg_all"], marker="o", color="black", linewidth=2, label="Partial sequence")
-    plt.plot(partial_scn_df["tscn"] * 100, partial_scn_df["scn_rmsd_avg_all"], marker="o", color="#1f77b4", linewidth=2, label="Partial sidechain, with full sequence")
+    plt.axhline(no_context, color="gray", linestyle="--", label="Full sequence context", linewidth=1.0)
+    plt.plot(partial_seq_df["tseq"] * 100, partial_seq_df["scn_rmsd_avg_all"], marker="o", color="black", linewidth=2, label="Partial sequence context")
+    plt.plot(partial_scn_df["tscn"] * 100, partial_scn_df["scn_rmsd_avg_all"], marker="o", color="#1f77b4", linewidth=2, label="Partial sidechain context")
     plt.legend()
     plt.xlabel("Partial context given (%)", fontsize=12)
     plt.ylabel("Average packing RMSD\n" r"over known sequence ($\AA$)", fontsize=12)
     plt.grid(True, linestyle='-', linewidth=0.5, alpha=0.7)
     plt.xticks(np.arange(0, 101, 10))
     plt.tight_layout()
-    plt.savefig(f"{cfg.out_dir}/packing_vs_partial_seq.pdf", dpi=300, bbox_inches="tight")
+    plt.savefig(f"{cfg.out_dir}/packing_vs_partial_seq.pdf", dpi=300, bbox_inches="tight", transparent=True)
     plt.savefig(f"{cfg.out_dir}/packing_vs_partial_seq.png", dpi=300, bbox_inches="tight")
     plt.close("all")
 
@@ -410,7 +504,7 @@ def plot_sc_medians_line(
     grouped = grouped.sort_values(["model", "length"])
 
     # 4) Create the plot
-    plt.figure(figsize=(6, 4))
+    plt.figure(figsize=(8, 6))
 
     # Just use the model names as labels
     model_map = {m: m for m in grouped["model"].unique()}

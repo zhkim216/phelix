@@ -6,18 +6,22 @@ overwrite_out_dir: true
 
 line_plots:
   input_pkl_files:
-    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_c0_aasd2/all_metrics.pkl
+    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
+    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_psce0.3_no_repack_every_step_c0_aasd4/all_metrics.pkl
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/proteinmpnn/all_metrics.pkl
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/esm3/all_metrics.pkl
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/esm_if1/all_metrics.pkl
-    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/lmdesign/all_metrics.pkl
+    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/lmdesign/all_metrics.pkl
+    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/attnpacker/all_metrics.pkl
 
   model_names:
-    - FAMPNN (100 steps)
+    - FAMPNN (0.3Å)
+    # - FAMPNN (0.0Å)
     - ProteinMPNN
     - ESM3
     - ESM-IF1
-    - LM-Design
+    # - LM-Design
+    - AttnPacker
 
 psce_sweep:
   input_pkl_files:
