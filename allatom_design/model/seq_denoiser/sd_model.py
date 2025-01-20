@@ -361,7 +361,7 @@ class SeqDenoiser(nn.Module):
                                           K=K_next, aatype_pred=aatype_pred,
                                           scaled_seq_probs=aux_preds["scaled_seq_probs"],
                                           psce=aux_preds["scn_diffusion_aux"]["psce"])
-            scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else torch.zeros_like(seq_mlm_mask)  # TODO: handle the case of user-provided sidechains
+            scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else scn_override_mask  # default to user-provided sidechains if seq_only
 
             # Unmask sequence, sidechains, and sidechain confidence
             aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
@@ -398,7 +398,7 @@ class SeqDenoiser(nn.Module):
                 # Mask out K_corrector residues
                 K_corrector = torch.ceil(K_next * corrector_step_ratio).long()
                 xt, aatype_t, psce_t, seq_mlm_mask = self.interpolant.remask_K(xt, aatype_t, psce_t, seq_mlm_mask, K_corrector)
-                scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else torch.zeros_like(seq_mlm_mask)
+                scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else scn_override_mask  # default to user-provided sidechains if seq_only
 
                 # Denoise back to K_next
                 x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=None, scn_mlm_mask=scn_mlm_mask)
@@ -409,7 +409,7 @@ class SeqDenoiser(nn.Module):
                                               K=K_next, aatype_pred=aatype_pred,
                                               scaled_seq_probs=aux_preds["scaled_seq_probs"],
                                               psce=aux_preds["scn_diffusion_aux"]["psce"])
-                scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else torch.zeros_like(seq_mlm_mask)
+                scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else scn_override_mask  # default to user-provided sidechains if seq_only
 
                 # Unmask sequence and sidechains
                 aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
