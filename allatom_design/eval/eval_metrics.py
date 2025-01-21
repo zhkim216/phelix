@@ -294,7 +294,7 @@ def load_sequence_and_residx_from_pdbs(pdbs: List[str]) -> Tuple[List[str],
                                                                  List[TensorType["n_s", int]]]:
     examples = [load_feats_from_pdb(pdb) for pdb in pdbs]
     aatypes = [example["aatype"] for example in examples]
-    sequences_list = ["".join([rc.restypes[x] for x in aatype]) for aatype in aatypes]
+    sequences_list = ["".join([rc.restypes_with_x[x] for x in aatype]) for aatype in aatypes]
     residue_index_list = [example["residue_index"] for example in examples]
     chain_index_list = [example["chain_index"] for example in examples]
     return sequences_list, residue_index_list, chain_index_list
