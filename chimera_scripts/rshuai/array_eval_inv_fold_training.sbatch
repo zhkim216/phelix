@@ -1,18 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=aasd_eval_inv_fold
+#SBATCH --job-name=if_test
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
+#SBATCH --array=0-5%2
 #
 # Send stdout and stderr to logs
-#SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
-#SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
+#SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%j.out
+#SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%j.err
 #
-# Array jobs over all models except the starred one (b15_aasd0)
-#SBATCH --array=0-18%2
-
-# Write batch script to logs
+## Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 ## Load modules and set environment variables:
@@ -27,6 +25,8 @@ HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Dataset paths
+# PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
+# DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
 DESIGNABILITY_CSV=null
 
@@ -35,38 +35,24 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
-# Models to evaluate (excluding b15_aasd0)
-MODEL_NAMES=( \
-"b12_aasd1" \
-"b12_aasd2" \
-"b12_aasd3" \
-"b12_aasd4" \
-"b12_aasd6" \
-"b12_aasd7" \
-"b15_aasd1" \
-"b15_aasd2" \
-"b15_aasd3" \
-"b15_aasd4" \
-"b15_aasd5" \
-"b16_aasd0" \
-"b16_aasd1" \
-"b16_aasd2" \
-"b16_aasd3" \
-"b17_aasd0" \
-"b17_aasd1" \
-"b17_aasd2" \
-"b17_aasd3" \
-)
+# Arrays for model names and noise labels
+model_names=(c2_aasd0 c2_aasd1)
+noise_labels=(0.0 0.1 0.3)
 
-MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
+# Determine which combination to run
+model_idx=$((SLURM_ARRAY_TASK_ID / 3))
+noise_idx=$((SLURM_ARRAY_TASK_ID % 3))
+
+MODEL_NAME=${model_names[$model_idx]}
+NOISE_LABEL=${noise_labels[$noise_idx]}
+
+# Model to evaluate
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
-
-BASE_GROUP=${MODEL_NAME%%_aasd*}
-GROUP="chimera_${BASE_GROUP}"
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_inv_fold
+EXP_NAME=${MODEL_NAME}_eval_inv_fold_nl${NOISE_LABEL}
+GROUP=chimera_c2
 
 # Run training script
 cd ${BASE_DIR}
@@ -86,6 +72,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     run_codes_sc=true \
     num_codes_sc_batches=1 \
     temperature=0.1 \
+    noise_labels=${NOISE_LABEL} \
     num_steps_list=[20] \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
