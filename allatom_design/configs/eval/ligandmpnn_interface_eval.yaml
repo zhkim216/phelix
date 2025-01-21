@@ -1,0 +1,29 @@
+seed: 0
+pdb_dir: null           # directory with .pdb files
+pdb_key_list: null      # text file listing PDB IDs
+pdb_key_ext: ".pdb"
+fixed_pos_csv: null     # CSV with columns [pdb_name, fixed_pos_seq, fixed_pos_scn]
+out_base: null          # base output directory, e.g. /scratch/.../ligandmpnn
+
+ligandmpnn_base_dir: /home/rshuai/research/huang_lab/other/LigandMPNN
+ligandmpnn_env_name: ligandmpnn_env
+
+# If you're running in an array job, these are overridden in the shell script:
+method: "seq"           # "seq" or "scn"
+fraction: 0.0           # from 0.0 .. 0.9
+run_ligandmpnn: true    # whether to directly run run.py after preparing inputs
+
+# Options for run.py
+mpnn:
+  model_type: "ligand_mpnn"
+  mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
+  checkpoint_name: "ligandmpnn_v_32_030_25.pt"
+  seed: 111
+  # By default, we set parse_these_chains_only="" so we parse all chains
+  parse_these_chains_only: ""
+  # We'll redesign all chains unless they're in "fixed_residues"
+  chains_to_design: ""
+
+hydra:
+  run:
+    dir: .
