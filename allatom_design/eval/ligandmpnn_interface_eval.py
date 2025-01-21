@@ -137,6 +137,7 @@ def main(cfg: DictConfig):
         # Specify checkpoint path
         ckpt = f"{cfg.mpnn.mpnn_params_dir}/{cfg.mpnn.checkpoint_name}"
         mpnn_cmd.append(f"--checkpoint_ligand_mpnn={ckpt}")
+        mpnn_cmd.append(f"--checkpoint_protein_mpnn={ckpt}")
 
         # For method "scn", set side_chain_context=1; for "seq", set 0
         side_chain_context_flag = 1 if cfg.method == "scn" else 0

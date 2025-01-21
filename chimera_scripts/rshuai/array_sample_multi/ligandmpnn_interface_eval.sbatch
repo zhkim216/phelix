@@ -31,7 +31,7 @@ PDB_KEY_LIST=/scratch/hielab/talal/datasets/af3_pdb/test_pdb_keys_L16_9999_inter
 FIXED_POS_DIR=/scratch/hielab/talal/datasets/af3_pdb/test_interfaces_fixed_pos
 
 # Output base directory for storing results
-OUT_BASE=/scratch/hielab/rshuai/allatom_design/allatom_design/interface_evals/ligandmpnn
+OUT_BASE=/scratch/hielab/rshuai/allatom_design/allatom_design/interface_evals/proteinmpnn
 
 # Fractions we want to test
 FRACTIONS=(0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9)
@@ -68,7 +68,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/ligandmpnn_interface_eval.py
     fraction=${T_SEQ} \
     run_ligandmpnn=true \
     ligandmpnn_base_dir=/home/talal/rshuai/other/LigandMPNN \
-    mpnn.model_type=ligand_mpnn \
+    mpnn.model_type=protein_mpnn \
+    mpnn.checkpoint_name=proteinmpnn_v_48_030.pt \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     mpnn.seed=111
 
