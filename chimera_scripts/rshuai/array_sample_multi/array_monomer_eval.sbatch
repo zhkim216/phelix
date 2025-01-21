@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c0_aasd2_interface_eval
+#SBATCH --job-name=c0_aasd2_monomer_eval
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -29,8 +29,8 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 # Set paths
 MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c0_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.010.ckpt
 PDB_DIR=/scratch/hielab/talal/datasets/af3_pdb/test_pdbs
-PDB_KEY_LIST=/scratch/hielab/talal/datasets/af3_pdb/test_pdb_keys_L16_9999_interfaces.list
-FIXED_POS_DIR=/scratch/hielab/talal/datasets/af3_pdb/test_interfaces_fixed_pos
+PDB_KEY_LIST=/scratch/hielab/talal/datasets/af3_pdb/test_pdb_keys_monomer_L100_500.list
+FIXED_POS_DIR=/scratch/hielab/talal/datasets/af3_pdb/test_monomer_L100_500_fixed_pos
 
 # Fractions we want to test
 FRACTIONS=(0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9)
@@ -55,8 +55,7 @@ T_SEQ=${FRACTIONS[$FRAC_IDX]}
 FIXED_CSV=${FIXED_POS_DIR}/fixed_positions_${METHOD}_${T_SEQ}.csv
 
 # Output directory
-# e.g. /scratch/.../interface_eval/scn_0.1
-OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c0_aasd2/interface_eval/ema-step300000-std0.010/${METHOD}_${T_SEQ}
+OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/${METHOD}_${T_SEQ}
 
 mkdir -p ${OUT_DIR}
 
@@ -74,8 +73,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/sample_multi.py \
     pdb_key_ext=.pdb \
     out_dir=${OUT_DIR} \
     repack_last=true \
-    seq_only=true \
+    seq_only=false \
+    num_steps=100 \
+    temperature=0.1 \
+    psce_threshold=0.3 \
     presort_by_length=true \
-    batch_size=2 \
-    num_steps=1 \
-    temperature=0.0
+    batch_size=4 \
+    run_self_consistency_eval=true
