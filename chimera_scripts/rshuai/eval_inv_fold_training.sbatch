@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b12_aasd6_eval_inv_fold
+#SBATCH --job-name=c2_aasd0_eval_inv_fold_nl0.0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -35,13 +35,13 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Model to evaluate
-MODEL_NAME=b12_aasd6
+MODEL_NAME=c2_aasd0
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_inv_fold
-GROUP=chimera_b12
+EXP_NAME=${MODEL_NAME}_eval_inv_fold_nl0.0
+GROUP=chimera_c2
 
 # Run training script
 cd ${BASE_DIR}
@@ -61,6 +61,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     run_codes_sc=true \
     num_codes_sc_batches=1 \
     temperature=0.1 \
+    noise_labels=0 \
     num_steps_list=[20] \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \

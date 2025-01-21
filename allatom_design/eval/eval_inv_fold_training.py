@@ -160,10 +160,15 @@ def main(cfg: DictConfig):
                         chain_index=chain_index,
                         cond_labels=cond_labels_in,
                         timesteps=timesteps,
-                        temperature=cfg.temperature,
                         aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
                         num_corrector_steps=cfg.num_corrector_steps,
                         corrector_step_ratio=cfg.corrector_step_ratio,
+                        seq_only=cfg.seq_only,
+                        temperature=cfg.temperature,
+                        repack_last=cfg.repack_last,
+                        repack_every_step=cfg.repack_every_step,
+                        psce_threshold=cfg.psce_threshold,
+                        noise_labels=cfg.noise_labels,
                         scd_inputs=scd_inputs,
                     )
 
@@ -272,10 +277,15 @@ def main(cfg: DictConfig):
                         chain_index=chain_index,
                         cond_labels=cond_labels_in,
                         timesteps=timesteps,
-                        temperature=cfg.temperature,
                         aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
                         num_corrector_steps=cfg.num_corrector_steps,
                         corrector_step_ratio=cfg.corrector_step_ratio,
+                        seq_only=cfg.seq_only,
+                        temperature=cfg.temperature,
+                        repack_last=cfg.repack_last,
+                        repack_every_step=cfg.repack_every_step,
+                        psce_threshold=cfg.psce_threshold,
+                        noise_labels=cfg.noise_labels,
                         scd_inputs=scd_inputs,
                     )
 
