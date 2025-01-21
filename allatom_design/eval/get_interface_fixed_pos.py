@@ -17,46 +17,6 @@ from joblib import Parallel, delayed
 from allatom_design.data.data import load_feats_from_pdb
 
 
-def fix_pos_single_pdb(
-    pdb_file: str,
-    key: str,
-    t_seq: float
-):
-    """
-    Process a single PDB file to find which residues to fix based on t_seq fraction
-    of interface residues. Returns rows for the sequence CSV and sidechain CSV.
-    """
-    data = load_feats_from_pdb(pdb_file)
-
-    inter_indices = np.where(data["interface_residue_mask"])[0]
-    num_to_fix = int(round(len(inter_indices) * t_seq))
-    fix_indices = np.random.choice(inter_indices, size=num_to_fix, replace=False)
-
-    chain_index = data["chain_index"]
-    residue_index = data["residue_index"]  # Typically 1-based PDB numbering
-
-    # Invert chain_id_mapping: idx -> chain_letter
-    chain_id_mapping = data["chain_id_mapping"]
-    idx_to_chain = {v: k for k, v in chain_id_mapping.items()}
-
-    # Build the string of fixed positions in parse_fixed_positions format
-    # e.g. "A1,A2,B10"
-    pos_list = []
-    for i_res in fix_indices:
-        chain_letter = idx_to_chain[int(chain_index[i_res])]
-        res_no = int(residue_index[i_res])
-        pos_list.append(f"{chain_letter}{res_no}")
-    fix_str = ",".join(natsorted(pos_list))
-
-    # seq_csv_rows: fix_str in fixed_pos_seq, empty in fixed_pos_scn
-    seq_csv_row = [key, fix_str, ""]
-
-    # scn_csv_rows: fix_str in fixed_pos_seq, fix_str in fixed_pos_scn
-    scn_csv_row = [key, fix_str, fix_str]
-
-    return seq_csv_row, scn_csv_row
-
-
 @hydra.main(config_path="../configs/eval/", config_name="get_interface_fixed_pos", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
@@ -92,7 +52,7 @@ def main(cfg: DictConfig):
     for t_seq in cfg.t_seqs:
         # Use joblib to parallelize
         results = Parallel(n_jobs=cfg.num_workers)(
-            delayed(fix_pos_single_pdb)(pdb_file, key, t_seq)
+            delayed(fix_pos_single_pdb)(pdb_file, key, t_seq, cfg.interface_only)
             for pdb_file, key in tqdm(zip(pdb_files, pdb_keys), total=len(pdb_files))
         )
 
@@ -110,6 +70,51 @@ def main(cfg: DictConfig):
             writer = csv.writer(f)
             for row in scn_csv_rows:
                 writer.writerow(row)
+
+
+def fix_pos_single_pdb(
+    pdb_file: str,
+    key: str,
+    t_seq: float,
+    interface_only: bool
+):
+    """
+    Process a single PDB file to find which residues to fix based on t_seq fraction
+    of interface residues. Returns rows for the sequence CSV and sidechain CSV.
+    """
+    data = load_feats_from_pdb(pdb_file)
+
+    if interface_only:
+        possible_indices = np.where(data["interface_residue_mask"])[0]
+    else:
+        possible_indices = np.arange(len(data["aatype"]))
+    num_to_fix = int(round(len(possible_indices) * t_seq))
+    fix_indices = np.random.choice(possible_indices, size=num_to_fix, replace=False)
+
+    chain_index = data["chain_index"]
+    residue_index = data["residue_index"]  # Typically 1-based PDB numbering
+
+    # Invert chain_id_mapping: idx -> chain_letter
+    chain_id_mapping = data["chain_id_mapping"]
+    idx_to_chain = {v: k for k, v in chain_id_mapping.items()}
+
+    # Build the string of fixed positions in parse_fixed_positions format
+    # e.g. "A1,A2,B10"
+    pos_list = []
+    for i_res in fix_indices:
+        chain_letter = idx_to_chain[int(chain_index[i_res])]
+        res_no = int(residue_index[i_res])
+        pos_list.append(f"{chain_letter}{res_no}")
+    fix_str = ",".join(natsorted(pos_list))
+
+    # seq_csv_rows: fix_str in fixed_pos_seq, empty in fixed_pos_scn
+    seq_csv_row = [key, fix_str, ""]
+
+    # scn_csv_rows: fix_str in fixed_pos_seq, fix_str in fixed_pos_scn
+    scn_csv_row = [key, fix_str, fix_str]
+
+    return seq_csv_row, scn_csv_row
+
 
 
 if __name__ == "__main__":
