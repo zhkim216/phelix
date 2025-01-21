@@ -324,7 +324,8 @@ def main(cfg: DictConfig):
                         codes_metrics[f"codes_{k}"].append(v.item())
 
                 # Update metrics
-                metrics.update({f"inv_fold/S{S}/{k}": np.mean(v) for k, v in codes_metrics.items()})
+                metrics.update({f"inv_fold/S{S}/{k}_mean": np.mean(v) for k, v in codes_metrics.items()})
+                metrics.update({f"inv_fold/S{S}/{k}_median": np.median(v) for k, v in codes_metrics.items()})
 
         # Log metrics to wandb
         if not cfg.no_wandb:
