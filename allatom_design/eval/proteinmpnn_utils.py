@@ -445,10 +445,10 @@ def run_mpnn(model: ProteinMPNN,
 
 
 def create_mpnn_embeddings(model: ProteinMPNN,
-             pdb_paths: List[str],
-             out_dir: str,
-             device: str,
-             cfg: DictConfig):
+                           pdb_paths: List[str],
+                           out_dir: str,
+                           device: str,
+                           cfg: DictConfig):
     if cfg.model_type == "ligand_mpnn":
         atom_context_num = model.features.atom_context_num
     else:
@@ -751,20 +751,8 @@ def create_mpnn_embeddings(model: ProteinMPNN,
 
 def load_mpnn_embeddings(embedding_paths: List[str]):
     all_embeds = []
-
     for fp_str in embedding_paths:
         fp = Path(fp_str)
-        if fp.suffix == ".gz":  # * ProtDomainSegmentor embeddings
-            with gzip.open(fp, "rb") as f:
-                embed = np.load(f)
-            all_embeds.append(embed)
-        elif fp.suffix == ".npy":  # * ProteinMPNN embeddings (3, 1, L, D)
-            embed = np.load(fp)
-            all_embeds.append(embed[:, 0].mean(-2))
-        elif fp.suffix == ".pkl":  # * ESM3 embeddings
-            with open(fp, "rb") as f:
-                embed_dict = pickle.load(f)
-            for v in embed_dict.values():
-                all_embeds.append(v[0][0].mean(-2).numpy())
-
+        embed = np.load(fp)
+        all_embeds.append(embed[:, 0].mean(-2))
     return np.array(all_embeds)

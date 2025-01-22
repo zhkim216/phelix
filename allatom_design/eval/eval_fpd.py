@@ -1,6 +1,4 @@
 import os
-import shutil
-from functools import partial
 from pathlib import Path
 
 import hydra
@@ -10,11 +8,14 @@ import pandas as pd
 import torch
 import wandb
 import yaml
+from huggingface_hub import login
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.eval import sampling_utils
+from allatom_design.eval.esm3_utils import (create_esm3_embeddings,
+                                            load_esm3_embeddings)
 from allatom_design.eval.eval_metrics import fpd
 from allatom_design.eval.proteinmpnn_utils import (create_mpnn_embeddings,
                                                    load_mpnn,
@@ -23,6 +24,7 @@ from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
+from esm3.esm.models.esm3 import ESM3
 
 
 @hydra.main(config_path="../configs/eval", config_name="eval_fpd", version_base="1.3.2")
@@ -131,35 +133,56 @@ def main(cfg: DictConfig):
     mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)
     mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
 
-    # Run MPNN to create embeddings
+    # Load ESM3 model
+    login(token=os.environ["HUGGINGFACE_TOKEN"])
+    device = "cuda"
+    model = ESM3.from_pretrained("esm3_sm_open_v1").to(device)
+    vqvae_encoder = model.get_structure_encoder()
+
+    # Run MPNN and ESM3 to create embeddings
     create_mpnn_embeddings(mpnn_model, pdb_paths=sampled_pdbs, out_dir=str(samp_embeddings_dir), device=device, cfg=mpnn_cfg)
+    create_esm3_embeddings(vqvae_encoder, pdb_paths=sampled_pdbs, out_dir=cfg.out_dir, device=device)
+
+    esm3_samp_embed_path = Path(cfg.out_dir) / "esm3_embed.pkl"
+    esm3_embed_path = Path(cfg.esm3_embed_dir) / "esm3_embed.pkl"
 
     # Load sampled embeddings
-    train_samp_embeddings = load_mpnn_embeddings([f"{str(samp_embeddings_dir)}/{Path(pdb).stem}.npy" for pdb in df[df["phase"] == "train"]["sample_name"].values])
-    eval_samp_embeddings = load_mpnn_embeddings([f"{str(samp_embeddings_dir)}/{Path(pdb).stem}.npy" for pdb in df[df["phase"] == "eval"]["sample_name"].values])
-    eval2_samp_embeddings = load_mpnn_embeddings([f"{str(samp_embeddings_dir)}/{Path(pdb).stem}.npy" for pdb in df[df["phase"] == "eval2"]["sample_name"].values])
+    mpnn_train_samp_embeddings = load_mpnn_embeddings([f"{str(samp_embeddings_dir)}/{Path(pdb).stem}.npy" for pdb in df[df["phase"] == "train"]["sample_name"].values])
+    mpnn_eval_samp_embeddings = load_mpnn_embeddings([f"{str(samp_embeddings_dir)}/{Path(pdb).stem}.npy" for pdb in df[df["phase"] == "eval"]["sample_name"].values])
+    mpnn_eval2_samp_embeddings = load_mpnn_embeddings([f"{str(samp_embeddings_dir)}/{Path(pdb).stem}.npy" for pdb in df[df["phase"] == "eval2"]["sample_name"].values])
+
+    esm3_train_samp_embeddings = load_esm3_embeddings([Path(pdb).stem for pdb in df[df["phase"] == "train"]["sample_name"].values], str(esm3_samp_embed_path))
+    esm3_eval_samp_embeddings = load_esm3_embeddings([Path(pdb).stem for pdb in df[df["phase"] == "eval"]["sample_name"].values], str(esm3_samp_embed_path))
+    esm3_eval2_samp_embeddings = load_esm3_embeddings([Path(pdb).stem for pdb in df[df["phase"] == "eval2"]["sample_name"].values], str(esm3_samp_embed_path))
 
     # Load pre-computed embeddings
-    train_embeddings = load_mpnn_embeddings([f"{cfg.embeddings_dir}/{pdb}.npy" for pdb in train_subsample_df["pdb_key"].values])
-    eval_embeddings = load_mpnn_embeddings([f"{cfg.embeddings_dir}/{pdb}.npy" for pdb in eval_subsample_df["pdb_key"].values])
-    eval2_embeddings = load_mpnn_embeddings([f"{cfg.embeddings_dir}/{pdb}.npy" for pdb in eval2_subsample_df["pdb_key"].values])
+    mpnn_train_embeddings = load_mpnn_embeddings([f"{cfg.mpnn_embeddings_dir}/{pdb}.npy" for pdb in train_subsample_df["pdb_key"].values])
+    mpnn_eval_embeddings = load_mpnn_embeddings([f"{cfg.mpnn_embeddings_dir}/{pdb}.npy" for pdb in eval_subsample_df["pdb_key"].values])
+    mpnn_eval2_embeddings = load_mpnn_embeddings([f"{cfg.mpnn_embeddings_dir}/{pdb}.npy" for pdb in eval2_subsample_df["pdb_key"].values])
+
+    esm3_train_embeddings = load_esm3_embeddings(train_subsample_df["pdb_key"].values, str(esm3_embed_path))
+    esm3_eval_embeddings = load_esm3_embeddings(eval_subsample_df["pdb_key"].values, str(esm3_embed_path))
+    esm3_eval2_embeddings = load_esm3_embeddings(eval2_subsample_df["pdb_key"].values, str(esm3_embed_path))
 
     # Calculate FPD scores
-    train_fpd_scores = []
-    eval_fpd_scores = []
-    eval2_fpd_scores = []
+    mpnn_train_fpd_scores = []
+    mpnn_eval_fpd_scores = []
+    mpnn_eval2_fpd_scores = []
 
     for i in range(3): # 3 layers
-        train_fpd_score = fpd_safe(train_samp_embeddings[:, i], train_embeddings[:, i])
-        train_fpd_scores.append(train_fpd_score)
+        train_fpd_score = fpd_safe(mpnn_train_samp_embeddings[:, i], mpnn_train_embeddings[:, i])
+        mpnn_train_fpd_scores.append(train_fpd_score)
 
-        eval_fpd_score = fpd_safe(eval_samp_embeddings[:, i], eval_embeddings[:, i])
-        eval_fpd_scores.append(eval_fpd_score)
+        eval_fpd_score = fpd_safe(mpnn_eval_samp_embeddings[:, i], mpnn_eval_embeddings[:, i])
+        mpnn_eval_fpd_scores.append(eval_fpd_score)
 
-        eval2_fpd_score = fpd_safe(eval2_samp_embeddings[:, i], eval2_embeddings[:, i])
-        eval2_fpd_scores.append(eval2_fpd_score)
+        eval2_fpd_score = fpd_safe(mpnn_eval2_samp_embeddings[:, i], mpnn_eval2_embeddings[:, i])
+        mpnn_eval2_fpd_scores.append(eval2_fpd_score)
 
-   # TODO: Add Wandb logging here -- y-axis can be the FPD score, x-axis can be the layer number
+    esm3_train_fpd_score = fpd_safe(esm3_train_samp_embeddings, esm3_train_embeddings)
+    esm3_eval_fpd_score = fpd_safe(esm3_eval_samp_embeddings, esm3_eval_embeddings)
+    esm3_eval2_fpd_score = fpd_safe(esm3_eval2_samp_embeddings, esm3_eval2_embeddings)
+
     # Set up wandb logging
     if not cfg.no_wandb:
         # Create wandb dir
@@ -180,9 +203,13 @@ def main(cfg: DictConfig):
         )
 
         # Log FPD scores
-        for phase, fpd_scores in zip(["train", "eval", "eval2"], [train_fpd_scores, eval_fpd_scores, eval2_fpd_scores]):
+        for phase, fpd_scores in zip(["train", "eval", "eval2"], [mpnn_train_fpd_scores, mpnn_eval_fpd_scores, mpnn_eval2_fpd_scores]):
             for i, fpd_score in enumerate(fpd_scores):
                 wandb.log({f"{phase}/mpnn_layer_{i}_fpd": fpd_score})
+
+        wandb.log({"train/esm3_fpd": esm3_train_fpd_score})
+        wandb.log({"eval/esm3_fpd": esm3_eval_fpd_score})
+        wandb.log({"eval2/esm3_fpd": esm3_eval2_fpd_score})
 
         wandb.finish()
 

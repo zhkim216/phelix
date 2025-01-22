@@ -5,7 +5,8 @@ group: "debug" # Wandb group name
 no_wandb: false
 
 # Paths
-embeddings_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/mpnn
+mpnn_embeddings_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/mpnn
+esm3_embed_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset
 train_lengths_csv: /scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_key_lengths.csv
 eval_lengths_csv: /scratch/users/rshuai/datasets/ingraham_cath_dataset/eval_pdb_key_lengths.csv
 eval2_lengths_csv: /scratch/users/rshuai/datasets/ingraham_cath_dataset/eval2_pdb_key_lengths.csv
