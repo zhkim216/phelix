@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=ligandmpnn_interface_eval
+#SBATCH --job-name=ligandmpnn_monomer_eval
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%j_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%j_%a.err
-#SBATCH --array=0-19%2
+#SBATCH --array=0-19%5
 
 # Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
@@ -27,11 +27,11 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Input PDB info
 PDB_DIR=/scratch/hielab/talal/datasets/af3_pdb/test_pdbs
-PDB_KEY_LIST=/scratch/hielab/talal/datasets/af3_pdb/test_pdb_keys_L16_9999_interfaces.list
-FIXED_POS_DIR=/scratch/hielab/talal/datasets/af3_pdb/test_interfaces_fixed_pos
+PDB_KEY_LIST=/scratch/hielab/talal/datasets/af3_pdb/test_pdb_keys_monomer_L100_500.list
+FIXED_POS_DIR=/scratch/hielab/talal/datasets/af3_pdb/test_monomer_L100_500_fixed_pos
 
 # Output base directory for storing results
-OUT_BASE=/scratch/hielab/rshuai/allatom_design/allatom_design/interface_evals/proteinmpnn
+OUT_BASE=/scratch/hielab/rshuai/allatom_design/allatom_design/monomer_evals/ligandmpnn
 
 # Fractions we want to test
 FRACTIONS=(0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9)

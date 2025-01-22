@@ -1,0 +1,23 @@
+seed: 0
+out_dir: null
+eval_dirs:
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/scn_0.0"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/scn_0.1"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/scn_0.2"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/scn_0.3"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/scn_0.4"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/scn_0.5"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/scn_0.6"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/scn_0.7"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/scn_0.8"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/scn_0.9"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/seq_0.0"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/seq_0.1"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/seq_0.2"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/seq_0.3"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/seq_0.4"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/seq_0.5"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/seq_0.6"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/seq_0.7"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/seq_0.8"
+  - "/media/scratch/huang_lab/allatom_design/allatom_design/c0_aasd2/monomer_eval/ema-step300000-std0.010/seq_0.9"

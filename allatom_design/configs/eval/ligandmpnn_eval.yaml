@@ -9,7 +9,7 @@ ligandmpnn_base_dir: /home/rshuai/research/huang_lab/other/LigandMPNN
 ligandmpnn_env_name: ligandmpnn_env
 
 # If you're running in an array job, these are overridden in the shell script:
-method: "seq"           # "seq" or "scn"
+method: "seq"           # "seq" or "scn" for using seq-only context or sequence with sidechain context
 fraction: 0.0           # from 0.0 .. 0.9
 run_ligandmpnn: true    # whether to directly run run.py after preparing inputs
 
