@@ -47,7 +47,7 @@ data:
 # Model options
 defaults:
   - _self_
-  - denoiser: dit_denoiser
+  - denoiser: u_dit_denoiser
   - sd_interpolant: mar_interpolant
 
 model:
