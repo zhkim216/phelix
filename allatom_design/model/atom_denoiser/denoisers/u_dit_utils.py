@@ -3,12 +3,14 @@ from typing import Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange, repeat
 from timm.layers import use_fused_attn
 from timm.models.vision_transformer import Mlp
 from torch.jit import Final
 from torchtyping import TensorType
 
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
+
 
 #################################################################################
 #                               Core U-DiT Model                                #
@@ -173,6 +175,44 @@ class MultiHeadRMSNorm(nn.Module):
 
 def modulate(x: TensorType["b n h"], shift: TensorType["b n h"], scale: TensorType["b n h"]):
     return x * (1 + scale) + shift
+
+
+class ResiduePool(nn.Module):
+    def __init__(self, factor: int = 2):
+        super().__init__()
+        self.factor = factor
+
+    def forward(self, x: TensorType["b n h"], residx: TensorType["b n"], seq_mask: TensorType["b n"]):
+        B, N, H = x.shape
+        assert N % self.factor == 0, f"N must be divisible by {self.factor}, but N is {N}"
+
+        # Mask x before pooling
+        x = x * seq_mask[..., None]
+
+        # Mean pool x
+        x = rearrange(x, "b (n df) h -> b n df h", df=self.factor)
+        x = x.mean(dim=2)
+
+        # Select the first element in the window for residx
+        residx = rearrange(residx, "b (n df) -> b n df", df=self.factor)
+        residx = residx[:, :, 0]
+
+        # Downsample seq_mask (if any value in the window is 1, output remains 1)
+        seq_mask = rearrange(seq_mask, "b (n df) -> b n df", df=self.factor)
+        seq_mask = (seq_mask.sum(dim=2) > 0).float()
+
+        return x, residx, seq_mask
+
+
+class ResidueUpsample(nn.Module):
+    def  __init__(self, factor: int = 2):
+        super().__init__()
+        self.factor = factor
+
+    def forward(self, x: TensorType["b n h"]):
+        # Nearest-neighbor upsample x
+        x = repeat(x, "b n h -> b (n df) h", df=self.factor) # TODO: Try linear interpolation
+        return x
 
 
 #################################################################################
