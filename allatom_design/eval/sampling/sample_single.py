@@ -221,7 +221,7 @@ def main(cfg: DictConfig):
                 "psce": aux["psce"]
         }
 
-        pdbs = [f"{sample_out_dir}/sample_{i + j}.pdb" for j in range(B)]
+        pdbs = [f"{sample_out_dir}/sample_{i*B + j}.pdb" for j in range(B)]
         SeqDenoiser.save_samples_to_pdb(samples, pdbs)
 
         if cfg.run_self_consistency_eval:
