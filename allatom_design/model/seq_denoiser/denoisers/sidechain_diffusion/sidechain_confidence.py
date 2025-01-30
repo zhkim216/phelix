@@ -105,6 +105,7 @@ class ConfidenceEncoder(nn.Module):
         self.decoder_in = self.hidden_dim * 4
 
         # Structure encoder
+        # TODO: remove this, this is not used in the current implementation
         self.sidechain_features = SidechainProteinFeatures(autoregressive=False,
                                                            node_features=self.node_features,
                                                            edge_features=self.edge_features,

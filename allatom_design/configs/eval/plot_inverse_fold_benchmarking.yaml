@@ -7,20 +7,22 @@ overwrite_out_dir: true
 line_plots:
   input_pkl_files:
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
-    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_psce0.3_no_repack_every_step_c0_aasd4/all_metrics.pkl
+    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_psce0.3_no_repack_every_step_c0_aasd4/all_metrics.pkl
+    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_c0_aasd2/all_metrics.pkl
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/proteinmpnn/all_metrics.pkl
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/esm3/all_metrics.pkl
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/esm_if1/all_metrics.pkl
-    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/lmdesign/all_metrics.pkl
+    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/lmdesign/all_metrics.pkl
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/attnpacker/all_metrics.pkl
 
   model_names:
     - FAMPNN (0.3Å)
-    # - FAMPNN (0.0Å)
+    - FAMPNN (0.0Å)
+    - FAMPNN (0.3Å, no psce filtering)
     - ProteinMPNN
     - ESM3
     - ESM-IF1
-    # - LM-Design
+    - LM-Design
     - AttnPacker
 
 psce_sweep:
@@ -52,21 +54,23 @@ iterative_sampling_plots:
     # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S500_c0_aasd2/all_metrics.pkl
     # # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/proteinmpnn/all_metrics.pkl
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S1_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
+    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S5_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S10_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S100_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
-    - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S300_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
+    # - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S300_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
     - /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/S500_psce0.3_no_repack_every_step_c0_aasd2/all_metrics.pkl
 
 
   model_names:
     - 1 step
+    - 5 steps
     - 10 steps
     # - 20 steps
     # - 50 steps
     - 100 steps
     # - 200 steps
-    - 300 steps
-    - 500 steps
+    # - 300 steps
+    - N steps
     # - ProteinMPNN
 
 confidence_plots:
