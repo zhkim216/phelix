@@ -21,7 +21,11 @@ minimpnn:
   n_channel: 128
   n_layers: 3
   k_neighbors: 48
+
+  # noise conditioning
   noise_cond_mult: 4
+  use_noise_block: false
+  last_channel_nl_embed: true
 
   model_type: "sidechain"
   augment_eps: 0.0
