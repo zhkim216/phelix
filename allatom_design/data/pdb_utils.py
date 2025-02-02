@@ -131,6 +131,7 @@ def write_to_pdb_frames(
             atom_mask=atom_mask[i].numpy(),
             residue_index=residue_index[i].numpy(),
             chain_index=chain_index[i].numpy(),
+            chain_ids=[PDB_CHAIN_IDS[int(idx)] for idx in torch.sort(torch.unique(chain_index[i])).values.tolist()],
             b_factors=b_factors[i].numpy()
         )
         for i in range(aatype.shape[0])
