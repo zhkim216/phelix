@@ -27,10 +27,10 @@ PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Model name to evaluate
-MODEL_NAME=c2_aasd0
+MODEL_NAME=c1_aasd1_eps0.3
 
-EXP_NAME=${MODEL_NAME}_eval_scn_pack_L64_512
-GROUP=chimera_c2
+EXP_NAME=${MODEL_NAME}_eval_scn_pack
+GROUP=chimera_c1
 
 # Set HF transformers cache
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
