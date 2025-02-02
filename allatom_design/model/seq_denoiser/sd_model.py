@@ -592,7 +592,8 @@ class SeqDenoiser(nn.Module):
                     "atom_positions": x_traj,
                     "atom_mask": atom_mask,
                     "residue_index": residue_index[i].unsqueeze(0).expand(aatype_traj.shape[0], -1),
-                    "chain_index": chain_index[i].unsqueeze(0).expand(aatype_traj.shape[0], -1)
+                    "chain_index": chain_index[i].unsqueeze(0).expand(aatype_traj.shape[0], -1),
+                    "b_factors": None
                 }
                 traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
                 write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)

@@ -1,6 +1,6 @@
 # Run settings
 seed: 0
-batch_size: 64
+batch_size: 16
 num_workers: 8
 
 # Inputs
@@ -12,13 +12,13 @@ pos_restrict_aatype:   # restricts allowed aatypes at certain positions. Diction
 pos_seq_override:  # overrides sequence in input pdb at certain positions and conditions on it. Dictionary mapping from "chain + residue index" to "desired aatype in 1-letter code format", e.g. {"A26": "A", "A27": "L"}
 out_dir: null
 run_self_consistency_eval: false
+num_samples: 16
 
-# Inverse folding options
+# Sequence design options
 aatype_decoding_order_mode: "random"
 num_corrector_steps: 0
 corrector_step_ratio: 0.5
 num_steps: 20
-num_samples: 16
 temperature: 0.1
 repack_last: true  # after design, repack the final sequence obtained
 timestep_schedule:
@@ -52,6 +52,7 @@ struct_pred_cfg:
     data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
     num_models: 1  # only 1 model is currently supported
     sample_models: true  # randomly sample models from the ensemble
+    save_best: false
     num_recycles: 3
     use_multimer: false
   esmfold:
