@@ -45,7 +45,7 @@ class FaMPNN(nn.Module):
         self.k_neighbors = cfg.k_neighbors
         self.per_residue_eps = cfg.get("per_residue_eps", False)
         self.augment_eps = cfg.augment_eps
-        self.max_eps = cfg.max_eps
+        self.max_eps = getattr(cfg, "max_eps", None)
         self.no_aatype_pred = getattr(cfg, "no_aatype_pred", False)
         self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors,
                                         per_residue_eps=self.per_residue_eps, augment_eps=self.augment_eps, max_eps=self.max_eps)

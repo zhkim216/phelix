@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c0_aasd2_sample_multi
+#SBATCH --job-name=sample_multi
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -26,9 +26,9 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Set paths
-MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c0_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.010.ckpt
-PDB_DIR=/scratch/hielab/rshuai/datasets/denovo500/pdbs
-OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c0_aasd2/sample_multi/ema-step300000-std0.010/denovo500_S100
+MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c1_aasd4_eps0.3/checkpoints/sd-step150000-epoch450.ckpt
+PDB_DIR=/scratch/hielab/rshuai/datasets/denovo250dev/pdbs
+OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c1_aasd4_eps0.3/sample_multi/sd-step150000-epoch450/denovo250dev_S100_so_nl0.3
 
 # Run script
 cd ${BASE_DIR}
@@ -39,5 +39,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/sample_multi.py \
     checkpoint_path=${MODEL_CKPT} \
     pdb_dir=${PDB_DIR} \
     out_dir=${OUT_DIR} \
+    noise_labels=0.3 \
     num_steps=100 \
+    seq_only=true \
     temperature=0.1
