@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c1_aasd4
+#SBATCH --job-name=if_test
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=c1_aasd4_eps0.3
+EXP_NAME=c1_aasd6_eps0.3
 GROUP=chimera_c1
 
 # Dataset paths
@@ -47,11 +47,12 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     interpolant.training_noise_schedule=uniform_sqrt_t \
     denoiser=minimpnn_denoiser \
     denoiser.minimpnn.augment_eps=0.3 \
+    denoiser.minimpnn.max_eps=0.5 \
     denoiser.minimpnn.per_residue_eps=true \
     denoiser.minimpnn.use_gvp=false \
     denoiser.minimpnn.n_layers=3 \
-    denoiser.minimpnn.use_noise_block=true \
-    denoiser.minimpnn.last_channel_nl_embed=false \
+    denoiser.minimpnn.use_noise_block=false \
+    denoiser.minimpnn.last_channel_nl_embed=true \
     denoiser.confidence_module.enabled=true \
     denoiser.confidence_module.structure_encoder.n_layers=3 \
     optim.optimizer=noam \

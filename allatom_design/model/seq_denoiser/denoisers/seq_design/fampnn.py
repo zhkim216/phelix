@@ -1,3 +1,4 @@
+import math
 from typing import Optional, Union
 
 import numpy as np
@@ -44,9 +45,10 @@ class FaMPNN(nn.Module):
         self.k_neighbors = cfg.k_neighbors
         self.per_residue_eps = cfg.get("per_residue_eps", False)
         self.augment_eps = cfg.augment_eps
+        self.max_eps = cfg.max_eps
         self.no_aatype_pred = getattr(cfg, "no_aatype_pred", False)
         self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors,
-                                        per_residue_eps=self.per_residue_eps, augment_eps=self.augment_eps)
+                                        per_residue_eps=self.per_residue_eps, augment_eps=self.augment_eps, max_eps=self.max_eps)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
         self.W_s = nn.Embedding(self.n_aatype, self.hidden_dim)
         self.dropout = nn.Dropout(cfg.dropout_p)
@@ -287,13 +289,14 @@ class FaMPNN(nn.Module):
 
 class ProteinFeatures(nn.Module):
     def __init__(self, edge_features, node_features, num_positional_embeddings=16,
-        num_rbf=16, top_k=30, per_residue_eps=False, augment_eps=0., num_chain_embeddings=16):
+        num_rbf=16, top_k=30, per_residue_eps=False, augment_eps=0., max_eps=None, num_chain_embeddings=16,):
         """ Extract protein features """
         super(ProteinFeatures, self).__init__()
         self.edge_features = edge_features
         self.node_features = node_features
         self.top_k = top_k
         self.per_residue_eps = per_residue_eps
+        self.max_eps = max_eps
         self.augment_eps = augment_eps
         self.num_rbf = num_rbf
         self.num_positional_embeddings = num_positional_embeddings
@@ -337,7 +340,7 @@ class ProteinFeatures(nn.Module):
                 # Training: randomly sample noise labels
                 r = torch.randn_like(X)  # random vector for each atom (this might differ from Cho et al.)
                 n = r / torch.norm(r, dim=-1, keepdim=True)
-                s = torch.randn_like(mask) * self.augment_eps  # per-residue noise label
+                s = truncated_half_normal_like(mask, self.augment_eps, self.max_eps) # per-residue noise label
                 noise = n * rearrange(s, "b n -> b n 1 1")
                 noise_labels = torch.abs(s)  # DISCREPANCY: noise labels should be positive
                 X = X + noise
@@ -694,3 +697,15 @@ class Noise_Embedding(nn.Module):
         x = x.outer(freqs.to(x.dtype))
         x = torch.cat([x.cos(), x.sin()], dim=1)
         return x
+
+
+def truncated_half_normal_like(x: TensorType["...", float],
+                               std: float, max_val: Optional[float]) -> TensorType["...", float]:
+    if max_val is None:
+        # return half-normal with no truncation
+        return torch.abs(torch.randn_like(x) * std)
+    u = torch.rand_like(x)
+    truncated_factor = torch.erf(torch.tensor(max_val / (math.sqrt(2) * std)))
+    u_scaled = u * truncated_factor
+    samples = std * math.sqrt(2) * torch.erfinv(u_scaled)
+    return samples

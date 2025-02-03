@@ -30,6 +30,7 @@ minimpnn:
   model_type: "sidechain"
   augment_eps: 0.0
   per_residue_eps: false
+  max_eps: null  # for per_residue_eps, samples from half-normal truncated to this value
   dropout_p: 0.1
   dec_edge_up: true
   aggregation: "sum"
