@@ -6,8 +6,34 @@
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
-#SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%j.out
-#SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%j.err
+#SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
+#SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
+#SBATCH --array=0-1
+
+#MODELS=("esm3" "esm_if1" "lmdesign" "proteinmpnn")
+MODELS=("c0_aasd2_ema-step300000-std0.010")
+MODEL_ID=$((SLURM_ARRAY_TASK_ID % 1))
+MODEL_NAME=${MODELS[$MODEL_ID]}
+
+# Determine if we are running the original or esmfold variant
+if [ ${SLURM_ARRAY_TASK_ID} -lt 1 ]; then
+    # Original run
+    EXP_NAME=${MODEL_NAME}
+    ESMFOLD_FLAG=""
+    OUTPUT_SUFFIX=""
+else
+    # ESMfold run
+    EXP_NAME=${MODEL_NAME}_esmfold
+    ESMFOLD_FLAG="struct_pred_cfg.model_name=esmfold"
+    OUTPUT_SUFFIX="_esmfold"
+fi
+
+# For proteinmpnn, input_fasta_dir should be null
+if [ "${MODEL_NAME}" == "proteinmpnn" ]; then
+    INPUT_FASTA_DIR="null"
+else
+    INPUT_FASTA_DIR="/scratch/hielab/rshuai/allatom_design/allatom_design/sc_evals/fastas/${MODEL_NAME}"
+fi
 
 # Load modules and conda environment
 source ~/.rshuai_bash_profile
@@ -28,14 +54,11 @@ OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-GROUP=denovo250dev_if_benchmarking
+GROUP=denovo500_if_benchmarking
 
 cd ${BASE_DIR}
 
 # Run inverse folding script
-MODEL_NAME=c1_aasd4_eps0.3
-EXP_NAME=${MODEL_NAME}_denovo250dev_S100_so_nl0.3
-INPUT_PDB_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/sample_multi/sd-step150000-epoch450/${EXP_NAME}/samples
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/inverse_fold_benchmarking.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
@@ -44,8 +67,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/inverse_fold_benchmarking.py
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
-    sample_dir=/scratch/hielab/rshuai/datasets/denovo250dev/pdbs \
-    input_pdb_dir=${INPUT_PDB_DIR} \
-    struct_pred_cfg.model_name=esmfold \
+    sample_dir=/scratch/hielab/rshuai/datasets/denovo500/pdbs \
+    input_fasta_dir=${INPUT_FASTA_DIR} \
+    ${ESMFOLD_FLAG} \
     hydra.run.dir=${HYDRA_DIR} \
-    out_dir=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/inverse_fold_benchmarking/sd-step150000-epoch450/${EXP_NAME}
+    out_dir=/scratch/hielab/rshuai/allatom_design/allatom_design/sc_evals/outputs/${MODEL_NAME}${OUTPUT_SUFFIX}
