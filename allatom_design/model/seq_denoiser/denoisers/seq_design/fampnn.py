@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from einops.layers.torch import Rearrange
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
@@ -15,8 +14,6 @@ from allatom_design.data.data import (aggregate, atom37_to_atom14,
                                       cat_neighbors_nodes, gather_edges,
                                       gather_nodes,
                                       get_graph_transformer_inputs, unpack)
-from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
-    TimestepEmbedder
 from allatom_design.model.seq_denoiser.denoisers.seq_design.gcp_net.gcp_net import \
     GCPNet
 from allatom_design.model.seq_denoiser.denoisers.seq_design.graph_transformer import \
@@ -65,16 +62,6 @@ class FaMPNN(nn.Module):
         self.use_gcp = getattr(cfg, "use_gcp", False)
         self.use_residue_transformer = getattr(cfg, "use_residue_transformer", False)
 
-        # Noise conditioning flags
-        self.last_channel_nl_embed = cfg.get("last_channel_nl_embed", False)
-        self.use_noise_block = cfg.get("use_noise_block", False)
-
-        if self.use_noise_block:
-            time_cond_dim = cfg.n_channel * cfg.noise_cond_mult
-            self.noise_embedder = TimestepEmbedder(time_cond_dim)
-        else:
-            time_cond_dim = None
-
         assert int(self.use_gvp) + int(self.use_gcp) < 2, 'Only one architecture for processing vector features is permitted!'
 
         if self.model_type not in ['graph_transformer', 'sidechain', 'baseline']:
@@ -105,13 +92,13 @@ class FaMPNN(nn.Module):
 
         # Encoder layers
         self.encoder_layers = nn.ModuleList([
-            EncLayer(self.hidden_dim, self.hidden_dim*2, dropout=cfg.dropout_p, time_cond_dim=time_cond_dim)
+            EncLayer(self.hidden_dim, self.hidden_dim*2, dropout=cfg.dropout_p)
             for _ in range(self.num_encoder_layers)
         ])
 
         # Decoder layers
         self.decoder_layers = nn.ModuleList([
-            DecLayer(self.hidden_dim, self.decoder_in, dropout=cfg.dropout_p, time_cond_dim=time_cond_dim)
+            DecLayer(self.hidden_dim, self.decoder_in, dropout=cfg.dropout_p)
             for _ in range(self.num_decoder_layers)
         ])
 
@@ -159,23 +146,15 @@ class FaMPNN(nn.Module):
         h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
         h_E = self.W_e(E)
 
-        if self.per_residue_eps and (self.augment_eps > 0) and self.last_channel_nl_embed:
+        if self.per_residue_eps and (self.augment_eps > 0):
             # add noise label to 128th dimension of h_V
             h_V[..., -1] = h_V[..., -1] + noise_labels
-
-        if self.use_noise_block:
-            # Use per-token adaLN to condition on noise labels
-            noise_labels = rearrange(noise_labels, "b n -> (b n)")  # reshape to 1D since we do per-residue noise embedding
-            t = self.noise_embedder(noise_labels)
-            t = rearrange(t, "(b n) c -> b n c", b=B)  # reshape back
-        else:
-            t = None
 
         # Encoder is unmasked self-attention
         mask_attend = gather_nodes(seq_mask.unsqueeze(-1), E_idx).squeeze(-1)
         mask_attend = seq_mask.unsqueeze(-1) * mask_attend
         for layer in self.encoder_layers:
-            h_V, h_E = layer(h_V, h_E, E_idx, seq_mask, mask_attend, time_cond=t)
+            h_V, h_E = layer(h_V, h_E, E_idx, seq_mask, mask_attend)
 
         #keep copy of node embeddings from encoder
         h_V_enc = h_V.clone()
@@ -225,7 +204,7 @@ class FaMPNN(nn.Module):
         for layer in self.decoder_layers:
             #encoder representation added to masked decoder representation
             h_ESV = mask_bw * h_ESV + h_EXV_encoder_fw
-            h_V, h_ESV = layer(h_V, h_ESV, seq_mask, E_idx, time_cond=t)
+            h_V, h_ESV = layer(h_V, h_ESV, seq_mask, E_idx)
 
         #keep copy of node embeddings from encoder
         h_V_dec = h_V.clone()
@@ -520,7 +499,7 @@ class PositionalEncodings(torch.nn.Module):
 
 
 class DecLayer(nn.Module):
-    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30, time_cond_dim=None):
+    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
         super(DecLayer, self).__init__()
         self.num_hidden = num_hidden
         self.num_in = num_in
@@ -542,28 +521,13 @@ class DecLayer(nn.Module):
         self.act = torch.nn.GELU()
         self.dense = PositionWiseFeedForward(self.num_hidden, num_hidden * 4)
 
-        # Noise conditioning
-        self.use_time_cond = False
-        if time_cond_dim is not None:
-            self.use_time_cond = True
-            self.time_block = nn.Sequential(
-                Rearrange('b n d -> b n 1 d'),
-                nn.SiLU(),
-                nn.Linear(time_cond_dim, num_hidden * 2))
-
-
-    def forward(self, h_V, h_E, mask_V=None, E_idx = None, mask_attend=None, time_cond: Optional[TensorType["b n c", float]] = None):
+    def forward(self, h_V, h_E, mask_V=None, E_idx = None, mask_attend=None):
         """ Parallel computation of full transformer layer """
 
         # Concatenate h_V_i to h_E_ij
         h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_E.size(-2),-1)
         h_EV = torch.cat([h_V_expand, h_E], -1)
-
-        h_message = self.act(self.W2(self.act(self.W1(h_EV))))
-        if self.use_time_cond:
-            scale, shift = self.time_block(time_cond).chunk(2, dim=-1)
-            h_message = h_message * (scale + 1) + shift
-        h_message = self.W3(h_message)
+        h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
 
         if mask_attend is not None:
             h_message = mask_attend.unsqueeze(-1) * h_message
@@ -590,7 +554,7 @@ class DecLayer(nn.Module):
 
 
 class EncLayer(nn.Module):
-    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30, time_cond_dim=None):
+    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
         super(EncLayer, self).__init__()
         self.num_hidden = num_hidden
         self.num_in = num_in
@@ -612,33 +576,13 @@ class EncLayer(nn.Module):
         self.dense = PositionWiseFeedForward(num_hidden, num_hidden * 4)
 
 
-        # Noise conditioning
-        self.use_time_cond = False
-        if time_cond_dim is not None:
-            self.use_time_cond = True
-            self.time_block1 = nn.Sequential(
-                Rearrange('b n d -> b n 1 d'),
-                nn.SiLU(),
-                nn.Linear(time_cond_dim, num_hidden * 2))
-            self.time_block2 = nn.Sequential(
-                Rearrange('b n d -> b n 1 d'),
-                nn.SiLU(),
-                nn.Linear(time_cond_dim, num_hidden * 2))
-
-
-    def forward(self, h_V, h_E, E_idx, mask_V=None, mask_attend=None,
-                time_cond: Optional[TensorType["b n c", float]] = None):
+    def forward(self, h_V, h_E, E_idx, mask_V=None, mask_attend=None):
         """ Parallel computation of full transformer layer """
 
         h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
         h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
         h_EV = torch.cat([h_V_expand, h_EV], -1)
-        h_message = self.act(self.W2(self.act(self.W1(h_EV))))
-        if self.use_time_cond:
-            # Time-conditioning
-            scale, shift = self.time_block1(time_cond).chunk(2, dim=-1)
-            h_message = h_message * (scale + 1) + shift
-        h_message = self.W3(h_message)
+        h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
 
         if mask_attend is not None:
             h_message = mask_attend.unsqueeze(-1) * h_message
@@ -654,49 +598,10 @@ class EncLayer(nn.Module):
         h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
         h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
         h_EV = torch.cat([h_V_expand, h_EV], -1)
-
-        h_message = self.act(self.W12(self.act(self.W11(h_EV))))
-        if self.use_time_cond:
-            # Time-conditioning
-            scale, shift = self.time_block2(time_cond).chunk(2, dim=-1)
-            h_message = h_message * (scale + 1) + shift
-        h_message = self.W13(h_message)
-
+        h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
         h_E = self.norm3(h_E + self.dropout3(h_message))
 
         return h_V, h_E
-
-
-class NoiseConditioningBlock(nn.Module):
-    def __init__(self, n_in_channel, n_out_channel):
-        super().__init__()
-        self.block = nn.Sequential(
-            Noise_Embedding(n_in_channel),
-            nn.Linear(n_in_channel, n_out_channel),
-            nn.SiLU(),
-            nn.Linear(n_out_channel, n_out_channel),
-        )
-
-    def forward(self, noise_level):
-        return self.block(noise_level)
-
-
-class Noise_Embedding(nn.Module):
-    def __init__(self, num_channels, max_positions=10000, endpoint=False):
-        super().__init__()
-        self.num_channels = num_channels
-        self.max_positions = max_positions
-        self.endpoint = endpoint
-
-    def forward(self, x):
-        freqs = torch.arange(
-            start=0, end=self.num_channels // 2, dtype=torch.float32, device=x.device
-        )
-        freqs = freqs / (self.num_channels // 2 - (1 if self.endpoint else 0))
-        freqs = (1 / self.max_positions) ** freqs
-        x = x.outer(freqs.to(x.dtype))
-        x = torch.cat([x.cos(), x.sin()], dim=1)
-        return x
 
 
 def truncated_half_normal_like(x: TensorType["...", float],
