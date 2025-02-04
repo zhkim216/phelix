@@ -70,8 +70,8 @@ class FaMPNN(nn.Module):
         self.use_noise_block = cfg.get("use_noise_block", False)
 
         if self.use_noise_block:
-            time_cond_dim = cfg.n_channel
-            self.noise_embedder = TimestepEmbedder(cfg.n_channel)
+            time_cond_dim = cfg.n_channel * cfg.noise_cond_mult
+            self.noise_embedder = TimestepEmbedder(time_cond_dim)
         else:
             time_cond_dim = None
 
