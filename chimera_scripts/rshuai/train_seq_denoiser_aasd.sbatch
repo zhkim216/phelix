@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=c1_aasd6_eps0.3
+EXP_NAME=c1_aasd7_eps0.3
 GROUP=chimera_c1
 
 # Dataset paths
@@ -51,7 +51,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.minimpnn.per_residue_eps=true \
     denoiser.minimpnn.use_gvp=false \
     denoiser.minimpnn.n_layers=3 \
-    denoiser.minimpnn.use_noise_block=false \
+    denoiser.minimpnn.use_noise_block=true \
     denoiser.minimpnn.last_channel_nl_embed=true \
     denoiser.confidence_module.enabled=true \
     denoiser.confidence_module.structure_encoder.n_layers=3 \
