@@ -167,6 +167,9 @@ def main(cfg: DictConfig):
     else:
         restrict_pos_aatype = None
 
+    # Print omitted amino acids
+    if cfg.omit_aas is not None:
+        print(f"Omitting aatype sampling for: {cfg.omit_aas}")
 
     # Sampling loop
     print(f"Evaluating with num denoising steps S={cfg.num_steps}")
