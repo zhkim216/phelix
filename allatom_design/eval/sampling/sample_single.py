@@ -201,11 +201,16 @@ def main(cfg: DictConfig):
             aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
             num_corrector_steps=cfg.num_corrector_steps,
             corrector_step_ratio=cfg.corrector_step_ratio,
+            seq_only=cfg.seq_only,
             temperature=cfg.temperature,
             repack_last=cfg.repack_last,
+            repack_every_step=cfg.repack_every_step,
+            psce_threshold=cfg.psce_threshold,
+            noise_labels=cfg.noise_labels,
             aatype_override_mask=aatype_override_mask,
             scn_override_mask=scn_override_mask,
             restrict_pos_aatype=restrict_pos_aatype,
+            omit_aas=cfg.omit_aas,
             scd_inputs=scd_inputs,
         )
 

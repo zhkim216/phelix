@@ -197,6 +197,7 @@ def main(cfg: DictConfig):
             noise_labels=cfg.noise_labels,
             aatype_override_mask=aatype_override_mask,
             scn_override_mask=scn_override_mask,
+            omit_aas=cfg.omit_aas,
             scd_inputs=scd_inputs,
         )
 
