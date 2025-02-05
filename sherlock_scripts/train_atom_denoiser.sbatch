@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=atom_denoiser_baseline
+#SBATCH --job-name=nova_a1
 #SBATCH -p possu,bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -32,12 +32,12 @@ export TORCH_HOME=/scratch/users/rshuai/subhang/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=null
-EXP_NAME=atom_denoiser_baseline
-GROUP=edm2_v2
+EXP_NAME=nova_a1
+GROUP=nova
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
-DESIGNABILITY_CSV=/scratch/users/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+DESIGNABILITY_CSV=null
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
@@ -50,11 +50,11 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.designability_csv=${DESIGNABILITY_CSV} \
     data.fixed_size=256 \
     train.batch_size=64 \
-    train.compile_model=false \
+    train.compile_model=true \
     trainer.strategy=ddp_find_unused_parameters_true \
     model.task=backbone \
-    denoiser=dit_denoiser \
-    optim.optimizer=noam \
+    denoiser=u_dit_denoiser \
+    optim.optimizer=adam_inv_sqrt \
     checkpointing.save_latest_every_n_epochs=80 \
     checkpointing.save_ema_every_n_epochs=20 \
     trainer.check_val_every_n_epoch=20 \
