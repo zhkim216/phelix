@@ -9,6 +9,7 @@ pdb_path: null
 fixed_pos_seq: # comma-separated, chain + residue index specification, e.g. "A1-100,B1-100"
 fixed_pos_scn: # null for no provided sidechains, otherwise should be subset of fixed_pos_seq, e.g. "A1-100"
 pos_restrict_aatype:   # restricts allowed aatypes at certain positions. Dictionary mapping from "chain + residue index" to "allowed aatypes in 1-letter code format", e.g. {"A26": "AVG", "A27": "VG"}
+omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "M"]. "X" is always excluded.
 pos_seq_override:  # overrides sequence in input pdb at certain positions and conditions on it. Dictionary mapping from "chain + residue index" to "desired aatype in 1-letter code format", e.g. {"A26": "A", "A27": "L"}
 out_dir: null
 run_self_consistency_eval: false
