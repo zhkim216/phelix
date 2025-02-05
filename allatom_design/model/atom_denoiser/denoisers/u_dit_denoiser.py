@@ -23,19 +23,18 @@ from torchtyping import TensorType
 from tqdm import tqdm
 
 import allatom_design.data.conditioning_labels as cl
-import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
 from allatom_design.data import residue_constants as rc
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
-from allatom_design.model.atom_denoiser.denoisers.u_dit_utils import (
-    UDiTBlock, FinalLayer, LabelEmbedder, MultiHeadRMSNorm)
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
 from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
     TimestepEmbedder
+from allatom_design.model.atom_denoiser.denoisers.u_dit_utils import (
+    UDiTBlock, FinalLayer, UDiTLevel, LabelEmbedder, MultiHeadRMSNorm)
 from openfold.model.primitives import Linear
 
 
@@ -272,12 +271,13 @@ class UDiT(nn.Module):
         self.cfg = cfg
         self.interpolant = interpolant
 
-        # Set up DiT model
+        # Set up U-DiT model
         self.num_atoms_in = cfg.num_atoms_in
         self.use_self_conditioning = cfg.use_self_conditioning
         self.condition_on_seq = cfg.condition_on_seq
 
         # Input and output channels
+        self.channels = [int(cfg.base_channels * cfg.channel_mult ** i) for i in range(cfg.num_downsamples + 1)]
         self.c = self.num_atoms_in * 3  # 3 xyz coordinates per atom
         self.in_channels = self.c * 2 if self.use_self_conditioning else self.c  # 2x for self-conditioning
         if self.condition_on_seq:
@@ -291,28 +291,29 @@ class UDiT(nn.Module):
         self.num_heads = cfg.num_heads
         self.pos_encoding = cfg.pos_encoding
 
-        self.x_embedder = Linear(self.in_channels, cfg.hidden_size, bias=True, init="glorot")  # "glorot" should match DiT Patchify init
+        self.x_embedder = Linear(self.in_channels, self.channels[0], bias=True, init="glorot")  # "glorot" should match DiT Patchify init
 
         # Positional encodings
         assert self.pos_encoding in ["absolute", "absolute_residx", "rotary", "rotary_residx"]
+
+        self.use_rotary_emb = False
+        self.use_residx = False
+
         if self.pos_encoding in ["absolute", "absolute_residx"]:
             self.pos_embed = posemb_sincos_1d
-
-        self.rotary_emb = None
-        if self.pos_encoding in ["rotary", "rotary_residx"]:
-            dim = cfg.hidden_size // cfg.num_heads
-            use_residx = (self.pos_encoding == "rotary_residx")
-            self.rotary_emb = rope.RotaryEmbedding(dim=dim, use_residx=use_residx, cache_if_possible=False)
+        elif self.pos_encoding in ["rotary", "rotary_residx"]:
+            self.use_rotary_emb = True
+            self.use_residx = (self.pos_encoding == "rotary_residx")
 
         # Time embeddings
-        self.t_embedder = TimestepEmbedder(cfg.hidden_size)
+        self.t_embedder = TimestepEmbedder(self.channels[-1])
 
         # Conditioning
         self.cond_label_to_dropout_p = getattr(cfg, "cond_label_to_dropout_p", {})
         self.cond_labels = [k for k, v in self.cond_label_to_dropout_p.items() if v is not None]
         self.cond_embedders = nn.ModuleDict({
             label: LabelEmbedder(num_classes=cl.COND_NUM_CLASSES[label],
-                                 hidden_size=cfg.hidden_size,
+                                 hidden_size=self.channels[-1],
                                  dropout_prob=self.cond_label_to_dropout_p[label]) for label in self.cond_labels
         })
 
@@ -321,16 +322,72 @@ class UDiT(nn.Module):
         if cfg.qk_rmsnorm:
             self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
 
-        # Blocks
-        self.blocks = nn.ModuleList([
-            UDiTBlock(cfg.hidden_size, cfg.num_heads,
-                     mlp_dropout=cfg.mlp_dropout, mlp_ratio=cfg.mlp_ratio,
-                     inf=cfg.inf,
-                     rotary_emb=self.rotary_emb,
-                     qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
-                     ) for _ in range(cfg.depth)
+        # U-DiT Blocks
+        def create_udit_level(level_idx: int):
+            if level_idx == cfg.num_downsamples:
+                return nn.ModuleList([
+                    UDiTBlock(self.channels[-1],
+                              embedding_size=self.channels[-1],
+                              num_heads=cfg.num_heads,
+                              use_rotary_emb=self.use_rotary_emb,
+                              use_residx=self.use_residx,
+                              mlp_dropout=cfg.mlp_dropout,
+                              mlp_ratio=cfg.mlp_ratio,
+                              inf=cfg.inf,
+                              qk_norm=cfg.qk_rmsnorm,
+                              norm_layer=self.qk_normlayer
+                              ) for _ in range(cfg.num_mid_blocks)
+                ])
+
+            hidden_size = self.channels[level_idx]
+            next_hidden_size = self.channels[level_idx + 1]
+
+            down_block = nn.ModuleList([
+                UDiTBlock(hidden_size,
+                          embedding_size=self.channels[-1],
+                          num_heads=cfg.num_heads,
+                          use_rotary_emb=self.use_rotary_emb,
+                          use_residx=self.use_residx,
+                          mlp_dropout=cfg.mlp_dropout,
+                          mlp_ratio=cfg.mlp_ratio,
+                          inf=cfg.inf,
+                          qk_norm=cfg.qk_rmsnorm,
+                          norm_layer=self.qk_normlayer
+                          ) for _ in range(cfg.num_updown_blocks)
+            ])
+
+            up_block = nn.ModuleList([
+                UDiTBlock(hidden_size,
+                          embedding_size=self.channels[-1],
+                          num_heads=cfg.num_heads,
+                          use_rotary_emb=self.use_rotary_emb,
+                          use_residx=self.use_residx,
+                          mlp_dropout=cfg.mlp_dropout,
+                          mlp_ratio=cfg.mlp_ratio,
+                          inf=cfg.inf,
+                          qk_norm=cfg.qk_rmsnorm,
+                          norm_layer=self.qk_normlayer
+                          ) for _ in range(cfg.num_updown_blocks)
+            ])
+
+            middle_block = create_udit_level(level_idx + 1)
+            return UDiTLevel(hidden_size, next_hidden_size, down_block, middle_block, up_block)
+
+        self.u_dit = create_udit_level(0)
+        self.dit = nn.ModuleList([
+            UDiTBlock(self.channels[0],
+                      embedding_size=self.channels[-1],
+                      num_heads=cfg.num_heads,
+                      use_rotary_emb=self.use_rotary_emb,
+                      use_residx=self.use_residx,
+                      mlp_dropout=cfg.mlp_dropout,
+                      mlp_ratio=cfg.mlp_ratio,
+                      inf=cfg.inf,
+                      qk_norm=cfg.qk_rmsnorm,
+                      norm_layer=self.qk_normlayer
+                      ) for _ in range(cfg.num_dit_blocks)
         ])
-        self.final_layer = FinalLayer(cfg.hidden_size, self.out_channels)
+        self.final_layer = FinalLayer(self.channels[0], self.channels[-1], self.out_channels)
         self.initialize_weights()
 
 
@@ -348,9 +405,11 @@ class UDiT(nn.Module):
         nn.init.normal_(self.t_embedder.mlp[2].weight, std=0.02)
 
         # Zero-out adaLN modulation layers in DiT blocks:
-        for block in self.blocks:
-            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+        def _adaln_init(module):
+            if isinstance(module, UDiTBlock):
+                nn.init.constant_(module.adaLN_modulation[-1].weight, 0)
+                nn.init.constant_(module.adaLN_modulation[-1].bias, 0)
+        self.apply(_adaln_init)
 
         # Zero-out output layers:
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
@@ -418,9 +477,9 @@ class UDiT(nn.Module):
             c = c + self.cond_embedders[label_name](labels_in, self.training)
 
         # Blocks
-        attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
-        for block in self.blocks:
-            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None)
+        x = self.u_dit(x, c, residx=residue_index.float(), seq_mask=seq_mask)
+        for block in self.dit:
+            x = block(x, c, residx=residue_index.float(), seq_mask=seq_mask, attn_bias=None)
 
         # Final layer
         x = self.final_layer(x, c)
