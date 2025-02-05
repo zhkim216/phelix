@@ -20,17 +20,27 @@ class UDiTBlock(nn.Module):
     """
     A U-DiT block with adaptive layer norm zero (adaLN-Zero) conditioning.
     """
-    def __init__(self, hidden_size, num_heads, mlp_dropout: float, mlp_ratio=4.0, **block_kwargs):
+    def __init__(self, hidden_size, embedding_size, num_heads, use_rotary_emb, use_residx, mlp_dropout: float, mlp_ratio=4.0, **block_kwargs):
         super().__init__()
-        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
-        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+
+        # Attention
+        self.num_heads = num_heads
+        rotary_emb = None
+        if use_rotary_emb:
+            rotary_emb = rope.RotaryEmbedding(dim=hidden_size // num_heads, use_residx=use_residx,
+                                              cache_if_possible=False)
+        self.attn_norm = nn.LayerNorm(hidden_size, elementwise_affine=True, bias=False)
+        self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, rotary_emb=rotary_emb, **block_kwargs)
+
+        # MLP
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
-        approx_gelu = lambda: nn.GELU(approximate="tanh")
-        self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=mlp_dropout)
+        self.mlp_norm = nn.LayerNorm(hidden_size, elementwise_affine=True, bias=False)
+        self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=nn.SiLU, drop=mlp_dropout)
+
+        # AdaLN-Zero
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
-            nn.Linear(hidden_size, 6 * hidden_size, bias=True)
+            nn.Linear(embedding_size, 6 * hidden_size, bias=True)
         )
 
     def forward(self,
@@ -40,7 +50,7 @@ class UDiTBlock(nn.Module):
                     TensorType["b n h", float]  # per-token conditioning
                     ],
                 residx: TensorType["b n", float],
-                attn_mask: TensorType["b n n", float],
+                seq_mask: TensorType["b n", float],
                 attn_bias: Optional[TensorType["b n n", float]],
                 per_token_conditioning: bool = False  # whether c is per-token or per-sequence
                 ):
@@ -48,10 +58,10 @@ class UDiTBlock(nn.Module):
             assert c.dim() == 2, "Per-sequence conditioning requires shape [B, H] for c"
             c = c.unsqueeze(1)
         assert c.dim() == 3
-
+        attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.num_heads)
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=-1)
-        x = x + gate_msa * self.attn(modulate(self.norm1(x), shift_msa, scale_msa), residx=residx, attn_mask=attn_mask, attn_bias=attn_bias)
-        x = x + gate_mlp * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+        x = x + gate_msa * self.attn(modulate(self.attn_norm(x), shift_msa, scale_msa), residx=residx, attn_mask=attn_mask, attn_bias=attn_bias)
+        x = x + gate_mlp * self.mlp(modulate(self.mlp_norm(x), shift_mlp, scale_mlp))
         return x
 
 
@@ -59,13 +69,13 @@ class FinalLayer(nn.Module):
     """
     The final layer of U-DiT.
     """
-    def __init__(self, hidden_size, out_channels):
+    def __init__(self, hidden_size, embedding_size, out_channels):
         super().__init__()
-        self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=True, bias=False)
         self.linear = nn.Linear(hidden_size, out_channels, bias=True)
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
-            nn.Linear(hidden_size, 2 * hidden_size, bias=True)
+            nn.Linear(embedding_size, 2 * hidden_size, bias=True)
         )
 
     def forward(self,
@@ -158,6 +168,56 @@ class Attention(nn.Module):
         x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
+        return x
+
+
+class UDiTLevel(nn.Module):
+    def __init__(self, hidden_size: int, next_hidden_size: int, down_block: nn.ModuleList, middle_block, up_block: nn.ModuleList):
+        super().__init__()
+        self.down_block = down_block
+        self.residue_pool = ResiduePool(factor=2)
+        self.down_linear = nn.Linear(hidden_size, next_hidden_size)
+
+        self.middle_block = middle_block
+
+        self.up_linear = nn.Linear(next_hidden_size, hidden_size)
+        self.residue_upsample = ResidueUpsample(factor=2)
+
+        self.x_norm = nn.LayerNorm(hidden_size, elementwise_affine=True)
+        self.skip_norm = nn.LayerNorm(hidden_size, elementwise_affine=True)
+
+        self.up_block = up_block
+
+    def forward(self, x, c, residx, seq_mask):
+        for block in self.down_block:
+            x = block(x, c, residx=residx, seq_mask=seq_mask, attn_bias=None)
+
+        # Downsample x and store skip connection
+        x = x * seq_mask[..., None]
+        skip = x
+        x, residx_ds, seq_mask_ds = self.residue_pool(x, residx, seq_mask)
+        x = self.down_linear(x)
+
+        if isinstance(self.middle_block, nn.ModuleList):
+            for block in self.middle_block:
+                x = block(x, c, residx=residx_ds, seq_mask=seq_mask_ds, attn_bias=None)
+        else:
+            x = self.middle_block(x, c, residx=residx_ds, seq_mask=seq_mask_ds)
+
+        # Upsample x
+        x = x * seq_mask_ds[..., None]
+        x = self.up_linear(x)
+        x = self.residue_upsample(x)
+
+        # Add skip connection
+        x = self.x_norm(x)
+        skip = self.skip_norm(skip)
+        x = (x + skip) / (2 ** 0.5)
+
+        for block in self.up_block:
+            x = block(x, c, residx=residx, seq_mask=seq_mask, attn_bias=None)
+
+        x = x * seq_mask[..., None]
         return x
 
 

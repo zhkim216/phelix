@@ -32,9 +32,13 @@ u_dit:
   qk_rmsnorm: true
 
   # Blocks
-  depth: 12
-  hidden_size: 384
-  num_heads: 6
+  num_downsamples: 3
+  num_updown_blocks: 2
+  num_mid_blocks: 4
+  num_dit_blocks: 6
+  base_channels: 384
+  channel_mult: 1.5
+  num_heads: 4
   mlp_dropout: 0.1
   mlp_ratio: 4.0
 
