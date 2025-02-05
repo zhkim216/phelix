@@ -33,13 +33,14 @@ trainer:
 
 # Data options
 data:
-    metric: "sc_aa_rmsd"
+    metric: "sc_ca_rmsd"
     min_margin: 1
+    winner_threshold: null
     overfit: ${overfit}
     short_epoch: false
     n_random_subset: null
     subset_length_range: null
-    se3_augment: true  # randomly rotate and translate data
+    se3_augment: false  # randomly rotate and translate data
     translation_scale: 1.0  # scale of the translation augmentation
     overwrite_cache: false  # overwrite the cached dataset
 
@@ -87,7 +88,7 @@ optim:
     factor: 2
     warmup_steps: 4000
   adam_inv_sqrt:
-    ref_lr: 3.0e-4
+    ref_lr: 1.0e-6
     ref_steps: 10000
     warmup_steps: 1000
 
