@@ -52,7 +52,7 @@ def main(cfg: DictConfig):
     _, train_dataloader = init_dataloader(phase="train", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
     _, val_dataloader = init_dataloader(phase="eval", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
     val_dataloaders = [val_dataloader]
-    
+
     # Init wandb
     local_rank = os.environ.get("LOCAL_RANK", None)
     print(f"Local rank: {local_rank}")
@@ -111,12 +111,23 @@ def main(cfg: DictConfig):
 
     # Define callbacks
     callbacks = []
-    latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
-                                                 save_top_k=-1,
-                                                 every_n_train_steps=cfg.checkpointing.save_latest_every_n_steps,
-                                                 filename="sd-step{step}-epoch{epoch:02d}",
-                                                 auto_insert_metric_name=False
-                                                 )
+
+    step_latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
+                                                      save_top_k=-1,
+                                                      every_n_train_steps=cfg.checkpointing.save_latest_every_n_steps,
+                                                      filename="sd-step{step}-epoch{epoch:02d}",
+                                                      auto_insert_metric_name=False
+                                                      )
+
+    # also keep track of a single latest checkpoint at the epoch level for resuming training
+    epoch_latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
+                                                       monitor="epoch",
+                                                       mode="max",
+                                                       save_top_k=1,
+                                                       every_n_epochs=cfg.checkpointing.save_latest_every_n_epochs,
+                                                       filename="sd-epoch{epoch:02d}",
+                                                       auto_insert_metric_name=False)
+
     val_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                               save_top_k=cfg.checkpointing.save_top_k,
                                               monitor="val/total_loss",
@@ -127,7 +138,7 @@ def main(cfg: DictConfig):
     ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
                                           save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
 
-    callbacks += [latest_checkpoint_callback, val_checkpoint_callback, ema_checkpoint]
+    callbacks += [step_latest_checkpoint_callback, epoch_latest_checkpoint_callback, val_checkpoint_callback, ema_checkpoint]
 
     if logger:
         lr_monitor = LearningRateMonitor(logging_interval="step")
