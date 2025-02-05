@@ -24,7 +24,7 @@ fixed_pos_verbose: true  # print fixed positions to stdout
 aatype_decoding_order_mode: "random"
 num_corrector_steps: 0
 corrector_step_ratio: 0.5
-seq_only: false  # true to not pack sidechains during sampling
+seq_only: true  # true to not pack sidechains during sampling
 num_steps: 100
 num_seqs_per_pdb: 1
 temperature: 0.1

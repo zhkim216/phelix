@@ -264,11 +264,11 @@ def main(cfg: DictConfig):
             for j, pdb in enumerate(pdbs):
                 sc_metrics["pdb_name"].append(Path(pdb).stem)
                 sc_metrics["pdb_key"].append(pdb_names[j])
+                sc_metrics["pred_seq"].append(pred_seqs[j])
 
                 for k, v in sc_info[pdb]["sc_metrics"].items():
                     sc_metrics[f"{k}"].append(v.item())
 
-            sc_metrics["pred_seq"].extend(pred_seqs)
             out_df = pd.DataFrame(sc_metrics)
 
             # Safely append to CSV using a file lock

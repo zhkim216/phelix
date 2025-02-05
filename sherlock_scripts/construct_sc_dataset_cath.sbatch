@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sample_multi_cath
+#SBATCH --job-name=construct_sc_dataset_cath
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8

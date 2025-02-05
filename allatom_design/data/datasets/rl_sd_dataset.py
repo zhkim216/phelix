@@ -27,8 +27,9 @@ class RLSDDataset(data.Dataset):
     def __init__(
         self,
         pdb_path: str,
-        metric: str = "sc_aa_rmsd",
+        metric: str = "sc_ca_rmsd",
         min_margin: float = 1.0,
+        winner_threshold: Optional[float] = None,  # winner must be at least as good as this
         overfit: int = -1,
         short_epoch: bool = False,
         n_random_subset: Optional[int] = None,
@@ -42,6 +43,7 @@ class RLSDDataset(data.Dataset):
         - pdb_path: Base path to sampled pdbs. Should contain directory "samples" and a self_consistency_metrics.csv file.
         - metric: metric to use for self-consistency
         - min_margin: minimum margin for self-consistency between pairs (should be positive)
+        - winner_threshold: if not None, the dataset will only return examples where the winner is at least as good as this threshold.
         - overfit: Number of examples to overfit on. -1 for all examples.
         - short_epoch: If True, the dataset will only return 500 random examples.
         - n_random_subset: If not None, the dataset will only return a random subset of n examples.
@@ -52,22 +54,24 @@ class RLSDDataset(data.Dataset):
         """
         self.pdb_path = pdb_path
         self.self_consistency_csv = f"{pdb_path}/self_consistency_metrics.csv"
+        self.overfit = overfit
+        self.se3_augment = se3_augment
+        self.translation_scale = translation_scale
+        self.overwrite_cache = overwrite_cache
+        self.subset_length_range = subset_length_range
 
+        # Defining reward metrics
         self.metric = metric
         self.lower_is_better = metric in ["sc_ca_rmsd", "sc_aa_rmsd"]
         self.min_margin = min_margin
-
-        self.overfit = overfit
-
-        self.se3_augment = se3_augment
-        self.translation_scale = translation_scale
-
-        self.overwrite_cache = overwrite_cache
-        self.subset_length_range = subset_length_range
+        self.winner_threshold = winner_threshold if winner_threshold is not None else -np.inf
 
         # Read in self-consistency scores and sample keys
         self.sc_df = pd.read_csv(self.self_consistency_csv)
         self.sample_keys = self.sc_df["pdb_name"].values
+
+        # Define reward in df while handling lower_is_better
+        self.sc_df["reward"] = self.define_rewards()
 
         # Cache coordinates for faster loading
         self._cache_examples()
@@ -77,8 +81,7 @@ class RLSDDataset(data.Dataset):
             self.subset_to_length_range(*self.subset_length_range)  # TODO: switch over to use length from CSV
 
         # Set fixed size to max length
-        # self.fixed_size = self._get_max_len()  # TODO: switch over to use length from CSV
-        self.fixed_size = 150  # DEBUG
+        self.fixed_size = self._get_max_len()  # TODO: switch over to use length from CSV
 
         ### Construct paired dataset ###
         self.paired_dataset = self._construct_paired_dataset()
@@ -210,14 +213,7 @@ class RLSDDataset(data.Dataset):
         """
         Reads in cached PDB files and returns max length of all examples.
         """
-        max_len = 0
-        for sample_key in tqdm(self.sample_keys, desc=f"Getting max length to use as fixed size", leave=False):
-            data_file = self._get_data_file(sample_key)
-            example = torch.load(data_file, weights_only=True)
-            seq_len = example["seq_mask"].sum().item()
-            max_len = seq_len if (seq_len > max_len) else max_len
-
-        return int(max_len)
+        return self.sc_df["pred_seq"].str.len().max()
 
 
     def subset_to_length_range(self, min_len: int, max_len: int):
@@ -243,23 +239,31 @@ class RLSDDataset(data.Dataset):
             indices = group.index.tolist()
 
             for i, j in itertools.combinations(indices, 2):
-                val_i = group.loc[i, self.metric]
-                val_j = group.loc[j, self.metric]
+                val_i = group.loc[i, "reward"]
+                val_j = group.loc[j, "reward"]
 
                 sample_i, sample_j = group.loc[i, "pdb_name"], group.loc[j, "pdb_name"]
 
-                if self.lower_is_better:
-                    if val_i <= val_j - self.min_margin:
-                        paired_sample_keys.append((sample_i, sample_j))  # i is winner, j is loser
-                    elif val_j <= val_i - self.min_margin:
-                        paired_sample_keys.append((sample_j, sample_i))  # j is winner, i is loser
-                else:
-                    if val_i >= val_j + self.min_margin:
-                        paired_sample_keys.append((sample_i, sample_j))  # i is winner, j is loser
-                    elif val_j >= val_i + self.min_margin:
-                        paired_sample_keys.append((sample_j, sample_i))  # j is winner, i is loser
+                if (val_i >= val_j + self.min_margin) and (val_i > self.winner_threshold):
+                    paired_sample_keys.append((sample_i, sample_j))  # i is winner, j is loser
+                elif (val_j >= val_i + self.min_margin) and (val_j > self.winner_threshold):
+                    paired_sample_keys.append((sample_j, sample_i))  # j is winner, i is loser
 
         return paired_sample_keys
+
+
+    def define_rewards(self) -> np.ndarray:
+        if self.metric == "gly_count":
+            # for sanity checking; use number of glycines as a reward
+            rewards = self.sc_df["pred_seq"].str.count("G").values
+        else:
+            rewards = self.sc_df[self.metric]
+
+        if self.lower_is_better:
+            self.winner_threshold = -self.winner_threshold
+            rewards = -self.sc_df["reward"]
+
+        return rewards
 
 
 def get_sample_file(pdb_path: str, sample_key: str) -> str:
