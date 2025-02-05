@@ -53,6 +53,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.confidence_module.enabled=true \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=20000 \
+    checkpointing.save_latest_every_n_epochs=10 \
     checkpointing.save_ema_every_n_steps=5000 \
     trainer.check_val_every_n_epoch=5 \
     hydra.run.dir=${HYDRA_DIR} \
