@@ -241,6 +241,7 @@ class SeqDenoiser(nn.Module):
                aatype_override_mask: Optional[TensorType["b n", int]] = None,
                restrict_pos_aatype: Optional[Tuple[TensorType["b n", float],
                                                    TensorType["b n k", int]]] = None,  # restrict aatype sampling at certain positions
+               omit_aas: Optional[List[str]] = None,  # omit certain amino acids from sampling, e.g. ["C", "G"]
                noise_labels: Optional[Union[float, TensorType["b n"]]] = None,  # per-residue noise label
                scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
                ):
@@ -263,6 +264,7 @@ class SeqDenoiser(nn.Module):
             scn_override_mask = torch.zeros((B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
 
         # Handle aatype restrictions
+        aux_inputs["omit_aas"] = omit_aas
         aux_inputs["restrict_pos_aatype"] = restrict_pos_aatype
 
         # Add in noise label

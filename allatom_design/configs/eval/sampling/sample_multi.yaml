@@ -19,6 +19,7 @@ run_self_consistency_eval: false
 # Fixed positions: path to csv with 3 columns: pdb_name, fixed_pos_seq, fixed_pos_scn.
 fixed_pos_csv: null  # e.g. 2fyzA, "A1-100,B1-100", "A1-100". If pdb_name is not in the csv, no fixed positions are used.
 fixed_pos_verbose: true  # print fixed positions to stdout
+omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
 
 # Inverse folding options
 aatype_decoding_order_mode: "random"
