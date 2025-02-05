@@ -121,7 +121,7 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
 
         # Handle aatype restrictions
         seq_logits[..., rc.restype_order_with_x["X"]] = -1e9  # do not sample mask/unknowns
-        omit_aas = aux_inputs.get("omit_aas", None)
+        omit_aas = aux_inputs.get("omit_aas", [])
         for aa in omit_aas:
             seq_logits[..., rc.restype_order_with_x[aa]] = -1e9  # omit the specified aatypes
 
