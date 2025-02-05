@@ -93,6 +93,10 @@ def main(cfg: DictConfig):
     else:
         fixed_pos_df = pd.DataFrame(columns=["fixed_pos_seq", "fixed_pos_scn"])
 
+    # Print omitted amino acids
+    if cfg.omit_aas is not None:
+        print(f"Omitting aatype sampling for: {cfg.omit_aas}")
+
     ### Load in PDB files ###
     if cfg.pdb_key_list is not None:
         # Get PDBs with keys in the list
