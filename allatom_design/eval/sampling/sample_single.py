@@ -210,6 +210,7 @@ def main(cfg: DictConfig):
             aatype_override_mask=aatype_override_mask,
             scn_override_mask=scn_override_mask,
             restrict_pos_aatype=restrict_pos_aatype,
+            omit_aas=cfg.omit_aas,
             scd_inputs=scd_inputs,
         )
 
