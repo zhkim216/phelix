@@ -29,12 +29,12 @@ class UDiTBlock(nn.Module):
         if use_rotary_emb:
             rotary_emb = rope.RotaryEmbedding(dim=hidden_size // num_heads, use_residx=use_residx,
                                               cache_if_possible=False)
-        self.attn_norm = nn.LayerNorm(hidden_size, elementwise_affine=True, bias=False)
+        self.attn_norm = LayerNorm(hidden_size, elementwise_affine=False)
         self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, rotary_emb=rotary_emb, **block_kwargs)
 
         # MLP
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
-        self.mlp_norm = nn.LayerNorm(hidden_size, elementwise_affine=True, bias=False)
+        self.mlp_norm = LayerNorm(hidden_size, elementwise_affine=False)
         self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=nn.SiLU, drop=mlp_dropout)
 
         # AdaLN-Zero
@@ -71,7 +71,7 @@ class FinalLayer(nn.Module):
     """
     def __init__(self, hidden_size, embedding_size, out_channels):
         super().__init__()
-        self.norm_final = nn.LayerNorm(hidden_size, elementwise_affine=True, bias=False)
+        self.norm_final = LayerNorm(hidden_size, elementwise_affine=False)
         self.linear = nn.Linear(hidden_size, out_channels, bias=True)
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
@@ -171,54 +171,26 @@ class Attention(nn.Module):
         return x
 
 
-class UDiTLevel(nn.Module):
-    def __init__(self, hidden_size: int, next_hidden_size: int, down_block: nn.ModuleList, middle_block, up_block: nn.ModuleList):
-        super().__init__()
-        self.down_block = down_block
-        self.residue_pool = ResiduePool(factor=2)
-        self.down_linear = nn.Linear(hidden_size, next_hidden_size)
+# https://github.com/laiguokun/Funnel-Transformer/blob/master/pytorch/ops.py
+class LayerNorm(nn.LayerNorm):
+    def __init__(self, *args, **kwargs):
+      super(LayerNorm, self).__init__(*args, **kwargs)
+      self.eps = 1e-9
 
-        self.middle_block = middle_block
-
-        self.up_linear = nn.Linear(next_hidden_size, hidden_size)
-        self.residue_upsample = ResidueUpsample(factor=2)
-
-        self.x_norm = nn.LayerNorm(hidden_size, elementwise_affine=True)
-        self.skip_norm = nn.LayerNorm(hidden_size, elementwise_affine=True)
-
-        self.up_block = up_block
-
-    def forward(self, x, c, residx, seq_mask):
-        for block in self.down_block:
-            x = block(x, c, residx=residx, seq_mask=seq_mask, attn_bias=None)
-
-        # Downsample x and store skip connection
-        x = x * seq_mask[..., None]
-        skip = x
-        x, residx_ds, seq_mask_ds = self.residue_pool(x, residx, seq_mask)
-        x = self.down_linear(x)
-
-        if isinstance(self.middle_block, nn.ModuleList):
-            for block in self.middle_block:
-                x = block(x, c, residx=residx_ds, seq_mask=seq_mask_ds, attn_bias=None)
-        else:
-            x = self.middle_block(x, c, residx=residx_ds, seq_mask=seq_mask_ds)
-
-        # Upsample x
-        x = x * seq_mask_ds[..., None]
-        x = self.up_linear(x)
-        x = self.residue_upsample(x)
-
-        # Add skip connection
-        x = self.x_norm(x)
-        skip = self.skip_norm(skip)
-        x = (x + skip) / (2 ** 0.5)
-
-        for block in self.up_block:
-            x = block(x, c, residx=residx, seq_mask=seq_mask, attn_bias=None)
-
-        x = x * seq_mask[..., None]
-        return x
+    def forward(self, inputs):
+      dtype = torch.float32
+      if self.elementwise_affine:
+        weight = self.weight.type(dtype)
+        bias = self.bias.type(dtype)
+      else:
+        weight = self.weight
+        bias = self.bias
+      input_dtype = inputs.dtype
+      inputs = inputs.type(dtype)
+      output = F.layer_norm(inputs, self.normalized_shape, weight, bias, self.eps)
+      if output.dtype != input_dtype:
+        output = output.type(input_dtype)
+      return output
 
 
 # rmsnorm
