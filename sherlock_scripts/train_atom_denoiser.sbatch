@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=nova_a1
+#SBATCH --job-name=nova_a2
 #SBATCH -p possu,bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -32,7 +32,7 @@ export TORCH_HOME=/scratch/users/rshuai/subhang/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=null
-EXP_NAME=nova_a1
+EXP_NAME=nova_a2
 GROUP=nova
 
 # Dataset paths
