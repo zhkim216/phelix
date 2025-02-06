@@ -334,7 +334,7 @@ def get_override_masks(batch: Dict[str, TensorType["b ..."]],
                 print(f"Fixed sequence: {fixed_seq_viz}")
         else:
             if verbose:
-                print("No fixed sequence positions specified.")
+                print(f"{pdb_name}: No fixed sequence positions specified.")
 
         if fixed_pos_scn:
             # sidechain override
@@ -349,7 +349,10 @@ def get_override_masks(batch: Dict[str, TensorType["b ..."]],
                 print(f"Fixed sidechains: {fixed_scn_viz}")
         else:
             if verbose:
-                print("No fixed sidechain positions specified.")
+                print(f"{pdb_name}: No fixed sidechain positions specified.")
+
+        if verbose:
+            print("\n========================\n")
 
     return aatype_override_mask, scn_override_mask
 
