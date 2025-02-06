@@ -34,7 +34,7 @@ from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
 from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
     TimestepEmbedder
 from allatom_design.model.atom_denoiser.denoisers.u_dit_utils import (
-    UDiTBlock, FinalLayer, UDiTLevel, LabelEmbedder, MultiHeadRMSNorm)
+    UDiTBlock, FinalLayer, ResiduePool, ResidueUpsample, LabelEmbedder, MultiHeadRMSNorm)
 from openfold.model.primitives import Linear
 
 
@@ -323,27 +323,12 @@ class UDiT(nn.Module):
             self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
 
         # U-DiT Blocks
-        def create_udit_level(level_idx: int):
-            if level_idx == cfg.num_downsamples:
-                return nn.ModuleList([
-                    UDiTBlock(self.channels[-1],
-                              embedding_size=self.channels[-1],
-                              num_heads=cfg.num_heads,
-                              use_rotary_emb=self.use_rotary_emb,
-                              use_residx=self.use_residx,
-                              mlp_dropout=cfg.mlp_dropout,
-                              mlp_ratio=cfg.mlp_ratio,
-                              inf=cfg.inf,
-                              qk_norm=cfg.qk_rmsnorm,
-                              norm_layer=self.qk_normlayer
-                              ) for _ in range(cfg.num_mid_blocks)
-                ])
+        self.encoder_blocks = nn.ModuleList()
+        self.downsample_linears = nn.ModuleList()
 
-            hidden_size = self.channels[level_idx]
-            next_hidden_size = self.channels[level_idx + 1]
-
-            down_block = nn.ModuleList([
-                UDiTBlock(hidden_size,
+        for i in range(cfg.num_downsamples + 1):
+            block_list = nn.ModuleList([
+                UDiTBlock(self.channels[i],
                           embedding_size=self.channels[-1],
                           num_heads=cfg.num_heads,
                           use_rotary_emb=self.use_rotary_emb,
@@ -353,28 +338,17 @@ class UDiT(nn.Module):
                           inf=cfg.inf,
                           qk_norm=cfg.qk_rmsnorm,
                           norm_layer=self.qk_normlayer
-                          ) for _ in range(cfg.num_updown_blocks)
+                          ) for _ in range(cfg.num_down_blocks)
             ])
+            self.encoder_blocks.append(block_list)
+            if i < cfg.num_downsamples:
+                self.downsample_linears.append(Linear(self.channels[i], self.channels[i + 1]))
 
-            up_block = nn.ModuleList([
-                UDiTBlock(hidden_size,
-                          embedding_size=self.channels[-1],
-                          num_heads=cfg.num_heads,
-                          use_rotary_emb=self.use_rotary_emb,
-                          use_residx=self.use_residx,
-                          mlp_dropout=cfg.mlp_dropout,
-                          mlp_ratio=cfg.mlp_ratio,
-                          inf=cfg.inf,
-                          qk_norm=cfg.qk_rmsnorm,
-                          norm_layer=self.qk_normlayer
-                          ) for _ in range(cfg.num_updown_blocks)
-            ])
+        self.residue_pool = ResiduePool(factor=2)
+        self.upsample_linear = Linear(self.channels[-1], self.channels[0])
+        self.residue_upsample = ResidueUpsample(factor=2 ** cfg.num_downsamples)
 
-            middle_block = create_udit_level(level_idx + 1)
-            return UDiTLevel(hidden_size, next_hidden_size, down_block, middle_block, up_block)
-
-        self.u_dit = create_udit_level(0)
-        self.dit = nn.ModuleList([
+        self.decoder_blocks = nn.ModuleList([
             UDiTBlock(self.channels[0],
                       embedding_size=self.channels[-1],
                       num_heads=cfg.num_heads,
@@ -385,8 +359,9 @@ class UDiT(nn.Module):
                       inf=cfg.inf,
                       qk_norm=cfg.qk_rmsnorm,
                       norm_layer=self.qk_normlayer
-                      ) for _ in range(cfg.num_dit_blocks)
+                      ) for _ in range(cfg.num_dec_blocks)
         ])
+
         self.final_layer = FinalLayer(self.channels[0], self.channels[-1], self.out_channels)
         self.initialize_weights()
 
@@ -395,14 +370,10 @@ class UDiT(nn.Module):
         # Initialize transformer layers:
         def _basic_init(module):
             if isinstance(module, nn.Linear):
-                torch.nn.init.xavier_uniform_(module.weight)
+                torch.nn.init.kaiming_normal_(module.weight)
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0)
         self.apply(_basic_init)
-
-        # Initialize timestep embedding MLP:
-        nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
-        nn.init.normal_(self.t_embedder.mlp[2].weight, std=0.02)
 
         # Zero-out adaLN modulation layers in DiT blocks:
         def _adaln_init(module):
@@ -416,7 +387,6 @@ class UDiT(nn.Module):
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
         nn.init.constant_(self.final_layer.linear.weight, 0)
         nn.init.constant_(self.final_layer.linear.bias, 0)
-
 
 
     def forward(self,
@@ -476,14 +446,31 @@ class UDiT(nn.Module):
             # embed the label
             c = c + self.cond_embedders[label_name](labels_in, self.training)
 
-        # Blocks
-        x = self.u_dit(x, c, residx=residue_index.float(), seq_mask=seq_mask)
-        for block in self.dit:
-            x = block(x, c, residx=residue_index.float(), seq_mask=seq_mask, attn_bias=None)
+        # Encoder blocks
+        x_skip = None
+        residx_skip = residue_index
+        seq_mask_skip = seq_mask
+
+        for i in range(self.cfg.num_downsamples + 1):
+            for block in self.encoder_blocks[i]:
+                x = block(x, c, residx=residue_index.float(), seq_mask=seq_mask, attn_bias=None)
+            if i == 0:
+                x_skip = x
+            if i < self.cfg.num_downsamples:
+                x, residue_index, seq_mask = self.residue_pool(x, residue_index, seq_mask)
+                x = self.downsample_linears[i](x)
+
+        # Decoder blocks
+        x = self.upsample_linear(x)
+        x = self.residue_upsample(x)
+        x = x + x_skip
+
+        for block in self.decoder_blocks:
+            x = block(x, c, residx=residx_skip.float(), seq_mask=seq_mask_skip, attn_bias=None)
 
         # Final layer
         x = self.final_layer(x, c)
-        x = x * seq_mask[..., None]  # zero out padding positions
+        x = x * seq_mask_skip[..., None]  # zero out padding positions
 
         # Reshape back to coordinates
         x = rearrange(x, "b n (a x) -> b n a x", x=3)
