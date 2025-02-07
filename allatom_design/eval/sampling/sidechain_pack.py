@@ -76,7 +76,8 @@ def main(cfg: DictConfig):
     else:
         dataset = ADDataset(phase="eval", evaluation_mode = True, **lit_sd_model.cfg.data)
 
-    dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
+    if cfg.subset_length_range is not None:
+        dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
     num_pdbs = cfg.num_pdbs if cfg.num_pdbs is not None else len(dataset)
     val_dataloader = DataLoader(dataset, batch_size=num_pdbs, num_workers=cfg.num_workers, pin_memory=True, shuffle=True, drop_last=False)
 

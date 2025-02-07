@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from omegaconf import DictConfig
 from torchtyping import TensorType
 from tqdm import tqdm
@@ -102,26 +103,27 @@ class SeqDenoiser(nn.Module):
               aatype,
               seq_mask,
               missing_atom_mask,
+              scn_mlm_mask,
               residue_index,
               chain_index
         ) -> TensorType["b n"]:
-        """
-        batch should contain:
-        - x: TensorType["b n a 3", float]
-        - residue_index: TensorType["b n", int]
-        - seq_mask: TensorType["b n", float]
-        - cond_labels_in: Dict[str, TensorType["b", int]]
-        """
-        # Denoise coords
+        atom_mask_noised = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)  # 0 for ghost atoms; X only has backbone atoms
+        atom_mask_noised = atom_mask_noised * seq_mask.unsqueeze(-1)  # mask out padding
+        atom_mask_noised = atom_mask_noised * (1 - missing_atom_mask)  # mask out missing atoms
+        atom_mask_noised[..., rc.non_bb_idxs] = atom_mask_noised[..., rc.non_bb_idxs] * scn_mlm_mask.unsqueeze(-1)  # mask out masked sidechain atoms
+
+        # Run denoiser and get logits
         seq_logits, _ = self.denoiser.seq_design_module(
                                         x,
                                         aatype,
                                         seq_mask,
-                                        missing_atom_mask,
+                                        atom_mask_noised,
                                         residue_index,
                                         chain_index)
+        log_probs = F.log_softmax(seq_logits, dim=-1)
+        return log_probs
 
-        return seq_logits
+
 
     def set_scale_factors(self,
                           scale_factors: Dict[str, Tuple[float, float]]):

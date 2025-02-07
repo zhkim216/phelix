@@ -106,8 +106,7 @@ class ConfidenceEncoder(nn.Module):
 
         # Structure encoder
         # TODO: remove this, this is not used in the current implementation
-        self.sidechain_features = SidechainProteinFeatures(autoregressive=False,
-                                                           node_features=self.node_features,
+        self.sidechain_features = SidechainProteinFeatures(node_features=self.node_features,
                                                            edge_features=self.edge_features,
                                                            top_k=self.k_neighbors)
         self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors, augment_eps=0.0)
