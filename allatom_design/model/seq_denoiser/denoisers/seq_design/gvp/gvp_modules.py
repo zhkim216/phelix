@@ -27,35 +27,20 @@
 # SOFTWARE.
 
 import typing as T
+
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 from torch_geometric.nn import MessagePassing
+
 from allatom_design.data import residue_constants as rc
-
-from allatom_design.data.data import (
-    get_rotation_frames,
-    rotate,
-    get_rc_tensor,
-    orientations,
-    dihedrals,
-    sidechains,
-    positional_embeddings,
-    normalize,
-    rbf,
-    nan_to_num,
-    dist
-)
-
+from allatom_design.data.data import get_rc_tensor
 from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_utils import (
-    flatten_graph,
-    tuple_cat,
-    tuple_index,
-    tuple_sum,
-    _norm_no_nan,
-    _split,
-    _merge,
-)
+    _merge, _norm_no_nan, _split, dihedrals, dist, flatten_graph,
+    get_rotation_frames, nan_to_num, normalize, orientations,
+    positional_embeddings, rbf, rotate, sidechains, tuple_cat, tuple_index,
+    tuple_sum)
+
 
 class GVPEncoder(nn.Module):
     def __init__(self, cfg):

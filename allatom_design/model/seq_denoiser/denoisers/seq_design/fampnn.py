@@ -10,18 +10,11 @@ from omegaconf import DictConfig
 from torchtyping import TensorType
 
 import allatom_design.data.residue_constants as rc
-from allatom_design.data.data import (aggregate, atom37_to_atom14,
-                                      cat_neighbors_nodes, gather_edges,
-                                      gather_nodes,
-                                      get_graph_transformer_inputs, unpack)
-from allatom_design.model.seq_denoiser.denoisers.seq_design.gcp_net.gcp_net import \
-    GCPNet
-from allatom_design.model.seq_denoiser.denoisers.seq_design.graph_transformer import \
-    GraphTransformer
+from allatom_design.data.data import atom37_to_atom14
 from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_modules import \
     GVPEncoder
-from allatom_design.model.seq_denoiser.denoisers.seq_design.residue_transformer import \
-    ResidueTransformer
+from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
+    cat_neighbors_nodes, gather_edges, gather_nodes)
 
 
 class FaMPNN(nn.Module):
@@ -29,10 +22,8 @@ class FaMPNN(nn.Module):
     def __init__(self, cfg: DictConfig):
         super().__init__()
         self.cfg = cfg
-        self.autoregressive = cfg.autoregressive
         self.n_aatype = cfg.n_aatype
         self.seq_emb_dim = cfg.n_channel
-        self.use_self_conditioning_seq = cfg.use_self_conditioning_seq
         self.model_type = cfg.model_type
         self.node_features = cfg.n_channel
         self.edge_features = cfg.n_channel
@@ -43,52 +34,24 @@ class FaMPNN(nn.Module):
         self.per_residue_eps = cfg.get("per_residue_eps", False)
         self.augment_eps = cfg.augment_eps
         self.max_eps = getattr(cfg, "max_eps", None)
-        self.no_aatype_pred = getattr(cfg, "no_aatype_pred", False)
         self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors,
                                         per_residue_eps=self.per_residue_eps, augment_eps=self.augment_eps, max_eps=self.max_eps)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
         self.W_s = nn.Embedding(self.n_aatype, self.hidden_dim)
         self.dropout = nn.Dropout(cfg.dropout_p)
         self.decoder_in = self.hidden_dim * 3
-        self.aggregation = cfg.aggregation
         self.return_embedding = cfg.return_embedding
-        self.max_nn = max(cfg.graph_transformer.nns)
-        self.pos_enc_size = rc.r_max * 4 + rc.s_max * 2 + 5
-        self.dim_pos_enc = cfg.graph_transformer.dim_pos_enc
-        self.num_heads = cfg.graph_transformer.num_heads
-        self.pos_enc = cfg.graph_transformer.pos_enc
-        self.attn_bias = cfg.graph_transformer.attn_bias
-        self.use_gvp = getattr(cfg, "use_gvp", False)
-        self.use_gcp = getattr(cfg, "use_gcp", False)
-        self.use_residue_transformer = getattr(cfg, "use_residue_transformer", False)
+        self.use_gvp = cfg.use_gvp
 
-        assert int(self.use_gvp) + int(self.use_gcp) < 2, 'Only one architecture for processing vector features is permitted!'
+        if self.model_type not in ['sidechain', 'baseline']:
+            raise ValueError(f'Incorrect model type specified: {self.model_type}, must be one of: sidechain, or baseline!')
 
-        if self.model_type not in ['graph_transformer', 'sidechain', 'baseline']:
-            raise ValueError(f'Incorrect model type specified: {self.model_type}, must be one of: graph_transformer, sidechain, or baseline!')
-
-        if self.autoregressive and self.model_type in ['graph_transformer']:
-            raise ValueError(f'Autoregressive training not implemented for model type: {self.model_type}')
-
-        if self.model_type in ['graph_transformer', 'sidechain']:
+        if self.model_type in ['sidechain']:
             self.decoder_in += self.hidden_dim
-            self.sidechain_features = SidechainProteinFeatures(autoregressive = self.autoregressive,
-                                                              node_features = self.node_features,
-                                                              edge_features = self.edge_features,
-                                                              top_k=self.k_neighbors)
+            self.sidechain_features = SidechainProteinFeatures(node_features=self.node_features,
+                                                               edge_features=self.edge_features,
+                                                               top_k=self.k_neighbors)
             self.W_e2 = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
-
-        if self.model_type in ['graph_transformer']:
-            self.atom_decoder_in = self.decoder_in + self.hidden_dim
-            self.gt = GraphTransformer(cfg.graph_transformer)
-            self.embed_pos = nn.Linear(self.pos_enc_size, self.dim_pos_enc, bias=True)
-            self.proj_attn_bias = nn.Linear(self.pos_enc_size, self.num_heads, bias=True)
-
-            #Full atom encoder layers
-            self.atom_decoder_layers = nn.ModuleList([
-                DecLayer(self.hidden_dim, self.atom_decoder_in, dropout=cfg.dropout_p)
-                for _ in range(self.num_decoder_layers)
-            ])
 
         # Encoder layers
         self.encoder_layers = nn.ModuleList([
@@ -102,15 +65,9 @@ class FaMPNN(nn.Module):
             for _ in range(self.num_decoder_layers)
         ])
 
-        #GVP and GCP are both embed vector features with scalar features
+        # GVP embeds vector features with scalar features
         if self.use_gvp:
             self.vector_encoder = GVPEncoder(cfg.gvp)
-
-        if self.use_gcp:
-            self.vector_encoder = GCPNet(cfg.gcp)
-
-        if self.use_residue_transformer:
-            self.transformer = ResidueTransformer(cfg.residue_transformer)
 
         # Output layers
         self.W_out = nn.Linear(self.hidden_dim, self.n_aatype, bias=True)
@@ -159,14 +116,9 @@ class FaMPNN(nn.Module):
         #keep copy of node embeddings from encoder
         h_V_enc = h_V.clone()
 
-        #implementation of causal mask if training autoregressively, otherwise mask is fully true
+        # mask is all 1s
         mask_size = E_idx.shape[1]
-        if self.autoregressive:
-            decoding_order = torch.argsort((seq_mask+0.0001)*(torch.abs(torch.randn(seq_mask.shape, device=seq_mask.device)))) #[numbers will be smaller for places where chain_M = 0.0 and higher for places where chain_M = 1.0]
-            permutation_matrix_reverse = F.one_hot(decoding_order, num_classes=mask_size).float()
-            order_mask_backward = torch.einsum('ij, biq, bjp->bqp',(1-torch.triu(torch.ones(mask_size,mask_size, device=seq_mask.device))), permutation_matrix_reverse, permutation_matrix_reverse)
-        else:
-            order_mask_backward = torch.ones(S.shape[0], mask_size, mask_size, device=E_idx.device)
+        order_mask_backward = torch.ones(S.shape[0], mask_size, mask_size, device=E_idx.device)
 
         mask_attend = torch.gather(order_mask_backward, 2, E_idx).unsqueeze(-1)
         mask_1D = seq_mask.view([seq_mask.size(0), seq_mask.size(1), 1, 1])
@@ -180,7 +132,7 @@ class FaMPNN(nn.Module):
         # edge embedding of encoder gets zeros for sequence added -> hidden dim = [Enc Embedding + Seq 0s ][128*2]
         h_EX_encoder = cat_neighbors_nodes(torch.zeros((B, N, self.hidden_dim), device = h_S.device), h_E, E_idx)
 
-        if self.model_type in ['graph_transformer','sidechain']:
+        if self.model_type in ['sidechain']:
 
             # Add empty hidden dim of 128 to end of h_EXV to later sum with added sidechain distance information
             h_EX_encoder = cat_neighbors_nodes(torch.zeros((B, N, self.hidden_dim), device = h_S.device), h_EX_encoder, E_idx)
@@ -209,54 +161,18 @@ class FaMPNN(nn.Module):
         #keep copy of node embeddings from encoder
         h_V_dec = h_V.clone()
 
-        if self.use_gvp or self.use_gcp:
+        if self.use_gvp:
             padding_mask = (seq_mask != 1)
             h_V_flattened = self.vector_encoder(X, aatype_noised, E_idx, h_V, h_ESV, padding_mask, atom14_mask)
             h_V = h_V_flattened.reshape(B, N, -1)
 
-        if self.model_type in ['graph_transformer']:
-            #get graph transformer inputs
-            q, ids_topk, unmasked_packed_X, num_atoms_per_residue, positional_enc, num_atoms = get_graph_transformer_inputs(X, atom14_mask, aatype_noised, seq_mask, chain_encoding, self.max_nn, self.pos_enc, self.attn_bias)
-
-            #embed full atomic positional encoding into edge embedding and attention bias
-            p_A = self.embed_pos(positional_enc).squeeze(-1) if self.pos_enc else None
-            attn_bias = self.proj_attn_bias(positional_enc).view(num_atoms, self.max_nn, self.num_heads).permute(0,2,1) if self.attn_bias else None
-
-            #graph transformer forward pass, garbage collect inputs
-            h_A = self.gt(unmasked_packed_X, ids_topk, q, p_A, attn_bias)
-
-            #aggergate atom embeddings into residue embeddings
-            h_R = aggregate(h_A, num_atoms_per_residue, self.hidden_dim, self.aggregation)
-
-            #unpack residue embeddings, (B N, ...) -> (B, N, ...)
-            h_R = unpack(
-                packed_rep = h_R,
-                tgt_shape = (B, N, self.hidden_dim),
-                mask = (seq_mask == 1)
-            )
-
-            #concatenate residue embedding to sequence embedding
-            h_ESV = cat_neighbors_nodes(h_R, h_ESV, E_idx)
-
-            for layer in self.atom_decoder_layers:
-                h_V, h_ESV = layer(h_V, h_ESV, seq_mask, E_idx)
-
-        if self.use_residue_transformer:
-            h_V_gnn = h_V.clone()
-            h_V = self.transformer(h_V, h_ESV, E_idx, aatype_noised, seq_mask)
-
         logits = self.W_out(h_V)
-
-        if self.no_aatype_pred:
-            logits = None
 
         h_V_out = None
         if self.return_embedding == 'encoder':
             h_V_out = h_V_enc
         elif self.return_embedding == 'decoder':
             h_V_out = h_V_dec
-        elif self.return_embedding == 'gnn':
-            h_V_out = h_V_gnn
         elif self.return_embedding == 'last':
             h_V_out = h_V
         else:
@@ -384,11 +300,10 @@ class ProteinFeatures(nn.Module):
         return E, E_idx, X, noise_labels
 
 class SidechainProteinFeatures(nn.Module):
-    def __init__(self, autoregressive, edge_features, node_features, num_positional_embeddings=16,
+    def __init__(self, edge_features, node_features, num_positional_embeddings=16,
         num_rbf=16, top_k=30):
         """ Extract protein features """
         super(SidechainProteinFeatures, self).__init__()
-        self.autoregressive = autoregressive
         self.edge_features = edge_features
         self.node_features = node_features
         self.top_k = top_k
@@ -425,12 +340,6 @@ class SidechainProteinFeatures(nn.Module):
         D_A_B = torch.sqrt(torch.sum((A[:,:,None,:] - B[:,None,:,:])**2,-1) + 1e-6) #[B, L, L]
         D_A_B_neighbors = gather_edges(D_A_B[:,:,:,None], E_idx)[:,:,:,0] #[B,L,K]
         RBF_A_B = self._rbf(D_A_B_neighbors)
-
-        #if the model is autoregressive, we cannot a lot a residue to see it's own sidechains!
-        if self.autoregressive:
-            atom_indices = torch.arange(E_idx.shape[1]).view(1, E_idx.shape[1], 1).expand(E_idx.shape).to(E_idx.device)
-            self_edges = E_idx == atom_indices
-            RBF_A_B[self_edges] = 0.
 
         return RBF_A_B
 
