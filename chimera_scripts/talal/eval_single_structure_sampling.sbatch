@@ -25,7 +25,7 @@ OMEGAFOLD_CACHE=/scratch/hielab/talal/cache/omegafold/omegafold.pt
 # Model to evaluate
 CHECKPOINT_PATH=/scratch/hielab/talal/allatom_design/allatom_design/aasd_gvp_pdb_0.3_single_pack/checkpoints/sd-epoch53-step365040-val_loss1.2307.ckpt
 
-# PDB to sample from 
+# PDB to sample from
 PDB_PATH=/home/talal/protein-dpo/data/af_pdbs/6cfg.pdb
 
 # Wandb settings / experiment name
@@ -45,8 +45,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_single_structure_sampli
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     aatype_decoding_order_mode=greedy \
-    corrector_step_ratio=0.5 \
-    num_corrector_steps=0 \
     temperature=1.0 \
     fixed_pos=[0,1,2,3,4,5,6,7,8,9,10] \
     num_steps=5 \

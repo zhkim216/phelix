@@ -284,45 +284,6 @@ class SidechainDiffusionModule(nn.Module):
         return x1_scn_local
 
 
-    def get_likelihoods(self,
-                        num_steps: int,
-                        x1_scn: TensorType["b n a_scn 3"],  # not centered on CA
-                        h_V: TensorType["b n h", float],
-                        aatype: TensorType["b n", int],
-                        x_bb: TensorType["b n a_bb 3", float],
-                        seq_mask: TensorType["b n", float],
-                        residue_index: TensorType["b n", int],
-                        chain_index: TensorType["b n", int],
-                        aux_inputs: Optional[Dict]):
-        x1_scn = x1_scn - x_bb[:, :, 1:2, :]  # center sidechain coordinates on CA
-        scn_atom_mask = aux_inputs["atom_mask"][..., rc.non_bb_idxs, None].expand_as(x1_scn)
-        x1_scn = torch.where(scn_atom_mask.bool(), x1_scn, 0)  # re-fill missing / ghost atoms with zeroes
-
-        # DEBUG
-        x1_scn = x1_scn * 0  # hack: for some reason, zeroing out sidechain atoms gives us better (inverse) correlations
-
-        # Extract sampling parameters
-        scd_aux_inputs = aux_inputs["scd"]
-        S_scd = num_steps
-
-        # Only pack residues that are unmasked
-        scn_mlm_mask = aux_inputs["seq_mlm_mask"]
-
-        denoiser_fn = partial(self.scn_denoiser, aatype=aatype, x_bb=x_bb,
-                              h_V=h_V, seq_mask=seq_mask, scn_mlm_mask=scn_mlm_mask,
-                              residue_index=residue_index, chain_index=chain_index)
-
-        x1_mask = scn_atom_mask * rearrange(scn_mlm_mask, "b n -> b n 1 1")
-
-        likelihood_aux = self.scn_interpolant.get_likelihoods(denoiser_fn, x1_scn, x1_mask, S_scd)
-
-        # Preprocess trajectory output
-        x_bb_traj = x_bb[:, None].expand(-1, S_scd, -1, -1, -1).cpu()
-        likelihood_aux["likelihood_xt_traj"] = likelihood_aux["likelihood_xt_traj"] + x_bb_traj[..., 1:2, :]  # undo centering of sidechain coordinates on CA
-        likelihood_aux["likelihood_xt_traj"] = cat_bb_scn(x_bb_traj, likelihood_aux["likelihood_xt_traj"])  # put scn coords back into full structure
-        return likelihood_aux
-
-
 class SidechainMLP(nn.Module):
     def __init__(self, cfg: DictConfig, scn_interpolant: ADInterpolant):
         """

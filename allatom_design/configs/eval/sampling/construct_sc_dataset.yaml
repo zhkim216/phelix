@@ -22,11 +22,8 @@ temperature_list: [0.1, 1.0]
 num_seqs_per_pdb_list: [4, 4]
 
 aatype_decoding_order_mode: "random"
-num_corrector_steps: 0
-corrector_step_ratio: 0
 seq_only: true
 repack_last: true
-repack_every_step: false
 psce_threshold: null
 noise_labels: null
 timestep_schedule:
