@@ -12,8 +12,6 @@ from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import cat_bb_scn, get_rc_tensor, stack_aux_traj
 from allatom_design.data.pdb_utils import *
 from allatom_design.eval import sampling_utils
-from allatom_design.interpolants.sd_interpolants.double_mar_interpolant import \
-    DOUBLE_MAR
 from allatom_design.interpolants.sd_interpolants.mar_interpolant import MAR
 from allatom_design.interpolants.sd_interpolants.sd_interpolant import \
     SDInterpolant
@@ -231,11 +229,8 @@ class SeqDenoiser(nn.Module):
                timesteps: TensorType["b s+1", float],  # timesteps for t_seq
                temperature: float,  # 0.0 for argmax / greedy sampling
                aatype_decoding_order_mode: str,
-               num_corrector_steps: int,
-               corrector_step_ratio: float,
                seq_only: bool = False,  # only sample sequence
                repack_last: bool = False,  # repack last step after sampling the sequence
-               repack_every_step: bool = False,  # repack after every step
                psce_threshold: Optional[float] = None,  # during design, only keep sidechains with psce below threshold; None to keep all
                scn_override_mask: Optional[TensorType["b n", int]] = None,
                aatype_override_mask: Optional[TensorType["b n", int]] = None,
@@ -371,53 +366,17 @@ class SeqDenoiser(nn.Module):
             seq_probs_t = sampling_utils.unmask(seq_probs_t, aux_preds["seq_probs"], seq_mlm_mask_prev, seq_mlm_mask)
             psce_t = sampling_utils.unmask(psce_t, aux_preds["scn_diffusion_aux"]["psce"], scn_mlm_mask_prev, scn_mlm_mask)
 
-            if repack_every_step and not seq_only:
-                # Repack the structure after every step (ignore the provided sidechains)
-                xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index, cond_labels,
-                                                            scn_override_mask,  # start from the provided sidechains
-                                                            seq_mlm_mask,  # pack to the currently known sequence
-                                                            scd_inputs)
-                psce_t = aux_preds_pack["psce"]
-                scn_mlm_mask = seq_mlm_mask.clone()
-
             if (psce_threshold is not None) and (i != S - 1):
                 # Re-mask sidechains with low confidence, but only if we are not at the last step
 
                 # get mask based on per-residue confidence
                 atom_mask_scn = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_t)[..., rc.non_bb_idxs]
                 psce_t_per_res = (psce_t * atom_mask_scn).sum(dim=-1) / atom_mask_scn.sum(dim=-1).clamp(min=1)  # average confidence per residue
-                print(f"Number before thresholding: {scn_mlm_mask.sum(dim=-1)[0]}")
                 scn_mlm_mask = scn_mlm_mask * (psce_t_per_res <= psce_threshold).float()
-                print(f"Number after thresholding: {scn_mlm_mask.sum(dim=-1)[0]}")
 
                 # apply mask
                 xt[..., rc.non_bb_idxs, :] = xt[..., rc.non_bb_idxs, :] * rearrange(scn_mlm_mask, "b n -> b n 1 1").float()
                 psce_t = psce_t * rearrange(scn_mlm_mask, "b n -> b n 1")
-
-
-            for j in range(num_corrector_steps):
-                # Corrector step where we mask and denoise equally
-                # Mask out K_corrector residues
-                K_corrector = torch.ceil(K_next * corrector_step_ratio).long()
-                xt, aatype_t, psce_t, seq_mlm_mask = self.interpolant.remask_K(xt, aatype_t, psce_t, seq_mlm_mask, K_corrector)
-                scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else scn_override_mask  # default to user-provided sidechains if seq_only
-
-                # Denoise back to K_next
-                x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, t=None, scn_mlm_mask=scn_mlm_mask)
-
-                # Update mask
-                seq_mlm_mask_prev, scn_mlm_mask_prev = seq_mlm_mask.clone(), scn_mlm_mask.clone()
-                seq_mlm_mask = mask_update_fn(seq_mlm_mask,
-                                              K=K_next, aatype_pred=aatype_pred,
-                                              scaled_seq_probs=aux_preds["scaled_seq_probs"],
-                                              psce=aux_preds["scn_diffusion_aux"]["psce"])
-                scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else scn_override_mask  # default to user-provided sidechains if seq_only
-
-                # Unmask sequence and sidechains
-                aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
-                xt = sampling_utils.unmask(xt, x1_pred, scn_mlm_mask_prev, scn_mlm_mask)
-                seq_probs_t = sampling_utils.unmask(seq_probs_t, aux_preds["seq_probs"], seq_mlm_mask_prev, seq_mlm_mask)
-                psce_t = sampling_utils.unmask(psce_t, aux_preds["psce"], scn_mlm_mask_prev, scn_mlm_mask)
 
             # Save trajectory outputs
             xt_traj.append(xt.cpu())
@@ -453,28 +412,6 @@ class SeqDenoiser(nn.Module):
             aux["scn_diffusion_aux_traj"] = stack_aux_traj(scn_diffusion_aux_traj, dim=1)  # values are shape (B, S, S_scd, N, A, 3)
 
         return xt, aatype_t, aux
-
-
-    def get_sidechain_likelihoods(self,
-                                  num_steps: int,
-                                  x: TensorType["b n a 3", float],
-                                  aatype: TensorType["b n", int],
-                                  seq_mask: TensorType["b n", float],
-                                  residue_index: TensorType["b n", int],
-                                  chain_index: TensorType["b n", int],
-                                  cond_labels: Dict[str, TensorType["b", int]],
-                                  atom_mask: TensorType["b n a", float],  # handles ghost and missing atoms
-                                  scd_inputs: Dict[str, Any] = {}  # sidechain diffusion inputs
-                                  ):
-        aux_inputs = {}
-        # Add sidechain diffusion inputs
-        aux_inputs["scd"] = scd_inputs
-        aux_inputs["seq_mlm_mask"] = seq_mask.clone()  # sidechain pack with all residues unmasked  # TODO: we can also score sidechains with masked sequence
-        aux_inputs["atom_mask"] = atom_mask  # 1 for valid atoms
-
-        likelihood_aux = self.denoiser.get_sidechain_likelihoods(num_steps, x, aatype, residue_index, chain_index, seq_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs)
-
-        return likelihood_aux
 
 
     @staticmethod
@@ -601,41 +538,6 @@ class SeqDenoiser(nn.Module):
                 write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
 
 
-    @staticmethod
-    def save_sidechain_likelihood_traj(likelihood_aux: Dict[str, Any],
-                                    aatype: TensorType["b n", int],
-                                    seq_mask: TensorType["b n", float],
-                                    residue_index: TensorType["b n", int],
-                                    chain_index: TensorType["b n", int],
-                                    save_traj_mask: List[bool],
-                                    save_diff_traj_steps: List[int],
-                                    filenames: List[str],
-                                    traj_conect: bool,
-                                    align_models_to_idx: Optional[int] = None):
-        """
-
-        """
-        B = seq_mask.shape[0]
-        device = seq_mask.device
-        for i in range(B):
-            if save_traj_mask[i]:
-                x_traj = likelihood_aux["likelihood_xt_traj"][i, save_diff_traj_steps]
-                S_scd, N, A, _ = x_traj.shape
-                aatype_traj = aatype[i][None].expand(S_scd, -1)
-                atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * seq_mask[i, :, None]  # [S_scd, N, A]
-
-                traj_feats = {
-                    "aatype": aatype_traj,
-                    "atom_positions": x_traj,
-                    "atom_mask": atom_mask,
-                    "residue_index": residue_index[i].unsqueeze(0).expand(S_scd, -1),
-                    "chain_index": chain_index[i].unsqueeze(0).expand(S_scd, -1),
-                    "b_factors": None
-                }
-                traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
-                write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
-
-
 def get_denoiser(cfg: DictConfig,
                  sigma_data: TensorType[(), float]
                  ) -> BaseSeqDenoiser:
@@ -654,7 +556,5 @@ def get_interpolant(cfg: DictConfig) -> SDInterpolant:
     """
     if cfg.name == "mar":
         return MAR(cfg)
-    elif cfg.name == 'double_mar':
-        return DOUBLE_MAR(cfg)
     else:
         raise ValueError(f"Unknown interpolant: {cfg.name}")

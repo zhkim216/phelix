@@ -23,14 +23,11 @@ omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is alwa
 
 # Inverse folding options
 aatype_decoding_order_mode: "random"
-num_corrector_steps: 0
-corrector_step_ratio: 0.5
 seq_only: true  # true to not pack sidechains during sampling
 num_steps: 100
 num_seqs_per_pdb: 1
 temperature: 0.1
 repack_last: true  # after design, repack the final sequence obtained
-repack_every_step: false  # repack after every step
 psce_threshold: null  # only keep sidechains below this threshold during design; null to keep all
 noise_labels: null  # per-residue noise labels, float for same noise for each residue  # TODO: implement user-provided per-residue noise labels
 timestep_schedule:

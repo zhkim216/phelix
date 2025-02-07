@@ -127,8 +127,6 @@ def main(cfg: DictConfig):
             timesteps=timesteps,
             temperature=cfg.temperature,
             aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
-            num_corrector_steps=cfg.num_corrector_steps,
-            corrector_step_ratio=cfg.corrector_step_ratio,
             seq_only=cfg.seq_only,
             scd_inputs=scd_inputs,
         )
