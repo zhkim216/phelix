@@ -18,8 +18,8 @@ from allatom_design.interpolants.sd_interpolants.sd_interpolant import \
     SDInterpolant
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
-from allatom_design.model.seq_denoiser.denoisers.minimpnn_denoiser import \
-    MiniMPNNDenoiser
+from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import \
+    FAMPNNDenoiser
 
 
 class SeqDenoiser(nn.Module):
@@ -546,8 +546,8 @@ def get_denoiser(cfg: DictConfig,
     """
     Get the denoiser specified in the config.
     """
-    if cfg.name == "minimpnn":
-        return MiniMPNNDenoiser(cfg, sigma_data)
+    if cfg.name == "fampnn" or cfg.name == "minimpnn":  # backwards compatibility
+        return FAMPNNDenoiser(cfg, sigma_data)
     else:
         raise ValueError(f"Unknown denoiser: {cfg.name}")
 

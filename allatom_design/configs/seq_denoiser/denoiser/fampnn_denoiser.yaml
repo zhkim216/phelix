@@ -1,4 +1,4 @@
-name: minimpnn
+name: fampnn
 
 task: ${model.task}
 
