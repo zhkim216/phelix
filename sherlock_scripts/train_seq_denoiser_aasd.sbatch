@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c3_aasd1
+#SBATCH --job-name=c3_aasd2
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
@@ -28,7 +28,7 @@ WANDB_ID=richardshuai
 cd ${BASE_DIR}
 
 # Set experiment name and group
-EXP_NAME=c3_aasd1
+EXP_NAME=c3_aasd2
 GROUP=sherlock_c3
 
 # Dataset paths
@@ -47,11 +47,11 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     train.batch_size=32 \
     train.compile_model=true \
     denoiser=fampnn_denoiser \
-    denoiser.drop_residx_p=0.5 \
     denoiser.fampnn.augment_eps=0.3 \
     denoiser.fampnn.per_residue_eps=true \
     denoiser.fampnn.use_gvp=false \
     denoiser.fampnn.n_layers=3 \
+    loss.loss_weights.scn.mse_loss=10.0 \
     trainer.check_val_every_n_epoch=10 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
