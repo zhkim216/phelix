@@ -1,7 +1,7 @@
 name: mar
 
 # Training noise distribution
-training_noise_schedule: "uniform_t"
+training_noise_schedule: "uniform_sqrt_t"
 
 training_noise_cfg:
   uniform_t:
