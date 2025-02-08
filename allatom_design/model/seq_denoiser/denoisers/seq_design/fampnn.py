@@ -91,7 +91,7 @@ class FAMPNN(nn.Module):
         residue_index: TensorType["b n", int],
         chain_encoding: TensorType["b n", int],
         noise_labels: Optional[Union[float, TensorType["b n"]]] = None,
-    ):
+        h_V_init: Optional[TensorType["b n h"]] = None):
 
         B, N, _, _ = denoised_coords.shape
         S = aatype_noised
@@ -104,11 +104,15 @@ class FAMPNN(nn.Module):
         E, E_idx, X, noise_labels = self.features(X, seq_mask, residue_index, chain_encoding, noise_labels)
 
         #h_V is size [B,N,H]
-        h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
+        if h_V_init is None:
+            h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
+        else:
+            h_V = h_V_init
+
         h_E = self.W_e(E)
 
         if self.per_residue_eps and (self.augment_eps > 0) and not self.ablate_noise_labels:
-            # add noise label to 128th dimension of h_V
+            # add noise label to last dimension of h_V
             h_V[..., -1] = h_V[..., -1] + noise_labels
 
         # Encoder is unmasked self-attention

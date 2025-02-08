@@ -1,6 +1,7 @@
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import DictConfig
 from torchtyping import TensorType
@@ -13,6 +14,9 @@ from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import \
     FAMPNN
 from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.scn_diffusion_mlp import \
     SidechainDiffusionModule
+from esm3.esm.models.esmc import ESMC
+from esm3.esm.sdk.api import ESMProtein, ESMProteinTensor, LogitsConfig
+from esm3.esm.utils.sampling import _BatchedESMProteinTensor
 
 
 class FAMPNNDenoiser(BaseSeqDenoiser):
@@ -27,10 +31,39 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         self.use_scn_diffusion = self.task in ["allatom_seq_des", 'scn_pack']
         self.drop_residx_p = cfg.get("drop_residx_p", 0.0)
 
+        # Sequence encoding: ESM-C
+        self.use_esm_c = cfg.get("esm_c", {}).get("use_esm_c", False)
+        if self.use_esm_c:
+            # Load ESM-C model, frozen and in eval mode
+            self.esm_c = ESMC.from_pretrained(cfg.esm_c.model_name).eval()
+            self.vocab = self.esm_c.tokenizer.get_vocab()
+            for param in self.esm_c.parameters():
+                param.requires_grad = False
+
+            # Naive projection layer for ESM-C embeddings
+            self.esm_c_proj = nn.Linear(self.esm_c.sequence_head[0].in_features, cfg.fampnn.n_channel)
+
+            # Build lookup tables
+            af_to_esm_idx = {}
+            esm_to_af_idx = {}
+
+            for aa, af_idx in rc.restype_order_with_x.items():
+                if aa == "X":
+                    # ESM-C does not use unknowns as mask tokens
+                    token_id = self.esm_c.tokenizer.mask_token_id
+                else:
+                    token_id = self.esm_c.tokenizer.convert_tokens_to_ids(aa)
+                af_to_esm_idx[af_idx] = token_id
+                esm_to_af_idx[token_id] = af_idx
+
+            self.register_buffer("af_to_esm", torch.zeros(len(af_to_esm_idx), dtype=torch.long, requires_grad=False))
+            for i in range(len(af_to_esm_idx)):
+                self.af_to_esm[i] = af_to_esm_idx[i]
+
         # Sequence design model: FAMPNN
         self.seq_design_module = FAMPNN(getattr(cfg, "fampnn", getattr(cfg, "minimpnn", None)))  # backwards compatibility
 
-        # Sidechain diffusion head: DiT
+        # Sidechain diffusion head
         if self.use_scn_diffusion:
             self.scn_diffusion_module = SidechainDiffusionModule(cfg.scn_diffusion_module, self.scn_sigma_data)
 
@@ -64,7 +97,16 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         if aux_inputs.get("drop_residx", None) is not None:
             residue_index = torch.where(aux_inputs["drop_residx"].unsqueeze(-1), torch.zeros_like(residue_index), residue_index)
 
-        # 1. Sequence design
+        # Sequence encoding
+        if self.use_esm_c:
+            # make sure to apply mask
+            with torch.no_grad():
+                protein_tensor = self.af2_to_esmc(aatype_noised, seq_mask)
+                esm_c_embed = self.esm_c.logits(protein_tensor, LogitsConfig(sequence=True, return_embeddings=True)).embeddings
+                esm_c_embed = esm_c_embed[:, 1:-1]  # remove CLS (first) and EOS (last, but possibly pad)
+                esm_c_embed = self.esm_c_proj(esm_c_embed) * seq_mask.unsqueeze(-1)  # zero out EOS of shorter sequences
+
+        # Sequence design
         seq_logits, mpnn_feature_dict = self.seq_design_module(
             x_noised,
             aatype_noised,
@@ -72,7 +114,8 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
             atom_mask_noised,
             residue_index,
             chain_encoding,
-            noise_labels=aux_inputs.get("noise_labels", None))
+            noise_labels=aux_inputs.get("noise_labels", None),
+            h_V_init=esm_c_embed)
 
         aatype_pred, scaled_seq_probs = self.sample_aatype(seq_logits, aux_inputs, is_sampling)
 
@@ -86,7 +129,7 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
             'scn_mlm_mask': aux_inputs.get('scn_mlm_mask', None)  # used during training
         }
 
-        # 2. Sidechain diffusion
+        # Sidechain diffusion
         x1_pred = None
         if self.use_scn_diffusion:
             x1_scn_pred, scn_diffusion_aux = self.scn_diffusion_module.sidechain_diffusion(
@@ -152,3 +195,16 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
             aatype_pred = torch.multinomial(scaled_seq_probs.view(B * N, -1), num_samples=1).view(B, N)
         return aatype_pred, scaled_seq_probs
 
+
+    def af2_to_esmc(self, aatype: TensorType["b n", int], seq_mask: TensorType["b n", float]) -> _BatchedESMProteinTensor:
+        esmc_aatype = self.af_to_esm[aatype]
+        pad_token = self.esm_c.tokenizer.pad_token_id
+        esmc_aatype = torch.where(seq_mask.bool(), esmc_aatype, pad_token)  # mask out padding
+
+        # handle CLS and EOS
+        esmc_aatype = F.pad(esmc_aatype, (1, 1), value=pad_token)  # dummy for CLS and EOS
+        lengths = seq_mask.sum(dim=-1).long()
+        esmc_aatype[:, 0] = self.esm_c.tokenizer.cls_token_id
+        esmc_aatype[torch.arange(len(lengths)), lengths + 1] = self.esm_c.tokenizer.eos_token_id
+
+        return _BatchedESMProteinTensor(esmc_aatype)

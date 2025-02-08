@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c3_aasd3
+#SBATCH --job-name=c3_aasd4
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
@@ -27,8 +27,11 @@ OUT_DIR=/scratch/users/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd ${BASE_DIR}
 
+# Set cache directories
+export HF_HOME=/scratch/users/rshuai/cache/huggingface
+
 # Set experiment name and group
-EXP_NAME=c3_aasd3
+EXP_NAME=c3_aasd4
 GROUP=sherlock_c3
 
 # Dataset paths
@@ -49,7 +52,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser=fampnn_denoiser \
     denoiser.fampnn.augment_eps=0.3 \
     denoiser.fampnn.per_residue_eps=true \
-    denoiser.fampnn.ablate_noise_labels=true \
+    denoiser.esm_c.use_esm_c=true \
     denoiser.fampnn.use_gvp=false \
     denoiser.fampnn.n_layers=3 \
     trainer.check_val_every_n_epoch=10 \
