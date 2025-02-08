@@ -48,7 +48,7 @@ data:
 # Model options
 defaults:
   - _self_
-  - denoiser: minimpnn_denoiser
+  - denoiser: fampnn_denoiser
   - interpolant: mar_interpolant
 
 model:

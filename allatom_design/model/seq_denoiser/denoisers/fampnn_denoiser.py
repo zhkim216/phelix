@@ -27,7 +27,7 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         self.use_scn_diffusion = self.task in ["allatom_seq_des", 'scn_pack']
 
         # Sequence design model: FAMPNN
-        self.seq_design_module = FaMPNN(getattr(cfg, "fampnn", cfg.minimpnn))  # backwards compatibility
+        self.seq_design_module = FaMPNN(getattr(cfg, "fampnn", getattr(cfg, "minimpnn", None)))  # backwards compatibility
 
         # Sidechain diffusion head: DiT
         if self.use_scn_diffusion:
