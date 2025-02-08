@@ -15,7 +15,7 @@ from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.scn_diffusi
     SidechainDiffusionModule
 
 
-class MiniMPNNDenoiser(BaseSeqDenoiser):
+class FAMPNNDenoiser(BaseSeqDenoiser):
     def __init__(self,
                  cfg: DictConfig,
                  sigma_data: Tuple[TensorType[(), float], TensorType[(), float]]):
@@ -26,8 +26,8 @@ class MiniMPNNDenoiser(BaseSeqDenoiser):
         self.task = cfg.task
         self.use_scn_diffusion = self.task in ["allatom_seq_des", 'scn_pack']
 
-        # Sequence design model: MiniMPNN
-        self.seq_design_module = FaMPNN(cfg.minimpnn)
+        # Sequence design model: FAMPNN
+        self.seq_design_module = FaMPNN(getattr(cfg, "fampnn", cfg.minimpnn))  # backwards compatibility
 
         # Sidechain diffusion head: DiT
         if self.use_scn_diffusion:
