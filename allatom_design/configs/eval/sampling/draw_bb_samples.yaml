@@ -19,7 +19,7 @@ overwrite_out_dir: false
 length_bin_size: 75  # bin lengths into intervals of this size for evaluation, starting from 0
 
 # Sampling run parameters
-length_range: [75,449]  # inclusive
+length_range: [75,374]  # inclusive
 length_step_size: 5
 n_samples_per_length: 10
 n_traj_per_length: 0  # number of trajectories to save per length
@@ -55,7 +55,7 @@ autoguidance_cfg:
 # Self-consistency evaluation
 sc:
   run_mpnn_sc: true  # run MPNN self-consistency eval
-  bin_range: [225, 449]  # only evaluate structures for length bins that start in this range (inclusive)
+  bin_range: [225, 374]  # only evaluate structures for length bins that start in this range (inclusive)
   max_samples_per_bin: 100  # maximum number of samples to evaluate per length bin
 
 # Dataset for nnTM calculation, path to directory containing PDBs

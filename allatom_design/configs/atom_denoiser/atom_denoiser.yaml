@@ -1,6 +1,6 @@
 # Wandb configuration
 project: "allatom_design"  # Wandb project name
-wandb_id: "richardshuai"  # Wandb username
+wandb_id: null  # Wandb username
 exp_name: null # Wandb exp name
 group: "debug" # Wandb group name
 
@@ -34,13 +34,8 @@ resume:
 
 # Data options
 data:
-    # first dataset is the "primary" dataset
-    # pdb_paths: [/media/scratch/datasets/ingraham_cath_dataset, /media/scratch/datasets/afdb]
-    pdb_paths: [/media/scratch/datasets/ingraham_cath_dataset]
-    # designability_csvs: [/media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv, null]
-    designability_csvs: [/media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv]
-    # dataset_weights: [0.25, 0.75]  # probability of selecting each dataset
-    dataset_weights: [1.0]  # probability of selecting each dataset
+    pdb_path: /data/research/ingraham_cath_dataset # /media/scratch/datasets/ingraham_cath_dataset
+    designability_csv: /data/research/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv # /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
     fixed_size: 128
     overfit: ${overfit}
     short_epoch: false
@@ -53,7 +48,7 @@ data:
 # Model options
 defaults:
   - _self_
-  - denoiser: dit_denoiser
+  - denoiser: u_dit_denoiser
   - sd_interpolant: mar_interpolant
 
 model:
@@ -84,9 +79,9 @@ optim:
     factor: 2
     warmup_steps: 4000
   adam_inv_sqrt:
-    ref_lr: 1.0e-2
-    ref_steps: 70000
-    warmup_steps: 1000
+    ref_lr: 1.0e-3
+    ref_steps: 30000
+    warmup_steps: 10000
 
 logging:
   log_dir: ${out_dir}
@@ -100,4 +95,4 @@ checkpointing:
 
 hydra:
   run:
-    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
+    dir: /data/research/hydra_outputs # /media/scratch/huang_lab/allatom_design/hydra_outputs

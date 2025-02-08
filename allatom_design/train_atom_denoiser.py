@@ -20,7 +20,6 @@ import allatom_design.data.datasets.ad_dataset as ad_dataset
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import ADDataset
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
-from allatom_design.data.datasets.multi_dataset import MultiDataset
 from allatom_design.checkpoint_utils import resume_ckpt_cfg
 
 
@@ -56,7 +55,10 @@ def main(cfg: DictConfig):
     _, train_dataloader = init_dataloader(phase="train")
     _, val_dataloader = init_dataloader(phase="eval")
 
-    val_dataloaders = [val_dataloader]
+    _, train_dataloader = init_dataloader(phase="train", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
+    _, val_dataloader = init_dataloader(phase="eval", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
+    _, val2_dataloader = init_dataloader(phase="eval2", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
+    val_dataloaders = [val_dataloader, val2_dataloader]
 
     # Init wandb
     local_rank = os.environ.get("LOCAL_RANK", None)
@@ -148,7 +150,6 @@ def main(cfg: DictConfig):
 
     # Compute scale factors for sigma data
     scale_factors = ad_dataset.compute_scale_factors(train_dataloader, n_examples=1000)
-    print(f"Computed scale factors: {scale_factors}")
 
     # override sigma_data if specified for consistent loss scaling
     bb_sigma_data_override, scn_sigma_data_override = cfg.model.override_sigma_data
