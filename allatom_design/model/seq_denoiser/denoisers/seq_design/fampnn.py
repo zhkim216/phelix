@@ -31,9 +31,13 @@ class FAMPNN(nn.Module):
         self.num_encoder_layers = cfg.n_layers
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
-        self.per_residue_eps = cfg.get("per_residue_eps", False)
+
+        # Backbone noise options
         self.augment_eps = cfg.augment_eps
+        self.per_residue_eps = cfg.get("per_residue_eps", False)
         self.max_eps = getattr(cfg, "max_eps", None)
+        self.ablate_noise_labels = getattr(cfg, "ablate_noise_labels", False)
+
         self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors,
                                         per_residue_eps=self.per_residue_eps, augment_eps=self.augment_eps, max_eps=self.max_eps)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
@@ -103,7 +107,7 @@ class FAMPNN(nn.Module):
         h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
         h_E = self.W_e(E)
 
-        if self.per_residue_eps and (self.augment_eps > 0):
+        if self.per_residue_eps and (self.augment_eps > 0) and not self.ablate_noise_labels:
             # add noise label to 128th dimension of h_V
             h_V[..., -1] = h_V[..., -1] + noise_labels
 
