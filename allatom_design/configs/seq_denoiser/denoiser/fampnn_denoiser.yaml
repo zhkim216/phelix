@@ -2,8 +2,6 @@ name: fampnn
 
 task: ${model.task}
 
-pos_encoding: rotary_residx  # one of ["absolute", "absolute_residx", "rotary", "rotary_residx"]
-
 defaults:
   - _self_
   - interpolant: edm_interpolant
@@ -71,7 +69,7 @@ scn_diffusion_module:
 
 # Confidence module
 confidence_module:
-  enabled: false
+  enabled: true
   subsample_train_iter_mult: 8  # train with roughly 1/K of the training iterations
 
   # Sidechain diffusion parameters
