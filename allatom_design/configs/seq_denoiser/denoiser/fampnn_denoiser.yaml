@@ -1,10 +1,11 @@
 name: fampnn
 
-task: ${model.task}
-
 defaults:
   - _self_
   - interpolant: edm_interpolant
+
+task: ${model.task}
+drop_residx_p: 0.0
 
 fampnn:
   n_aatype: ${model.n_aatype}

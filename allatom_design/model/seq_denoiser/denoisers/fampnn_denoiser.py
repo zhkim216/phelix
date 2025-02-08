@@ -10,7 +10,7 @@ from allatom_design.data.data import cat_bb_scn, get_rc_tensor
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import \
-    FaMPNN
+    FAMPNN
 from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.scn_diffusion_mlp import \
     SidechainDiffusionModule
 
@@ -25,9 +25,10 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         self.bb_sigma_data, self.scn_sigma_data = sigma_data
         self.task = cfg.task
         self.use_scn_diffusion = self.task in ["allatom_seq_des", 'scn_pack']
+        self.drop_residx_p = cfg.get("drop_residx_p", 0.0)
 
         # Sequence design model: FAMPNN
-        self.seq_design_module = FaMPNN(getattr(cfg, "fampnn", getattr(cfg, "minimpnn", None)))  # backwards compatibility
+        self.seq_design_module = FAMPNN(getattr(cfg, "fampnn", getattr(cfg, "minimpnn", None)))  # backwards compatibility
 
         # Sidechain diffusion head: DiT
         if self.use_scn_diffusion:
@@ -37,7 +38,6 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
     def forward(self,
                 x_noised: TensorType["b n a 3", float],
                 aatype_noised: TensorType["b n", int],
-                t: TensorType["b", float],  # possibly a tuple (t_seq, t_scn)
                 residue_index: TensorType["b n", int],
                 chain_encoding: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
@@ -55,6 +55,14 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         atom_mask_noised = atom_mask_noised * seq_mask.unsqueeze(-1)  # mask out padding
         atom_mask_noised = atom_mask_noised * (1 - missing_atom_mask)  # mask out missing atoms
         atom_mask_noised[..., rc.non_bb_idxs] = atom_mask_noised[..., rc.non_bb_idxs] * scn_mlm_mask.unsqueeze(-1)  # mask out masked sidechain atoms
+
+        # Drop out residue index
+        if self.training:
+            # at train time, randomly drop out all residue indices for each batch element
+            aux_inputs["drop_residx"] = torch.rand(residue_index.shape[0], device=residue_index.device) < self.drop_residx_p  # [B]
+
+        if aux_inputs.get("drop_residx", None) is not None:
+            residue_index = torch.where(aux_inputs["drop_residx"].unsqueeze(-1), torch.zeros_like(residue_index), residue_index)
 
         # 1. Sequence design
         seq_logits, mpnn_feature_dict = self.seq_design_module(

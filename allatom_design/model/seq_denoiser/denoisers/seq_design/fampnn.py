@@ -17,7 +17,7 @@ from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
 
 
-class FaMPNN(nn.Module):
+class FAMPNN(nn.Module):
     """Modified ProteinMPNN network to predict sequence from full atom structure."""
     def __init__(self, cfg: DictConfig):
         super().__init__()
