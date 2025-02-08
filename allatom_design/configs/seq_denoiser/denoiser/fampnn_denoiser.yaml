@@ -7,6 +7,11 @@ defaults:
 task: ${model.task}
 drop_residx_p: 0.0
 
+esm_c:
+  use_esm_c: false
+  model_name: "esmc_300m"  # esmc_600m
+
+
 fampnn:
   n_aatype: ${model.n_aatype}
   use_gvp: false

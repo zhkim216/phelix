@@ -24,6 +24,9 @@ cd $BASE_DIR
 EXP_NAME=c2_aasd2
 GROUP=chimera_c2
 
+# Set cache directories
+export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
+
 # Dataset paths
 PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
 DESIGNABILITY_CSV=null
