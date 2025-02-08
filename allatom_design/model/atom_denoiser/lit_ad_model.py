@@ -67,7 +67,10 @@ class LitAtomDenoiser(L.LightningModule):
 
     def validation_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
         # Lightning automatically disables grads + sets model to eval mode
-        phase_suffix = ""
+        if dataloader_idx == 0:
+            phase_suffix = ""
+        elif dataloader_idx == 1:
+            phase_suffix = "2"
 
         outputs = self(batch)
         _, aux = self.loss(outputs, batch, return_aux=True)

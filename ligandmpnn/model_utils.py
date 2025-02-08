@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import itertools
 import sys
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -108,7 +109,7 @@ class ProteinMPNN(torch.nn.Module):
             if p.dim() > 1:
                 torch.nn.init.xavier_uniform_(p)
 
-    def encode(self, feature_dict):
+    def encode(self, feature_dict, pdb=None, output_dir=None):
         # xyz_37 = feature_dict["xyz_37"] #[B,L,37,3] - xyz coordinates for all atoms if needed
         # xyz_37_m = feature_dict["xyz_37_m"] #[B,L,37] - mask for all coords
         # Y = feature_dict["Y"] #[B,L,num_context_atoms,3] - for ligandMPNN coords
@@ -127,6 +128,8 @@ class ProteinMPNN(torch.nn.Module):
         B, L = S_true.shape
         device = S_true.device
 
+        h_V_outputs = []
+
         if self.model_type == "ligand_mpnn":
             V, E, E_idx, Y_nodes, Y_edges, Y_m = self.features(feature_dict)
             h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=device)
@@ -137,6 +140,7 @@ class ProteinMPNN(torch.nn.Module):
             mask_attend = mask.unsqueeze(-1) * mask_attend
             for layer in self.encoder_layers:
                 h_V, h_E = layer(h_V, h_E, E_idx, mask, mask_attend)
+                h_V_outputs.append(h_V.clone())
 
             h_V_C = self.W_c(h_V)
             Y_m_edges = Y_m[:, :, :, None] * Y_m[:, :, None, :]
@@ -162,6 +166,7 @@ class ProteinMPNN(torch.nn.Module):
             mask_attend = mask.unsqueeze(-1) * mask_attend
             for layer in self.encoder_layers:
                 h_V, h_E = layer(h_V, h_E, E_idx, mask, mask_attend)
+                h_V_outputs.append(h_V.clone())
         elif (
             self.model_type == "per_residue_label_membrane_mpnn"
             or self.model_type == "global_label_membrane_mpnn"
@@ -174,10 +179,17 @@ class ProteinMPNN(torch.nn.Module):
             mask_attend = mask.unsqueeze(-1) * mask_attend
             for layer in self.encoder_layers:
                 h_V, h_E = layer(h_V, h_E, E_idx, mask, mask_attend)
+                h_V_outputs.append(h_V.clone())
 
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{pdb}.npy"
+        h_V_outputs_tensor = torch.stack(h_V_outputs)
+        h_V_outputs_array = h_V_outputs_tensor.cpu().detach().numpy()
+        np.save(output_path, h_V_outputs_array)
         return h_V, h_E, E_idx
 
-    def sample(self, feature_dict):
+    def sample(self, feature_dict, pdb=None, output_dir=None):
         # xyz_37 = feature_dict["xyz_37"] #[B,L,37,3] - xyz coordinates for all atoms if needed
         # xyz_37_m = feature_dict["xyz_37_m"] #[B,L,37] - mask for all coords
         # Y = feature_dict["Y"] #[B,L,num_context_atoms,3] - for ligandMPNN coords
@@ -213,7 +225,7 @@ class ProteinMPNN(torch.nn.Module):
         B, L = S_true.shape
         device = S_true.device
 
-        h_V, h_E, E_idx = self.encode(feature_dict)
+        h_V, h_E, E_idx = self.encode(feature_dict, pdb, output_dir)
 
         chain_mask = mask * chain_mask  # update chain_M to include missing regions
         decoding_order = torch.argsort(

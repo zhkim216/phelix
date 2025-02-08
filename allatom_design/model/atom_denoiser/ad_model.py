@@ -1,15 +1,9 @@
 import copy
-from functools import partial
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Tuple
 
-import numpy as np
-import torch
 import torch.nn as nn
 from omegaconf import DictConfig
-from torchtyping import TensorType
-from tqdm import tqdm
 
-from allatom_design.data import residue_constants as rc
 from allatom_design.data.pdb_utils import *
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
@@ -25,6 +19,8 @@ from allatom_design.model.atom_denoiser.denoisers.triangle_dit_denoiser import \
     TriangleDiTDenoiser
 from allatom_design.model.atom_denoiser.denoisers.mpnn_dit_denoiser import \
     MPNNDiTDenoiser
+from allatom_design.model.atom_denoiser.denoisers.u_dit_denoiser import \
+    UDiTDenoiser
 
 
 class AtomDenoiser(nn.Module):
@@ -341,6 +337,8 @@ def get_denoiser(cfg: DictConfig,
     """
     if cfg.name == "dit":
         return DiTDenoiser(cfg, sigma_data)
+    elif cfg.name == "u_dit":
+        return UDiTDenoiser(cfg, sigma_data)
     elif cfg.name == "esm_dit":
         return ESMDiTDenoiser(cfg, sigma_data)
     elif cfg.name == "triangle_dit":
