@@ -8,7 +8,7 @@ defaults:
   - _self_
   - interpolant: edm_interpolant
 
-minimpnn:
+fampnn:
   n_aatype: ${model.n_aatype}
   use_gvp: false
   n_channel: 128
@@ -23,24 +23,24 @@ minimpnn:
   return_embedding: "last"
 
   gvp:
-    out_dim: ${model.denoiser.minimpnn.n_channel}
+    out_dim: ${model.denoiser.fampnn.n_channel}
     node_hidden_dim_scalar: 128
     node_hidden_dim_vector: 16
     edge_hidden_dim_scalar: 512
     edge_hidden_dim_vector: 1
     rotate_out: false
     graph_embedding:
-      mpnn_n_channel: ${model.denoiser.minimpnn.n_channel}
-      top_k_neighbors: ${model.denoiser.minimpnn.k_neighbors}
+      mpnn_n_channel: ${model.denoiser.fampnn.n_channel}
+      top_k_neighbors: ${model.denoiser.fampnn.k_neighbors}
       num_positional_embeddings: 16
       n_aatype: ${model.n_aatype}
       remove_edges_without_coords: true
-      node_hidden_dim_scalar: ${model.denoiser.minimpnn.gvp.node_hidden_dim_scalar}
-      node_hidden_dim_vector: ${model.denoiser.minimpnn.gvp.node_hidden_dim_vector}
-      edge_hidden_dim_scalar: ${model.denoiser.minimpnn.gvp.edge_hidden_dim_scalar}
-      edge_hidden_dim_vector: ${model.denoiser.minimpnn.gvp.edge_hidden_dim_vector}
-    dropout: ${model.denoiser.minimpnn.dropout_p}
-    num_encoder_layers: ${model.denoiser.minimpnn.n_layers}
+      node_hidden_dim_scalar: ${model.denoiser.fampnn.gvp.node_hidden_dim_scalar}
+      node_hidden_dim_vector: ${model.denoiser.fampnn.gvp.node_hidden_dim_vector}
+      edge_hidden_dim_scalar: ${model.denoiser.fampnn.gvp.edge_hidden_dim_scalar}
+      edge_hidden_dim_vector: ${model.denoiser.fampnn.gvp.edge_hidden_dim_vector}
+    dropout: ${model.denoiser.fampnn.dropout_p}
+    num_encoder_layers: ${model.denoiser.fampnn.n_layers}
 
 scn_diffusion_module:
   hidden_size: 256
@@ -58,7 +58,7 @@ scn_diffusion_module:
     n_aatype: ${model.n_aatype}
     self_cond_p: ${model.denoiser.scn_diffusion_module.self_cond_p}
 
-    c_h_V: ${denoiser.minimpnn.n_channel}  # mpnn node conditioning
+    c_h_V: ${denoiser.fampnn.n_channel}  # mpnn node conditioning
 
     # Blocks
     depth: 4
@@ -93,8 +93,8 @@ confidence_module:
       num_steps: ${..num_steps}
 
   # Model
-  c_h_V: ${denoiser.minimpnn.n_channel}
-  hidden_size: ${denoiser.minimpnn.n_channel}
+  c_h_V: ${denoiser.fampnn.n_channel}
+  hidden_size: ${denoiser.fampnn.n_channel}
   n_aatype: ${model.n_aatype}
 
   sce_bins:
@@ -104,7 +104,7 @@ confidence_module:
 
   structure_encoder:
     n_aatype: ${model.n_aatype}
-    n_channel: ${denoiser.minimpnn.n_channel}
+    n_channel: ${denoiser.fampnn.n_channel}
     n_layers: 3
-    k_neighbors: ${denoiser.minimpnn.k_neighbors}
+    k_neighbors: ${denoiser.fampnn.k_neighbors}
     dropout_p: 0.1
