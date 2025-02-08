@@ -15,11 +15,14 @@ fampnn:
   k_neighbors: 48
 
   model_type: "sidechain"
+  dropout_p: 0.1
+  return_embedding: "last"
+
+  # Backbone noise options
   augment_eps: 0.0
   per_residue_eps: false
   max_eps: null  # for per_residue_eps, samples from half-normal truncated to this value
-  dropout_p: 0.1
-  return_embedding: "last"
+  ablate_noise_labels: false
 
   gvp:
     out_dim: ${model.denoiser.fampnn.n_channel}
