@@ -209,8 +209,11 @@ class ADDataset(data.Dataset):
         example["atom_mask"] = atom_mask
         example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
         if not self.evaluation_mode:
-            example['interface_residue_mask'] = data['interface_residue_mask']
-            example['chain_ids'] = data['chain_ids']
+            # example['interface_residue_mask'] = data['interface_residue_mask']
+            # example['chain_ids'] = data['chain_ids']
+            # DEBUG: remove this once we re-cache the dataset
+            example["interface_residue_mask"] = data.get("interface_residue_mask", torch.zeros_like(seq_mask))
+            example["chain_ids"] = data.get("chain_ids", torch.tensor([1]))
 
         # Construct conditioning inputs
         cond_labels_in = {}
