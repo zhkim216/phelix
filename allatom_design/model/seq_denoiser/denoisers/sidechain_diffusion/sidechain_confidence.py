@@ -95,24 +95,25 @@ class ConfidenceEncoder(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        self.n_aatype = cfg.n_aatype
-        self.node_features = cfg.n_channel
-        self.edge_features = cfg.n_channel
         self.hidden_dim = cfg.n_channel
-        self.num_encoder_layers = cfg.n_layers
-        self.num_decoder_layers = cfg.n_layers
-        self.k_neighbors = cfg.k_neighbors
         self.decoder_in = self.hidden_dim * 4
+        self.num_decoder_layers = cfg.n_layers
 
-        # Structure encoder
-        # TODO: remove this, this is not used in the current implementation
-        self.sidechain_features = SidechainProteinFeatures(node_features=self.node_features,
-                                                           edge_features=self.edge_features,
-                                                           top_k=self.k_neighbors)
-        self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors, augment_eps=0.0)
-        self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
-        self.W_s = nn.Embedding(self.n_aatype, self.hidden_dim)
-        self.W_e2 = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
+        if not getattr(cfg, "remove_unused_params", False):
+            # TODO: for backwards compatibility, but these are never used
+            self.n_aatype = cfg.n_aatype
+            self.node_features = cfg.n_channel
+            self.edge_features = cfg.n_channel
+            self.k_neighbors = cfg.k_neighbors
+
+            # Structure encoder
+            self.sidechain_features = SidechainProteinFeatures(node_features=self.node_features,
+                                                               edge_features=self.edge_features,
+                                                               top_k=self.k_neighbors)
+            self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors, augment_eps=0.0)
+            self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
+            self.W_s = nn.Embedding(self.n_aatype, self.hidden_dim)
+            self.W_e2 = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
 
         # Decoder layers
         self.decoder_layers = nn.ModuleList([

@@ -15,7 +15,7 @@ from allatom_design.model.seq_denoiser.denoisers.seq_design.fampnn import \
 from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.scn_diffusion_mlp import \
     SidechainDiffusionModule
 from esm3.esm.models.esmc import ESMC
-from esm3.esm.sdk.api import ESMProtein, ESMProteinTensor, LogitsConfig
+from esm3.esm.sdk.api import LogitsConfig
 from esm3.esm.utils.sampling import _BatchedESMProteinTensor
 
 
@@ -35,7 +35,7 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         self.use_esm_c = cfg.get("esm_c", {}).get("use_esm_c", False)
         if self.use_esm_c:
             # Load ESM-C model, frozen and in eval mode
-            self.esm_c = ESMC.from_pretrained(cfg.esm_c.model_name).eval()
+            self.esm_c = ESMC.from_pretrained(cfg.esm_c.model_name, device=torch.device("cpu")).eval()
             self.vocab = self.esm_c.tokenizer.get_vocab()
             for param in self.esm_c.parameters():
                 param.requires_grad = False
@@ -98,6 +98,7 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
             residue_index = torch.where(aux_inputs["drop_residx"].unsqueeze(-1), torch.zeros_like(residue_index), residue_index)
 
         # Sequence encoding
+        esm_c_embed = None
         if self.use_esm_c:
             # make sure to apply mask
             with torch.no_grad():
