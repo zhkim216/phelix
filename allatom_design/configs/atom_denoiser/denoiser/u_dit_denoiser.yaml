@@ -33,9 +33,9 @@ u_dit:
 
   # Blocks
   num_downsamples: 3
-  num_updown_blocks: 2
-  num_mid_blocks: 4
-  num_dit_blocks: 6
+  num_updown_blocks: 3
+  num_mid_blocks: 6
+  num_dit_blocks: 2
   base_channels: 384
   channel_mult: 1.5
   num_heads: 4
