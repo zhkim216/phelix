@@ -29,7 +29,6 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         self.bb_sigma_data, self.scn_sigma_data = sigma_data
         self.task = cfg.task
         self.use_scn_diffusion = self.task in ["allatom_seq_des", 'scn_pack']
-        self.drop_residx_p = cfg.get("drop_residx_p", 0.0)
 
         # Sequence encoding: ESM-C
         self.use_esm_c = cfg.get("esm_c", {}).get("use_esm_c", False)
@@ -93,11 +92,7 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         atom_mask_noised = atom_mask_noised * (1 - missing_atom_mask)  # mask out missing atoms
         atom_mask_noised[..., rc.non_bb_idxs] = atom_mask_noised[..., rc.non_bb_idxs] * scn_mlm_mask.unsqueeze(-1)  # mask out masked sidechain atoms
 
-        # Drop out residue index
-        if self.training:
-            # at train time, randomly drop out all residue indices for each batch element
-            aux_inputs["drop_residx"] = torch.rand(residue_index.shape[0], device=residue_index.device) < self.drop_residx_p  # [B]
-
+        # Drop residue index for certain proteins in the batch
         if aux_inputs.get("drop_residx", None) is not None:
             residue_index = torch.where(aux_inputs["drop_residx"].unsqueeze(-1), torch.zeros_like(residue_index), residue_index)
 
@@ -119,6 +114,7 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
             atom_mask_noised,
             residue_index,
             chain_encoding,
+            noise=aux_inputs.get("noise", None),
             noise_labels=aux_inputs.get("noise_labels", None),
             h_V_init=esm_c_embed)
 

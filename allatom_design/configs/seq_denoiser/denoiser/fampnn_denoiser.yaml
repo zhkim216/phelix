@@ -7,6 +7,11 @@ defaults:
 task: ${model.task}
 drop_residx_p: 0.0
 
+# Backbone noise options
+augment_eps: 0.0
+per_residue_eps: false
+max_eps: null  # for per_residue_eps, samples from half-normal truncated to this value
+
 esm_c:
   use_esm_c: false
   model_name: "esmc_300m"  # esmc_600m
@@ -18,16 +23,11 @@ fampnn:
   n_channel: 128
   n_layers: 3
   k_neighbors: 48
+  ablate_noise_labels: false
 
   model_type: "sidechain"
   dropout_p: 0.1
   return_embedding: "last"
-
-  # Backbone noise options
-  augment_eps: 0.0
-  per_residue_eps: false
-  max_eps: null  # for per_residue_eps, samples from half-normal truncated to this value
-  ablate_noise_labels: false
 
   gvp:
     out_dim: ${model.denoiser.fampnn.n_channel}

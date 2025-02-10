@@ -71,12 +71,12 @@ class LitRLSeqDenoiser(L.LightningModule):
     def forward(self, batch, **kwargs):
         t = kwargs.get("t", None)  # used if running evals
 
-        # Apply interpolant to the batch
+        ## Apply interpolant to the batch ##
         interpolant_out = self.interpolant(batch, t)
         interpolant_out["seq_mlm_mask"][1::2] = interpolant_out["seq_mlm_mask"][::2]  # set paired examples to have the same mask
         interpolant_out["scn_mlm_mask"] = interpolant_out["seq_mlm_mask"].clone()  # for rl finetuning, we never randomly dropout sidechains
 
-        ## apply masks to input coordinates and aatype
+        # apply masks to input coordinates and aatype
         x, aatype = batch["x"], batch["aatype"]
         x_noised, aatype_noised = x.clone(), aatype.clone()
         seq_mlm_mask = interpolant_out["seq_mlm_mask"]
@@ -87,14 +87,35 @@ class LitRLSeqDenoiser(L.LightningModule):
 
         x_noised[..., rc.non_bb_idxs, :] = x[..., rc.non_bb_idxs, :] * rearrange(seq_mlm_mask, "b n -> b n 1 1").float()  # mask out sidechains
 
+        # construct batch overrides
         batch["x_noised"] = x_noised
         batch["aatype_noised"] = aatype_noised
         batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]  # 1 for unmasked aatype
         batch["scn_mlm_mask"] = interpolant_out["scn_mlm_mask"]  # 1 for unmasked sidechains
 
+        ## Get random backbone noise ##
+        if self.training:
+            noise, noise_labels = self.model.get_random_noise(batch["seq_mask"])
+            noise[1::2] = noise[::2]  # set paired examples to have the same noise
+            noise_labels[1::2] = noise_labels[::2]  # set paired examples to have the same noise labels
+
+        ## Randomly drop out residue index ##
+        if self.training:
+            # at train time, randomly drop out all residue indices for each batch element
+            residue_index = batch["residue_index"]
+            drop_residx = torch.rand(residue_index.shape[0], device=residue_index.device) < self.drop_residx_p  # [B]
+            drop_residx[1::2] = drop_residx[::2]  # set paired examples to have the same residx dropout
+
+        # construct aux inputs overrides
+        aux_inputs_override = {
+            "noise": noise,
+            "noise_labels": noise_labels,
+            "drop_residx": drop_residx,
+        }
+
         # Run models
-        outputs = self.model(batch, skip_interpolant=True, **kwargs)
-        outputs_ref = self.ref_model(batch, skip_interpolant=True, **kwargs)
+        outputs = self.model(batch, skip_interpolant=True, aux_inputs_override=aux_inputs_override, **kwargs)
+        outputs_ref = self.ref_model(batch, skip_interpolant=True, aux_inputs_override=aux_inputs_override, **kwargs)
         return outputs, outputs_ref
 
 
