@@ -82,6 +82,8 @@ def main(cfg: DictConfig):
         B = lengths.shape[0]
 
         residue_index = torch.arange(lengths.max(), dtype=torch.long).to(device)
+        # TEMP: pad residue index to the next largest multiple of 8
+        residue_index = torch.cat([residue_index, torch.zeros(8 - (residue_index.shape[0] % 8), dtype=torch.long).to(device)])
         residue_index = residue_index[None].expand(B, -1)
 
         # Create timesteps for backbone

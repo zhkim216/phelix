@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=baseline_fs512_eval_fpd_ema
+#SBATCH --job-name=nova_a1_eval_fpd_ema
 #SBATCH -p bioe,possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#SBATCH --array=0-28%5
+#SBATCH --array=0-9%10
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/users/rshuai/subhang/slurm_log_files/job_%j.out
@@ -30,36 +30,40 @@ MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
 AF2_DATA_DIR=/scratch/users/rshuai/model_params/af2
 
 # Dataset paths
-EMBEDDINGS_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/mpnn
+MPNN_EMBEDDINGS_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/mpnn
+ESM3_EMBED_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/esm3
 TRAIN_LENGTHS_CSV=/scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_key_lengths.csv
 EVAL_LENGTHS_CSV=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval_pdb_key_lengths.csv
 EVAL2_LENGTHS_CSV=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval2_pdb_key_lengths.csv
 
-# Set cache directories
+# Set HF variables
+export HUGGINGFACE_TOKEN=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
 export HF_HOME=/scratch/users/rshuai/subhang/cache/huggingface
+
+# Set cache directories
 export TORCH_HOME=/scratch/users/rshuai/subhang/cache/torch
 OMEGAFOLD_CACHE=/scratch/users/rshuai/subhang/cache/omegafold/omegafold.pt
 
 # Denoiser checkpoint
-MODEL_NAME=baseline_fs512
+MODEL_NAME=nova_a1
 CKPT_DIR=/scratch/users/rshuai/subhang/allatom_design/allatom_design/${MODEL_NAME}/post_hoc_ema_ckpts
 
 # Wandb settings
 WANDB_ID=null
-GROUP=${MODEL_NAME}_s0
+GROUP=${MODEL_NAME}_fpd_ema
 
 # Define step size and maximum step to sweep over
 STEP_SIZE=0.01
-MAX_STEP=0.29
+MAX_STEP=0.10
 current_step=$(echo "scale=2; $STEP_SIZE * $SLURM_ARRAY_TASK_ID" | bc)
 formatted_step=$(printf "%.3f" "$current_step")
-MODEL_CKPT="${CKPT_DIR}/ema-step1000000-std${formatted_step}.ckpt"
+MODEL_CKPT="${CKPT_DIR}/ema-step500000-std${formatted_step}.ckpt"
 
 # Set the experiment name to include the current MODEL_CKPT step
-EXP_NAME=${MODEL_NAME}_eval_ema${formatted_step}
+EXP_NAME=${MODEL_NAME}_fpd_eval_ema${formatted_step}
 
 # Optionally, set a group name that reflects the checkpoint step
-GROUP=${MODEL_NAME}_ema
+GROUP=${MODEL_NAME}_fpd_ema
 
 # Run eval script
 cd ${BASE_DIR}
@@ -70,7 +74,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_fpd.py \
     group=${GROUP} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     model_ckpt=${MODEL_CKPT} \
-    embeddings_dir=${EMBEDDINGS_DIR} \
+    mpnn_embeddings_dir=${MPNN_EMBEDDINGS_DIR} \
+    esm3_embed_dir=${ESM3_EMBED_DIR} \
     train_lengths_csv=${TRAIN_LENGTHS_CSV} \
     eval_lengths_csv=${EVAL_LENGTHS_CSV} \
     eval2_lengths_csv=${EVAL2_LENGTHS_CSV}
