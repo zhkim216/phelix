@@ -60,6 +60,10 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
             for i in range(len(af_to_esm_idx)):
                 self.af_to_esm[i] = af_to_esm_idx[i]
 
+            self.register_buffer("esm_to_af", torch.full((max(esm_to_af_idx.keys()) + 1, ), fill_value=-1, dtype=torch.long, requires_grad=False))
+            for i in esm_to_af_idx.keys():
+                self.esm_to_af[i] = esm_to_af_idx[i]
+
         # Sequence design model: FAMPNN
         self.seq_design_module = FAMPNN(getattr(cfg, "fampnn", getattr(cfg, "minimpnn", None)))  # backwards compatibility
 
@@ -150,6 +154,11 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
                 x_bb = mpnn_feature_dict["X"][..., rc.atom14_bb_idxs, :]
                 x1_pred = cat_bb_scn(x_bb, x1_scn_pred)
 
+        # Return train time modifications
+        if self.training:
+            aux_preds["X"] = mpnn_feature_dict["X"]  # possibly added noise to X
+            aux_preds["noise_labels"] = mpnn_feature_dict["noise_labels"]  # possibly added per-residue noise
+            aux_preds["drop_residx"] = aux_inputs.get("drop_residx", None)  # possibly dropped residue indices
 
         return x1_pred, aatype_pred, aux_preds
 
@@ -173,9 +182,10 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
 
         # Handle aatype restrictions
         seq_logits[..., rc.restype_order_with_x["X"]] = -1e9  # do not sample mask/unknowns
-        omit_aas = aux_inputs.get("omit_aas", [])
-        for aa in omit_aas:
-            seq_logits[..., rc.restype_order_with_x[aa]] = -1e9  # omit the specified aatypes
+        omit_aas = aux_inputs.get("omit_aas", None)
+        if omit_aas is not None:
+            for aa in omit_aas:
+                seq_logits[..., rc.restype_order_with_x[aa]] = -1e9  # omit the specified aatypes
 
         restrict_pos_aatype = aux_inputs.get("restrict_pos_aatype", None)
         if restrict_pos_aatype is not None:

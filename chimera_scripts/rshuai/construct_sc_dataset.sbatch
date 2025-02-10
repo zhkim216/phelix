@@ -43,7 +43,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/construct_sc_datase
     pdb_dir=${PDB_DIR} \
     pdb_key_list=${PDB_KEY_LIST} \
     out_dir=${OUT_DIR} \
-    run_self_consistency_eval=true \
     num_steps=50 \
     temperature_list=[0.1,0.5,1.0] \
     num_seqs_per_pdb_list=[2,2,4] \
