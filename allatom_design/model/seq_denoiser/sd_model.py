@@ -1,4 +1,5 @@
 import copy
+import math
 from functools import partial
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -45,6 +46,15 @@ class SeqDenoiser(nn.Module):
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
         self.interpolant = get_interpolant(cfg.interpolant)
 
+        self.drop_residx_p = cfg.get("drop_residx_p", 0.0)
+
+        # Backbone noise options
+        denoiser_cfg = cfg.denoiser
+        fampnn_cfg = denoiser_cfg.get("fampnn", denoiser_cfg.get("minimpnn", None))  # default to FAMPNN / MiniMPNN settings for backwards compatibility
+        self.augment_eps = denoiser_cfg.get("augment_eps", fampnn_cfg.get("augment_eps", None))
+        self.per_residue_eps = denoiser_cfg.get("per_residue_eps", fampnn_cfg.get("per_residue_eps", False))
+        self.max_eps = denoiser_cfg.get("max_eps", fampnn_cfg.get("max_eps", None))
+
 
     def setup(self):
         # Initialize denoiser pre-trained weights if needed
@@ -54,7 +64,8 @@ class SeqDenoiser(nn.Module):
     def forward(self,
                 batch: Dict[str, TensorType["b ..."]],
                 t: Optional[TensorType["b", float]] = None,
-                skip_interpolant: bool = False  # for dpo-finetuning, interpolant is applied to the batch outside of the model
+                aux_inputs_override: Optional[Dict[str, TensorType["b ..."]]] = None,  # for providing overrides to aux_inputs
+                skip_interpolant: bool = False,  # for dpo-finetuning, interpolant is applied to the batch outside of the model
                 ) -> Dict[str, TensorType["b ..."]]:
         """
         batch should contain:
@@ -67,13 +78,23 @@ class SeqDenoiser(nn.Module):
         batch = copy.deepcopy(batch)
         outputs = {}
 
-        # Apply interpolant to noise the inputs
+        ## Apply interpolant to noise the inputs ##
         if not skip_interpolant:
             interpolant_out = self.interpolant(batch, t)
             batch["x_noised"] = interpolant_out["x_noised"]
             batch["aatype_noised"] = interpolant_out["aatype_noised"]
             batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]  # 1 for unmasked aatype
             batch["scn_mlm_mask"] = interpolant_out["scn_mlm_mask"]  # 1 for unmasked sidechains
+
+        ## Get random backbone noise ##
+        noise, noise_labels = self.get_random_noise(batch["seq_mask"])
+
+        ## Randomly drop out residue index ##
+        drop_residx = None
+        if self.training:
+            # at train time, randomly drop out all residue indices for each batch element
+            residue_index = batch["residue_index"]
+            drop_residx = torch.rand(residue_index.shape[0], device=residue_index.device) < self.drop_residx_p  # [B]
 
         # During training, keep track of certain additional features
         aux_inputs = {
@@ -83,7 +104,11 @@ class SeqDenoiser(nn.Module):
             "t_scd": batch.get("t_scd", None),  # scalar; fix t_scd (sidechain diffusion time) if provided, usually for eval
             "seq_mlm_mask": batch["seq_mlm_mask"],
             "scn_mlm_mask": batch["scn_mlm_mask"],
+            "noise": noise,
+            "noise_labels": noise_labels,
+            "drop_residx": drop_residx,
         }
+        aux_inputs.update(aux_inputs_override or {})  # override aux_inputs if provided
 
         # Denoise coords
         _, _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"],
@@ -136,6 +161,37 @@ class SeqDenoiser(nn.Module):
         self.scn_mean.data = torch.tensor(scn_mean)
         self.scn_std.data = torch.tensor(scn_std)
         print(f"Setting scn_mean: {scn_mean}, scn_std: {scn_std}")
+
+
+    def get_random_noise(self, seq_mask: TensorType["b n", float]) -> Tuple[TensorType["b n 14 3", float], TensorType["b n", float]]:
+        ## Choose random backbone noise ##
+        B, N = seq_mask.shape
+
+        if self.per_residue_eps:
+            # per-residue noise, based on pseudocode from Cho et al.
+            if self.training and self.augment_eps > 0:
+                # training: randomly sample noise labels
+                r = torch.randn((B, N, 14, 3), device=seq_mask.device)  # random vector for each atom (this might differ from Cho et al.)
+                n = r / torch.norm(r, dim=-1, keepdim=True)
+                s = truncated_half_normal_like(seq_mask, self.augment_eps, self.max_eps) # per-residue noise label
+                noise = n * rearrange(s, "b n -> b n 1 1")
+                noise_labels = torch.abs(s)  # we enforce noise labels to be positive
+            else:
+                # eval: assume no noise
+                noise, noise_labels = None, None
+
+        else:
+            # global noise, similar to ProteinMPNN
+            noise_labels = None
+            if self.training and self.augment_eps > 0:
+                # training: add randomly sampled noise to input
+                noise = self.augment_eps * torch.randn((B, N, 14, 3), device=seq_mask.device)
+                noise_labels = None
+            else:
+                # eval: assume no noise
+                noise, noise_labels = None
+
+        return noise, noise_labels
 
 
     def sidechain_pack(self,
@@ -560,3 +616,15 @@ def get_interpolant(cfg: DictConfig) -> SDInterpolant:
         return MAR(cfg)
     else:
         raise ValueError(f"Unknown interpolant: {cfg.name}")
+
+
+def truncated_half_normal_like(x: TensorType["...", float],
+                               std: float, max_val: Optional[float]) -> TensorType["...", float]:
+    if max_val is None:
+        # return half-normal with no truncation
+        return torch.abs(torch.randn_like(x) * std)
+    u = torch.rand_like(x)
+    truncated_factor = torch.erf(torch.tensor(max_val / (math.sqrt(2) * std)))
+    u_scaled = u * truncated_factor
+    samples = std * math.sqrt(2) * torch.erfinv(u_scaled)
+    return samples
