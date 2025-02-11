@@ -32,6 +32,7 @@ class FAMPNN(nn.Module):
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
         self.ablate_noise_labels = getattr(cfg, "ablate_noise_labels", False)
+        self.init_hV_with_hS = getattr(cfg, "init_hV_with_hS", False)
 
         self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
@@ -86,7 +87,7 @@ class FAMPNN(nn.Module):
         chain_encoding: TensorType["b n", int],
         noise: Optional[TensorType["b n a x", float]] = None,  # amount of noise to add to each atom
         noise_labels: Optional[Union[float, TensorType["b n"]]] = None,
-        h_V_init: Optional[TensorType["b n h"]] = None):
+        h_S_init: Optional[TensorType["b n h"]] = None):
 
         B, N, _, _ = denoised_coords.shape
         S = aatype_noised
@@ -108,11 +109,16 @@ class FAMPNN(nn.Module):
         # Prepare node and edge embeddings
         E, E_idx, X = self.features(X, seq_mask, residue_index, chain_encoding)
 
-        #h_V is size [B,N,H]
-        if h_V_init is None:
-            h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
+        h_S = self.W_s(aatype_noised)  # [B, N, H]
+        if h_S_init is not None:
+            # add h_S_init to h_S
+            h_S = h_S + h_S_init
+
+        if self.init_hV_with_hS:
+            # Initialize h_V with sequence embeddings
+            h_V = h_S
         else:
-            h_V = h_V_init
+            h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
 
         h_E = self.W_e(E)
 
@@ -139,7 +145,6 @@ class FAMPNN(nn.Module):
         mask_fw = mask_1D * (1. - mask_attend)
 
         # Concatenate sequence embeddings to edge embeddings
-        h_S = self.W_s(aatype_noised)
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
 
         # edge embedding of encoder gets zeros for sequence added -> hidden dim = [Enc Embedding + Seq 0s ][128*2]

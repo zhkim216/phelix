@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=c3_aasd5_test
+EXP_NAME=c3_aasd5
 GROUP=seq_denoiser_c3
 
 # Set cache directories
@@ -40,14 +40,15 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.fixed_size=256 \
     data.pdb_path=${PDB_PATH} \
     data.subset_length_range=[16,9999] \
-    train.batch_size=32 \
+    train.batch_size=64 \
     train.compile_model=true \
     denoiser=fampnn_denoiser \
-    denoiser.fampnn.augment_eps=0.3 \
-    denoiser.fampnn.per_residue_eps=true \
-    denoiser.esm_c.use_esm_c=true \
+    denoiser.augment_eps=0.3 \
+    denoiser.per_residue_eps=true \
     denoiser.fampnn.use_gvp=false \
     denoiser.fampnn.n_layers=3 \
+    denoiser.esm.use_esmc=true \
+    denoiser.fampnn.init_hV_with_hS=false \
     trainer.check_val_every_n_epoch=10 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
