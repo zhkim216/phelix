@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c3_aasd4
+#SBATCH --job-name=c3_aasd6
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
@@ -31,8 +31,8 @@ cd ${BASE_DIR}
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Set experiment name and group
-EXP_NAME=c3_aasd4
-GROUP=sherlock_c3
+EXP_NAME=c3_aasd6
+GROUP=seq_denoiser_c3
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
@@ -55,6 +55,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.fampnn.use_gvp=false \
     denoiser.fampnn.n_layers=3 \
     denoiser.esm.use_esmc=true \
+    denoiser.fampnn.init_hV_with_hS=true \
     trainer.check_val_every_n_epoch=10 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
