@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c3_aasd5
+#SBATCH --job-name=c3_aasd7
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=c3_aasd5
+EXP_NAME=c3_aasd7
 GROUP=seq_denoiser_c3
 
 # Set cache directories
