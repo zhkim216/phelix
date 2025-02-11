@@ -15,12 +15,13 @@ from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 
-from allatom_design.checkpoint_utils import EMATrackerCheckpoint
 import allatom_design.data.datasets.ad_dataset as ad_dataset
+from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
+                                             resume_ckpt_cfg)
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import ADDataset
+from allatom_design.data.datasets.multi_dataset import MultiDataset
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
-from allatom_design.checkpoint_utils import resume_ckpt_cfg
 
 
 @hydra.main(config_path="configs/atom_denoiser", config_name="atom_denoiser", version_base="1.3.2")
@@ -183,12 +184,15 @@ def get_dataloader(phase: str,
                    num_workers: int,
                    cuda: bool) -> Tuple[ADDataset, DataLoader]:
     num_datasets = len(data_cfg.pdb_paths)
+    if data_cfg.designability_csvs is None:
+        data_cfg.designability_csvs = [None] * num_datasets
+
     datasets = [ADDataset(pdb_path=data_cfg.pdb_paths[i],
                           designability_csv=data_cfg.designability_csvs[i],
                           phase=phase, **data_cfg) for i in range(num_datasets)]
     if phase == "train":
         dataset = MultiDataset(datasets, data_cfg.dataset_weights, primary_dset_idx=0)
-    elif phase == "eval":
+    elif phase in ["eval", "eval2"]:
         # only use the primary dataset for validation
         dataset = datasets[0]
     else:

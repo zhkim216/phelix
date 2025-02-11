@@ -24,7 +24,7 @@ trainer:
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
-  check_val_every_n_epoch: 50  # How often to run validation
+  check_val_every_n_epoch: 20  # How often to run validation
 
 # Resuming training options
 resume:
@@ -34,14 +34,16 @@ resume:
 
 # Data options
 data:
-    pdb_path: /data/research/ingraham_cath_dataset # /media/scratch/datasets/ingraham_cath_dataset
-    designability_csv: /data/research/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv # /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+    pdb_paths: [/data/research/ingraham_cath_dataset] # /media/scratch/datasets/ingraham_cath_dataset
+    dataset_weights: [1.0]  # probability of selecting each dataset
+    designability_csvs: null
     fixed_size: 128
     overfit: ${overfit}
     short_epoch: false
     n_random_subset: null
+    subset_length_range: null
     se3_augment: true  # randomly rotate and translate data
-    translation_scale: 0.0  # scale of the translation augmentation
+    translation_scale: 1.0  # scale of the translation augmentation
     overwrite_cache: false  # overwrite the cached dataset
     afdb_res_plddt_cutoff: 0  # 0-100, only keep residues with pLDDT >= cutoff
 
@@ -71,7 +73,7 @@ loss:
       mse_loss: 1.0
 
 optim:
-  optimizer: "adamw"
+  optimizer: "adam_inv_sqrt"
   adamw:
     lr: 1.0e-4
     warmup_steps: 1000
@@ -90,6 +92,7 @@ logging:
 
 checkpointing:
   save_latest_every_n_steps: 50000  # Save the full model every n steps
+  save_latest_every_n_epochs: 100  # Keep 1 latest copy of the model every n epochs, for resuming
   save_ema_every_n_steps: 20000  # Save the EMA model every n steps
   save_top_k: 1
 
