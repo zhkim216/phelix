@@ -13,6 +13,7 @@ pdb_dir: null
 pdb_key_list: null
 pdb_key_ext: ""
 presort_by_length: false
+subset_length_range: null
 out_dir: null
 
 num_steps: 100

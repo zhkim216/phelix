@@ -103,14 +103,21 @@ def main(cfg: DictConfig):
         end_idx = min(start_idx + chunk_size, len(pdb_files))
         pdb_files = pdb_files[start_idx:end_idx]
 
-    # If specified, pre-sort by length (descending)
-    if cfg.presort_by_length:
+    # If needed, calculate lengths of each PDB
+    if cfg.presort_by_length or (cfg.subset_length_range is not None):
         # determine lengths
         results = Parallel(n_jobs=-1)(delayed(get_length)(f) for f in tqdm(pdb_files, desc="Loading PDBs to determine lengths"))
         pdb_to_length = dict(results)
 
-        # sort by length, longest first
-        pdb_files = sorted(pdb_files, key=lambda x: pdb_to_length[x], reverse=True)
+        if cfg.subset_length_range is not None:
+            # filter by length
+            min_len, max_len = cfg.subset_length_range
+            pdb_files = [f for f in pdb_files if min_len <= pdb_to_length[f] <= max_len]
+
+        if cfg.presort_by_length:
+            # sort by length, longest first
+            pdb_files = sorted(pdb_files, key=lambda x: pdb_to_length[x], reverse=True)
+
 
     ### SAMPLING ###
     print(f"Sampling with num denoising steps S={cfg.num_steps} on {len(pdb_files)} PDBs (array_id={cfg.array_id})")
