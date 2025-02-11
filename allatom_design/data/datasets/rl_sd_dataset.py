@@ -220,16 +220,10 @@ class RLSDDataset(data.Dataset):
         """
         Subsets the dataset to only include proteins with sequence length in [min_len, max_len].
         """
-        sample_keys = []
-        for sample_key in tqdm(self.sample_keys, desc=f"Subsetting to length range [{min_len}, {max_len}]", leave=False):
-            data_file = self._get_data_file(sample_key)
-            example = torch.load(data_file, weights_only=True)
-            seq_len = example["seq_mask"].sum().item()
-            if min_len <= seq_len <= max_len:
-                sample_keys.append(sample_key)
-
-        self.sample_keys = np.array(sample_keys)
-        self.sc_df = self.sc_df[self.sc_df["pdb_name"].isin(self.sample_keys)]
+        lengths = self.sc_df["pred_seq"].str.len()
+        mask = lengths.between(min_len, max_len)
+        self.sample_keys = self.sc_df[mask]["pdb_name"].values
+        self.sc_df = self.sc_df[mask]
 
 
     def _construct_paired_dataset(self):

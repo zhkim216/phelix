@@ -78,19 +78,42 @@ class ADDataset(data.Dataset):
         self.evaluation_mode = evaluation_mode
 
         # Read in PDB keys
-        self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
+        self.pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys.csv"
 
-        with open(self.pdb_keys_file) as f:
-            self.pdb_keys = np.array(f.read().split("\n")[:-1])
+        if not Path(self.pdb_keys_csv).exists():
+            # backwards compatibility; load in PDB keys from list and save to CSV format
+            self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
+            with open(self.pdb_keys_file) as f:
+                self.pdb_keys = np.array(f.read().split("\n")[:-1])
 
+            # cache coordinates for faster loading
+            self._cache_examples(self.pdb_keys)
+
+            # get lengths; store them and save to csv
+            pdb_key_to_length = {}
+            for pdb_key in tqdm(self.pdb_keys, desc="Getting lengths", leave=False):
+                data_file = self._get_data_file(pdb_key)
+                example = torch.load(data_file, weights_only=True)
+                seq_len = example["seq_mask"].sum().long().item()
+                pdb_key_to_length[pdb_key] = seq_len
+
+            # save to csv
+            self.pdb_keys_df = pd.DataFrame({"pdb_key": self.pdb_keys, "seq_length": [pdb_key_to_length[pdb_key] for pdb_key in self.pdb_keys]})
+            self.pdb_keys_df.to_csv(self.pdb_keys_csv, index=False)
+
+        else:
+            # load from csv
+            self.pdb_keys_df = pd.read_csv(self.pdb_keys_csv)
+
+            # cache coordinates for faster loading
+            self._cache_examples(self.pdb_keys_df["pdb_key"])
+
+        # Cluster sampling for AF3 dataset
         if self.cluster_sample:
             if not pdb_path.endswith("af3_pdb"):
                 print('Cluster sampling disabled for non AF3 dataset')
             else:
                 self._cluster_sample_pdb_keys()
-
-        # Cache coordinates for faster loading
-        self._cache_examples()
 
         # For efficiency set fixed size to max length in the eval or test dataset
         if self.evaluation_mode:
@@ -105,24 +128,25 @@ class ADDataset(data.Dataset):
         # Subsetting and overfitting
         if overfit > 0 and phase == "train":
             # Overfit on a subset of the data
-            n_data = len(self.pdb_keys)
+            n_data = len(self.pdb_keys_df)
             np.random.seed(0)  # convenient for reproducibility of overfitting dataset
-            self.pdb_keys = np.random.choice(self.pdb_keys, overfit, replace=False).repeat(n_data // overfit)
+            indices = np.random.choice(n_data, overfit, replace=False).repeat(n_data // overfit)
+            self.pdb_keys_df = self.pdb_keys_df.iloc[indices]
 
         if short_epoch:
-            self.pdb_keys = np.random.choice(self.pdb_keys, min(500, len(self.pdb_keys)), replace=False)
+            self.pdb_keys_df = self.pdb_keys_df.sample(min(500, len(self.pdb_keys_df)), replace=False)
 
         if n_random_subset is not None:
-            self.pdb_keys = np.random.choice(self.pdb_keys, min(n_random_subset, len(self.pdb_keys)), replace=False)
+            self.pdb_keys_df = self.pdb_keys_df.sample(min(n_random_subset, len(self.pdb_keys_df)), replace=False)
 
         if subset_length_range is not None:
             self.subset_to_length_range(*self.subset_length_range)
 
     def __len__(self):
-        return len(self.pdb_keys)
+        return len(self.pdb_keys_df)
 
     def __getitem__(self, idx):
-        pdb_key = self.pdb_keys[idx]
+        pdb_key = self.pdb_keys_df["pdb_key"].iloc[idx]
         data = self.get_item(pdb_key)
         return data
 
@@ -273,7 +297,10 @@ class ADDataset(data.Dataset):
         return multimer_crop_mask, start_idx, cond_labels_in
 
     def _cluster_sample_pdb_keys(self):
-        self.pdb_keys = [random.choice(list(group)) for _, group in groupby(sorted(self.pdb_keys), key=lambda x: x.rsplit('_', 1)[-1])]
+        pdb_keys = self.pdb_keys_df["pdb_key"].tolist()
+        pdb_keys = [random.choice(list(group)) for _, group in groupby(sorted(pdb_keys), key=lambda x: x.rsplit("_", 1)[-1])]
+        self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["pdb_key"].isin(pdb_keys)]
+
 
     def _get_data_file(self, pdb_key: str) -> str:
         """
@@ -304,7 +331,7 @@ class ADDataset(data.Dataset):
         return dataset_source_label
 
 
-    def _cache_examples(self):
+    def _cache_examples(self, pdb_keys: List[str]):
         """
         Reads in PDB files and caches the examples to disk.
         Cached files are stored in cached_examples/ in the pdb_path.
@@ -318,7 +345,7 @@ class ADDataset(data.Dataset):
         print(f"Using {num_workers} Workers!")
 
         # Prepare arguments as tuples (pdb_key, cache_dir, overwrite_cache) for process_pdb_key
-        task_args = [(pdb_key, cache_dir, self.overwrite_cache, self.pdb_path, self.phase) for pdb_key in self.pdb_keys]
+        task_args = [(pdb_key, cache_dir, self.overwrite_cache, self.pdb_path, self.phase) for pdb_key in pdb_keys]
 
         # Use a Pool for parallel processing
         with Pool(processes=num_workers) as pool:
@@ -328,19 +355,13 @@ class ADDataset(data.Dataset):
 
         print("Caching completed.")
 
+
     def _get_max_len(self):
         """
         Reads in cached PDB files and returns max length of all examples.
         This is only done for eval and test datasets where we do no cropping.
         """
-        max_len = 0
-        for pdb_key in tqdm(self.pdb_keys, desc=f"Getting max length in evaluation dataset", leave=False):
-            data_file = self._get_data_file(pdb_key)
-            example = torch.load(data_file, weights_only=True)
-            seq_len = example["seq_mask"].sum().item()
-            max_len = seq_len if (seq_len > max_len) else max_len
-
-        return int(max_len)
+        return int(self.pdb_keys_df["seq_length"].max())
 
     def _load_designability_info(self) -> None:
         """
@@ -357,21 +378,8 @@ class ADDataset(data.Dataset):
         """
         Subsets the dataset to only include proteins with sequence length in [min_len, max_len].
         """
-        pdb_keys = []
-        for pdb_key in tqdm(self.pdb_keys, desc=f"Subsetting to length range [{min_len}, {max_len}]", leave=False):
-            data_file = self._get_data_file(pdb_key)
-            example = torch.load(data_file, weights_only=True)
-            seq_len = example["seq_mask"].sum().item()
-            if min_len <= seq_len <= max_len:
-                pdb_keys.append(pdb_key)
-
-        # Write these pdb_keys to a file for future reference
-        pdb_keys_len_file = f"{self.pdb_path}/{self.phase}_pdb_keys_L{min_len}_{max_len}.list"
-        with open(pdb_keys_len_file, "w") as f:
-            for pdb_key in pdb_keys:
-                f.write(f"{pdb_key}\n")
-
-        self.pdb_keys = np.array(pdb_keys)
+        lengths = self.pdb_keys_df["seq_length"]
+        self.pdb_keys_df = self.pdb_keys_df[lengths.between(min_len, max_len)]
 
 
     def _remove_low_plddt_residues(self, data: Dict[str, TensorType["n ..."]]) -> Dict[str, TensorType["n ..."]]:
