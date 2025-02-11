@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c3_bb0
+#SBATCH --job-name=c3_bb1
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -30,11 +30,12 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=c3_bb0
+EXP_NAME=c3_bb1
 GROUP=atom_denoiser_c3
 
 # Dataset paths
-PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
+# PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
+PDB_PATH=/scratch/users/tianyulu/augmented_ingraham_cath_bugfree
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
@@ -46,6 +47,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.pdb_paths=[${PDB_PATH}] \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
+    data.run_eval2=false \
     train.batch_size=64 \
     train.compile_model=true \
     denoiser=dit_denoiser \
