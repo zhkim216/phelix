@@ -94,16 +94,18 @@ class LitRLSeqDenoiser(L.LightningModule):
         batch["scn_mlm_mask"] = interpolant_out["scn_mlm_mask"]  # 1 for unmasked sidechains
 
         ## Get random backbone noise ##
+        noise, noise_labels = None, None
         if self.training:
             noise, noise_labels = self.model.get_random_noise(batch["seq_mask"])
             noise[1::2] = noise[::2]  # set paired examples to have the same noise
             noise_labels[1::2] = noise_labels[::2]  # set paired examples to have the same noise labels
 
         ## Randomly drop out residue index ##
+        drop_residx = None
         if self.training:
             # at train time, randomly drop out all residue indices for each batch element
             residue_index = batch["residue_index"]
-            drop_residx = torch.rand(residue_index.shape[0], device=residue_index.device) < self.drop_residx_p  # [B]
+            drop_residx = torch.rand(residue_index.shape[0], device=residue_index.device) < self.model.drop_residx_p  # [B]
             drop_residx[1::2] = drop_residx[::2]  # set paired examples to have the same residx dropout
 
         # construct aux inputs overrides

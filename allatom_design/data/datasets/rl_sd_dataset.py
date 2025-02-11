@@ -261,7 +261,7 @@ class RLSDDataset(data.Dataset):
 
         if self.lower_is_better:
             self.winner_threshold = -self.winner_threshold
-            rewards = -self.sc_df["reward"]
+            rewards = -self.sc_df[self.metric]
 
         return rewards
 
