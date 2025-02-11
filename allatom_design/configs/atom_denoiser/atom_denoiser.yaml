@@ -47,6 +47,8 @@ data:
     overwrite_cache: false  # overwrite the cached dataset
     afdb_res_plddt_cutoff: 0  # 0-100, only keep residues with pLDDT >= cutoff
 
+    run_eval2: true
+
 # Model options
 defaults:
   - _self_

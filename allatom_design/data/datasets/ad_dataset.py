@@ -285,6 +285,8 @@ class ADDataset(data.Dataset):
     def _get_dataset_source_label(self) -> str:
         if self.pdb_path.endswith("ingraham_cath_dataset"):
             dataset_source_label = "EXPERIMENTAL"
+        elif self.pdb_path.endswith("augmented_ingraham_cath_bugfree"):
+            dataset_source_label = "EXPERIMENTAL"
         elif self.pdb_path.endswith("afdb"):
             dataset_source_label = "SYNTHETIC"
         elif self.pdb_path.endswith("af3_pdb"):
@@ -469,6 +471,10 @@ def compute_scale_factors(train_dataloader: DataLoader,
 def get_pdb_data_file(pdb_path, phase, pdb_key: str) -> str:
     if pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
         pdb_data_file = f"{pdb_path}/pdb_store/{pdb_key}"
+    elif pdb_path.endswith("augmented_ingraham_cath_bugfree"):  # tianyu's augmented dataset
+        pdb_data_file = f"{pdb_path}/mpnn_esmfold/{pdb_key}"
+        if not Path(pdb_data_file).exists():
+            pdb_data_file = f"{pdb_path}/dne_mpnn/{pdb_key}"
     elif pdb_path.endswith("af3_pdb"):
         pdb_data_file = f"{pdb_path}/{phase}_mmcifs/{pdb_key[1:3]}/{pdb_key[:4]}-assembly1.cif" #just use first assembly for now
     elif pdb_path.endswith("afdb"):  # AFDB augmentation dataset
