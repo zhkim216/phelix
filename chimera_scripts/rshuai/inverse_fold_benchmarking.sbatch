@@ -33,9 +33,10 @@ GROUP=denovo250dev_if_benchmarking
 cd ${BASE_DIR}
 
 # Run inverse folding script
-MODEL_NAME=c1_aasd4_eps0.3
-EXP_NAME=${MODEL_NAME}_denovo250dev_S100_so_nl0.3
-INPUT_PDB_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/sample_multi/sd-step150000-epoch450/${EXP_NAME}/samples
+MODEL_NAME=c2_aasd2
+BASE_NAME=denovo250dev_S100_so_nl0.3
+EXP_NAME=${MODEL_NAME}_${BASE_NAME}
+INPUT_PDB_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/sample_multi/ema-step300000-std0.220/${BASE_NAME}/samples
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/inverse_fold_benchmarking.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
@@ -46,6 +47,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/inverse_fold_benchmarking.py
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     sample_dir=/scratch/hielab/rshuai/datasets/denovo250dev/pdbs \
     input_pdb_dir=${INPUT_PDB_DIR} \
-    struct_pred_cfg.model_name=esmfold \
+    struct_pred_cfg.model_name=af2 \
     hydra.run.dir=${HYDRA_DIR} \
-    out_dir=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/inverse_fold_benchmarking/sd-step150000-epoch450/${EXP_NAME}
+    out_dir=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/inverse_fold_benchmarking/ema-step300000-std0.220/${EXP_NAME}
