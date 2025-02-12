@@ -35,11 +35,12 @@ resume:
 # Data options
 data:
     pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+    designability_csv: null
     fixed_size: 128
     overfit: ${overfit}
     short_epoch: false
     n_random_subset: null
+    subset_length_range: null
     se3_augment: true  # randomly rotate and translate data
     translation_scale: 1.0  # scale of the translation augmentation
     overwrite_cache: false  # overwrite the cached dataset
@@ -47,12 +48,12 @@ data:
 # Model options
 defaults:
   - _self_
-  - denoiser: minimpnn_denoiser
+  - denoiser: fampnn_denoiser
   - interpolant: mar_interpolant
 
 model:
   task: "allatom_seq_des"  # "seq_des", "allatom_seq_des"
-  scale_factor_mode: null  # filled in based on the denoiser and its interpolant
+  override_sigma_data: [9.6, 0.64]  # override sigma data for [backbone, sidechain]
   num_atoms_in: 37
   n_aatype: 21
   eps: 1.0e-8
@@ -65,10 +66,12 @@ eval:
 
 loss:
   task: ${model.task}
+  inf: ${model.inf}
   loss_weights:
     scn:
       mse_loss: 1.0
     seq_loss: 1.0
+    psce_loss: 1.0
 
   # loss configs
   seq_loss:
@@ -76,6 +79,8 @@ loss:
     n_aatype: ${model.n_aatype}
     per_token_avg: false
 
+  mse_loss:
+    per_token_avg: true
 
 optim:
   optimizer: "noam"
@@ -86,9 +91,9 @@ optim:
     factor: 2
     warmup_steps: 4000
   adam_inv_sqrt:
-    ref_lr: 1.0e-2
-    ref_steps: 70000
-    warmup_steps: 1000
+    ref_lr: 1.0e-3
+    ref_steps: 50000
+    warmup_steps: 4000
 
 logging:
   log_dir: ${out_dir}
@@ -96,8 +101,9 @@ logging:
   wandb_watch_freq: 5000  # Log gradients every n steps
 
 checkpointing:
-  save_latest_every_n_epochs: 50  # Save the latest model every n epochs (if validation set is being checked)
-  save_ema_every_n_epochs: 5  # Save the EMA model every n epochs
+  save_latest_every_n_steps: 10000  # Save the full model every n steps
+  save_latest_every_n_epochs: 10  # Keep 1 latest copy of the model every n epochs, for resuming
+  save_ema_every_n_steps: 3000  # Save the EMA model every n steps
   save_top_k: 1
 
 hydra:

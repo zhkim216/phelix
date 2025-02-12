@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a10_aasd5
+#SBATCH --job-name=c3_aasd7
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,12 +21,14 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=a10_aasd5
-GROUP=chimera_a10
+EXP_NAME=c3_aasd7
+GROUP=seq_denoiser_c3
+
+# Set cache directories
+export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
@@ -37,18 +39,16 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     no_wandb=false \
     data.fixed_size=256 \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
+    data.subset_length_range=[16,9999] \
     train.batch_size=64 \
     train.compile_model=true \
-    model.task=allatom_seq_des \
-    interpolant.training_noise_schedule=uniform_squared_t \
-    denoiser=minimpnn_denoiser \
-    denoiser.minimpnn.augment_eps=0.2 \
-    denoiser.scn_diffusion_module.training_batch_size_mult=8 \
-    denoiser.autoguidance.enabled=true \
-    optim.optimizer=noam \
-    checkpointing.save_latest_every_n_epochs=20 \
-    checkpointing.save_ema_every_n_epochs=5 \
-    trainer.check_val_every_n_epoch=20 \
+    denoiser=fampnn_denoiser \
+    denoiser.augment_eps=0.3 \
+    denoiser.per_residue_eps=true \
+    denoiser.fampnn.use_gvp=false \
+    denoiser.fampnn.n_layers=3 \
+    denoiser.esm.use_esmc=true \
+    denoiser.fampnn.init_hV_with_hS=false \
+    trainer.check_val_every_n_epoch=10 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}

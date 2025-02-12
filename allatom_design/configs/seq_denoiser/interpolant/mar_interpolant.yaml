@@ -1,7 +1,7 @@
 name: mar
 
 # Training noise distribution
-training_noise_schedule: "uniform_t"
+training_noise_schedule: "uniform_sqrt_t"
 
 training_noise_cfg:
   uniform_t:
@@ -10,5 +10,17 @@ training_noise_cfg:
   constant_t:
     t: 1.0
   uniform_squared_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_cubed_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_cosine_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_sqrt_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_cbrt_t:
     t_min: 0.0
     t_max: 1.0

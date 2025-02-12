@@ -8,6 +8,8 @@ from torchtyping import TensorType
 import allatom_design.data.protein as protein
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import torch_rmsd_weighted
+from allatom_design.data.protein import PDB_CHAIN_IDS
+
 
 
 def write_batched_to_pdb(
@@ -77,6 +79,7 @@ def write_to_pdb(
         atom_mask=atom_mask.numpy(),
         residue_index=residue_index.numpy(),
         chain_index=chain_index.numpy(),
+        chain_ids=[PDB_CHAIN_IDS[int(idx)] for idx in torch.sort(torch.unique(chain_index)).values.tolist()],
         b_factors=b_factors.numpy()
     )
 
@@ -128,6 +131,7 @@ def write_to_pdb_frames(
             atom_mask=atom_mask[i].numpy(),
             residue_index=residue_index[i].numpy(),
             chain_index=chain_index[i].numpy(),
+            chain_ids=[PDB_CHAIN_IDS[int(idx)] for idx in torch.sort(torch.unique(chain_index[i])).values.tolist()],
             b_factors=b_factors[i].numpy()
         )
         for i in range(aatype.shape[0])

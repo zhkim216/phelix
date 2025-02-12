@@ -1,5 +1,6 @@
+import os
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -7,36 +8,29 @@ import torch.nn.functional as F
 from einops import rearrange
 from torchtyping import TensorType
 
+import allatom_design.data.conditioning_labels as cl
 import openfold.data.data_transforms as data_transforms
 from allatom_design.data import protein
 from allatom_design.data import residue_constants as rc
 from openfold.utils.feats import atom14_to_atom37
-from pathlib import Path
-from openfold.utils.rigid_utils import Rigid
-import subprocess
-from typing import Tuple, Union
+from openfold.utils.rigid_utils import Rigid, Rotation
 
+FEATURES_LONG = ("residue_index", "chain_index", "aatype")
 
-def load_feats_from_pdb(pdb, chain_residx_gap: int, max_conformers: int = 1):
+def load_feats_from_pdb(pdb, chain_ids_override: str = None, max_conformers: int = 1):
     """
     Load model input features from a PDB file or mmcif file.
     - chain_residx_gap: Gap to add between residue indices in different chains.
     - max_conformers: Handle disordered atoms, max number of altlocs to store. If > 1, returns coords with shape [seqlen, num_atoms, max_conformers, 3]
     """
     feats = {}
-    protein_obj = protein.read_pdb(pdb, max_conformers=max_conformers)
+    protein_obj, chain_id_mapping = protein.read_pdb(pdb, chain_ids_override=chain_ids_override, max_conformers=max_conformers)
     for k, v in vars(protein_obj).items():
         feats[k] = torch.Tensor(v)
 
     feats["all_atom_positions"] = feats.pop("atom_positions")
     feats["all_atom_mask"] = feats.pop("atom_mask")
-
     feats["aatype"] = feats["aatype"].long()
-
-    # Renumber residue indices; add gap for PDBs with multiple chains
-    if chain_residx_gap is not None:
-        raise NotImplementedError("Currently not supporting multiple chains, since this may require renumbering residues across chains with a scheme to handle missing residues within chains.")
-        # feats["residue_index"] = renumber_and_add_chain_gap(feats["residue_index"], feats["chain_index"], chain_residx_gap=chain_residx_gap)
 
     # Add one-hot encoding of amino acid types
     feats["target_feat"] = F.one_hot(feats["aatype"], num_classes=len(rc.restypes_with_x)).float()
@@ -60,9 +54,53 @@ def load_feats_from_pdb(pdb, chain_residx_gap: int, max_conformers: int = 1):
 
     feats["ghost_atom_mask"] = ghost_atom_mask  # [n, a] or [n, c, a]
     feats["missing_atom_mask"] = missing_atom_mask  # [n, a] or [n, c, a]
+    feats["interface_residue_mask"] = get_interface_residue_mask(feats['all_atom_positions'], feats['chain_index'])
+
+    # Mapping from chain letter to chain index
+    feats["chain_id_mapping"] = chain_id_mapping
 
     return feats
 
+def get_interface_residue_mask(x, chain_index):
+    # Extract C-alpha atoms' positions
+    x_ca = x[:, 1, :]
+
+    # Calculate pairwise Euclidean distances between C-alpha atoms
+    d_ca = x_ca[None, :, :] - x_ca[:,  None, :]
+    d_ca = torch.sqrt(torch.sum(d_ca ** 2, dim=2))
+
+    # Create a mask for residues within the same chain
+    same_chain_mask = torch.eq(chain_index[:, None], chain_index[None, :])
+    d_ca[same_chain_mask] = np.inf  # Set distances within the same chain to infinity
+
+    # Apply cutoff to get interface residues
+    within_cutoff = d_ca < rc.interface_cutoff
+    interface_residue_mask = torch.any(within_cutoff, dim=1).to(dtype=torch.bool)
+    return interface_residue_mask
+
+def check_valid_interface(x, atom_mask, chain_index):
+    num_residues, num_atoms_per_residue, _ = x.shape
+    x_flat = x.reshape(-1, 3)
+    atom_mask_flat = atom_mask.reshape(-1)
+
+    # Create residue index mapping
+    residue_index = torch.arange(num_residues, device=x.device).repeat_interleave(num_atoms_per_residue)
+
+    # Mask to filter valid atoms
+    valid_mask = atom_mask_flat.bool()
+    x_valid = x_flat[valid_mask]
+    residue_index_valid = residue_index[valid_mask]
+    chain_index_valid = chain_index[residue_index_valid]
+
+    # Calculate pairwise distances only for valid atoms
+    d_valid = torch.cdist(x_valid, x_valid, p=2)
+
+    # Mask out same-chain residues
+    same_chain_mask = chain_index_valid[:, None] == chain_index_valid[None, :]
+    d_valid[same_chain_mask] = float('inf')
+
+    # Check if any inter-chain distance is below the threshold
+    return torch.any(d_valid < 5.01)
 
 def aa_to_bb_feats(feats: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     """
@@ -103,15 +141,48 @@ def renumber_and_add_chain_gap(residue_index: TensorType["n"],
     return residue_index
 
 
-def make_fixed_size_1d(data: TensorType["n ..."], fixed_size: int, start_idx: int):
+def make_fixed_size_1d(data: TensorType["n ..."], fixed_size: int, start_idx: int, multimer_crop_mask: TensorType["n"] = None):
     data_len = data.shape[0]
     if data_len > fixed_size:
-        new_data = data[start_idx : (start_idx + fixed_size)]
-    if data_len <= fixed_size:
+        if multimer_crop_mask is not None:
+            new_data = data[multimer_crop_mask]
+        else:
+            new_data = data[start_idx : (start_idx + fixed_size)]
+    else:
         pad_size = fixed_size - data_len
         extra_shape = data.shape[1:]
         new_data = torch.cat([data, torch.zeros(pad_size, *extra_shape)], 0)
     return new_data
+
+def trim_to_max_len(batch: TensorType["b n ..."]):
+    max_len = int(max(torch.sum(batch['seq_mask'], dim=-1)))
+
+    trimmed_example = {}
+    for k, v in batch.items():
+
+        #features which aren't trimmed
+        if k in ['pdb_key','cond_labels_in','chain_ids']:
+            trimmed_example[k] = v
+        else:
+            trimmed_example[k] = v[:,:max_len,...]
+
+    return trimmed_example
+
+
+def pad_to_max_len(batch: Dict[str, TensorType["b n ..."]], max_len: int):
+    """
+    Inverse of trim_to_max_len; pads a batch to a fixed length.
+    """
+    padded_example = {}
+    for k, v in batch.items():
+        # features which aren't padded
+        if k in ['pdb_key', 'cond_labels_in', 'chain_ids']:
+            padded_example[k] = v
+        else:
+            B, N, *extra_shape = v.shape
+            padding = torch.zeros((B, max_len - N, *extra_shape), device=v.device, dtype=v.dtype)
+            padded_example[k] = torch.cat([v, padding], dim=1)
+    return padded_example
 
 
 def dgram_from_positions(
@@ -211,6 +282,25 @@ def torch_rmsd_weighted(a: TensorType["b n x", float],
     if return_aligned:
         return weighted_rmsd, (aligned_a, b)
     return weighted_rmsd
+
+
+def atom37_to_torsions_rad(aatype: TensorType["b n", int],
+                           coords: TensorType["b n 37 3", float],
+                           atom_mask: TensorType["b n 37", float]
+                           ) -> Tuple[TensorType["b n 7"], TensorType["b n 7"]]:
+    """
+    Uses OpenFold's atom37_to_torsion_angles to convert atom37 coordinates to torsion angles in radians.
+    """
+    feats = data_transforms.atom37_to_torsion_angles("")({"aatype": aatype, "all_atom_positions": coords, "all_atom_mask": atom_mask})
+
+    sin_angles, cos_angles = feats["torsion_angles_sin_cos"][..., 0], feats["torsion_angles_sin_cos"][..., 1]
+    torsions_deg = torch.atan2(sin_angles, cos_angles)
+
+    alt_sin_angles, alt_cos_angles = feats["alt_torsion_angles_sin_cos"][..., 0], feats["alt_torsion_angles_sin_cos"][..., 1]
+    alt_torsions_deg = torch.atan2(alt_sin_angles, alt_cos_angles)
+
+    torsion_angles_mask = feats["torsion_angles_mask"]
+    return torsions_deg, alt_torsions_deg, torsion_angles_mask
 
 
 def tm_score(a: TensorType["b n a 3"],
@@ -369,3 +459,164 @@ def atom14_aatype_to_atom37(atom14_pos: TensorType["b n 14 3", float],
     feats["aatype"] = aatype
     feats = data_transforms.make_atom14_masks(feats)
     return atom14_to_atom37(atom14_pos, feats)
+
+def get_rc_tensor(rc_np, aatype):
+    return torch.tensor(rc_np, device=aatype.device)[aatype]
+
+def batched_gather(data, inds, dim=0, no_batch_dims=0):
+    ranges = []
+    for i, s in enumerate(data.shape[:no_batch_dims]):
+        r = torch.arange(s)
+        r = r.view(*(*((1,) * i), -1, *((1,) * (len(inds.shape) - i - 1))))
+        ranges.append(r)
+
+    remaining_dims = [
+        slice(None) for _ in range(len(data.shape) - no_batch_dims)
+    ]
+    remaining_dims[dim - no_batch_dims if dim >= 0 else dim] = inds
+    ranges.extend(remaining_dims)
+    return data[ranges]
+
+def atom37_to_atom14(aatype: TensorType["... n", int],
+                     all_atom_pos: TensorType["... n 37 3", float],
+                     atom37_mask: Optional[TensorType["... n 37", float]] = None):
+    """Convert Atom37 positions to Atom14 positions."""
+    if atom37_mask is None:
+        atom37_mask = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)
+
+    residx_atom14_to_atom37 = get_rc_tensor(
+        rc.RESTYPE_ATOM14_TO_ATOM37, aatype
+    )
+
+    no_batch_dims = len(aatype.shape) - 1
+
+    atom14_mask = batched_gather(
+        atom37_mask,
+        residx_atom14_to_atom37,
+        dim=no_batch_dims + 1,
+        no_batch_dims=no_batch_dims + 1,
+    ).to(all_atom_pos.dtype)
+
+    # create a mask for known groundtruth positions
+    atom14_mask *= get_rc_tensor(rc.RESTYPE_ATOM14_MASK_WITH_X, aatype)
+
+    # gather the groundtruth positions
+    atom14_positions = batched_gather(
+        all_atom_pos,
+        residx_atom14_to_atom37,
+        dim=no_batch_dims + 1,
+        no_batch_dims=no_batch_dims + 1,
+    )
+
+    return atom14_positions, atom14_mask
+
+
+def backbone_coords_to_frames(x_bb: TensorType["... 4 3", float],
+                              atom_mask: TensorType["... 4", float],
+                              eps=1e-8):
+    """
+    Convert backbone coordinates to local frames (rotation + translation) for each residue.
+    """
+    base_atom_names = ["C", "CA", "N"]
+    rigid_group_base_atom37_idx = torch.tensor([rc.bb_atom_order[atom] for atom in base_atom_names])
+    base_atom_pos = x_bb[..., rigid_group_base_atom37_idx, :]
+    gt_frames = Rigid.from_3_points(
+            p_neg_x_axis=base_atom_pos[..., 0, :],
+            origin=base_atom_pos[..., 1, :],
+            p_xy_plane=base_atom_pos[..., 2, :],
+            eps=eps,
+    )
+    gt_exists = torch.min(atom_mask[..., rigid_group_base_atom37_idx], dim=-1)[0]
+
+    rots = torch.eye(3, dtype=x_bb.dtype, device=x_bb.device)
+    rots = torch.tile(rots, (*x_bb.shape[:-2], 1, 1))
+    rots[..., 0, 0] = -1
+    rots[..., 2, 2] = -1
+
+    rots = Rotation(rot_mats=rots)
+    gt_frames = gt_frames.compose(Rigid(rots, None))
+
+    gt_frames_tensor = gt_frames.to_tensor_4x4()
+
+    return gt_frames_tensor, gt_exists
+
+
+def transform_sidechain_frame(x_scn: TensorType["b n 33 3", float],
+                              x_bb: TensorType["b n 4 3", float],
+                              atom_mask_scn: TensorType["b n 33", float],
+                              atom_mask_bb: TensorType["b n 4", float],
+                              to_local: bool) -> Tuple[
+                                  TensorType["b n 33 3", float],
+                                  TensorType["b n", float]
+                              ]:
+    """
+    Transform sidechain coordinates based on the backbone frame.
+    If to_local, transform from global to local frame. Otherwise, transform from local to global frame.
+    """
+    bb_frames, bb_frames_exists = backbone_coords_to_frames(x_bb, atom_mask_bb)
+    T = Rigid.from_tensor_4x4(bb_frames[..., None, :, :])
+
+    if to_local:
+        # Transform from global to local frame, ghost atom value is at 0
+        x_scn = T.invert_apply(x_scn)
+        ghost_atom_value = 0
+    else:
+        # Transform from local to global frame, ghost atom value is at CA
+        x_scn = T.apply(x_scn)
+        ca_idx = rc.bb_atom_order["CA"]
+        ghost_atom_value = x_bb[..., ca_idx:ca_idx + 1, :]
+
+    x_scn = torch.where(atom_mask_scn[..., None].bool(), x_scn, ghost_atom_value)  # "zero out" ghost atoms and missing atoms
+    x_scn = torch.where(bb_frames_exists[..., None, None].bool(), x_scn, ghost_atom_value)  # "zero out" sidechain atoms where backbone frame does not exist
+
+    return x_scn, bb_frames_exists
+
+def process_single_pdb(data):
+    example = {}
+
+    # Use raw coordinates
+    x = data["all_atom_positions"]  # [n, a, 3]
+    atom_mask = data["all_atom_mask"]  # [n, a]
+    seq_mask = data["seq_mask"]  # [n]
+    x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
+
+    # per-channel mask for x, used for loss.
+    # We only mask out missing atoms from PDB files, not ghost atoms.
+    x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
+
+    # Construct example
+    example["x"] = x * atom_mask[..., None]
+    example["seq_mask"] = seq_mask
+    example["x_mask"] = x_mask
+    example["residue_index"] = data["residue_index"]
+    example["chain_index"] = data["chain_index"]
+    example["aatype"] = data["aatype"]  # not one-hot encoded
+    example["ghost_atom_mask"] = data["ghost_atom_mask"]
+    example["missing_atom_mask"] = data["missing_atom_mask"]
+    example["atom_mask"] = atom_mask
+    example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
+    example['interface_residue_mask'] = data['interface_residue_mask']
+    example['chain_ids'] = data['chain_ids']
+
+    # Construct conditioning inputs
+    cond_labels_in = {}
+
+    # Add designability info
+    cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
+
+    # Add dataset source and crop aug label, set to experimental and uncropped by default
+    cond_labels_in["dataset_source"] = cl.DEFAULT_TOKEN["dataset_source"]
+    cond_labels_in["crop_aug"] = cl.DEFAULT_TOKEN["crop_aug"]
+
+    # Convert data types
+    example_out = {}
+
+    for k, v in example.items():
+        if k in FEATURES_LONG:
+            example_out[k] = v.long()
+        else:
+            example_out[k] = v.float()
+
+    # Add conditioning labels
+    example_out["cond_labels_in"] = cond_labels_in
+    return example_out

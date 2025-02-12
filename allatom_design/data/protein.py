@@ -17,10 +17,11 @@ Adapted from original code by alexechu.
 """
 import dataclasses
 import io
-from typing import Any, Mapping, Optional, Union
+from pathlib import Path
+from typing import Any, Dict, Mapping, Optional, Tuple, Union
 
 import numpy as np
-from Bio.PDB import MMCIFParser, PDBParser, Structure
+from Bio.PDB import MMCIFParser, PDBList, PDBParser, Structure
 from Bio.PDB.Atom import DisorderedAtom
 
 from allatom_design.data import residue_constants
@@ -56,10 +57,14 @@ class Protein:
     # belongs to.
     chain_index: np.ndarray  # [num_res]
 
-    # B-factors, or temperature factors, of each residue (in sq. angstroms units),
-    # representing the displacement of the residue from its ground truth mean
-    # value.
-    b_factors: np.ndarray  # [num_res, num_atom_type]
+    #alphabetic IDs of chains contained in the protein example
+    chain_ids: list #[num_chains]
+
+    #uncertainty in electron density, or predicted error in atom coordinates
+    b_factors: np.ndarray
+
+    # keep track of the offset due to detected insertion codes
+    insertion_code_offsets: np.ndarray = None # [num_res]
 
     def __post_init__(self):
         if len(np.unique(self.chain_index)) > PDB_MAX_CHAINS:
@@ -69,7 +74,7 @@ class Protein:
             )
 
 
-def read_pdb(pdb_file: Union[str, Structure.Structure], chain_id: Optional[str] = None, max_conformers: int = 1) -> Protein:
+def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Optional[str] = None, max_conformers: int = 1) -> Tuple[Protein, Dict[str, int]]:
     """Takes a PDB string and constructs a Protein object.
     WARNING: All non-standard residue types will be converted into UNK. All
       non-standard atoms will be ignored.
@@ -82,7 +87,8 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_id: Optional[str] 
       max_conformers: Handle disordered atoms, max number of altlocs to store
 
     Returns:
-      A new `Protein` parsed from the pdb contents.
+      - A new `Protein` parsed from the pdb contents.
+      - A dictionary that maps from chain letter to chain ID
     """
     if isinstance(pdb_file, str):
         if pdb_file.endswith(".cif"):
@@ -95,33 +101,37 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_id: Optional[str] 
 
     models = list(structure.get_models())
     if len(models) != 1:
-        raise ValueError(
-            f"Only single model PDBs are supported. Found {len(models)} models."
-        )
+        print(f"Only single model PDBs are supported. Found {len(models)} models, but using first model by default.")
+
     model = models[0]
 
     atom_positions = []
     aatype = []
     atom_mask = []
     residue_index = []
-    chain_ids = []
     b_factors = []
+    residue_chain_ids = []
+    chain_ids = []
+    insertion_code_offsets = []
 
     for chain in model:
-        if chain_id is not None and chain.id != chain_id:
+        insertion_code_offset = 0
+        if (chain_ids_override is not None) and (chain.id not in chain_ids_override):
             continue
+
+        if chain.id not in chain_ids:
+            chain_ids.append(chain.id)
+
         for res in chain:
             if res.id[2] != " ":
-                # raise ValueError(
-                #     f"PDB contains an insertion code at chain {chain.id} and residue "
-                #     f"index {res.id[1]}. These are not supported at the moment."
-                # )
-                # TODO: Handle insertion codes.
-                # print(f"WARNING: PDB {pdb_file} contains an insertion code at chain {chain.id} and residue index {res.id[1]}. These aren't supported at the moment.")
-                pass
+                insertion_code_offset +=1
+                print(f'Insertion code detected, increased residue index offset to {insertion_code_offset} for pdb {Path(pdb_file).name}')
+
             if res.id[0] != " ":
-                # Ignore heteroatoms.
-                continue
+                if res.resname in residue_constants.ncaa_mapping.keys(): #allow all ncaas to get classified as 'X'
+                    pass
+                else:
+                    continue
 
             res_shortname = residue_constants.restype_3to1.get(res.resname, "X")
             restype_idx = residue_constants.restype_order.get(
@@ -167,23 +177,29 @@ def read_pdb(pdb_file: Union[str, Structure.Structure], chain_id: Optional[str] 
             aatype.append(restype_idx)
             atom_positions.append(pos)
             atom_mask.append(mask)
-            residue_index.append(res.id[1])
-            chain_ids.append(chain.id)
+            residue_index.append(res.id[1] + insertion_code_offset)
             b_factors.append(res_b_factors)
+            residue_chain_ids.append(chain.id)
+            insertion_code_offsets.append(insertion_code_offset)
+
+    # If specified, override chain ids with provided override, else use chain ids discovered from parsing PDB
+    if chain_ids_override is not None:
+        chain_ids = chain_ids_override
 
     # Chain IDs are usually characters so map these to ints.
-    unique_chain_ids = np.unique(chain_ids)
-    chain_id_mapping = {cid: n for n, cid in enumerate(unique_chain_ids)}
-    chain_index = np.array([chain_id_mapping[cid] for cid in chain_ids])
-
+    chain_id_mapping = {cid: n for n, cid in enumerate(chain_ids)}
+    chain_ids_numeric = [n for _, n in chain_id_mapping.items()]
+    chain_index = np.array([chain_id_mapping[cid] for cid in residue_chain_ids])
     return Protein(
         atom_positions=np.array(atom_positions),
         atom_mask=np.array(atom_mask),
         aatype=np.array(aatype),
         residue_index=np.array(residue_index),
         chain_index=chain_index,
-        b_factors=np.array(b_factors),
-    )
+        chain_ids=chain_ids_numeric,
+        b_factors=b_factors,
+        insertion_code_offsets=insertion_code_offsets,
+    ), chain_id_mapping
 
 
 def _chain_end(atom_index, end_resname, chain_name, residue_index) -> str:
@@ -279,7 +295,7 @@ def to_pdb(prot: Protein, conect=False, model_idx: int = 1) -> str:
                 f"{res_name_3:>3} {chain_ids[chain_index[i]]:>1}"
                 f"{residue_index[i]:>4}{insertion_code:>1}   "
                 f"{pos[0]:>8.3f}{pos[1]:>8.3f}{pos[2]:>8.3f}"
-                f"{occupancy:>6.2f}{b_factor:>6.2f}          "
+                f"{occupancy:>6.2f}{b_factor:>6.3f}          "
                 f"{element:>2}{charge:>2}"
             )
             pdb_lines.append(atom_line)

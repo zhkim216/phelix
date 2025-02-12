@@ -19,6 +19,8 @@ from omegafold import pipeline as of_pipeline
 from omegafold.utils.torch_utils import recursive_to
 import argparse
 from allatom_design.data import residue_constants as rc
+import numpy as np
+from colabdesign.af.alphafold.common import protein
 
 
 def run_esmfold(sequence_list: List[str],
@@ -85,6 +87,7 @@ def run_esmfold(sequence_list: List[str],
 
 def run_esmfold_batched(sequences_list: List[str],
                         residue_index_list: List[TensorType["n_s", int]],
+                        chain_index_list: List[TensorType["n_s", int]],
                         model: EsmForProteinFolding,
                         tokenizer: EsmTokenizer,
                         max_tokens_per_batch: int = 1024,
@@ -105,7 +108,7 @@ def run_esmfold_batched(sequences_list: List[str],
     esm_outputs = defaultdict(list)
     original_ids = []
 
-    dataset = create_batched_seq_dataset(sequences_list, residue_index_list, max_tokens_per_batch=max_tokens_per_batch)
+    dataset = create_batched_seq_dataset(sequences_list, residue_index_list, chain_index_list, max_tokens_per_batch=max_tokens_per_batch)
     for batch in dataset:
         # Set up inputs
         inputs = tokenizer(
@@ -115,7 +118,11 @@ def run_esmfold_batched(sequences_list: List[str],
             add_special_tokens=False,
         ).to(model.device)
 
-        inputs["position_ids"] = batch["residue_index"].to(model.device)
+        # Add residue index gap of 1000 for chain separation
+        residue_index = batch["residue_index"]
+        residue_index = residue_index + (1000 * batch["chain_index"])
+
+        inputs["position_ids"] = residue_index.to(model.device)
 
         # Run model
         with torch.no_grad():
@@ -126,6 +133,7 @@ def run_esmfold_batched(sequences_list: List[str],
         pred_coords_atom14 = outputs["positions"][-1]  # positions is shape (l, b, n, 14, 3)
         pred_coords_atom37 = data.atom14_aatype_to_atom37(pred_coords_atom14, outputs["aatype"])
         plddts = outputs["plddt"][:, :, 1] * seq_mask  # get pLDDT for CA atoms
+        plddts = plddts * 100
         avg_plddt = (plddts * seq_mask).sum(dim=-1) / seq_mask.sum(dim=-1).clamp(min=1e-3)
 
         aatype, seq_mask = outputs.aatype.cpu(), seq_mask.cpu()
@@ -137,7 +145,7 @@ def run_esmfold_batched(sequences_list: List[str],
             "plddts": plddts,
             "seq_mask": seq_mask,
             "aatype": aatype,
-            "residue_index": batch["residue_index"],
+            "residue_index": residue_index,
             "avg_plddt": avg_plddt[..., None],  # add sequence dimension for consistency
             "atom_mask": atom_mask,    # add atom mask based on input aatypes for convenience
         }
@@ -167,6 +175,7 @@ def run_esmfold_batched(sequences_list: List[str],
 
 def create_batched_seq_dataset(all_sequences: List[str],
                                all_residue_indices: List[TensorType["n_s", int]],
+                               all_chain_indices: List[TensorType["n_s", int]],
                                max_tokens_per_batch: int = 1024,
                                ) -> Generator[dict, None, None]:
     """
@@ -176,7 +185,7 @@ def create_batched_seq_dataset(all_sequences: List[str],
     """
     # Sort by sequence length
     B = len(all_sequences)
-    examples = [(seq, residx, id) for seq, residx, id in zip(all_sequences, all_residue_indices, range(B))]
+    examples = [(seq, residx, chain_idx, id) for seq, residx, chain_idx, id in zip(all_sequences, all_residue_indices, all_chain_indices, range(B))]
     examples = sorted(examples, key=lambda x: len(x[0]))
 
     # Define collator
@@ -187,15 +196,17 @@ def create_batched_seq_dataset(all_sequences: List[str],
         - residue_index: (b n) residue index
         - id: (b) unique identifier for each sequence
         """
-        batch = {"sequence": [], "residue_index": [], "id": []}
+        batch = {"sequence": [], "residue_index": [], "id": [], "chain_index": []}
 
-        N = max(len(seq) for seq, _, _ in examples)
-        for seq, residx, id in examples:
+        N = max(len(seq) for seq, _, _, _ in examples)
+        for seq, residx, chain_idx, id in examples:
             batch["sequence"].append(seq)
             batch["residue_index"].append(data.make_fixed_size_1d(residx, fixed_size=N, start_idx=None))
+            batch["chain_index"].append(data.make_fixed_size_1d(chain_idx, fixed_size=N, start_idx=None))
             batch["id"].append(id)
 
         batch["residue_index"] = torch.stack(batch["residue_index"], dim=0).to(torch.long)
+        batch["chain_index"] = torch.stack(batch["chain_index"], dim=0).to(torch.long)
         return batch
 
     # Yield batches
@@ -204,18 +215,34 @@ def create_batched_seq_dataset(all_sequences: List[str],
     total_tokens = sum(len(seq) for seq in all_sequences)
     pbar = tqdm(total=total_tokens, desc="Number of ESMFold tokens processed", leave=False)
 
-    for seq, residx, id in examples:
+    for seq, residx, chain_idx, id in examples:
         # If adding this sequence would exceed the token limit, yield the current batch
         if num_tokens + len(seq) > max_tokens_per_batch and num_tokens > 0:
             yield collate_fn(batch_examples)
             batch_examples, num_tokens = [], 0
 
         # Add this sequence to the current batch
-        batch_examples.append((seq, residx, id))
+        batch_examples.append((seq, residx, chain_idx, id))
         num_tokens += len(seq)
         pbar.update(len(seq))
 
     yield collate_fn(batch_examples)
+
+def save_best_model(af_model, filename):
+    aux = af_model._tmp["best"]["aux"]["all"]
+    plddts = np.mean(af_model._tmp["best"]["aux"]["all"]['plddt'], axis = -1)
+    best_model_idx = np.argmax(plddts)
+    p = {k:aux[k][best_model_idx] for k in ["aatype","residue_index","atom_positions","atom_mask"]}
+    p["b_factors"] = 100 * p["atom_mask"] * aux["plddt"][best_model_idx][...,None]
+
+    def to_pdb_str(x, n=None):
+      p_str = protein.to_pdb(protein.Protein(**x))
+      p_str = "\n".join(p_str.splitlines()[1:-2])
+      return p_str
+
+    p_str = to_pdb_str(p) + "\nEND\n"
+    with open(filename, 'w') as f:
+        f.write(p_str)
 
 
 def run_af2(sequences_list: List[str],
@@ -225,6 +252,7 @@ def run_af2(sequences_list: List[str],
             num_models: int,
             sample_models: bool,
             num_recycles: int,
+            save_best: bool,
             rm_template_interchain: bool = False,
             chains: Optional[str] = None,
             homooligomer: bool = False,
@@ -246,16 +274,21 @@ def run_af2(sequences_list: List[str],
         af_model.restart()
         af_model.set_opt("template", rm_ic=rm_template_interchain)
         af_model.predict(seq=seq,
-                         num_models=num_models,
+                         num_models=num_models if save_best else 1, #default to 1 model unless we are saving only the best
                          sample_models=sample_models,
                          num_recycles=num_recycles,
                          verbose=False)
 
-        af_model._save_results(save_best=True, verbose=False)
-        af_model.save_current_pdb(output_pdb)
+        af_model._save_results(save_best=save_best, best_metric='plddt', verbose=False)
+
+        if save_best:
+            save_best_model(af_model, output_pdb)
+        else:
+            af_model.save_current_pdb(output_pdb)
+
         output_files.append(output_pdb)
 
-    preds = [data.load_feats_from_pdb(pdb, chain_residx_gap=None) for pdb in output_files]
+    preds = [data.load_feats_from_pdb(pdb) for pdb in output_files]
 
     # Preprocess plddt-CA
     plddts = [pred["b_factors"][:, 1] for pred in preds]
@@ -267,7 +300,7 @@ def run_af2(sequences_list: List[str],
         "plddts": plddts,
         "seq_mask": [pred["seq_mask"] for pred in preds],
         "aatype": [pred["aatype"] for pred in preds],
-        "residue_index": [pred["residue_index"] for pred in preds],
+        "residue_index": [pred["residue_index"].long() for pred in preds],
         "avg_plddt": avg_plddts,
         "atom_mask": [pred["all_atom_mask"] for pred in preds],
     }
@@ -286,6 +319,7 @@ def run_omegafold(sequences_list: List[str],
                   deterministic: bool = True,
                   subbatch_size: Optional[int] = None,
                   **kwargs):
+    raise NotImplementedError("Multichain support is not implemented yet.")
     forward_config = argparse.Namespace(
         subbatch_size=subbatch_size,
         num_recycle=num_recycle,
@@ -293,7 +327,8 @@ def run_omegafold(sequences_list: List[str],
     of_inputs = omegafold_inputs(sequences_list, num_pseudo_msa, mask_rate, num_recycle, deterministic, device)
     of_outputs = defaultdict(list)
 
-    for (of_input, of_aux), residue_index in zip(of_inputs, residue_index_list):
+    for (of_input, of_aux), residue_index in tqdm(zip(of_inputs, residue_index_list), total=len(residue_index_list),
+                                                  desc="Running OmegaFold", leave=False):
         # TODO: like ESMFold, omegafold seems to ignore discontiguous residues
         output = omegafold_model(of_input, predict_with_confidence=True, fwd_cfg=forward_config)
 

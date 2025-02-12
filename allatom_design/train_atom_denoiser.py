@@ -15,10 +15,12 @@ from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 
-from allatom_design.checkpoint_utils import EMATrackerCheckpoint
 import allatom_design.data.datasets.ad_dataset as ad_dataset
+from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
+                                             resume_ckpt_cfg)
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import ADDataset
+from allatom_design.data.datasets.multi_dataset import MultiDataset
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
 
 
@@ -27,7 +29,10 @@ def main(cfg: DictConfig):
     """
     Script for training an atom denoiser model.
     """
-    assert cfg.resume.ckpt_path is None, "Resuming checkpoints not supported yet, should be None"
+    # If resuming from checkpoint, get config
+    if cfg.resume.ckpt_path:
+        print(f"Resuming from checkpoint: {cfg.resume.ckpt_path}")
+        cfg, safe_ckpt_to_resume = resume_ckpt_cfg(cfg)
 
     # Update config and resolve
     update_config(cfg)  # Conditionally update certain config values
@@ -47,12 +52,17 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
     # Set up dataloaders
-    init_dataloader = partial(get_dataloader, num_workers=cfg.num_workers, cuda=cfg.cuda)
+    init_dataloader = partial(get_dataloader, data_cfg=cfg.data, num_workers=cfg.num_workers, cuda=cfg.cuda, batch_size=cfg.train.batch_size)
+    _, train_dataloader = init_dataloader(phase="train")
+    _, val_dataloader = init_dataloader(phase="eval")
 
     _, train_dataloader = init_dataloader(phase="train", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
     _, val_dataloader = init_dataloader(phase="eval", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
-    _, val2_dataloader = init_dataloader(phase="eval2", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
-    val_dataloaders = [val_dataloader, val2_dataloader]
+    val_dataloaders = [val_dataloader]
+
+    if cfg.data.run_eval2:
+        _, val2_dataloader = init_dataloader(phase="eval2", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
+        val_dataloaders.append(val2_dataloader)
 
     # Init wandb
     local_rank = os.environ.get("LOCAL_RANK", None)
@@ -105,7 +115,15 @@ def main(cfg: DictConfig):
         yaml.safe_dump(OmegaConf.to_container(cfg, resolve=False), f)
 
     # Set up model
-    lit_model = LitAtomDenoiser(cfg)
+    resumed_ckpt_path = None
+    if cfg.resume.ckpt_path:
+        resumed_ckpt_path = f"{ckpt_dir}/orig_resumed.ckpt"
+        if local_rank is None:
+            # save the original checkpoint to resume from (also handles overrides to torch.compile)
+            torch.save(safe_ckpt_to_resume, resumed_ckpt_path)
+        lit_model = LitAtomDenoiser.load_from_checkpoint(resumed_ckpt_path, cfg=cfg)
+    else:
+        lit_model = LitAtomDenoiser(cfg)
 
     if not cfg.no_wandb:
         logger.watch(lit_model.model, log="all", log_freq=cfg.logging.wandb_watch_freq)
@@ -114,33 +132,21 @@ def main(cfg: DictConfig):
     callbacks = []
     latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                                  save_top_k=-1,
-                                                 monitor="epoch",
-                                                 mode="max",
-                                                 every_n_epochs=cfg.checkpointing.save_latest_every_n_epochs,
-                                                 filename="ad-epoch{epoch:02d}",
+                                                 every_n_train_steps=cfg.checkpointing.save_latest_every_n_steps,
+                                                 filename="ad-step{step}-epoch{epoch:02d}",
                                                  auto_insert_metric_name=False
                                                  )
     val_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                               save_top_k=cfg.checkpointing.save_top_k,
                                               monitor="val/total_loss",
                                               mode="min",
-                                              filename="ad-epoch{epoch:02d}-val_loss{val/total_loss:.4f}",
+                                              filename="ad-epoch{epoch:02d}-step{step}-val_loss{val/total_loss:.4f}",
                                               auto_insert_metric_name=False  # needed since metric has / in name
                                               )
     ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
-                                          save_freq_epochs=cfg.checkpointing.save_ema_every_n_epochs)
+                                          save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
 
     callbacks += [latest_checkpoint_callback, val_checkpoint_callback, ema_checkpoint]
-
-    train_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
-                                                save_top_k=cfg.checkpointing.save_top_k,
-                                                monitor="train/total_loss_epoch",
-                                                mode="min",
-                                                filename="ad-epoch{epoch:02d}-train_loss{train/total_loss:.4f}",
-                                                auto_insert_metric_name=False  # needed since metric has / in name
-                                                )
-
-    callbacks.append(train_checkpoint_callback)
 
     if logger:
         lr_monitor = LearningRateMonitor(logging_interval="step")
@@ -152,10 +158,12 @@ def main(cfg: DictConfig):
     # override sigma_data if specified for consistent loss scaling
     bb_sigma_data_override, scn_sigma_data_override = cfg.model.override_sigma_data
     if bb_sigma_data_override is not None:
+        print(f"Overriding bb sigma data with {bb_sigma_data_override}")
         bb_mean, bb_std = scale_factors["bb"]
         bb_std = bb_sigma_data_override
         scale_factors["bb"] = (bb_mean, bb_std)
     if scn_sigma_data_override is not None:
+        print(f"Overriding scn sigma data with {scn_sigma_data_override}")
         scn_mean, scn_std = scale_factors["scn"]
         scn_std = scn_sigma_data_override
         scale_factors["scn"] = (scn_mean, scn_std)
@@ -170,7 +178,7 @@ def main(cfg: DictConfig):
                         callbacks=callbacks,
                         **cfg.trainer
                         )
-    trainer.fit(model=lit_model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloaders)
+    trainer.fit(model=lit_model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloaders, ckpt_path=resumed_ckpt_path)
 
 
 def get_dataloader(phase: str,
@@ -178,7 +186,21 @@ def get_dataloader(phase: str,
                    batch_size: int,
                    num_workers: int,
                    cuda: bool) -> Tuple[ADDataset, DataLoader]:
-    dataset = ADDataset(phase=phase, **data_cfg)
+    num_datasets = len(data_cfg.pdb_paths)
+    if data_cfg.designability_csvs is None:
+        data_cfg.designability_csvs = [None] * num_datasets
+
+    datasets = [ADDataset(pdb_path=data_cfg.pdb_paths[i],
+                          designability_csv=data_cfg.designability_csvs[i],
+                          phase=phase, **data_cfg) for i in range(num_datasets)]
+    if phase == "train":
+        dataset = MultiDataset(datasets, data_cfg.dataset_weights, primary_dset_idx=0)
+    elif phase in ["eval", "eval2"]:
+        # only use the primary dataset for validation
+        dataset = datasets[0]
+    else:
+        raise ValueError(f"Invalid phase: {phase}")
+
     dataloader = DataLoader(dataset,
                             batch_size=batch_size,
                             num_workers=num_workers,
@@ -186,8 +208,8 @@ def get_dataloader(phase: str,
                             shuffle=(phase == "train"),
                             drop_last=True
                             )
-    return dataset, dataloader
 
+    return dataset, dataloader
 
 
 def update_config(cfg: DictConfig) -> None:

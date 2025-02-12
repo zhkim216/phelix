@@ -1,0 +1,55 @@
+# Wandb configuration
+project: "allatom_design"  # Wandb project name
+wandb_id: "richardshuai"  # Wandb username
+group: "debug" # Wandb group name
+no_wandb: false
+exp_name: "denovo_pmpnn_if"
+
+# Sampling run settings
+sample_dir: /media/scratch/datasets/denovo500/pdbs
+pdb_key_list: null
+input_fasta_dir: null  # use sequences in input fastas for self-consistency eval, rather than using ProteinMPNN
+input_pdb_dir: null  # use structures in input pdbs for self-consistency eval, rather than using ProteinMPNN or fastas
+skip_pdbs: null  # stem of pdb files to skip
+num_workers: 10
+out_dir: /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/proteinmpnn_inverse_fold
+overwrite_out_dir: true  # if true, delete existing output directory
+seed: 0
+cuda: true
+
+
+# MPNN args
+mpnn:
+  mpnn_cfg: allatom_design/configs/mpnn/proteinmpnn.yaml
+  mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
+  overrides:
+    # num seqs per structure will be batch_size * number_of_batches
+    batch_size: 1
+    number_of_batches: 1
+    temperature: 0.1
+    verbose: false
+
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: "af2"  # ["esmfold", "af2", "omegafold"]
+  af2:
+    data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
+    num_models: 5
+    save_best: true  # save best plddt model
+    sample_models: true  # randomly sample models from the ensemble
+    num_recycles: 3
+    use_multimer: false
+  esmfold:
+    max_tokens_per_batch: 512
+  omegafold:
+    num_pseudo_msa: 15
+    mask_rate: 0.12
+    num_recycle: 2  # performance saturates after around 10 recycles
+    deterministic: true
+    subbatch_size: null
+    cache_file: /media/scratch/huang_lab/cache/omegafold/omegafold.pt
+
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

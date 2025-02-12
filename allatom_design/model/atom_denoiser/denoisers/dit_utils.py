@@ -211,3 +211,26 @@ class LabelEmbedder(nn.Module):
             labels = self.token_drop(labels, force_drop_ids)
         embeddings = self.embedding_table(labels)
         return embeddings
+
+
+class DenoisingMLPBlock(nn.Module):
+    """
+    MLP block with adaptive layer norm zero (adaLN-Zero) conditioning. Basically a DiT block, but without attention.
+    """
+    def __init__(self, hidden_size, mlp_dropout: float, mlp_ratio=4.0):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        mlp_hidden_dim = int(hidden_size * mlp_ratio)
+        approx_gelu = lambda: nn.GELU(approximate="tanh")
+        self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=mlp_dropout)
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, 3 * hidden_size, bias=True)
+        )
+
+    def forward(self, x, c: TensorType["b n h", float],  # per-token conditioning
+                ):
+        assert c.dim() == 3
+        shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(3, dim=-1)
+        x = x + gate_mlp * self.mlp(modulate(self.norm1(x), shift_mlp, scale_mlp))
+        return x

@@ -202,6 +202,33 @@ class MiniMPNN(nn.Module):
         return h_V, h_E, E_idx
 
 
+    def encode_bb_coords(self, bb_coords, seq_mask, residue_index, t_bb: TensorType["b", float]):
+        # create dummy aatype
+        aatype_dummy = F.one_hot(torch.zeros_like(residue_index), self.n_aatype).float()
+
+        # condition on backbone time
+        time_cond = None
+        if self.use_time_cond:
+            time_cond = self.noise_block(t_bb)
+
+        feature_dict = {
+            "X": bb_coords,
+            "S": aatype_dummy,
+            "S_self_cond": None,
+            "time_cond": time_cond,
+            "mask": seq_mask,
+            "chain_mask": seq_mask,  # TODO: double check this
+            "R_idx": residue_index,
+            "chain_labels": seq_mask,  # TODO: add chain index here?
+            "randn": None,
+        }
+
+        ### Encoder ###
+        h_V, h_E, E_idx = self.encode(feature_dict)
+
+        return h_V
+
+
 class NoiseConditioningBlock(nn.Module):
     def __init__(self, n_in_channel, n_out_channel):
         super().__init__()
@@ -248,7 +275,7 @@ class ProteinFeatures(torch.nn.Module):
         super(ProteinFeatures, self).__init__()
         self.edge_features = edge_features
         self.node_features = node_features
-        self.top_k = top_k
+        self.top_k = top_k if top_k is not None else np.inf  # inf for fully-connected graph
         self.num_rbf = num_rbf
         self.num_positional_embeddings = num_positional_embeddings
 
@@ -264,7 +291,7 @@ class ProteinFeatures(torch.nn.Module):
         D_max, _ = torch.max(D, -1, keepdim=True)
         D_adjust = D + (1.0 - mask_2D) * D_max
         D_neighbors, E_idx = torch.topk(
-            D_adjust, np.minimum(self.top_k, X.shape[1]), dim=-1, largest=False
+            D_adjust, np.minimum(self.top_k, X.shape[1]).astype(int), dim=-1, largest=False
         )
         return D_neighbors, E_idx
 

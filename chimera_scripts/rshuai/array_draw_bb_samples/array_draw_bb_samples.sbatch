@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a10_bb3_draw_bb_samples
+#SBATCH --job-name=a12_bb9_smax
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -9,7 +9,7 @@
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
 #
-#SBATCH --array=0-4%5
+#SBATCH --array=0-4
 
 # Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.sh
@@ -35,20 +35,20 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
-# Denoiser checkpoint
-MODEL_NAME=a11_bb1
-AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-epoch3239.ckpt
-
 # Sampling sweep values
-s_max_values=(40 80 120 160 320)
-s_max=${s_max_values[$SLURM_ARRAY_TASK_ID]}
+s_max_values=(80 40 20 10 5)
+s_max=${s_max_values[${SLURM_ARRAY_TASK_ID}]}
+
+# Denoiser checkpoint
+MODEL_NAME=a12_bb9
+AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-step550000-epoch3313.ckpt
 
 # Wandb settings
 WANDB_ID=richardshuai
-GROUP=${MODEL_NAME}_s0
+GROUP=a12_bb9_smax
 
 # Set the experiment name to include the current s_max_override value
-EXP_NAME=${MODEL_NAME}_bb_smax${s_max}
+EXP_NAME=${MODEL_NAME}_smax${s_max}
 
 # Run eval script
 cd ${BASE_DIR}
