@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c3_bb1
+#SBATCH --job-name=baseline_dit_12b
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8

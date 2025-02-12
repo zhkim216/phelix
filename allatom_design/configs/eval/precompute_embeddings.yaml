@@ -1,4 +1,4 @@
-compute_mpnn: false
+compute_mpnn: true
 compute_esm3: true
 
 train_pdb_key_file: /scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_keys.list
