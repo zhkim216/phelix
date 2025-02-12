@@ -36,8 +36,8 @@ EXP_NAME=nova_a3
 GROUP=nova
 
 # Dataset paths
-PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
-DESIGNABILITY_CSV=null
+# PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
+PDB_PATh=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
@@ -47,16 +47,11 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     data.fixed_size=256 \
+    data.subset_length_range=[32,256] \
     train.batch_size=64 \
     train.compile_model=true \
-    trainer.strategy=ddp_find_unused_parameters_true \
-    model.task=backbone \
     denoiser=u_dit_denoiser \
-    optim.optimizer=adam_inv_sqrt \
-    checkpointing.save_latest_every_n_epochs=80 \
-    checkpointing.save_ema_every_n_epochs=20 \
-    trainer.check_val_every_n_epoch=20 \
+    trainer.check_val_every_n_epoch=2 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
