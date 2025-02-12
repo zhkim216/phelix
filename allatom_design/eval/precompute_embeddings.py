@@ -1,15 +1,19 @@
 import os
 import warnings
+from collections import defaultdict
 from pathlib import Path
 
 import hydra
+import numpy as np
+import pandas as pd
 import torch
-from esm3.esm.models.esm3 import ESM3
 from huggingface_hub import login
 from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.eval.esm3_utils import create_esm3_embeddings
-from allatom_design.eval.proteinmpnn_utils import load_mpnn, create_mpnn_embeddings
+from allatom_design.eval.proteinmpnn_utils import (create_mpnn_embeddings,
+                                                   load_mpnn)
+from esm3.esm.models.esm3 import ESM3
 
 warnings.filterwarnings("ignore")
 
@@ -17,15 +21,35 @@ warnings.filterwarnings("ignore")
 def main(cfg: DictConfig):
     device = torch.device("cuda")
 
-    pdb_key_files = [cfg.train_pdb_key_file, cfg.eval_pdb_key_file, cfg.eval2_pdb_key_file]
+    # Get pdb keys for each phase
+    phase_to_pdb_key_files = {"train": cfg.train_pdb_key_file, "eval": cfg.eval_pdb_key_file, "eval2": cfg.eval2_pdb_key_file}
+    pdbs_df = defaultdict(list)
+    for phase, file_path in phase_to_pdb_key_files.items():
+        if file_path is None:
+            # skip if key file is not provided
+            continue
 
-    pdbs = []
-    for file_path in pdb_key_files:
         with open(file_path) as f:
-            pdbs.extend(f.read().split("\n")[:-1])
+            phase_pdbs = np.array(f.read().split("\n")[:-1])
 
+        if cfg.subsample_n is not None:
+            # subsample to at max subsample_n pdbs from each phase
+            phase_pdbs = np.random.choice(phase_pdbs, min(cfg.subsample_n, len(phase_pdbs)), replace=False)
+
+        pdb_keys = [Path(pdb).stem for pdb in phase_pdbs]  # remove .pdb extension in case it exists in key list
+        pdbs_df["pdb_key"].extend(pdb_keys)
+        pdbs_df["phase"].extend([phase] * len(pdb_keys))
+    pdbs_df = pd.DataFrame(pdbs_df)
+
+    # Dump pdbs with pre-computed embeddings to keys lists
+    for phase in pdbs_df["phase"].unique():
+        phase_pdbs = pdbs_df[pdbs_df["phase"] == phase]
+        with open(Path(cfg.out_dir, f"precomputed_{phase}_pdb_keys.list"), "w") as f:
+            f.write("\n".join(phase_pdbs["pdb_key"]))
+
+    # Compute embeddings for FPD
     pdbs_dir = Path(cfg.pdbs_dir)
-    pdb_paths = [str(pdbs_dir / f"{pdb}.pdb") for pdb in pdbs]
+    pdb_paths = [str(pdbs_dir / f"{pdb}.pdb") for pdb in pdbs_df["pdb_key"]]
 
     if cfg.compute_mpnn:
         mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)

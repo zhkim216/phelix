@@ -35,17 +35,17 @@ def create_esm3_embeddings(vqvae_encoder,
                 print(e)
                 continue
 
-    out_file = Path(out_dir) / "esm3_embed.pkl"
-    with open(out_file, "wb") as f:
-        pickle.dump(embedding_dict, f)
+    # Dump each embedding to a pickle file
+    for pdb_key, embed in embedding_dict.items():
+        out_file = Path(out_dir) / f"{pdb_key}.pkl"
+        with open(out_file, "wb") as f:
+            pickle.dump(embed, f)
 
 
-def load_esm3_embeddings(pdbs: List[str], embed_path: str):
+def load_esm3_embeddings(embedding_paths: List[str]):
     all_embeds = []
-    fp = Path(embed_path)
-    with open(fp, "rb") as f:
-        embed_dict = pickle.load(f)
-    for k, v in embed_dict.items():
-        if k in pdbs:
-            all_embeds.append(v[0][0].mean(-2).numpy())
+    for embedding_path in embedding_paths:
+        with open(embedding_path, "rb") as f:
+            embed = pickle.load(f)
+        all_embeds.append(embed[0][0].mean(-2).numpy())
     return np.array(all_embeds)
