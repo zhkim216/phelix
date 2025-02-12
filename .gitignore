@@ -1,4 +1,5 @@
 .vscode
+.hydra/
 out_dir
 cutlass
 
@@ -155,6 +156,12 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+#wandb
+wandb/
+
+#text files
+*.txt
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

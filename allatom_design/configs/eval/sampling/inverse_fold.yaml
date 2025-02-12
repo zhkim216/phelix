@@ -29,12 +29,14 @@ num_pdbs: 16  # number of structures to inverse fold
 num_seqs_per_pdb: 1  # number of sequences per structure to inverse fold
 subset_length_range: [32, 256]
 n_traj: 0  # number of trajectories to randomly save
-limit_traj_steps: 10  # limit the number of steps we save in a trajectory (evenly spaced)
-limit_diff_traj_steps: 3
+limit_traj_steps: 0  # limit the number of steps we save in a trajectory (evenly spaced)
+limit_diff_traj_steps: 0
 traj_conect: false
 
 # Sampling hyperparameters
+temperature: 0.1
 aatype_decoding_order_mode: "random"
+seq_only: false  # if true, sample sequence without sampling sidechains
 timestep_schedule:
   num_steps: 10
   mode: "linear"
@@ -51,7 +53,7 @@ scn_diffusion:
     t_end: 1.0
   noise_schedule:
     name: "step_scale"
-    c: 1.4
+    c: 1.5
   churn_cfg:
     s_churn: 0
     s_noise: 1.0
@@ -59,19 +61,15 @@ scn_diffusion:
     s_t_max: 50.0
     num_steps: ${scn_diffusion.num_steps}
 
-  # Autoguidance
-  autoguidance_cfg:
-    use_autoguidance: false
-    w: 1.0
-
 
 # Structure prediction model args
 struct_pred_cfg:
-  model_name: "omegafold"  # ["esmfold", "af2", "omegafold"]
+  model_name: "esmfold"  # ["esmfold", "af2", "omegafold"]
   af2:
     data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
     num_models: 1  # only 1 model is currently supported
     sample_models: true  # randomly sample models from the ensemble
+    save_best: false
     num_recycles: 3
     use_multimer: false
   esmfold:

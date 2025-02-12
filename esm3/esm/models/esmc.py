@@ -15,17 +15,13 @@ except ImportError:
     pad_input = None
     unpad_input = None
     is_flash_attn_available = False
+    print("================ WARNING: flash_attn not available. ================")
 
 from esm3.esm.layers.regression_head import RegressionHead
 from esm3.esm.layers.transformer_stack import TransformerStack
-from esm3.esm.sdk.api import (
-    ESMCInferenceClient,
-    ESMProtein,
-    ESMProteinTensor,
-    ForwardTrackData,
-    LogitsConfig,
-    LogitsOutput,
-)
+from esm3.esm.sdk.api import (ESMCInferenceClient, ESMProtein,
+                              ESMProteinTensor, ForwardTrackData, LogitsConfig,
+                              LogitsOutput)
 from esm3.esm.tokenization import EsmSequenceTokenizer
 from esm3.esm.utils import encoding
 from esm3.esm.utils.constants.models import ESMC_600M
@@ -181,6 +177,12 @@ class ESMC(nn.Module, ESMCInferenceClient):
         return ESMProteinTensor(sequence=sequence_tokens).to(
             next(self.parameters()).device
         )
+
+    def tokenize_sequences(self, sequences_list: list[str]) -> _BatchedESMProteinTensor:
+        sequence_tokens = self._tokenize(sequences_list)
+        batched_protein_tensor = _BatchedESMProteinTensor(sequence=sequence_tokens)
+        return batched_protein_tensor
+
 
     def decode(self, input: ESMProteinTensor) -> ESMProtein:
         input = attr.evolve(input)  # Make a copy

@@ -1,0 +1,13 @@
+seed: 0
+pdb_dir: null
+pdb_key_list: null
+pdb_key_ext: ".pdb"
+out_dir: null
+num_workers: 8
+t_seqs: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+interface_only: true  # only fix positions among interface residues
+
+
+hydra:
+  run:
+    dir: .

@@ -49,18 +49,13 @@ def main(cfg: DictConfig):
     # Gather EMA checkpoints
     ema_ckpts = natsorted(glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/ema_tracker/*.ckpt"))
 
-    # Gather denoiser checkpoints
-    pattern = re.compile(r"(?:ad|sd)-epoch\d+\.ckpt$")  # only consider ckpts of form ad-epochXXXX.ckpt or sd-epochXXXX.ckpt
-    denoiser_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
-    denoiser_ckpts = natsorted([ckpt for ckpt in denoiser_ckpts if pattern.search(Path(ckpt).name)])
-
     # Compute posthoc EMA coefficients based on input steps/stds and desired output step/stds
     out_step = cfg.out_step
     if cfg.out_stds is None:
         out_stds = np.arange(*cfg.out_stds_arange)
     else:
         out_stds = cfg.out_stds
-    print(f"Computing posthoc EMA coefficients for: \nStep {out_step} \nStds {out_stds}...")
+    print(f"Computing posthoc EMA coefficients for: step {out_step} \nStds: {out_stds}...")
 
     in_steps = []
     in_stds = []
@@ -80,6 +75,7 @@ def main(cfg: DictConfig):
 
     # Initialize output state dicts
     out_state_dicts = []
+
     for _ in out_stds:
         out_state_dict = copy.deepcopy(ckpt_dict["ema_state"]["emas"][0])
         for p in out_state_dict.values():
@@ -99,10 +95,15 @@ def main(cfg: DictConfig):
                     p += coefs[ei, j] * ema_weights_in[n]
             ei += 1
 
+    # Gather denoiser checkpoints
+    pattern = re.compile(r"(?:ad|sd)-step(\d+)-epoch(\d+)\.ckpt$")  # only consider checkpoints of the form ad-step{step}-epoch{epoch}.ckpt or sd-step{step}-epoch{epoch}.ckpt
+    denoiser_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
+    denoiser_ckpts = natsorted([ckpt for ckpt in denoiser_ckpts if pattern.search(Path(ckpt).name)])
+
     for out_std, out_state_dict in zip(out_stds, out_state_dicts):
         # Create new checkpoints containing EMA weights
         out_ckpt = Path(cfg.out_dir, f"ema-step{out_step}-std{out_std:.3f}.ckpt")
-        base_ckpt = denoiser_ckpts[0]  # besides the updated EMA weights, the rest of the model will be the same as the last checkpoint
+        base_ckpt = denoiser_ckpts[-1]  # besides the updated EMA weights, the rest of the model will be the same as the last checkpoint
         ckpt_dict = torch.load(base_ckpt, map_location="cpu")
 
         # Load the base model

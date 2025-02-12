@@ -7,7 +7,7 @@ group: "debug" # Wandb group name
 # Run settings
 no_wandb: false  # Disable wandb logging
 seed: 0
-start_epoch: 0  # start evaluation after this epoch, 0 or null to start from the beginning
+start_step: 0  # start evaluation after this epoch, 0 or null to start from the beginning
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 batch_size: 64
 num_workers: 10
@@ -26,11 +26,17 @@ data:
     designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
     n_random_subset: null
 
-subset_length_range: [64, 256]  # only evaluate on sequences within this length range
+subset_length_range: null # only evaluate on sequences within this length range
 
 # Inverse folding options
 aatype_decoding_order_mode: "random"
-num_steps_list: [1, 20, 100]  # number of denoising steps for inverse folding
+seq_only: true  # true to not pack sidechains during sampling
+temperature: 0.1
+repack_last: true  # after design, repack the final sequence obtained
+psce_threshold: null  # only keep sidechains below this threshold during design; null to keep all
+noise_labels: null  # per-residue noise labels, float for same noise for each residue  # TODO: implement user-provided per-residue noise labels
+
+num_steps_list: [50]  # number of denoising steps for inverse folding
 timestep_schedule:
   num_steps: null  # will be filled in by num_steps_list
   mode: "linear"
@@ -47,7 +53,7 @@ scn_diffusion:
     t_end: 1.0
   noise_schedule:
     name: "step_scale"
-    c: 1.4
+    c: 1.5
   churn_cfg:
     s_churn: 0
     s_noise: 1.0
@@ -55,21 +61,17 @@ scn_diffusion:
     s_t_max: 50.0
     num_steps: ${scn_diffusion.num_steps}
 
-  # Autoguidance
-  autoguidance_cfg:
-    use_autoguidance: false
-    w: 1.0
-
 # Co-design self-consistency eval options
 num_codes_sc_batches: 1
 
 # Structure prediction model args
 struct_pred_cfg:
-  model_name: "omegafold"  # ["esmfold", "af2", "omegafold"]
+  model_name: "af2"  # ["esmfold", "af2", "omegafold"]
   af2:
     data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
     num_models: 1  # only 1 model is currently supported
-    sample_models: true  # randomly sample models from the ensemble
+    sample_models: false  # randomly sample models from the ensemble
+    save_best: false
     num_recycles: 3
     use_multimer: false
   esmfold:

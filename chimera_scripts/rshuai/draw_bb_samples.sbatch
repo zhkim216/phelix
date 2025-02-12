@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a10_bb3_draw_bb_samples
+#SBATCH --job-name=a13_bb0_draw_samples
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -35,13 +35,13 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Denoiser checkpoint
-MODEL_NAME=a11_bb1
-AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-epoch3239.ckpt
+MODEL_NAME=a13_bb0
+AD_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/ad-step650000-epoch3915.ckpt
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_draw_bb_samples
-GROUP=${MODEL_NAME}_s0
+EXP_NAME=${MODEL_NAME}_bb_samp_noaug_undesignable
+GROUP=${MODEL_NAME}
 
 # Run eval script
 cd ${BASE_DIR}
@@ -56,7 +56,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py 
     ss_kld.dssp_csv=${DSSP_CSV} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
-    s_max_override=80 \
     n_samples_per_length=10 \
-    +cond_labels.designability=DESIGNABLE \
+    +cond_labels.designability=UNDESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}

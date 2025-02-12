@@ -574,11 +574,11 @@ atom_types = [
 atom_order = {atom_type: i for i, atom_type in enumerate(atom_types)}
 atom_type_num = len(atom_types)  # := 37.
 bb_atoms = ["N", "CA", "C", "O"]
+bb_atom_order = {atom_type: i for i, atom_type in enumerate(bb_atoms)}
+num_bb_atoms = len(bb_atoms)
 bb_idxs = [atom_order[atom_type] for atom_type in bb_atoms]  # := [0, 1, 2, 4].
 non_bb_idxs = [i for i in range(atom_type_num) if i not in bb_idxs]  # := [3, 5, ..., 36]
-
-# For indexing N/C/O from backbone-only representation
-nco_idxs = [i for i in range(len(bb_idxs)) if bb_atoms[i] != "CA"]
+atom14_bb_idxs = [0,1,2,3]
 
 # A compact atom encoding with 14 columns
 # pylint: disable=line-too-long
@@ -679,11 +679,102 @@ restype_name_to_atom14_names = {
         "",
     ],
     "VAL": ["N", "CA", "C", "O", "CB", "CG1", "CG2", "", "", "", "", "", "", ""],
-    "UNK": ["", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+    "UNK": ["N", "CA", "C", "O", "", "", "", "", "", "", "", "","", ""],
 }
 # pylint: enable=line-too-long
 # pylint: enable=bad-whitespace
 
+restype_name_to_atom14_names_no_pad = {
+    "ALA": ["N", "CA", "C", "O", "CB"],
+    "ARG": [
+        "N",
+        "CA",
+        "C",
+        "O",
+        "CB",
+        "CG",
+        "CD",
+        "NE",
+        "CZ",
+        "NH1",
+        "NH2",
+    ],
+    "ASN": ["N", "CA", "C", "O", "CB", "CG", "OD1", "ND2",],
+    "ASP": ["N", "CA", "C", "O", "CB", "CG", "OD1", "OD2",],
+    "CYS": ["N", "CA", "C", "O", "CB", "SG"],
+    "GLN": ["N", "CA", "C", "O", "CB", "CG", "CD", "OE1", "NE2",],
+    "GLU": ["N", "CA", "C", "O", "CB", "CG", "CD", "OE1", "OE2",],
+    "GLY": ["N", "CA", "C", "O",],
+    "HIS": [
+        "N",
+        "CA",
+        "C",
+        "O",
+        "CB",
+        "CG",
+        "ND1",
+        "CD2",
+        "CE1",
+        "NE2",
+    ],
+    "ILE": ["N", "CA", "C", "O", "CB", "CG1", "CG2", "CD1",],
+    "LEU": ["N", "CA", "C", "O", "CB", "CG", "CD1", "CD2",],
+    "LYS": ["N", "CA", "C", "O", "CB", "CG", "CD", "CE", "NZ",],
+    "MET": ["N", "CA", "C", "O", "CB", "CG", "SD", "CE",],
+    "PHE": [
+        "N",
+        "CA",
+        "C",
+        "O",
+        "CB",
+        "CG",
+        "CD1",
+        "CD2",
+        "CE1",
+        "CE2",
+        "CZ",
+    ],
+    "PRO": ["N", "CA", "C", "O", "CB", "CG", "CD",],
+    "SER": ["N", "CA", "C", "O", "CB", "OG",],
+    "THR": ["N", "CA", "C", "O", "CB", "OG1", "CG2",],
+    "TRP": [
+        "N",
+        "CA",
+        "C",
+        "O",
+        "CB",
+        "CG",
+        "CD1",
+        "CD2",
+        "NE1",
+        "CE2",
+        "CE3",
+        "CZ2",
+        "CZ3",
+        "CH2",
+    ],
+    "TYR": [
+        "N",
+        "CA",
+        "C",
+        "O",
+        "CB",
+        "CG",
+        "CD1",
+        "CD2",
+        "CE1",
+        "CE2",
+        "CZ",
+        "OH",
+    ],
+    "VAL": ["N", "CA", "C", "O", "CB", "CG1", "CG2",],
+    "UNK": ["N", "CA", "C", "O",],
+}
+
+restype_name_to_atom14_idx = {
+    aa: [atom_order.get(atom) for atom in atoms]
+    for aa, atoms in restype_name_to_atom14_names_no_pad.items()
+}
 
 # This is the standard residue order when coding AA type as a number.
 # Reproduce it by taking 3-letter AA codes and sorting them alphabetically.
@@ -714,7 +805,9 @@ restype_num = len(restypes)  # := 20.
 unk_restype_index = restype_num  # Catch-all index for unknown restypes.
 
 restypes_with_x = restypes + ["X"]
+restype_with_x_num = len(restypes_with_x)
 restype_order_with_x = {restype: i for i, restype in enumerate(restypes_with_x)}
+idx_to_restype_with_x = {i: restype for restype, i in restype_order_with_x.items()}
 
 
 def sequence_to_onehot(
@@ -793,6 +886,8 @@ restype_3to1 = {v: k for k, v in restype_1to3.items()}
 
 # Define a restype name for all unknown residues.
 unk_restype = "UNK"
+restype_1to3_with_X = restype_1to3.copy()
+restype_1to3_with_X["X"] = unk_restype
 
 resnames = [restype_1to3[r] for r in restypes] + [unk_restype]
 resname_to_idx = {resname: i for i, resname in enumerate(resnames)}
@@ -1115,3 +1210,107 @@ standard_residue_bonds, _, standard_residue_bond_angles = load_stereo_chemical_p
 
 # Map atom mask to residue type
 atom37_mask_restype = {tuple(mask): i for i, mask in enumerate(restype_atom37_mask)}
+
+def _make_restype_atom14_to_atom37():
+  """Map from atom14 to atom37 per residue type."""
+  restype_atom14_to_atom37 = []  # mapping (restype, atom14) --> atom37
+  for rt in restypes_with_x:
+    atom_names = restype_name_to_atom14_names[
+        restype_1to3_with_X[rt]]
+    restype_atom14_to_atom37.append([
+        (atom_order[name] if name else 1) #set to CA if missing
+        for name in atom_names
+    ])
+
+  restype_atom14_to_atom37 = np.array(restype_atom14_to_atom37, dtype=np.int32)
+  return restype_atom14_to_atom37
+
+def _make_restype_atom14_mask_with_x():
+  """Mask of which atoms are present for which residue type in atom14."""
+  restype_atom14_mask = []
+
+  for rt in restypes_with_x:
+    atom_names = restype_name_to_atom14_names[
+        restype_1to3_with_X[rt]]
+    restype_atom14_mask.append([(1. if name else 0.) for name in atom_names])
+
+  restype_atom14_mask = np.array(restype_atom14_mask, dtype=np.float32)
+  return restype_atom14_mask
+
+def _make_restype_to_atom37_idx():
+    restype_to_atom37_idx = []
+
+    for rt in restypes_with_x:
+        atom_names = restype_name_to_atom14_names[
+            restype_1to3_with_X[rt]]
+        restype_to_atom37_idx.append([(atom_order[name] if name != "" else -1) for name in atom_names])
+
+    restype_to_atom37_idx = np.array(restype_to_atom37_idx, dtype=np.int64)
+    return restype_to_atom37_idx
+
+
+def _make_restype_atom37_to_atom14():
+    restype_atom37_to_atom14 = []
+
+    for rt in restypes_with_x:
+        atom_names = restype_name_to_atom14_names[restype_1to3_with_X[rt]]
+        atom_name_to_idx14 = {name: i for i, name in enumerate(atom_names)}
+        restype_atom37_to_atom14.append(
+            [
+                (atom_name_to_idx14[name] if name in atom_name_to_idx14 else 0)
+                for name in atom_types
+            ]
+        )
+    return np.array(restype_atom37_to_atom14, dtype=np.int32)
+
+RESTYPE_ATOM14_TO_ATOM37 = _make_restype_atom14_to_atom37()
+RESTYPE_ATOM14_MASK_WITH_X = _make_restype_atom14_mask_with_x()
+RESTYPE_TO_ATOM37_IDX = _make_restype_to_atom37_idx()
+RESTYPE_TO_NUM_ATOMS = np.sum(RESTYPE_ATOM14_MASK_WITH_X, axis = 1)
+RESTYPE_ATOM37_TO_ATOM14 = _make_restype_atom37_to_atom14()
+
+""""
+Constant for determining interface residues
+"""
+
+interface_cutoff = 15 #Angstroms, from AF3
+
+"""
+Constants for positoinal encoding
+"""
+#max relative residue distance
+r_max = 32
+
+#max relative chain distance
+s_max = 2
+
+"""
+Residue mapping for NCAAs, some we map to X/UNK, other's we map to a corresponding canonical amino acid
+
+MSE: Selenomethionine (Methionine with selenium replacing sulfur)
+CME: S,S-(2-Hydroxyethyl)thio-cysteine (Cysteine modified with a hydroxyethyl group)
+CSO: S-hydroxycysteine (Cysteine with a hydroxyl group replacing sulfur)
+TPO: Phosphothreonine (Threonine with a phosphate group)
+SEP: Phosphoserine (Serine with a phosphate group)
+PTR: Phosphotyrosine (Tyrosine with a phosphate group)
+MLY: Nε-methyllysine (Lysine methylated at the ε-amino group)
+HYP: Hydroxyproline (Proline with a hydroxyl group)
+PCA: Pyroglutamate (Cyclized glutamine or glutamic acid)
+ACE: Acetyl group (Used as a blocking group, often at the N-terminus)
+"""
+
+ncaa_mapping = {
+    'MSE':"M",
+    'CME':"X",
+    'CSO':"X",
+    'TPO':"X",
+    'SEP':"X",
+    'PTR':"X",
+    'MLY':"X",
+    'HYP':"X",
+    'PCA':"X",
+    'ACE':"X",
+    'GTS':"X",
+    'GSH':"X"
+}
+

@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
+from allatom_design.data.data import trim_to_max_len
 from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.datasets.ad_dataset import ADDataset
 from allatom_design.eval import eval_metrics, sampling_utils
@@ -83,18 +84,20 @@ def main(cfg: DictConfig):
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     # Get checkpoints from denoiser training run
-    pattern = re.compile(r"sd-epoch\d+\.ckpt$")  # only consider ckpts of form sd-epochXXXX.ckpt
+    pattern = re.compile(r"sd-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form sd-step{step}-epoch{epoch}.ckpt
     sd_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
     sd_ckpts = natsorted([ckpt for ckpt in sd_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
 
-    dataset = None  # we will load the dataset based on the model config
-
     pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints")
     for sd_ckpt in pbar:
-        # Skip if epoch is before start_epoch
-        epoch = int(Path(sd_ckpt).stem.replace("sd-epoch", ""))
-        pbar.set_postfix_str(f"Epoch: {epoch}")
-        if (cfg.start_epoch is not None) and (epoch < cfg.start_epoch):
+        match = pattern.search(Path(sd_ckpt).name)
+        epoch = int(match.group(1))
+        global_step = torch.load(sd_ckpt).get('global_step')
+
+        pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
+
+        # Skip if global_step is before start_step
+        if (cfg.start_step is not None) and (global_step < cfg.start_step):
             continue
 
         # Load denoiser model and dataset
@@ -102,11 +105,10 @@ def main(cfg: DictConfig):
         with open_dict(lit_sd_model.cfg.data):
             lit_sd_model.cfg.data.update({k: v for k, v in cfg.data.items() if v is not None})  # override data config where specified
 
-        if dataset is None:
-            # Load dataset based on model config
-            dataset = ADDataset(phase="eval", **lit_sd_model.cfg.data)
-            val_dataloader = DataLoader(dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True, shuffle=False, drop_last=False)
-            dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
+        # Load dataset based on model config
+        dataset = ADDataset(phase="eval", evaluation_mode= True, **lit_sd_model.cfg.data)
+        val_dataloader = DataLoader(dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True, shuffle=False, drop_last=False)
+        dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
 
         # Set up sidechain diffusion inputs
         t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
@@ -120,7 +122,6 @@ def main(cfg: DictConfig):
                       "timesteps": None,  # filled in based on batch size
                       "noise_schedule": noise_schedule,
                       "churn_cfg": churn_cfg,
-                      "autoguidance_cfg": dict(cfg.scn_diffusion.autoguidance_cfg),
                       "return_scn_diffusion_aux": False
                       }
 
@@ -140,7 +141,8 @@ def main(cfg: DictConfig):
                 Path(seq_recovery_dir).mkdir(parents=True, exist_ok=True)
                 seq_rec_df_S = defaultdict(list)
                 for batch in tqdm(val_dataloader, desc="Evaluating sequence recovery on validation set", leave=False):
-                    x, seq_mask, residue_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device)
+                    batch = trim_to_max_len(batch)
+                    x, aatype, seq_mask, missing_atom_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["missing_atom_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
                     timesteps = t_seq[None].expand(x.shape[0], -1).to(device)
 
                     # Define sidechain diffusion timesteps
@@ -151,19 +153,30 @@ def main(cfg: DictConfig):
 
                     x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
                         x,
+                        aatype=aatype,
                         seq_mask=seq_mask,
+                        missing_atom_mask=missing_atom_mask,
                         residue_index=residue_index,
+                        chain_index=chain_index,
+                        cond_labels=cond_labels_in,
                         timesteps=timesteps,
                         aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
-                        cond_labels=cond_labels_in,
+                        seq_only=cfg.seq_only,
+                        temperature=cfg.temperature,
+                        repack_last=cfg.repack_last,
+                        psce_threshold=cfg.psce_threshold,
+                        noise_labels=cfg.noise_labels,
                         scd_inputs=scd_inputs,
                     )
+
+
                     samples = {"x_denoised": x_denoised,
                             "seq_mask": seq_mask,
                             "residue_index": residue_index,
                             "pred_aatype": aatype_denoised,
                             "aatype_pred_traj": aux["aatype_pred_traj"],
                             "aatype_t_traj": aux["aatype_t_traj"],
+                            "psce": torch.zeros((x.shape[0], x.shape[1], 33))
                     }
 
                     # Update info for sequence recovery eval
@@ -221,6 +234,10 @@ def main(cfg: DictConfig):
                 cfg.timestep_schedule.num_steps = S
                 t_seq = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
 
+                # We set the seed for the same batch each time
+                g = torch.Generator()
+                g.manual_seed(cfg.seed)
+
                 val_dataloader = DataLoader(
                     dataset,
                     batch_size=cfg.batch_size,
@@ -228,13 +245,16 @@ def main(cfg: DictConfig):
                     pin_memory=True,
                     shuffle=True,
                     drop_last=False,
+                    generator=g
                 )
 
                 pdbs = []
                 for bi, batch in enumerate(val_dataloader):
                     if bi >= cfg.num_codes_sc_batches:
                         break
-                    x, seq_mask, residue_index = batch["x"].to(device), batch["seq_mask"].to(device), batch["residue_index"].to(device)
+
+                    batch = trim_to_max_len(batch)
+                    x, aatype, seq_mask, missing_atom_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["missing_atom_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
 
                     B = x.shape[0]
                     cond_labels_in = create_cond_labels_input(B, {"designability": "DESIGNABLE"}, device)
@@ -247,19 +267,30 @@ def main(cfg: DictConfig):
                     # Generate samples
                     x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(
                         x,
+                        aatype=torch.zeros_like(aatype),
                         seq_mask=seq_mask,
+                        missing_atom_mask=missing_atom_mask,
                         residue_index=residue_index,
+                        chain_index=chain_index,
+                        cond_labels=cond_labels_in,
                         timesteps=timesteps,
                         aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
-                        cond_labels=cond_labels_in,
+                        seq_only=cfg.seq_only,
+                        temperature=cfg.temperature,
+                        repack_last=cfg.repack_last,
+                        psce_threshold=cfg.psce_threshold,
+                        noise_labels=cfg.noise_labels,
                         scd_inputs=scd_inputs,
                     )
 
                     samples = {
                         "x_denoised": x_denoised,
                         "seq_mask": seq_mask.cpu(),
+                        "missing_atom_mask": missing_atom_mask.cpu(),
                         "residue_index": residue_index,
+                        "chain_index": chain_index,
                         "pred_aatype": aatype_denoised.cpu(),
+                        "psce": aux["psce"]
                     }
 
                     # Save samples
@@ -279,6 +310,7 @@ def main(cfg: DictConfig):
                     eval_codesign=True,
                     temp_dir=f"{cfg.out_dir}/tmp")
 
+
                 # Aggregate results
                 codes_metrics = defaultdict(list)
                 for pdb in pdbs:
@@ -286,12 +318,11 @@ def main(cfg: DictConfig):
                         codes_metrics[f"codes_{k}"].append(v.item())
 
                 # Update metrics
-                metrics.update({f"inv_fold/S{S}/{k}": np.mean(v) for k, v in codes_metrics.items()})
+                metrics.update({f"inv_fold/S{S}/{k}_mean": np.mean(v) for k, v in codes_metrics.items()})
+                metrics.update({f"inv_fold/S{S}/{k}_median": np.median(v) for k, v in codes_metrics.items()})
 
         # Log metrics to wandb
         if not cfg.no_wandb:
-            # Get global step
-            global_step = torch.load(sd_ckpt, map_location="cpu")["global_step"]
             metrics["trainer/global_step"] = global_step
             metrics["trainer/epoch"] = epoch
 

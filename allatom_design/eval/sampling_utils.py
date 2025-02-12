@@ -4,10 +4,13 @@ import numpy as np
 import torch
 from torchtyping import TensorType
 from omegaconf import DictConfig
+from allatom_design.data.data import get_rc_tensor
+import allatom_design.data.residue_constants as rc
 
 
 def get_decoding_order(mode: str,
                        seq_mask: TensorType["b n", float],
+                       mlm_mask_prev: TensorType["b n", int],
                        **kwargs) -> TensorType["b n", int]:
     """
     Get the order in which residues should be decoded, from 0 to N-1.
@@ -22,12 +25,10 @@ def get_decoding_order(mode: str,
     """
     B, N = seq_mask.shape
 
-    if mode == "random":
-        res_decoding_order = torch.where(seq_mask.bool(), torch.rand_like(seq_mask), 1.0e6)  # decode padded positions last
-        res_decoding_order = res_decoding_order.argsort(dim=-1)
-    elif mode == "autoregressive":
+    if mode == "autoregressive":
         res_decoding_order = torch.arange(N, device=seq_mask.device).expand(B, N)
-        res_decoding_order = torch.where(seq_mask.bool(), res_decoding_order, 1.0e6)  # decode padded positions last
+        res_decoding_order = torch.where(seq_mask.bool(), res_decoding_order, 1.0e6)  # move padded positions to end of order
+        res_decoding_order = torch.where(mlm_mask_prev.bool(), res_decoding_order, 1.0e6) # move already unmaksed positions to end of order
     elif mode == "random_spans":
         timesteps = kwargs["timesteps"]
         lengths = seq_mask.sum(dim=-1).long()
@@ -39,33 +40,86 @@ def get_decoding_order(mode: str,
             chunks = torch.split(indices, chunk_sizes.tolist())
             chunks = [chunks[i] for i in torch.randperm(len(chunks))]
             res_decoding_order[i, :lengths[i]] = torch.cat(chunks)
-    elif mode == "random_bidirectional":
-        indices = get_random_bidirectional(seq_mask)
-        res_decoding_order = torch.argsort(indices, dim=-1)
     else:
-        raise NotImplementedError(f"residue decoding order mode {mode} not implemented")
+        res_decoding_order = torch.where(seq_mask.bool(), torch.rand_like(seq_mask), 1.0e6)  # decode padded positions last
+        res_decoding_order = res_decoding_order.argsort(dim=-1)
 
     return res_decoding_order.long()
 
-
-def get_random_bidirectional(seq_mask: TensorType["b n", float]) -> TensorType["b n", int]:
+def get_confidence_decoding_order(mode: str,
+                                  aatype_pred: TensorType["b n", int],
+                                  scaled_seq_probs: TensorType["b n", float],
+                                  psce: TensorType["b n 33", float],
+                                  seq_mask: TensorType["b n", float],
+                                  mlm_mask_prev: TensorType["b n", int]) -> TensorType["b n", int]:
     """
-    Start from a random position and decode residues randomly in both directions.
+    Use sequence probabilities to decide a confidence based sampling order
     """
-    B, N = seq_mask.shape
-    p = torch.rand((B, ), device=seq_mask.device)  # choose percentage of residues to generate to the left; uniform
-    p = torch.stack([p, 1 - p], dim=1)
+    if mode == 'greedy':
+        confidence, _ = torch.max(scaled_seq_probs, dim = -1)
+        confidence = torch.where(seq_mask == 0, -1e6, confidence) #padded tokens sent to end of order
+        confidence = torch.where(mlm_mask_prev == 1, 1e6, confidence) #previously unmasked tokens sent to beginning of order
+        confidence_decoding_order = torch.argsort(torch.argsort(confidence, dim = -1, descending = True)) #update decoding order based on confidence
+    elif mode == 'greedy_psce':
+        scn_atom_mask = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_pred)[..., rc.non_bb_idxs]  # get atom mask corresponding to predicted sequence
+        avg_psce_per_res = (psce * scn_atom_mask).sum(dim=-1) / scn_atom_mask.sum(dim=-1).clamp(min=1)
 
-    partition_flags = torch.multinomial(p, num_samples=N, replacement=True) + 1  # 1=generate to the left, 2=generate to the right
-    partition_flags = partition_flags * seq_mask.long()  # mask out residues that are not in the sequence
-    partition_flags[:, 0] = 0  # the first residue is not a shift
+        # lower psce = higher confidence
+        confidence = -avg_psce_per_res
+        confidence = torch.where(seq_mask == 0, -1e6, confidence) #padded tokens sent to end of order
+        confidence = torch.where(unmasked_prev == 1, 1e6, confidence) #previously unmasked tokens sent to beginning of order
+        confidence_decoding_order = torch.argsort(torch.argsort(confidence, dim = -1, descending = True)) #update decoding order based on confidence
+    else:
+        raise ValueError(f'Confidence mode {mode} has not been implemented yet!')
 
-    start_idx = (partition_flags == 1).sum(dim=1)  # we start based on the number of residues to the left
-    counts = torch.where(partition_flags == 1, torch.cumsum(-1 * (partition_flags == 1), dim=1), partition_flags)
-    counts = torch.where(partition_flags == 2, torch.cumsum(partition_flags == 2, dim=1), counts)
+    return confidence_decoding_order
 
-    indices = (counts + start_idx[..., None]) * seq_mask.long() # add shifts to start index
-    return indices
+
+def update_mlm_mask(mlm_mask: TensorType["b n", float],
+                    aatype_decoding_order: TensorType["b n", int],
+                    aatype_decoding_order_mode: str,
+                    K: TensorType["b", int],
+                    aatype_pred: TensorType["b n", int],
+                    seq_mask: TensorType["b n", float],
+                    scaled_seq_probs: TensorType["b n k", float],
+                    psce: TensorType["b n 33", float]
+                    ) -> TensorType["b n", float]:
+    """
+    Update mlm_mask so that K total residues are unmasked.
+    """
+    mlm_mask_prev = mlm_mask.clone()
+    if aatype_decoding_order_mode in ['greedy', "greedy_psce"]:
+        aatype_decoding_order = get_confidence_decoding_order(mode=aatype_decoding_order_mode,
+                                                              aatype_pred=aatype_pred,
+                                                              scaled_seq_probs=scaled_seq_probs,
+                                                              psce=psce,
+                                                              seq_mask=seq_mask,
+                                                              mlm_mask_prev=mlm_mask_prev)
+
+    ## using decoding order to decide positions to unmask
+    residues_to_unmask = (~mlm_mask_prev.bool()) & (aatype_decoding_order < K[:,None])
+    mlm_mask = residues_to_unmask + mlm_mask_prev
+    return mlm_mask
+
+
+def unmask(curr: TensorType["b n ..."],
+           pred: TensorType["b n ..."],
+           mlm_mask_prev: TensorType["b n", float],
+           mlm_mask: TensorType["b n", float]) -> TensorType["b n ..."]:
+    """
+    Update curr based on pred and newly unmasked residues.
+    """
+    residues_to_unmask = mlm_mask - mlm_mask_prev
+    assert residues_to_unmask.min() >= 0, "Trying to mask residues that are already unmasked"
+
+    # Expand to data dims
+    n_data_dims = len(curr.shape) - 2
+    residues_to_unmask = residues_to_unmask.view(residues_to_unmask.shape + (1,) * n_data_dims)
+
+    # Unmask residues
+    curr = torch.where(residues_to_unmask.bool(), pred, curr)
+
+    return curr
 
 
 def get_timesteps_from_schedule(mode: str,
@@ -93,6 +147,9 @@ def get_timesteps_from_schedule(mode: str,
     elif mode == "last_only":
         timesteps = torch.zeros_like(timesteps)
         timesteps[-1] = 1.0
+    elif mode == "first_only":
+        timesteps = torch.ones_like(timesteps)
+        timesteps[0] = 0.0
     else:
         raise NotImplementedError(f"timestep schedule mode {mode} not implemented")
 

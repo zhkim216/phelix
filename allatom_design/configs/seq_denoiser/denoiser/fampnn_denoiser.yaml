@@ -1,0 +1,117 @@
+name: fampnn
+
+defaults:
+  - _self_
+  - interpolant: edm_interpolant
+
+task: ${model.task}
+drop_residx_p: 0.0
+
+# Backbone noise options
+augment_eps: 0.0
+per_residue_eps: false
+max_eps: null  # for per_residue_eps, samples from half-normal truncated to this value
+
+esm:
+  use_esmc: false
+  model_name: "esmc_300m"  # esmc_600m
+
+fampnn:
+  n_aatype: ${model.n_aatype}
+  use_gvp: false
+  n_channel: 128
+  n_layers: 3
+  k_neighbors: 48
+  ablate_noise_labels: false
+  init_hV_with_hS: false
+
+  model_type: "sidechain"
+  dropout_p: 0.1
+  return_embedding: "last"
+
+  gvp:
+    out_dim: ${model.denoiser.fampnn.n_channel}
+    node_hidden_dim_scalar: 128
+    node_hidden_dim_vector: 16
+    edge_hidden_dim_scalar: 512
+    edge_hidden_dim_vector: 1
+    rotate_out: false
+    graph_embedding:
+      mpnn_n_channel: ${model.denoiser.fampnn.n_channel}
+      top_k_neighbors: ${model.denoiser.fampnn.k_neighbors}
+      num_positional_embeddings: 16
+      n_aatype: ${model.n_aatype}
+      remove_edges_without_coords: true
+      node_hidden_dim_scalar: ${model.denoiser.fampnn.gvp.node_hidden_dim_scalar}
+      node_hidden_dim_vector: ${model.denoiser.fampnn.gvp.node_hidden_dim_vector}
+      edge_hidden_dim_scalar: ${model.denoiser.fampnn.gvp.edge_hidden_dim_scalar}
+      edge_hidden_dim_vector: ${model.denoiser.fampnn.gvp.edge_hidden_dim_vector}
+    dropout: ${model.denoiser.fampnn.dropout_p}
+    num_encoder_layers: ${model.denoiser.fampnn.n_layers}
+
+scn_diffusion_module:
+  hidden_size: 256
+
+  # Diffusion settings
+  interpolant: ${model.denoiser.interpolant}
+  use_self_conditioning: true
+  self_cond_p: 0.5
+  training_batch_size_mult: 8  # batch size multiplier for diffusion module
+
+  scn_denoiser:
+    num_atoms_in: ${model.num_atoms_in}
+    use_self_conditioning: ${model.denoiser.scn_diffusion_module.use_self_conditioning}
+    n_aatype: ${model.n_aatype}
+    self_cond_p: ${model.denoiser.scn_diffusion_module.self_cond_p}
+
+    c_h_V: ${denoiser.fampnn.n_channel}  # mpnn node conditioning
+
+    # Blocks
+    depth: 4
+    hidden_size: ${model.denoiser.scn_diffusion_module.hidden_size}
+    mlp_dropout: 0.0
+    mlp_ratio: 4.0
+
+  confidence_module: ${model.denoiser.confidence_module}
+
+
+# Confidence module
+confidence_module:
+  enabled: true
+  subsample_train_iter_mult: 8  # train with roughly 1/K of the training iterations
+  remove_unused_params: true  # for backwards compatibility
+
+  # Sidechain diffusion parameters
+  scn_diffusion:
+    num_steps: 50
+    timestep_schedule:
+      num_steps: ${..num_steps}
+      mode: "linear"
+      t_start: 0.0
+      t_end: 1.0
+    noise_schedule:
+      name: "step_scale"
+      c: 1.5
+    churn_cfg:
+      s_churn: 0
+      s_noise: 1.0
+      s_t_min: 0.01
+      s_t_max: 50.0
+      num_steps: ${..num_steps}
+
+  # Model
+  c_h_V: ${denoiser.fampnn.n_channel}
+  hidden_size: ${denoiser.fampnn.n_channel}
+  n_aatype: ${model.n_aatype}
+
+  sce_bins:
+    min_bin: 0.0
+    max_bin: 4.0
+    n_bins: 33
+
+  structure_encoder:
+    n_aatype: ${model.n_aatype}
+    n_channel: ${denoiser.fampnn.n_channel}
+    n_layers: 3
+    k_neighbors: ${denoiser.fampnn.k_neighbors}
+    dropout_p: 0.1

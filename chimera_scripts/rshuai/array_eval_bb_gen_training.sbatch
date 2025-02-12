@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=a8_bb4_eval_bb_gen_scg_array
+#SBATCH --job-name=a12_eval_bb_gen
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
-#SBATCH --array=0-5
+#SBATCH --array=0-9%5
 
 # Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
@@ -19,7 +19,6 @@ conda activate rshuai_allatom_design
 BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
 MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
-WANDB_ID=richardshuai
 
 # Set HF transformers cache
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -29,44 +28,45 @@ cd ${BASE_DIR}
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
 DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
-NNTM_DATASET=null  # disable for array jobs
+NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
 
-# Model name
-MODEL_NAME=a8_bb4
-GROUP=chimera_a8_s2
-
-# Directory where denoiser was trained
-DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
+# Set cache directories
+export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
+export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
+OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Define parameter options
-w_options=(0.5 0.75 1.0 1.2 1.5 2.0)
+MODEL_INDEX=${SLURM_ARRAY_TASK_ID}
+MODEL_NAME=a12_bb${MODEL_INDEX}
 
-# Calculate indices based on SLURM_ARRAY_TASK_ID
-w_index=$(( SLURM_ARRAY_TASK_ID % 5 ))     # 0 to 4 for 'w' values
+# Denoiser path
+DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
-# Assign parameter values
-w=${w_options[$w_index]}
-EXP_NAME=${MODEL_NAME}_eval_bb_gen_scg_w${w}
+# Wandb settings / experiment name
+WANDB_ID=richardshuai
+EXP_NAME=${MODEL_NAME}_eval_bb_gen
+GROUP=chimera_a12
 
-# Run the evaluation script with the current parameter combination
+# Run eval script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
-    start_epoch=1000 \
-    eval_every_n_ckpts=2 \
-    batch_size=64 \
     data.pdb_path=${PDB_PATH} \
     data.designability_csv=${DESIGNABILITY_CSV} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
+    struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
+    struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
+    start_step=0 \
+    eval_every_n_ckpts=1 \
+    batch_size=64 \
     nntm_dataset=${NNTM_DATASET} \
     length_range=[256,384] \
     num_steps_list=[500] \
     length_step_size=4 \
     n_samples_per_length=4 \
-    autoguidance_cfg.use_autoguidance=false \
     mpnn.overrides.batch_size=1 \
     +cond_labels.designability=DESIGNABLE \
     hydra.run.dir=${HYDRA_DIR}

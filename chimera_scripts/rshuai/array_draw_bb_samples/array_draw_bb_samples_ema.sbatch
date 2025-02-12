@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a11_bb1_draw_bb_samples
+#SBATCH --job-name=a12_bb9_ema_sweep
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -9,7 +9,7 @@
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
 #
-#SBATCH --array=0-28
+#SBATCH --array=0-8
 
 # Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}.sh
@@ -36,22 +36,21 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Denoiser checkpoint
-MODEL_NAME=a11_bb1
+MODEL_NAME=a12_bb9
 CKPT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/post_hoc_ema_ckpts
 
 # Wandb settings
 WANDB_ID=richardshuai
 GROUP=${MODEL_NAME}_s0
 
-# Define step size and maximum step to sweep over
-STEP_SIZE=0.01
-MAX_STEP=0.29
-current_step=$(echo "scale=2; $STEP_SIZE * $SLURM_ARRAY_TASK_ID" | bc)
-formatted_step=$(printf "%.3f" "$current_step")
-AD_CKPT="${CKPT_DIR}/ema-step1000000-std${formatted_step}.ckpt"
+# Define EMA steps to sweep over
+EMA_STEPS=( $(seq 0.03 0.03 0.27) )
+ema_step=${EMA_STEPS[${SLURM_ARRAY_TASK_ID}]}
+ema_step=$(printf "%.3f" "$ema_step")
+AD_CKPT="${CKPT_DIR}/ema-step650000-std${ema_step}.ckpt"
 
 # Set the experiment name to include the current ad_ckpt step
-EXP_NAME=${MODEL_NAME}_eval_ema${formatted_step}
+EXP_NAME=${MODEL_NAME}_eval_ema${ema_step}
 
 # Optionally, set a group name that reflects the checkpoint step
 GROUP=${MODEL_NAME}_ema

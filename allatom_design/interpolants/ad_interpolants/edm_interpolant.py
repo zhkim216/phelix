@@ -205,6 +205,79 @@ class EDM(ADInterpolant):
         return xt_next, aux_preds
 
 
+    def get_likelihoods(self,
+                        f: Callable,
+                        x1: TensorType["b n a 3", float],
+                        x1_mask: TensorType["b n a 3", float],  # denotes real elements of x1 vs. padding/ghost atoms
+                        num_steps: TensorType["b", float]):
+        """
+        Solve the probability flow ODE to get latent encodings and likelihoods.
+        Based on https://github.com/yang-song/score_sde_pytorch/blob/main/likelihood.py
+        See also https://github.com/crowsonkb/k-diffusion/blob/cc49cf6182284e577e896943f8e29c7c9d1a7f2c/k_diffusion/sampling.py#L281
+        """
+        B, N, _, _ = x1.shape
+        timesteps = torch.linspace(1, 0, num_steps + 1, device=x1.device)[None].expand(B, -1)
+
+        # Initialize xt to sigma_min
+        sigma_min = self.sigma(torch.tensor(1.)).item()  # s_min * sigma_data
+        sigma_max = self.sigma(torch.tensor(0.)).item()  # s_max * sigma_data
+        xt = x1 + torch.randn_like(x1) * sigma_min
+
+        # Noise for skilling-hutchinson
+        eps = torch.randn_like(xt)
+        sum_dlogp = torch.zeros((B, N), device=xt.device)
+
+        xt_traj = []
+        for i in range(num_steps):
+            t = timesteps[:, i]
+            t_next = timesteps[:, i + 1]
+            sigma, sigma_next = self.sigma(t), self.sigma(t_next)
+            ds = sigma_next - sigma
+
+            with torch.enable_grad():
+                # Euler integrator
+                xt.requires_grad_(True)
+                x1_pred, _ = f(xt, t=t)
+                dx_ds = (xt - x1_pred) / rearrange(sigma, "b -> b 1 1 1")
+                hutch_proj = (dx_ds * eps * x1_mask).sum()
+                grad = torch.autograd.grad(hutch_proj, xt)[0]
+
+            xt.requires_grad_(False)
+            dx = dx_ds * rearrange(ds, "b -> b 1 1 1")
+            xt = xt + dx
+            dlogp_ds = (grad * eps * x1_mask).sum((2, 3))  # [b, n]
+            dlogp = dlogp_ds * rearrange(ds, "b -> b 1")
+            sum_dlogp = sum_dlogp + dlogp
+
+            sigma = sigma_next
+            xt_traj.append(xt.cpu())
+
+        residue_num_dims = x1_mask.sum((2, 3))  # number of dimensions in each residue
+        prior_logp = -1 * residue_num_dims / 2.0 * np.log(2 * np.pi * sigma_max**2) - (
+            xt * xt
+        ).sum((2, 3)) / (2 * sigma_max**2)
+
+        logp = prior_logp + sum_dlogp  # [b, n]
+
+        res_num_atoms = residue_num_dims / 3  # number of atoms in each residue
+        nats_per_atom = -logp / res_num_atoms
+        bits_per_dim = -logp / residue_num_dims / np.log(2)
+        likelihood_aux = {
+            "prior_logp": prior_logp,
+            "prior_logp_per_atom": prior_logp / res_num_atoms,
+            "deltalogp": sum_dlogp,
+            "deltalogp_per_atom": sum_dlogp / res_num_atoms,
+            "logp": logp,
+            "npa": nats_per_atom,
+            "bpd": bits_per_dim,
+            "res_num_atoms": res_num_atoms,
+            "encoded_latent": xt,
+            "likelihood_xt_traj": torch.stack(xt_traj, dim=1),
+        }
+        likelihood_aux = {k: v.cpu() for k, v in likelihood_aux.items()}
+        return likelihood_aux
+
+
     def get_loss_weight(self, t: TensorType["b"]) -> TensorType["b"]:
         """
         Compute the weight of the loss at time t.

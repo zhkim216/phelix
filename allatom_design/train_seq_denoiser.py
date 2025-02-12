@@ -12,12 +12,12 @@ from lightning.fabric.loggers.logger import _DummyExperiment as DummyExperiment
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.strategies import DDPStrategy
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 
 import allatom_design.data.datasets.ad_dataset as ad_dataset
 from allatom_design.checkpoint_utils import EMATrackerCheckpoint
-from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import ADDataset
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
@@ -111,35 +111,34 @@ def main(cfg: DictConfig):
 
     # Define callbacks
     callbacks = []
-    latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
-                                                 save_top_k=-1,
-                                                 monitor="epoch",
-                                                 mode="max",
-                                                 every_n_epochs=cfg.checkpointing.save_latest_every_n_epochs,
-                                                 filename="sd-epoch{epoch:02d}",
-                                                 auto_insert_metric_name=False
-                                                 )
+
+    step_latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
+                                                      save_top_k=-1,
+                                                      every_n_train_steps=cfg.checkpointing.save_latest_every_n_steps,
+                                                      filename="sd-step{step}-epoch{epoch:02d}",
+                                                      auto_insert_metric_name=False
+                                                      )
+
+    # also keep track of a single latest checkpoint at the epoch level for resuming training
+    epoch_latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
+                                                       monitor="epoch",
+                                                       mode="max",
+                                                       save_top_k=1,
+                                                       every_n_epochs=cfg.checkpointing.save_latest_every_n_epochs,
+                                                       filename="sd-epoch{epoch:02d}",
+                                                       auto_insert_metric_name=False)
+
     val_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                               save_top_k=cfg.checkpointing.save_top_k,
                                               monitor="val/total_loss",
                                               mode="min",
-                                              filename="sd-epoch{epoch:02d}-val_loss{val/total_loss:.4f}",
+                                              filename="sd-epoch{epoch:02d}-step{step}-val_loss{val/total_loss:.4f}",
                                               auto_insert_metric_name=False  # needed since metric has / in name
                                               )
-
     ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
-                                          save_freq_epochs=cfg.checkpointing.save_ema_every_n_epochs)
+                                          save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
 
-    callbacks += [latest_checkpoint_callback, val_checkpoint_callback, ema_checkpoint]
-
-    train_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
-                                                save_top_k=cfg.checkpointing.save_top_k,
-                                                monitor="train/total_loss_epoch",
-                                                mode="min",
-                                                filename="sd-epoch{epoch:02d}-train_loss{train/total_loss:.4f}",
-                                                auto_insert_metric_name=False  # needed since metric has / in name
-                                                )
-    callbacks.append(train_checkpoint_callback)
+    callbacks += [step_latest_checkpoint_callback, epoch_latest_checkpoint_callback, val_checkpoint_callback, ema_checkpoint]
 
     if logger:
         lr_monitor = LearningRateMonitor(logging_interval="step")
@@ -147,7 +146,23 @@ def main(cfg: DictConfig):
 
     # Compute scale factors for sigma data
     scale_factors = ad_dataset.compute_scale_factors(train_dataloader, n_examples=1000)
-    lit_model.model.set_scale_factors(scale_factors)  # set scale factors in model
+    print(f"Computed scale factors: {scale_factors}")
+
+    # override sigma_data if specified for consistent loss scaling
+    bb_sigma_data_override, scn_sigma_data_override = cfg.model.override_sigma_data
+    if bb_sigma_data_override is not None:
+        print(f"Overriding bb sigma data with {bb_sigma_data_override}")
+        bb_mean, bb_std = scale_factors["bb"]
+        bb_std = bb_sigma_data_override
+        scale_factors["bb"] = (bb_mean, bb_std)
+    if scn_sigma_data_override is not None:
+        print(f"Overriding scn sigma data with {scn_sigma_data_override}")
+        scn_mean, scn_std = scale_factors["scn"]
+        scn_std = scn_sigma_data_override
+        scale_factors["scn"] = (scn_mean, scn_std)
+
+    # set scale factors in model
+    lit_model.model.set_scale_factors(scale_factors)
 
     # Train
     trainer = L.Trainer(logger=logger,
@@ -185,8 +200,8 @@ def update_config(cfg: DictConfig) -> None:
         cfg.model.inf = 1e4
         cfg.model.eps = 1e-4
 
-    if getattr(cfg.denoiser, "autoguidance", None) and cfg.denoiser.autoguidance.enabled:
-        # Autoguidance model parameters are not always used
+    if getattr(cfg.denoiser, "confidence_module", None) and cfg.denoiser.confidence_module.enabled:
+        # Confidence module parameters are not always used
         cfg.trainer.strategy = "ddp_find_unused_parameters_true"
 
 
