@@ -6,11 +6,11 @@
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
-#SBATCH --output=/scratch/users/rshuai/subhang/slurm_log_files/job_%j.out
-#SBATCH --error=/scratch/users/rshuai/subhang/slurm_log_files/job_%j.err
+#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%j.out
+#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%j.err
 
 # Write batch script to logs
-scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/subhang/slurm_log_files/job_$SLURM_JOB_ID.sh
+scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 # Load modules and conda environment
 ml python
@@ -20,8 +20,8 @@ source /home/groups/possu/miniconda/etc/profile.d/conda.sh
 conda activate allatom_design
 
 # Define directories
-BASE_DIR=/home/users/rshuai/subhang/allatom-design
-HYDRA_DIR=/scratch/users/rshuai/subhang/hydra_outputs
+BASE_DIR=/home/users/rshuai/allatom-design
+HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 
 # Set up Hugging Face
 export HUGGINGFACE_TOKEN=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
@@ -31,14 +31,14 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
 
 # Directories
-TRAIN_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_keys.list
-EVAL_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys.list
-EVAL2_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval2_pdb_keys.list
+TRAIN_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/train_pdb_keys.list
+EVAL_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/eval_pdb_keys.list
+EVAL2_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/eval2_pdb_keys.list
 
-PDBS_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/pdb_store_with_ext
+PDBS_DIR=/scratch/users/rshuai/subhang/datasets/augmented_ingraham_cath_bugfree/all_pdbs
 
-MPNN_OUT_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/mpnn
-ESM3_OUT_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset
+MPNN_OUT_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings/mpnn
+ESM3_OUT_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings/esm3
 
 # Run eval script
 cd ${BASE_DIR}

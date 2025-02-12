@@ -1,6 +1,9 @@
+subsample_n: 100000  # subsample to at most n keys per phase
+
 compute_mpnn: true
 compute_esm3: true
 
+# PDB key files for each phase; null to skip
 train_pdb_key_file: /scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_keys.list
 eval_pdb_key_file: /scratch/users/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys.list
 eval2_pdb_key_file: /scratch/users/rshuai/datasets/ingraham_cath_dataset/eval2_pdb_keys.list
