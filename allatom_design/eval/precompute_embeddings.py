@@ -20,6 +20,7 @@ warnings.filterwarnings("ignore")
 @hydra.main(config_path="../configs/eval", config_name="precompute_embeddings", version_base="1.3.2")
 def main(cfg: DictConfig):
     device = torch.device("cuda")
+    Path(cfg.out_dir).mkdir(parents=True, exist_ok=True)
 
     # Get pdb keys for each phase
     phase_to_pdb_key_files = {"train": cfg.train_pdb_key_file, "eval": cfg.eval_pdb_key_file, "eval2": cfg.eval2_pdb_key_file}
@@ -56,7 +57,7 @@ def main(cfg: DictConfig):
         mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)
         mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
 
-        create_mpnn_embeddings(mpnn_model, pdb_paths=pdb_paths, out_dir=cfg.mpnn.out_dir, device=device, cfg=mpnn_cfg)
+        create_mpnn_embeddings(mpnn_model, pdb_paths=pdb_paths, out_dir=f"{cfg.out_dir}/mpnn", device=device, cfg=mpnn_cfg)
 
     if cfg.compute_esm3:
         login(token=os.environ["HUGGINGFACE_TOKEN"])
@@ -64,7 +65,7 @@ def main(cfg: DictConfig):
         model = ESM3.from_pretrained("esm3_sm_open_v1").to(device)
         vqvae_encoder = model.get_structure_encoder()
 
-        create_esm3_embeddings(vqvae_encoder, pdb_paths=pdb_paths, out_dir=cfg.esm3.out_dir, device=device)
+        create_esm3_embeddings(vqvae_encoder, pdb_paths=pdb_paths, out_dir=f"{cfg.out_dir}/esm3", device=device)
 
 
 if __name__ == "__main__":

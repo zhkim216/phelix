@@ -35,10 +35,8 @@ TRAIN_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfr
 EVAL_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/eval_pdb_keys.list
 EVAL2_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/eval2_pdb_keys.list
 
-PDBS_DIR=/scratch/users/rshuai/subhang/datasets/augmented_ingraham_cath_bugfree/all_pdbs
-
-MPNN_OUT_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings/mpnn
-ESM3_OUT_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings/esm3
+PDBS_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/all_pdbs
+OUT_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings
 
 # Run eval script
 cd ${BASE_DIR}
@@ -49,7 +47,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/precompute_embeddings.py \
     eval_pdb_key_file=${EVAL_PDB_KEY_FILE} \
     eval2_pdb_key_file=${EVAL2_PDB_KEY_FILE} \
     pdbs_dir=${PDBS_DIR} \
-    mpnn.out_dir=${MPNN_OUT_DIR} \
-    esm3.out_dir=${ESM3_OUT_DIR} \
+    out_dir=${OUT_DIR} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     hydra.run.dir=${HYDRA_DIR}
