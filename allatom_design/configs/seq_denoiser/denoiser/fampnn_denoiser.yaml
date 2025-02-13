@@ -23,7 +23,7 @@ fampnn:
   n_layers: 3
   k_neighbors: 48
   ablate_noise_labels: false
-  init_hV_with_hS: false
+  init_hV_with_hS: true
 
   model_type: "sidechain"
   dropout_p: 0.1
