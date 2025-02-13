@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=nova_a1_eval_fpd_ema
-#SBATCH -p bioe,possu
+#SBATCH --job-name=c3_bb0_eval_fpd_ema
+#SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#SBATCH --array=0-9%10
+#SBATCH --array=0-9%3
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%j.out
@@ -40,12 +40,12 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Denoiser checkpoint
-MODEL_NAME=ai_baseline_dit_12b
+MODEL_NAME=c3_bb0
 CKPT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}/post_hoc_ema_ckpts
 
 # Wandb settings
 WANDB_ID=null
-GROUP=ai_eval_fpd
+GROUP=eval_fpd
 
 # Define step size and maximum step to sweep over
 STEP_SIZE=0.01
