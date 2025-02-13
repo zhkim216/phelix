@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c3_aasd10
+#SBATCH --job-name=c4_aasd0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -21,8 +21,8 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=c3_aasd10
-GROUP=seq_denoiser_c3
+EXP_NAME=c4_aasd0
+GROUP=seq_denoiser_c4
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -47,8 +47,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.per_residue_eps=true \
     denoiser.fampnn.use_gvp=false \
     denoiser.fampnn.n_layers=3 \
+    denoiser.fampnn.n_channel=144 \
     denoiser.esm.use_esmc=true \
-    denoiser.fampnn.init_hV_with_hS=false \
     trainer.check_val_every_n_epoch=10 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}

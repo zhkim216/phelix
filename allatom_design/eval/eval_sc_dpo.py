@@ -312,8 +312,11 @@ def main(cfg: DictConfig):
             dir=wandb_dir,
         )
 
-        metrics = ["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]
-        metrics = {f"{model}/{metric}": out_sc_df[f"{model}_{metric}"].mean() for model in ["esmfold", "af2"] for metric in metrics}
+        metrics = {}
+        for model in ["esmfold", "af2"]:
+            for sc_metric in ["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]:
+                metrics[f"{model}/{sc_metric}_mean"] = out_sc_df[f"{model}_{sc_metric}"].mean()
+                metrics[f"{model}/{sc_metric}_median"] = out_sc_df[f"{model}_{sc_metric}"].median()
 
         wandb.log(metrics)
         wandb.finish()
