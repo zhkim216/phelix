@@ -39,7 +39,7 @@ def main(cfg: DictConfig):
                 continue
 
             with open(file_path) as f:
-                phase_pdbs = np.array(f.read().split("\n"))
+                phase_pdbs = np.array(f.read().splitlines())
 
             if cfg.subsample_n is not None:
                 # subsample to at max subsample_n pdbs from each phase
