@@ -259,16 +259,16 @@ def main(cfg: DictConfig):
             override_metrics_to_compute=["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]
         )
 
-        af2_sc_info = eval_metrics.run_self_consistency_eval(
-            pdbs,
-            None, None,  # no MPNN model for co-design
-            af2,
-            device,
-            out_dir=pred_out_dir,
-            eval_codesign=True,
-            temp_dir=f"{pred_out_dir}/tmp",
-            override_metrics_to_compute=["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]
-        )
+        # af2_sc_info = eval_metrics.run_self_consistency_eval(
+        #     pdbs,
+        #     None, None,  # no MPNN model for co-design
+        #     af2,
+        #     device,
+        #     out_dir=pred_out_dir,
+        #     eval_codesign=True,
+        #     temp_dir=f"{pred_out_dir}/tmp",
+        #     override_metrics_to_compute=["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]
+        # )
 
         # Aggregate results
         sc_metrics = defaultdict(list)
@@ -280,8 +280,8 @@ def main(cfg: DictConfig):
             for k, v in esmfold_sc_info[pdb_path]["sc_metrics"].items():
                 sc_metrics[f"esmfold_{k}"].append(v.item())
 
-            for k, v in af2_sc_info[pdb_path]["sc_metrics"].items():
-                sc_metrics[f"af2_{k}"].append(v.item())
+            # for k, v in af2_sc_info[pdb_path]["sc_metrics"].items():
+            #     sc_metrics[f"af2_{k}"].append(v.item())
 
         out_df_batch = pd.DataFrame(sc_metrics)
 
@@ -313,7 +313,9 @@ def main(cfg: DictConfig):
         )
 
         metrics = ["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]
-        metrics = {f"{model}/{metric}": out_sc_df[f"{model}_{metric}"].mean() for model in ["esmfold", "af2"] for metric in metrics}
+        # metrics = {f"{model}/{metric}": out_sc_df[f"{model}_{metric}"].mean() for model in ["esmfold", "af2"] for metric in metrics}
+        metrics = {f"{model}/{metric}": out_sc_df[f"{model}_{metric}"].mean() for model in ["esmfold"] for metric in metrics}
+
         wandb.log(metrics)
         wandb.finish()
 
