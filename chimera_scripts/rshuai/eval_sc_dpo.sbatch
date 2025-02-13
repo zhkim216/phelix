@@ -28,15 +28,14 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 GROUP=eval_sc_dpo
-EXP_NAME=c3_aasd0_eval_sc_dpo
+MODEL_NAME=d2_aasd0
+CKPT=sd-step100000-epoch36.ckpt
+EXP_NAME=${MODEL_NAME}_eval_sc_dpo
 
 # Set paths
-# MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/d1_aasd0/checkpoints/sd-step80000-epoch59.ckpt
-# MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c3_aasd11/checkpoints/sd-step150000-epoch450.ckpt
-MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c3_aasd0/checkpoints/sd-step150000-epoch474.ckpt
-# MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
+MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/${CKPT}
 PDB_DIR=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store
-PDB_KEY_LIST=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys_L50_150.list
+PDB_KEY_LIST=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys.list
 
 # Run script
 cd ${BASE_DIR}
@@ -50,5 +49,5 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_sc_dpo.py \
     checkpoint_path=${MODEL_CKPT} \
     pdb_dir=${PDB_DIR} \
     pdb_key_list=${PDB_KEY_LIST} \
-    subset_length_range=[50,150] \
+    subset_length_range=[50,256] \
     num_pdbs=300
