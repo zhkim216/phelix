@@ -12,6 +12,8 @@ def create_esm3_embeddings(vqvae_encoder,
                            pdb_paths: List[str],
                            out_dir: str,
                            device: str):
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+
     embedding_dict = {}
     with torch.no_grad():
         for pdb in tqdm.tqdm(pdb_paths, desc="Running ESM3 on PDBs", leave=False):
@@ -35,11 +37,10 @@ def create_esm3_embeddings(vqvae_encoder,
                 print(e)
                 continue
 
-    # Dump each embedding to a pickle file
-    for pdb_key, embed in embedding_dict.items():
-        out_file = Path(out_dir) / f"{pdb_key}.pkl"
-        with open(out_file, "wb") as f:
-            pickle.dump(embed, f)
+            # Dump each embedding to a pickle file
+            out_file = Path(out_dir) / f"{name}.pkl"
+            with open(out_file, "wb") as f:
+                pickle.dump(embedding_dict[name], f)
 
 
 def load_esm3_embeddings(embedding_paths: List[str]):
