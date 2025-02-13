@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=d2_aasd0
+#SBATCH --job-name=d2_aasd4
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -22,11 +22,12 @@ WANDB_ID=richardshuai
 cd $BASE_DIR
 
 # Run settings
-EXP_NAME=d2_aasd0
-GROUP=seq_denoiser_d2
+EXP_NAME=d2_aasd4
+GROUP=seq_denoiser_d3
 
 # Dataset paths
-CKPT_PATH=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
+# CKPT_PATH=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
+CKPT_PATH=/scratch/hielab/rshuai/allatom_design/allatom_design/c3_aasd11/checkpoints/sd-step150000-epoch450.ckpt
 TRAIN_PDB_PATH=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/construct_sc_dataset/ingraham_cath_L50_256_S50
 VAL_PDB_PATH=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/construct_sc_dataset/ingraham_cath_L50_256_S50_val
 
@@ -42,7 +43,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/rl_seq_denoiser.py \
     val_pdb_path=${VAL_PDB_PATH} \
     train.batch_size=32 \
     train.compile_model=true \
-    data.min_margin=2.0 \
+    data.min_margin=3.0 \
     data.winner_threshold=3.0 \
     checkpointing.save_latest_every_n_steps=10000 \
     checkpointing.save_ema_every_n_steps=5000 \
