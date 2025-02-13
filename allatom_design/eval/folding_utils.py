@@ -269,7 +269,7 @@ def run_af2(sequences_list: List[str],
     # Predict structures
     for _, (seq, pdb) in enumerate(zip(sequences_list, pdbs)):
         output_pdb = f"{out_dir}/af2_{Path(pdb).stem}.pdb"
-        af_model.prep_inputs(pdb, chains, homooligomer=homooligomer)
+        af_model.prep_inputs(pdb, chains, homooligomer=homooligomer, ignore_missing=False)
 
         af_model.restart()
         af_model.set_opt("template", rm_ic=rm_template_interchain)
