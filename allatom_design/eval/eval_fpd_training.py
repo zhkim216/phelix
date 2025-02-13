@@ -91,8 +91,14 @@ def main(cfg: DictConfig):
         df_dict["phase"].extend([phase] * len(phase_to_keys[phase]))
         df_dict["pdb_key"].extend(phase_to_keys[phase])
         df_dict["seq_length"].extend(lengths)
-
     df = pd.DataFrame(df_dict)
+
+    # Subset by length
+    if cfg.subset_length_range is not None:
+        min_len, max_len = cfg.subset_length_range
+        df = df[(df["seq_length"] >= min_len) & (df["seq_length"] <= max_len)]
+
+    # Randomly subsample
     subsample_fracs = {"train": cfg.pct_subsample_train, "eval": cfg.pct_subsample_eval, "eval2": cfg.pct_subsample_eval}
     df = df.groupby("phase", group_keys=False).apply(lambda x: x.sample(frac=subsample_fracs[x.name], replace=False))
     df = df.sort_values("seq_length").reset_index(drop=True)
