@@ -49,4 +49,4 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_sc_dpo.py \
     pdb_dir=${PDB_DIR} \
     pdb_key_list=${PDB_KEY_LIST} \
     subset_length_range=[50,150] \
-    num_pdbs=100
+    num_pdbs=300
