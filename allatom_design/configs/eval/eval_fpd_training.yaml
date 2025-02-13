@@ -1,23 +1,22 @@
 # Wandb configuration
 project: "allatom_design"  # Wandb project name
-wandb_id: "richardshuai"  # Wandb username
-exp_name: null  # Wandb exp name
+wandb_id: "richardshuai"   # Wandb username
+exp_name: null             # Wandb exp name
 group: "eval_fpd_training_debug" # Wandb group name
 
 # Run settings
 no_wandb: false  # Disable wandb logging
 seed: 0
-start_epoch: 0  # start evaluation after this epoch, 0 or null to start from the beginning
+start_step: 0  # start evaluation after this step, 0 or null to start from the beginning
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 batch_size: 32
 num_workers: 10
 
 # Paths
-mpnn_embeddings_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/mpnn
-esm3_embed_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/esm3
-train_lengths_csv: /scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_key_lengths.csv
-eval_lengths_csv: /scratch/users/rshuai/datasets/ingraham_cath_dataset/eval_pdb_key_lengths.csv
-eval2_lengths_csv: /scratch/users/rshuai/datasets/ingraham_cath_dataset/eval2_pdb_key_lengths.csv
+fpd_embeddings_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings
+use_mpnn: false
+use_esm3: true
+
 pct_subsample_train: 0.1
 pct_subsample_eval: 1.0
 
@@ -33,31 +32,29 @@ timestep_schedule:
   mode: "linear"
   t_start: 0.0
   t_end: 1.0
+
 noise_schedule:
   name: "linear"
+
 churn_cfg:
   s_churn: 0
   s_noise: 1.0
   s_t_min: 0.01
   s_t_max: 50.0
   num_steps: ${num_steps}
-s_max_override: null  # if not null, override s_max in interpolant
 
 autoguidance_cfg:
   use_autoguidance: false
   w: 1.0
-
 
 # Embedding model configs
 mpnn:
   mpnn_cfg: allatom_design/configs/mpnn/proteinmpnn.yaml
   mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
   overrides:
-    # num seqs per structure will be batch_size * number_of_batches
     batch_size: 1
     number_of_batches: 1
     verbose: false
-
 
 hydra:
   run:
