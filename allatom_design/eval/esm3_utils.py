@@ -45,8 +45,10 @@ def create_esm3_embeddings(vqvae_encoder,
 
 def load_esm3_embeddings(embedding_paths: List[str]):
     all_embeds = []
+    lengths = []
     for embedding_path in embedding_paths:
         with open(embedding_path, "rb") as f:
             embed = pickle.load(f)
         all_embeds.append(embed[0][0].mean(-2).numpy())
-    return np.array(all_embeds)
+        lengths.append(embed[0][0].shape[-2])
+    return np.array(all_embeds), lengths

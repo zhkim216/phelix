@@ -5,11 +5,9 @@ group: "debug" # Wandb group name
 no_wandb: false
 
 # Paths
-mpnn_embeddings_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/mpnn
-esm3_embed_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/esm3
-train_lengths_csv: /scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_key_lengths.csv
-eval_lengths_csv: /scratch/users/rshuai/datasets/ingraham_cath_dataset/eval_pdb_key_lengths.csv
-eval2_lengths_csv: /scratch/users/rshuai/datasets/ingraham_cath_dataset/eval2_pdb_key_lengths.csv
+fpd_embeddings_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings
+use_mpnn: false
+use_esm3: true
 pct_subsample_train: 0.1
 pct_subsample_eval: 1.0
 
@@ -20,7 +18,7 @@ seed: 0
 batch_size: 64
 
 # Backbone generation config
-model_ckpt: /scratch/users/rshuai/subhang/allatom_design/allatom_design/config_g_sing_gain_fs512/checkpoints/ad-epoch3199.ckpt
+model_ckpt: null
 
 # Sampling parameters
 num_steps: 500
@@ -37,7 +35,6 @@ churn_cfg:
   s_t_min: 0.01
   s_t_max: 50.0
   num_steps: ${num_steps}
-s_max_override: null  # if not null, override s_max in interpolant
 
 # Conditioning
 # cond_labels: {"designability": "DESIGNABLE"}  # null for unconditional sampling
