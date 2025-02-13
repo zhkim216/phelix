@@ -63,7 +63,7 @@ def main(cfg: DictConfig):
     precomputed_key_files = [f"{cfg.fpd_embeddings_dir}/precomputed_{phase}_pdb_keys.csv" for phase in phases]
     phase_to_keys = {phase: pd.read_csv(file_path, header=None).values.flatten() for phase, file_path in zip(phases, precomputed_key_files)}
 
-    # Get dataframes with length info, then subsample
+    # Get dataframes with length info
     df = {"phase": [], "pdb_key": [], "seq_length": []}
     for phase in phases:
         if cfg.use_esm3:
@@ -77,6 +77,12 @@ def main(cfg: DictConfig):
         df["seq_length"].extend(lengths)
     df = pd.DataFrame(df)
 
+    # Subset by length
+    if cfg.subset_length_range is not None:
+        min_len, max_len = cfg.subset_length_range
+        df = df[(df["seq_length"] >= min_len) & (df["seq_length"] <= max_len)]
+
+    # Randomly subsample
     subsample_fracs = {"train": cfg.pct_subsample_train, "eval": cfg.pct_subsample_eval, "eval2": cfg.pct_subsample_eval}
     df = df.groupby("phase", group_keys=False).apply(lambda x: x.sample(frac=subsample_fracs[x.name], replace=False))  # subsample
 
