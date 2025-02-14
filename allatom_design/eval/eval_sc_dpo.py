@@ -283,6 +283,10 @@ def main(cfg: DictConfig):
             for k, v in af2_sc_info[pdb_path]["sc_metrics"].items():
                 sc_metrics[f"af2_{k}"].append(v.item())
 
+            # Add plddt info
+            sc_metrics["esmfold_avg_plddt"].append(esmfold_sc_info[pdb_path]["struct_preds"]["avg_plddt"].item())
+            sc_metrics["af2_avg_plddt"].append(af2_sc_info[pdb_path]["struct_preds"]["avg_plddt"].item())
+
         out_df_batch = pd.DataFrame(sc_metrics)
 
         sc_metrics_dfs.append(out_df_batch)
@@ -314,7 +318,7 @@ def main(cfg: DictConfig):
 
         metrics = {}
         for model in ["esmfold", "af2"]:
-            for sc_metric in ["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]:
+            for sc_metric in ["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm", "avg_plddt"]:
                 metrics[f"{model}/{sc_metric}_mean"] = out_sc_df[f"{model}_{sc_metric}"].mean()
                 metrics[f"{model}/{sc_metric}_median"] = out_sc_df[f"{model}_{sc_metric}"].median()
 
