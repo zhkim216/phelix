@@ -115,14 +115,14 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
             with torch.no_grad():
                 protein_tensor = self.af2_to_esmc(aatype_noised, seq_mask)
                 logits_output = self.esmc.logits(protein_tensor, LogitsConfig(sequence=True, return_embeddings=True, return_hidden_states=True))
-                esmc_embed = torch.cat([logits_output.hidden_states, logits_output.embeddings.unsqueeze(0)], dim=0)
-                esmc_embed = esmc_embed[:, :, 1:-1]  # remove CLS (first) and EOS (last, but possibly pad)
+            esmc_embed = torch.cat([logits_output.hidden_states, logits_output.embeddings.unsqueeze(0)], dim=0)
+            esmc_embed = esmc_embed[:, :, 1:-1]  # remove CLS (first) and EOS (last, but possibly pad)
 
-                # preprocess ESM sequence embedding
-                esmc_embed = rearrange(esmc_embed, "l b n h -> b n l h")
-                esmc_embed = (self.esmc_combine.softmax(0).unsqueeze(0) @ esmc_embed).squeeze(2)
-                esmc_embed = self.esmc_mlp(esmc_embed)
-                esmc_embed = esmc_embed * seq_mask.unsqueeze(-1)  # zero out padding & EOS of shorter sequences
+            # preprocess ESM sequence embedding
+            esmc_embed = rearrange(esmc_embed, "l b n h -> b n l h")
+            esmc_embed = (self.esmc_combine.softmax(0).unsqueeze(0) @ esmc_embed).squeeze(2)
+            esmc_embed = self.esmc_mlp(esmc_embed)
+            esmc_embed = esmc_embed * seq_mask.unsqueeze(-1)  # zero out padding & EOS of shorter sequences
 
         # Sequence design
         seq_logits, mpnn_feature_dict = self.seq_design_module(

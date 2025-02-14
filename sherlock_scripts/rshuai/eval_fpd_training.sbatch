@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=holy_a1_eval_bb_gen
+#SBATCH --job-name=c3_bb0_test
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -10,7 +10,7 @@
 #SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%A_%a.err
 #
 ## Write batch script to logs
-scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/subhang/slurm_log_files/job_$SLURM_JOB_ID.sh
+scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 ## Load modules and conda environment
 source ~/.subhang_bash_profile
@@ -21,22 +21,24 @@ source /home/groups/possu/miniconda/etc/profile.d/conda.sh
 conda activate allatom_design
 
 # Define directories
-BASE_DIR=/home/users/rshuai/subhang/allatom-design
-HYDRA_DIR=/scratch/users/rshuai/subhang/hydra_outputs
-OUT_DIR=/scratch/users/rshuai/subhang/allatom_design
+BASE_DIR=/home/users/rshuai/code/allatom-design
+HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
+OUT_DIR=/scratch/users/rshuai/allatom_design
 MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
+FPD_EMBEDDINGS_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings
 
 # Model name to evaluate
-MODEL_NAME=holy_a1
+MODEL_NAME=c3_bb0
 EXP_NAME=${MODEL_NAME}_eval_fpd_training
-GROUP=sherlock_fpd_test
+WANDB_ID=null
+GROUP=eval_fpd_training
 
 # Set HF variables
 export HUGGINGFACE_TOKEN=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
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Directory where denoiser was trained to
-DENOISER_TRAIN_DIR=/scratch/users/rshuai/subhang/allatom_design/allatom_design/${MODEL_NAME}
+DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Run training script
 cd ${BASE_DIR}
@@ -47,8 +49,13 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_fpd_training.py \
     num_workers=${SLURM_CPUS_ON_NODE} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
-    start_epoch=0 \
-    eval_every_n_ckpts=1 \
+    fpd_embeddings_dir=${FPD_EMBEDDINGS_DIR} \
+    use_mpnn=true \
+    use_esm3=true \
+    start_step=0 \
+    eval_every_n_ckpts=2 \
     batch_size=64 \
     num_steps=500 \
+    pct_subsample_train=0.05 \
+    pct_subsample_eval=1.0 \
     hydra.run.dir=${HYDRA_DIR}

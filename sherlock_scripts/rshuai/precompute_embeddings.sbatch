@@ -1,16 +1,16 @@
 #!/bin/bash
-#SBATCH --job-name=pc_esm3_embs
-#SBATCH -p possu,bioe
+#SBATCH --job-name=pc_mpnn_embs
+#SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
-#SBATCH --output=/scratch/users/rshuai/subhang/slurm_log_files/job_%j.out
-#SBATCH --error=/scratch/users/rshuai/subhang/slurm_log_files/job_%j.err
+#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%j.out
+#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%j.err
 
 # Write batch script to logs
-scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/subhang/slurm_log_files/job_$SLURM_JOB_ID.sh
+scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 # Load modules and conda environment
 ml python
@@ -20,8 +20,8 @@ source /home/groups/possu/miniconda/etc/profile.d/conda.sh
 conda activate allatom_design
 
 # Define directories
-BASE_DIR=/home/users/rshuai/subhang/allatom-design
-HYDRA_DIR=/scratch/users/rshuai/subhang/hydra_outputs
+BASE_DIR=/home/users/rshuai/code/allatom-design
+HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 
 # Set up Hugging Face
 export HUGGINGFACE_TOKEN=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
@@ -31,25 +31,31 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
 
 # Directories
-TRAIN_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_keys.list
-EVAL_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys.list
-EVAL2_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval2_pdb_keys.list
+## if we need to subset the original pdb key list
+# TRAIN_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/train_pdb_keys.list
+# EVAL_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/eval_pdb_keys.list
+# EVAL2_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/eval2_pdb_keys.list
+# USE_PRECOMPUTED_KEY_FILES=false
 
-PDBS_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/pdb_store_with_ext
+## if we've already subsetted the pdbs
+TRAIN_PDB_KEY_FILE=null
+EVAL_PDB_KEY_FILE=null
+EVAL2_PDB_KEY_FILE=null
+USE_PRECOMPUTED_KEY_FILES=true
 
-MPNN_OUT_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/mpnn
-ESM3_OUT_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset
+PDBS_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/all_pdbs
+OUT_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings
 
 # Run eval script
 cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/precompute_embeddings.py \
-    compute_mpnn=false \
-    compute_esm3=true \
+    compute_mpnn=true \
+    compute_esm3=false \
+    use_precomputed_key_files=${USE_PRECOMPUTED_KEY_FILES} \
     train_pdb_key_file=${TRAIN_PDB_KEY_FILE} \
     eval_pdb_key_file=${EVAL_PDB_KEY_FILE} \
     eval2_pdb_key_file=${EVAL2_PDB_KEY_FILE} \
     pdbs_dir=${PDBS_DIR} \
-    mpnn.out_dir=${MPNN_OUT_DIR} \
-    esm3.out_dir=${ESM3_OUT_DIR} \
+    out_dir=${OUT_DIR} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     hydra.run.dir=${HYDRA_DIR}
