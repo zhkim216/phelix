@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c3_bb0_eval_fpd_ema
+#SBATCH --job-name=ai_baseline_dit_12b_eval_fpd_ema
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -30,7 +30,7 @@ MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
 AF2_DATA_DIR=/scratch/users/rshuai/model_params/af2
 
 # Dataset paths
-FPD_EMBEDDINGS_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings
+FPD_EMBEDDINGS_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings
 
 # Set HF variables
 export HUGGINGFACE_TOKEN=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
@@ -40,12 +40,12 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Denoiser checkpoint
-MODEL_NAME=c3_bb0
+MODEL_NAME=ai_baseline_dit_12b
 CKPT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}/post_hoc_ema_ckpts
 
 # Wandb settings
 WANDB_ID=null
-GROUP=eval_fpd
+GROUP=ai_eval_fpd_ema
 
 # Define step size and maximum step to sweep over
 STEP_SIZE=0.01
@@ -69,4 +69,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_fpd.py \
     group=${GROUP} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     model_ckpt=${MODEL_CKPT} \
-    fpd_embeddings_dir=${FPD_EMBEDDINGS_DIR}
+    fpd_embeddings_dir=${FPD_EMBEDDINGS_DIR} \
+    pct_subsample_train=0.05 \
+    subset_length_range=[32,256]
