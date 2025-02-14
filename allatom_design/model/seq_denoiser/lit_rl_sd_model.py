@@ -74,18 +74,18 @@ class LitRLSeqDenoiser(L.LightningModule):
         ## Apply interpolant to the batch ##
         interpolant_out = self.interpolant(batch, t)
         interpolant_out["seq_mlm_mask"][1::2] = interpolant_out["seq_mlm_mask"][::2]  # set paired examples to have the same mask
-        interpolant_out["scn_mlm_mask"] = interpolant_out["seq_mlm_mask"].clone()  # for rl finetuning, we never randomly dropout sidechains
+        interpolant_out["scn_mlm_mask"][1::2] = interpolant_out["scn_mlm_mask"][::2]  # set paired examples to have the same mask
 
         # apply masks to input coordinates and aatype
         x, aatype = batch["x"], batch["aatype"]
         x_noised, aatype_noised = x.clone(), aatype.clone()
-        seq_mlm_mask = interpolant_out["seq_mlm_mask"]
+        seq_mlm_mask, scn_mlm_mask = interpolant_out["seq_mlm_mask"], interpolant_out["scn_mlm_mask"]
 
-        aatype_noised = torch.where(seq_mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])  # TODO: replace with MASK
+        aatype_noised = torch.where(seq_mlm_mask.bool(), aatype, rc.restype_order_with_x["X"])
         aatype_noised = aatype_noised * batch["seq_mask"]  # set pad residues back to 0
         aatype_noised = aatype_noised.long()
 
-        x_noised[..., rc.non_bb_idxs, :] = x[..., rc.non_bb_idxs, :] * rearrange(seq_mlm_mask, "b n -> b n 1 1").float()  # mask out sidechains
+        x_noised[..., rc.non_bb_idxs, :] = x[..., rc.non_bb_idxs, :] * rearrange(scn_mlm_mask, "b n -> b n 1 1").float()  # mask out sidechains
 
         # construct batch overrides
         batch["x_noised"] = x_noised
@@ -116,8 +116,9 @@ class LitRLSeqDenoiser(L.LightningModule):
         }
 
         # Run models
+        with torch.no_grad():
+            outputs_ref = self.ref_model(batch, skip_interpolant=True, aux_inputs_override=aux_inputs_override, **kwargs)
         outputs = self.model(batch, skip_interpolant=True, aux_inputs_override=aux_inputs_override, **kwargs)
-        outputs_ref = self.ref_model(batch, skip_interpolant=True, aux_inputs_override=aux_inputs_override, **kwargs)
         return outputs, outputs_ref
 
 

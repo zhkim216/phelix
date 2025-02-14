@@ -752,8 +752,10 @@ def create_mpnn_embeddings(model: ProteinMPNN,
 
 def load_mpnn_embeddings(embedding_paths: List[str]):
     all_embeds = []
+    lengths = []
     for fp_str in embedding_paths:
         fp = Path(fp_str)
         embed = np.load(fp)
+        lengths.append(embed.shape[-2])
         all_embeds.append(embed[:, 0].mean(-2))
-    return np.array(all_embeds)
+    return np.array(all_embeds), lengths

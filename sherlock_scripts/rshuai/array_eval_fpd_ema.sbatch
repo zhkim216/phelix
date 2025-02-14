@@ -1,17 +1,17 @@
 #!/bin/bash
-#SBATCH --job-name=nova_a1_eval_fpd_ema
-#SBATCH -p bioe,possu
+#SBATCH --job-name=ai_baseline_dit_12b_eval_fpd_ema
+#SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#SBATCH --array=0-9%10
+#SBATCH --array=0-9%3
 #
 # Send stdout and stderr to logs
-#SBATCH --output=/scratch/users/rshuai/subhang/slurm_log_files/job_%j.out
-#SBATCH --error=/scratch/users/rshuai/subhang/slurm_log_files/job_%j.err
+#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%j.out
+#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%j.err
 #
 ## Write batch script to logs
-scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/subhang/slurm_log_files/job_$SLURM_JOB_ID.sh
+scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 ## Load modules and conda environment
 source ~/.subhang_bash_profile
@@ -22,35 +22,30 @@ source /home/groups/possu/miniconda/etc/profile.d/conda.sh
 conda activate allatom_design
 
 # Set base directories
-BASE_DIR=/home/users/rshuai/subhang/allatom-design
-HYDRA_DIR=/scratch/users/rshuai/subhang/hydra_outputs
+BASE_DIR=/home/users/rshuai/code/allatom-design
+HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 
 # Model params
 MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
 AF2_DATA_DIR=/scratch/users/rshuai/model_params/af2
 
 # Dataset paths
-MPNN_EMBEDDINGS_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/mpnn
-ESM3_EMBED_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings/esm3
-TRAIN_LENGTHS_CSV=/scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_key_lengths.csv
-EVAL_LENGTHS_CSV=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval_pdb_key_lengths.csv
-EVAL2_LENGTHS_CSV=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval2_pdb_key_lengths.csv
+FPD_EMBEDDINGS_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings
 
 # Set HF variables
 export HUGGINGFACE_TOKEN=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
-export HF_HOME=/scratch/users/rshuai/subhang/cache/huggingface
+export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Set cache directories
-export TORCH_HOME=/scratch/users/rshuai/subhang/cache/torch
-OMEGAFOLD_CACHE=/scratch/users/rshuai/subhang/cache/omegafold/omegafold.pt
+export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Denoiser checkpoint
-MODEL_NAME=nova_a1
-CKPT_DIR=/scratch/users/rshuai/subhang/allatom_design/allatom_design/${MODEL_NAME}/post_hoc_ema_ckpts
+MODEL_NAME=ai_baseline_dit_12b
+CKPT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}/post_hoc_ema_ckpts
 
 # Wandb settings
 WANDB_ID=null
-GROUP=${MODEL_NAME}_fpd_ema
+GROUP=ai_eval_fpd_ema
 
 # Define step size and maximum step to sweep over
 STEP_SIZE=0.01
@@ -74,8 +69,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_fpd.py \
     group=${GROUP} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     model_ckpt=${MODEL_CKPT} \
-    mpnn_embeddings_dir=${MPNN_EMBEDDINGS_DIR} \
-    esm3_embed_dir=${ESM3_EMBED_DIR} \
-    train_lengths_csv=${TRAIN_LENGTHS_CSV} \
-    eval_lengths_csv=${EVAL_LENGTHS_CSV} \
-    eval2_lengths_csv=${EVAL2_LENGTHS_CSV}
+    fpd_embeddings_dir=${FPD_EMBEDDINGS_DIR} \
+    pct_subsample_train=0.05 \
+    subset_length_range=[32,256]

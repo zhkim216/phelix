@@ -246,6 +246,8 @@ def save_best_model(af_model, filename):
 
 
 def run_af2(sequences_list: List[str],
+            residue_index_list: List[TensorType["n_s", int]],
+            chain_index_list: List[TensorType["n_s", int]],
             pdbs: List[str],  # used for extracting residue index. TODO remove dependence on pdb file
             af_model: mk_af_model,
             out_dir: str,
@@ -255,7 +257,6 @@ def run_af2(sequences_list: List[str],
             save_best: bool,
             rm_template_interchain: bool = False,
             chains: Optional[str] = None,
-            homooligomer: bool = False,
             **kwargs) -> Tuple[Dict[str, torch.Tensor],
                                List[str]]:
     """
@@ -267,9 +268,11 @@ def run_af2(sequences_list: List[str],
     output_files = []
 
     # Predict structures
-    for _, (seq, pdb) in enumerate(zip(sequences_list, pdbs)):
+    for _, (seq, pdb, residue_index, chain_index) in enumerate(zip(sequences_list, pdbs, residue_index_list, chain_index_list)):
         output_pdb = f"{out_dir}/af2_{Path(pdb).stem}.pdb"
-        af_model.prep_inputs(pdb, chains, homooligomer=homooligomer)
+        assert len(chain_index_list[0].unique()) == 1, "Multi-chain prediction not supported yet"
+        # af_model.prep_inputs(pdb, chains, ignore_missing=False)
+        _prep_struct_pred(af_model, residue_index)
 
         af_model.restart()
         af_model.set_opt("template", rm_ic=rm_template_interchain)
@@ -306,6 +309,39 @@ def run_af2(sequences_list: List[str],
     }
 
     return af2_outputs, output_files
+
+
+def _prep_struct_pred(model: mk_af_model,
+                      residue_index: TensorType["n_s", int]):
+    '''
+    Prep inputs for structure prediction without requiring an input PDB.
+    Adapted from ColabDesign's _prep_fixbb function.
+    ---------------------------------------------------
+    if copies > 1:
+      -homooligomer=True - input pdb chains are parsed as homo-oligomeric units
+      -repeat=True       - tie the repeating sequence within single chain
+    -rm_template_seq     - if template is defined, remove information about template sequence
+    -fix_pos="1,2-10"    - specify which positions to keep fixed in the sequence
+                           note: supervised loss is applied to all positions, use "partial"
+                           protocol to apply supervised loss to only subset of positions
+    -ignore_missing=True - skip positions that have missing density (no CA coordinate)
+    ---------------------------------------------------
+    '''
+    # prep features
+    residue_index = np.array(residue_index)
+    model._len = residue_index.shape[0]
+    model._lengths = [model._len]
+
+    # feat dims
+    num_seq = 1
+    res_idx = residue_index
+
+    # configure input features
+    model._inputs = model._prep_features(num_res=sum(model._lengths), num_seq=num_seq)
+    model._inputs["residue_index"] = res_idx
+    model._wt_aatype = np.full(model._len, fill_value=-1, dtype=np.int64)
+
+    model._prep_model()
 
 
 def run_omegafold(sequences_list: List[str],
@@ -433,6 +469,7 @@ def get_struct_pred_model(cfg: DictConfig,
         af_model = mk_af_model(data_dir=cfg.af2.data_dir,
                                use_multimer=cfg.af2.use_multimer)
         struct_pred_model["af_model"] = af_model
+        af_model._get_loss = af_model._loss_unsupervised
 
     elif model_name == "esmfold":
         esmfold, tokenizer = get_esmfold_model(device=device)

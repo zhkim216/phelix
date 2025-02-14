@@ -84,7 +84,7 @@ class ADDataset(data.Dataset):
             # backwards compatibility; load in PDB keys from list and save to CSV format
             self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
             with open(self.pdb_keys_file) as f:
-                self.pdb_keys = np.array(f.read().split("\n")[:-1])
+                self.pdb_keys = np.array(f.read().splitlines())
 
             # cache coordinates for faster loading
             self._cache_examples(self.pdb_keys)

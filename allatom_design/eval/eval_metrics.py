@@ -119,6 +119,8 @@ def run_self_consistency_eval(pdbs: List[str],
             if struct_model_name == "af2":
                 # === Run AlphaFold2 === #
                 af2_preds, filenames = run_af2(sequences_list=sequences_list,
+                                               residue_index_list=residue_index_list,
+                                               chain_index_list=chain_index_list,
                                                pdbs=[pdb] * len(sequences_list),
                                                af_model=struct_pred_model["af_model"],
                                                out_dir=preds_dir, **struct_pred_cfg.af2)
@@ -185,6 +187,8 @@ def run_self_consistency_eval(pdbs: List[str],
         if struct_model_name == "af2":
             # === Run AlphaFold2 === #
             af2_preds, filenames = run_af2(sequences_list=sequences_list,
+                                           residue_index_list=residue_index_list,
+                                           chain_index_list=chain_index_list,
                                            pdbs=pdbs,
                                            af_model=struct_pred_model["af_model"],
                                            out_dir=preds_dir, **struct_pred_cfg.af2)

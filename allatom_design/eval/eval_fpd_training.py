@@ -22,8 +22,7 @@ from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.eval.esm3_utils import (create_esm3_embeddings,
                                             load_esm3_embeddings)
-from allatom_design.eval.eval_fpd import fpd_safe, subsample_embeddings
-from allatom_design.eval.eval_metrics import fpd
+from allatom_design.eval.eval_fpd import fpd_safe
 from allatom_design.eval.proteinmpnn_utils import (create_mpnn_embeddings,
                                                    load_mpnn,
                                                    load_mpnn_embeddings)
@@ -75,23 +74,50 @@ def main(cfg: DictConfig):
     with open(Path(log_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
-    # Subsample embeddings
-    train_subsample_df = subsample_embeddings(cfg.train_lengths_csv, cfg.pct_subsample_train, phase="train")
-    eval_subsample_df = subsample_embeddings(cfg.eval_lengths_csv, cfg.pct_subsample_eval, phase="eval")
-    eval2_subsample_df = subsample_embeddings(cfg.eval2_lengths_csv, cfg.pct_subsample_eval, phase="eval2")
+    # === Build dataframe with keys and lengths from embeddings ===
+    phases = ["train", "eval", "eval2"]
+    precomputed_key_files = [f"{cfg.fpd_embeddings_dir}/precomputed_{phase}_pdb_keys.csv" for phase in phases]
+    phase_to_keys = {phase: pd.read_csv(file_path, header=None).values.flatten() for phase, file_path in zip(phases, precomputed_key_files)}
 
-    print(f"Sampling {len(train_subsample_df)} train, {len(eval_subsample_df)} eval, {len(eval2_subsample_df)} eval2 structures for FPD calculation.")
+    df_dict = {"phase": [], "pdb_key": [], "seq_length": []}
+    for phase in phases:
+        if cfg.use_esm3:
+            _, lengths = load_esm3_embeddings([f"{cfg.fpd_embeddings_dir}/esm3/{pdb}.pkl" for pdb in phase_to_keys[phase]])
+        elif cfg.use_mpnn:
+            _, lengths = load_mpnn_embeddings([f"{cfg.fpd_embeddings_dir}/mpnn/{pdb}.npy" for pdb in phase_to_keys[phase]])
+        else:
+            raise ValueError("Must set at least one of use_esm3 or use_mpnn to True.")
 
-    # Concatenate into one dataframe
-    df = pd.concat([train_subsample_df, eval_subsample_df, eval2_subsample_df], ignore_index=True)
-    df = df.sort_values("length").reset_index(drop=True)  # sort by length for sampling efficiency
+        df_dict["phase"].extend([phase] * len(phase_to_keys[phase]))
+        df_dict["pdb_key"].extend(phase_to_keys[phase])
+        df_dict["seq_length"].extend(lengths)
+    df = pd.DataFrame(df_dict)
+
+    # Subset by length
+    if cfg.subset_length_range is not None:
+        min_len, max_len = cfg.subset_length_range
+        df = df[(df["seq_length"] >= min_len) & (df["seq_length"] <= max_len)]
+
+    # Randomly subsample
+    subsample_fracs = {"train": cfg.pct_subsample_train, "eval": cfg.pct_subsample_eval, "eval2": cfg.pct_subsample_eval}
+    df = df.groupby("phase", group_keys=False).apply(lambda x: x.sample(frac=subsample_fracs[x.name], replace=False))
+    df = df.sort_values("seq_length").reset_index(drop=True)
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # Load precomputed embeddings (for FPD reference)
+    phase_to_p_embeds = defaultdict(dict)
+    for phase in phases:
+        phase_pdb_keys = df[df["phase"] == phase]["pdb_key"].values
+        if cfg.use_esm3:
+            phase_to_p_embeds[phase]["esm3"], _ = load_esm3_embeddings([f"{cfg.fpd_embeddings_dir}/esm3/{pdb}.pkl" for pdb in phase_pdb_keys])
+        if cfg.use_mpnn:
+            phase_to_p_embeds[phase]["mpnn"], _ = load_mpnn_embeddings([f"{cfg.fpd_embeddings_dir}/mpnn/{pdb}.npy" for pdb in phase_pdb_keys])
+
     # Get checkpoints from denoiser training run
-    pattern = re.compile(r"ad-epoch\d+\.ckpt$")  # only consider ckpts of form ad-epochXXXX.ckpt
+    pattern = re.compile(r"ad-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form ad-step{step}-epoch{epoch}.ckpt
     ad_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
     ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
 
@@ -99,10 +125,14 @@ def main(cfg: DictConfig):
     for ad_ckpt in pbar:
         L.seed_everything(cfg.seed)  # Reset the random seed for each checkpoint
 
-        # Skip if epoch is before start_epoch
-        epoch = int(Path(ad_ckpt).stem.replace("ad-epoch", ""))
-        pbar.set_postfix_str(f"Epoch: {epoch}")
-        if (cfg.start_epoch is not None) and (epoch < cfg.start_epoch):
+        match = pattern.search(Path(ad_ckpt).name)
+        epoch = int(match.group(1))
+        global_step = torch.load(ad_ckpt).get('global_step')
+
+        pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
+
+        # Skip if global_step is before start_step
+        if (cfg.start_step is not None) and (global_step < cfg.start_step):
             continue
 
         # Create output directory for this epoch
@@ -114,9 +144,9 @@ def main(cfg: DictConfig):
         # Load denoiser model and dataset
         lit_ad_model = LitAtomDenoiser.load_from_checkpoint(ad_ckpt).eval()
 
-        ### BEGIN EVAL ###
-        pbar = tqdm(total=len(df), desc="Sampling backbones")
-        all_lengths = df["length"].values
+        # === Sample new backbones ===
+        pbar_i = tqdm(total=len(df), desc="Sampling backbones")
+        all_lengths = df["seq_length"].values
         pdb_keys = df["pdb_key"].values
         sampled_pdbs = []
 
@@ -125,19 +155,18 @@ def main(cfg: DictConfig):
             B = lengths.shape[0]
 
             residue_index = torch.arange(lengths.max(), dtype=torch.long).to(device)
-            # TEMP: pad residue index to the next largest multiple of 8
             residue_index = torch.cat([residue_index, torch.zeros(8 - (residue_index.shape[0] % 8), dtype=torch.long).to(device)])
             residue_index = residue_index[None].expand(B, -1)
 
-            # Create timesteps for backbone
+            # Create timesteps
             t_bb = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
             t_bb = t_bb[None].expand(B, -1).to(device)
             timesteps = t_bb
 
-            # Create noise schedule for backbone
+            # Create noise schedule
             noise_schedule = NoiseSchedule(cfg.noise_schedule)
 
-            # Create churn config for backbone
+            # Create churn config
             churn_cfg = dict(cfg.churn_cfg)
 
             cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, device)
@@ -162,96 +191,78 @@ def main(cfg: DictConfig):
             sampled_pdbs.extend(filenames)
             AtomDenoiser.save_samples_to_pdb(samples, filenames)
 
-            pbar.update(B)
-        pbar.close()
+            pbar_i.update(B)
+        pbar_i.close()
 
-        # Add sampled pdb names to df
         df["sample_name"] = [Path(pdb).stem for pdb in sampled_pdbs]
 
-        # Create output directories
-        samp_embeddings_dir = Path(log_dir_i, "mpnn_embeddings")
-        samp_embeddings_dir.mkdir(parents=True, exist_ok=True)
+        # Prepare to compute FPD metrics
+        fpd_metrics = {}
+        phase_to_s_embeds = defaultdict(dict)
 
-        # Load MPNN model
-        mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
-        mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)
-        mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
+        # === MPNN ===
+        if cfg.use_mpnn:
+            mpnn_samp_dir = f"{log_dir_i}/mpnn"
+            Path(mpnn_samp_dir).mkdir(parents=True, exist_ok=True)
 
-        # Load ESM3 model
-        login(token=os.environ["HUGGINGFACE_TOKEN"])
-        model = ESM3.from_pretrained("esm3_sm_open_v1").to(device)
-        vqvae_encoder = model.get_structure_encoder()
+            mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
+            mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)
+            mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
 
-        # Run MPNN to create embeddings
-        create_mpnn_embeddings(mpnn_model, pdb_paths=sampled_pdbs, out_dir=str(samp_embeddings_dir), device=device, cfg=mpnn_cfg)
-        create_esm3_embeddings(vqvae_encoder, pdb_paths=sampled_pdbs, out_dir=log_dir_i, device=device)
+            create_mpnn_embeddings(
+                mpnn_model,
+                pdb_paths=sampled_pdbs,
+                out_dir=str(mpnn_samp_dir),
+                device=device,
+                cfg=mpnn_cfg
+            )
 
-        esm3_samp_embed_path = Path(log_dir_i) / "esm3_embed.pkl"
-        esm3_embed_path = Path(cfg.esm3_embed_dir) / "esm3_embed.pkl"
+            for phase in phases:
+                phase_pdb_keys = df[df["phase"] == phase]["sample_name"].values
+                phase_to_s_embeds[phase]["mpnn"], _ = load_mpnn_embeddings([f"{mpnn_samp_dir}/{pdb}.npy" for pdb in phase_pdb_keys])
 
-        # Load sampled embeddings
-        mpnn_train_samp_embeddings = load_mpnn_embeddings([f"{str(samp_embeddings_dir)}/{Path(pdb).stem}.npy" for pdb in df[df["phase"] == "train"]["sample_name"].values])
-        mpnn_eval_samp_embeddings = load_mpnn_embeddings([f"{str(samp_embeddings_dir)}/{Path(pdb).stem}.npy" for pdb in df[df["phase"] == "eval"]["sample_name"].values])
-        mpnn_eval2_samp_embeddings = load_mpnn_embeddings([f"{str(samp_embeddings_dir)}/{Path(pdb).stem}.npy" for pdb in df[df["phase"] == "eval2"]["sample_name"].values])
+            # Compute FPD for MPNN layers
+            for phase in phases:
+                for i in range(3):
+                    fpd = fpd_safe(phase_to_s_embeds[phase]["mpnn"][:, i], phase_to_p_embeds[phase]["mpnn"][:, i])
+                    fpd_metrics[f"{phase}/mpnn_layer_{i}_fpd"] = fpd
 
-        esm3_train_samp_embeddings = load_esm3_embeddings([Path(pdb).stem for pdb in df[df["phase"] == "train"]["sample_name"].values], str(esm3_samp_embed_path))
-        esm3_eval_samp_embeddings = load_esm3_embeddings([Path(pdb).stem for pdb in df[df["phase"] == "eval"]["sample_name"].values], str(esm3_samp_embed_path))
-        esm3_eval2_samp_embeddings = load_esm3_embeddings([Path(pdb).stem for pdb in df[df["phase"] == "eval2"]["sample_name"].values], str(esm3_samp_embed_path))
+        # === ESM3 ===
+        if cfg.use_esm3:
+            esm3_samp_dir = f"{log_dir_i}/esm3"
+            Path(esm3_samp_dir).mkdir(parents=True, exist_ok=True)
 
-        # Load pre-computed embeddings
-        mpnn_train_embeddings = load_mpnn_embeddings([f"{cfg.mpnn_embeddings_dir}/{pdb}.npy" for pdb in train_subsample_df["pdb_key"].values])
-        mpnn_eval_embeddings = load_mpnn_embeddings([f"{cfg.mpnn_embeddings_dir}/{pdb}.npy" for pdb in eval_subsample_df["pdb_key"].values])
-        mpnn_eval2_embeddings = load_mpnn_embeddings([f"{cfg.mpnn_embeddings_dir}/{pdb}.npy" for pdb in eval2_subsample_df["pdb_key"].values])
+            login(token=os.environ["HUGGINGFACE_TOKEN"])
+            model = ESM3.from_pretrained("esm3_sm_open_v1").to(device)
+            vqvae_encoder = model.get_structure_encoder()
 
-        esm3_train_embeddings = load_esm3_embeddings(train_subsample_df["pdb_key"].values, str(esm3_embed_path))
-        esm3_eval_embeddings = load_esm3_embeddings(eval_subsample_df["pdb_key"].values, str(esm3_embed_path))
-        esm3_eval2_embeddings = load_esm3_embeddings(eval2_subsample_df["pdb_key"].values, str(esm3_embed_path))
+            create_esm3_embeddings(
+                vqvae_encoder,
+                pdb_paths=sampled_pdbs,
+                out_dir=esm3_samp_dir,
+                device=device
+            )
 
+            for phase in phases:
+                phase_pdb_keys = df[df["phase"] == phase]["sample_name"].values
+                phase_to_s_embeds[phase]["esm3"], _ = load_esm3_embeddings([f"{esm3_samp_dir}/{pdb}.pkl" for pdb in phase_pdb_keys])
 
-        # Calculate FPD scores
-        mpnn_train_fpd_scores = []
-        mpnn_eval_fpd_scores = []
-        mpnn_eval2_fpd_scores = []
-
-        for i in range(3): # 3 layers
-            train_fpd_score = fpd_safe(mpnn_train_samp_embeddings[:, i], mpnn_train_embeddings[:, i])
-            mpnn_train_fpd_scores.append(train_fpd_score)
-
-            eval_fpd_score = fpd_safe(mpnn_eval_samp_embeddings[:, i], mpnn_eval_embeddings[:, i])
-            mpnn_eval_fpd_scores.append(eval_fpd_score)
-
-            eval2_fpd_score = fpd_safe(mpnn_eval2_samp_embeddings[:, i], mpnn_eval2_embeddings[:, i])
-            mpnn_eval2_fpd_scores.append(eval2_fpd_score)
-
-        esm3_train_fpd_score = fpd_safe(esm3_train_samp_embeddings, esm3_train_embeddings)
-        esm3_eval_fpd_score = fpd_safe(esm3_eval_samp_embeddings, esm3_eval_embeddings)
-        esm3_eval2_fpd_score = fpd_safe(esm3_eval2_samp_embeddings, esm3_eval2_embeddings)
-
-        # Aggregate metrics
-        metrics = {}
-        for phase, fpd_scores in zip(["train", "eval", "eval2"], [mpnn_train_fpd_scores, mpnn_eval_fpd_scores, mpnn_eval2_fpd_scores]):
-            for i, fpd_score in enumerate(fpd_scores):
-                metrics[f"fpd/{phase}/mpnn_layer_{i}"] = fpd_score
-
-        metrics[f"fpd/train/esm3"] = esm3_train_fpd_score
-        metrics[f"fpd/eval/esm3"] = esm3_eval_fpd_score
-        metrics[f"fpd/eval2/esm3"] = esm3_eval2_fpd_score
+            # Compute FPD for ESM3
+            for phase in phases:
+                fpd = fpd_safe(phase_to_s_embeds[phase]["esm3"],phase_to_p_embeds[phase]["esm3"])
+                fpd_metrics[f"{phase}/esm3_fpd"] = fpd
 
         # Dump metrics to pickle
-        with open(f"{log_dir_i}/metrics.pkl", "wb") as f:
-            pickle.dump(metrics, f)
+        with open(f"{log_dir_i}/fpd_scores.pkl", "wb") as f:
+            pickle.dump(fpd_metrics, f)
 
         # Log metrics to wandb
         if not cfg.no_wandb:
-            # Get global step
-            global_step = torch.load(ad_ckpt, map_location="cpu")["global_step"]
-            metrics["trainer/global_step"] = global_step
-            metrics["trainer/epoch"] = epoch
-
-            wandb.log(metrics, step=global_step)
+            fpd_metrics["trainer/global_step"] = global_step
+            fpd_metrics["trainer/epoch"] = epoch
+            wandb.log(fpd_metrics, step=global_step)
 
     wandb.finish()
-
 
 
 if __name__ == "__main__":
