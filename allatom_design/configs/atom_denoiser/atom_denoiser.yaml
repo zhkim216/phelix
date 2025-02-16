@@ -52,26 +52,28 @@ data:
 # Model options
 defaults:
   - _self_
-  - denoiser: u_dit_denoiser
-  - sd_interpolant: mar_interpolant
+  - denoiser: dit_denoiser
+  - scaffold_manager: unconditional
 
 model:
-  task: "backbone"  # "backbone"
+  task: "backbone"  # "backbone", "scaffold"
   override_sigma_data: [9.6, 0.66]  # override sigma data for [backbone, sidechain]
   eps: 1.0e-8
   inf: 1.0e9
+  n_aatype: 21
   denoiser: ${denoiser}
-  sd_interpolant: ${sd_interpolant}
+  scaffold_manager: ${scaffold_manager}
 
 eval:
   eval_timesteps_bb: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]  # backbone timesteps to evaluate at
-  eval_timesteps_seq: []  # seq timesteps to evaluate at
-
 
 loss:
   task: ${model.task}
   loss_weights:
     bb:
+      mse_loss: 1.0
+    scaffold:
+      # separte loss to reconstruct scaffold
       mse_loss: 1.0
 
 optim:
