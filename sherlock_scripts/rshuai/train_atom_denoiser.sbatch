@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s0_bb0
+#SBATCH --job-name=s0_bb1
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -30,7 +30,7 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=s0_bb0
+EXP_NAME=s0_bb1
 GROUP=ai_cath
 
 # Dataset paths
@@ -47,9 +47,13 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.pdb_paths=[${PDB_PATH}] \
     data.fixed_size=160 \
     data.subset_length_range=[32,160] \
+    model.task=scaffold \
+    scaffold_manager=scaffold_manager \
+    denoiser.scaffold_module.enabled=false \
     train.batch_size=64 \
     train.compile_model=true \
     denoiser=dit_denoiser \
     trainer.check_val_every_n_epoch=2 \
+    trainer.strategy=ddp_find_unused_parameters_true \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
