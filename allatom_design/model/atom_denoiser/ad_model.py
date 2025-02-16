@@ -8,19 +8,21 @@ from allatom_design.data.pdb_utils import *
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.interpolants.sd_interpolants.mar_interpolant import MAR
-from allatom_design.interpolants.sd_interpolants.sd_interpolant import SDInterpolant
+from allatom_design.interpolants.sd_interpolants.sd_interpolant import \
+    SDInterpolant
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     DiTDenoiser
 from allatom_design.model.atom_denoiser.denoisers.esm_dit_denoiser import \
     ESMDiTDenoiser
-from allatom_design.model.atom_denoiser.denoisers.triangle_dit_denoiser import \
-    TriangleDiTDenoiser
 from allatom_design.model.atom_denoiser.denoisers.mpnn_dit_denoiser import \
     MPNNDiTDenoiser
+from allatom_design.model.atom_denoiser.denoisers.triangle_dit_denoiser import \
+    TriangleDiTDenoiser
 from allatom_design.model.atom_denoiser.denoisers.u_dit_denoiser import \
     UDiTDenoiser
+from allatom_design.model.atom_denoiser.scaffold_manager import ScaffoldManager
 
 
 class AtomDenoiser(nn.Module):
@@ -40,17 +42,18 @@ class AtomDenoiser(nn.Module):
         self.sigma_data = self.bb_std
 
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
-        self.sd_interpolant = get_interpolant(getattr(cfg, "sd_interpolant", None))
+        self.sm = get_scaffold_manager(cfg.scaffold_manager)
+
+        if self.task == "scaffold":
+            assert self.sm is not None, "Scaffold manager must be specified for scaffolding task"
 
 
     def setup(self):
         # Initialize denoiser pre-trained weights if needed
         self.denoiser.setup()
 
-
     def forward(self,
                 batch: Dict[str, TensorType["b ..."]],
-                t_sd: Optional[TensorType["b", float]] = None,  # timestep of sequence design inputs
                 ) -> Dict[str, TensorType["b ..."]]:
         """
         batch should contain:
@@ -63,33 +66,37 @@ class AtomDenoiser(nn.Module):
         batch = copy.deepcopy(batch)
         outputs = {}
 
-        # Mask out sequence and sidechains with sd_interpolant
-        if self.sd_interpolant is None:
-            # don't noise
-            batch["xt_scn"] = batch["x"][..., rc.non_bb_idxs, :]
-            batch["aatype_noised"] = batch["aatype"]
-            batch["mlm_mask"] = torch.ones_like(batch["seq_mask"]) * batch["seq_mask"]
+        # Get scaffolding input with scaffold manager
+        if self.sm is None:
+            # unconditional generation
+            x_scaffold = torch.zeros_like(batch["x"])
+            scaffold_mask = torch.zeros_like(batch["atom_mask"])
+            aatype_in = torch.full_like(batch["residue_index"], fill_value=rc.restype_order_with_x["X"])
         else:
-            interpolant_out = self.sd_interpolant(batch, t_sd)
-            batch["xt_scn"] = interpolant_out["x_noised"][..., rc.non_bb_idxs, :]
-            batch["aatype_noised"] = interpolant_out["aatype_noised"]
-            batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]
+            sm_outputs = self.sm(batch)
+            x_scaffold = sm_outputs["x_scaffold"]
+            scaffold_mask = sm_outputs["scaffold_mask"]
+            aatype_in = sm_outputs["aatype_in"]
+            outputs["scaffold_aux"] = sm_outputs
 
         # During training, keep track of certain additional features
         aux_inputs = {
             "x": batch["x"],  # ground truth coordinates
             "t_bb": batch.get("t_bb", None),  # scalar; fix t_bb if provided, usually for eval
-            "missing_atom_mask": batch["missing_atom_mask"]
+            "missing_atom_mask": batch["missing_atom_mask"],
         }
 
         # Denoise coords
-        _, aux_preds = self.denoiser(batch["xt_scn"], batch["aatype_noised"], t_sd,
-                                     batch["residue_index"], batch["seq_mask"], batch["seq_mlm_mask"],
+        _, aux_preds = self.denoiser(x_scaffold,
+                                     scaffold_mask,
+                                     aatype_in,
+                                     batch["residue_index"], batch["seq_mask"],
                                      cond_labels_in=batch["cond_labels_in"],
                                      aux_inputs=aux_inputs)
 
         # Additional outputs for computing loss
         outputs.update(aux_preds)
+
 
         return outputs
 
@@ -143,10 +150,9 @@ class AtomDenoiser(nn.Module):
         aux["seq_mask"] = seq_mask.cpu()
 
         # Initialize sequence / sidechain prior (all masked, time t=0)
-        t_sd = torch.zeros((B, ), device=residue_index.device)
-        xt_scn = torch.zeros((B, N, len(rc.non_bb_idxs), 3), device=residue_index.device)
-        aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
-        mlm_mask = torch.zeros_like(seq_mask)
+        x_scaffold = torch.zeros((B, N, rc.atom_type_num, 3), device=residue_index.device)
+        scaffold_mask = torch.zeros((B, N, rc.atom_type_num), device=residue_index.device)
+        aatype_in = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
 
         num_steps = timesteps.shape[-1] - 1
 
@@ -175,9 +181,14 @@ class AtomDenoiser(nn.Module):
             "aatype_override": aatype_override,
             "aatype_override_mask": aatype_override_mask,
         }
-        x1_bb, aux_preds = self.denoiser(xt_scn=xt_scn,
-                                         aatype_noised=aatype_noised, t_sd=t_sd, residue_index=residue_index,
-                                         seq_mask=seq_mask, mlm_mask=mlm_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs, is_sampling=True)
+        x1_bb, aux_preds = self.denoiser(x_scaffold=x_scaffold,
+                                         scaffold_mask=scaffold_mask,
+                                         aatype_in=aatype_in,
+                                         residue_index=residue_index,
+                                         seq_mask=seq_mask,
+                                         cond_labels_in=cond_labels,
+                                         aux_inputs=aux_inputs,
+                                         is_sampling=True)
 
         aux.update(aux_preds["bb_diffusion_aux"])
         return x1_bb, aux
@@ -349,13 +360,13 @@ def get_denoiser(cfg: DictConfig,
         raise ValueError(f"Unknown denoiser: {cfg.name}")
 
 
-def get_interpolant(cfg: Optional[DictConfig]) -> SDInterpolant:
+def get_scaffold_manager(cfg: Optional[DictConfig]) -> Optional[ScaffoldManager]:
     """
-    Get the interpolant specified in the config.
+    Get the scaffold manager specified in the config.
     """
-    if cfg is None:
+    if cfg.name == "unconditional":
         return None
-    elif cfg.name == "mar":
-        return MAR(cfg)
+    elif cfg.name == "scaffold_manager":
+        return ScaffoldManager(cfg)
     else:
-        raise ValueError(f"Unknown interpolant: {cfg.name}")
+        raise ValueError(f"Unknown scaffold manager: {cfg.name}")

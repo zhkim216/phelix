@@ -1,0 +1,7 @@
+name: scaffold_manager
+
+contiguous_p: 0.05
+discontiguous_p: 0.9
+max_span_len: 12
+max_discontiguous_res: 24
+dist_threshold: 45.0
