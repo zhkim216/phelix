@@ -89,10 +89,7 @@ class ADLoss(nn.Module):
             aux["scaffold/mse_loss"] = masked_mse(bb_pred,
                                                   bb_target,
                                                   mask=bb_mask)
-            test = masked_mse(bb_pred,
-                              scaffold_aux["x_scaffold"][..., rc.bb_idxs, :],
-                              mask=bb_mask
-                              )
+
             aux_monitor["scaffold/unweighted_mse_loss"] = aux["scaffold/mse_loss"].mean().detach().clone()
             aux["scaffold/mse_loss"] = aux["scaffold/mse_loss"] * loss_weight_bb  # apply time step loss weight
 
