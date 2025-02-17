@@ -15,7 +15,7 @@ from allatom_design.data import residue_constants as rc
 from openfold.utils.feats import atom14_to_atom37
 from openfold.utils.rigid_utils import Rigid, Rotation
 
-FEATURES_LONG = ("residue_index", "chain_index", "aatype")
+FEATURES_LONG = ("residue_index", "chain_index", "aatype", "aatype_scaffold")
 
 def load_feats_from_pdb(pdb, chain_ids_override: str = None, max_conformers: int = 1):
     """
@@ -336,7 +336,6 @@ def uniform_rand_rotation(batch_size):
 def center_random_augmentation(coords_in: TensorType["n a 3", float],
                                seq_mask: TensorType["n", float],
                                atom_mask: TensorType["n a", float],
-                               missing_atom_mask: TensorType["n a", float],
                                translation_scale=1.0,
                                return_transforms=False
                                ):
@@ -348,20 +347,18 @@ def center_random_augmentation(coords_in: TensorType["n a 3", float],
     Inputs:
         - seq_mask: 0 if residue is padding
         - atom_mask: 1 if not ghost and not missing atom, 0 otherwise
-        - missing_atom_mask: 1 if atom is missing, 0 if present
     """
     input_dim = coords_in.dim()
     if input_dim == 3:
         # unbatched; add batch dimension
         coords_in = coords_in.unsqueeze(0)
         atom_mask = atom_mask.unsqueeze(0)
-        missing_atom_mask = missing_atom_mask.unsqueeze(0)
         seq_mask = seq_mask.unsqueeze(0)
 
     X = coords_in[:, :, 1:2]  # [b n 1 3]
 
     # Center coords
-    M = (1 - missing_atom_mask[:, :, 1:2]) * seq_mask[:, :, None]  # [b n 1]
+    M = atom_mask[:, :, 1:2] * seq_mask[:, :, None]  # [b n 1]
     M_sum = M.sum(dim=1, keepdim=True)[..., None]  # [b 1 1 1]
     coords_mean = (X * M[..., None]).sum(dim=1, keepdim=True) / M_sum  # [b 1 1 3]
     coords_in = coords_in - coords_mean
@@ -405,6 +402,8 @@ def apply_random_augmentation(coords_in: TensorType["b n a 3", float],
         # unbatched; add batch dimension
         coords_in = coords_in.unsqueeze(0)
         transforms = tuple(t.unsqueeze(0) for t in transforms)
+        seq_mask = seq_mask.unsqueeze(0)
+        atom_mask = atom_mask.unsqueeze(0)
 
     coords_mean, random_rot, random_trans = transforms
 
@@ -571,7 +570,7 @@ def transform_sidechain_frame(x_scn: TensorType["b n 33 3", float],
 
     return x_scn, bb_frames_exists
 
-def process_single_pdb(data):
+def process_single_pdb(data, sm: Optional["ScaffoldManager"] = None):
     example = {}
 
     # Use raw coordinates
@@ -598,6 +597,9 @@ def process_single_pdb(data):
     example['interface_residue_mask'] = data['interface_residue_mask']
     example['chain_ids'] = data['chain_ids']
 
+    # Get scaffolding input with scaffold manager
+    example["x_scaffold"], example["scaffold_mask"], example["aatype_scaffold"], example["x"] = get_scaffolding_inputs(sm, example)
+
     # Construct conditioning inputs
     cond_labels_in = {}
 
@@ -620,3 +622,29 @@ def process_single_pdb(data):
     # Add conditioning labels
     example_out["cond_labels_in"] = cond_labels_in
     return example_out
+
+
+def get_scaffolding_inputs(sm: Optional["ScaffoldManager"],
+                           example: Dict[str, TensorType["..."]]) -> Tuple[TensorType["n 37 3"],
+                                                                           TensorType["n 37"],
+                                                                           TensorType["n"],
+                                                                           TensorType["n 37 3"]]:
+    """
+    Given a scaffold manager and example, return the scaffolded inputs.
+    Centers both the motif and the original coordinates on the CA of the scaffolding residues.
+
+    If sm is None, returns unconditional generation inputs.
+    """
+    x_recentered = example["x"]
+    if sm is None:
+        x_scaffold = torch.zeros_like(example["x"])
+        scaffold_mask = torch.zeros_like(example["atom_mask"])
+        aatype_scaffold = torch.full_like(example["residue_index"], fill_value=rc.restype_order_with_x["X"])
+    else:
+        sm_outputs = sm(example)
+        x_scaffold = sm_outputs["x_scaffold"]
+        scaffold_mask = sm_outputs["scaffold_mask"]
+        aatype_scaffold = sm_outputs["aatype_scaffold"]
+        x_recentered = sm_outputs["x_recentered"]
+
+    return x_scaffold, scaffold_mask, aatype_scaffold, x_recentered

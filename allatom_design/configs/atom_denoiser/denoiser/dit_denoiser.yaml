@@ -66,9 +66,6 @@ dit:
     crop_aug: 0.0
     designability: null
 
-  # Scaffold conditioning
-  h_s: ${model.denoiser.scaffold_module.fampnn.n_channel}
-
   # QK normalization
   qk_rmsnorm: true
 
@@ -78,6 +75,13 @@ dit:
   num_heads: 6
   mlp_dropout: 0.1
   mlp_ratio: 4.0
+
+  # Scaffold conditioning
+  scaffolding:
+    h_s: ${model.denoiser.scaffold_module.fampnn.n_channel}
+    use_h_s: ${denoiser.scaffold_module.enabled}
+    use_concat: false
+    use_seq: false
 
 
 autoguidance:

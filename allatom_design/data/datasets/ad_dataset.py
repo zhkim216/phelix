@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 from einops import rearrange
+from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader
 from torchtyping import TensorType
@@ -18,10 +19,10 @@ import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (center_random_augmentation,
                                       load_feats_from_pdb, make_fixed_size_1d,
-                                      transform_sidechain_frame)
+                                      transform_sidechain_frame, get_scaffolding_inputs, FEATURES_LONG)
 from allatom_design.data.pdb_utils import write_to_pdb
+from allatom_design.data.datasets.scaffold_manager import get_scaffold_manager
 
-FEATURES_LONG = ("residue_index", "chain_index", "aatype")
 
 class ADDataset(data.Dataset):
     """
@@ -45,6 +46,7 @@ class ADDataset(data.Dataset):
         afdb_res_plddt_cutoff: float = 0.0,
         spatial_crop_ratio: float = 0.5,
         evaluation_mode: bool = False,
+        scaffold_manager_cfg: Optional[DictConfig] = None,
         **kwargs
     ):
         """
@@ -76,6 +78,8 @@ class ADDataset(data.Dataset):
         self.cluster_sample = cluster_sample
         self.spatial_crop_ratio = spatial_crop_ratio
         self.evaluation_mode = evaluation_mode
+
+        self.sm = get_scaffold_manager(scaffold_manager_cfg)  # for constructing scaffolding inputs
 
         # Read in PDB keys
         self.pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys.csv"
@@ -215,7 +219,7 @@ class ADDataset(data.Dataset):
 
         if self.se3_augment:
             # Center on CA and apply random rotation
-            x = center_random_augmentation(x, seq_mask, atom_mask, data["missing_atom_mask"],translation_scale=self.translation_scale)
+            x = center_random_augmentation(x, seq_mask, atom_mask, translation_scale=self.translation_scale)
 
         # per-channel mask for x, used for loss.
         # We only mask out missing atoms from PDB files, not ghost atoms.
@@ -238,6 +242,9 @@ class ADDataset(data.Dataset):
             # DEBUG: remove this once we re-cache the dataset
             example["interface_residue_mask"] = data.get("interface_residue_mask", torch.zeros_like(seq_mask))
             example["chain_ids"] = data.get("chain_ids", torch.tensor([1]))
+
+        # Get scaffolding input with scaffold manager
+        example["x_scaffold"], example["scaffold_mask"], example["aatype_scaffold"], example["x"] = get_scaffolding_inputs(self.sm, example)
 
         # Construct conditioning inputs
         cond_labels_in = {}
@@ -554,3 +561,4 @@ def cached_example_to_pdb(pt_file: str, out_pdb_file: str, mode: str = "aa", con
         mode=mode,
         conect=conect,
     )
+

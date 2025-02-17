@@ -126,7 +126,7 @@ class RLSDDataset(data.Dataset):
 
         if self.se3_augment:
             # Center on CA and apply random rotation
-            x = center_random_augmentation(x, seq_mask, atom_mask, data["missing_atom_mask"],translation_scale=self.translation_scale)
+            x = center_random_augmentation(x, seq_mask, atom_mask, translation_scale=self.translation_scale)
 
         # per-channel mask for x, used for loss.
         # We only mask out missing atoms from PDB files, not ghost atoms.

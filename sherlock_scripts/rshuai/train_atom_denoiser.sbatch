@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s0_bb3
+#SBATCH --job-name=s1_bb0
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -30,8 +30,8 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=s0_bb3
-GROUP=ai_cath
+EXP_NAME=s1_bb0
+GROUP=ai_cath_scaffolding
 
 # Dataset paths
 # PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
@@ -49,9 +49,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.subset_length_range=[32,160] \
     model.task=scaffold \
     scaffold_manager=scaffold_manager \
-    denoiser.scaffold_module.enabled=true \
+    denoiser.scaffold_module.enabled=false \
+    denoiser.dit.scaffolding.use_concat=true \
     train.batch_size=16 \
-    denoiser.training_batch_size_mult=4 \
+    denoiser.training_batch_size_mult=8 \
     train.compile_model=true \
     denoiser=dit_denoiser \
     trainer.check_val_every_n_epoch=1 \
