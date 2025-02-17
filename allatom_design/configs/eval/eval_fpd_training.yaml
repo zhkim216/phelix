@@ -17,6 +17,7 @@ fpd_embeddings_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_emb
 use_mpnn: false
 use_esm3: true
 
+subsample_seed: 0  # seed for pct_subsample
 pct_subsample_train: 0.1
 pct_subsample_eval: 1.0
 subset_length_range: null
