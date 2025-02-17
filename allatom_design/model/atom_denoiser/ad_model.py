@@ -42,7 +42,7 @@ class AtomDenoiser(nn.Module):
         self.sigma_data = self.bb_std
 
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
-        self.sm = get_scaffold_manager(cfg.scaffold_manager)
+        self.sm = get_scaffold_manager(cfg.get("scaffold_manager", None))
 
         if self.task == "scaffold":
             assert self.sm is not None, "Scaffold manager must be specified for scaffolding task"
@@ -364,7 +364,7 @@ def get_scaffold_manager(cfg: Optional[DictConfig]) -> Optional[ScaffoldManager]
     """
     Get the scaffold manager specified in the config.
     """
-    if cfg.name == "unconditional":
+    if (cfg is None) or (cfg.name == "unconditional"):
         return None
     elif cfg.name == "scaffold_manager":
         return ScaffoldManager(cfg)

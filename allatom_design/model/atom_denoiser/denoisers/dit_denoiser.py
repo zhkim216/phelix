@@ -55,7 +55,7 @@ class DiTDenoiser(BaseAtomDenoiser):
         self.use_self_conditioning = cfg.use_self_conditioning
 
         # Set up scaffolding module
-        self.use_scaffold_module = cfg.scaffold_module.enabled
+        self.use_scaffold_module = cfg.get("scaffold_module", {}).get("enabled", False)
         if self.use_scaffold_module:
             self.fampnn = FAMPNN(cfg.scaffold_module.fampnn)
 
@@ -401,7 +401,7 @@ class DiT(nn.Module):
         self.num_atoms_in = cfg.num_atoms_in
         self.use_self_conditioning = cfg.use_self_conditioning
         self.condition_on_seq = cfg.condition_on_seq
-        self.condition_on_scaffold = cfg.condition_on_scaffold
+        self.condition_on_scaffold = cfg.get("condition_on_scaffold", False)
 
         # Input and output channels
         self.c = self.num_atoms_in * 3  # 3 xyz coordinates per atom
