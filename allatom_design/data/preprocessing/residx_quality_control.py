@@ -49,6 +49,16 @@ restype_1to3 = {
 restype_3to1 = {v: k for k, v in restype_1to3.items()}
 
 
+def get_pdb_keys(pdb_keys_fp: Path, pdb_store_fp: Path):
+    remaining_keys = []
+    with open(pdb_keys_fp, 'r') as fp:
+        for line in fp.readlines():
+            pdb_key = line.strip()
+            if (pdb_store_fp / pdb_key).exists():
+                remaining_keys.append(pdb_key)
+    with open(pdb_store_fp.parent / f"{pdb_keys_fp.stem}{pdb_keys_fp.suffix}", 'w') as fp:
+        fp.write('\n'.join(remaining_keys) + '\n')
+
 def group_consecutive_idx(nums):
 
     nums = np.array(nums)
@@ -243,6 +253,9 @@ def multiprocess_runner(
     df["problem"] = [r[1] for r in ret]
     df["num_chains"] = [r[2] for r in ret]
     df.to_csv(f"{Path(save_dir).parent}/problematic_pdbs_{pdb_keys.stem}.csv", index=False)
+
+    # Save the filtered pdb_keys list to the parent of the save_dir
+    get_pdb_keys(pdb_keys, save_dir)
 
 
 if __name__ == "__main__":
