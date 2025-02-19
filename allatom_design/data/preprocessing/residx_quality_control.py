@@ -242,7 +242,7 @@ def multiprocess_runner(
     df["pdb"] = [r[0] for r in ret]
     df["problem"] = [r[1] for r in ret]
     df["num_chains"] = [r[2] for r in ret]
-    df.to_csv(f"problematic_pdbs_{pdb_keys.stem}.csv", index=False)
+    df.to_csv(f"{Path(save_dir).parent}/problematic_pdbs_{pdb_keys.stem}.csv", index=False)
 
 
 if __name__ == "__main__":
