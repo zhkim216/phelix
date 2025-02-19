@@ -82,29 +82,11 @@ class LitAtomDenoiser(L.LightningModule):
         ts = list(self.cfg.eval.eval_timesteps_bb)
 
         for t in ts:
-            t_sd = 0.0  # assume no sequence/sidechain information
-            t_sd_batch = torch.full((B,), fill_value=t_sd, device=batch["seq_mask"].device)
-
             batch["t_bb"] = t
-            outputs = self(batch, t_sd=t_sd_batch)
+            outputs = self(batch)
             _, aux = self.loss(outputs, batch, return_aux=True)
             aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
-            self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_ts{t_sd}_tbb{t}")
-
-
-        # Log metrics as a function of sequence time
-        if self.cfg.eval.eval_timesteps_seq:
-            ts = list(itertools.product(self.cfg.eval.eval_timesteps_seq, self.cfg.eval.eval_timesteps_bb))
-            for t_sd, t_bb in ts:
-                t_sd_batch = torch.full((B,), fill_value=t_sd, device=batch["seq_mask"].device)
-                batch["t_bb"] = t_bb
-
-                outputs = self(batch, t_sd=t_sd_batch)
-                _, aux = self.loss(outputs, batch, return_aux=True)
-                aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
-                aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
-                self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix,
-                          key_suffix=f"_ts{t_sd}_tbb{t_bb}")
+            self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_tbb{t}")
 
 
     def _log(self,

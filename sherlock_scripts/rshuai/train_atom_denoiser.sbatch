@@ -21,7 +21,7 @@ source /home/groups/possu/miniconda/etc/profile.d/conda.sh
 conda activate allatom_design
 
 # Define directories
-BASE_DIR=/home/users/rshuai/allatom-design
+BASE_DIR=/home/users/rshuai/code/allatom-design
 HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 OUT_DIR=/scratch/users/rshuai/allatom_design
 WANDB_ID=null  # launch to subhang's wandb
