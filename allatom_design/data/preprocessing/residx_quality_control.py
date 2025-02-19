@@ -16,6 +16,7 @@ from Bio.PDB.MMCIFParser import FastMMCIFParser
 import numpy as np
 import pandas as pd
 import typer
+from tqdm import tqdm
 
 
 io = PDBIO()
@@ -214,6 +215,8 @@ def runner(
 
 def multiprocess_runner(
     pdb_keys: Path,
+    mmcif_dir: Path = Path("/scratch/users/tianyulu/datasets/mmCIF"),
+    pdb_store_dir: Path = Path("/oak/stanford/groups/possu/tianyu/ingraham_cath_dataset/pdb_store"),
     max_threads: int = 8,
     save_dir: Path = Path(
         "/scratch/users/tianyulu/datasets/ingraham_cath_dataset_label_seqid/pdb_store"
@@ -226,7 +229,14 @@ def multiprocess_runner(
             all_pdb_keys.append(line.strip())
 
     with multiprocessing.Pool(max_threads) as p:
-        ret = p.map(partial(runner, save_dir=save_dir, shift_res=shift_res), all_pdb_keys)
+        ret = list(tqdm(
+            p.imap(
+                partial(runner, mmcif_dir=mmcif_dir, pdb_store_dir=pdb_store_dir, save_dir=save_dir, shift_res=shift_res),
+                all_pdb_keys
+            ),
+            total=len(all_pdb_keys),
+            desc="Processing PDBs"
+        ))
 
     df = pd.DataFrame()
     df["pdb"] = [r[0] for r in ret]
