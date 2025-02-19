@@ -67,9 +67,7 @@ def main(cfg: DictConfig):
         yaml.safe_dump(cfg_dict, f)
 
     sample_out_dir = Path(cfg.out_dir, "samples")
-    traj_out_dir = Path(cfg.out_dir, "traj")
     Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
-    Path(traj_out_dir).mkdir(parents=True, exist_ok=True)
 
     # Load PDBs
     if cfg.pdb_key_list is not None:
@@ -93,11 +91,8 @@ def main(cfg: DictConfig):
     noise_schedule = NoiseSchedule(cfg.noise_schedule)
     churn_cfg = dict(cfg.churn_cfg)
 
-    # For partial trajectory saving
-    save_traj_steps = np.linspace(0, cfg.num_steps - 1, cfg.limit_traj_steps, dtype=int)
-    pbar = tqdm(total=len(pdbs))
-
     # Process in batches
+    pbar = tqdm(total=len(pdbs))
     for i in range(0, len(pdbs), cfg.batch_size):
         pdb_batch_files = pdbs[i : i + cfg.batch_size]
         B = len(pdb_batch_files)
@@ -143,6 +138,13 @@ def main(cfg: DictConfig):
         centered_filenames = [f"{sample_out_dir}/centered_{pdb_stem}.pdb" for pdb_stem in pdb_names]
         AtomDenoiser.save_samples_to_pdb(samples, centered_filenames)
 
+        # Build scaffold inputs
+        scaffold_inputs = {
+            "x_scaffold": batch["x_scaffold"],
+            "scaffold_mask": batch["scaffold_mask"],
+            "aatype_scaffold": batch["aatype_scaffold"],
+        }
+
         # Build timesteps for sampling
         timesteps = t_bb[None].expand(B, -1).to(device)
 
@@ -175,31 +177,6 @@ def main(cfg: DictConfig):
             out_filenames.append(f"{sample_out_dir}/sample_{pdb_stem}_{i + j}.pdb")
 
         AtomDenoiser.save_samples_to_pdb(samples, out_filenames)
-
-        # Write trajectories to file (if desired)
-        if cfg.n_traj_per_length > 0:
-            align_models_to_idx = None
-            if cfg.align_traj_to_last_step:
-                align_models_to_idx = cfg.limit_traj_steps - 1
-
-            save_trajs_fn = partial(
-                AtomDenoiser.save_trajs_to_pdb,
-                aux,
-                residue_index=batched["residue_index"],
-                chain_index=torch.zeros_like(batched["residue_index"]),
-                save_traj_mask=np.arange(B) < cfg.n_traj_per_length,
-                save_traj_steps=save_traj_steps,
-                traj_conect=cfg.traj_conect,
-                align_models_to_idx=align_models_to_idx
-            )
-            save_trajs_fn(
-                x_traj_key="x1_bb_traj",
-                filenames=[f"{traj_out_dir}/x1_traj_sample_{Path(p).stem}_{i + j}.pdb" for j, p in enumerate(pdb_batch)]
-            )
-            save_trajs_fn(
-                x_traj_key="xt_bb_traj",
-                filenames=[f"{traj_out_dir}/xt_traj_sample_{Path(p).stem}_{i + j}.pdb" for j, p in enumerate(pdb_batch)]
-            )
 
         pbar.update(B)
 

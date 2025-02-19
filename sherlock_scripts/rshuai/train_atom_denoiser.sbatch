@@ -30,7 +30,7 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=s1_bb0
+EXP_NAME=s1_bb3
 GROUP=ai_cath_scaffolding
 
 # Dataset paths
@@ -51,8 +51,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     scaffold_manager=scaffold_manager \
     denoiser.scaffold_module.enabled=false \
     denoiser.dit.scaffolding.use_concat=true \
-    train.batch_size=16 \
-    denoiser.training_batch_size_mult=8 \
+    train.batch_size=32 \
+    denoiser.training_batch_size_mult=16 \
     train.compile_model=true \
     denoiser=dit_denoiser \
     trainer.check_val_every_n_epoch=1 \

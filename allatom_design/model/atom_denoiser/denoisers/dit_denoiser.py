@@ -260,12 +260,20 @@ class DiTDenoiser(BaseAtomDenoiser):
             use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])
             if use_autoguidance:
                 assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
-                autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model, aatype_scaffold=aatype_scaffold,
+                autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model,
+                                                              x_scaffold=x_scaffold,
+                                                              scaffold_mask=scaffold_mask,
+                                                              aatype_scaffold=aatype_scaffold,
+                                                              h_s=h_s,
                                                               residue_index=residue_index, seq_mask=seq_mask,
                                                               cond_labels_in=cond_labels_in)
 
             # Run integration steps
-            denoiser_fn = partial(self.dit, h_s=h_s, aatype_scaffold=aatype_scaffold,
+            denoiser_fn = partial(self.dit,
+                                  x_scaffold=x_scaffold,
+                                  scaffold_mask=scaffold_mask,
+                                  aatype_scaffold=aatype_scaffold,
+                                  h_s=h_s,
                                   residue_index=residue_index, seq_mask=seq_mask,
                                   cond_labels_in=cond_labels_in)
 
@@ -540,6 +548,7 @@ class DiT(nn.Module):
 
         # Concatenate scaffold conditioning
         if self.scaffolding.use_concat:
+            x_scaffold = x_scaffold * scaffold_mask[..., None]  # zero out non-scaffold positions
             x_scaffold = rearrange(x_scaffold[..., rc.bb_idxs, :], "b n a x -> b n (a x)")
             x = torch.cat([x, x_scaffold], dim=-1)
 
