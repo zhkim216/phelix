@@ -206,7 +206,7 @@ def get_dataloader(phase: str,
                             num_workers=num_workers,
                             pin_memory=cuda,
                             shuffle=(phase == "train"),
-                            drop_last=True
+                            drop_last=(phase == "train")
                             )
 
     return dataset, dataloader
