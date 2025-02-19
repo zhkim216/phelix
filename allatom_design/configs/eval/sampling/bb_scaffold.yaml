@@ -18,12 +18,6 @@ pdb_dir: null
 pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
 pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
 
-# Trajectory saving
-n_traj_per_length: 0
-limit_traj_steps: 0
-traj_conect: false
-align_traj_to_last_step: false
-
 # Denoising steps
 num_steps: 500
 timestep_schedule:
