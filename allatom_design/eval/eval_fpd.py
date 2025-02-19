@@ -63,19 +63,37 @@ def main(cfg: DictConfig):
     precomputed_key_files = [f"{cfg.fpd_embeddings_dir}/precomputed_{phase}_pdb_keys.csv" for phase in phases]
     phase_to_keys = {phase: pd.read_csv(file_path, header=None).values.flatten() for phase, file_path in zip(phases, precomputed_key_files)}
 
-    # Get dataframes with length info
-    df = {"phase": [], "pdb_key": [], "seq_length": []}
+    # Get sequence lengths for all pdb keys and store as dataframe
+    df_dict = {"phase": [], "pdb_key": [], "seq_length": []}
     for phase in phases:
-        if cfg.use_esm3:
-            _, lengths = load_esm3_embeddings([f"{cfg.fpd_embeddings_dir}/esm3/{pdb}.pkl" for pdb in phase_to_keys[phase]])
-        elif cfg.use_mpnn:
-            _, lengths = load_mpnn_embeddings([f"{cfg.fpd_embeddings_dir}/mpnn/{pdb}.npy" for pdb in phase_to_keys[phase]])
+        cached_lengths_file = f"{cfg.fpd_embeddings_dir}/precomputed_{phase}_pdb_keys_lengths.csv"
+        if Path(cached_lengths_file).exists():
+            # Check if cached lengths file exists
+            print(f"Loading cached lengths from {cached_lengths_file}")
+            lengths_df = pd.read_csv(cached_lengths_file)
+            lengths = lengths_df["seq_length"].values
+            assert (phase_to_keys[phase] == lengths_df["pdb_key"].values).all(), "Keys in cached lengths csv do not match keys in precomputed pdb keys csv."
         else:
-            raise ValueError("Must use at least one embedding type.")
-        df["phase"].extend([phase] * len(phase_to_keys[phase]))
-        df["pdb_key"].extend(phase_to_keys[phase])
-        df["seq_length"].extend(lengths)
-    df = pd.DataFrame(df)
+            # Otherwise, compute lengths and cache them
+            if cfg.use_esm3:
+                _, lengths = load_esm3_embeddings([f"{cfg.fpd_embeddings_dir}/esm3/{pdb}.pkl" for pdb in phase_to_keys[phase]])
+            elif cfg.use_mpnn:
+                _, lengths = load_mpnn_embeddings([f"{cfg.fpd_embeddings_dir}/mpnn/{pdb}.npy" for pdb in phase_to_keys[phase]])
+            else:
+                raise ValueError("Must set at least one of use_esm3 or use_mpnn to True.")
+
+            # Cache the lengths
+            lengths_df = pd.DataFrame({
+                "pdb_key": phase_to_keys[phase],
+                "seq_length": lengths
+            })
+            lengths_df.to_csv(cached_lengths_file, index=False)
+            print(f"Cached lengths to {cached_lengths_file}")
+
+        df_dict["phase"].extend([phase] * len(phase_to_keys[phase]))
+        df_dict["pdb_key"].extend(phase_to_keys[phase])
+        df_dict["seq_length"].extend(lengths)
+    df = pd.DataFrame(df_dict)
 
     # Subset by length
     if cfg.subset_length_range is not None:
@@ -84,7 +102,7 @@ def main(cfg: DictConfig):
 
     # Randomly subsample
     subsample_fracs = {"train": cfg.pct_subsample_train, "eval": cfg.pct_subsample_eval, "eval2": cfg.pct_subsample_eval}
-    df = df.groupby("phase", group_keys=False).apply(lambda x: x.sample(frac=subsample_fracs[x.name], replace=False))  # subsample
+    df = df.groupby("phase", group_keys=False)[["phase", "pdb_key", "seq_length"]].apply(lambda x: x.sample(frac=subsample_fracs[x.name], replace=False, random_state=cfg.subsample_seed))
 
     # Load in precomputed embeddings
     phase_to_p_embeds = defaultdict(dict)  # phase -> model -> precomputed embeddings
@@ -105,6 +123,7 @@ def main(cfg: DictConfig):
     pdb_keys = df["pdb_key"].values
     sampled_pdbs = []
 
+    L.seed_everything(cfg.seed)  # set seed right before sampling
     for i in range(0, len(all_lengths), cfg.batch_size):
         lengths = torch.tensor(all_lengths[i : i + cfg.batch_size], dtype=torch.long).to(device)
         B = lengths.shape[0]

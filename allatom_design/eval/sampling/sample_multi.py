@@ -270,6 +270,7 @@ def main(cfg: DictConfig):
 
                 for k, v in sc_info[pdb]["sc_metrics"].items():
                     sc_metrics[f"{k}"].append(v.item())
+                sc_metrics["avg_plddt"].append(sc_info[pdb]["struct_preds"]["avg_plddt"].item())
 
             out_df = pd.DataFrame(sc_metrics)
 
