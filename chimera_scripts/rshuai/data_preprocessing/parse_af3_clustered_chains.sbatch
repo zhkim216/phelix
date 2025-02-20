@@ -19,7 +19,8 @@ BASE_DIR=/home/talal/rshuai/allatom-design
 cd ${BASE_DIR}
 
 # Run script
-python3 allatom_design/data/preprocessing/get_af3_monomer_pdb_key_list.py \
+PHASE=eval
+python3 allatom_design/data/preprocessing/parse_af3_clustered_chains.py \
     --chain_clustering_csv /scratch/hielab/talal/datasets/af3_pdb/data_caches/data_caches/val_clusterings/protein_chain_cluster_mapping.csv \
-    --phase eval \
-    --out_dir $SCRATCH/datasets/af3_pdb_monomer
+    --phase ${PHASE} \
+    --out_file $SCRATCH/datasets/af3_pdb_monomer/${PHASE}_pdb_keys_all.list

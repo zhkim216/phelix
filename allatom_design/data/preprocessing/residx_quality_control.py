@@ -4,7 +4,7 @@ Iterate over label seq id and auth seq id, detect where gaps in label seq id dif
 Also saves a slice of the mmCIF file that matches the domain parsed by Ingraham CATH of only those that match
 
 Author: Tianyu Lu
-Adapated by: Richard Shuai
+Adapted by: Richard Shuai
 """
 
 from functools import partial
