@@ -27,7 +27,7 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Set paths
-NOISE_LABELS=0.3
+NOISE_LABELS=0.0
 MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
 PDB_DIR=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset_residx_fixed_resolution_rfree_filtered/pdb_store
 PDB_KEY_LIST=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset_residx_fixed_resolution_rfree_filtered/train_pdb_keys.list

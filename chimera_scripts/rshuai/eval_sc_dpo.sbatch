@@ -31,7 +31,7 @@ GROUP=eval_sc_dpo
 MODEL_NAME=d2_aasd0
 CKPT=sd-step100000-epoch36.ckpt
 # MODEL_NAME=c2_aasd2
-NOISE_LABELS=0.3
+NOISE_LABELS=0.0
 EXP_NAME=${MODEL_NAME}_eval_sc_dpo_nl${NOISE_LABELS}
 
 # Set paths
