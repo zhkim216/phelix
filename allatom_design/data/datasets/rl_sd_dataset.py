@@ -78,10 +78,10 @@ class RLSDDataset(data.Dataset):
 
         # Subset to length range
         if subset_length_range is not None:
-            self.subset_to_length_range(*self.subset_length_range)  # TODO: switch over to use length from CSV
+            self.subset_to_length_range(*self.subset_length_range)
 
         # Set fixed size to max length
-        self.fixed_size = self._get_max_len()  # TODO: switch over to use length from CSV
+        self.fixed_size = self._get_max_len()
 
         ### Construct paired dataset ###
         self.paired_dataset = self._construct_paired_dataset()
