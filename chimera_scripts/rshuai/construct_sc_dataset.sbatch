@@ -4,8 +4,8 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%j.out
-#SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%j.err
+#SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.out
+#SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%A_%a.err
 #SBATCH --array=0-1
 
 # Write batch script to logs
@@ -53,6 +53,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/construct_sc_datase
     num_steps=50 \
     noise_labels=${NOISE_LABELS} \
     temperature_list=[0.1,0.5,1.0] \
-    num_seqs_per_pdb_list=[2,2,4] \
+    num_seqs_per_pdb_list=[1,1,2] \
     array_id=${SLURM_ARRAY_TASK_ID} \
-    num_arrays=100
+    num_arrays=2
