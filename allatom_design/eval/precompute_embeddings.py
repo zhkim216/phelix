@@ -12,8 +12,10 @@ from huggingface_hub import login
 from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.eval.esm3_utils import create_esm3_embeddings
+from allatom_design.eval.fampnn_utils import create_fampnn_embeddings
 from allatom_design.eval.proteinmpnn_utils import (create_mpnn_embeddings,
                                                    load_mpnn)
+from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from esm3.esm.models.esm3 import ESM3
 
 warnings.filterwarnings("ignore")
@@ -27,6 +29,9 @@ def main(cfg: DictConfig):
     L.seed_everything(cfg.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+    # Disable gradients globally
+    torch.set_grad_enabled(False)
 
     # Get pdb keys for each phase
     if not cfg.use_precomputed_key_files:
@@ -71,7 +76,7 @@ def main(cfg: DictConfig):
 
     # Compute embeddings for FPD
     pdbs_dir = Path(cfg.pdbs_dir)
-    pdb_paths = [str(pdbs_dir / f"{pdb}.pdb") for pdb in all_pdb_keys]
+    pdb_paths = [str(pdbs_dir / f"{pdb}{cfg.pdb_key_ext}") for pdb in all_pdb_keys]
 
     if cfg.compute_mpnn:
         mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
@@ -87,6 +92,15 @@ def main(cfg: DictConfig):
         vqvae_encoder = model.get_structure_encoder()
 
         create_esm3_embeddings(vqvae_encoder, pdb_paths=pdb_paths, out_dir=f"{cfg.out_dir}/esm3", device=device)
+
+    if cfg.compute_fampnn:
+        lit_sd_model = LitSeqDenoiser.load_from_checkpoint(cfg.fampnn.checkpoint_path).eval()
+        create_fampnn_embeddings(lit_sd_model.model, pdb_paths=pdb_paths,
+                                 backbone_only=True,
+                                 batch_size=cfg.fampnn.batch_size,
+                                 device=lit_sd_model.device,
+                                 out_dir=f"{cfg.out_dir}/fampnn")
+
 
 
 if __name__ == "__main__":
