@@ -49,11 +49,14 @@ def main(cfg: DictConfig):
     fasta_out_dir = f"{out_dir}/fastas"
     sample_pkl_dir = f"{out_dir}/sample_pkls"
     pred_out_dir = f"{out_dir}/preds"
+    sc_info_dir = f"{out_dir}/sc_info"
 
     Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
     Path(fasta_out_dir).mkdir(parents=True, exist_ok=True)
     Path(sample_pkl_dir).mkdir(parents=True, exist_ok=True)
     Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
+    Path(sc_info_dir).mkdir(parents=True, exist_ok=True)
+
 
     # Preserve config
     with open(Path(out_dir, "config.yaml"), "w") as f:
@@ -125,6 +128,7 @@ def main(cfg: DictConfig):
     cfg.timestep_schedule.num_steps = cfg.num_steps
     t_seq = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
 
+    sc_metrics = defaultdict(list)
     for temperature, num_seqs_per_pdb in zip(cfg.temperature_list, cfg.num_seqs_per_pdb_list):
         # Process PDBs in batches of size B
         pdb_files_repeated = np.repeat(pdb_files, num_seqs_per_pdb)
@@ -242,8 +246,13 @@ def main(cfg: DictConfig):
                 override_metrics_to_compute=["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]
             )
 
+            # Dump self-consistency info to pickle
+            for k, v in sc_info.items():
+                sample_name = Path(k).stem
+                with open(f"{sc_info_dir}/{sample_name}.pkl", "wb") as f:
+                    pickle.dump(v, f)
+
             # Aggregate results
-            sc_metrics = defaultdict(list)
             for j, pdb in enumerate(pdbs):
                 sc_metrics["pdb_name"].append(Path(pdb).stem)
                 sc_metrics["pdb_key"].append(pdb_names[j])
@@ -253,24 +262,23 @@ def main(cfg: DictConfig):
                     sc_metrics[f"{k}"].append(v.item())
                 sc_metrics["avg_plddt"].append(sc_info[pdb]["struct_preds"]["avg_plddt"].item())
 
-            out_df = pd.DataFrame(sc_metrics)
-
-            # Safely append to CSV using a file lock
-            with open(self_consistency_path, "a+") as f:
-                # Acquire exclusive lock
-                fcntl.flock(f, fcntl.LOCK_EX)
-
-                # Check if file is empty
-                f.seek(0, os.SEEK_END)
-                file_empty = (f.tell() == 0)
-
-                # Write DataFrame
-                out_df.to_csv(f, index=False, header=file_empty)
-
-                # Release lock
-                fcntl.flock(f, fcntl.LOCK_UN)
-
             pbar.update(B)
+
+    # Safely append to CSV using a file lock
+    out_df = pd.DataFrame(sc_metrics)
+    with open(self_consistency_path, "a+") as f:
+        # Acquire exclusive lock
+        fcntl.flock(f, fcntl.LOCK_EX)
+
+        # Check if file is empty
+        f.seek(0, os.SEEK_END)
+        file_empty = (f.tell() == 0)
+
+        # Write DataFrame
+        out_df.to_csv(f, index=False, header=file_empty)
+
+        # Release lock
+        fcntl.flock(f, fcntl.LOCK_UN)
 
     pbar.close()
 

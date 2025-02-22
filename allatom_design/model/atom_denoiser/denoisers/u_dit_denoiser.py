@@ -65,7 +65,7 @@ class UDiTDenoiser(BaseAtomDenoiser):
     def forward(self,
                 x_scaffold: TensorType["b n 33 3", float],
                 scaffold_mask: TensorType["b n 37 3", float],
-                aatype_in: TensorType["b n", int],
+                aatype_scaffold: TensorType["b n", int],
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
                 cond_labels_in: Dict[str, TensorType["b", int]] = {},
@@ -76,7 +76,7 @@ class UDiTDenoiser(BaseAtomDenoiser):
         aux_preds = {}
 
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
-            aatype_in=aatype_in,
+            aatype_scaffold=aatype_scaffold,
             residue_index=residue_index,
             seq_mask=seq_mask,
             cond_labels_in=cond_labels_in,
@@ -90,7 +90,7 @@ class UDiTDenoiser(BaseAtomDenoiser):
 
 
     def backbone_diffusion(self,
-                           aatype_in: TensorType["b n", int],
+                           aatype_scaffold: TensorType["b n", int],
                            residue_index: TensorType["b n", int],
                            seq_mask: TensorType["b n", float],
                            cond_labels_in: Dict[str, TensorType["b", int]] = {},
@@ -110,7 +110,7 @@ class UDiTDenoiser(BaseAtomDenoiser):
             # Repeat inputs for batch multiplier  # TODO: randomly augment these too
             M = self.cfg.training_batch_size_mult
             x_bb_gt_batched = repeat(x_bb_gt, "b n a x -> (m b) n a x", m=M, b=B)
-            aatype_in_batched = repeat(aatype_in, "b n -> (m b) n", m=M, b=B)
+            aatype_scaffold_batched = repeat(aatype_scaffold, "b n -> (m b) n", m=M, b=B)
             residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
             cond_labels_in_batched = {label: repeat(cond_labels_in[label], "b -> (m b)", m=M, b=B) for label in cond_labels_in}
@@ -131,13 +131,13 @@ class UDiTDenoiser(BaseAtomDenoiser):
             if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                 # Apply self-conditioning
                 with torch.no_grad():
-                    x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_in_batched, t_batched,
+                    x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_scaffold_batched, t_batched,
                                                            seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                            cond_labels_in=cond_labels_in_batched)
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                 denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched)
 
-            x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_in_batched, t_batched,
+            x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched, aatype_scaffold_batched, t_batched,
                                                    seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                    cond_labels_in=cond_labels_in_batched)
 
@@ -149,13 +149,13 @@ class UDiTDenoiser(BaseAtomDenoiser):
                 denoiser_fn = self.guiding_model
                 if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                     with torch.no_grad():
-                        x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched, aatype_in_batched, t_batched,
+                        x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched, aatype_scaffold_batched, t_batched,
                                                              seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                              cond_labels_in=cond_labels_in_batched)
                     torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                     denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_guide)
 
-                x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched, aatype_in_batched, t_batched,
+                x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched, aatype_scaffold_batched, t_batched,
                                                      seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                      cond_labels_in=cond_labels_in_batched)
 
@@ -212,12 +212,12 @@ class UDiTDenoiser(BaseAtomDenoiser):
             use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])
             if use_autoguidance:
                 assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
-                autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model, aatype_in=aatype_in,
+                autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model, aatype_scaffold=aatype_scaffold,
                                                               residue_index=residue_index, seq_mask=seq_mask,
                                                               cond_labels_in=cond_labels_in)
 
             # Run integration steps
-            denoiser_fn = partial(self.u_dit, aatype_in=aatype_in,
+            denoiser_fn = partial(self.u_dit, aatype_scaffold=aatype_scaffold,
                                   residue_index=residue_index, seq_mask=seq_mask,
                                   cond_labels_in=cond_labels_in)
 
@@ -420,7 +420,7 @@ class UDiT(nn.Module):
 
     def forward(self,
                 x_noised: TensorType["b n 4 3", float],
-                aatype_in: Optional[TensorType["b n", int]],
+                aatype_scaffold: Optional[TensorType["b n", int]],
                 t: TensorType["b", float],
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
@@ -444,7 +444,7 @@ class UDiT(nn.Module):
 
         # Concatenate one-hot sequence conditioning
         if self.condition_on_seq:
-            aatype_oh = F.one_hot(aatype_in, num_classes=self.n_aatype).float()
+            aatype_oh = F.one_hot(aatype_scaffold, num_classes=self.n_aatype).float()
             x = torch.cat([x, aatype_oh], dim=-1)
 
         # Begin U-DiT forward pass

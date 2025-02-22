@@ -22,7 +22,6 @@ from allatom_design.model.atom_denoiser.denoisers.triangle_dit_denoiser import \
     TriangleDiTDenoiser
 from allatom_design.model.atom_denoiser.denoisers.u_dit_denoiser import \
     UDiTDenoiser
-from allatom_design.model.atom_denoiser.scaffold_manager import ScaffoldManager
 
 
 class AtomDenoiser(nn.Module):
@@ -42,10 +41,6 @@ class AtomDenoiser(nn.Module):
         self.sigma_data = self.bb_std
 
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
-        self.sm = get_scaffold_manager(cfg.get("scaffold_manager", None))
-
-        if self.task == "scaffold":
-            assert self.sm is not None, "Scaffold manager must be specified for scaffolding task"
 
 
     def setup(self):
@@ -66,19 +61,6 @@ class AtomDenoiser(nn.Module):
         batch = copy.deepcopy(batch)
         outputs = {}
 
-        # Get scaffolding input with scaffold manager
-        if self.sm is None:
-            # unconditional generation
-            x_scaffold = torch.zeros_like(batch["x"])
-            scaffold_mask = torch.zeros_like(batch["atom_mask"])
-            aatype_in = torch.full_like(batch["residue_index"], fill_value=rc.restype_order_with_x["X"])
-        else:
-            sm_outputs = self.sm(batch)
-            x_scaffold = sm_outputs["x_scaffold"]
-            scaffold_mask = sm_outputs["scaffold_mask"]
-            aatype_in = sm_outputs["aatype_in"]
-            outputs["scaffold_aux"] = sm_outputs
-
         # During training, keep track of certain additional features
         aux_inputs = {
             "x": batch["x"],  # ground truth coordinates
@@ -87,9 +69,9 @@ class AtomDenoiser(nn.Module):
         }
 
         # Denoise coords
-        _, aux_preds = self.denoiser(x_scaffold,
-                                     scaffold_mask,
-                                     aatype_in,
+        _, aux_preds = self.denoiser(batch["x_scaffold"],
+                                     batch["scaffold_mask"],
+                                     batch["aatype_scaffold"],
                                      batch["residue_index"], batch["seq_mask"],
                                      cond_labels_in=batch["cond_labels_in"],
                                      aux_inputs=aux_inputs)
@@ -121,8 +103,8 @@ class AtomDenoiser(nn.Module):
                noise_schedule: NoiseSchedule = None,
                churn_cfg: Dict[str, float] = None,
                autoguidance_cfg: Optional[Dict[str, Any]] = None,  # autoguidance config
-               ) -> Tuple[TensorType["b n 4 3", float],
-                          Dict[str, torch.Tensor]]:
+               scaffold_inputs: Optional[Dict[str, torch.Tensor]] = None,
+               ) -> Tuple[TensorType["b n 4 3", float], Dict[str, torch.Tensor]]:
         """
         Sample from the model.
 
@@ -139,6 +121,11 @@ class AtomDenoiser(nn.Module):
             - s_churn: controls overall amount of stochasticity to add in sampling
             - s_noise: std of noise to add with churn
         - cond_labels: dictionary mapping from conditioning label to token ID for each batch element
+
+        - scaffold_inputs: dictionary containing scaffold information with keys:
+            - x_scaffold: TensorType["b n a 3", float], coordinates of scaffold atoms
+            - scaffold_mask: TensorType["b n a", float], mask indicating which atoms are part of the scaffold
+            - aatype_scaffold: TensorType["b n", int], input amino acid type for conditioning
         """
         B, N = residue_index.shape
 
@@ -150,9 +137,14 @@ class AtomDenoiser(nn.Module):
         aux["seq_mask"] = seq_mask.cpu()
 
         # Initialize sequence / sidechain prior (all masked, time t=0)
-        x_scaffold = torch.zeros((B, N, rc.atom_type_num, 3), device=residue_index.device)
-        scaffold_mask = torch.zeros((B, N, rc.atom_type_num), device=residue_index.device)
-        aatype_in = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
+        if scaffold_inputs is None:
+            x_scaffold = torch.zeros((B, N, rc.atom_type_num, 3), device=residue_index.device)
+            scaffold_mask = torch.zeros((B, N, rc.atom_type_num), device=residue_index.device)
+            aatype_scaffold = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
+        else:
+            x_scaffold = scaffold_inputs["x_scaffold"]
+            scaffold_mask = scaffold_inputs["scaffold_mask"]
+            aatype_scaffold = scaffold_inputs["aatype_scaffold"]
 
         num_steps = timesteps.shape[-1] - 1
 
@@ -183,7 +175,7 @@ class AtomDenoiser(nn.Module):
         }
         x1_bb, aux_preds = self.denoiser(x_scaffold=x_scaffold,
                                          scaffold_mask=scaffold_mask,
-                                         aatype_in=aatype_in,
+                                         aatype_scaffold=aatype_scaffold,
                                          residue_index=residue_index,
                                          seq_mask=seq_mask,
                                          cond_labels_in=cond_labels,
@@ -358,15 +350,3 @@ def get_denoiser(cfg: DictConfig,
         return MPNNDiTDenoiser(cfg, sigma_data)
     else:
         raise ValueError(f"Unknown denoiser: {cfg.name}")
-
-
-def get_scaffold_manager(cfg: Optional[DictConfig]) -> Optional[ScaffoldManager]:
-    """
-    Get the scaffold manager specified in the config.
-    """
-    if (cfg is None) or (cfg.name == "unconditional"):
-        return None
-    elif cfg.name == "scaffold_manager":
-        return ScaffoldManager(cfg)
-    else:
-        raise ValueError(f"Unknown scaffold manager: {cfg.name}")

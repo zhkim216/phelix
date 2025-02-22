@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=pc_mpnn_embs
+#SBATCH --job-name=pc_fampnn_embs
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -29,6 +29,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Model params
 MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
+FAMPNN_MODEL_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
 
 # Directories
 ## if we need to subset the original pdb key list
@@ -38,24 +39,36 @@ MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
 # USE_PRECOMPUTED_KEY_FILES=false
 
 ## if we've already subsetted the pdbs
-TRAIN_PDB_KEY_FILE=null
-EVAL_PDB_KEY_FILE=null
-EVAL2_PDB_KEY_FILE=null
-USE_PRECOMPUTED_KEY_FILES=true
+# TRAIN_PDB_KEY_FILE=null
+# EVAL_PDB_KEY_FILE=null
+# EVAL2_PDB_KEY_FILE=null
+# USE_PRECOMPUTED_KEY_FILES=true
 
-PDBS_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/all_pdbs
-OUT_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings
+# PDBS_DIR=/scratch/users/rshuai/datasets/augmented_ingraham_cath_bugfree/all_pdbs
+# OUT_DIR=/scratch/users/rshuai/datasets/augmented_ingraham_cath_bugfree/fampnn_embeddings
+
+TRAIN_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_keys.list
+EVAL_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys.list
+EVAL2_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval2_pdb_keys.list
+USE_PRECOMPUTED_KEY_FILES=false
+
+PDBS_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/pdb_store
+OUT_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/fampnn_embeddings
 
 # Run eval script
 cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/precompute_embeddings.py \
-    compute_mpnn=true \
+    compute_mpnn=false \
     compute_esm3=false \
+    compute_fampnn=true \
     use_precomputed_key_files=${USE_PRECOMPUTED_KEY_FILES} \
     train_pdb_key_file=${TRAIN_PDB_KEY_FILE} \
     eval_pdb_key_file=${EVAL_PDB_KEY_FILE} \
     eval2_pdb_key_file=${EVAL2_PDB_KEY_FILE} \
+    pdb_key_ext="" \
     pdbs_dir=${PDBS_DIR} \
     out_dir=${OUT_DIR} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
+    fampnn.checkpoint_path=${FAMPNN_MODEL_CKPT} \
+    subsample_n=null \
     hydra.run.dir=${HYDRA_DIR}
