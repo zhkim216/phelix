@@ -31,7 +31,7 @@ NOISE_LABELS=0.0
 MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
 PDB_DIR=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/train_mmcifs
 PDB_KEY_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/train_pdb_keys.list
-OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/construct_sc_dataset/af3_pdb_monomer_L32_256_nl${NOISE_LABELS}_eval
+OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/construct_sc_dataset/af3_pdb_monomer_L32_256_nl${NOISE_LABELS}
 
 # PDB_KEY_LIST=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys.list
 # OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/construct_sc_dataset/ingraham_cath_L151_256_S50_val
