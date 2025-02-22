@@ -89,7 +89,7 @@ def create_fampnn_embeddings(model: FAMPNNDenoiser,
             name = pdb_names[j]
             out_file = Path(out_dir) / f"{name}.pt"
             length_j = lengths[j].item()
-            mpnn_feature_dict_j = {k: v[j, :length_j] for k, v in mpnn_feature_dict.items()}
+            mpnn_feature_dict_j = {k: v[j, :length_j].clone() for k, v in mpnn_feature_dict.items()}
             torch.save(mpnn_feature_dict_j, out_file)
 
         pbar.update(B)
