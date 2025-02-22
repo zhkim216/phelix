@@ -56,6 +56,9 @@ def main(cfg: DictConfig):
     # Plot PCA
     pca_model = plot_pca(ref_embeds, samp_embeds, f"{cfg.out_dir}/esm3_pca.png")
 
+    # Plot KDE of PCA embeddings
+    plot_pca_kde(ref_embeds, samp_embeds, pca_model, f"{cfg.out_dir}/esm3_pca_kde.png")
+
     # If we also want to do a raster layout of reference PDBs in a grid:
     if cfg.raster.plot_raster:
         ref_pca = pca_model.transform(ref_embeds)
@@ -130,6 +133,59 @@ def plot_pca(ref_embeds: np.ndarray, samp_embeds: np.ndarray, out_fp: str) -> PC
 
     return pca_model
 
+
+def plot_pca_kde(ref_embeds: np.ndarray, samp_embeds: np.ndarray, pca_model: PCA, out_fp: str,
+                 bw_adjust: float = 1,
+                 ) -> None:
+    """
+    Creates a KDE plot of the PCA embeddings comparing reference vs. sample,
+    and saves it to out_fp.
+    """
+    # Transform embeddings using the provided PCA model
+    ref_pca = pca_model.transform(ref_embeds)
+    samp_pca = pca_model.transform(samp_embeds)
+
+    # Build dataframe
+    df_pca = pd.DataFrame({
+        "x": np.concatenate([ref_pca[:, 0], samp_pca[:, 0]]),
+        "y": np.concatenate([ref_pca[:, 1], samp_pca[:, 1]]),
+        "Label": ["Reference"] * len(ref_pca) + ["Sample"] * len(samp_pca),
+    })
+
+    # Plot KDE
+    fig, ax = plt.subplots(figsize=(5, 5))
+    sns.kdeplot(
+        data=df_pca[df_pca["Label"] == "Reference"],
+        x="x",
+        y="y",
+        fill=True,
+        alpha=0.5,
+        color="blue",
+        ax=ax,
+        label="Reference",
+        bw_adjust=bw_adjust
+    )
+    sns.kdeplot(
+        data=df_pca[df_pca["Label"] == "Sample"],
+        x="x",
+        y="y",
+        fill=True,
+        alpha=0.5,
+        color="orange",
+        ax=ax,
+        label="Sample",
+        bw_adjust=bw_adjust
+    )
+    ax.set_title("PCA KDE")
+    ax.set_xlabel("PC 1")
+    ax.set_ylabel("PC 2")
+    ax.plot([], [], color="blue", label="Reference")
+    ax.plot([], [], color="orange", label="Sample")
+    ax.legend(loc="best")
+
+    plt.tight_layout()
+    plt.savefig(out_fp, dpi=300)
+    plt.close(fig)
 
 
 def create_raster(df_ref: pd.DataFrame, cfg: DictConfig) -> None:
