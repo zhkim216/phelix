@@ -32,25 +32,25 @@ MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
 
 # Directories
 ## if we need to subset the original pdb key list
-# TRAIN_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/train_pdb_keys.list
-# EVAL_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/eval_pdb_keys.list
-# EVAL2_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/eval2_pdb_keys.list
-# USE_PRECOMPUTED_KEY_FILES=false
+TRAIN_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/train_pdb_keys.list
+EVAL_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/eval_pdb_keys.list
+EVAL2_PDB_KEY_FILE=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/eval2_pdb_keys.list
+USE_PRECOMPUTED_KEY_FILES=false
 
 ## if we've already subsetted the pdbs
-TRAIN_PDB_KEY_FILE=null
-EVAL_PDB_KEY_FILE=null
-EVAL2_PDB_KEY_FILE=null
-USE_PRECOMPUTED_KEY_FILES=true
+# TRAIN_PDB_KEY_FILE=null
+# EVAL_PDB_KEY_FILE=null
+# EVAL2_PDB_KEY_FILE=null
+# USE_PRECOMPUTED_KEY_FILES=true
 
 PDBS_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/all_pdbs
-OUT_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings
+OUT_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/esm3_embeddings
 
 # Run eval script
 cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/precompute_embeddings.py \
-    compute_mpnn=true \
-    compute_esm3=false \
+    compute_mpnn=false \
+    compute_esm3=true \
     use_precomputed_key_files=${USE_PRECOMPUTED_KEY_FILES} \
     train_pdb_key_file=${TRAIN_PDB_KEY_FILE} \
     eval_pdb_key_file=${EVAL_PDB_KEY_FILE} \
@@ -58,4 +58,5 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/precompute_embeddings.py \
     pdbs_dir=${PDBS_DIR} \
     out_dir=${OUT_DIR} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
+    subsample_n=null \
     hydra.run.dir=${HYDRA_DIR}
