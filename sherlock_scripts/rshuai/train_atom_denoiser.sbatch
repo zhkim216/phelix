@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=ai_dit_12b_bs512
+#SBATCH --job-name=ai_dit_12b
 #SBATCH -p bioe
-#SBATCH --gpus-per-node=2
-#SBATCH --cpus-per-task=16
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -48,7 +48,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.pdb_paths=[${PDB_PATH}] \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
-    train.batch_size=256 \
+    train.batch_size=64 \
     train.compile_model=true \
     denoiser=dit_denoiser \
     trainer.check_val_every_n_epoch=20 \

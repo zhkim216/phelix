@@ -3,12 +3,14 @@ subsample_n: 100000  # subsample to at most n keys per phase
 
 compute_mpnn: true
 compute_esm3: true
+compute_fampnn: true
 
 # PDB key files for each phase; null to skip
 use_precomputed_key_files: false  # true to use precomputed key files in out_dir/precomputed_{phase}_pdb_keys.list
 train_pdb_key_file: /scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_keys.list
 eval_pdb_key_file: /scratch/users/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys.list
 eval2_pdb_key_file: /scratch/users/rshuai/datasets/ingraham_cath_dataset/eval2_pdb_keys.list
+pdb_key_ext: ".pdb"  # extension of input pdbs (regardless of what is in the key file)
 
 pdbs_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/pdb_store_with_ext
 out_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings
@@ -20,6 +22,10 @@ mpnn:
     batch_size: 1
     number_of_batches: 1
     verbose: false
+
+fampnn:
+  checkpoint_path: null
+  batch_size: 16
 
 hydra:
   run:

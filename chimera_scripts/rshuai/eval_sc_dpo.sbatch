@@ -30,10 +30,13 @@ WANDB_ID=richardshuai
 GROUP=eval_sc_dpo
 MODEL_NAME=d2_aasd0
 CKPT=sd-step100000-epoch36.ckpt
-EXP_NAME=${MODEL_NAME}_eval_sc_dpo
+# MODEL_NAME=c2_aasd2
+NOISE_LABELS=0.0
+EXP_NAME=${MODEL_NAME}_eval_sc_dpo_nl${NOISE_LABELS}
 
 # Set paths
 MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}/checkpoints/${CKPT}
+# MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
 PDB_DIR=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store
 PDB_KEY_LIST=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys.list
 
@@ -50,4 +53,5 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_sc_dpo.py \
     pdb_dir=${PDB_DIR} \
     pdb_key_list=${PDB_KEY_LIST} \
     subset_length_range=[50,256] \
+    noise_labels=${NOISE_LABELS} \
     num_pdbs=300

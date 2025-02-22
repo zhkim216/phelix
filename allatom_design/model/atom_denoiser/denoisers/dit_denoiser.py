@@ -31,7 +31,6 @@ from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
-from allatom_design.data.data import center_random_augmentation, apply_random_augmentation
 from allatom_design.model.atom_denoiser.denoisers.dit_utils import (
     DiTBlock, FinalLayer, LabelEmbedder, MultiHeadRMSNorm)
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
@@ -78,7 +77,7 @@ class DiTDenoiser(BaseAtomDenoiser):
     def forward(self,
                 x_scaffold: TensorType["b n 37 3", float],
                 scaffold_mask: TensorType["b n 37", float],
-                aatype_in: TensorType["b n", int],
+                aatype_scaffold: TensorType["b n", int],
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
                 cond_labels_in: Dict[str, TensorType["b", int]] = {},
@@ -89,12 +88,14 @@ class DiTDenoiser(BaseAtomDenoiser):
         aux_preds = {}
 
         if self.use_scaffold_module:
-            h_s = self.process_scaffold(x_scaffold, scaffold_mask, aatype_in, seq_mask, residue_index)
+            h_s = self.process_scaffold(x_scaffold, scaffold_mask, aatype_scaffold, seq_mask, residue_index)
         else:
             h_s = None
 
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
-            aatype_in=aatype_in,
+            x_scaffold=x_scaffold,
+            scaffold_mask=scaffold_mask,
+            aatype_scaffold=aatype_scaffold,
             residue_index=residue_index,
             seq_mask=seq_mask,
             h_s=h_s,
@@ -109,7 +110,9 @@ class DiTDenoiser(BaseAtomDenoiser):
 
 
     def backbone_diffusion(self,
-                           aatype_in: TensorType["b n", int],
+                           x_scaffold: TensorType["b n 37 3", float],
+                           scaffold_mask: TensorType["b n 37", float],
+                           aatype_scaffold: TensorType["b n", int],
                            residue_index: TensorType["b n", int],
                            seq_mask: TensorType["b n", float],
                            h_s: TensorType["b n h"],
@@ -130,11 +133,15 @@ class DiTDenoiser(BaseAtomDenoiser):
             # Repeat inputs for batch multiplier  # TODO: randomly augment these too
             M = self.cfg.training_batch_size_mult
             x_bb_gt_batched = repeat(x_bb_gt, "b n a x -> (m b) n a x", m=M, b=B)
-            aatype_in_batched = repeat(aatype_in, "b n -> (m b) n", m=M, b=B)
             residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
             seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
-            h_s_batched = repeat(h_s, "b n h -> (m b) n h", m=M, b=B) if h_s is not None else None
             cond_labels_in_batched = {label: repeat(cond_labels_in[label], "b -> (m b)", m=M, b=B) for label in cond_labels_in}
+
+            # repeat scaffolding inputs
+            x_scaffold_batched = repeat(x_scaffold, "b n a x -> (m b) n a x", m=M, b=B)
+            scaffold_mask_batched = repeat(scaffold_mask, "b n a -> (m b) n a", m=M, b=B)
+            aatype_scaffold_batched = repeat(aatype_scaffold, "b n -> (m b) n", m=M, b=B)
+            h_s_batched = repeat(h_s, "b n h -> (m b) n h", m=M, b=B) if h_s is not None else None
 
             # Evaluate at specific timesteps (for validation)
             t_bb = None
@@ -153,16 +160,22 @@ class DiTDenoiser(BaseAtomDenoiser):
                 # Apply self-conditioning
                 with torch.no_grad():
                     x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched,
+                                                           x_scaffold_batched,
+                                                           scaffold_mask_batched,
+                                                           aatype_scaffold_batched,
                                                            h_s_batched,
-                                                           aatype_in_batched, t_batched,
+                                                           t_batched,
                                                            seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                            cond_labels_in=cond_labels_in_batched)
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                 denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched)
 
             x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched,
+                                                   x_scaffold_batched,
+                                                   scaffold_mask_batched,
+                                                   aatype_scaffold_batched,
                                                    h_s_batched,
-                                                   aatype_in_batched, t_batched,
+                                                   t_batched,
                                                    seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                    cond_labels_in=cond_labels_in_batched)
 
@@ -175,16 +188,22 @@ class DiTDenoiser(BaseAtomDenoiser):
                 if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                     with torch.no_grad():
                         x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched,
+                                                             x_scaffold_batched,
+                                                             scaffold_mask_batched,
+                                                             aatype_scaffold_batched,
                                                              h_s_batched,
-                                                             aatype_in_batched, t_batched,
+                                                             t_batched,
                                                              seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                              cond_labels_in=cond_labels_in_batched)
                     torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                     denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_guide)
 
                 x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched,
+                                                     x_scaffold_batched,
+                                                     scaffold_mask_batched,
+                                                     aatype_scaffold_batched,
                                                      h_s_batched,
-                                                     aatype_in_batched, t_batched,
+                                                     t_batched,
                                                      seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                      cond_labels_in=cond_labels_in_batched)
 
@@ -241,12 +260,20 @@ class DiTDenoiser(BaseAtomDenoiser):
             use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])
             if use_autoguidance:
                 assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
-                autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model, aatype_in=aatype_in,
+                autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model,
+                                                              x_scaffold=x_scaffold,
+                                                              scaffold_mask=scaffold_mask,
+                                                              aatype_scaffold=aatype_scaffold,
+                                                              h_s=h_s,
                                                               residue_index=residue_index, seq_mask=seq_mask,
                                                               cond_labels_in=cond_labels_in)
 
             # Run integration steps
-            denoiser_fn = partial(self.dit, h_s=h_s, aatype_in=aatype_in,
+            denoiser_fn = partial(self.dit,
+                                  x_scaffold=x_scaffold,
+                                  scaffold_mask=scaffold_mask,
+                                  aatype_scaffold=aatype_scaffold,
+                                  h_s=h_s,
                                   residue_index=residue_index, seq_mask=seq_mask,
                                   cond_labels_in=cond_labels_in)
 
@@ -257,14 +284,6 @@ class DiTDenoiser(BaseAtomDenoiser):
 
                 xt_bb, t = self.interpolant.churn(xt_bb, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
                 xt_bb = xt_bb * (1 - xt_bb_override_mask[i]) + xt_bb_override[i] * xt_bb_override_mask[i]  # override xt for inputs
-
-                # # AF3 CentreRandomAugmentation on both xt and the self-conditioning inputs  # TODO: handle xt overrides
-                # xt_bb, transforms = center_random_augmentation(xt_bb,
-                #                                             seq_mask=seq_mask,
-                #                                             atom_mask=atom_mask,
-                #                                             missing_atom_mask=torch.zeros_like(atom_mask),
-                #                                             translation_scale=0.0,
-                #                                             return_transforms=True)
 
                 # Apply self-conditioning
                 if self.use_self_conditioning and i > 0:
@@ -303,7 +322,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
     @torch.compiler.disable
     def process_scaffold(self, x_scaffold, scaffold_mask,
-                         aatype_in, seq_mask, residue_index):
+                         aatype_scaffold, seq_mask, residue_index):
         B, N, A, _ = x_scaffold.shape
         # Find residues where scaffold_mask is nonzero in any atom
         has_scaffold = scaffold_mask.any(dim=(-1))  # [b n]
@@ -329,7 +348,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                     packed_x.append(x_scaffold[bi, indices])
                     packed_scaffold_mask.append(scaffold_mask[bi, indices])
                     packed_seq_mask.append(seq_mask[bi, indices])
-                    packed_aatype.append(aatype_in[bi, indices])
+                    packed_aatype.append(aatype_scaffold[bi, indices])
                     packed_residue_index.append(residue_index[bi, indices])
 
             # Pad to max length
@@ -363,7 +382,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
         else:
             # If no scaffold positions, set h_s to zero and skip FAMPNN
-            h_s = torch.zeros((B, N, self.fampnn.n_channel), device=x_scaffold.device)
+            h_s = torch.zeros((B, N, self.fampnn.hidden_dim), device=x_scaffold.device)
 
         return h_s
 
@@ -377,7 +396,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                         residue_index: TensorType["b n", int],
                         cond_labels_in: Dict[str, TensorType["b", int]] = {},):
         denoiser_fn = partial(self.dit,
-                              aatype_in=aatype,
+                              aatype_scaffold=aatype,
                               seq_mask=seq_mask,
                               residue_index=residue_index,
                               cond_labels_in=cond_labels_in)
@@ -400,15 +419,20 @@ class DiT(nn.Module):
         # Set up DiT model
         self.num_atoms_in = cfg.num_atoms_in
         self.use_self_conditioning = cfg.use_self_conditioning
-        self.condition_on_seq = cfg.condition_on_seq
-        self.condition_on_scaffold = cfg.get("condition_on_scaffold", False)
+
+        self.scaffolding = cfg.scaffolding  # scaffold conditioning config
+        # self.condition_on_seq = cfg.condition_on_seq
+        # self.condition_on_scaffold = cfg.get("condition_on_scaffold", False)
 
         # Input and output channels
         self.c = self.num_atoms_in * 3  # 3 xyz coordinates per atom
         self.in_channels = self.c * 2 if self.use_self_conditioning else self.c  # 2x for self-conditioning
-        if self.condition_on_seq:
+        if self.scaffolding.use_seq:
             # +n_aatype for seq conditioning
             self.in_channels = self.in_channels + cfg.n_aatype
+        if self.scaffolding.use_concat:
+            # +self.c for conditioning on scaffold via concatenation
+            self.in_channels = self.in_channels + self.c
 
         self.out_channels = self.c
         self.n_aatype = cfg.n_aatype
@@ -442,9 +466,9 @@ class DiT(nn.Module):
                                  dropout_prob=self.cond_label_to_dropout_p[label]) for label in self.cond_labels
         })
 
-        # Scaffold conditioning
-        if self.condition_on_scaffold:
-            self.h_s_embedder = Linear(cfg.h_s, cfg.hidden_size)
+        # Scaffold conditioning via per-residue embeddings
+        if self.scaffolding.use_h_s:
+            self.h_s_embedder = Linear(self.scaffolding.h_s, cfg.hidden_size)
 
         # QK-normalization from SD3
         self.qk_normlayer = None
@@ -492,8 +516,10 @@ class DiT(nn.Module):
 
     def forward(self,
                 x_noised: TensorType["b n 4 3", float],
+                x_scaffold: TensorType["b n 37 3", float],
+                scaffold_mask: TensorType["b n 37", float],
+                aatype_scaffold: Optional[TensorType["b n", int]],
                 h_s: Optional[TensorType["b n h"]],
-                aatype_in: Optional[TensorType["b n", int]],
                 t: TensorType["b", float],
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
@@ -516,9 +542,15 @@ class DiT(nn.Module):
         x = rearrange(x_noised, "b n a x -> b n (a x)")
 
         # Concatenate one-hot sequence conditioning
-        if self.condition_on_seq:
-            aatype_oh = F.one_hot(aatype_in, num_classes=self.n_aatype).float()
+        if self.scaffolding.use_seq:
+            aatype_oh = F.one_hot(aatype_scaffold, num_classes=self.n_aatype).float()
             x = torch.cat([x, aatype_oh], dim=-1)
+
+        # Concatenate scaffold conditioning
+        if self.scaffolding.use_concat:
+            x_scaffold = x_scaffold * scaffold_mask[..., None]  # zero out non-scaffold positions
+            x_scaffold = rearrange(x_scaffold[..., rc.bb_idxs, :], "b n a x -> b n (a x)")
+            x = torch.cat([x, x_scaffold], dim=-1)
 
         # Begin DiT forward pass
         x = self.x_embedder(x)
@@ -554,7 +586,7 @@ class DiT(nn.Module):
 
         # Scaffold conditioning
         c = c.unsqueeze(1).expand((-1, x.shape[1], -1))  # expand to sequence length
-        if self.condition_on_scaffold:
+        if self.scaffolding.use_h_s:
             h_s = self.h_s_embedder(h_s)
             c = c + h_s
 

@@ -124,13 +124,14 @@ class SeqDenoiser(nn.Module):
         return outputs
 
     def score(self,
-              x,
-              aatype,
-              seq_mask,
-              missing_atom_mask,
-              scn_mlm_mask,
-              residue_index,
-              chain_index
+              x: TensorType["b n 37 3", float],
+              aatype: TensorType["b n", int],
+              seq_mask: TensorType["b n", float],
+              missing_atom_mask: TensorType["b n 37", float],  # 1 where atoms are missing
+              scn_mlm_mask: TensorType["b n", float],  # 0 for masked sidechains
+              residue_index: TensorType["b n", int],
+              chain_index: TensorType["b n", int],
+              return_embeddings: bool = False,
         ) -> TensorType["b n"]:
         atom_mask_noised = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)  # 0 for ghost atoms; X only has backbone atoms
         atom_mask_noised = atom_mask_noised * seq_mask.unsqueeze(-1)  # mask out padding
@@ -138,16 +139,17 @@ class SeqDenoiser(nn.Module):
         atom_mask_noised[..., rc.non_bb_idxs] = atom_mask_noised[..., rc.non_bb_idxs] * scn_mlm_mask.unsqueeze(-1)  # mask out masked sidechain atoms
 
         # Run denoiser and get logits
-        seq_logits, _ = self.denoiser.seq_design_module(
-                                        x,
-                                        aatype,
-                                        seq_mask,
-                                        atom_mask_noised,
-                                        residue_index,
-                                        chain_index)
+        seq_logits, mpnn_feature_dict = self.denoiser.seq_design_module(x,
+                                                                        aatype,
+                                                                        seq_mask,
+                                                                        atom_mask_noised,
+                                                                        residue_index,
+                                                                        chain_index,
+                                                                        return_encoder_embeds=return_embeddings)
         log_probs = F.log_softmax(seq_logits, dim=-1)
+        if return_embeddings:
+            return log_probs, mpnn_feature_dict
         return log_probs
-
 
 
     def set_scale_factors(self,

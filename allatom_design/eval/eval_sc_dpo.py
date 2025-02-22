@@ -126,8 +126,11 @@ def main(cfg: DictConfig):
             pdb_files = sorted(pdb_files, key=lambda x: pdb_to_length[x], reverse=True)
 
     if cfg.num_pdbs is not None:
+        # Use isolated random state for consistent subsampling
+        rng = np.random.RandomState(cfg.seed)
+
         # subsample, ensuring order is preserved
-        chosen_indices = sorted(np.random.choice(len(pdb_files), cfg.num_pdbs, replace=False))
+        chosen_indices = sorted(rng.choice(len(pdb_files), cfg.num_pdbs, replace=False))
         pdb_files = [pdb_files[i] for i in chosen_indices]
 
     ### SAMPLING ###

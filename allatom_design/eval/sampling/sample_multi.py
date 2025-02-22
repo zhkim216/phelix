@@ -21,9 +21,9 @@ from tqdm import tqdm
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (load_feats_from_pdb, pad_to_max_len,
-                                      process_single_pdb)
+from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.eval import eval_metrics, sampling_utils
+from allatom_design.eval.fampnn_utils import get_fampnn_batch
 from allatom_design.eval.folding_utils import get_struct_pred_model
 from allatom_design.eval.sampling.sample_single import parse_fixed_positions
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
@@ -142,28 +142,7 @@ def main(cfg: DictConfig):
     for i in range(0, len(pdb_files_repeated), cfg.batch_size):
         pdb_batch_files = pdb_files_repeated[i:i+cfg.batch_size]
         B = len(pdb_batch_files)
-
-        # Load and process all PDBs in this batch
-        batch_list = []
-        batch_chain_id_mapping = []
-        for pdb_file in pdb_batch_files:
-            data = load_feats_from_pdb(pdb_file)
-            single = process_single_pdb(data)
-            batch_list.append(single)
-
-            # store chain ID mapping for parsing fixed positions
-            batch_chain_id_mapping.append(data["chain_id_mapping"])
-
-        pdb_names = [Path(pdb_file).stem for pdb_file in pdb_batch_files]
-
-        # Create a batch dictionary from batch_list by stacking
-        model_input_keys = ["x", "aatype", "seq_mask", "missing_atom_mask", "residue_index", "chain_index", "interface_residue_mask"]
-        max_len = max(b["x"].shape[0] for b in batch_list)  # determine the max_len (max number of residues across the batch)
-        batch_list = [pad_to_max_len({k: b[k].unsqueeze(0) for k in model_input_keys}, max_len)for b in batch_list]  # pad each batch to max length
-        batch = {k: torch.cat([b[k] for b in batch_list], dim=0) for k in model_input_keys}  # stack the padded batches
-
-        # Move to device
-        batch = {k: batch[k].to(device) for k in model_input_keys}
+        batch, pdb_names, batch_chain_id_mapping = get_fampnn_batch(pdb_batch_files, device=device)
 
         # Prepare scd_inputs for this batch
         scd_inputs = dict(scd_inputs_template)

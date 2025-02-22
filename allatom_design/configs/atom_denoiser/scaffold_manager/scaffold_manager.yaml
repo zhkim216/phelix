@@ -5,3 +5,7 @@ discontiguous_p: 0.9
 max_span_len: 12
 max_discontiguous_res: 24
 dist_threshold: 45.0
+
+translation_scale: ${data.translation_scale}
+se3_augment: ${data.se3_augment}
+

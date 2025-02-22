@@ -87,7 +87,9 @@ class FAMPNN(nn.Module):
         chain_encoding: TensorType["b n", int],
         noise: Optional[TensorType["b n a x", float]] = None,  # amount of noise to add to each atom
         noise_labels: Optional[Union[float, TensorType["b n"]]] = None,
-        h_S_init: Optional[TensorType["b n h"]] = None):
+        h_S_init: Optional[TensorType["b n h"]] = None,
+        return_encoder_embeds: bool = False,
+        ):
 
         B, N, _, _ = denoised_coords.shape
         S = aatype_noised
@@ -197,6 +199,9 @@ class FAMPNN(nn.Module):
             raise ValueError(f'Incorrect return embedding type specified: {self.return_embedding}, must be one of: encoder, decoder, gnn, or last!')
 
         mpnn_feature_dict = {"h_V": h_V_out, "h_ESV": h_ESV, "X": X, "atom14_mask": atom14_mask, "E_idx": E_idx, "S": S, "noise_labels": noise_labels}
+        if return_encoder_embeds:
+            mpnn_feature_dict["h_V_enc"] = h_V_enc
+
         return logits, mpnn_feature_dict
 
 

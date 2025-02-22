@@ -60,10 +60,19 @@ eval:
 loss:
   inf: ${model.inf}
   loss_weights:
-    scn:
-      mse_loss: 0.0
-    seq_loss: 0.0
-    psce_loss: 1.0
+    alpha: 0.0  # weighting of NLL loss on winners for IRPO
+    winner:
+      scn:
+        mse_loss: ${loss.loss_weights.alpha}
+      seq_loss: ${loss.loss_weights.alpha}
+      psce_loss: 1.0
+
+    loser:
+      scn:
+        mse_loss: 0.0
+      seq_loss: 0.0
+      psce_loss: 1.0
+
     dpo:
       seq_loss: 1.0
 
