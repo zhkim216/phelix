@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=ai_dit_12b
+#SBATCH --job-name=s1_bb0
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -13,7 +13,6 @@
 scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 ## Load modules and conda environment
-source ~/.subhang_bash_profile  # launch to subhang's wandb
 ml python
 module load gcc/12.4.0
 module load cuda/12.1
@@ -24,15 +23,15 @@ conda activate allatom_design
 BASE_DIR=/home/users/rshuai/code/allatom-design
 HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 OUT_DIR=/scratch/users/rshuai/allatom_design
-WANDB_ID=null  # launch to subhang's wandb
+WANDB_ID=richardshuai
 cd ${BASE_DIR}
 
 # Set cache directories
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=ai_dit_12b_bs512
-GROUP=ai_cath
+EXP_NAME=s1_bb3
+GROUP=ai_cath_scaffolding
 
 # Dataset paths
 # PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
@@ -46,12 +45,17 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
-    data.fixed_size=256 \
-    data.subset_length_range=[32,256] \
-    train.batch_size=64 \
+    data.fixed_size=160 \
+    data.subset_length_range=[32,160] \
+    model.task=scaffold \
+    scaffold_manager=scaffold_manager \
+    denoiser.scaffold_module.enabled=false \
+    denoiser.dit.scaffolding.use_concat=true \
+    train.batch_size=32 \
+    denoiser.training_batch_size_mult=16 \
     train.compile_model=true \
     denoiser=dit_denoiser \
-    trainer.check_val_every_n_epoch=20 \
-    checkpointing.save_latest_every_n_steps=10000 \
+    trainer.check_val_every_n_epoch=1 \
+    trainer.strategy=ddp_find_unused_parameters_true \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
