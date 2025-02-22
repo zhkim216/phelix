@@ -84,10 +84,12 @@ def create_fampnn_embeddings(model: FAMPNNDenoiser,
 
         # Save FAMPNN feature dict to output directory
         mpnn_feature_dict = {k: v.cpu() for k, v in mpnn_feature_dict.items() if k in ["h_V", "h_V_enc"]}  # prune to node embeddings only
+        lengths = seq_mask.sum(dim=-1).long()
         for j in range(B):
             name = pdb_names[j]
             out_file = Path(out_dir) / f"{name}.pt"
-            mpnn_feature_dict_j = {k: v[j] for k, v in mpnn_feature_dict.items()}
+            length_j = lengths[j].item()
+            mpnn_feature_dict_j = {k: v[j, :length_j] for k, v in mpnn_feature_dict.items()}
             torch.save(mpnn_feature_dict_j, out_file)
 
         pbar.update(B)
