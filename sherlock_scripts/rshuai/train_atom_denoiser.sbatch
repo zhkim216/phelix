@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=u0_a0
+#SBATCH --job-name=u0_a1
 #SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -30,7 +30,7 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=u0_a0
+EXP_NAME=u0_a1
 GROUP=backbone_u0
 
 # Dataset paths
@@ -50,6 +50,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     train.batch_size=64 \
     train.compile_model=true \
     denoiser=dit_denoiser \
+    loss.loss_weights.bb.d2_mse_loss=1.0 \
+    loss.loss_weights.bb.d4_mse_loss=1.0 \
+    loss.loss_weights.bb.d8_mse_loss=1.0 \
     trainer.check_val_every_n_epoch=2 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
