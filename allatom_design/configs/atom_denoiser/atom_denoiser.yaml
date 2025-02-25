@@ -71,6 +71,9 @@ loss:
   loss_weights:
     bb:
       mse_loss: 1.0
+      d2_mse_loss: 0.0
+      d4_mse_loss: 0.0
+      d8_mse_loss: 0.0
     scaffold:
       # if task is scaffolding, use a separate loss to reconstruct scaffold
       mse_loss: 0.0

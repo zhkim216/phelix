@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=u0_a0
-#SBATCH -p possu
+#SBATCH --job-name=s1_bb0
+#SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -30,8 +30,8 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=u0_a0
-GROUP=backbone_u0
+EXP_NAME=s1_bb3
+GROUP=ai_cath_scaffolding
 
 # Dataset paths
 # PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
@@ -45,11 +45,17 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
-    data.fixed_size=256 \
-    data.subset_length_range=[32,256] \
-    train.batch_size=64 \
+    data.fixed_size=160 \
+    data.subset_length_range=[32,160] \
+    model.task=scaffold \
+    scaffold_manager=scaffold_manager \
+    denoiser.scaffold_module.enabled=false \
+    denoiser.dit.scaffolding.use_concat=true \
+    train.batch_size=32 \
+    denoiser.training_batch_size_mult=16 \
     train.compile_model=true \
     denoiser=dit_denoiser \
-    trainer.check_val_every_n_epoch=2 \
+    trainer.check_val_every_n_epoch=1 \
+    trainer.strategy=ddp_find_unused_parameters_true \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
