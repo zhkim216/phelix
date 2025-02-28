@@ -71,7 +71,9 @@ def main(cfg: DictConfig):
         pred_out_dir = f"{out_dir}/preds"  # directory for structure predictions (if running folding)
         Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
-        self_consistency_path = f"{out_dir}/self_consistency_metrics.csv"
+        out_df_path = f"{out_dir}/self_consistency_metrics.csv"
+    else:
+        out_df_path = f"{out_dir}/fampnn_outputs.csv"
 
     # Setup sidechain diffusion inputs
     t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)
@@ -104,8 +106,8 @@ def main(cfg: DictConfig):
             pdb_keys = f.read().splitlines()
         pdb_files = [f"{cfg.pdb_dir}/{key}{cfg.pdb_key_ext}" for key in pdb_keys]
     else:
-        # Get all PDBs with .pdb extension in the directory
-        pdb_files = natsorted(list(glob.glob(f"{cfg.pdb_dir}/*.pdb")))
+        # Get all PDBs with .pdb_key_ext extension in the directory
+        pdb_files = natsorted(list(glob.glob(f"{cfg.pdb_dir}/*")))
         if len(pdb_files) == 0:
             raise ValueError(f"No PDB files found in directory {cfg.pdb_dir}")
 
@@ -139,6 +141,7 @@ def main(cfg: DictConfig):
     pdb_files_repeated = np.repeat(pdb_files, cfg.num_seqs_per_pdb)
 
     pbar = tqdm(total=len(pdb_files_repeated))
+    out_metrics = defaultdict(list)
     for i in range(0, len(pdb_files_repeated), cfg.batch_size):
         pdb_batch_files = pdb_files_repeated[i:i+cfg.batch_size]
         B = len(pdb_batch_files)
@@ -241,34 +244,40 @@ def main(cfg: DictConfig):
             )
 
             # Aggregate results
-            sc_metrics = defaultdict(list)
             for j, pdb in enumerate(pdbs):
-                sc_metrics["pdb_name"].append(Path(pdb).stem)
-                sc_metrics["pdb_key"].append(pdb_names[j])
-                sc_metrics["pred_seq"].append(pred_seqs[j])
+                out_metrics["pdb_name"].append(Path(pdb).stem)
+                out_metrics["pdb_key"].append(pdb_names[j])
+                out_metrics["pred_seq"].append(pred_seqs[j])
 
                 for k, v in sc_info[pdb]["sc_metrics"].items():
-                    sc_metrics[f"{k}"].append(v.item())
-                sc_metrics["avg_plddt"].append(sc_info[pdb]["struct_preds"]["avg_plddt"].item())
-
-            out_df = pd.DataFrame(sc_metrics)
-
-            # Safely append to CSV using a file lock
-            with open(self_consistency_path, "a+") as f:
-                # Acquire exclusive lock
-                fcntl.flock(f, fcntl.LOCK_EX)
-
-                # Check if file is empty
-                f.seek(0, os.SEEK_END)
-                file_empty = (f.tell() == 0)
-
-                # Write DataFrame
-                out_df.to_csv(f, index=False, header=file_empty)
-
-                # Release lock
-                fcntl.flock(f, fcntl.LOCK_UN)
+                    out_metrics[f"{k}"].append(v.item())
+                out_metrics["avg_plddt"].append(sc_info[pdb]["struct_preds"]["avg_plddt"].item())
+        else:
+            # If not running self-consistency evaluation, just append basic metrics to a CSV
+            for j, pdb in enumerate(pdbs):
+                out_metrics["pdb_name"].append(Path(pdb).stem)
+                out_metrics["pdb_key"].append(pdb_names[j])
+                out_metrics["pred_seq"].append(pred_seqs[j])
+                out_metrics["design_number"].append((i+j) % cfg.num_seqs_per_pdb)
 
         pbar.update(B)
+
+    out_df = pd.DataFrame(out_metrics)
+
+    # Safely append to CSV using a file lock
+    with open(out_df_path, "a+") as f:
+        # Acquire exclusive lock
+        fcntl.flock(f, fcntl.LOCK_EX)
+
+        # Check if file is empty
+        f.seek(0, os.SEEK_END)
+        file_empty = (f.tell() == 0)
+
+        # Write DataFrame
+        out_df.to_csv(f, index=False, header=file_empty)
+
+        # Release lock
+        fcntl.flock(f, fcntl.LOCK_UN)
 
     pbar.close()
 
