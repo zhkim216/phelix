@@ -114,7 +114,7 @@ class ADDataset(data.Dataset):
 
         # Cluster sampling for AF3 dataset
         if self.cluster_sample:
-            if not pdb_path.endswith("af3_pdb"):
+            if not pdb_path.endswith("af3_pdb") or not pdb_path.endswith("af3_pdb_monomer"):
                 print('Cluster sampling disabled for non AF3 dataset')
             else:
                 self._cluster_sample_pdb_keys()
