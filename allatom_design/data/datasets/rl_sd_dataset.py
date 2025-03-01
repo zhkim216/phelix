@@ -150,7 +150,6 @@ class RLSDDataset(data.Dataset):
         cond_labels_in = {}
 
         # Set cond labels to default
-        cond_labels_in["dataset_source"] = cl.DEFAULT_TOKEN_ID['dataset_source']
         cond_labels_in["crop_aug"] = cl.DEFAULT_TOKEN_ID['crop_aug']
 
         # Make fixed size example: only padding, no cropping

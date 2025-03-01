@@ -156,7 +156,6 @@ def main(cfg: DictConfig):
 
         cond_labels_in = {
             "crop_aug": torch.Tensor([cl.DEFAULT_TOKEN_ID['crop_aug']]*B).to(device),
-            "dataset_source": torch.Tensor([cl.DEFAULT_TOKEN_ID['dataset_source']]*B).to(device),
         }
 
         aatype_override_mask, scn_override_mask = get_override_masks(batch, pdb_names, batch_chain_id_mapping, fixed_pos_df, verbose=cfg.fixed_pos_verbose)

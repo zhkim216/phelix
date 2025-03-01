@@ -188,7 +188,6 @@ def main(cfg: DictConfig):
         # Define conditioning labels when we inverse fold
         cond_labels_in = {
             "crop_aug": torch.Tensor([cl.DEFAULT_TOKEN_ID['crop_aug']]*B).to(device),
-            "dataset_source": torch.Tensor([cl.DEFAULT_TOKEN_ID['dataset_source']]*B).to(device),
         }
 
         x_denoised, aatype_denoised, aux = lit_sd_model.model.sample(

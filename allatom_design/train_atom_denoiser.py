@@ -227,9 +227,10 @@ def update_config(cfg: DictConfig) -> None:
 
     if cfg.data.cluster_sample:
         # if we're using cluster sampling, we want to reload the dataloader every epoch
-        cfg.trainer.reload_dataloaders_every_epoch = True
+        cfg.trainer.reload_dataloaders_every_n_epochs = 1
     else:
-        cfg.trainer.reload_dataloaders_every_epoch = False
+        # don't reload dataloaders every epoch
+        cfg.trainer.reload_dataloaders_every_n_epochs = 0
 
 
 if __name__ == "__main__":
