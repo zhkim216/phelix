@@ -50,7 +50,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser.autoguidance.enabled=true \
     denoiser.dit.hidden_size=768 \
     denoiser.dit.num_heads=12 \
-    denoiser.dit.cond_label_to_dropout_p.dataset_source=null \
     optim.optimizer=noam \
     checkpointing.save_latest_every_n_steps=50000 \
     checkpointing.save_ema_every_n_steps=10000 \

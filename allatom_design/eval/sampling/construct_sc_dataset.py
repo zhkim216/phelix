@@ -165,7 +165,6 @@ def main(cfg: DictConfig):
 
             cond_labels_in = {
                 "crop_aug": torch.Tensor([cl.DEFAULT_TOKEN_ID['crop_aug']]*B).to(device),
-                "dataset_source": torch.Tensor([cl.DEFAULT_TOKEN_ID['dataset_source']]*B).to(device),
             }
 
             # Run sampling

@@ -118,7 +118,6 @@ class FitDataset(ADDataset):
 
         # Construct conditioning inputs
         cond_labels_in = {}
-        cond_labels_in["dataset_source"] = cl.DEFAULT_TOKEN_ID["dataset_source"]
         cond_labels_in["crop_aug"] = cl.DEFAULT_TOKEN_ID['crop_aug']
 
         # Make fixed size example

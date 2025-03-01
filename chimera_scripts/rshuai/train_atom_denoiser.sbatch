@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=b2_bb7
+#SBATCH --job-name=test
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -25,11 +25,12 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=b2_bb7
-GROUP=chimera_b2
+EXP_NAME=test
+GROUP=chimera_test
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
+PDB_PATH=/scratch/hielab/rshuai/datasets/af3_pdb_monomer
+ANNOTATION_CSV=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
@@ -39,17 +40,13 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
+    data.annotation_csvs=[${ANNOTATION_CSV}] \
+    data.cluster_sample=true \
     data.fixed_size=256 \
+    data.subset_length_range=[32,256] \
     train.batch_size=64 \
     train.compile_model=true \
-    model.task=backbone \
-    denoiser=mpnn_dit_denoiser \
-    denoiser.autoguidance.enabled=false \
-    denoiser.dit.mpnn_downsample_factor=16 \
-    optim.optimizer=noam \
-    checkpointing.save_latest_every_n_steps=50000 \
-    checkpointing.save_ema_every_n_steps=10000 \
-    trainer.check_val_every_n_epoch=30 \
+    denoiser=dit_denoiser \
+    trainer.check_val_every_n_epoch=2 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
-

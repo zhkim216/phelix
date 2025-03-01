@@ -137,9 +137,6 @@ class ADDataset(data.Dataset):
         if self.evaluation_mode:
             self.fixed_size = self._get_max_len()
 
-        # Get dataset source label
-        self.dataset_source_label = self._get_dataset_source_label()
-
         # Subsetting and overfitting
         if overfit > 0 and phase == "train":
             # Overfit on a subset of the data
@@ -258,8 +255,7 @@ class ADDataset(data.Dataset):
         # Construct conditioning inputs
         cond_labels_in = {}
 
-        # Add dataset source label
-        cond_labels_in["dataset_source"] = cl.TOKEN_TO_ID["dataset_source"][self.dataset_source_label]
+        # Condition on cropping
         cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]
 
         #Disable cropping for specified datasets
@@ -319,27 +315,6 @@ class ADDataset(data.Dataset):
         """
         data_file = f"{self.pdb_path}/cached_examples/{pdb_key}.pt"
         return data_file
-
-    def _get_dataset_source_label(self) -> str:
-        if self.pdb_path.endswith("ingraham_cath_dataset"):
-            dataset_source_label = "EXPERIMENTAL"
-        elif self.pdb_path.endswith("augmented_ingraham_cath_bugfree"):
-            dataset_source_label = "EXPERIMENTAL"
-        elif self.pdb_path.endswith("afdb"):
-            dataset_source_label = "SYNTHETIC"
-        elif self.pdb_path.endswith("af3_pdb"):
-            dataset_source_label = "EXPERIMENTAL"
-        elif self.pdb_path.endswith("qfit-test-set/rcsb-pdb"):
-            dataset_source_label = "EXPERIMENTAL"
-        elif self.pdb_path.endswith("rcsb_test_cases"):
-            dataset_source_label = "EXPERIMENTAL"
-        elif Path(self.pdb_path).stem.startswith("casp"):
-            dataset_source_label = "EXPERIMENTAL"
-        elif self.pdb_path.endswith("denovo100") or self.pdb_path.endswith("denovo200") or self.pdb_path.endswith("denovo300") or self.pdb_path.endswith("denovo400") or self.pdb_path.endswith("denovo500"):
-            dataset_source_label = "EXPERIMENTAL"
-        else:
-            assert False, f"Unknown dataset: {self.pdb_path}"
-        return dataset_source_label
 
 
     def _cache_examples(self, pdb_keys: List[str]):
@@ -505,6 +480,8 @@ def get_pdb_data_file(pdb_path, phase, pdb_key: str) -> str:
             pdb_data_file = f"{pdb_path}/dne_mpnn/{pdb_key}"
     elif pdb_path.endswith("af3_pdb"):
         pdb_data_file = f"{pdb_path}/{phase}_mmcifs/{pdb_key[1:3]}/{pdb_key[:4]}-assembly1.cif" #just use first assembly for now
+    elif pdb_path.endswith("af3_pdb_monomer"):
+        pdb_data_file = f"{pdb_path}/{phase}_mmcifs/{pdb_key}.cif"
     elif pdb_path.endswith("afdb"):  # AFDB augmentation dataset
         pdb_data_file = f"{pdb_path}/foldseek_cluster_reps/{pdb_key}.cif"
     elif pdb_path.endswith("qfit-test-set/rcsb-pdb"):

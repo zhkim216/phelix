@@ -28,7 +28,6 @@ dit:
     # null to disable conditioning, 0 to disable label dropout
     crop_aug: 0.0
     designability: 0.2
-    dataset_source: 0.0
 
   # QK normalization
   qk_rmsnorm: true

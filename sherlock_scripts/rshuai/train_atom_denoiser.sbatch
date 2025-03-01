@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=u0_a1
+#SBATCH --job-name=u1_a0
 #SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -30,12 +30,14 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=u0_a1
-GROUP=backbone_u0
+EXP_NAME=u1_a0_test
+GROUP=backbone_u1
 
 # Dataset paths
 # PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
-PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
+# PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
+PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
+ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
@@ -45,14 +47,13 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
+    data.annotation_csvs=[${ANNOTATION_CSV}] \
+    data.cluster_sample=true \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
     train.batch_size=64 \
     train.compile_model=true \
     denoiser=dit_denoiser \
-    loss.loss_weights.bb.d2_mse_loss=1.0 \
-    loss.loss_weights.bb.d4_mse_loss=1.0 \
-    loss.loss_weights.bb.d8_mse_loss=1.0 \
     trainer.check_val_every_n_epoch=2 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
