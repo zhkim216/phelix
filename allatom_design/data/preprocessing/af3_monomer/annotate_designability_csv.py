@@ -15,7 +15,7 @@ from tqdm import tqdm
 mmcif_parser = FastMMCIFParser(auth_chains=True, auth_residues=False, QUIET=True)
 
 def main():
-    parser = argparse.ArgumentParser(description="Parse designability statistics csv")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--designability_stats_csv", type=str, help="Path to designability statistics csv.")
     parser.add_argument("--af3_dir", type=str, help="Path to AF3 dataset directory, containing eval_mmcifs and train_mmcifs.")
     parser.add_argument("--out_dir", type=str, help="Output directory.")
