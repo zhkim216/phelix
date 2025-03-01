@@ -26,7 +26,6 @@ trainer:
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
   check_val_every_n_epoch: 20  # How often to run validation
   reload_dataloaders_every_n_epochs: null  # updated based on data.cluster_sample
-  max_scrmsd: null  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
 
 # Resuming training options
 resume:
@@ -49,6 +48,8 @@ data:
     translation_scale: 1.0  # scale of the translation augmentation
     overwrite_cache: false  # overwrite the cached dataset
     afdb_res_plddt_cutoff: 0  # 0-100, only keep residues with pLDDT >= cutoff
+    max_scrmsd: null  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
+    max_rel_rog: null  # subset to only pdbs with relative radius of gyration <= max_rel_rog
     run_eval2: true
     scaffold_manager_cfg: ${scaffold_manager}
 
