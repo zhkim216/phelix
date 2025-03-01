@@ -25,6 +25,8 @@ trainer:
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
   check_val_every_n_epoch: 20  # How often to run validation
+  reload_dataloaders_every_n_epochs: null  # updated based on data.cluster_sample
+  max_scrmsd: null  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
 
 # Resuming training options
 resume:
@@ -36,7 +38,8 @@ resume:
 data:
     pdb_paths: [/data/research/ingraham_cath_dataset] # /media/scratch/datasets/ingraham_cath_dataset
     dataset_weights: [1.0]  # probability of selecting each dataset
-    designability_csvs: null
+    cluster_sample: false  # use cluster sampling for training; must be true for af3 datasets
+    annotation_csvs: null
     fixed_size: 128
     overfit: ${overfit}
     short_epoch: false

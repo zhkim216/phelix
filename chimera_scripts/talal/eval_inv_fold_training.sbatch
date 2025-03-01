@@ -19,7 +19,6 @@ AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/talal/datasets/casp14
-DESIGNABILITY_CSV=/scratch/hielab/talal/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/talal/cache/huggingface
@@ -53,5 +52,4 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     no_wandb=true \
     num_codes_sc_batches=1 \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     hydra.run.dir=${HYDRA_DIR}

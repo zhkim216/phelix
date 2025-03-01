@@ -30,7 +30,6 @@ cd ${BASE_DIR}
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
-DESIGNABILITY_CSV=/scratch/users/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Model name to evaluate
 MODEL_NAME=a8_aasd0_eps_0.0
@@ -58,6 +57,5 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     run_codes_sc=true \
     num_codes_sc_batches=1 \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     subset_length_range=[64,256] \
     hydra.run.dir=${HYDRA_DIR}

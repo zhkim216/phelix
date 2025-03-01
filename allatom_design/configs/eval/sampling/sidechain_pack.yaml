@@ -11,9 +11,7 @@ batch_size: 16
 data:
     # pdb_path: /media/scratch/datasets/qfit-test-set/rcsb-pdb
     # pdb_path: /media/scratch/datasets/rcsb_test_cases
-    # designability_csv: ""
     pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
     n_random_subset: null
 
 # Sidechain packing run parameters

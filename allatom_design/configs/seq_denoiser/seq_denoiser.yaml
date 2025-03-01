@@ -35,7 +35,6 @@ resume:
 # Data options
 data:
     pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    designability_csv: null
     fixed_size: 128
     overfit: ${overfit}
     short_epoch: false

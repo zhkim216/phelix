@@ -40,7 +40,6 @@ churn_cfg:
   num_steps: ${num_steps}
 
 # Conditioning
-# cond_labels: {"designability": "DESIGNABLE"}  # null for unconditional sampling
 cond_labels: null
 
 # Autoguidance

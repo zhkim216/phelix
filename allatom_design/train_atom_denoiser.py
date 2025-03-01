@@ -187,11 +187,11 @@ def get_dataloader(phase: str,
                    num_workers: int,
                    cuda: bool) -> Tuple[ADDataset, DataLoader]:
     num_datasets = len(data_cfg.pdb_paths)
-    if data_cfg.designability_csvs is None:
-        data_cfg.designability_csvs = [None] * num_datasets
+    if data_cfg.annotation_csvs is None:
+        data_cfg.annotation_csvs = [None] * num_datasets
 
     datasets = [ADDataset(pdb_path=data_cfg.pdb_paths[i],
-                          designability_csv=data_cfg.designability_csvs[i],
+                          annotation_csv=data_cfg.annotation_csvs[i],
                           phase=phase, **data_cfg) for i in range(num_datasets)]
     if phase == "train":
         dataset = MultiDataset(datasets, data_cfg.dataset_weights, primary_dset_idx=0)
@@ -224,6 +224,12 @@ def update_config(cfg: DictConfig) -> None:
     if getattr(cfg.denoiser, "autoguidance", None) and cfg.denoiser.autoguidance.enabled:
         # Autoguidance model parameters are not always used
         cfg.trainer.strategy = "ddp_find_unused_parameters_true"
+
+    if cfg.data.cluster_sample:
+        # if we're using cluster sampling, we want to reload the dataloader every epoch
+        cfg.trainer.reload_dataloaders_every_epoch = True
+    else:
+        cfg.trainer.reload_dataloaders_every_epoch = False
 
 
 if __name__ == "__main__":

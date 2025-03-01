@@ -34,9 +34,7 @@ GROUP=chimera_c1
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-# DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 # PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
-DESIGNABILITY_CSV=null
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
@@ -47,7 +45,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     no_wandb=false \
     data.fixed_size=256 \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     data.subset_length_range=[16,9999] \
     train.batch_size=64 \
     train.compile_model=true \

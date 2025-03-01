@@ -29,7 +29,6 @@ cd ${BASE_DIR}
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
-DESIGNABILITY_CSV=/scratch/users/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Define eps values for the sweep
 eps_values=(0.0 0.01 0.02 0.1 0.2 0.3 0.4 0.5 0.6 1.0)
@@ -49,7 +48,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     no_wandb=false \
     data.fixed_size=128 \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     train.batch_size=64 \
     train.compile_model=true \
     model.task=allatom_seq_des \

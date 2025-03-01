@@ -28,7 +28,6 @@ GROUP=chimera_a5
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Define parameter grids
 PSIGMA_MEANS=(-1.0 -0.5 -0.5 0 1.0)
@@ -59,7 +58,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     train.compile_model=true \
     denoiser=dit_denoiser \
     data.fixed_size=128 \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     model.task=ca_backbone \
     model.use_self_conditioning=true \
     interpolant=multimodal/edm_ca_interpolant \

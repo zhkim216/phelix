@@ -25,9 +25,7 @@ AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Dataset paths
 # PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-# DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
-DESIGNABILITY_CSV=null
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -52,7 +50,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/inverse_fold.py \
     sd_ckpt=${SD_CKPT} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     temperature=0.0 \
