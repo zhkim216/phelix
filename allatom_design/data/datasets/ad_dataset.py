@@ -10,12 +10,13 @@ import numpy as np
 import pandas as pd
 import torch
 from einops import rearrange
+from joblib import Parallel, delayed
+from natsort import natsorted
 from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader
 from torchtyping import TensorType
 from tqdm import tqdm
-from natsort import natsorted
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
@@ -66,12 +67,8 @@ class LitADDataModule(L.LightningDataModule):
                     self._cache_examples(pdb_path, pdb_keys, phase)
 
                     # get lengths; store them and save to csv
-                    pdb_key_to_length = {}
-                    for pdb_key in tqdm(pdb_keys, desc="Getting lengths", leave=False):
-                        data_file = self._get_data_file(pdb_key)
-                        example = torch.load(data_file, weights_only=True)
-                        seq_len = example["seq_mask"].sum().long().item()
-                        pdb_key_to_length[pdb_key] = seq_len
+                    cache_dir = f"{pdb_path}/cached_examples"
+                    pdb_key_to_length = get_lengths(pdb_keys, cache_dir)
 
                     # save to csv
                     pdb_keys_df = pd.DataFrame({"pdb_key": pdb_keys, "seq_length": [pdb_key_to_length[pdb_key] for pdb_key in pdb_keys]})
@@ -512,20 +509,59 @@ class ADDataset(data.Dataset):
             raise ValueError(f"Unsupported data type {data_type} in batch. Expected a dict or torch.Tensor.")
 
 
+def get_lengths(pdb_keys: List[str], cache_dir: str) -> Dict[str, int]:
+    """
+    Computes sequence lengths for given PDB keys in parallel using joblib.
+    Args:
+        pdb_keys: List of PDB keys to process
+        cache_dir: Directory containing cached examples
+    Returns:
+        Dictionary mapping PDB keys to their sequence lengths.
+    """
+    # Use 8 workers for parallel processing
+    num_workers = 8
+    print(f"Computing sequence lengths using {num_workers} workers...")
+
+    # Create parallel executor without progress reporting
+    parallel = Parallel(n_jobs=num_workers, verbose=0)
+
+    # Create delayed function calls
+    jobs = [delayed(_get_seq_length)(pdb_key, cache_dir) for pdb_key in pdb_keys]
+
+    # Run with tqdm progress bar
+    results = parallel(tqdm(jobs, desc="Getting lengths", total=len(jobs)))
+
+    # Convert results list of tuples into dictionary
+    return dict(results)
+
+def _get_seq_length(pdb_key: str, cache_dir: str) -> Tuple[str, int]:
+    """
+    Helper function for parallel processing of sequence lengths.
+    Args:
+        pdb_key: The PDB key to process
+        cache_dir: Directory containing cached examples
+    Returns:
+        Tuple of (pdb_key, sequence_length)
+    """
+    data_file = f"{cache_dir}/{pdb_key}.pt"
+    example = torch.load(data_file, weights_only=True)
+    seq_len = example["seq_mask"].sum().long().item()
+    return (pdb_key, seq_len)
+
+
 def compute_scale_factors(train_dataloader: DataLoader,
                           n_examples: int = 1000,
                           ) -> Dict[str, Tuple[float, float]]:
     """
     Compute mu and sigma of data based on at least n random examples (rounded up to multiple of batch size).
 
-    Returns a dict mapping from "bb" to (mu, sigma) for backbone features, and "scn" to (mu, sigma) for sidechain
+    Returns a dict mapping from "bb" to (mu, sigma) for backbone features.
 
     Adapted from: https://github.com/Stability-AI/stablediffusion/blob/main/ldm/models/diffusion/ddpm.py
     """
     # Collect x's
     counter = 0
-    # separate backbone and sidechain features
-    xs_bb, xs_scn = [], []
+    xs_bb = []
 
     pbar = tqdm(total=n_examples, desc="Computing scale factors")
     for batch in train_dataloader:
@@ -534,31 +570,9 @@ def compute_scale_factors(train_dataloader: DataLoader,
         # Mask out padding and missing atoms
         mask = batch["x_mask"]
 
-        # scale backbone and sidechain features separately
+        # Extract backbone atoms
         x_bb = x[..., rc.bb_idxs, :]
         x_bb = x_bb[mask[..., rc.bb_idxs, :].bool()]
-
-        # Subset to sidechain-only atoms
-        x_scn = x[..., rc.non_bb_idxs, :]
-        scn_mask = mask[..., rc.non_bb_idxs, :]
-
-        ### Center sidechain on CA
-        # x_scn = x_scn - x[..., 1:2, :]
-        # scn_missing_atom_mask = batch["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
-        # x_scn = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn)  # fill missing atoms with zeroes
-        # scn_ghost_atom_mask = batch["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
-        # x_scn = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn)  # fill ghost atoms with zeroes
-
-        ### Transform sidechains to local coordinates
-        x_scn, bb_frames_exists = transform_sidechain_frame(x_scn,
-                                                            x[..., rc.bb_idxs, :],
-                                                            batch["atom_mask"][..., rc.non_bb_idxs],
-                                                            batch["atom_mask"][..., rc.bb_idxs],
-                                                            to_local=True)
-        scn_mask = scn_mask * rearrange(bb_frames_exists, "b n -> b n 1 1")  # mask out sidechain atoms that don't have a frame
-        x_scn = x_scn[scn_mask.bool()]
-
-        xs_scn.append(x_scn)
         xs_bb.append(x_bb)
 
         counter += batch["x"].shape[0]
@@ -569,13 +583,11 @@ def compute_scale_factors(train_dataloader: DataLoader,
     pbar.close()
 
     # Aggregate and compute mean and std
-    xs_scn = torch.cat(xs_scn, dim=0)  # [b, n, a_scn, 3]
     xs_bb = torch.cat(xs_bb, dim=0)  # [b, n, a_bb, 3]
 
     mean_bb, std_bb = xs_bb.mean().item(), xs_bb.std().item()
-    mean_scn, std_scn = xs_scn.mean().item(), xs_scn.std().item()
 
-    return {"bb": (mean_bb, std_bb), "scn": (mean_scn, std_scn)}
+    return {"bb": (mean_bb, std_bb)}
 
 
 def get_pdb_data_file(pdb_path: str, phase: str, pdb_key: str) -> str:

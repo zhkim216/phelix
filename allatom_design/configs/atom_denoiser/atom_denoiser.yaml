@@ -61,7 +61,7 @@ defaults:
 
 model:
   task: "backbone"  # "backbone", "scaffold"
-  override_sigma_data: [9.6, 0.66]  # override sigma data for [backbone, sidechain]
+  override_bb_sigma_data: 9.6  # override sigma data for backbone
   eps: 1.0e-8
   inf: 1.0e9
   n_aatype: 21

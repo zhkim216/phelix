@@ -35,9 +35,7 @@ class AtomDenoiser(nn.Module):
         self.task = cfg.task
 
         # Data scaling parameters
-        self.register_buffer("bb_mean", torch.tensor(0.0))
         self.register_buffer("bb_std", torch.tensor(1.0))
-
         self.sigma_data = self.bb_std
 
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
@@ -83,12 +81,9 @@ class AtomDenoiser(nn.Module):
         return outputs
 
 
-    def set_scale_factors(self,
-                          scale_factors: Dict[str, Tuple[float, float]]):
-        bb_mean, bb_std = scale_factors["bb"]
-        self.bb_mean.data = torch.tensor(bb_mean)
-        self.bb_std.data = torch.tensor(bb_std)
-        print(f"Setting bb_mean: {bb_mean}, bb_std: {bb_std}")
+    def set_sigma_data(self, sigma_data: float):
+        self.bb_std.data = torch.tensor(sigma_data)
+        print(f"Setting backbone sigma_data: {sigma_data}")
 
 
     def sample(self,
