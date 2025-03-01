@@ -36,6 +36,7 @@ class ADDataset(data.Dataset):
         cluster_sample: bool,
         fixed_size: int,
         phase: str,
+        run_eval2: bool,
         overfit: int = -1,
         short_epoch: bool = False,
         n_random_subset: Optional[int] = None,
@@ -44,6 +45,7 @@ class ADDataset(data.Dataset):
         overwrite_cache: bool = False,
         subset_length_range: Optional[int] = None,
         max_scrmsd: Optional[float] = None,
+        max_rel_rog: Optional[float] = None,
         afdb_res_plddt_cutoff: float = 0.0,
         spatial_crop_ratio: float = 0.5,
         evaluation_mode: bool = False,
@@ -56,6 +58,7 @@ class ADDataset(data.Dataset):
         - annotation_csv: If provided, path to csv containing information about pdb keys.
         - fixed_size: Input fixed size.
         - phase: "train", "eval", or "test"
+        - run_eval2: if True, run evals on a random subset of train (need train_pdb_keys_eval2.list, eval2_pdb_keys_eval2.list)
         - overfit: Number of examples to overfit on. -1 for all examples.
         - short_epoch: If True, the dataset will only return 500 random examples.
         - n_random_subset: If not None, the dataset will only return a random subset of n examples.
@@ -71,6 +74,7 @@ class ADDataset(data.Dataset):
         self.cluster_sample = cluster_sample
         self.fixed_size = fixed_size
         self.phase = phase
+        self.run_eval2 = run_eval2
         self.overfit = overfit
 
         self.se3_augment = se3_augment
@@ -84,14 +88,15 @@ class ADDataset(data.Dataset):
         self.sm = get_scaffold_manager(scaffold_manager_cfg)  # for constructing scaffolding inputs
 
         # Read in PDB keys
-        self.pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys.csv"
+        eval2_suffix = "_with_eval2" if run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
+        self.pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys{eval2_suffix}.csv"
 
         # Load annotation info
         self._load_annotation_info()
 
         if not Path(self.pdb_keys_csv).exists():
             # backwards compatibility; load in PDB keys from list and save to CSV format
-            self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
+            self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys{eval2_suffix}.list"
             with open(self.pdb_keys_file) as f:
                 self.pdb_keys = np.array(f.read().splitlines())
 
@@ -124,6 +129,9 @@ class ADDataset(data.Dataset):
         # Subset based on scRMSD
         if max_scrmsd is not None:
             self.subset_by_scrmsd(max_scrmsd)
+
+        if max_rel_rog is not None:
+            self.subset_by_rel_rog(max_rel_rog)
 
         # Cluster sampling for AF3 dataset
         if pdb_path.endswith("af3_pdb") or pdb_path.endswith("af3_pdb_monomer"):
@@ -371,9 +379,14 @@ class ADDataset(data.Dataset):
         """
         Subsets the dataset to only include proteins with scRMSD <= max_scrmsd.
         """
-        # lengths = self.pdb_keys_df["seq_length"]
-        # self.pdb_keys_df = self.pdb_keys_df[lengths.between(min_len, max_len)]
         keep_pdb_keys = set((self.annotation_csv["sc_ca_rmsd"] <= max_scrmsd).index)
+        self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["pdb_key"].isin(keep_pdb_keys)]
+
+    def subset_by_rel_rog(self, max_rel_rog: float):
+        """
+        Subsets the dataset to only include proteins with relative radius of gyration <= max_rel_rog.
+        """
+        keep_pdb_keys = set((self.annotation_csv["rel_rog"] <= max_rel_rog).index)
         self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["pdb_key"].isin(keep_pdb_keys)]
 
 
@@ -471,7 +484,7 @@ def compute_scale_factors(train_dataloader: DataLoader,
 
     return {"bb": (mean_bb, std_bb), "scn": (mean_scn, std_scn)}
 
-def get_pdb_data_file(pdb_path, phase, pdb_key: str) -> str:
+def get_pdb_data_file(pdb_path: str, phase: str, pdb_key: str) -> str:
     if pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
         pdb_data_file = f"{pdb_path}/pdb_store/{pdb_key}"
     elif pdb_path.endswith("augmented_ingraham_cath_bugfree"):  # tianyu's augmented dataset
@@ -481,7 +494,11 @@ def get_pdb_data_file(pdb_path, phase, pdb_key: str) -> str:
     elif pdb_path.endswith("af3_pdb"):
         pdb_data_file = f"{pdb_path}/{phase}_mmcifs/{pdb_key[1:3]}/{pdb_key[:4]}-assembly1.cif" #just use first assembly for now
     elif pdb_path.endswith("af3_pdb_monomer"):
-        pdb_data_file = f"{pdb_path}/{phase}_mmcifs/{pdb_key}.cif"
+        mmcif_phase = phase
+        if phase == "eval2":
+            # grab eval2 from train as well
+            mmcif_phase = "train"
+        pdb_data_file = f"{pdb_path}/{mmcif_phase}_mmcifs/{pdb_key}.cif"
     elif pdb_path.endswith("afdb"):  # AFDB augmentation dataset
         pdb_data_file = f"{pdb_path}/foldseek_cluster_reps/{pdb_key}.cif"
     elif pdb_path.endswith("qfit-test-set/rcsb-pdb"):
