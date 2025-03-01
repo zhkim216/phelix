@@ -15,11 +15,11 @@ import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (load_feats_from_pdb,
                                       make_fixed_size_1d)
-from allatom_design.data.datasets.ad_dataset import ADDataset
+from allatom_design.data.datasets.sd_dataset import SDDataset
 
 FEATURES_LONG = ("residue_index", "chain_index", "aatype")
 
-class FitDataset(ADDataset):
+class FitDataset(SDDataset):
     def __init__(
         self,
         cfg

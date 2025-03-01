@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import pad_to_max_len, trim_to_max_len
-from allatom_design.data.datasets.ad_dataset import ADDataset
+from allatom_design.data.datasets.sd_dataset import SDDataset
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
@@ -97,7 +97,7 @@ def main(cfg: DictConfig):
         lit_sd_model.cfg.data.update({k: v for k, v in cfg.data.items() if v is not None})  # override data config where specified
 
         # Load dataset based on model config
-        dataset = ADDataset(phase="eval", evaluation_mode = True, **lit_sd_model.cfg.data)
+        dataset = SDDataset(phase="eval", evaluation_mode = True, **lit_sd_model.cfg.data)
 
         val_dataloader = DataLoader(dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True, shuffle=False, drop_last=False)
 
