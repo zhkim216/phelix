@@ -19,8 +19,7 @@ import allatom_design.data.datasets.ad_dataset as ad_dataset
 from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
                                              resume_ckpt_cfg)
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.datasets.ad_dataset import ADDataset
-from allatom_design.data.datasets.multi_dataset import MultiDataset
+from allatom_design.data.datasets.ad_dataset import LitADDataModule
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
 
 
@@ -51,18 +50,13 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.deterministic = True  # nonrandom CUDNN convolution algo, maybe slower
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
-    # Set up dataloaders
-    init_dataloader = partial(get_dataloader, data_cfg=cfg.data, num_workers=cfg.num_workers, cuda=cfg.cuda, batch_size=cfg.train.batch_size)
-    _, train_dataloader = init_dataloader(phase="train")
-    _, val_dataloader = init_dataloader(phase="eval")
-
-    _, train_dataloader = init_dataloader(phase="train", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
-    _, val_dataloader = init_dataloader(phase="eval", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
-    val_dataloaders = [val_dataloader]
-
-    if cfg.data.run_eval2:
-        _, val2_dataloader = init_dataloader(phase="eval2", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
-        val_dataloaders.append(val2_dataloader)
+    # Set up LightningDataModule
+    datamodule = LitADDataModule(
+        data_cfg=cfg.data,
+        batch_size=cfg.train.batch_size,
+        num_workers=cfg.num_workers,
+        cuda=cfg.cuda,
+    )
 
     # Init wandb
     local_rank = os.environ.get("LOCAL_RANK", None)
@@ -153,9 +147,10 @@ def main(cfg: DictConfig):
         callbacks.append(lr_monitor)
 
     # Compute scale factors for sigma data
-    scale_factors = ad_dataset.compute_scale_factors(train_dataloader, n_examples=1000)
+    scale_factors = ad_dataset.compute_scale_factors(datamodule.train_dataloader(), n_examples=1000)
 
     # override sigma_data if specified for consistent loss scaling
+    print(f"Computed scale factors: {scale_factors}")
     bb_sigma_data_override, scn_sigma_data_override = cfg.model.override_sigma_data
     if bb_sigma_data_override is not None:
         print(f"Overriding bb sigma data with {bb_sigma_data_override}")
@@ -178,38 +173,8 @@ def main(cfg: DictConfig):
                         callbacks=callbacks,
                         **cfg.trainer
                         )
-    trainer.fit(model=lit_model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloaders, ckpt_path=resumed_ckpt_path)
+    trainer.fit(model=lit_model, datamodule=datamodule, ckpt_path=resumed_ckpt_path)
 
-
-def get_dataloader(phase: str,
-                   data_cfg: DictConfig,
-                   batch_size: int,
-                   num_workers: int,
-                   cuda: bool) -> Tuple[ADDataset, DataLoader]:
-    num_datasets = len(data_cfg.pdb_paths)
-    if data_cfg.annotation_csvs is None:
-        data_cfg.annotation_csvs = [None] * num_datasets
-
-    datasets = [ADDataset(pdb_path=data_cfg.pdb_paths[i],
-                          annotation_csv=data_cfg.annotation_csvs[i],
-                          phase=phase, **data_cfg) for i in range(num_datasets)]
-    if phase == "train":
-        dataset = MultiDataset(datasets, data_cfg.dataset_weights, primary_dset_idx=0)
-    elif phase in ["eval", "eval2"]:
-        # only use the primary dataset for validation
-        dataset = datasets[0]
-    else:
-        raise ValueError(f"Invalid phase: {phase}")
-
-    dataloader = DataLoader(dataset,
-                            batch_size=batch_size,
-                            num_workers=num_workers,
-                            pin_memory=cuda,
-                            shuffle=(phase == "train"),
-                            drop_last=(phase == "train")
-                            )
-
-    return dataset, dataloader
 
 
 def update_config(cfg: DictConfig) -> None:
