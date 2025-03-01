@@ -146,25 +146,19 @@ def main(cfg: DictConfig):
         lr_monitor = LearningRateMonitor(logging_interval="step")
         callbacks.append(lr_monitor)
 
-    # Compute scale factors for sigma data
-    scale_factors = ad_dataset.compute_scale_factors(datamodule.train_dataloader(), n_examples=1000)
-
-    # override sigma_data if specified for consistent loss scaling
-    print(f"Computed scale factors: {scale_factors}")
-    bb_sigma_data_override, scn_sigma_data_override = cfg.model.override_sigma_data
-    if bb_sigma_data_override is not None:
-        print(f"Overriding bb sigma data with {bb_sigma_data_override}")
-        bb_mean, bb_std = scale_factors["bb"]
-        bb_std = bb_sigma_data_override
-        scale_factors["bb"] = (bb_mean, bb_std)
-    if scn_sigma_data_override is not None:
-        print(f"Overriding scn sigma data with {scn_sigma_data_override}")
-        scn_mean, scn_std = scale_factors["scn"]
-        scn_std = scn_sigma_data_override
-        scale_factors["scn"] = (scn_mean, scn_std)
+    if cfg.model.override_bb_sigma_data is None:
+        # Automatically compute scale factors for sigma data
+        datamodule.prepare_data()
+        scale_factors = ad_dataset.compute_scale_factors(datamodule.train_dataloader(), n_examples=1000)
+        print(f"Computed scale factors: {scale_factors}")
+        sigma_data = scale_factors["bb"][1]
+    if cfg.model.override_bb_sigma_data is not None:
+        # override sigma_data if specified for consistent loss scaling
+        print(f"Overriding backbone sigma data with {cfg.model.override_bb_sigma_data}")
+        sigma_data = cfg.model.override_bb_sigma_data
 
     # set scale factors in model
-    lit_model.model.set_scale_factors(scale_factors)
+    lit_model.model.set_sigma_data(sigma_data)
 
     # Train
     trainer = L.Trainer(logger=logger,
