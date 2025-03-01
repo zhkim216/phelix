@@ -6,7 +6,7 @@
 #SBATCH --time=96:00:00
 #SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%A_%a.err
-#SBATCH --array=0-19%10
+#SBATCH --array=0-49%10
 
 scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
@@ -33,7 +33,7 @@ NOISE_LABELS=0.0
 MODEL_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
 PDB_DIR=/scratch/users/tianyulu/datasets/ingraham_cath_dataset_residx_fixed/pdb_store
 PDB_KEY_LIST=null
-OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/c2_aasd2/sample_multi/ingraham_cath_dataset_residx_fixed_fampnn32_nl0.0_S100
+OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/c2_aasd2/sample_multi/ingraham_cath_dataset_residx_fixed_fampnn32_nl0.0_S50
 
 cd ${BASE_DIR}
 
@@ -47,10 +47,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/sample_multi.py \
     pdb_key_list=${PDB_KEY_LIST} \
     presort_by_length=true \
     out_dir=${OUT_DIR} \
-    num_steps=100 \
+    num_steps=50 \
     noise_labels=${NOISE_LABELS} \
     temperature=0.1 \
     num_seqs_per_pdb=32 \
     array_id=${SLURM_ARRAY_TASK_ID} \
-    num_arrays=20
+    num_arrays=50
 
