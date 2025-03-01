@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=u1_a0
+#SBATCH --job-name=u1_a0_test
 #SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -35,9 +35,13 @@ GROUP=backbone_u1
 
 # Dataset paths
 # PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
-# PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
-PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
-ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv
+PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
+ANNOTATION_CSV=null
+CLUSTER_SAMPLE=false
+
+# PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
+# ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv
+# CLUSTER_SAMPLE=true
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
@@ -48,7 +52,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
     data.annotation_csvs=[${ANNOTATION_CSV}] \
-    data.cluster_sample=true \
+    data.cluster_sample=${CLUSTER_SAMPLE} \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
     train.batch_size=64 \

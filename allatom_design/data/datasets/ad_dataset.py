@@ -3,8 +3,9 @@ import random
 from itertools import groupby
 from multiprocessing import Pool
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
+import lightning as L
 import numpy as np
 import pandas as pd
 import torch
@@ -14,14 +15,154 @@ from torch.utils import data
 from torch.utils.data import DataLoader
 from torchtyping import TensorType
 from tqdm import tqdm
+from natsort import natsorted
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (center_random_augmentation,
+from allatom_design.data.data import (FEATURES_LONG,
+                                      center_random_augmentation,
+                                      get_scaffolding_inputs,
                                       load_feats_from_pdb, make_fixed_size_1d,
-                                      transform_sidechain_frame, get_scaffolding_inputs, FEATURES_LONG)
-from allatom_design.data.pdb_utils import write_to_pdb
+                                      transform_sidechain_frame)
+from allatom_design.data.datasets.multi_dataset import MultiDataset
 from allatom_design.data.datasets.scaffold_manager import get_scaffold_manager
+from allatom_design.data.pdb_utils import write_to_pdb
+
+
+class LitADDataModule(L.LightningDataModule):
+    def __init__(self, data_cfg: DictConfig, batch_size: int, num_workers: int, cuda: bool):
+        super().__init__()
+        self.data_cfg = data_cfg
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.cuda = cuda
+
+        # Data configs
+        self.pdb_paths = data_cfg.pdb_paths
+        self.annotation_csvs = data_cfg.annotation_csvs
+        self.overwrite_cache = data_cfg.overwrite_cache
+        self.run_eval2 = data_cfg.run_eval2
+        self.phases = ["train", "eval"] if not self.run_eval2 else ["train", "eval", "eval2"]
+
+
+    def prepare_data(self):
+        """
+        Called only once on rank 0 in distributed mode, so it is safe for multiprocessing.
+        """
+        # Cache all examples; save lengths to a CSV
+        for pdb_path in self.pdb_paths:
+            print(f"Caching examples for {pdb_path}...")
+            for phase in self.phases:
+                eval2_suffix = "_with_eval2" if self.run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
+                pdb_keys_csv = f"{pdb_path}/{phase}_pdb_keys{eval2_suffix}.csv"
+
+                if not Path(pdb_keys_csv).exists():
+                    # Backwards compatibility; load in PDB keys from list and save to CSV format
+                    pdb_keys_file = f"{pdb_path}/{phase}_pdb_keys{eval2_suffix}.list"
+                    with open(pdb_keys_file) as f:
+                        pdb_keys = np.array(f.read().splitlines())
+
+                    # cache coordinates for faster loading
+                    self._cache_examples(pdb_path, pdb_keys, phase)
+
+                    # get lengths; store them and save to csv
+                    pdb_key_to_length = {}
+                    for pdb_key in tqdm(pdb_keys, desc="Getting lengths", leave=False):
+                        data_file = self._get_data_file(pdb_key)
+                        example = torch.load(data_file, weights_only=True)
+                        seq_len = example["seq_mask"].sum().long().item()
+                        pdb_key_to_length[pdb_key] = seq_len
+
+                    # save to csv
+                    pdb_keys_df = pd.DataFrame({"pdb_key": pdb_keys, "seq_length": [pdb_key_to_length[pdb_key] for pdb_key in pdb_keys]})
+                    pdb_keys_df.to_csv(pdb_keys_csv, index=False)
+
+                else:
+                    # Load from csv
+                    pdb_keys_df = pd.read_csv(pdb_keys_csv)
+
+                    # cache coordinates for faster loading
+                    self._cache_examples(pdb_path, pdb_keys_df["pdb_key"], phase)
+
+
+    def setup(self, stage: Optional[str] = None):
+        """
+        Lightning calls setup() once (per process).
+        """
+        pass
+
+
+    def train_dataloader(self) -> DataLoader:
+        """
+        Called each epoch if reload_dataloaders_every_n_epochs > 0.
+        """
+        train_loader = self.get_dataloader(phase="train")
+        return train_loader
+
+
+    def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
+        """
+        Called each epoch if reload_dataloaders_every_n_epochs > 0.
+        If run_eval2 is True, return both the 'eval' and 'eval2' dataloaders.
+        """
+        val_loader = self.get_dataloader(phase="eval")
+
+        if self.run_eval2:
+            val2_loader = self.get_dataloader(phase="eval2")
+            return [val_loader, val2_loader]
+
+        return val_loader
+
+
+    def get_dataloader(self, phase: str) -> DataLoader:
+        num_datasets = len(self.pdb_paths)
+        if self.annotation_csvs is None:
+            self.annotation_csvs = [None] * num_datasets
+
+        datasets = [ADDataset(pdb_path=self.pdb_paths[i],
+                              annotation_csv=self.annotation_csvs[i],
+                              phase=phase, **self.data_cfg) for i in range(num_datasets)]
+        if phase == "train":
+            dataset = MultiDataset(datasets, self.data_cfg.dataset_weights, primary_dset_idx=0)
+        elif phase in ["eval", "eval2"]:
+            # only use the primary dataset for validation
+            dataset = datasets[0]
+        else:
+            raise ValueError(f"Invalid phase: {phase}")
+
+        dataloader = DataLoader(dataset,
+                                batch_size=self.batch_size,
+                                num_workers=self.num_workers,
+                                pin_memory=self.cuda,
+                                shuffle=(phase == "train"),
+                                drop_last=(phase == "train"))
+
+        return dataloader
+
+
+    def _cache_examples(self, pdb_path: str, pdb_keys: List[str], phase: str):
+        """
+        Reads in PDB files and caches the examples to disk.
+        Cached files are stored in cached_examples/ in the pdb_path.
+        """
+        cache_dir = f"{pdb_path}/cached_examples"
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        print(f"Caching {phase} examples to {cache_dir}...")
+
+        # Define the number of workers based on CPU count or set manually
+        num_workers = 8
+        print(f"Using {num_workers} Workers!")
+
+        # Prepare arguments as tuples (pdb_key, cache_dir, overwrite_cache) for process_pdb_key
+        task_args = [(pdb_key, cache_dir, self.overwrite_cache, pdb_path, phase) for pdb_key in pdb_keys]
+
+        # Use a Pool for parallel processing
+        with Pool(processes=num_workers) as pool:
+            # Use tqdm to display progress
+            for _ in tqdm(pool.imap_unordered(process_pdb_key, task_args), total=len(task_args), desc="Caching PDBs"):
+                pass
+
+        print("Caching completed.")
 
 
 class ADDataset(data.Dataset):
@@ -87,40 +228,19 @@ class ADDataset(data.Dataset):
 
         self.sm = get_scaffold_manager(scaffold_manager_cfg)  # for constructing scaffolding inputs
 
+        # Require cluster sampling for training on AF3 dataset
+        if pdb_path.endswith("af3_pdb") or pdb_path.endswith("af3_pdb_monomer"):
+            assert self.cluster_sample, "Cluster sampling must be enabled for AF3 dataset"
+        else:
+            assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
+
         # Read in PDB keys
         eval2_suffix = "_with_eval2" if run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
         self.pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys{eval2_suffix}.csv"
+        self.pdb_keys_df = pd.read_csv(self.pdb_keys_csv)
 
         # Load annotation info
         self._load_annotation_info()
-
-        if not Path(self.pdb_keys_csv).exists():
-            # backwards compatibility; load in PDB keys from list and save to CSV format
-            self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys{eval2_suffix}.list"
-            with open(self.pdb_keys_file) as f:
-                self.pdb_keys = np.array(f.read().splitlines())
-
-            # cache coordinates for faster loading
-            self._cache_examples(self.pdb_keys)
-
-            # get lengths; store them and save to csv
-            pdb_key_to_length = {}
-            for pdb_key in tqdm(self.pdb_keys, desc="Getting lengths", leave=False):
-                data_file = self._get_data_file(pdb_key)
-                example = torch.load(data_file, weights_only=True)
-                seq_len = example["seq_mask"].sum().long().item()
-                pdb_key_to_length[pdb_key] = seq_len
-
-            # save to csv
-            self.pdb_keys_df = pd.DataFrame({"pdb_key": self.pdb_keys, "seq_length": [pdb_key_to_length[pdb_key] for pdb_key in self.pdb_keys]})
-            self.pdb_keys_df.to_csv(self.pdb_keys_csv, index=False)
-
-        else:
-            # load from csv
-            self.pdb_keys_df = pd.read_csv(self.pdb_keys_csv)
-
-            # cache coordinates for faster loading
-            self._cache_examples(self.pdb_keys_df["pdb_key"])
 
         # Subset to length range
         if subset_length_range is not None:
@@ -130,16 +250,14 @@ class ADDataset(data.Dataset):
         if max_scrmsd is not None:
             self.subset_by_scrmsd(max_scrmsd)
 
+        # Subset based on relative radius of gyration
         if max_rel_rog is not None:
             self.subset_by_rel_rog(max_rel_rog)
 
-        # Cluster sampling for AF3 dataset
-        if pdb_path.endswith("af3_pdb") or pdb_path.endswith("af3_pdb_monomer"):
-            assert self.cluster_sample, "Cluster sampling must be enabled for AF3 dataset"
-            print("Re-sampling dataset based on clusters")
+        # For training on AF3 datasets, we cluster sample the PDB keys
+        if self.cluster_sample and (phase == "train"):
+            print("Cluster-resampling dataset...")
             self._cluster_sample_pdb_keys()
-        else:
-            assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
 
         # For efficiency set fixed size to max length in the eval or test dataset
         if self.evaluation_mode:
@@ -325,31 +443,6 @@ class ADDataset(data.Dataset):
         return data_file
 
 
-    def _cache_examples(self, pdb_keys: List[str]):
-        """
-        Reads in PDB files and caches the examples to disk.
-        Cached files are stored in cached_examples/ in the pdb_path.
-        """
-        cache_dir = f"{self.pdb_path}/cached_examples"
-        Path(cache_dir).mkdir(parents=True, exist_ok=True)
-        print(f"Caching examples to {cache_dir}...")
-
-        # Define the number of workers based on CPU count or set manually
-        num_workers = 8
-        print(f"Using {num_workers} Workers!")
-
-        # Prepare arguments as tuples (pdb_key, cache_dir, overwrite_cache) for process_pdb_key
-        task_args = [(pdb_key, cache_dir, self.overwrite_cache, self.pdb_path, self.phase) for pdb_key in pdb_keys]
-
-        # Use a Pool for parallel processing
-        with Pool(processes=num_workers) as pool:
-            # Use tqdm to display progress
-            for _ in tqdm(pool.imap_unordered(process_pdb_key, task_args), total=len(task_args), desc="Caching PDBs"):
-                pass
-
-        print("Caching completed.")
-
-
     def _get_max_len(self):
         """
         Reads in cached PDB files and returns max length of all examples.
@@ -379,14 +472,14 @@ class ADDataset(data.Dataset):
         """
         Subsets the dataset to only include proteins with scRMSD <= max_scrmsd.
         """
-        keep_pdb_keys = set((self.annotation_csv["sc_ca_rmsd"] <= max_scrmsd).index)
+        keep_pdb_keys = set(self.annotation_df[self.annotation_df["sc_ca_rmsd"] <= max_scrmsd].index)
         self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["pdb_key"].isin(keep_pdb_keys)]
 
     def subset_by_rel_rog(self, max_rel_rog: float):
         """
         Subsets the dataset to only include proteins with relative radius of gyration <= max_rel_rog.
         """
-        keep_pdb_keys = set((self.annotation_csv["rel_rog"] <= max_rel_rog).index)
+        keep_pdb_keys = set(self.annotation_df[self.annotation_df["rel_rog"] <= max_rel_rog].index)
         self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["pdb_key"].isin(keep_pdb_keys)]
 
 
@@ -484,6 +577,7 @@ def compute_scale_factors(train_dataloader: DataLoader,
 
     return {"bb": (mean_bb, std_bb), "scn": (mean_scn, std_scn)}
 
+
 def get_pdb_data_file(pdb_path: str, phase: str, pdb_key: str) -> str:
     if pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
         pdb_data_file = f"{pdb_path}/pdb_store/{pdb_key}"
@@ -512,6 +606,7 @@ def get_pdb_data_file(pdb_path: str, phase: str, pdb_key: str) -> str:
     else:
         assert False, f"Unknown dataset: {pdb_path}"
     return pdb_data_file
+
 
 # Modify process_pdb_key to be standalone if necessary (multiprocessing does not work well with methods)
 def process_pdb_key(args):
@@ -555,6 +650,9 @@ def cached_example_to_pdb(pt_file: str, out_pdb_file: str, mode: str = "aa", con
 
     # b_factors might not exist
     b_factors = data.get("b_factors", None)
+
+    # # Center for convenience
+    # atom_positions = center_random_augmentation(atom_positions, data["seq_mask"], atom_mask, translation_scale=0.0)
 
     # Call the write_to_pdb function
     write_to_pdb(
