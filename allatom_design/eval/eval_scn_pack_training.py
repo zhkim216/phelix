@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import trim_to_max_len, pad_to_max_len
-from allatom_design.data.datasets.ad_dataset import ADDataset
+from allatom_design.data.datasets.sd_dataset import SDDataset
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
@@ -92,7 +92,7 @@ def main(cfg: DictConfig):
 
         if dataset is None:
             # Load dataset based on model config
-            dataset = ADDataset(phase="eval", evaluation_mode = True, **lit_ad_model.cfg.data)
+            dataset = SDDataset(phase="eval", evaluation_mode = True, **lit_ad_model.cfg.data)
             val_dataloader = DataLoader(dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True, shuffle=False, drop_last=False)
             dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
 

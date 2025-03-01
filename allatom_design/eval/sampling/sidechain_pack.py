@@ -20,7 +20,7 @@ from tqdm import tqdm
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.data import pad_to_max_len, trim_to_max_len
-from allatom_design.data.datasets.ad_dataset import ADDataset
+from allatom_design.data.datasets.sd_dataset import SDDataset
 from allatom_design.data.pdb_utils import write_batched_to_pdb
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
@@ -72,9 +72,9 @@ def main(cfg: DictConfig):
     # Load dataset based on model config
     if lit_sd_model.cfg.data.overfit > 0:
         # For debugging with overfitting models, we sidechain pack on the training set
-        dataset = ADDataset(phase="train", **lit_sd_model.cfg.data)
+        dataset = SDDataset(phase="train", **lit_sd_model.cfg.data)
     else:
-        dataset = ADDataset(phase="eval", evaluation_mode = True, **lit_sd_model.cfg.data)
+        dataset = SDDataset(phase="eval", evaluation_mode = True, **lit_sd_model.cfg.data)
 
     if cfg.subset_length_range is not None:
         dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
@@ -108,7 +108,7 @@ def main(cfg: DictConfig):
     pbar = tqdm(range(0, len(example_indices), cfg.batch_size))
     for bi in pbar:
         idxs = example_indices[bi:bi + cfg.batch_size]
-        batch_i = ADDataset.index_into_batch(examples, idxs)
+        batch_i = SDDataset.index_into_batch(examples, idxs)
         batch_i = trim_to_max_len(batch_i)
 
         x, aatype = batch_i["x"].to(device), batch_i["aatype"].to(device)
