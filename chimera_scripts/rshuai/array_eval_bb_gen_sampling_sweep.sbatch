@@ -28,7 +28,6 @@ cd ${BASE_DIR}
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 NNTM_DATASET=null  # don't run nntm since it breaks with large sweeps
 
 # Model name to evaluate
@@ -78,7 +77,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     eval_every_n_ckpts=2 \
     batch_size=64 \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     nntm_dataset=${NNTM_DATASET} \
     length_range=[64,128] \

@@ -24,7 +24,6 @@ cd ${BASE_DIR}
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 
 # Model name to evaluate
 MODEL_NAME=c1_aasd1_eps0.3
@@ -48,6 +47,5 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scn_pack_training.py \
     eval_every_n_ckpts=1 \
     batch_size=64 \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     subset_length_range=[64,512] \
     hydra.run.dir=${HYDRA_DIR}

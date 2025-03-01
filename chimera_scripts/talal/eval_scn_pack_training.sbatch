@@ -41,6 +41,5 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scn_pack_training.py \
     eval_every_n_ckpts=1 \
     batch_size=64 \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     hydra.run.dir=${HYDRA_DIR} \
     no_wandb=false \

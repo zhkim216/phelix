@@ -257,7 +257,7 @@ def main(cfg: DictConfig):
                     x, aatype, seq_mask, missing_atom_mask, residue_index, chain_index = batch["x"].to(device), batch['aatype'].to(device), batch["seq_mask"].to(device), batch["missing_atom_mask"].to(device), batch["residue_index"].to(device), batch["chain_index"].to(device)
 
                     B = x.shape[0]
-                    cond_labels_in = create_cond_labels_input(B, {"designability": "DESIGNABLE"}, device)
+                    cond_labels_in = {}
                     cond_labels_in["crop_aug"] = batch["cond_labels_in"]["crop_aug"].to(device)  # we provide whether this example was cropped
 
                     # Define timesteps for sequence and sidechain diffusion

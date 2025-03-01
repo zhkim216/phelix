@@ -12,7 +12,6 @@ for t in $(seq 0.1 0.1 1.0); do
     exp_name=casp13_14_15_tseq_${t} \
     batch_size=8 \
     data.pdb_path=/media/scratch/datasets/casp13_14_15 \
-    data.designability_csv='' \
     scn_diffusion.noise_schedule.c=1.5 \
     scn_diffusion.num_steps=50 \
     num_pdbs=null \

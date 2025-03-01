@@ -32,9 +32,10 @@ class ADDataset(data.Dataset):
     def __init__(
         self,
         pdb_path: str,
+        annotation_csv: Optional[str],
+        cluster_sample: bool,
         fixed_size: int,
         phase: str,
-        designability_csv: Optional[str] = None,
         overfit: int = -1,
         short_epoch: bool = False,
         n_random_subset: Optional[int] = None,
@@ -42,7 +43,7 @@ class ADDataset(data.Dataset):
         translation_scale: float = 1.0,
         overwrite_cache: bool = False,
         subset_length_range: Optional[int] = None,
-        cluster_sample: bool = True,
+        max_scrmsd: Optional[float] = None,
         afdb_res_plddt_cutoff: float = 0.0,
         spatial_crop_ratio: float = 0.5,
         evaluation_mode: bool = False,
@@ -52,9 +53,9 @@ class ADDataset(data.Dataset):
         """
         Args:
         - pdb_path: Path to the dataset of PDBs.
+        - annotation_csv: If provided, path to csv containing information about pdb keys.
         - fixed_size: Input fixed size.
         - phase: "train", "eval", or "test"
-        - designability_csv: Path to a CSV with designability info for the dataset.
         - overfit: Number of examples to overfit on. -1 for all examples.
         - short_epoch: If True, the dataset will only return 500 random examples.
         - n_random_subset: If not None, the dataset will only return a random subset of n examples.
@@ -62,12 +63,14 @@ class ADDataset(data.Dataset):
         - translation_scale: Scale of translation augmentation (when using raw coords or coords feats)
         - overwrite_cache: If True, overwrite the dataset cache. Useful if the dataset features have been updated.
         - subset_length_range: List with with [min, max] length of proteins to subset form training data
+        - scrmsd: for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
         - afdb_res_plddt_cutoff: If > 0, for AFDB dataset, cut out any residues with PLDDT < cutoff
         """
         self.pdb_path = pdb_path
+        self.annotation_csv = annotation_csv
+        self.cluster_sample = cluster_sample
         self.fixed_size = fixed_size
         self.phase = phase
-        self.designability_csv = designability_csv
         self.overfit = overfit
 
         self.se3_augment = se3_augment
@@ -75,7 +78,6 @@ class ADDataset(data.Dataset):
         self.overwrite_cache = overwrite_cache
         self.subset_length_range = subset_length_range
         self.afdb_res_plddt_cutoff = afdb_res_plddt_cutoff
-        self.cluster_sample = cluster_sample
         self.spatial_crop_ratio = spatial_crop_ratio
         self.evaluation_mode = evaluation_mode
 
@@ -83,6 +85,9 @@ class ADDataset(data.Dataset):
 
         # Read in PDB keys
         self.pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys.csv"
+
+        # Load annotation info
+        self._load_annotation_info()
 
         if not Path(self.pdb_keys_csv).exists():
             # backwards compatibility; load in PDB keys from list and save to CSV format
@@ -112,19 +117,25 @@ class ADDataset(data.Dataset):
             # cache coordinates for faster loading
             self._cache_examples(self.pdb_keys_df["pdb_key"])
 
+        # Subset to length range
+        if subset_length_range is not None:
+            self.subset_to_length_range(*self.subset_length_range)
+
+        # Subset based on scRMSD
+        if max_scrmsd is not None:
+            self.subset_by_scrmsd(max_scrmsd)
+
         # Cluster sampling for AF3 dataset
-        if self.cluster_sample:
-            if not pdb_path.endswith("af3_pdb") or not pdb_path.endswith("af3_pdb_monomer"):
-                print('Cluster sampling disabled for non AF3 dataset')
-            else:
-                self._cluster_sample_pdb_keys()
+        if pdb_path.endswith("af3_pdb") or pdb_path.endswith("af3_pdb_monomer"):
+            assert self.cluster_sample, "Cluster sampling must be enabled for AF3 dataset"
+            print("Re-sampling dataset based on clusters")
+            self._cluster_sample_pdb_keys()
+        else:
+            assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
 
         # For efficiency set fixed size to max length in the eval or test dataset
         if self.evaluation_mode:
             self.fixed_size = self._get_max_len()
-
-        # Load designability info
-        self._load_designability_info()
 
         # Get dataset source label
         self.dataset_source_label = self._get_dataset_source_label()
@@ -143,8 +154,6 @@ class ADDataset(data.Dataset):
         if n_random_subset is not None:
             self.pdb_keys_df = self.pdb_keys_df.sample(min(n_random_subset, len(self.pdb_keys_df)), replace=False)
 
-        if subset_length_range is not None:
-            self.subset_to_length_range(*self.subset_length_range)
 
     def __len__(self):
         return len(self.pdb_keys_df)
@@ -248,11 +257,6 @@ class ADDataset(data.Dataset):
 
         # Construct conditioning inputs
         cond_labels_in = {}
-
-        # Add designability info
-        cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
-        if self.designability_csv and self.pdb_path.endswith("ingraham_cath_dataset"):
-            cond_labels_in["designability"] = self.pdb_to_designability[pdb_key]
 
         # Add dataset source label
         cond_labels_in["dataset_source"] = cl.TOKEN_TO_ID["dataset_source"][self.dataset_source_label]
@@ -370,15 +374,15 @@ class ADDataset(data.Dataset):
         """
         return int(self.pdb_keys_df["seq_length"].max())
 
-    def _load_designability_info(self) -> None:
+    def _load_annotation_info(self) -> None:
         """
-        If designability info is provided, load it into a mapping from pdb key to designability (0 or 1).
+        If annotation info is provided, load it as a DataFrame with pdb_key as the index.
         """
-        if not self.designability_csv:
+        if not self.annotation_csv:
+            self.annotation_df = None
             return
-        designability_df = pd.read_csv(self.designability_csv)
-        self.pdb_to_designability = designability_df.set_index("pdb")["designable"].to_dict()
-        self.pdb_to_designability["3f5hA"] = 0  # 3f5hA is missing from the designability dataset
+        self.annotation_df = pd.read_csv(self.annotation_csv)
+        self.annotation_df = self.annotation_df.set_index("pdb_key")
 
 
     def subset_to_length_range(self, min_len: int, max_len: int):
@@ -387,6 +391,15 @@ class ADDataset(data.Dataset):
         """
         lengths = self.pdb_keys_df["seq_length"]
         self.pdb_keys_df = self.pdb_keys_df[lengths.between(min_len, max_len)]
+
+    def subset_by_scrmsd(self, max_scrmsd: float):
+        """
+        Subsets the dataset to only include proteins with scRMSD <= max_scrmsd.
+        """
+        # lengths = self.pdb_keys_df["seq_length"]
+        # self.pdb_keys_df = self.pdb_keys_df[lengths.between(min_len, max_len)]
+        keep_pdb_keys = set((self.annotation_csv["sc_ca_rmsd"] <= max_scrmsd).index)
+        self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["pdb_key"].isin(keep_pdb_keys)]
 
 
     def _remove_low_plddt_residues(self, data: Dict[str, TensorType["n ..."]]) -> Dict[str, TensorType["n ..."]]:

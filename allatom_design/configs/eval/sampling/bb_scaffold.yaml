@@ -35,7 +35,7 @@ churn_cfg:
   num_steps: ${num_steps}
 
 # Conditioning
-cond_labels: null  # e.g. {"designability": "DESIGNABLE"} if you want a label
+cond_labels: null
 
 # Autoguidance
 autoguidance_cfg:

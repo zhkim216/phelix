@@ -14,10 +14,6 @@ TOKEN_TO_ID = {
         "UNCROPPED": 0,
         "CROPPED": 1,
     },
-    "designability": {
-        "UNDESIGNABLE": 0,
-        "DESIGNABLE": 1
-    },
     "dataset_source": {
         "EXPERIMENTAL": 0,
         "SYNTHETIC": 1

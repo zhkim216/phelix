@@ -27,7 +27,6 @@ cd ${BASE_DIR}
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
 NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
 
 # Set cache directories
@@ -55,7 +54,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     num_workers=${SLURM_CPUS_ON_NODE} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \

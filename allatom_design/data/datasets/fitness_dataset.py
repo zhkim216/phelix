@@ -8,8 +8,8 @@ from einops import rearrange
 from torch.utils import data
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import pandas as pd 
-import os 
+import pandas as pd
+import os
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
@@ -39,7 +39,7 @@ class FitDataset(ADDataset):
 
     def __len__(self):
         return len(self.mutation_data)
-    
+
     def _get_max_len(self):
         """
         Reads in cached PDB files and returns max length of all examples.
@@ -118,7 +118,6 @@ class FitDataset(ADDataset):
 
         # Construct conditioning inputs
         cond_labels_in = {}
-        cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
         cond_labels_in["dataset_source"] = cl.DEFAULT_TOKEN_ID["dataset_source"]
         cond_labels_in["crop_aug"] = cl.DEFAULT_TOKEN_ID['crop_aug']
 
@@ -144,15 +143,14 @@ class FitDataset(ADDataset):
     def __getitem__(self, idx):
         pdb_key, mut, label, experiment = self.mutation_data[idx]
         pdb_data = self.get_item(pdb_key)
-        
+
         example_out = {
-            "pdb_key": pdb_key, 
-            "mut": mut, 
+            "pdb_key": pdb_key,
+            "mut": mut,
             "label": label,
-            "experiment": experiment, 
+            "experiment": experiment,
             "pdb_data": pdb_data
         }
 
         return example_out
 
-        

@@ -604,9 +604,6 @@ def process_single_pdb(data, sm: Optional["ScaffoldManager"] = None):
     # Construct conditioning inputs
     cond_labels_in = {}
 
-    # Add designability info
-    cond_labels_in["designability"] = cl.PLACEHOLDER_TOKEN_ID
-
     # Add dataset source and crop aug label, set to experimental and uncropped by default
     cond_labels_in["dataset_source"] = cl.DEFAULT_TOKEN["dataset_source"]
     cond_labels_in["crop_aug"] = cl.DEFAULT_TOKEN["crop_aug"]

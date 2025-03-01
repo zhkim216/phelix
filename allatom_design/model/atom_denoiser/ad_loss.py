@@ -26,7 +26,8 @@ class ADLoss(nn.Module):
                 self.loss_weights[k] = cfg.loss_weights[k]
 
         # Define losses based on task
-        self.loss_keys = {"bb/mse_loss", "bb/d2_mse_loss", "bb/d4_mse_loss", "bb/d8_mse_loss"}
+        # self.loss_keys = {"bb/mse_loss", "bb/d2_mse_loss", "bb/d4_mse_loss", "bb/d8_mse_loss"}
+        self.loss_keys = {"bb/mse_loss"}
 
         if self.task == "scaffold":
             self.loss_keys.add("scaffold/mse_loss")
@@ -64,18 +65,18 @@ class ADLoss(nn.Module):
         aux_monitor["bb/unweighted_mse_loss"] = aux["bb/mse_loss"].mean().detach().clone()
         aux["bb/mse_loss"] = aux["bb/mse_loss"] * loss_weight_bb  # apply time step loss weight
 
-        for d in [2, 4, 8]:
-            # Downsample x
-            bb_pred_ds = bb_pred * bb_mask
-            bb_pred_ds = rearrange(bb_pred_ds, "b (n df) a x -> b n df a x", df=d).mean(dim=2)  # mean pool
-            bb_target_ds = bb_target * bb_mask
-            bb_target_ds = rearrange(bb_target_ds, "b (n df) a x -> b n df a x", df=d).mean(dim=2)
-            bb_mask_ds = rearrange(bb_mask, "b (n df) a x -> b n df a x", df=d).all(dim=2).float()  # only compute loss where all are unmasked in the window are 1
+        # for d in [2, 4, 8]:
+        #     # Downsample x
+        #     bb_pred_ds = bb_pred * bb_mask
+        #     bb_pred_ds = rearrange(bb_pred_ds, "b (n df) a x -> b n df a x", df=d).mean(dim=2)  # mean pool
+        #     bb_target_ds = bb_target * bb_mask
+        #     bb_target_ds = rearrange(bb_target_ds, "b (n df) a x -> b n df a x", df=d).mean(dim=2)
+        #     bb_mask_ds = rearrange(bb_mask, "b (n df) a x -> b n df a x", df=d).all(dim=2).float()  # only compute loss where all are unmasked in the window are 1
 
-            aux[f"bb/d{d}_mse_loss"] = masked_mse(bb_pred_ds,
-                                                  bb_target_ds,
-                                                  mask=bb_mask_ds)
-            aux[f"bb/d{d}_mse_loss"] = aux[f"bb/d{d}_mse_loss"] * loss_weight_bb
+        #     aux[f"bb/d{d}_mse_loss"] = masked_mse(bb_pred_ds,
+        #                                           bb_target_ds,
+        #                                           mask=bb_mask_ds)
+        #     aux[f"bb/d{d}_mse_loss"] = aux[f"bb/d{d}_mse_loss"] * loss_weight_bb
 
         # Compute loss for autoguidance model
         if bb_diff_outputs.get("autoguidance_aux") is not None:

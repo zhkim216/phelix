@@ -18,7 +18,6 @@ batch_size: 16
 # Data options for overriding denoiser config (null values default to denoiser config)
 data:
     pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
     n_random_subset: null
 
 # Evaluation mode
