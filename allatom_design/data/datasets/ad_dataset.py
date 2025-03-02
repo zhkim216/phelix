@@ -426,9 +426,9 @@ class ADDataset(data.Dataset):
         return multimer_crop_mask, start_idx, cond_labels_in
 
     def _cluster_sample_pdb_keys(self):
-        pdb_keys = self.pdb_keys_df["pdb_key"].tolist()
-        pdb_keys = [random.choice(list(group)) for _, group in groupby(sorted(pdb_keys), key=lambda x: x.rsplit("_", 1)[-1])]
-        self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["pdb_key"].isin(pdb_keys)]
+        # Randomly select one PDB key from each cluster
+        self.pdb_keys_df = self.pdb_keys_df.groupby(
+            self.pdb_keys_df["pdb_key"].str.split("_").str[-1], group_keys=False).apply(lambda g: g.sample(n=1))
 
 
     def _get_data_file(self, pdb_key: str) -> str:
