@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=test
+#SBATCH --job-name=u1_a0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -25,12 +25,13 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=test
-GROUP=chimera_test
+EXP_NAME=u1_a0
+GROUP=af3_monomer
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/af3_pdb_monomer
 ANNOTATION_CSV=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv
+CLUSTER_SAMPLE=true
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
@@ -41,9 +42,11 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
     data.annotation_csvs=[${ANNOTATION_CSV}] \
-    data.cluster_sample=true \
+    data.cluster_sample=${CLUSTER_SAMPLE} \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
+    data.max_scrmsd=2.0 \
+    data.max_rel_rog=1.4 \
     train.batch_size=64 \
     train.compile_model=true \
     denoiser=dit_denoiser \
