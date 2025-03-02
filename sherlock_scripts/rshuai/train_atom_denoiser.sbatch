@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=ai_dit_12b_ema99
+#SBATCH --job-name=u1_a0_sherlock
 #SBATCH -p bioe,possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -30,18 +30,18 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=ai_dit_12b_ema99
-GROUP=ai_cath
+EXP_NAME=u1_a0_sherlock
+GROUP=af3_monomer
 
 # Dataset paths
 # PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
-PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
-ANNOTATION_CSV=null
-CLUSTER_SAMPLE=false
+# PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
+# ANNOTATION_CSV=null
+# CLUSTER_SAMPLE=false
 
-# PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
-# ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv
-# CLUSTER_SAMPLE=true
+PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
+ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv
+CLUSTER_SAMPLE=true
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
@@ -55,6 +55,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.cluster_sample=${CLUSTER_SAMPLE} \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
+    data.max_scrmsd=2.0 \
+    data.max_rel_rog=1.4 \
     train.batch_size=64 \
     train.compile_model=true \
     denoiser=dit_denoiser \
