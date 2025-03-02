@@ -137,10 +137,13 @@ def main(cfg: DictConfig):
                                               filename="ad-epoch{epoch:02d}-step{step}-val_loss{val/total_loss:.4f}",
                                               auto_insert_metric_name=False  # needed since metric has / in name
                                               )
-    ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
-                                          save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
+    callbacks += [latest_checkpoint_callback, val_checkpoint_callback]
 
-    callbacks += [latest_checkpoint_callback, val_checkpoint_callback, ema_checkpoint]
+    if cfg.model.ema.use_phema:
+        # Store EMA tracker
+        ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
+                                            save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
+        callbacks.append(ema_checkpoint)
 
     if logger:
         lr_monitor = LearningRateMonitor(logging_interval="step")

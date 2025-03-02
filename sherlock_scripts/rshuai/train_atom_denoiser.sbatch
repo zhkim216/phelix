@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=u1_a0_test
-#SBATCH -p possu
+#SBATCH --job-name=ai_dit_12b_ema99
+#SBATCH -p bioe,possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -30,8 +30,8 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=u1_a0_test
-GROUP=backbone_u1
+EXP_NAME=ai_dit_12b_ema99
+GROUP=ai_cath
 
 # Dataset paths
 # PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
