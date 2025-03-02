@@ -1,18 +1,19 @@
 import itertools
+import copy
 from typing import Any, Dict
 
 import lightning as L
 import numpy as np
 import torch
-from einops import rearrange
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import DictConfig
 from torch.optim import Adam, AdamW
-from torch.optim.lr_scheduler import LinearLR, LRScheduler
+from torch.optim.lr_scheduler import LinearLR
 from torchtyping import TensorType
 
 from allatom_design.model.atom_denoiser.ad_loss import ADLoss
 from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
+from allatom_design.model.lr_schedule import InverseSqrtLR, NoamLR
 from allatom_design.model.phema import PowerFunctionEMA
 
 
@@ -26,8 +27,15 @@ class LitAtomDenoiser(L.LightningModule):
             print(f"Using torch.compile to optimize model performance...")
             self.model = torch.compile(self.model)
 
-        # Initialize EMA tracker after torch.compile
-        self.ema_tracker = PowerFunctionEMA(self.model)
+        self.use_phema = cfg.model.ema.use_phema
+        self.ema_decay = cfg.model.ema.ema_decay
+        if self.use_phema:
+            # Use EDM2 post-hoc EMA
+            self.ema_tracker = PowerFunctionEMA(self.model)
+        else:
+            # Use vanilla EMA
+            self.model_ema = copy.deepcopy(self.model)
+            self.model_ema.requires_grad_(False)
 
         # Set up loss
         self.loss = ADLoss(cfg.loss)
@@ -46,8 +54,9 @@ class LitAtomDenoiser(L.LightningModule):
 
 
     def on_train_start(self):
-        # Initialize EMA trackers at the start of training
-        self.ema_tracker.reset()
+        # Initialize EMA trackers at the start of training (if using phema)
+        if self.use_phema:
+            self.ema_tracker.reset()
 
 
     def training_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int):
@@ -61,8 +70,11 @@ class LitAtomDenoiser(L.LightningModule):
 
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
-        # Update EMA tracker
-        self.ema_tracker.update(t=self.trainer.global_step)
+        # Update whichever EMA we're using
+        if self.use_phema:
+            self.ema_tracker.update(t=self.trainer.global_step)
+        else:
+            self.update_ema()
 
 
     def validation_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
@@ -72,7 +84,14 @@ class LitAtomDenoiser(L.LightningModule):
         elif dataloader_idx == 1:
             phase_suffix = "2"
 
-        outputs = self(batch)
+        # Use the appropriate model based on EMA
+        if self.use_phema:
+            # evaluate with current model
+            outputs = self(batch)
+        else:
+            # evaluate with EMA model
+            outputs = self.model_ema(batch)
+
         _, aux = self.loss(outputs, batch, return_aux=True)
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
 
@@ -83,7 +102,11 @@ class LitAtomDenoiser(L.LightningModule):
 
         for t in ts:
             batch["t_bb"] = t
-            outputs = self(batch)
+            if self.use_phema:
+                outputs = self(batch)
+            else:
+                outputs = self.model_ema(batch)
+
             _, aux = self.loss(outputs, batch, return_aux=True)
             aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
             self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_tbb{t}")
@@ -115,7 +138,7 @@ class LitAtomDenoiser(L.LightningModule):
         optim_cfg = self.cfg.optim
         if optim_cfg.optimizer == "adamw":
             optimizer = AdamW(list(self.model.parameters()) + list(self.loss.parameters()),
-                            lr=optim_cfg.adamw.lr, eps=1.0e-15)
+                              lr=optim_cfg.adamw.lr, eps=1.0e-15)
             scheduler = LinearLR(optimizer, start_factor=1e-3, end_factor=1, total_iters=optim_cfg.adamw.warmup_steps)
         elif optim_cfg.optimizer == "noam":
             optimizer = Adam(list(self.model.parameters()) + list(self.loss.parameters()),
@@ -154,32 +177,18 @@ class LitAtomDenoiser(L.LightningModule):
                 self.log_dict({f"total_l{norm_type}_grad_norm": total_norm})
 
 
-class NoamLR(LRScheduler):
-    def __init__(self, optimizer, model_size, factor, warmup, last_epoch=-1):
-        self.model_size = model_size
-        self.factor = factor
-        self.warmup = warmup
-        super().__init__(optimizer, last_epoch)
-
-    def get_lr(self):
-        step = max(self.last_epoch, 1)
-        rate = self.factor * (self.model_size ** (-0.5) * min(step ** (-0.5), step * self.warmup ** (-1.5)))
-        return [rate for _ in self.base_lrs]
+    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+        """
+        If not self.use_phema, store weight of EMA model in checkpoint.
+        """
+        if not self.use_phema:
+            checkpoint["state_dict"] = self.model_ema.state_dict()
 
 
-class InverseSqrtLR(LRScheduler):
-    def __init__(self, optimizer, ref_lr: float, ref_steps: int, warmup_steps: int, last_epoch=-1):
-        self.ref_lr = ref_lr
-        self.ref_steps = ref_steps
-        self.warmup_steps = warmup_steps
-        super().__init__(optimizer, last_epoch)
-
-    def get_lr(self):
-        step = max(self.last_epoch, 1)
-        lr = self.ref_lr
-        if self.ref_steps > 0:
-            lr /= np.sqrt(max(step / self.ref_steps, 1))
-        if self.warmup_steps > 0:
-            lr *= min(step / self.warmup_steps, 1)
-
-        return [lr for _ in self.base_lrs]
+    def update_ema(self) -> None:
+        """
+        If not self.use_phema, performs vanilla EMA update based on self.ema_decay.
+        """
+        with torch.no_grad():
+            for p_ema, p in zip(self.model_ema.parameters(), self.model.parameters()):
+                p_ema.copy_(p_ema * self.ema_decay + p * (1.0 - self.ema_decay))

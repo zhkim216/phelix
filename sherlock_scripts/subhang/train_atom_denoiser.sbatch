@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=ai_nova_a4
-#SBATCH -p possu,bioe
+#SBATCH --job-name=ai_dit_12b_ema99
+#SBATCH -p bioe,possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -30,14 +30,20 @@ cd ${BASE_DIR}
 # Set cache directories
 export TORCH_HOME=/scratch/users/rshuai/subhang/cache/torch
 
-# Wandb settings / experiment name
+# Set experiment name and grouop
 WANDB_ID=null
-EXP_NAME=ai_nova_a4
-GROUP=nova
+EXP_NAME=ai_dit_12b_ema99
+GROUP=ai_cath
 
 # Dataset paths
 # PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
 PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
+ANNOTATION_CSV=null
+CLUSTER_SAMPLE=false
+
+# PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
+# ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv
+# CLUSTER_SAMPLE=true
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
@@ -47,11 +53,13 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
+    data.annotation_csvs=[${ANNOTATION_CSV}] \
+    data.cluster_sample=${CLUSTER_SAMPLE} \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
     train.batch_size=64 \
     train.compile_model=true \
-    denoiser=u_dit_denoiser \
+    denoiser=dit_denoiser \
     trainer.check_val_every_n_epoch=2 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}

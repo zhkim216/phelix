@@ -23,8 +23,7 @@ from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (FEATURES_LONG,
                                       center_random_augmentation,
                                       get_scaffolding_inputs,
-                                      load_feats_from_pdb, make_fixed_size_1d,
-                                      transform_sidechain_frame)
+                                      load_feats_from_pdb, make_fixed_size_1d)
 from allatom_design.data.datasets.multi_dataset import MultiDataset
 from allatom_design.data.datasets.scaffold_manager import get_scaffold_manager
 from allatom_design.data.pdb_utils import write_to_pdb
@@ -521,17 +520,9 @@ def get_lengths(pdb_keys: List[str], cache_dir: str) -> Dict[str, int]:
     # Use 8 workers for parallel processing
     num_workers = 8
     print(f"Computing sequence lengths using {num_workers} workers...")
-
-    # Create parallel executor without progress reporting
     parallel = Parallel(n_jobs=num_workers, verbose=0)
-
-    # Create delayed function calls
     jobs = [delayed(_get_seq_length)(pdb_key, cache_dir) for pdb_key in pdb_keys]
-
-    # Run with tqdm progress bar
     results = parallel(tqdm(jobs, desc="Getting lengths", total=len(jobs)))
-
-    # Convert results list of tuples into dictionary
     return dict(results)
 
 def _get_seq_length(pdb_key: str, cache_dir: str) -> Tuple[str, int]:
