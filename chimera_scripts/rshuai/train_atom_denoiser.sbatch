@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=u1_a1
+#SBATCH --job-name=u1_a1_phema_test
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -25,7 +25,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=u1_a1
+EXP_NAME=u1_a1_phema_test
 GROUP=af3_monomer
 
 # Dataset paths
@@ -47,9 +47,11 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.subset_length_range=[32,256] \
     data.max_scrmsd=2.0 \
     data.max_rel_rog=1.4 \
+    data.n_train_cluster_resample=10 \
     train.batch_size=64 \
+    model.ema.use_phema=true \
     train.compile_model=true \
     denoiser=dit_denoiser \
-    trainer.check_val_every_n_epoch=30 \
+    trainer.check_val_every_n_epoch=1 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}

@@ -187,6 +187,7 @@ class ADDataset(data.Dataset):
         spatial_crop_ratio: float = 0.5,
         evaluation_mode: bool = False,
         scaffold_manager_cfg: Optional[DictConfig] = None,
+        n_train_cluster_resample: int = 1,
         **kwargs
     ):
         """
@@ -205,6 +206,7 @@ class ADDataset(data.Dataset):
         - subset_length_range: List with with [min, max] length of proteins to subset form training data
         - scrmsd: for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
         - afdb_res_plddt_cutoff: If > 0, for AFDB dataset, cut out any residues with PLDDT < cutoff
+        - n_train_cluster_resample: Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
         """
         self.pdb_path = pdb_path
         self.annotation_csv = annotation_csv
@@ -221,6 +223,7 @@ class ADDataset(data.Dataset):
         self.afdb_res_plddt_cutoff = afdb_res_plddt_cutoff
         self.spatial_crop_ratio = spatial_crop_ratio
         self.evaluation_mode = evaluation_mode
+        self.n_train_cluster_resample = n_train_cluster_resample
 
         self.sm = get_scaffold_manager(scaffold_manager_cfg)  # for constructing scaffolding inputs
 
@@ -252,8 +255,8 @@ class ADDataset(data.Dataset):
 
         # For training on AF3 datasets, we cluster sample the PDB keys
         if self.cluster_sample and (phase == "train"):
-            print("Cluster-resampling dataset...")
-            self._cluster_sample_pdb_keys()
+            print(f"Cluster-resampling dataset {self.n_train_cluster_resample} times...")
+            self._cluster_sample_pdb_keys(n_train_cluster_resample=self.n_train_cluster_resample)
 
         # For efficiency set fixed size to max length in the eval or test dataset
         if self.evaluation_mode:
@@ -425,10 +428,16 @@ class ADDataset(data.Dataset):
 
         return multimer_crop_mask, start_idx, cond_labels_in
 
-    def _cluster_sample_pdb_keys(self):
-        # Randomly select one PDB key from each cluster
-        self.pdb_keys_df = self.pdb_keys_df.groupby(
-            self.pdb_keys_df["pdb_key"].str.split("_").str[-1], group_keys=False).apply(lambda g: g.sample(n=1))
+    def _cluster_sample_pdb_keys(self, n_train_cluster_resample: int):
+        pdb_keys_dfs = []
+        for _ in range(n_train_cluster_resample):
+            # Resample N times to get different clusters
+            pdb_keys_df = self.pdb_keys_df.copy()
+            pdb_keys_df["cluster_id"] = pdb_keys_df["pdb_key"].str.split("_").str[-1]
+            pdb_keys_df = pdb_keys_df.groupby("cluster_id", group_keys=False).apply(lambda g: g.sample(n=1))  # randomly select one PDB key from each cluster
+            pdb_keys_dfs.append(pdb_keys_df)
+
+        self.pdb_keys_df = pd.concat(pdb_keys_dfs, ignore_index=True)
 
 
     def _get_data_file(self, pdb_key: str) -> str:
