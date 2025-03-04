@@ -111,6 +111,13 @@ def main(cfg: DictConfig):
         if len(pdb_files) == 0:
             raise ValueError(f"No PDB files found in directory {cfg.pdb_dir}")
 
+    # Re-run missing PDBs
+    if cfg.fix_missing:
+        out_df = pd.read_csv(out_df_path)
+        pdb_keys = out_df["pdb_key"].unique()
+        pdb_files = [f for f in pdb_files if Path(f).stem not in pdb_keys]
+        out_df_path = f"{out_dir}/fampnn_outputs_missing.csv"  # save to a different file
+
     # Parallelization
     if cfg.array_id is not None:
         # Determine chunk size

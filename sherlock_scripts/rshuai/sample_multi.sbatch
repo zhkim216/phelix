@@ -6,7 +6,7 @@
 #SBATCH --time=96:00:00
 #SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%A_%a.err
-#SBATCH --array=0-49%10
+#SBATCH --array=0-4%5
 
 scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
@@ -51,6 +51,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/sample_multi.py \
     noise_labels=${NOISE_LABELS} \
     temperature=0.1 \
     num_seqs_per_pdb=32 \
+    fix_missing=true
     array_id=${SLURM_ARRAY_TASK_ID} \
-    num_arrays=50
+    num_arrays=5
 
