@@ -21,6 +21,7 @@ from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import LitADDataModule
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
+from allatom_design.model.ema import EMA
 
 
 @hydra.main(config_path="configs/atom_denoiser", config_name="atom_denoiser", version_base="1.3.2")
@@ -144,6 +145,9 @@ def main(cfg: DictConfig):
         ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
                                             save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
         callbacks.append(ema_checkpoint)
+    else:
+        ema_callback = EMA(decay=cfg.model.ema.ema_decay)
+        callbacks.append(ema_callback)
 
     if logger:
         lr_monitor = LearningRateMonitor(logging_interval="step")

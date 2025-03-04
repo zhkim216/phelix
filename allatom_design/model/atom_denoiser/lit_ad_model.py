@@ -28,14 +28,9 @@ class LitAtomDenoiser(L.LightningModule):
             self.model = torch.compile(self.model)
 
         self.use_phema = cfg.model.ema.use_phema
-        self.ema_decay = cfg.model.ema.ema_decay
         if self.use_phema:
             # Use EDM2 post-hoc EMA
             self.ema_tracker = PowerFunctionEMA(self.model)
-        else:
-            # Use vanilla EMA
-            self.model_ema = copy.deepcopy(self.model)
-            self.model_ema.requires_grad_(False)
 
         # Set up loss
         self.loss = ADLoss(cfg.loss)
@@ -73,8 +68,6 @@ class LitAtomDenoiser(L.LightningModule):
         # Update whichever EMA we're using
         if self.use_phema:
             self.ema_tracker.update(t=self.trainer.global_step)
-        else:
-            self.update_ema()
 
 
     def validation_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
@@ -84,14 +77,7 @@ class LitAtomDenoiser(L.LightningModule):
         elif dataloader_idx == 1:
             phase_suffix = "2"
 
-        # Use the appropriate model based on EMA
-        if self.use_phema:
-            # evaluate with current model
-            outputs = self(batch)
-        else:
-            # evaluate with EMA model
-            outputs = self.model_ema(batch)
-
+        outputs = self(batch)
         _, aux = self.loss(outputs, batch, return_aux=True)
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
 
@@ -102,10 +88,7 @@ class LitAtomDenoiser(L.LightningModule):
 
         for t in ts:
             batch["t_bb"] = t
-            if self.use_phema:
-                outputs = self(batch)
-            else:
-                outputs = self.model_ema(batch)
+            outputs = self(batch)
 
             _, aux = self.loss(outputs, batch, return_aux=True)
             aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
@@ -175,20 +158,3 @@ class LitAtomDenoiser(L.LightningModule):
             if total_norm_key in grad_norms:
                 total_norm = grad_norms[total_norm_key]
                 self.log_dict({f"total_l{norm_type}_grad_norm": total_norm})
-
-
-    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
-        """
-        If not self.use_phema, store weight of EMA model in checkpoint.
-        """
-        if not self.use_phema:
-            checkpoint["state_dict"] = self.model_ema.state_dict()
-
-
-    def update_ema(self) -> None:
-        """
-        If not self.use_phema, performs vanilla EMA update based on self.ema_decay.
-        """
-        with torch.no_grad():
-            for p_ema, p in zip(self.model_ema.parameters(), self.model.parameters()):
-                p_ema.copy_(p_ema * self.ema_decay + p * (1.0 - self.ema_decay))
