@@ -75,7 +75,7 @@ def main(cfg: DictConfig):
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # # Load in MPNN + structure prediction model for self-consistency evals
+    # Load in MPNN + structure prediction model for self-consistency evals
     mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
     mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)  # override base mpnn config with mpnn.overrides
     mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
@@ -89,6 +89,7 @@ def main(cfg: DictConfig):
         print(f"Using EMA checkpoints from {ema_ckpt_dir}")
         ad_ckpts = glob.glob(f"{ema_ckpt_dir}/*.ckpt")
     else:
+        print(f"Using non-EMA checkpoints from {cfg.denoiser_train_dir}/checkpoints")
         pattern = re.compile(r"ad-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form ad-step{step}-epoch{epoch}.ckpt
         ad_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
     ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
@@ -114,6 +115,7 @@ def main(cfg: DictConfig):
 
         # Sample backbones
         pdbs = []
+        L.seed_everything(cfg.seed)  # reset seed for each checkpoint
         for i in range(0, len(all_lengths), cfg.batch_size):
             # Choose lengths and residue index
             lengths = torch.tensor(all_lengths[i:i + cfg.batch_size], dtype=torch.long).to(lit_ad_model.device)
