@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=a13_bb0_eval_bb_gen
+#SBATCH --job-name=eval
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -25,8 +25,8 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 cd ${BASE_DIR}
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
+# NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
+NNTM_DATASET=null
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -34,13 +34,13 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Denoiser path
-MODEL_NAME=a13_bb0
+MODEL_NAME=u1_a1_phema
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_eval_bb_gen
-GROUP=chimera_a13
+GROUP=af3_monomer
 
 # Run eval script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
@@ -49,7 +49,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     group=${GROUP} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
-    data.pdb_path=${PDB_PATH} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
@@ -57,10 +56,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     eval_every_n_ckpts=1 \
     batch_size=64 \
     nntm_dataset=${NNTM_DATASET} \
-    length_range=[256,384] \
-    num_steps_list=[500] \
+    length_range=[32,256] \
     length_step_size=4 \
-    n_samples_per_length=4 \
-    mpnn.overrides.batch_size=1 \
-    +cond_labels.designability=DESIGNABLE \
+    n_samples_per_length=8 \
     hydra.run.dir=${HYDRA_DIR}

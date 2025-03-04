@@ -181,12 +181,13 @@ class ProteinMPNN(torch.nn.Module):
                 h_V, h_E = layer(h_V, h_E, E_idx, mask, mask_attend)
                 h_V_outputs.append(h_V.clone())
 
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"{pdb}.npy"
-        h_V_outputs_tensor = torch.stack(h_V_outputs)
-        h_V_outputs_array = h_V_outputs_tensor.cpu().detach().numpy()
-        np.save(output_path, h_V_outputs_array)
+        if output_dir is not None:
+            output_dir = Path(output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"{pdb}.npy"
+            h_V_outputs_tensor = torch.stack(h_V_outputs)
+            h_V_outputs_array = h_V_outputs_tensor.cpu().detach().numpy()
+            np.save(output_path, h_V_outputs_array)
         return h_V, h_E, E_idx
 
     def sample(self, feature_dict, pdb=None, output_dir=None):
