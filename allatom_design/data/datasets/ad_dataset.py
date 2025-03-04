@@ -53,7 +53,7 @@ class LitADDataModule(L.LightningDataModule):
         for pdb_path in self.pdb_paths:
             print(f"Caching examples for {pdb_path}...")
             for phase in self.phases:
-                eval2_suffix = "_with_eval2" if self.run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
+                eval2_suffix = "_for_eval2" if self.run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
                 pdb_keys_csv = f"{pdb_path}/{phase}_pdb_keys{eval2_suffix}.csv"
 
                 if not Path(pdb_keys_csv).exists():
@@ -234,7 +234,7 @@ class ADDataset(data.Dataset):
             assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
 
         # Read in PDB keys
-        eval2_suffix = "_with_eval2" if run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
+        eval2_suffix = "_for_eval2" if run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
         self.pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys{eval2_suffix}.csv"
         self.pdb_keys_df = pd.read_csv(self.pdb_keys_csv)
 

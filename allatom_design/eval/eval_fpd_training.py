@@ -135,8 +135,13 @@ def main(cfg: DictConfig):
             phase_to_p_embeds[phase]["mpnn"], _ = load_mpnn_embeddings([f"{cfg.fpd_embeddings_dir}/mpnn/{pdb}.npy" for pdb in phase_pdb_keys])
 
     # Get checkpoints from denoiser training run
-    pattern = re.compile(r"ad-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form ad-step{step}-epoch{epoch}.ckpt
-    ad_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
+    ema_ckpt_dir = f"{cfg.denoiser_train_dir}/checkpoints/ema"
+    if Path(ema_ckpt_dir).exists():
+        print(f"Using EMA checkpoints from {ema_ckpt_dir}")
+        ad_ckpts = glob.glob(f"{ema_ckpt_dir}/*.ckpt")
+    else:
+        pattern = re.compile(r"ad-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form ad-step{step}-epoch{epoch}.ckpt
+        ad_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
     ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
 
     pbar = tqdm(ad_ckpts, desc="Evaluating checkpoints")

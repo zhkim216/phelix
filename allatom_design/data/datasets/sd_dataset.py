@@ -88,7 +88,7 @@ class SDDataset(data.Dataset):
         self.sm = get_scaffold_manager(scaffold_manager_cfg)  # for constructing scaffolding inputs
 
         # Read in PDB keys
-        eval2_suffix = "_with_eval2" if run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
+        eval2_suffix = "_for_eval2" if run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
         self.pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys{eval2_suffix}.csv"
 
         # Load annotation info

@@ -21,7 +21,7 @@ from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import LitADDataModule
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
-from allatom_design.model.ema import EMA
+from allatom_design.model.ema import EMA, EMAModelCheckpoint
 
 
 @hydra.main(config_path="configs/atom_denoiser", config_name="atom_denoiser", version_base="1.3.2")
@@ -131,23 +131,30 @@ def main(cfg: DictConfig):
                                                  filename="ad-step{step}-epoch{epoch:02d}",
                                                  auto_insert_metric_name=False
                                                  )
-    val_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
-                                              save_top_k=cfg.checkpointing.save_top_k,
-                                              monitor="val/total_loss",
-                                              mode="min",
-                                              filename="ad-epoch{epoch:02d}-step{step}-val_loss{val/total_loss:.4f}",
-                                              auto_insert_metric_name=False  # needed since metric has / in name
-                                              )
-    callbacks += [latest_checkpoint_callback, val_checkpoint_callback]
+    callbacks += [latest_checkpoint_callback]
 
     if cfg.model.ema.use_phema:
         # Store EMA tracker
         ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
-                                            save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
+                                              save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
         callbacks.append(ema_checkpoint)
     else:
-        ema_callback = EMA(decay=cfg.model.ema.ema_decay)
+        # EMA callback
+        ema_decay = cfg.model.ema.ema_decay
+        ema_callback = EMA(decay=ema_decay)
         callbacks.append(ema_callback)
+
+        # Save EMA model under checkpoints/ema
+        ema_ckpt_dir = f"{ckpt_dir}/ema"
+        Path(ema_ckpt_dir).mkdir(parents=True, exist_ok=True)
+        latest_ema_checkpoint_callback = EMAModelCheckpoint(
+            dirpath=ema_ckpt_dir,
+            save_top_k=-1,
+            every_n_train_steps=cfg.checkpointing.save_latest_every_n_steps,
+            filename="ad-step{step}-epoch{epoch:02d}-ema" + str(ema_decay),
+            auto_insert_metric_name=False
+        )
+        callbacks.append(latest_ema_checkpoint_callback)
 
     if logger:
         lr_monitor = LearningRateMonitor(logging_interval="step")
