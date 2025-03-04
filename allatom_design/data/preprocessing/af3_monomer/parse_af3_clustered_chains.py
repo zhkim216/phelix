@@ -16,10 +16,6 @@ def main():
     chain_df = pd.read_csv(args.chain_clustering_csv, keep_default_na=False)
     chain_df["pdb_key"] = chain_df["pdb_id"].str[:4] + "_"  + chain_df["chain_id"] + "_" + chain_df["cluster_id"].astype(str)
 
-    # For validation and test, only take first PDB in the cluster for deterministic evaluation
-    if args.phase in ["val", "test"]:
-        chain_df = chain_df.groupby("chain_id").first().reset_index()
-
     # Save out pdb_keys
     Path(args.out_file).parent.mkdir(parents=True, exist_ok=True)
     with open(args.out_file, "w") as fout:

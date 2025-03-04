@@ -166,6 +166,10 @@ def main(cfg: DictConfig):
         ad_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
         ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
 
+    # Sample structures for FPD calculation
+    print(f"Sampling {len(df[df['phase'] == 'train'])} train, {len(df[df['phase'] == 'eval'])} eval, {len(df[df['phase'] == 'eval2'])} eval2 structures for FPD calculation.")
+    df = df.sort_values("seq_length").reset_index(drop=True)  # sort by length for sampling efficiency
+
     pbar = tqdm(ad_ckpts, desc="Evaluating checkpoints")
     for ad_ckpt in pbar:
         match = pattern.search(Path(ad_ckpt).name)
