@@ -1,10 +1,13 @@
 import pickle
+import shutil
 from pathlib import Path
 from typing import List
 
+import biotite.structure.io as strucio
 import numpy as np
 import torch
 import tqdm
+
 from esm3.esm.sdk.api import ESMProtein
 
 
@@ -13,6 +16,8 @@ def create_esm3_embeddings(vqvae_encoder,
                            out_dir: str,
                            device: str):
     Path(out_dir).mkdir(parents=True, exist_ok=True)
+    temp_dir = f"{out_dir}/temp"
+    Path(temp_dir).mkdir(parents=True, exist_ok=True)
 
     embedding_dict = {}
     with torch.no_grad():
@@ -21,6 +26,13 @@ def create_esm3_embeddings(vqvae_encoder,
                 name = pdb[pdb.rfind("/") + 1:]
                 if name[-4:] == ".pdb":
                     name = name[:-4]
+                elif name[-4:] == ".cif":
+                    name = name[:-4]
+                    # convert cif to pdb in temp dir
+                    structure = strucio.load_structure(pdb)
+                    temp_pdb = f"{temp_dir}/{name}.pdb"
+                    strucio.save_structure(temp_pdb, structure)
+                    pdb = temp_pdb
 
                 protein = ESMProtein.from_pdb(pdb)
                 coords = protein.coordinates.unsqueeze(0).to(device)
@@ -41,6 +53,9 @@ def create_esm3_embeddings(vqvae_encoder,
             out_file = Path(out_dir) / f"{name}.pkl"
             with open(out_file, "wb") as f:
                 pickle.dump(embedding_dict[name], f)
+
+    # Delete temp dir
+    shutil.rmtree(temp_dir)
 
 
 def load_esm3_embeddings(embedding_paths: List[str]):

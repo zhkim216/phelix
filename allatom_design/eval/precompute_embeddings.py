@@ -11,6 +11,7 @@ import torch
 from huggingface_hub import login
 from omegaconf import DictConfig, OmegaConf
 
+from allatom_design.data.datasets.ad_dataset import get_pdb_data_file
 from allatom_design.eval.esm3_utils import create_esm3_embeddings
 from allatom_design.eval.fampnn_utils import create_fampnn_embeddings
 from allatom_design.eval.proteinmpnn_utils import (create_mpnn_embeddings,
@@ -33,6 +34,11 @@ def main(cfg: DictConfig):
     # Disable gradients globally
     torch.set_grad_enabled(False)
 
+    # Use cluster sampling for AF3 datasets
+    use_cluster_sampling = False
+    if cfg.pdb_path.endswith("af3_pdb") or cfg.pdb_path.endswith("af3_pdb_monomer"):
+        use_cluster_sampling = True
+
     # Get pdb keys for each phase
     if not cfg.use_precomputed_key_files:
         # Subset from pdb key files
@@ -45,6 +51,11 @@ def main(cfg: DictConfig):
 
             with open(file_path) as f:
                 phase_pdbs = np.array(f.read().splitlines())
+
+            if use_cluster_sampling and phase == "train":
+                pdb_keys_df = pd.DataFrame({"pdb_key": phase_pdbs, "cluster_id": [pdb.split("_")[-1] for pdb in phase_pdbs]})
+                pdb_keys_df = pdb_keys_df.groupby("cluster_id", group_keys=False).apply(lambda g: g.sample(n=1, random_state=cfg.seed))
+                phase_pdbs = pdb_keys_df["pdb_key"].values
 
             if cfg.subsample_n is not None:
                 # subsample to at max subsample_n pdbs from each phase
@@ -75,8 +86,7 @@ def main(cfg: DictConfig):
             all_pdb_keys.extend(phase_pdbs)
 
     # Compute embeddings for FPD
-    pdbs_dir = Path(cfg.pdbs_dir)
-    pdb_paths = [str(pdbs_dir / f"{pdb}{cfg.pdb_key_ext}") for pdb in all_pdb_keys]
+    pdb_paths = [get_pdb_data_file(cfg.pdb_path, phase, pdb_key) for phase, pdb_key in zip(pdbs_df["phase"].values, all_pdb_keys)]
 
     if cfg.compute_mpnn:
         mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)

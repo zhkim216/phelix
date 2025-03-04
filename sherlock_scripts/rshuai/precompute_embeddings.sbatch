@@ -47,26 +47,25 @@ FAMPNN_MODEL_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/c2_aasd2/p
 # PDBS_DIR=/scratch/users/rshuai/datasets/augmented_ingraham_cath_bugfree/all_pdbs
 # OUT_DIR=/scratch/users/rshuai/datasets/augmented_ingraham_cath_bugfree/fampnn_embeddings
 
-TRAIN_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/train_pdb_keys.list
-EVAL_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys.list
-EVAL2_PDB_KEY_FILE=/scratch/users/rshuai/datasets/ingraham_cath_dataset/eval2_pdb_keys.list
+TRAIN_PDB_KEY_FILE=/scratch/users/rshuai/datasets/af3_pdb_monomer/train_pdb_keys_for_eval2.list
+EVAL_PDB_KEY_FILE=/scratch/users/rshuai/datasets/af3_pdb_monomer/eval_pdb_keys_for_eval2.list
+EVAL2_PDB_KEY_FILE=/scratch/users/rshuai/datasets/af3_pdb_monomer/eval2_pdb_keys_for_eval2.list
 USE_PRECOMPUTED_KEY_FILES=false
 
-PDBS_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/pdb_store
-OUT_DIR=/scratch/users/rshuai/datasets/ingraham_cath_dataset/fampnn_embeddings
+PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
+OUT_DIR=/scratch/users/rshuai/datasets/af3_pdb_monomer/fpd_embeddings
 
 # Run eval script
 cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/precompute_embeddings.py \
     compute_mpnn=false \
-    compute_esm3=false \
-    compute_fampnn=true \
+    compute_esm3=true \
+    compute_fampnn=false \
     use_precomputed_key_files=${USE_PRECOMPUTED_KEY_FILES} \
     train_pdb_key_file=${TRAIN_PDB_KEY_FILE} \
     eval_pdb_key_file=${EVAL_PDB_KEY_FILE} \
     eval2_pdb_key_file=${EVAL2_PDB_KEY_FILE} \
-    pdb_key_ext="" \
-    pdbs_dir=${PDBS_DIR} \
+    pdb_path=${PDB_PATH} \
     out_dir=${OUT_DIR} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     fampnn.checkpoint_path=${FAMPNN_MODEL_CKPT} \
