@@ -41,7 +41,7 @@ GROUP=af3_monomer
 # CLUSTER_SAMPLE=false
 
 PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
-ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv
+ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2/annotated_pdb_keys.csv
 CLUSTER_SAMPLE=true
 
 # Run training script

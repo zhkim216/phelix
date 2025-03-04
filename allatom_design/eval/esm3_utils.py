@@ -30,6 +30,7 @@ def create_esm3_embeddings(vqvae_encoder,
                     name = name[:-4]
                     # convert cif to pdb in temp dir
                     structure = strucio.load_structure(pdb)
+                    structure.chain_id[:] = "A"  # force all chains to be chain A
                     temp_pdb = f"{temp_dir}/{name}.pdb"
                     strucio.save_structure(temp_pdb, structure)
                     pdb = temp_pdb

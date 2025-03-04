@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=test_eval_fpd
+#SBATCH --job-name=ai_baseline_dit_12b_eval_fpd_training
 #SBATCH -p possu,bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -25,11 +25,10 @@ BASE_DIR=/home/users/rshuai/code/allatom-design
 HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 OUT_DIR=/scratch/users/rshuai/allatom_design
 MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
-FPD_EMBEDDINGS_DIR=/scratch/users/rshuai/datasets/af3_pdb_monomer/fpd_embeddings
-ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2/annotated_pdb_keys.csv
+FPD_EMBEDDINGS_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings
 
 # Model name to evaluate
-MODEL_NAME=u1_a2
+MODEL_NAME=ai_baseline_dit_12b
 EXP_NAME=${MODEL_NAME}_eval_fpd_training
 WANDB_ID=null
 GROUP=eval_fpd_training
@@ -51,14 +50,11 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_fpd_training.py \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     fpd_embeddings_dir=${FPD_EMBEDDINGS_DIR} \
-    annotation_csv=${ANNOTATION_CSV} \
     use_esm3=true \
     start_step=0 \
     eval_every_n_ckpts=1 \
     batch_size=64 \
     num_steps=500 \
-    pct_subsample_train=0.1 \
-    max_scrmsd=2.0 \
-    max_rel_rog=1.4 \
+    pct_subsample_train=0.05 \
     subset_length_range=[32,256] \
     hydra.run.dir=${HYDRA_DIR}

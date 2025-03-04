@@ -25,4 +25,4 @@ python3 allatom_design/data/preprocessing/af3_monomer/create_eval2_keys.py \
     --annotated_pdb_keys_csv /scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv \
     --n_eval2 2000 \
     --seed 0 \
-    --out_dir /scratch/users/rshuai/datasets/af3_pdb_monomer/eval2_keys
+    --out_dir /scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2

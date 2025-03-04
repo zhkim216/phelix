@@ -87,12 +87,14 @@ def main(cfg: DictConfig):
     if Path(ema_ckpt_dir).exists():
         # Use EMA checkpoints if they exist
         print(f"Using EMA checkpoints from {ema_ckpt_dir}")
+        pattern = re.compile(r"ad-step(\d+)-epoch(\d+)-ema(\d+\.\d+)\.ckpt$")  # match checkpoints of the form ad-step{step}-epoch{epoch}-ema{decay_rate}.ckpt
         ad_ckpts = glob.glob(f"{ema_ckpt_dir}/*.ckpt")
+        ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
     else:
         print(f"Using non-EMA checkpoints from {cfg.denoiser_train_dir}/checkpoints")
         pattern = re.compile(r"ad-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form ad-step{step}-epoch{epoch}.ckpt
         ad_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
-    ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
+        ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
 
     pbar = tqdm(ad_ckpts, desc="Evaluating checkpoints")
     for ad_ckpt in pbar:
