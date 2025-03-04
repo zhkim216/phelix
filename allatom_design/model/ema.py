@@ -1,5 +1,5 @@
 """
-EMA implementation for PyTorch Lightning. Source: https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/common/callbacks/ema.py
+EMA implementation for PyTorch Lightning. Adapted from: https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/common/callbacks/ema.py
 """
 
 # Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
@@ -19,11 +19,12 @@ import contextlib
 import copy
 import os
 import threading
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 
 import lightning.pytorch as pl
 import torch
 from lightning.pytorch import Callback
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.utilities.exceptions import MisconfigurationException
 from lightning.pytorch.utilities.rank_zero import rank_zero_info
 
@@ -362,3 +363,23 @@ class EMAOptimizer(torch.optim.Optimizer):
     def add_param_group(self, param_group):
         self.optimizer.add_param_group(param_group)
         self.rebuild_ema_params = True
+
+
+class EMAModelCheckpoint(ModelCheckpoint):
+    """
+    A ModelCheckpoint subclass that swaps in the EMA weights
+    right before saving, then swaps them back out.
+    """
+
+    def _save_checkpoint(self, trainer: "pl.Trainer", filepath: str) -> None:
+        # Find your existing EMA callback, if present
+        ema_callback: Optional[EMA] = None
+        for cb in trainer.callbacks:
+            if isinstance(cb, EMA):
+                ema_callback = cb
+                break
+
+        assert ema_callback is not None, "EMA callback not found."
+        # Swap in EMA weights
+        with ema_callback.save_ema_model(trainer):
+            super()._save_checkpoint(trainer, filepath)

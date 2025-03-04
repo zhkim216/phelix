@@ -29,9 +29,9 @@ def main():
     # Save outputs
     Path(args.out_dir).mkdir(parents=True, exist_ok=True)
     df.to_csv(f"{args.out_dir}/annotated_pdb_keys.csv", index=False, header=True)
-    df[df["phase"] == "train"]["pdb_key"].to_csv(f"{args.out_dir}/train_pdb_keys_with_eval2.list", index=False, header=False)
-    df[df["phase"] == "eval"]["pdb_key"].to_csv(f"{args.out_dir}/eval_pdb_keys_with_eval2.list", index=False, header=False)
-    df[df["phase"] == "eval2"]["pdb_key"].to_csv(f"{args.out_dir}/eval2_pdb_keys_with_eval2.list", index=False, header=False)
+    df[df["phase"] == "train"]["pdb_key"].to_csv(f"{args.out_dir}/train_pdb_keys_for_eval2.list", index=False, header=False)
+    df[df["phase"] == "eval"]["pdb_key"].to_csv(f"{args.out_dir}/eval_pdb_keys_for_eval2.list", index=False, header=False)
+    df[df["phase"] == "eval2"]["pdb_key"].to_csv(f"{args.out_dir}/eval2_pdb_keys_for_eval2.list", index=False, header=False)
 
 
 if __name__ == "__main__":

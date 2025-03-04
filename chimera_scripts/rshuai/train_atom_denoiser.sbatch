@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=u1_a1_ema99_test
+#SBATCH --job-name=u1_a1
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -25,7 +25,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=u1_a1_ema99_test
+EXP_NAME=u1_a1
 GROUP=af3_monomer
 
 # Dataset paths
