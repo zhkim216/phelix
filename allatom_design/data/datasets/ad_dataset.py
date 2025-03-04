@@ -254,9 +254,9 @@ class ADDataset(data.Dataset):
             self.subset_by_rel_rog(max_rel_rog)
 
         # For training on AF3 datasets, we cluster sample the PDB keys
-        if self.cluster_sample and (phase == "train"):
+        if self.cluster_sample:
             print(f"Cluster-resampling dataset {self.n_train_cluster_resample} times...")
-            self._cluster_sample_pdb_keys(n_train_cluster_resample=self.n_train_cluster_resample)
+            self._cluster_sample_pdb_keys(phase=phase, n_train_cluster_resample=self.n_train_cluster_resample)
 
         # For efficiency set fixed size to max length in the eval or test dataset
         if self.evaluation_mode:
@@ -428,16 +428,20 @@ class ADDataset(data.Dataset):
 
         return multimer_crop_mask, start_idx, cond_labels_in
 
-    def _cluster_sample_pdb_keys(self, n_train_cluster_resample: int):
-        pdb_keys_dfs = []
-        for _ in range(n_train_cluster_resample):
-            # Resample N times to get different clusters
-            pdb_keys_df = self.pdb_keys_df.copy()
-            pdb_keys_df["cluster_id"] = pdb_keys_df["pdb_key"].str.split("_").str[-1]
-            pdb_keys_df = pdb_keys_df.groupby("cluster_id", group_keys=False).apply(lambda g: g.sample(n=1))  # randomly select one PDB key from each cluster
-            pdb_keys_dfs.append(pdb_keys_df)
-
-        self.pdb_keys_df = pd.concat(pdb_keys_dfs, ignore_index=True)
+    def _cluster_sample_pdb_keys(self, phase: str, n_train_cluster_resample: int):
+        self.pdb_keys_df["cluster_id"] = self.pdb_keys_df["pdb_key"].str.split("_").str[-1]
+        if phase == "train":
+            # For training, randomly resample N times to get different clusters
+            pdb_keys_dfs = []
+            for _ in range(n_train_cluster_resample):
+                pdb_keys_df = self.pdb_keys_df.copy()
+                # randomly select one PDB key from each cluster
+                pdb_keys_df = pdb_keys_df.groupby("cluster_id", group_keys=False).apply(lambda g: g.sample(n=1)).reset_index(drop=True)
+                pdb_keys_dfs.append(pdb_keys_df)
+            self.pdb_keys_df = pd.concat(pdb_keys_dfs, ignore_index=True)
+        elif phase in ["eval", "eval2"]:
+            # For eval, only take the first PDB in each cluster for deterministic evaluation
+            self.pdb_keys_df = self.pdb_keys_df.groupby("cluster_id", as_index=False).first().reset_index(drop=True)
 
 
     def _get_data_file(self, pdb_key: str) -> str:

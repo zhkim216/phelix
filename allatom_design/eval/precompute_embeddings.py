@@ -52,9 +52,14 @@ def main(cfg: DictConfig):
             with open(file_path) as f:
                 phase_pdbs = np.array(f.read().splitlines())
 
-            if use_cluster_sampling and phase == "train":
+            if use_cluster_sampling:
                 pdb_keys_df = pd.DataFrame({"pdb_key": phase_pdbs, "cluster_id": [pdb.split("_")[-1] for pdb in phase_pdbs]})
-                pdb_keys_df = pdb_keys_df.groupby("cluster_id", group_keys=False).apply(lambda g: g.sample(n=1, random_state=cfg.seed))
+                if phase == "train":
+                    # For train, randomly sample one PDB from each cluster
+                    pdb_keys_df = pdb_keys_df.groupby("cluster_id", group_keys=False).apply(lambda g: g.sample(n=1, random_state=cfg.seed)).reset_index(drop=True)
+                elif phase in ["eval", "eval2"]:
+                    # For eval, only take the first PDB in each cluster for deterministic evaluation
+                    pdb_keys_df = pdb_keys_df.groupby("cluster_id", as_index=False).first().reset_index(drop=True)
                 phase_pdbs = pdb_keys_df["pdb_key"].values
 
             if cfg.subsample_n is not None:
