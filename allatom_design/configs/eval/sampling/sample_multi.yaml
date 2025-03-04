@@ -6,6 +6,7 @@ num_workers: 8
 # Parallelization: job array parameters
 array_id: null  # Set by Slurm array job. Null means run all.
 num_arrays: 1   # Number of total arrays. If array_id is null, this can remain 1.
+fix_missing: false  # if true, will load in output df and re-run missing entries
 
 # Inputs
 checkpoint_path: null
