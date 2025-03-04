@@ -137,6 +137,7 @@ def main(cfg: DictConfig):
     # Get checkpoints from denoiser training run
     ema_ckpt_dir = f"{cfg.denoiser_train_dir}/checkpoints/ema"
     if Path(ema_ckpt_dir).exists():
+        # Use EMA checkpoints if they exist
         print(f"Using EMA checkpoints from {ema_ckpt_dir}")
         ad_ckpts = glob.glob(f"{ema_ckpt_dir}/*.ckpt")
     else:

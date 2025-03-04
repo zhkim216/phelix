@@ -73,10 +73,6 @@ def main(cfg: DictConfig):
     save_traj_mask = np.tile(np.arange(cfg.n_samples_per_length) < cfg.n_traj_per_length, len(lengths_to_sample))  # get mask of the trajectories we'll save
     save_traj_steps = np.linspace(0, cfg.num_steps - 1, cfg.limit_traj_steps, dtype=int)  # get the steps of the trajectories we'll save
 
-    # Override s_max
-    if cfg.s_max_override is not None:
-        lit_ad_model.model.denoiser.interpolant.set_s_max(cfg.s_max_override)
-
     # === Sample structures === #
     print(f"Drawing {cfg.n_samples_per_length} samples each of lengths {start} to {end} with step size {cfg.length_step_size}")
     pbar = tqdm(total=len(all_lengths))

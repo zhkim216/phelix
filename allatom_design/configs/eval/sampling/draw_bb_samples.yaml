@@ -41,7 +41,6 @@ churn_cfg:
   s_t_min: 0.01
   s_t_max: 50.0
   num_steps: ${num_steps}
-s_max_override: null  # if not null, override s_max in interpolant
 
 # Conditioning
 cond_labels: null

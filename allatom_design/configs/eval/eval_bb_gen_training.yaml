@@ -12,14 +12,11 @@ eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 batch_size: 32
 num_workers: 10
 
+compute_diversity_metrics: false  # whether to compute pairwise TM and clustering metrics
+
 # Denoiser options
 denoiser_train_dir:
 out_dir: ${denoiser_train_dir}/eval_bb_gen_training
-
-# Data options for overriding denoiser config (null values default to denoiser config)
-data:
-    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    n_random_subset: null
 
 # Sampling run parameters
 length_range: [64, 128]
@@ -29,9 +26,7 @@ n_samples_per_length: 2
 # Backbone generation options
 cond_labels: null
 
-num_steps_list: [500]  # number of diffusion steps for backbone generation
-num_steps: null  # filled in based on num_steps_list
-
+num_steps: 500
 timestep_schedule:
   num_steps: ${num_steps}
   mode: "linear"
@@ -45,7 +40,6 @@ churn_cfg:
   s_t_min: 0.01
   s_t_max: 50.0
   num_steps: ${num_steps}
-s_max_override: null  # if not null, override s_max in interpolant
 
 autoguidance_cfg:
   use_autoguidance: false
@@ -94,7 +88,8 @@ struct_pred_cfg:
     cache_file: /media/scratch/huang_lab/cache/omegafold/omegafold.pt
 
 # Dataset for nnTM calculation, path to directory containing PDBs, null to skip nnTM calculation
-nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered
+# nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered
+nntm_dataset: null
 
 hydra:
   run:
