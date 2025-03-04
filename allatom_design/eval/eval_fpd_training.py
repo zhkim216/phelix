@@ -79,37 +79,55 @@ def main(cfg: DictConfig):
     precomputed_key_files = [f"{cfg.fpd_embeddings_dir}/precomputed_{phase}_pdb_keys.csv" for phase in phases]
     phase_to_keys = {phase: pd.read_csv(file_path, header=None).values.flatten() for phase, file_path in zip(phases, precomputed_key_files)}
 
-    # Get sequence lengths for all pdb keys and store as dataframe
-    df_dict = {"phase": [], "pdb_key": [], "seq_length": []}
-    for phase in phases:
-        cached_lengths_file = f"{cfg.fpd_embeddings_dir}/precomputed_{phase}_pdb_keys_lengths.csv"
-        if Path(cached_lengths_file).exists():
-            # Check if cached lengths file exists
-            print(f"Loading cached lengths from {cached_lengths_file}")
-            lengths_df = pd.read_csv(cached_lengths_file)
-            lengths = lengths_df["seq_length"].values
-            assert (phase_to_keys[phase] == lengths_df["pdb_key"].values).all(), "Keys in cached lengths csv do not match keys in precomputed pdb keys csv."
-        else:
-            # Otherwise, compute lengths and cache them
-            if cfg.use_esm3:
-                _, lengths = load_esm3_embeddings([f"{cfg.fpd_embeddings_dir}/esm3/{pdb}.pkl" for pdb in phase_to_keys[phase]])
-            elif cfg.use_mpnn:
-                _, lengths = load_mpnn_embeddings([f"{cfg.fpd_embeddings_dir}/mpnn/{pdb}.npy" for pdb in phase_to_keys[phase]])
+    if cfg.annotation_csv is not None:
+        # Get sequence length, designability info, and other useful info directly from annotation csv
+        df = pd.read_csv(cfg.annotation_csv)
+
+        # subset to only precomputed pdb keys
+        all_pdb_keys = set().union(*phase_to_keys.values())
+        df = df[df["pdb_key"].isin(all_pdb_keys)]
+    else:
+        # Get sequence lengths for all pdb keys and store as dataframe
+        df_dict = {"phase": [], "pdb_key": [], "seq_length": []}
+        for phase in phases:
+            cached_lengths_file = f"{cfg.fpd_embeddings_dir}/precomputed_{phase}_pdb_keys_lengths.csv"
+            if Path(cached_lengths_file).exists():
+                # Check if cached lengths file exists
+                print(f"Loading cached lengths from {cached_lengths_file}")
+                lengths_df = pd.read_csv(cached_lengths_file)
+                lengths = lengths_df["seq_length"].values
+                assert (phase_to_keys[phase] == lengths_df["pdb_key"].values).all(), "Keys in cached lengths csv do not match keys in precomputed pdb keys csv."
             else:
-                raise ValueError("Must set at least one of use_esm3 or use_mpnn to True.")
+                # Otherwise, compute lengths and cache them
+                if cfg.use_esm3:
+                    _, lengths = load_esm3_embeddings([f"{cfg.fpd_embeddings_dir}/esm3/{pdb}.pkl" for pdb in phase_to_keys[phase]])
+                elif cfg.use_mpnn:
+                    _, lengths = load_mpnn_embeddings([f"{cfg.fpd_embeddings_dir}/mpnn/{pdb}.npy" for pdb in phase_to_keys[phase]])
+                else:
+                    raise ValueError("Must set at least one of use_esm3 or use_mpnn to True.")
 
-            # Cache the lengths
-            lengths_df = pd.DataFrame({
-                "pdb_key": phase_to_keys[phase],
-                "seq_length": lengths
-            })
-            lengths_df.to_csv(cached_lengths_file, index=False)
-            print(f"Cached lengths to {cached_lengths_file}")
+                # Cache the lengths
+                lengths_df = pd.DataFrame({
+                    "pdb_key": phase_to_keys[phase],
+                    "seq_length": lengths
+                })
+                lengths_df.to_csv(cached_lengths_file, index=False)
+                print(f"Cached lengths to {cached_lengths_file}")
 
-        df_dict["phase"].extend([phase] * len(phase_to_keys[phase]))
-        df_dict["pdb_key"].extend(phase_to_keys[phase])
-        df_dict["seq_length"].extend(lengths)
-    df = pd.DataFrame(df_dict)
+            df_dict["phase"].extend([phase] * len(phase_to_keys[phase]))
+            df_dict["pdb_key"].extend(phase_to_keys[phase])
+            df_dict["seq_length"].extend(lengths)
+        df = pd.DataFrame(df_dict)
+
+    # Filter by designability / radius of gyration
+    if cfg.max_scrmsd is not None or cfg.max_rel_rog is not None:
+        assert cfg.annotation_csv is not None, "Must provide annotation csv to filter by designability / radius of gyration."
+        if cfg.max_scrmsd is not None:
+            print(f"Filtering by max scrmsd: {cfg.max_scrmsd}")
+            df = df[df["sc_ca_rmsd"] <= cfg.max_scrmsd]
+        if cfg.max_rel_rog is not None:
+            print(f"Filtering by max rel_rog: {cfg.max_rel_rog}")
+            df = df[df["rel_rog"] <= cfg.max_rel_rog]
 
     # Subset by length
     if cfg.subset_length_range is not None:
@@ -139,11 +157,14 @@ def main(cfg: DictConfig):
     if Path(ema_ckpt_dir).exists():
         # Use EMA checkpoints if they exist
         print(f"Using EMA checkpoints from {ema_ckpt_dir}")
+        pattern = re.compile(r"ad-step(\d+)-epoch(\d+)-ema(\d+\.\d+)\.ckpt$")  # match checkpoints of the form ad-step{step}-epoch{epoch}-ema{decay_rate}.ckpt
         ad_ckpts = glob.glob(f"{ema_ckpt_dir}/*.ckpt")
+        ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
     else:
+        print(f"Using non-EMA checkpoints from {cfg.denoiser_train_dir}/checkpoints")
         pattern = re.compile(r"ad-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form ad-step{step}-epoch{epoch}.ckpt
         ad_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
-    ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
+        ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
 
     pbar = tqdm(ad_ckpts, desc="Evaluating checkpoints")
     for ad_ckpt in pbar:

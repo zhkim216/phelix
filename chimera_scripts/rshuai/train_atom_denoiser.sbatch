@@ -30,7 +30,7 @@ GROUP=af3_monomer
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/af3_pdb_monomer
-ANNOTATION_CSV=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv
+ANNOTATION_CSV=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2/annotated_pdb_keys.csv
 CLUSTER_SAMPLE=true
 
 # Run training script
