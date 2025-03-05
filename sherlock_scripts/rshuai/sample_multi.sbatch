@@ -51,7 +51,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/sample_multi.py \
     noise_labels=${NOISE_LABELS} \
     temperature=0.1 \
     num_seqs_per_pdb=32 \
-    fix_missing=true
+    fix_missing=true \
     array_id=${SLURM_ARRAY_TASK_ID} \
     num_arrays=5
 
