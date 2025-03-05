@@ -43,6 +43,8 @@ restype_1to3 = {
 }
 restype_3to1 = {v: k for k, v in restype_1to3.items()}
 
+SKIP_KEYS = ["1q86_E_F_64067", "7kjn_B_C_568"]
+
 
 def get_pdb_keys(pdb_keys_fp: Path, pdb_store_fp: Path, out_list_name: Path):
     remaining_keys = []
@@ -213,6 +215,9 @@ def multiprocess_runner(
     with open(pdb_keys, "r") as fp:
         for line in fp.readlines():
             all_pdb_keys.append(line.strip())
+
+    # Remove any keys that are in the skip list
+    all_pdb_keys = [k for k in all_pdb_keys if k not in SKIP_KEYS]
 
     # If fix_missing, load the existing CSV (if it exists) and skip any that are already processed
     if fix_missing and out_df_path.exists():

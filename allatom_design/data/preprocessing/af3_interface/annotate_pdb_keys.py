@@ -39,6 +39,11 @@ def main():
     df["chain_1_seq_length"] = [r[0] for r in chain_lengths]
     df["chain_2_seq_length"] = [r[1] for r in chain_lengths]
 
+    # Get rid of problematic entries
+    problematic_df = df[(df["chain_1_seq_length"].isna()) | (df["chain_2_seq_length"].isna())]
+    df = df.drop(problematic_df.index).reset_index(drop=True)
+    print(f"Removed {len(problematic_df)} problematic entries.")
+
     # Randomly select n_eval2 rows from train_df
     train_df = df[df["phase"] == "train"]
     eval2_df = train_df.sample(n=args.n_eval2, random_state=args.seed)
@@ -50,21 +55,26 @@ def main():
     df[df["phase"] == "train"]["pdb_key"].to_csv(f"{args.out_dir}/train_pdb_keys_for_eval2.list", index=False, header=False)
     df[df["phase"] == "eval"]["pdb_key"].to_csv(f"{args.out_dir}/eval_pdb_keys_for_eval2.list", index=False, header=False)
     df[df["phase"] == "eval2"]["pdb_key"].to_csv(f"{args.out_dir}/eval2_pdb_keys_for_eval2.list", index=False, header=False)
+    problematic_df.to_csv(f"{args.out_dir}/problematic_pdb_keys.csv", index=False, header=True)  # save problematic entries to a separate file
 
 
 def compute_chain_lengths(row, dataset_dir) -> tuple[int, int]:
-    mmcif_dir = f"{dataset_dir}/{row['phase']}_mmcifs"
-    mmcif_path = f"{mmcif_dir}/{row['pdb_key']}.cif"
-    model_num = 0
-    structure = mmcif_parser.get_structure("s", mmcif_path)[model_num]
-    chains = list(structure.get_chains())
-    if len(chains) != 2:
-        raise ValueError(f"Expected exactly 2 chains in {mmcif_path}, found {len(chains)}")
-    chain_lengths = []
-    for chain in chains:
-        Ca_coords = [atom for residue in chain for atom in residue if atom.get_name() == "CA"]
-        chain_lengths.append(len(Ca_coords))
-    return chain_lengths[0], chain_lengths[1]
+    try:
+        mmcif_dir = f"{dataset_dir}/{row['phase']}_mmcifs"
+        mmcif_path = f"{mmcif_dir}/{row['pdb_key']}.cif"
+        model_num = 0
+        structure = mmcif_parser.get_structure("s", mmcif_path)[model_num]
+        chains = list(structure.get_chains())
+        if len(chains) != 2:
+            raise ValueError(f"Expected exactly 2 chains in {mmcif_path}, found {len(chains)}")
+        chain_lengths = []
+        for chain in chains:
+            Ca_coords = [atom for residue in chain for atom in residue if atom.get_name() == "CA"]
+            chain_lengths.append(len(Ca_coords))
+        return chain_lengths[0], chain_lengths[1]
+    except Exception as e:
+        print(f"Error processing {mmcif_path}: {e}")
+        return np.nan, np.nan
 
 
 if __name__ == "__main__":
