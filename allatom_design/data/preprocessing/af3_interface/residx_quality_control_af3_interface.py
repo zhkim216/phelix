@@ -5,7 +5,6 @@ Quality control + residue numbering for AF3 mmCIFs
 import multiprocessing
 from functools import partial
 from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import typer
@@ -15,6 +14,8 @@ from Bio.PDB.mmcifio import MMCIFIO
 from Bio.PDB.MMCIFParser import FastMMCIFParser
 from tqdm import tqdm
 from collections import defaultdict
+import fcntl
+import os
 
 label_seqid_parser = FastMMCIFParser(auth_chains=True, auth_residues=False, QUIET=True)
 
@@ -99,12 +100,8 @@ def runner(
     shift_res: bool = False,
 ):
     """
-    For each key (assumed to correspond to a .cif file), parse the structure twice:
-    - label_seqid_parser (label-based residue numbering)
-    - auth_seqid_parser (author-based residue numbering)
-    Check the resolution and R-free.
-    If valid, compare label_seqids vs auth_seqids to see if they differ, and if not,
-    optionally save the subset of residues (using save_residues).
+    For each key (assumed to correspond to a .cif file), parse the structure,
+    check resolution + R-free, etc. Then optionally save the subset of residues.
     """
     save_dir.mkdir(parents=True, exist_ok=True)
     pdb_code, chain_id_1, chain_id_2, _ = pdb_key.split("_")
@@ -162,6 +159,7 @@ def runner(
 
     all_chains = []
     for res in Selection.unfold_entities(s1, "R"):
+        # Convert to single-letter code if recognized
         resname = restype_3to1.get(res.resname, "X")
         if resname != "X":
             chain_id = res.get_parent().id
@@ -180,7 +178,9 @@ def runner(
     # If everything looks good, save the residues
     save_residues(chain_id_to_cif_residues, save_dir / f"{pdb_key}.cif", shift_res=shift_res)
 
-    num_gaps = sum([len(group_consecutive_idx(label_seqids)) - 1 for label_seqids in chain_id_to_label_seqids.values()])
+    num_gaps = sum([len(group_consecutive_idx(label_seqids)) - 1
+                    for label_seqids in chain_id_to_label_seqids.values()])
+
     return (pdb_key, f"Has {num_gaps} gaps", num_chains)
 
 
@@ -191,13 +191,40 @@ def multiprocess_runner(
     max_threads: int = 8,
     save_dir: Path = Path("/path/to/save"),
     out_list_name: Path = Path("/path/to/save/pdb_keys.list"),
-    shift_res: bool = False
+    shift_res: bool = False,
+    array_id: int = None,
+    num_arrays: int = None,
+    fix_missing: bool = False,
 ):
+    """
+    Main function that reads in PDB keys, optionally splits them among array jobs,
+    skips keys that have already been processed, and writes results to a shared CSV
+    using file locking for parallel safety.
+    """
+    # Where we store the output CSV
+    out_df_path = save_dir.parent / f"problematic_pdbs_{pdb_keys.stem}.csv"
+
+    # Read the full key list
     all_pdb_keys = []
     with open(pdb_keys, "r") as fp:
         for line in fp.readlines():
             all_pdb_keys.append(line.strip())
 
+    # If fix_missing, load the existing CSV (if it exists) and skip any that are already processed
+    if fix_missing and out_df_path.exists():
+        existing_df = pd.read_csv(out_df_path)
+        done_set = set(existing_df["pdb"].tolist())
+        unprocessed = [k for k in all_pdb_keys if k not in done_set]
+        all_pdb_keys = unprocessed
+
+    # If array_id is given, slice out the chunk of keys for this job
+    if array_id is not None and num_arrays is not None:
+        chunk_size = int(np.ceil(len(all_pdb_keys) / num_arrays))
+        start_idx = array_id * chunk_size
+        end_idx = min(start_idx + chunk_size, len(all_pdb_keys))
+        all_pdb_keys = all_pdb_keys[start_idx:end_idx]
+
+    # Run in parallel
     with multiprocessing.Pool(max_threads) as p:
         ret = list(tqdm(
             p.imap(
@@ -214,13 +241,21 @@ def multiprocess_runner(
             desc="Processing mmCIFs"
         ))
 
+    # Build a DataFrame from the results
     df = pd.DataFrame()
     df["pdb"] = [r[0] for r in ret]
     df["problem"] = [r[1] for r in ret]
     df["num_chains"] = [r[2] for r in ret]
-    df.to_csv(f"{save_dir.parent}/problematic_pdbs_{pdb_keys.stem}.csv", index=False)
 
-    # Save the filtered pdb_keys list
+    # Append results to the CSV with a file lock
+    with open(out_df_path, "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.seek(0, os.SEEK_END)
+        file_empty = (f.tell() == 0)
+        df.to_csv(f, index=False, header=file_empty)
+        fcntl.flock(f, fcntl.LOCK_UN)
+
+    # Update the filtered pdb_keys list
     get_pdb_keys(pdb_keys, save_dir, out_list_name)
 
 
