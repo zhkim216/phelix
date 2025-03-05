@@ -170,6 +170,10 @@ def runner(
 
     num_chains = len(set(all_chains))
 
+    # Verify that we have both chains of the interface
+    if len(chain_id_to_label_seqids) != 2:
+        return (pdb_key, f"Only found {len(chain_id_to_label_seqids)} chains", num_chains)
+
     # Verify that each chain has at least one residue
     for chain, cif_residues in chain_id_to_cif_residues.items():
         if len(cif_residues) == 0:
