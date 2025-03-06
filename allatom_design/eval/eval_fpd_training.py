@@ -173,8 +173,7 @@ def main(cfg: DictConfig):
     pbar = tqdm(ad_ckpts, desc="Evaluating checkpoints")
     for ad_ckpt in pbar:
         match = pattern.search(Path(ad_ckpt).name)
-        epoch = int(match.group(1))
-        global_step = torch.load(ad_ckpt).get('global_step')
+        global_step, epoch = int(match.group(1)), int(match.group(2))
 
         pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
 
@@ -183,7 +182,7 @@ def main(cfg: DictConfig):
             continue
 
         # Create output directory for this epoch
-        log_dir_i = f"{log_dir}/step_{epoch}"
+        log_dir_i = f"{log_dir}/step_{global_step}"
         Path(log_dir_i).mkdir(parents=True, exist_ok=True)
         sampled_pdbs_dir_i = f"{log_dir_i}/sampled_pdbs"
         Path(sampled_pdbs_dir_i).mkdir(parents=True, exist_ok=True)
@@ -235,7 +234,7 @@ def main(cfg: DictConfig):
                 "residue_index": residue_index.cpu(),
             }
 
-            filenames = [f"{sampled_pdbs_dir_i}/step_{epoch}_{pdb_keys[i + j]}_L{lengths[j]}.pdb" for j in range(B)]
+            filenames = [f"{sampled_pdbs_dir_i}/step_{global_step}_{pdb_keys[i + j]}_L{lengths[j]}.pdb" for j in range(B)]
             sampled_pdbs.extend(filenames)
             AtomDenoiser.save_samples_to_pdb(samples, filenames)
 

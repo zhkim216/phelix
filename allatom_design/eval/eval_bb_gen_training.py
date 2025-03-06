@@ -62,10 +62,6 @@ def main(cfg: DictConfig):
 
     # Set up out directories
     Path(log_dir).mkdir(parents=True, exist_ok=True)
-    sampled_pdbs_dir = f"{log_dir}/sampled_pdbs"
-    Path(sampled_pdbs_dir).mkdir(parents=True, exist_ok=True)
-    saved_metrics_dir = f"{log_dir}/metrics"
-    Path(saved_metrics_dir).mkdir(parents=True, exist_ok=True)
 
     # Preserve config
     with open(Path(log_dir, "config.yaml"), "w") as f:
@@ -106,8 +102,17 @@ def main(cfg: DictConfig):
         if (cfg.start_step is not None) and (global_step < cfg.start_step):
             continue
 
+        # Create output directory for this epoch
+        log_dir_i = f"{log_dir}/epoch_{epoch}"
+        Path(log_dir_i).mkdir(parents=True, exist_ok=True)
+        sampled_pdbs_dir_i = f"{log_dir_i}/sampled_pdbs"
+        Path(sampled_pdbs_dir_i).mkdir(parents=True, exist_ok=True)
+        saved_metrics_dir_i = f"{log_dir_i}/metrics"
+        Path(saved_metrics_dir_i).mkdir(parents=True, exist_ok=True)
+
         # Load denoiser model
         lit_ad_model = LitAtomDenoiser.load_from_checkpoint(ad_ckpt).eval()
+
 
         ### BEGIN EVAL ###
         # Define the range of lengths to sample
@@ -152,7 +157,8 @@ def main(cfg: DictConfig):
             samples = {k: v.cpu() if v is not None else v for k, v  in samples.items()}
 
             # Save samples
-            filenames = [f"{sampled_pdbs_dir}/epoch_{epoch}_sample_{i+j}_len_{l.item()}.pdb" for j, l in enumerate(lengths)]
+            filenames = [f"{sampled_pdbs_dir_i}/step_{global_step}__sample_{i+j}_L{l.item()}.pdb" for j, l in enumerate(lengths)]
+
             AtomDenoiser.save_samples_to_pdb(samples, filenames)
             pdbs.extend(filenames)
 
@@ -170,14 +176,14 @@ def main(cfg: DictConfig):
                                                               mpnn_model, mpnn_cfg,
                                                               struct_pred_model,
                                                               device,
-                                                              out_dir=log_dir,
-                                                              temp_dir=f"{log_dir}/tmp")
+                                                              out_dir=log_dir_i,
+                                                              temp_dir=f"{log_dir_i}/tmp")
         for pdb, v in mpnn_sc_info.items():
             all_metrics[pdb]["mpnn_sc_info"] = v
 
         # Run nnTM evaluation
         if cfg.nntm_dataset is not None:
-            nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=log_dir)
+            nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=log_dir_i)
 
             for pdb, v in nntm_info.items():
                 all_metrics[pdb]["nntm_info"] = v
@@ -185,7 +191,7 @@ def main(cfg: DictConfig):
 
         ### SAVE METRICS ###
         # Save all metrics to pickle file
-        with open(f"{saved_metrics_dir}/epoch_{epoch}_all_metrics.pkl", "wb") as f:
+        with open(f"{saved_metrics_dir_i}/epoch_{epoch}_all_metrics.pkl", "wb") as f:
             pickle.dump(all_metrics, f)
 
         # Aggregate per-pdb metrics
@@ -212,7 +218,7 @@ def main(cfg: DictConfig):
             # === Calculate mean pairwise TM score === #
             coords = [load_feats_from_pdb(pdb)["all_atom_positions"] for pdb in pdbs]
             sample_metrics["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(coords,
-                                                                                    temp_dir=f"{log_dir}/tmp",
+                                                                                    temp_dir=f"{log_dir_i}/tmp",
                                                                                     subsample_pairs=cfg.pairwise_tm_subsample)
 
             # === Run clustering analysis === #
@@ -221,9 +227,9 @@ def main(cfg: DictConfig):
                 designable_pdbs = [pdb for pdb in pdbs if all_metrics[pdb]["mpnn_sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff]
                 sample_metrics[f"sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
 
-                cluster_out_dir = Path(f"{log_dir}/clustering/sctm{sctm_cutoff}")
-                sample_metrics[f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{log_dir}/tmp",
-                                                                                                **cfg.clustering.foldseek_opts)
+                cluster_out_dir = Path(f"{log_dir_i}/clustering/sctm{sctm_cutoff}")
+                sample_metrics[f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{log_dir_i}/tmp",
+                                                                                              **cfg.clustering.foldseek_opts)
 
         # === Calculate mean metrics === #
         metrics = {f"bb_gen/S{cfg.num_steps}/{k}": np.mean(v) for k, v in sample_metrics.items()}
