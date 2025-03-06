@@ -12,7 +12,7 @@ eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 batch_size: 32
 num_workers: 10
 
-compute_diversity_metrics: false  # whether to compute pairwise TM and clustering metrics
+compute_diversity_metrics: true  # whether to compute pairwise TM and clustering metrics
 
 # Denoiser options
 denoiser_train_dir:
