@@ -24,4 +24,5 @@ cd ${BASE_DIR}
 python3 allatom_design/data/preprocessing/af3_monomer/parse_sc_dataset_csv.py \
     --train_sc_csv /scratch/users/rshuai/allatom_design/allatom_design/c2_aasd2/construct_sc_dataset/af3_pdb_monomer_L32_256_nl0.0/self_consistency_metrics.csv \
     --eval_sc_csv /scratch/users/rshuai/allatom_design/allatom_design/c2_aasd2/construct_sc_dataset/af3_pdb_monomer_L32_512_nl0.0_eval/self_consistency_metrics.csv \
+    --struct_preds_dir /scratch/users/rshuai/datasets/af3_pdb_monomer/esmfold_preds \
     --out_dir /scratch/users/rshuai/datasets/af3_pdb_monomer/designability_info
