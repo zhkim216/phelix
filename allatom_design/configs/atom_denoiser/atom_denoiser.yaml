@@ -24,7 +24,7 @@ trainer:
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
-  check_val_every_n_epoch: 20  # How often to run validation
+  check_val_every_n_epoch: 5  # How often to run validation
   reload_dataloaders_every_n_epochs: null  # updated based on data.cluster_sample
 
 # Resuming training options
@@ -51,7 +51,8 @@ data:
     max_scrmsd: null  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
     max_rel_rog: null  # subset to only pdbs with relative radius of gyration <= max_rel_rog
     run_eval2: true
-    n_train_cluster_resample: 1  # Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
+    n_train_cluster_resample: 10  # Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
+    use_struct_preds: false
     scaffold_manager_cfg: ${scaffold_manager}
 
 # Model options

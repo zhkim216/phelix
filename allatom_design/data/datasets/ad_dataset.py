@@ -42,6 +42,7 @@ class LitADDataModule(L.LightningDataModule):
         self.annotation_csvs = data_cfg.annotation_csvs
         self.overwrite_cache = data_cfg.overwrite_cache
         self.run_eval2 = data_cfg.run_eval2
+        self.use_struct_preds = data_cfg.use_struct_preds
         self.phases = ["train", "eval"] if not self.run_eval2 else ["train", "eval", "eval2"]
 
 
@@ -50,7 +51,9 @@ class LitADDataModule(L.LightningDataModule):
         Called only once on rank 0 in distributed mode, so it is safe for multiprocessing.
         """
         # Cache all examples; save lengths to a CSV
+
         for pdb_path in self.pdb_paths:
+            cache_dir = f"{pdb_path}/cached_examples" if not self.use_struct_preds else f"{pdb_path}/cached_esmfold_examples"
             print(f"Caching examples for {pdb_path}...")
             for phase in self.phases:
                 eval2_suffix = "_for_eval2" if self.run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
@@ -63,10 +66,9 @@ class LitADDataModule(L.LightningDataModule):
                         pdb_keys = np.array(f.read().splitlines())
 
                     # cache coordinates for faster loading
-                    self._cache_examples(pdb_path, pdb_keys, phase)
+                    self._cache_examples(cache_dir, pdb_path, pdb_keys, phase)
 
                     # get lengths; store them and save to csv
-                    cache_dir = f"{pdb_path}/cached_examples"
                     pdb_key_to_length = get_lengths(pdb_keys, cache_dir)
 
                     # save to csv
@@ -78,7 +80,7 @@ class LitADDataModule(L.LightningDataModule):
                     pdb_keys_df = pd.read_csv(pdb_keys_csv)
 
                     # cache coordinates for faster loading
-                    self._cache_examples(pdb_path, pdb_keys_df["pdb_key"], phase)
+                    self._cache_examples(cache_dir, pdb_path, pdb_keys_df["pdb_key"], phase)
 
 
     def setup(self, stage: Optional[str] = None):
@@ -136,27 +138,26 @@ class LitADDataModule(L.LightningDataModule):
         return dataloader
 
 
-    def _cache_examples(self, pdb_path: str, pdb_keys: List[str], phase: str):
+    def _cache_examples(self, cache_dir: str, pdb_path: str, pdb_keys: List[str], phase: str):
         """
         Reads in PDB files and caches the examples to disk.
         Cached files are stored in cached_examples/ in the pdb_path.
         """
-        cache_dir = f"{pdb_path}/cached_examples"
         Path(cache_dir).mkdir(parents=True, exist_ok=True)
         print(f"Caching {phase} examples to {cache_dir}...")
 
-        # Define the number of workers based on CPU count or set manually
+        # Use 8 workers for parallel processing
         num_workers = 8
-        print(f"Using {num_workers} Workers!")
+        print(f"Using {num_workers} workers...")
 
-        # Prepare arguments as tuples (pdb_key, cache_dir, overwrite_cache) for process_pdb_key
-        task_args = [(pdb_key, cache_dir, self.overwrite_cache, pdb_path, phase) for pdb_key in pdb_keys]
+        # Prepare arguments as tuples for process_pdb_key
+        task_args = [(pdb_key, cache_dir, self.overwrite_cache, pdb_path, phase, self.use_struct_preds)
+                     for pdb_key in pdb_keys]
 
-        # Use a Pool for parallel processing
-        with Pool(processes=num_workers) as pool:
-            # Use tqdm to display progress
-            for _ in tqdm(pool.imap_unordered(process_pdb_key, task_args), total=len(task_args), desc="Caching PDBs"):
-                pass
+        # Use joblib for parallel processing
+        parallel = Parallel(n_jobs=num_workers, verbose=0)
+        jobs = [delayed(process_pdb_key)(args) for args in task_args]
+        parallel(tqdm(jobs, desc="Caching PDBs", total=len(jobs)))
 
         print("Caching completed.")
 
@@ -188,6 +189,7 @@ class ADDataset(data.Dataset):
         evaluation_mode: bool = False,
         scaffold_manager_cfg: Optional[DictConfig] = None,
         n_train_cluster_resample: int = 1,
+        use_struct_preds: bool = False,
         **kwargs
     ):
         """
@@ -207,6 +209,7 @@ class ADDataset(data.Dataset):
         - scrmsd: for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
         - afdb_res_plddt_cutoff: If > 0, for AFDB dataset, cut out any residues with PLDDT < cutoff
         - n_train_cluster_resample: Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
+        - use_struct_preds: if True, load from ESMFold structure predictions instead of crystal structures
         """
         self.pdb_path = pdb_path
         self.annotation_csv = annotation_csv
@@ -224,6 +227,7 @@ class ADDataset(data.Dataset):
         self.spatial_crop_ratio = spatial_crop_ratio
         self.evaluation_mode = evaluation_mode
         self.n_train_cluster_resample = n_train_cluster_resample
+        self.use_struct_preds = use_struct_preds
 
         self.sm = get_scaffold_manager(scaffold_manager_cfg)  # for constructing scaffolding inputs
 
@@ -448,8 +452,9 @@ class ADDataset(data.Dataset):
         """
         For a given pdb_key, return the path to the cached data file.
         """
-        data_file = f"{self.pdb_path}/cached_examples/{pdb_key}.pt"
-        return data_file
+        if self.use_struct_preds:
+            return f"{self.pdb_path}/cached_esmfold_examples/{pdb_key}.pt"
+        return f"{self.pdb_path}/cached_examples/{pdb_key}.pt"
 
 
     def _get_max_len(self):
@@ -594,7 +599,7 @@ def compute_scale_factors(train_dataloader: DataLoader,
     return {"bb": (mean_bb, std_bb)}
 
 
-def get_pdb_data_file(pdb_path: str, phase: str, pdb_key: str) -> str:
+def get_pdb_data_file(pdb_path: str, phase: str, pdb_key: str, use_struct_preds: bool) -> str:
     if pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
         pdb_data_file = f"{pdb_path}/pdb_store/{pdb_key}"
     elif pdb_path.endswith("augmented_ingraham_cath_bugfree"):  # tianyu's augmented dataset
@@ -604,21 +609,18 @@ def get_pdb_data_file(pdb_path: str, phase: str, pdb_key: str) -> str:
     elif pdb_path.endswith("af3_pdb"):
         pdb_data_file = f"{pdb_path}/{phase}_mmcifs/{pdb_key[1:3]}/{pdb_key[:4]}-assembly1.cif" #just use first assembly for now
     elif pdb_path.endswith("af3_pdb_monomer"):
-        mmcif_phase = phase
-        if phase == "eval2":
-            # grab eval2 from train as well
-            mmcif_phase = "train"
-        pdb_data_file = f"{pdb_path}/{mmcif_phase}_mmcifs/{pdb_key}.cif"
+        if not use_struct_preds:
+            # use original monomer mmcifs
+            mmcif_phase = phase
+            if phase == "eval2":
+                # grab eval2 from train as well
+                mmcif_phase = "train"
+            pdb_data_file = f"{pdb_path}/{mmcif_phase}_mmcifs/{pdb_key}.cif"
+        else:
+            # use ESMFold structure predictions
+            pdb_data_file = f"{pdb_path}/esmfold_preds/{pdb_key}.pdb"
     elif pdb_path.endswith("afdb"):  # AFDB augmentation dataset
         pdb_data_file = f"{pdb_path}/foldseek_cluster_reps/{pdb_key}.cif"
-    elif pdb_path.endswith("qfit-test-set/rcsb-pdb"):
-        pdb_data_file = f"{pdb_path}/all/{pdb_key}.pdb1"  # qfit dataset, use only pdb1s for now
-    elif pdb_path.endswith("rcsb_test_cases"):
-        pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
-    elif Path(pdb_path).stem.startswith("casp"):
-        pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
-    elif pdb_path.endswith("denovo100") or pdb_path.endswith("denovo200") or pdb_path.endswith("denovo300") or pdb_path.endswith("denovo400") or pdb_path.endswith("denovo500"):
-        pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
     else:
         assert False, f"Unknown dataset: {pdb_path}"
     return pdb_data_file
@@ -626,12 +628,12 @@ def get_pdb_data_file(pdb_path: str, phase: str, pdb_key: str) -> str:
 
 # Modify process_pdb_key to be standalone if necessary (multiprocessing does not work well with methods)
 def process_pdb_key(args):
-    pdb_key, cache_dir, overwrite_cache, pdb_path, phase = args
+    pdb_key, cache_dir, overwrite_cache, pdb_path, phase, use_struct_preds = args
     out_file = f"{cache_dir}/{pdb_key}.pt"
     if Path(out_file).exists() and not overwrite_cache:
         return  # Skip caching if file exists and overwrite_cache is False
 
-    pdb_data_file = get_pdb_data_file(pdb_path, phase, pdb_key)  # Ensure this function can work independently
+    pdb_data_file = get_pdb_data_file(pdb_path, phase, pdb_key, use_struct_preds)  # Ensure this function can work independently
 
     #specific to multimeric af3 dataset
     chain_ids_override = None

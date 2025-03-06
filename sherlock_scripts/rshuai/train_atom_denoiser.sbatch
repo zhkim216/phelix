@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=u1_a2
+#SBATCH --job-name=u1_a3
 #SBATCH -p bioe,possu
-#SBATCH --gpus-per-node=1
-#SBATCH --cpus-per-task=8
+#SBATCH --gpus-per-node=2
+#SBATCH --cpus-per-task=16
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -30,7 +30,7 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=u1_a2
+EXP_NAME=u1_a3
 # GROUP=ai_cath
 GROUP=af3_monomer
 
@@ -58,9 +58,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.subset_length_range=[32,256] \
     data.max_scrmsd=2.0 \
     data.max_rel_rog=1.4 \
-    train.batch_size=128 \
+    data.n_train_cluster_resample=10 \
+    data.use_struct_preds=true \
+    train.batch_size=32 \
     train.compile_model=true \
     denoiser=dit_denoiser \
-    trainer.check_val_every_n_epoch=2 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
