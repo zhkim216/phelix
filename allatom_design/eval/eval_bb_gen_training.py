@@ -210,7 +210,7 @@ def main(cfg: DictConfig):
         ### Compute metrics that require all samples ##
         if cfg.compute_diversity_metrics:
             # === Calculate mean pairwise TM score === #
-            coords = [load_feats_from_pdb(pdb, chain_residx_gap=None)["all_atom_positions"] for pdb in pdbs]
+            coords = [load_feats_from_pdb(pdb)["all_atom_positions"] for pdb in pdbs]
             sample_metrics["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(coords,
                                                                                     temp_dir=f"{log_dir}/tmp",
                                                                                     subsample_pairs=cfg.pairwise_tm_subsample)
