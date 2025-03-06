@@ -53,6 +53,7 @@ data:
     run_eval2: true
     n_train_cluster_resample: 10  # Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
     use_struct_preds: false
+    use_first_sample: false  # use only first MPNN sample; for ablation on ai cath
     scaffold_manager_cfg: ${scaffold_manager}
 
 # Model options

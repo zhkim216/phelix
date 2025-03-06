@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=u1_a3
+#SBATCH --job-name=u1_a4
 #SBATCH -p bioe,possu
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
@@ -30,19 +30,25 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=u1_a3
-# GROUP=ai_cath
-GROUP=af3_monomer
+EXP_NAME=u1_a4
+GROUP=ai_cath
+# GROUP=af3_monomer
 
 # Dataset paths
 # PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
-# PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
-# ANNOTATION_CSV=null
-# CLUSTER_SAMPLE=false
+PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
+ANNOTATION_CSV=null
+CLUSTER_SAMPLE=false
+USE_FIRST_SAMPLE=true
 
-PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
-ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2/annotated_pdb_keys.csv
-CLUSTER_SAMPLE=true
+# PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
+# ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2/annotated_pdb_keys.csv
+# CLUSTER_SAMPLE=true
+# USE_FIRST_SAMPLE=false
+    # data.use_struct_preds=true \
+    # data.n_train_cluster_resample=10 \
+    # data.max_scrmsd=2.0 \
+    # data.max_rel_rog=1.4 \
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
@@ -54,12 +60,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.pdb_paths=[${PDB_PATH}] \
     data.annotation_csvs=[${ANNOTATION_CSV}] \
     data.cluster_sample=${CLUSTER_SAMPLE} \
+    data.use_first_sample=${USE_FIRST_SAMPLE} \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
-    data.max_scrmsd=2.0 \
-    data.max_rel_rog=1.4 \
-    data.n_train_cluster_resample=10 \
-    data.use_struct_preds=true \
+    trainer.check_val_every_n_epoch=20 \
     train.batch_size=32 \
     train.compile_model=true \
     denoiser=dit_denoiser \
