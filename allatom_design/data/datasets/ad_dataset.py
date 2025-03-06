@@ -190,6 +190,7 @@ class ADDataset(data.Dataset):
         scaffold_manager_cfg: Optional[DictConfig] = None,
         n_train_cluster_resample: int = 1,
         use_struct_preds: bool = False,
+        use_first_sample: bool = False,  # for ablation on ai cath
         **kwargs
     ):
         """
@@ -228,6 +229,7 @@ class ADDataset(data.Dataset):
         self.evaluation_mode = evaluation_mode
         self.n_train_cluster_resample = n_train_cluster_resample
         self.use_struct_preds = use_struct_preds
+        self.use_first_sample = use_first_sample
 
         self.sm = get_scaffold_manager(scaffold_manager_cfg)  # for constructing scaffolding inputs
 
@@ -236,6 +238,9 @@ class ADDataset(data.Dataset):
             assert self.cluster_sample, "Cluster sampling must be enabled for AF3 dataset"
         else:
             assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
+
+        if self.use_first_sample:
+            assert pdb_path.endswith("augmented_ingraham_cath_bugfree"), "use_first_sample only supported for ai cath dataset"
 
         # Read in PDB keys
         eval2_suffix = "_for_eval2" if run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
@@ -261,6 +266,13 @@ class ADDataset(data.Dataset):
         if self.cluster_sample:
             print(f"Cluster-resampling dataset {self.n_train_cluster_resample} times...")
             self._cluster_sample_pdb_keys(phase=phase, n_train_cluster_resample=self.n_train_cluster_resample)
+
+        # Ablation on AI-CATH: only use the first sample
+        if self.use_first_sample:
+            self.pdb_keys_df["original_pdb_key"] = self.pdb_keys_df["pdb_key"].str.split("_").str[0]
+            print(f"Number of samples before: {len(self.pdb_keys_df)}")
+            self.pdb_keys_df = self.pdb_keys_df.groupby("original_pdb_key", as_index=False).first().reset_index(drop=True)
+            print(f"Number of samples after taking first: {len(self.pdb_keys_df)}")
 
         # For efficiency set fixed size to max length in the eval or test dataset
         if self.evaluation_mode:
