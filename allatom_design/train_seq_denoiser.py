@@ -12,13 +12,11 @@ from lightning.fabric.loggers.logger import _DummyExperiment as DummyExperiment
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.strategies import DDPStrategy
 from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader
 
-import allatom_design.data.datasets.ad_dataset as ad_dataset
+import allatom_design.data.datasets.sd_dataset as sd_dataset
 from allatom_design.checkpoint_utils import EMATrackerCheckpoint
-from allatom_design.data.datasets.sd_dataset import SDDataset
+from allatom_design.data.datasets.sd_dataset import LitSDDataModule
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
 
@@ -46,12 +44,13 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.deterministic = True  # nonrandom CUDNN convolution algo, maybe slower
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
-    # Set up dataloaders
-    init_dataloader = partial(get_dataloader, num_workers=cfg.num_workers, cuda=cfg.cuda)
-
-    _, train_dataloader = init_dataloader(phase="train", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
-    _, val_dataloader = init_dataloader(phase="eval", data_cfg=cfg.data, batch_size=cfg.train.batch_size)
-    val_dataloaders = [val_dataloader]
+    # Set up LightningDataModule
+    datamodule = LitSDDataModule(
+        data_cfg=cfg.data,
+        batch_size=cfg.train.batch_size,
+        num_workers=cfg.num_workers,
+        cuda=cfg.cuda,
+    )
 
     # Init wandb
     local_rank = os.environ.get("LOCAL_RANK", None)
@@ -111,15 +110,15 @@ def main(cfg: DictConfig):
 
     # Define callbacks
     callbacks = []
+    latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
+                                                 save_top_k=-1,
+                                                 every_n_train_steps=cfg.checkpointing.save_latest_every_n_steps,
+                                                 filename="sd-step{step}-epoch{epoch:02d}",
+                                                 auto_insert_metric_name=False
+                                                 )
+    ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
+                                          save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
 
-    step_latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
-                                                      save_top_k=-1,
-                                                      every_n_train_steps=cfg.checkpointing.save_latest_every_n_steps,
-                                                      filename="sd-step{step}-epoch{epoch:02d}",
-                                                      auto_insert_metric_name=False
-                                                      )
-
-    # also keep track of a single latest checkpoint at the epoch level for resuming training
     epoch_latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
                                                        monitor="epoch",
                                                        mode="max",
@@ -128,24 +127,15 @@ def main(cfg: DictConfig):
                                                        filename="sd-epoch{epoch:02d}",
                                                        auto_insert_metric_name=False)
 
-    val_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
-                                              save_top_k=cfg.checkpointing.save_top_k,
-                                              monitor="val/total_loss",
-                                              mode="min",
-                                              filename="sd-epoch{epoch:02d}-step{step}-val_loss{val/total_loss:.4f}",
-                                              auto_insert_metric_name=False  # needed since metric has / in name
-                                              )
-    ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
-                                          save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
-
-    callbacks += [step_latest_checkpoint_callback, epoch_latest_checkpoint_callback, val_checkpoint_callback, ema_checkpoint]
+    callbacks += [latest_checkpoint_callback, epoch_latest_checkpoint_callback, ema_checkpoint]
 
     if logger:
         lr_monitor = LearningRateMonitor(logging_interval="step")
         callbacks.append(lr_monitor)
 
     # Compute scale factors for sigma data
-    scale_factors = ad_dataset.compute_scale_factors(train_dataloader, n_examples=1000)
+    datamodule.prepare_data()
+    scale_factors = sd_dataset.compute_scale_factors(datamodule.train_dataloader(), n_examples=1000)
     print(f"Computed scale factors: {scale_factors}")
 
     # override sigma_data if specified for consistent loss scaling
@@ -171,24 +161,7 @@ def main(cfg: DictConfig):
                         callbacks=callbacks,
                         **cfg.trainer
                         )
-    trainer.fit(model=lit_model, train_dataloaders=train_dataloader, val_dataloaders=val_dataloaders)
-
-
-def get_dataloader(phase: str,
-                   data_cfg: DictConfig,
-                   batch_size: int,
-                   num_workers: int,
-                   cuda: bool) -> Tuple[SDDataset, DataLoader]:
-    dataset = SDDataset(phase=phase, **data_cfg)
-    dataloader = DataLoader(dataset,
-                            batch_size=batch_size,
-                            num_workers=num_workers,
-                            pin_memory=cuda,
-                            shuffle=(phase == "train"),
-                            drop_last=True
-                            )
-    return dataset, dataloader
-
+    trainer.fit(model=lit_model, datamodule=datamodule)
 
 
 def update_config(cfg: DictConfig) -> None:
@@ -203,6 +176,13 @@ def update_config(cfg: DictConfig) -> None:
     if getattr(cfg.denoiser, "confidence_module", None) and cfg.denoiser.confidence_module.enabled:
         # Confidence module parameters are not always used
         cfg.trainer.strategy = "ddp_find_unused_parameters_true"
+
+    if cfg.data.cluster_sample:
+        # if we're using cluster sampling, we want to reload the dataloader every epoch
+        cfg.trainer.reload_dataloaders_every_n_epochs = 1
+    else:
+        # don't reload dataloaders every epoch
+        cfg.trainer.reload_dataloaders_every_n_epochs = 0
 
 
 if __name__ == "__main__":

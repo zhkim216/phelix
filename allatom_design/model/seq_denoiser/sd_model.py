@@ -191,7 +191,7 @@ class SeqDenoiser(nn.Module):
                 noise_labels = None
             else:
                 # eval: assume no noise
-                noise, noise_labels = None
+                noise, noise_labels = None, None
 
         return noise, noise_labels
 
