@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=c4_aasd1_ctrl
+#SBATCH --job-name=c6_aasd0_test
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=1
-#SBATCH --cpus-per-task=8
+#SBATCH --gpus-per-node=4
+#SBATCH --cpus-per-task=32
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -21,14 +21,14 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=c4_aasd1_ctrl
-GROUP=seq_denoiser_c4
+EXP_NAME=c6_aasd0_test
+GROUP=seq_denoiser_c6
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
+PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
@@ -37,18 +37,21 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     group=${GROUP} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
-    data.fixed_size=256 \
+    data.fixed_size=1024 \
     data.pdb_path=${PDB_PATH} \
+    data.cluster_sample=true \
     data.subset_length_range=[16,9999] \
-    train.batch_size=64 \
+    train.batch_size=8 \
+    trainer.accumulate_grad_batches=4 \
     train.compile_model=true \
+    model.task=allatom_seq_des \
     denoiser=fampnn_denoiser \
     denoiser.augment_eps=0.3 \
-    denoiser.per_residue_eps=true \
-    denoiser.fampnn.use_gvp=false \
-    denoiser.fampnn.n_layers=3 \
-    denoiser.fampnn.n_channel=160 \
-    denoiser.esm.use_esmc=false \
+    denoiser.fampnn.use_gvp=true \
+    denoiser.fampnn.n_layers=5 \
+    denoiser.confidence_module.enabled=true \
+    checkpointing.save_latest_every_n_steps=5000 \
+    checkpointing.save_ema_every_n_steps=2000 \
     trainer.check_val_every_n_epoch=10 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}

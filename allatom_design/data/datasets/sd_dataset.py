@@ -5,10 +5,12 @@ from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
+import lightning as L
 import numpy as np
 import pandas as pd
 import torch
 from einops import rearrange
+from joblib import Parallel, delayed
 from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader
@@ -17,26 +19,133 @@ from tqdm import tqdm
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (center_random_augmentation,
+from allatom_design.data.data import (FEATURES_LONG,
+                                      center_random_augmentation,
                                       load_feats_from_pdb, make_fixed_size_1d,
-                                      transform_sidechain_frame, get_scaffolding_inputs, FEATURES_LONG)
+                                      transform_sidechain_frame)
 from allatom_design.data.pdb_utils import write_to_pdb
-from allatom_design.data.datasets.scaffold_manager import get_scaffold_manager
+
+
+class LitSDDataModule(L.LightningDataModule):
+    def __init__(self, data_cfg: DictConfig, batch_size: int, num_workers: int, cuda: bool):
+        super().__init__()
+        self.data_cfg = data_cfg
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.cuda = cuda
+
+        # Data configs
+        self.pdb_path = data_cfg.pdb_path
+        self.overwrite_cache = data_cfg.overwrite_cache
+        self.phases = ["train", "eval"]
+
+
+    def prepare_data(self):
+        """
+        Called only once on rank 0 in distributed mode, so it is safe for multiprocessing.
+        """
+        # Cache all examples; save lengths to a CSV
+        print(f"Caching examples for {self.pdb_path}...")
+        for phase in self.phases:
+            pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys.csv"
+
+            if not Path(pdb_keys_csv).exists():
+                # Backwards compatibility; load in PDB keys from list and save to CSV format
+                pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
+                with open(pdb_keys_file) as f:
+                    pdb_keys = np.array(f.read().splitlines())
+
+                # cache coordinates for faster loading
+                self._cache_examples(pdb_keys, phase)
+
+                # get lengths; store them and save to csv
+                cache_dir = f"{self.pdb_path}/cached_examples"
+                pdb_key_to_length = get_lengths(pdb_keys, cache_dir)
+
+                # save to csv
+                pdb_keys_df = pd.DataFrame({"pdb_key": pdb_keys, "seq_length": [pdb_key_to_length[pdb_key] for pdb_key in pdb_keys]})
+                pdb_keys_df.to_csv(pdb_keys_csv, index=False)
+
+            else:
+                # Load from csv
+                pdb_keys_df = pd.read_csv(pdb_keys_csv)
+
+                # cache coordinates for faster loading
+                self._cache_examples(pdb_keys_df["pdb_key"], phase)
+
+
+    def setup(self, stage: Optional[str] = None):
+        """
+        Lightning calls setup() once (per process).
+        """
+        pass
+
+
+    def train_dataloader(self) -> DataLoader:
+        """
+        Called each epoch if reload_dataloaders_every_n_epochs > 0.
+        """
+        train_loader = self.get_dataloader(phase="train")
+        return train_loader
+
+
+    def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
+        """
+        Called each epoch if reload_dataloaders_every_n_epochs > 0.
+        """
+        val_loader = self.get_dataloader(phase="eval")
+
+        return val_loader
+
+
+    def get_dataloader(self, phase: str) -> DataLoader:
+        dataset = SDDataset(phase=phase, **self.data_cfg)
+        dataloader = DataLoader(dataset,
+                                batch_size=self.batch_size,
+                                num_workers=self.num_workers,
+                                pin_memory=self.cuda,
+                                shuffle=(phase == "train"),
+                                drop_last=(phase == "train")
+                                )
+        return dataloader
+
+
+    def _cache_examples(self, pdb_keys: List[str], phase: str):
+        """
+        Reads in PDB files and caches the examples to disk.
+        Cached files are stored in cached_examples/ in the pdb_path.
+        """
+        cache_dir = f"{self.pdb_path}/cached_examples"
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        print(f"Caching examples to {cache_dir}...")
+
+        # Define the number of workers based on CPU count or set manually
+        num_workers = 8
+        print(f"Using {num_workers} Workers!")
+
+        # Prepare arguments as tuples (pdb_key, cache_dir, overwrite_cache) for process_pdb_key
+        task_args = [(pdb_key, cache_dir, self.overwrite_cache, self.pdb_path, phase) for pdb_key in pdb_keys]
+
+        # Use a Pool for parallel processing
+        with Pool(processes=num_workers) as pool:
+            # Use tqdm to display progress
+            for _ in tqdm(pool.imap_unordered(process_pdb_key, task_args), total=len(task_args), desc="Caching PDBs"):
+                pass
+
+        print("Caching completed.")
 
 
 class SDDataset(data.Dataset):
     """
-    Dataset used for the atom denoiser and sequence denoiser.
+    Dataset used for the sequence denoiser.
     """
 
     def __init__(
         self,
         pdb_path: str,
-        annotation_csv: Optional[str],
         cluster_sample: bool,
         fixed_size: int,
         phase: str,
-        run_eval2: bool,
         overfit: int = -1,
         short_epoch: bool = False,
         n_random_subset: Optional[int] = None,
@@ -44,21 +153,15 @@ class SDDataset(data.Dataset):
         translation_scale: float = 1.0,
         overwrite_cache: bool = False,
         subset_length_range: Optional[int] = None,
-        max_scrmsd: Optional[float] = None,
-        max_rel_rog: Optional[float] = None,
-        afdb_res_plddt_cutoff: float = 0.0,
         spatial_crop_ratio: float = 0.5,
         evaluation_mode: bool = False,
-        scaffold_manager_cfg: Optional[DictConfig] = None,
         **kwargs
     ):
         """
         Args:
         - pdb_path: Path to the dataset of PDBs.
-        - annotation_csv: If provided, path to csv containing information about pdb keys.
         - fixed_size: Input fixed size.
         - phase: "train", "eval", or "test"
-        - run_eval2: if True, run evals on a random subset of train (need train_pdb_keys_eval2.list, eval2_pdb_keys_eval2.list)
         - overfit: Number of examples to overfit on. -1 for all examples.
         - short_epoch: If True, the dataset will only return 500 random examples.
         - n_random_subset: If not None, the dataset will only return a random subset of n examples.
@@ -66,80 +169,38 @@ class SDDataset(data.Dataset):
         - translation_scale: Scale of translation augmentation (when using raw coords or coords feats)
         - overwrite_cache: If True, overwrite the dataset cache. Useful if the dataset features have been updated.
         - subset_length_range: List with with [min, max] length of proteins to subset form training data
-        - scrmsd: for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
-        - afdb_res_plddt_cutoff: If > 0, for AFDB dataset, cut out any residues with PLDDT < cutoff
         """
         self.pdb_path = pdb_path
-        self.annotation_csv = annotation_csv
         self.cluster_sample = cluster_sample
         self.fixed_size = fixed_size
         self.phase = phase
-        self.run_eval2 = run_eval2
         self.overfit = overfit
 
         self.se3_augment = se3_augment
         self.translation_scale = translation_scale
         self.overwrite_cache = overwrite_cache
         self.subset_length_range = subset_length_range
-        self.afdb_res_plddt_cutoff = afdb_res_plddt_cutoff
         self.spatial_crop_ratio = spatial_crop_ratio
         self.evaluation_mode = evaluation_mode
+        self.cluster_sample = cluster_sample
 
-        self.sm = get_scaffold_manager(scaffold_manager_cfg)  # for constructing scaffolding inputs
+        # Require cluster sampling for training on AF3 dataset
+        if pdb_path.endswith("af3_pdb") or pdb_path.endswith("af3_pdb_monomer"):
+            assert self.cluster_sample, "Cluster sampling must be enabled for AF3 dataset"
+        else:
+            assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
 
         # Read in PDB keys
-        eval2_suffix = "_for_eval2" if run_eval2 else ""  # if using eval2, we load in a slightly smaller set of training pdb keys
-        self.pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys{eval2_suffix}.csv"
+        self.pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys.csv"
+        self.pdb_keys_df = pd.read_csv(self.pdb_keys_csv)
 
-        # Load annotation info
-        self._load_annotation_info()
-
-        if not Path(self.pdb_keys_csv).exists():
-            # backwards compatibility; load in PDB keys from list and save to CSV format
-            self.pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys{eval2_suffix}.list"
-            with open(self.pdb_keys_file) as f:
-                self.pdb_keys = np.array(f.read().splitlines())
-
-            # cache coordinates for faster loading
-            self._cache_examples(self.pdb_keys)
-
-            # get lengths; store them and save to csv
-            pdb_key_to_length = {}
-            for pdb_key in tqdm(self.pdb_keys, desc="Getting lengths", leave=False):
-                data_file = self._get_data_file(pdb_key)
-                example = torch.load(data_file, weights_only=True)
-                seq_len = example["seq_mask"].sum().long().item()
-                pdb_key_to_length[pdb_key] = seq_len
-
-            # save to csv
-            self.pdb_keys_df = pd.DataFrame({"pdb_key": self.pdb_keys, "seq_length": [pdb_key_to_length[pdb_key] for pdb_key in self.pdb_keys]})
-            self.pdb_keys_df.to_csv(self.pdb_keys_csv, index=False)
-
-        else:
-            # load from csv
-            self.pdb_keys_df = pd.read_csv(self.pdb_keys_csv)
-
-            # cache coordinates for faster loading
-            self._cache_examples(self.pdb_keys_df["pdb_key"])
-
-        # Subset to length range
         if subset_length_range is not None:
             self.subset_to_length_range(*self.subset_length_range)
 
-        # Subset based on scRMSD
-        if max_scrmsd is not None:
-            self.subset_by_scrmsd(max_scrmsd)
-
-        if max_rel_rog is not None:
-            self.subset_by_rel_rog(max_rel_rog)
-
-        # Cluster sampling for AF3 dataset
-        if pdb_path.endswith("af3_pdb") or pdb_path.endswith("af3_pdb_monomer"):
-            assert self.cluster_sample, "Cluster sampling must be enabled for AF3 dataset"
-            print("Re-sampling dataset based on clusters")
-            self._cluster_sample_pdb_keys()
-        else:
-            assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
+        # For training on AF3 datasets, we cluster sample the PDB keys
+        if self.cluster_sample:
+            print(f"Cluster-resampling dataset...")
+            self._cluster_sample_pdb_keys(phase=phase)
 
         # For efficiency set fixed size to max length in the eval or test dataset
         if self.evaluation_mode:
@@ -215,12 +276,10 @@ class SDDataset(data.Dataset):
 
         return crop_mask
 
+
     def get_item(self, pdb_key):
         data_file = self._get_data_file(pdb_key)
         data = torch.load(data_file, weights_only=True)
-
-        # Remove any residues with PLDDT < cutoff
-        data = self._remove_low_plddt_residues(data)
 
         example = {}
 
@@ -250,15 +309,8 @@ class SDDataset(data.Dataset):
         example["missing_atom_mask"] = data["missing_atom_mask"]
         example["atom_mask"] = atom_mask
         example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
-        if not self.evaluation_mode:
-            # example['interface_residue_mask'] = data['interface_residue_mask']
-            # example['chain_ids'] = data['chain_ids']
-            # DEBUG: remove this once we re-cache the dataset
-            example["interface_residue_mask"] = data.get("interface_residue_mask", torch.zeros_like(seq_mask))
-            example["chain_ids"] = data.get("chain_ids", torch.tensor([1]))
-
-        # Get scaffolding input with scaffold manager
-        example["x_scaffold"], example["scaffold_mask"], example["aatype_scaffold"], example["x"] = get_scaffolding_inputs(self.sm, example)
+        example['interface_residue_mask'] = data['interface_residue_mask']
+        example['chain_ids'] = data['chain_ids']
 
         # Construct conditioning inputs
         cond_labels_in = {}
@@ -311,10 +363,14 @@ class SDDataset(data.Dataset):
 
         return multimer_crop_mask, start_idx, cond_labels_in
 
-    def _cluster_sample_pdb_keys(self):
-        pdb_keys = self.pdb_keys_df["pdb_key"].tolist()
-        pdb_keys = [random.choice(list(group)) for _, group in groupby(sorted(pdb_keys), key=lambda x: x.rsplit("_", 1)[-1])]
-        self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["pdb_key"].isin(pdb_keys)]
+    def _cluster_sample_pdb_keys(self, phase: str):
+        if phase == "train":
+            # randomly select one PDB key from each cluster
+            print(f"Number of PDB keys before cluster sampling: {len(self.pdb_keys_df)}")
+            self.pdb_keys_df["cluster_id"] = self.pdb_keys_df["pdb_key"].str.split("_").str[-1]
+            self.pdb_keys_df = self.pdb_keys_df.groupby("cluster_id", group_keys=False).apply(lambda g: g.sample(n=1)).reset_index(drop=True)
+            print(f"Number of PDB keys after cluster sampling: {len(self.pdb_keys_df)}")
+            print(f"First 10 PDB keys after cluster sampling: {self.pdb_keys_df['pdb_key'].head(10).tolist()}")
 
 
     def _get_data_file(self, pdb_key: str) -> str:
@@ -325,47 +381,12 @@ class SDDataset(data.Dataset):
         return data_file
 
 
-    def _cache_examples(self, pdb_keys: List[str]):
-        """
-        Reads in PDB files and caches the examples to disk.
-        Cached files are stored in cached_examples/ in the pdb_path.
-        """
-        cache_dir = f"{self.pdb_path}/cached_examples"
-        Path(cache_dir).mkdir(parents=True, exist_ok=True)
-        print(f"Caching examples to {cache_dir}...")
-
-        # Define the number of workers based on CPU count or set manually
-        num_workers = 8
-        print(f"Using {num_workers} Workers!")
-
-        # Prepare arguments as tuples (pdb_key, cache_dir, overwrite_cache) for process_pdb_key
-        task_args = [(pdb_key, cache_dir, self.overwrite_cache, self.pdb_path, self.phase) for pdb_key in pdb_keys]
-
-        # Use a Pool for parallel processing
-        with Pool(processes=num_workers) as pool:
-            # Use tqdm to display progress
-            for _ in tqdm(pool.imap_unordered(process_pdb_key, task_args), total=len(task_args), desc="Caching PDBs"):
-                pass
-
-        print("Caching completed.")
-
-
     def _get_max_len(self):
         """
         Reads in cached PDB files and returns max length of all examples.
         This is only done for eval and test datasets where we do no cropping.
         """
         return int(self.pdb_keys_df["seq_length"].max())
-
-    def _load_annotation_info(self) -> None:
-        """
-        If annotation info is provided, load it as a DataFrame with pdb_key as the index.
-        """
-        if not self.annotation_csv:
-            self.annotation_df = None
-            return
-        self.annotation_df = pd.read_csv(self.annotation_csv)
-        self.annotation_df = self.annotation_df.set_index("pdb_key")
 
 
     def subset_to_length_range(self, min_len: int, max_len: int):
@@ -374,33 +395,6 @@ class SDDataset(data.Dataset):
         """
         lengths = self.pdb_keys_df["seq_length"]
         self.pdb_keys_df = self.pdb_keys_df[lengths.between(min_len, max_len)]
-
-    def subset_by_scrmsd(self, max_scrmsd: float):
-        """
-        Subsets the dataset to only include proteins with scRMSD <= max_scrmsd.
-        """
-        keep_pdb_keys = set((self.annotation_csv["sc_ca_rmsd"] <= max_scrmsd).index)
-        self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["pdb_key"].isin(keep_pdb_keys)]
-
-    def subset_by_rel_rog(self, max_rel_rog: float):
-        """
-        Subsets the dataset to only include proteins with relative radius of gyration <= max_rel_rog.
-        """
-        keep_pdb_keys = set((self.annotation_csv["rel_rog"] <= max_rel_rog).index)
-        self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["pdb_key"].isin(keep_pdb_keys)]
-
-
-    def _remove_low_plddt_residues(self, data: Dict[str, TensorType["n ..."]]) -> Dict[str, TensorType["n ..."]]:
-        """
-        If data comes from the afdb dataset, remove residues with plddt lower than self.afdb_res_plddt_cutoff.
-        """
-        if not self.pdb_path.endswith("afdb"):
-            return data
-
-        plddt_mask = data["b_factors"][:, 1] >= self.afdb_res_plddt_cutoff  # filter by C-alpha pLDDT
-        for k, v in data.items():
-            data[k] = v[plddt_mask]
-        return data
 
 
     @staticmethod
@@ -529,6 +523,39 @@ def process_pdb_key(args):
 
     example = load_feats_from_pdb(pdb_data_file, chain_ids_override=chain_ids_override, max_conformers=1)
     torch.save(example, out_file)
+
+
+def get_lengths(pdb_keys: List[str], cache_dir: str) -> Dict[str, int]:
+    """
+    Computes sequence lengths for given PDB keys in parallel using joblib.
+    Args:
+        pdb_keys: List of PDB keys to process
+        cache_dir: Directory containing cached examples
+    Returns:
+        Dictionary mapping PDB keys to their sequence lengths.
+    """
+    # Use 8 workers for parallel processing
+    num_workers = 8
+    print(f"Computing sequence lengths using {num_workers} workers...")
+    parallel = Parallel(n_jobs=num_workers, verbose=0)
+    jobs = [delayed(_get_seq_length)(pdb_key, cache_dir) for pdb_key in pdb_keys]
+    results = parallel(tqdm(jobs, desc="Getting lengths", total=len(jobs)))
+    return dict(results)
+
+
+def _get_seq_length(pdb_key: str, cache_dir: str) -> Tuple[str, int]:
+    """
+    Helper function for parallel processing of sequence lengths.
+    Args:
+        pdb_key: The PDB key to process
+        cache_dir: Directory containing cached examples
+    Returns:
+        Tuple of (pdb_key, sequence_length)
+    """
+    data_file = f"{cache_dir}/{pdb_key}.pt"
+    example = torch.load(data_file, weights_only=True)
+    seq_len = example["seq_mask"].sum().long().item()
+    return (pdb_key, seq_len)
 
 
 def cached_example_to_pdb(pt_file: str, out_pdb_file: str, mode: str = "aa", conect: bool = False):
