@@ -69,9 +69,19 @@ def main(cfg: DictConfig):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Get checkpoints from denoiser training run
-    pattern = re.compile(r"sd-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form sd-step{step}-epoch{epoch}.ckpt
-    sd_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
-    sd_ckpts = natsorted([ckpt for ckpt in sd_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
+    ema_ckpt_dir = f"{cfg.denoiser_train_dir}/checkpoints/ema"
+    if Path(ema_ckpt_dir).exists():
+        # Use EMA checkpoints if they exist
+        print(f"Using EMA checkpoints from {ema_ckpt_dir}")
+        pattern = re.compile(r"sd-step(\d+)-epoch(\d+)-ema(\d+\.\d+)\.ckpt$")  # match checkpoints of the form sd-step{step}-epoch{epoch}-ema{decay_rate}.ckpt
+        sd_ckpts = glob.glob(f"{ema_ckpt_dir}/*.ckpt")
+        sd_ckpts = natsorted([ckpt for ckpt in sd_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
+    else:
+        print(f"Using non-EMA checkpoints from {cfg.denoiser_train_dir}/checkpoints")
+        pattern = re.compile(r"sd-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form sd-step{step}-epoch{epoch}.ckpt
+        sd_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
+        sd_ckpts = natsorted([ckpt for ckpt in sd_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
+
 
     dataset = None  # we will load the dataset based on the model config
 

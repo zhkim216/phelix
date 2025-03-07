@@ -62,6 +62,10 @@ model:
   inf: 1.0e9
   denoiser: ${denoiser}
   interpolant: ${interpolant}
+  ema:
+    use_phema: false  # use post-hoc EMA
+    ema_decay: 0.99  # if not using phema, use this decay rate
+
 
 eval:
   eval_timesteps: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]  # Timesteps to evaluate at
@@ -106,7 +110,6 @@ checkpointing:
   save_latest_every_n_steps: 10000  # Save the full model every n steps
   save_latest_every_n_epochs: 10  # Keep 1 latest copy of the model every n epochs, for resuming
   save_ema_every_n_steps: 3000  # Save the EMA model every n steps
-  save_top_k: 1
 
 hydra:
   run:

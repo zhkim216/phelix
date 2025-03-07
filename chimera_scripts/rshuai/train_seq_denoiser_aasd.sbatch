@@ -45,6 +45,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     trainer.accumulate_grad_batches=4 \
     train.compile_model=true \
     model.task=allatom_seq_des \
+    model.ema.use_phema=true \
     denoiser=fampnn_denoiser \
     denoiser.augment_eps=0.3 \
     denoiser.fampnn.use_gvp=true \

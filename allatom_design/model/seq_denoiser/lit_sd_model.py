@@ -28,8 +28,10 @@ class LitSeqDenoiser(L.LightningModule):
             print(f"Using torch.compile to optimize model performance...")
             self.model = torch.compile(self.model)
 
-        # Initialize EMA tracker after torch.compile
-        self.ema_tracker = PowerFunctionEMA(self.model)
+        self.use_phema = cfg.model.ema.use_phema
+        if self.use_phema:
+            # Use EDM2 post-hoc EMA
+            self.ema_tracker = PowerFunctionEMA(self.model)
 
         # Set up loss
         self.loss = SDLoss(cfg.loss)
@@ -47,8 +49,9 @@ class LitSeqDenoiser(L.LightningModule):
         return self.model(batch, **kwargs)
 
     def on_train_start(self):
-        # Initialize EMA trackers at the start of training
-        self.ema_tracker.reset()
+        # Initialize EMA trackers at the start of training (if using phema)
+        if self.use_phema:
+            self.ema_tracker.reset()
 
 
     def training_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int):
@@ -63,8 +66,9 @@ class LitSeqDenoiser(L.LightningModule):
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         if (batch_idx + 1) % self.trainer.accumulate_grad_batches == 0:
-            # Update EMA tracker
-            self.ema_tracker.update(t=self.trainer.global_step)
+            if self.use_phema:
+                # Update EMA tracker
+                self.ema_tracker.update(t=self.trainer.global_step)
 
 
     def validation_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):

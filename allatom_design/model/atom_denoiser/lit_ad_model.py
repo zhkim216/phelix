@@ -65,9 +65,10 @@ class LitAtomDenoiser(L.LightningModule):
 
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
-        # Update whichever EMA we're using
-        if self.use_phema:
-            self.ema_tracker.update(t=self.trainer.global_step)
+        if (batch_idx + 1) % self.trainer.accumulate_grad_batches == 0:
+            if self.use_phema:
+                # Update EMA tracker
+                self.ema_tracker.update(t=self.trainer.global_step)
 
 
     def validation_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
