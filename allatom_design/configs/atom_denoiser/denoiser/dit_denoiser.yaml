@@ -75,6 +75,24 @@ dit:
   mlp_dropout: 0.1
   mlp_ratio: 4.0
 
+  # Pair representation
+  pair_rep:
+    enabled: false
+    use_self_conditioning: ${denoiser.use_self_conditioning}
+    c_z: 256
+    hidden_size: ${denoiser.dit.hidden_size}
+
+    rel_pos:
+      c_z: ${denoiser.dit.pair_rep.c_z}
+      relpos_k: 32
+    distogram:
+      # TODO: might want different distogram bins for self-conditioning, like Proteina?
+      min_bin: 1.0
+      max_bin: 30.0
+      no_bins: 65
+
+
+
   # Scaffold conditioning
   scaffolding:
     h_s: ${model.denoiser.scaffold_module.fampnn.n_channel}
