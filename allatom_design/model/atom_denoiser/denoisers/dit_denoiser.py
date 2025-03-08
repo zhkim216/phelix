@@ -37,8 +37,9 @@ from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
 from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
     TimestepEmbedder
-from openfold.model.primitives import Linear
 from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import FAMPNN
+from openfold.model.primitives import Linear
+from allatom_design.model.atom_denoiser.denoisers.pair_rep_utils import PairRepBuilder
 
 
 class DiTDenoiser(BaseAtomDenoiser):
@@ -67,6 +68,7 @@ class DiTDenoiser(BaseAtomDenoiser):
         if self.use_autoguidance:
             self.autoguidance_train_p = 1 / cfg.autoguidance.subsample_train_iter_mult
             self.guiding_model = DiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.interpolant)  # override with autoguidance config
+
 
     def setup(self):
         if self.use_scaffold_module and self.cfg.scaffold_module.pretrained_weights_path is not None:
@@ -416,17 +418,21 @@ class DiT(nn.Module):
         self.cfg = cfg
         self.interpolant = interpolant
 
+        # Set up pair representation builder
+        self.use_pair_repr = cfg.get("pair_rep", {}).get("enabled", False)
+        if self.use_pair_repr:
+            self.pair_rep_builder = PairRepBuilder(cfg.pair_rep)
+
         # Set up DiT model
         self.num_atoms_in = cfg.num_atoms_in
         self.use_self_conditioning = cfg.use_self_conditioning
 
         self.scaffolding = cfg.scaffolding  # scaffold conditioning config
-        # self.condition_on_seq = cfg.condition_on_seq
-        # self.condition_on_scaffold = cfg.get("condition_on_scaffold", False)
 
         # Input and output channels
         self.c = self.num_atoms_in * 3  # 3 xyz coordinates per atom
         self.in_channels = self.c * 2 if self.use_self_conditioning else self.c  # 2x for self-conditioning
+
         if self.scaffolding.use_seq:
             # +n_aatype for seq conditioning
             self.in_channels = self.in_channels + cfg.n_aatype
@@ -474,7 +480,6 @@ class DiT(nn.Module):
         self.qk_normlayer = None
         if cfg.qk_rmsnorm:
             self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
-
         # Blocks
         self.blocks = nn.ModuleList([
             DiTBlock(cfg.hidden_size, cfg.num_heads,
@@ -484,6 +489,12 @@ class DiT(nn.Module):
                      qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
                      ) for _ in range(cfg.depth)
         ])
+        if self.use_pair_repr:
+            self.to_pair_biases = nn.ModuleList([
+                nn.Sequential(nn.LayerNorm(cfg.pair_rep.c_z),
+                              Linear(cfg.pair_rep.c_z, cfg.num_heads, init="normal", bias=False))  # openfold initialization
+                for _ in range(cfg.depth)
+            ])
         self.final_layer = FinalLayer(cfg.hidden_size, self.out_channels)
         self.initialize_weights()
 
@@ -495,7 +506,7 @@ class DiT(nn.Module):
                 torch.nn.init.xavier_uniform_(module.weight)
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0)
-        self.apply(_basic_init)
+        self.blocks.apply(_basic_init)
 
         # Initialize timestep embedding MLP:
         nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
@@ -529,9 +540,21 @@ class DiT(nn.Module):
                            Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
+        if self.use_pair_repr:
+            # Keep original x_noised and x_self_cond before preconditioning
+            x_noised_orig = x_noised
+            x_self_cond_orig = x_self_cond
+
         # Preconditioning
         precondition_in, precondition_out = self.interpolant.setup_preconditioning(x_noised, x_self_cond, t)
         x_noised, x_self_cond, t = precondition_in()  # input preconditioning
+
+        # Construct pair representation
+        if self.use_pair_repr:
+            # Get pair representation
+            z = self.pair_rep_builder(x_noised_orig[..., rc.atom_order["CA"], :],
+                                      x_self_cond_orig[..., rc.atom_order["CA"], :] if x_self_cond_orig is not None else None,
+                                      residue_index, seq_mask, t)
 
         # Concatenate self-conditioning
         if self.use_self_conditioning:
@@ -592,8 +615,12 @@ class DiT(nn.Module):
 
         # Blocks
         attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
-        for block in self.blocks:
-            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True)
+        for bi, block in enumerate(self.blocks):
+            attn_bias = None
+            if self.use_pair_repr:
+                to_pair_bias_fn = self.to_pair_biases[bi]
+                attn_bias = rearrange(to_pair_bias_fn(z), "b i j h -> b h i j")
+            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=attn_bias, per_token_conditioning=True)
 
         # Final layer
         x = self.final_layer(x, c, per_token_conditioning=True)
@@ -604,4 +631,5 @@ class DiT(nn.Module):
         x = precondition_out(x)  # output preconditioning
 
         return x, aux_preds
+
 
