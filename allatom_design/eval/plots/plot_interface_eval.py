@@ -21,7 +21,7 @@ from tqdm import tqdm
 from Bio import SeqIO
 
 
-@hydra.main(version_base="1.3.2", config_path="../configs/eval", config_name="plot_interface_eval")
+@hydra.main(version_base="1.3.2", config_path="../../configs/eval/plots", config_name="plot_interface_eval")
 def main(cfg: DictConfig):
     """
     Loads PKL files from cfg.eval_dirs and computes interface sequence accuracy

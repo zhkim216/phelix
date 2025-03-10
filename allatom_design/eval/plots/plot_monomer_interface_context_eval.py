@@ -18,7 +18,7 @@ from collections import defaultdict
 import allatom_design.data.residue_constants as rc
 from Bio import SeqIO
 
-@hydra.main(version_base="1.3.2", config_path="../configs/eval", config_name="plot_monomer_interface_context_eval")
+@hydra.main(version_base="1.3.2", config_path="../../configs/eval/plots", config_name="plot_monomer_interface_context_eval")
 def main(cfg: DictConfig):
     """
     Combines both interface and monomer evaluation into one script.

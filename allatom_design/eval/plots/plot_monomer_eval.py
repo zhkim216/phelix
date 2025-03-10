@@ -17,7 +17,7 @@ import allatom_design.data.residue_constants as rc
 from tqdm import tqdm
 
 
-@hydra.main(version_base="1.3.2", config_path="../configs/eval", config_name="plot_monomer_eval")
+@hydra.main(version_base="1.3.2", config_path="../../configs/eval/plots", config_name="plot_monomer_eval")
 def main(cfg: DictConfig):
     """
     Loads:
