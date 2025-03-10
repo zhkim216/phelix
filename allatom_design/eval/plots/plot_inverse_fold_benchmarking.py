@@ -24,7 +24,7 @@ from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import transform_sidechain_frame
 
 
-@hydra.main(config_path="../configs/eval", config_name="plot_inverse_fold_benchmarking", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/plots", config_name="plot_inverse_fold_benchmarking", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Plot self-consistency metrics from pickle files obtained from inverse_fold_benchmarking.py

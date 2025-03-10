@@ -17,7 +17,7 @@ from allatom_design.eval.esm3_utils import load_esm3_embeddings
 from allatom_design.eval.eval_metrics import fpd
 
 
-@hydra.main(version_base="1.3.2", config_path="../configs/eval", config_name="plot_fpd_embeddings")
+@hydra.main(version_base="1.3.2", config_path="../../configs/eval/plots", config_name="plot_fpd_embeddings")
 def main(cfg: DictConfig):
 
     # Convert cfg to a dict and store it if desired

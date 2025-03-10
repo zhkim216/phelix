@@ -154,6 +154,7 @@ def run_mpnn(model: ProteinMPNN,
             chains=parse_these_chains_only_list,
             parse_all_atoms=parse_all_atoms_flag,
             parse_atoms_with_zero_occupancy=cfg.parse_atoms_with_zero_occupancy,
+            ca_only=cfg.model_type == "ca_only_mpnn"
         )
         # make chain_letter + residue_idx + insertion_code mapping to integers
         R_idx_list = list(protein_dict["R_idx"].cpu().numpy())  # residue indices
@@ -534,6 +535,7 @@ def create_mpnn_embeddings(model: ProteinMPNN,
             chains=parse_these_chains_only_list,
             parse_all_atoms=parse_all_atoms_flag,
             parse_atoms_with_zero_occupancy=cfg.parse_atoms_with_zero_occupancy,
+            ca_only=cfg.model_type == "ca_only_mpnn"
         )
         # make chain_letter + residue_idx + insertion_code mapping to integers
         R_idx_list = list(protein_dict["R_idx"].cpu().numpy())  # residue indices

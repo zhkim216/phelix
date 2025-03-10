@@ -1,0 +1,62 @@
+# Wandb configuration
+project: "allatom_design"        # Wandb project name
+wandb_id: "richardshuai"         # Wandb username
+exp_name: null                   # Wandb exp name
+group: "eval_sc_debug"           # Wandb group name
+
+# Run settings
+no_wandb: false
+seed: 0
+out_dir: "out_dir/test_eval_sc_results"     # Output directory
+sampled_pdb_dir: "/path/to/pdbs" # Directory containing already-sampled PDBs
+
+compute_diversity_metrics: true  # Whether to compute pairwise TM and clustering metrics
+
+# MPNN args
+mpnn:
+  mpnn_cfg: allatom_design/configs/mpnn/proteinmpnn.yaml
+  mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
+  overrides:
+    model_type: ca_only_mpnn
+    batch_size: 1
+    number_of_batches: 1
+    verbose: false
+
+# Pairwise TM-scores
+pairwise_tm_subsample: 2000
+
+# Foldseek clustering analysis
+clustering:
+  sctm_cutoffs: [0.7, 0.8]
+  foldseek_opts:
+    alignment_type: 0
+    tmscore_threshold: 0.5
+    c: 0.0
+    s: 7.5
+    cluster_reassign: true
+
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: "esmfold"  # ["esmfold", "af2", "omegafold"]
+  af2:
+    data_dir: /media/scratch/huang_lab/af2
+    num_models: 1
+    sample_models: true
+    num_recycles: 3
+    use_multimer: false
+  esmfold:
+    max_tokens_per_batch: 1024
+  omegafold:
+    num_pseudo_msa: 15
+    mask_rate: 0.12
+    num_recycle: 2
+    deterministic: true
+    subbatch_size: null
+    cache_file: /media/scratch/huang_lab/cache/omegafold/omegafold.pt
+
+# Dataset for nnTM calculation, set to null to skip nnTM evaluation
+nntm_dataset: null
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

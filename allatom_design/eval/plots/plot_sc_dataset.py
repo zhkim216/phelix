@@ -7,7 +7,7 @@ from omegaconf import DictConfig, OmegaConf
 import hydra
 import re
 
-@hydra.main(config_path="../configs/eval", config_name="plot_sc_dataset", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/plots", config_name="plot_sc_dataset", version_base="1.3.2")
 def main(cfg: DictConfig):
     # Convert to a dict for easy usage
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
