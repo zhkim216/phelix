@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=ai_dit_12b_ema99
+#SBATCH --job-name=eval_ai_dit_12b_ema99_fampnn
 #SBATCH -p possu,bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -22,6 +22,7 @@ BASE_DIR=/home/users/rshuai/code/allatom-design
 HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 OUT_DIR=/scratch/users/rshuai/allatom_design
 MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
+FAMPNN_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
 
 # Set HF transformers cache
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
@@ -39,10 +40,11 @@ OMEGAFOLD_CACHE=/scratch/users/rshuai/cache/omegafold/omegafold.pt
 # Denoiser path
 MODEL_NAME=ai_dit_12b_ema99
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
+NOISE_LABELS=0.0
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_bb_gen
+EXP_NAME=${MODEL_NAME}_eval_bb_gen_nl${NOISE_LABELS}
 GROUP=ai_cath
 
 # Run eval script
@@ -52,7 +54,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     group=${GROUP} \
     num_workers=${SLURM_CPUS_ON_NODE} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
-    mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
+    seq_des_cfg.proteinmpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
+    seq_des_cfg.fampnn.fampnn_ckpt=${FAMPNN_CKPT} \
+    seq_des_cfg.fampnn.overrides.noise_labels=${NOISE_LABELS} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     start_step=0 \
