@@ -1,7 +1,5 @@
 import os
-from functools import partial
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple, Union
 
 import hydra
 import lightning as L
@@ -13,7 +11,6 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader
 
 import allatom_design.data.datasets.ad_dataset as ad_dataset
 from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
