@@ -222,10 +222,10 @@ def main(cfg: DictConfig):
             for sctm_cutoff in cfg.clustering.sctm_cutoffs:
                 # Cluster only on designable samples (scTM > sctm_cutoff)
                 designable_pdbs = [pdb for pdb in pdbs if (all_metrics[pdb]["sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff).any()]
-                sample_metrics[f"sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
+                sample_metrics[f"{cfg.seq_des_cfg.model_name}_sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
 
                 cluster_out_dir = Path(f"{log_dir_i}/clustering/sctm{sctm_cutoff}")
-                sample_metrics[f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{log_dir_i}/tmp",
+                sample_metrics[f"{cfg.seq_des_cfg.model_name}_sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{log_dir_i}/tmp",
                                                                                               **cfg.clustering.foldseek_opts)
 
         # === Calculate mean metrics === #
