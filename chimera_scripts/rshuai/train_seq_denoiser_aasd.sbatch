@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=c6_aasd0_test
+#SBATCH --job-name=c6_aasd0
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=32
-#SBATCH --time=96:00:00
+#SBATCH --gpus-per-node=2
+#SBATCH --cpus-per-task=16
+#SBATCH --time=120:00:00
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%j.out
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=c6_aasd0_test
+EXP_NAME=c6_aasd0
 GROUP=seq_denoiser_c6
 
 # Set cache directories
@@ -42,17 +42,16 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.cluster_sample=true \
     data.subset_length_range=[16,9999] \
     train.batch_size=8 \
-    trainer.accumulate_grad_batches=4 \
+    trainer.accumulate_grad_batches=8 \
     train.compile_model=true \
     model.task=allatom_seq_des \
-    model.ema.use_phema=true \
     denoiser=fampnn_denoiser \
+    denoiser.per_residue_eps=true \
     denoiser.augment_eps=0.3 \
     denoiser.fampnn.use_gvp=true \
     denoiser.fampnn.n_layers=5 \
     denoiser.confidence_module.enabled=true \
     checkpointing.save_latest_every_n_steps=5000 \
-    checkpointing.save_ema_every_n_steps=2000 \
-    trainer.check_val_every_n_epoch=10 \
+    trainer.check_val_every_n_epoch=20 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
