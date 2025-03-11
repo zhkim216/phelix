@@ -1,0 +1,35 @@
+defaults:
+  - _self_
+
+# Inverse folding options
+omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
+aatype_decoding_order_mode: "random"
+seq_only: true  # true to not pack sidechains during sampling
+num_steps: 50
+num_seqs_per_pdb: 1
+temperature: 0.1
+repack_last: true  # after design, repack the final sequence obtained
+psce_threshold: null  # only keep sidechains below this threshold during design; null to keep all
+noise_labels: null  # per-residue noise labels, float for same noise for each residue  # TODO: implement user-provided per-residue noise labels
+timestep_schedule:
+  num_steps: null  # will be filled in by num_steps
+  mode: "linear"
+  t_start: 0.0
+  t_end: 1.0
+
+scn_diffusion:
+  num_steps: 50
+  timestep_schedule:
+    num_steps: ${scn_diffusion.num_steps}
+    mode: "linear"
+    t_start: 0.0
+    t_end: 1.0
+  noise_schedule:
+    name: "step_scale"
+    c: 1.5
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${scn_diffusion.num_steps}

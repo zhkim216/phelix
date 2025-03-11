@@ -24,6 +24,7 @@ from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
 from allatom_design.eval import eval_metrics
 from allatom_design.eval.dssp_utils import annotate_sse, pdb_to_xyz
+from allatom_design.eval.fampnn_utils import run_fampnn
 from allatom_design.eval.folding_utils import (run_af2, run_esmfold_batched,
                                                run_omegafold)
 from allatom_design.eval.proteinmpnn_utils import run_mpnn
@@ -61,8 +62,7 @@ def compute_secondary_structure_content(pdbs: List[str]) -> Dict[str, Dict[str, 
 
 
 def run_self_consistency_eval(pdbs: List[str],
-                              mpnn_model: Optional[ProteinMPNN],
-                              mpnn_cfg: Optional[DictConfig],
+                              seq_des_model: Dict[str, Any],  # contains sequence design model components
                               struct_pred_model: Dict[str, Any],  # contains struct pred model components
                               device: torch.device,
                               out_dir: str,
@@ -103,18 +103,29 @@ def run_self_consistency_eval(pdbs: List[str],
     ca_aligned_preds_dir = Path(out_dir, f"{'codesign_' if eval_codesign else 'mpnn_'}ca_aligned_preds")
     ca_aligned_preds_dir.mkdir(parents=True, exist_ok=True)
 
-    # === Run MPNN === #
+    # === Run sequence design === #
     if not eval_codesign:
-        mpnn_preds_dict = run_mpnn(mpnn_model, pdb_paths=pdbs, device=device, cfg=mpnn_cfg)
-        for pdb, mpnn_preds in mpnn_preds_dict.items():
-            sc_info[pdb]["mpnn_preds"] = mpnn_preds
+        seq_des_model_name = seq_des_model["model_name"]
+        if seq_des_model_name == "proteinmpnn":
+            mpnn_model, mpnn_cfg = seq_des_model["mpnn_model"], seq_des_model["mpnn_cfg"]
+            mpnn_preds_dict = run_mpnn(mpnn_model, pdb_paths=pdbs, device=device, cfg=mpnn_cfg)
+            for pdb, mpnn_preds in mpnn_preds_dict.items():
+                sc_info[pdb]["mpnn_preds"] = mpnn_preds
+        elif seq_des_model_name == "fampnn":
+            fampnn_model, fampnn_cfg = seq_des_model["fampnn_model"], seq_des_model["fampnn_cfg"]
+            fampnn_preds_dict = run_fampnn(fampnn_model, pdb_paths=pdbs, device=device, cfg=fampnn_cfg)
 
     # === Run structure prediction === #
     if not eval_codesign:
-        # For backbone eval, run structure prediction on MPNN sequences for each PDB
+        # For backbone eval, run structure prediction on the designed sequences for each PDB
         for pdb in tqdm(pdbs, desc=f"Running {struct_model_name}", leave=False):
-            mpnn_preds = sc_info[pdb]["mpnn_preds"]
-            sequences_list, residue_index_list, chain_index_list = mpnn_preds["mpnn_seqs"], mpnn_preds["residue_index"], mpnn_preds["chain_index"]
+            # Extract sequences
+            if seq_des_model_name == "proteinmpnn":
+                mpnn_preds = sc_info[pdb]["mpnn_preds"]
+                sequences_list, residue_index_list, chain_index_list = mpnn_preds["mpnn_seqs"], mpnn_preds["residue_index"], mpnn_preds["chain_index"]
+            elif seq_des_model_name == "fampnn":
+                fampnn_preds = fampnn_preds_dict[pdb]
+                sequences_list, residue_index_list, chain_index_list = fampnn_preds["pred_seqs"], fampnn_preds["residue_index"], fampnn_preds["chain_index"]
 
             if struct_model_name == "af2":
                 # === Run AlphaFold2 === #

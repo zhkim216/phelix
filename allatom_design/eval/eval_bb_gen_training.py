@@ -18,8 +18,8 @@ from tqdm import tqdm
 from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.eval import eval_metrics, sampling_utils
+from allatom_design.eval.fampnn_utils import get_seq_des_model
 from allatom_design.eval.folding_utils import get_struct_pred_model
-from allatom_design.eval.proteinmpnn_utils import load_mpnn
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
@@ -72,10 +72,7 @@ def main(cfg: DictConfig):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load in MPNN + structure prediction model for self-consistency evals
-    mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
-    mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)  # override base mpnn config with mpnn.overrides
-    mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
-
+    seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
     struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     # Get checkpoints from denoiser training run
@@ -103,7 +100,7 @@ def main(cfg: DictConfig):
             continue
 
         # Create output directory for this epoch
-        log_dir_i = f"{log_dir}/epoch_{epoch}"
+        log_dir_i = f"{log_dir}/step_{global_step}_epoch_{epoch}"
         Path(log_dir_i).mkdir(parents=True, exist_ok=True)
         sampled_pdbs_dir_i = f"{log_dir_i}/sampled_pdbs"
         Path(sampled_pdbs_dir_i).mkdir(parents=True, exist_ok=True)
@@ -112,7 +109,6 @@ def main(cfg: DictConfig):
 
         # Load denoiser model
         lit_ad_model = LitAtomDenoiser.load_from_checkpoint(ad_ckpt).eval()
-
 
         ### BEGIN EVAL ###
         # Define the range of lengths to sample
@@ -157,7 +153,7 @@ def main(cfg: DictConfig):
             samples = {k: v.cpu() if v is not None else v for k, v  in samples.items()}
 
             # Save samples
-            filenames = [f"{sampled_pdbs_dir_i}/step_{global_step}__sample_{i+j}_L{l.item()}.pdb" for j, l in enumerate(lengths)]
+            filenames = [f"{sampled_pdbs_dir_i}/step_{global_step}_sample_{i+j}_L{l.item()}.pdb" for j, l in enumerate(lengths)]
 
             AtomDenoiser.save_samples_to_pdb(samples, filenames)
             pdbs.extend(filenames)
@@ -172,14 +168,14 @@ def main(cfg: DictConfig):
             all_metrics[pdb]["ss_info"] = v
 
         # Run MPNN + structure prediction self-consistency evals
-        mpnn_sc_info = eval_metrics.run_self_consistency_eval(pdbs,
-                                                              mpnn_model, mpnn_cfg,
-                                                              struct_pred_model,
-                                                              device,
-                                                              out_dir=log_dir_i,
-                                                              temp_dir=f"{log_dir_i}/tmp")
-        for pdb, v in mpnn_sc_info.items():
-            all_metrics[pdb]["mpnn_sc_info"] = v
+        sc_info = eval_metrics.run_self_consistency_eval(pdbs,
+                                                         seq_des_model,
+                                                         struct_pred_model,
+                                                         device,
+                                                         out_dir=log_dir_i,
+                                                         temp_dir=f"{log_dir_i}/tmp")
+        for pdb, v in sc_info.items():
+            all_metrics[pdb]["sc_info"] = v
 
         # Run nnTM evaluation
         if cfg.nntm_dataset is not None:
@@ -202,12 +198,13 @@ def main(cfg: DictConfig):
                 sample_metrics[f"{k}"].append(v)
 
             # MPNN self-consistency metrics
-            for k, v in mpnn_sc_info[pdb]["sc_metrics"].items():
+            for k, v in sc_info[pdb]["sc_metrics"].items():
                 # take mean and best across MPNN sequences
                 mean_sc_metric = torch.mean(v)
                 best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
-                sample_metrics[f"mpnn_{k}_mean"].append(mean_sc_metric.item())
-                sample_metrics[f"mpnn_{k}_best"].append(best_sc_metric.item())
+
+                sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
+                sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_best"].append(best_sc_metric.item())
 
             # nntm metrics
             if cfg.nntm_dataset is not None:
@@ -224,7 +221,7 @@ def main(cfg: DictConfig):
             # === Run clustering analysis === #
             for sctm_cutoff in cfg.clustering.sctm_cutoffs:
                 # Cluster only on designable samples (scTM > sctm_cutoff)
-                designable_pdbs = [pdb for pdb in pdbs if all_metrics[pdb]["mpnn_sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff]
+                designable_pdbs = [pdb for pdb in pdbs if (all_metrics[pdb]["sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff).any()]
                 sample_metrics[f"sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
 
                 cluster_out_dir = Path(f"{log_dir_i}/clustering/sctm{sctm_cutoff}")
