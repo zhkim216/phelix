@@ -134,6 +134,7 @@ class TriangleDiTDenoiser(BaseAtomDenoiser):
 
             # Noise the ground truth backbone
             interpolant_out = self.interpolant({"x": x_bb_gt_batched, "aatype": None}, t=t_bb)
+            x_bb_target_batched = interpolant_out["x_target"]
             xt_bb_batched = interpolant_out["x_noised"]
             t_batched = interpolant_out["t"]
             loss_weight_t_batched = interpolant_out["loss_weight_t"]
@@ -174,7 +175,7 @@ class TriangleDiTDenoiser(BaseAtomDenoiser):
                 # add to autoguidance outputs
                 diffusion_aux["autoguidance_aux"] = {
                     "bb_pred": x1_bb_batched_guide,
-                    "bb_target": x_bb_gt_batched,
+                    "bb_target": x_bb_target_batched,  # diffusion target; for edm this is just the ground truth coordinates
                     "loss_weight_t": loss_weight_t_batched
                 }
 
@@ -183,7 +184,7 @@ class TriangleDiTDenoiser(BaseAtomDenoiser):
 
             # Cache intermediates for computing loss
             diffusion_aux["bb_pred"] = x1_bb_batched
-            diffusion_aux["bb_target"] = x_bb_gt_batched
+            diffusion_aux["bb_target"] = x_bb_target_batched  # diffusion target; for edm this is just the ground truth coordinates
             diffusion_aux["loss_weight_t"] = loss_weight_t_batched
 
         else:
@@ -476,7 +477,7 @@ class PairStackDiT(nn.Module):
         x = x * seq_mask[..., None]  # zero out padding positions
 
         # Reshape back to coordinates
-        x = rearrange(x, "b n (a x) -> b n a x", x=3)
+        x = rearrange(x, "b n (a x) -> b n a x", x=3).float()
         x = precondition_out(x)  # output preconditioning
 
         return x, aux_preds

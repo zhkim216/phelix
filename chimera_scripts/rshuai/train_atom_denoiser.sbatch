@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=u1_a1
+#SBATCH --job-name=u2_a1_lr1e-3
 #SBATCH -p gpu_batch
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=2
+#SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -27,7 +27,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=u1_a1
+EXP_NAME=u2_a1_lr1e-3
 GROUP=af3_monomer
 
 # Dataset paths
@@ -36,23 +36,27 @@ ANNOTATION_CSV=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/pdb_key_annotatio
 CLUSTER_SAMPLE=true
 
 # Run training script
-WANDB__SERVICE_WAIT=300 srun python3 allatom_design/train_atom_denoiser.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
-    num_workers=${SLURM_CPUS_PER_TASK} \
+    num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
     data.annotation_csvs=[${ANNOTATION_CSV}] \
     data.cluster_sample=${CLUSTER_SAMPLE} \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
-    data.max_scrmsd=2.0 \
+    data.use_struct_preds=true \
+    data.max_scrmsd=1.0 \
     data.max_rel_rog=1.4 \
-    data.n_train_cluster_resample=10 \
+    data.n_train_cluster_resample=50 \
+    data.translation_scale=0.0 \
     train.batch_size=64 \
     train.compile_model=true \
     denoiser=dit_denoiser \
-    trainer.check_val_every_n_epoch=5 \
+    denoiser/interpolant=sd3_rf_interpolant \
+    optim.adam_inv_sqrt.ref_lr=1e-3 \
+    trainer.check_val_every_n_epoch=2 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
