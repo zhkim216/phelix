@@ -148,7 +148,7 @@ class LitADDataModule(L.LightningDataModule):
 
         # Use 8 workers for parallel processing
         num_workers = 8
-        print(f"Using {num_workers} workers...")
+        print(f"Using {num_workers} workers for caching...")
 
         # Prepare arguments as tuples for process_pdb_key
         task_args = [(pdb_key, cache_dir, self.overwrite_cache, pdb_path, phase, self.use_struct_preds)
@@ -264,7 +264,6 @@ class ADDataset(data.Dataset):
 
         # For training on AF3 datasets, we cluster sample the PDB keys
         if self.cluster_sample:
-            print(f"Cluster-resampling dataset {self.n_train_cluster_resample} times...")
             self._cluster_sample_pdb_keys(phase=phase, n_train_cluster_resample=self.n_train_cluster_resample)
 
         # Ablation on AI-CATH: only use the first sample
@@ -448,6 +447,7 @@ class ADDataset(data.Dataset):
         self.pdb_keys_df["cluster_id"] = self.pdb_keys_df["pdb_key"].str.split("_").str[-1]
         if phase == "train":
             # For training, randomly resample N times to get different clusters
+            print(f"Cluster-resampling dataset {self.n_train_cluster_resample} times...")
             pdb_keys_dfs = []
             for _ in range(n_train_cluster_resample):
                 pdb_keys_df = self.pdb_keys_df.copy()

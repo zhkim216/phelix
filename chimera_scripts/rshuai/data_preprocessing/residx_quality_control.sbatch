@@ -24,4 +24,4 @@ python3 allatom_design/data/preprocessing/residx_quality_control.py \
     --mmcif-dir /large_storage/hielab/rshuai/datasets/mmCIF \
     --pdb-store-dir /scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store \
     --save-dir /scratch/hielab/rshuai/datasets/ingraham_cath_dataset_residx_fixed_resolution_rfree_filtered/pdb_store \
-    --max-threads ${SLURM_CPUS_ON_NODE}
+    --max-threads ${SLURM_CPUS_PER_TASK}

@@ -1,7 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=u1_a1
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=1
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=2
+#SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #
@@ -34,11 +36,11 @@ ANNOTATION_CSV=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/pdb_key_annotatio
 CLUSTER_SAMPLE=true
 
 # Run training script
-WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
+WANDB__SERVICE_WAIT=300 srun python3 allatom_design/train_atom_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
-    num_workers=${SLURM_CPUS_ON_NODE} \
+    num_workers=${SLURM_CPUS_PER_TASK} \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
     data.annotation_csvs=[${ANNOTATION_CSV}] \
