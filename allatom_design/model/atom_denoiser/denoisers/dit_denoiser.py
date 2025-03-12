@@ -29,6 +29,7 @@ from allatom_design.data import residue_constants as rc
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
+from allatom_design.interpolants.ad_interpolants.sd3_rf_interpolant import SD3_RF
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_utils import (
@@ -60,7 +61,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             self.fampnn = FAMPNN(cfg.scaffold_module.fampnn)
 
         # Set up DiT
-        self.interpolant = EDM(cfg.interpolant, sigma_data=sigma_data)
+        self.interpolant = get_interpolant(cfg.interpolant, sigma_data)
         self.dit = DiT(cfg.dit, self.interpolant)
 
         # Autoguidance
@@ -152,6 +153,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
             # Noise the ground truth backbone
             interpolant_out = self.interpolant({"x": x_bb_gt_batched, "aatype": None}, t=t_bb)
+            x_bb_target_batched = interpolant_out["x_target"]
             xt_bb_batched = interpolant_out["x_noised"]
             t_batched = interpolant_out["t"]
             loss_weight_t_batched = interpolant_out["loss_weight_t"]
@@ -212,7 +214,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                 # add to autoguidance outputs
                 diffusion_aux["autoguidance_aux"] = {
                     "bb_pred": x1_bb_batched_guide,
-                    "bb_target": x_bb_gt_batched,
+                    "bb_target": x_bb_target_batched,  # diffusion target; for edm this is just the ground truth coordinates
                     "loss_weight_t": loss_weight_t_batched
                 }
 
@@ -221,7 +223,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
             # Cache intermediates for computing loss
             diffusion_aux["bb_pred"] = x1_bb_batched
-            diffusion_aux["bb_target"] = x_bb_gt_batched
+            diffusion_aux["bb_target"] = x_bb_target_batched  # diffusion target; for edm this is just the ground truth coordinates
             diffusion_aux["loss_weight_t"] = loss_weight_t_batched
 
         else:
@@ -627,9 +629,22 @@ class DiT(nn.Module):
         x = x * seq_mask[..., None]  # zero out padding positions
 
         # Reshape back to coordinates
-        x = rearrange(x, "b n (a x) -> b n a x", x=3)
+        x = rearrange(x, "b n (a x) -> b n a x", x=3).float()  # ensure we're not in bf16
         x = precondition_out(x)  # output preconditioning
 
         return x, aux_preds
 
 
+
+def get_interpolant(cfg: DictConfig,
+                    sigma_data: TensorType[(), float]
+                    ) -> ADInterpolant:
+    """
+    Get the interpolant specified in the config.
+    """
+    if cfg.name == "edm":
+        return EDM(cfg, sigma_data)
+    elif cfg.name == "sd3_rf":
+        return SD3_RF(cfg)
+    else:
+        raise ValueError(f"Unknown interpolant: {cfg.name}")

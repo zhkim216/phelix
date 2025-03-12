@@ -4,7 +4,6 @@ defaults:
   - _self_
   - interpolant: edm_interpolant
 
-
 # Diffusion settings
 use_self_conditioning: true
 self_cond_p: 0.9

@@ -363,9 +363,8 @@ class ADDataset(data.Dataset):
 
         x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
 
-        if self.se3_augment:
-            # Center on CA and apply random rotation
-            x = center_random_augmentation(x, seq_mask, atom_mask, translation_scale=self.translation_scale)
+        # Center on CA and apply random rotation (if enabled)
+        x = center_random_augmentation(x, seq_mask, atom_mask, translation_scale=self.translation_scale, apply_random_augmentation=self.se3_augment)
 
         # per-channel mask for x, used for loss.
         # We only mask out missing atoms from PDB files, not ghost atoms.
@@ -383,11 +382,8 @@ class ADDataset(data.Dataset):
         example["atom_mask"] = atom_mask
         example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
         if not self.evaluation_mode:
-            # example['interface_residue_mask'] = data['interface_residue_mask']
-            # example['chain_ids'] = data['chain_ids']
-            # DEBUG: remove this once we re-cache the dataset
-            example["interface_residue_mask"] = data.get("interface_residue_mask", torch.zeros_like(seq_mask))
-            example["chain_ids"] = data.get("chain_ids", torch.tensor([1]))
+            example['interface_residue_mask'] = data['interface_residue_mask']
+            example['chain_ids'] = data['chain_ids']
 
         # Get scaffolding input with scaffold manager
         example["x_scaffold"], example["scaffold_mask"], example["aatype_scaffold"], example["x"] = get_scaffolding_inputs(self.sm, example)

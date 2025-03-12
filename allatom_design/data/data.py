@@ -338,7 +338,8 @@ def center_random_augmentation(coords_in: TensorType["n a 3", float],
                                seq_mask: TensorType["n", float],
                                atom_mask: TensorType["n a", float],
                                translation_scale=1.0,
-                               return_transforms=False
+                               return_transforms=False,
+                               apply_random_augmentation: bool = True
                                ):
     """
     Batched or unbatched.
@@ -363,6 +364,10 @@ def center_random_augmentation(coords_in: TensorType["n a 3", float],
     M_sum = M.sum(dim=1, keepdim=True)[..., None]  # [b 1 1 1]
     coords_mean = (X * M[..., None]).sum(dim=1, keepdim=True) / M_sum  # [b 1 1 3]
     coords_in = coords_in - coords_mean
+
+    if not apply_random_augmentation:
+        # Return centered coordinates without random augmentation
+        return coords_in.squeeze(0) if input_dim == 3 else coords_in
 
     # Apply random rotation
     random_rot = uniform_rand_rotation(coords_in.shape[0]).to(coords_in.device)
