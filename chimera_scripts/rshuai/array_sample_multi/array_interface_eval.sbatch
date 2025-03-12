@@ -64,7 +64,7 @@ mkdir -p ${OUT_DIR}
 cd ${BASE_DIR}
 
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/sample_multi.py \
-    num_workers=${SLURM_CPUS_ON_NODE} \
+    num_workers=${SLURM_CPUS_PER_TASK} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     hydra.run.dir=${HYDRA_DIR} \
     checkpoint_path=${MODEL_CKPT} \
