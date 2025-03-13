@@ -1,7 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=a13_bb10
+#SBATCH --job-name=u1_a7
 #SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=1
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #
@@ -25,34 +27,35 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=a13_bb10
-GROUP=chimera_a13
+EXP_NAME=u1_a7
+GROUP=af3_monomer
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-AFDB_PDB_PATH=/scratch/hielab/rshuai/datasets/afdb
+PDB_PATH=/scratch/hielab/rshuai/datasets/af3_pdb_monomer
+ANNOTATION_CSV=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2/annotated_pdb_keys.csv
+CLUSTER_SAMPLE=true
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
-    num_workers=${SLURM_CPUS_PER_TASK} \
+    num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
-    data.pdb_paths=[${PDB_PATH},${AFDB_PDB_PATH}] \
-    data.dataset_weights=[0.10,0.90] \
-    data.fixed_size=512 \
-    data.afdb_res_plddt_cutoff=80 \
+    data.pdb_paths=[${PDB_PATH}] \
+    data.annotation_csvs=[${ANNOTATION_CSV}] \
+    data.cluster_sample=${CLUSTER_SAMPLE} \
+    data.fixed_size=256 \
+    data.subset_length_range=[32,256] \
+    data.use_struct_preds=true \
+    data.max_scrmsd=2.0 \
+    data.max_rel_rog=1.4 \
+    data.n_train_cluster_resample=10 \
+    denoiser.dit.depth=15 \
+    denoiser.dit.hidden_size=768 \
     train.batch_size=128 \
     train.compile_model=true \
-    model.task=backbone \
     denoiser=dit_denoiser \
-    denoiser.autoguidance.enabled=true \
-    denoiser.dit.hidden_size=768 \
-    denoiser.dit.num_heads=12 \
-    optim.optimizer=noam \
-    checkpointing.save_latest_every_n_steps=50000 \
-    checkpointing.save_ema_every_n_steps=10000 \
-    trainer.check_val_every_n_epoch=30 \
+    trainer.check_val_every_n_epoch=4 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}

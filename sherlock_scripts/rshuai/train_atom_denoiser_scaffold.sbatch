@@ -39,7 +39,6 @@ GROUP=af3_monomer_scaffolding
 PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
 ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2/annotated_pdb_keys.csv
 CLUSTER_SAMPLE=true
-USE_FIRST_SAMPLE=false
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
