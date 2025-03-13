@@ -107,7 +107,7 @@ def main(cfg: DictConfig):
         pdb_names = [Path(pdb_file).stem for pdb_file in pdb_batch_files]
 
         # Create a batch dictionary from batch_list by stacking
-        model_input_keys = ["x", "seq_mask", "atom_mask", "missing_atom_mask", "residue_index", "x_scaffold", "scaffold_mask", "aatype_scaffold"]
+        model_input_keys = ["x", "seq_mask", "atom_mask", "missing_atom_mask", "residue_index", "x_motif", "motif_mask", "aatype_scaffold"]
         max_len = max(b["x"].shape[0] for b in batch_list)  # determine the max_len (max number of residues across the batch)
         batch_list = [pad_to_max_len({k: b[k].unsqueeze(0) for k in model_input_keys}, max_len)for b in batch_list]  # pad each batch to max length
         batch = {k: torch.cat([b[k] for b in batch_list], dim=0) for k in model_input_keys}  # stack the padded batches
@@ -117,11 +117,11 @@ def main(cfg: DictConfig):
 
         # Save motifs
         motif_samples = {"aatype": batch["aatype_scaffold"],
-                         "atom_positions": batch["x_scaffold"],
-                         "atom_mask": batch["scaffold_mask"],
+                         "atom_positions": batch["x_motif"],
+                         "atom_mask": batch["motif_mask"],
                          "residue_index": batch["residue_index"],
                          "chain_index": torch.zeros_like(batch["residue_index"]),
-                         "b_factors": torch.ones_like(batch["scaffold_mask"], dtype=torch.float32)
+                         "b_factors": torch.ones_like(batch["motif_mask"], dtype=torch.float32)
                          }
         feats = {k: v.cpu() if isinstance(v, torch.Tensor) else v for k, v in motif_samples.items()}  # move to cpu
         motif_filenames = [f"{sample_out_dir}/motif_{pdb_stem}.pdb" for pdb_stem in pdb_names]
@@ -138,8 +138,8 @@ def main(cfg: DictConfig):
 
         # Build scaffold inputs
         scaffold_inputs = {
-            "x_scaffold": batch["x_scaffold"],
-            "scaffold_mask": batch["scaffold_mask"],
+            "x_motif": batch["x_motif"],
+            "motif_mask": batch["motif_mask"],
             "aatype_scaffold": batch["aatype_scaffold"],
         }
 

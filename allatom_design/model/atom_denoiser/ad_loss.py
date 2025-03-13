@@ -81,7 +81,7 @@ class ADLoss(nn.Module):
 
         # Compute scaffold loss
         if self.task == "scaffold":
-            bb_scaffold_mask = batch["scaffold_mask"][..., rc.bb_idxs]
+            bb_scaffold_mask = batch["motif_mask"][..., rc.bb_idxs]
             bb_scaffold_mask = repeat(bb_scaffold_mask, "b n a -> (m b) n a", m=M)
             bb_mask = bb_mask * bb_scaffold_mask[..., None]
 

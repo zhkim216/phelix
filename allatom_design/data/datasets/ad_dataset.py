@@ -386,7 +386,7 @@ class ADDataset(data.Dataset):
             example['chain_ids'] = data['chain_ids']
 
         # Get scaffolding input with scaffold manager
-        example["x_scaffold"], example["scaffold_mask"], example["aatype_scaffold"], example["x"] = get_scaffolding_inputs(self.sm, example)
+        example["x_motif"], example["motif_mask"], example["aatype_scaffold"], example["x"] = get_scaffolding_inputs(self.sm, example)
 
         # Construct conditioning inputs
         cond_labels_in = {}

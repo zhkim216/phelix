@@ -228,8 +228,10 @@ def main(cfg: DictConfig):
                 sample_metrics[f"{cfg.seq_des_cfg.model_name}_sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{log_dir_i}/tmp",
                                                                                               **cfg.clustering.foldseek_opts)
 
-        # === Calculate mean metrics === #
-        metrics = {f"bb_gen/S{cfg.num_steps}/{k}": np.mean(v) for k, v in sample_metrics.items()}
+        # === Calculate metrics to log === #
+        metrics = {}
+        metrics.update({f"bb_gen/mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
+        metrics.update({f"bb_gen/median/{k}": np.median(v) for k, v in sample_metrics.items()})
 
         # Log metrics to wandb
         if not cfg.no_wandb:

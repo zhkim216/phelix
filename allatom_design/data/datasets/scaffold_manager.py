@@ -46,9 +46,9 @@ class ScaffoldManager(nn.Module):
         seq_mask = example["seq_mask"]
         x = example["x"]
 
-        scaffold_mask = torch.zeros_like(atom_mask)    # 1 for unmasked, 0 for masked
+        motif_mask = torch.zeros_like(atom_mask)    # 1 for unmasked, 0 for masked
         seq_len = seq_mask.sum().long().item()
-        device = scaffold_mask.device
+        device = motif_mask.device
 
         if self.cond_type_override is None:
             # choose a conditioning type (during training)
@@ -64,7 +64,7 @@ class ScaffoldManager(nn.Module):
             # Scaffold a sequence-contiguous span
             span_len = torch.randint(1, min(self.max_span_len, seq_len) + 1, (1,), device=device).item()
             start = torch.randint(0, seq_len - span_len + 1, (1,), device=device).item()
-            scaffold_mask[start:start + span_len] = 1
+            motif_mask[start:start + span_len] = 1
         elif conditioning_type == "discontiguous":
             # Scaffold based on spatial proximity
             # we select neighbors by CA distances
@@ -79,7 +79,7 @@ class ScaffoldManager(nn.Module):
 
             if n_neighbors <= 1:
                 # If we have 1 or 0 neighbors, fall back to just using the selected residue
-                scaffold_mask[random_residue_idx] = 1
+                motif_mask[random_residue_idx] = 1
             else:
                 # Pick random number of neighbors
                 n_to_select = torch.randint(2, min(self.max_discontiguous_res, n_neighbors) + 1, (1,), device=device).item()
@@ -87,24 +87,24 @@ class ScaffoldManager(nn.Module):
                 # Get indices of neighbors (including the original residue)
                 neighbor_indices = torch.where(close_mask)[0]
                 selected_indices = neighbor_indices[torch.randperm(len(neighbor_indices))[:n_to_select]]
-                scaffold_mask[selected_indices] = 1
+                motif_mask[selected_indices] = 1
 
         # Only condition on backbone atoms  # TODO: support sidechain atoms
-        scaffold_mask[:, rc.non_bb_idxs] = 0
+        motif_mask[:, rc.non_bb_idxs] = 0
         aatype_scaffold = torch.full_like(example["residue_index"], fill_value=rc.restype_order_with_x["X"])  # TODO: fix for sequence conditioning
 
-        scaffold_mask = scaffold_mask * atom_mask  # unmask only existing atoms
-        x_scaffold = x * scaffold_mask[..., None]
+        motif_mask = motif_mask * atom_mask  # unmask only existing atoms
+        x_motif = x * motif_mask[..., None]
 
-         # Re-center on CA of scaffolding residues
+         # Re-center on CA of motif residues
         x_recentered = x
-        if self.se3_augment and (scaffold_mask[..., 1:2].any()):  # only center if there are any scaffolding residues
-            x_scaffold, transforms = center_random_augmentation(x_scaffold, seq_mask, scaffold_mask,
+        if self.se3_augment and (motif_mask[..., 1:2].any()):  # only center if there are any scaffolding residues
+            x_motif, transforms = center_random_augmentation(x_motif, seq_mask, motif_mask,
                                                                 translation_scale=self.translation_scale,
                                                                 return_transforms=True)
             x_recentered = apply_random_augmentation(x, transforms, seq_mask, atom_mask)
 
-        return {"x_scaffold": x_scaffold, "scaffold_mask": scaffold_mask, "aatype_scaffold": aatype_scaffold, "x_recentered": x_recentered}
+        return {"x_motif": x_motif, "motif_mask": motif_mask, "aatype_scaffold": aatype_scaffold, "x_recentered": x_recentered}
 
 
     def set_conditioning_type(self, conditioning_type: str) -> None:

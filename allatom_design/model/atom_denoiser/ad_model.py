@@ -68,8 +68,8 @@ class AtomDenoiser(nn.Module):
         }
 
         # Denoise coords
-        _, aux_preds = self.denoiser(batch["x_scaffold"],
-                                     batch["scaffold_mask"],
+        _, aux_preds = self.denoiser(batch["x_motif"],
+                                     batch["motif_mask"],
                                      batch["aatype_scaffold"],
                                      batch["residue_index"], batch["seq_mask"],
                                      cond_labels_in=batch["cond_labels_in"],
@@ -119,8 +119,8 @@ class AtomDenoiser(nn.Module):
         - cond_labels: dictionary mapping from conditioning label to token ID for each batch element
 
         - scaffold_inputs: dictionary containing scaffold information with keys:
-            - x_scaffold: TensorType["b n a 3", float], coordinates of scaffold atoms
-            - scaffold_mask: TensorType["b n a", float], mask indicating which atoms are part of the scaffold
+            - x_motif: TensorType["b n a 3", float], coordinates of scaffold atoms
+            - motif_mask: TensorType["b n a", float], mask indicating which atoms are part of the scaffold
             - aatype_scaffold: TensorType["b n", int], input amino acid type for conditioning
         """
         B, N = residue_index.shape
@@ -134,12 +134,12 @@ class AtomDenoiser(nn.Module):
 
         # Initialize sequence / sidechain prior (all masked, time t=0)
         if scaffold_inputs is None:
-            x_scaffold = torch.zeros((B, N, rc.atom_type_num, 3), device=residue_index.device)
-            scaffold_mask = torch.zeros((B, N, rc.atom_type_num), device=residue_index.device)
+            x_motif = torch.zeros((B, N, rc.atom_type_num, 3), device=residue_index.device)
+            motif_mask = torch.zeros((B, N, rc.atom_type_num), device=residue_index.device)
             aatype_scaffold = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
         else:
-            x_scaffold = scaffold_inputs["x_scaffold"]
-            scaffold_mask = scaffold_inputs["scaffold_mask"]
+            x_motif = scaffold_inputs["x_motif"]
+            motif_mask = scaffold_inputs["motif_mask"]
             aatype_scaffold = scaffold_inputs["aatype_scaffold"]
 
         num_steps = timesteps.shape[-1] - 1
@@ -169,8 +169,8 @@ class AtomDenoiser(nn.Module):
             "aatype_override": aatype_override,
             "aatype_override_mask": aatype_override_mask,
         }
-        x1_bb, aux_preds = self.denoiser(x_scaffold=x_scaffold,
-                                         scaffold_mask=scaffold_mask,
+        x1_bb, aux_preds = self.denoiser(x_motif=x_motif,
+                                         motif_mask=motif_mask,
                                          aatype_scaffold=aatype_scaffold,
                                          residue_index=residue_index,
                                          seq_mask=seq_mask,

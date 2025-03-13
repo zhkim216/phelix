@@ -78,8 +78,8 @@ class DiTDenoiser(BaseAtomDenoiser):
 
 
     def forward(self,
-                x_scaffold: TensorType["b n 37 3", float],
-                scaffold_mask: TensorType["b n 37", float],
+                x_motif: TensorType["b n 37 3", float],
+                motif_mask: TensorType["b n 37", float],
                 aatype_scaffold: TensorType["b n", int],
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
@@ -91,13 +91,13 @@ class DiTDenoiser(BaseAtomDenoiser):
         aux_preds = {}
 
         if self.use_scaffold_module:
-            h_s = self.process_scaffold(x_scaffold, scaffold_mask, aatype_scaffold, seq_mask, residue_index)
+            h_s = self.process_scaffold(x_motif, motif_mask, aatype_scaffold, seq_mask, residue_index)
         else:
             h_s = None
 
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
-            x_scaffold=x_scaffold,
-            scaffold_mask=scaffold_mask,
+            x_motif=x_motif,
+            motif_mask=motif_mask,
             aatype_scaffold=aatype_scaffold,
             residue_index=residue_index,
             seq_mask=seq_mask,
@@ -113,8 +113,8 @@ class DiTDenoiser(BaseAtomDenoiser):
 
 
     def backbone_diffusion(self,
-                           x_scaffold: TensorType["b n 37 3", float],
-                           scaffold_mask: TensorType["b n 37", float],
+                           x_motif: TensorType["b n 37 3", float],
+                           motif_mask: TensorType["b n 37", float],
                            aatype_scaffold: TensorType["b n", int],
                            residue_index: TensorType["b n", int],
                            seq_mask: TensorType["b n", float],
@@ -141,8 +141,8 @@ class DiTDenoiser(BaseAtomDenoiser):
             cond_labels_in_batched = {label: repeat(cond_labels_in[label], "b -> (m b)", m=M, b=B) for label in cond_labels_in}
 
             # repeat scaffolding inputs
-            x_scaffold_batched = repeat(x_scaffold, "b n a x -> (m b) n a x", m=M, b=B)
-            scaffold_mask_batched = repeat(scaffold_mask, "b n a -> (m b) n a", m=M, b=B)
+            x_scaffold_batched = repeat(x_motif, "b n a x -> (m b) n a x", m=M, b=B)
+            scaffold_mask_batched = repeat(motif_mask, "b n a -> (m b) n a", m=M, b=B)
             aatype_scaffold_batched = repeat(aatype_scaffold, "b n -> (m b) n", m=M, b=B)
             h_s_batched = repeat(h_s, "b n h -> (m b) n h", m=M, b=B) if h_s is not None else None
 
@@ -265,8 +265,8 @@ class DiTDenoiser(BaseAtomDenoiser):
             if use_autoguidance:
                 assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
                 autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model,
-                                                              x_scaffold=x_scaffold,
-                                                              scaffold_mask=scaffold_mask,
+                                                              x_motif=x_motif,
+                                                              motif_mask=motif_mask,
                                                               aatype_scaffold=aatype_scaffold,
                                                               h_s=h_s,
                                                               residue_index=residue_index, seq_mask=seq_mask,
@@ -274,8 +274,8 @@ class DiTDenoiser(BaseAtomDenoiser):
 
             # Run integration steps
             denoiser_fn = partial(self.dit,
-                                  x_scaffold=x_scaffold,
-                                  scaffold_mask=scaffold_mask,
+                                  x_motif=x_motif,
+                                  motif_mask=motif_mask,
                                   aatype_scaffold=aatype_scaffold,
                                   h_s=h_s,
                                   residue_index=residue_index, seq_mask=seq_mask,
@@ -325,11 +325,11 @@ class DiTDenoiser(BaseAtomDenoiser):
 
 
     @torch.compiler.disable
-    def process_scaffold(self, x_scaffold, scaffold_mask,
+    def process_scaffold(self, x_motif, motif_mask,
                          aatype_scaffold, seq_mask, residue_index):
-        B, N, A, _ = x_scaffold.shape
-        # Find residues where scaffold_mask is nonzero in any atom
-        has_scaffold = scaffold_mask.any(dim=(-1))  # [b n]
+        B, N, A, _ = x_motif.shape
+        # Find residues where motif_mask is nonzero in any atom
+        has_scaffold = motif_mask.any(dim=(-1))  # [b n]
 
         # Get indices of residues with scaffold information
         scaffold_indices = [torch.where(has_scaffold[bi])[0] for bi in range(B)]
@@ -349,8 +349,8 @@ class DiTDenoiser(BaseAtomDenoiser):
                 if len(indices) > 0:
                     packed_bis.append(bi)
 
-                    packed_x.append(x_scaffold[bi, indices])
-                    packed_scaffold_mask.append(scaffold_mask[bi, indices])
+                    packed_x.append(x_motif[bi, indices])
+                    packed_scaffold_mask.append(motif_mask[bi, indices])
                     packed_seq_mask.append(seq_mask[bi, indices])
                     packed_aatype.append(aatype_scaffold[bi, indices])
                     packed_residue_index.append(residue_index[bi, indices])
@@ -386,7 +386,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
         else:
             # If no scaffold positions, set h_s to zero and skip FAMPNN
-            h_s = torch.zeros((B, N, self.fampnn.hidden_dim), device=x_scaffold.device)
+            h_s = torch.zeros((B, N, self.fampnn.hidden_dim), device=x_motif.device)
 
         return h_s
 
@@ -529,8 +529,8 @@ class DiT(nn.Module):
 
     def forward(self,
                 x_noised: TensorType["b n 4 3", float],
-                x_scaffold: TensorType["b n 37 3", float],
-                scaffold_mask: TensorType["b n 37", float],
+                x_motif: TensorType["b n 37 3", float],
+                motif_mask: TensorType["b n 37", float],
                 aatype_scaffold: Optional[TensorType["b n", int]],
                 h_s: Optional[TensorType["b n h"]],
                 t: TensorType["b", float],
@@ -573,9 +573,9 @@ class DiT(nn.Module):
 
         # Concatenate scaffold conditioning
         if self.scaffolding.use_concat:
-            x_scaffold = x_scaffold * scaffold_mask[..., None]  # zero out non-scaffold positions
-            x_scaffold = rearrange(x_scaffold[..., rc.bb_idxs, :], "b n a x -> b n (a x)")
-            x = torch.cat([x, x_scaffold], dim=-1)
+            x_motif = x_motif * motif_mask[..., None]  # zero out non-scaffold positions
+            x_motif = rearrange(x_motif[..., rc.bb_idxs, :], "b n a x -> b n (a x)")
+            x = torch.cat([x, x_motif], dim=-1)
 
         # Begin DiT forward pass
         x = self.x_embedder(x)
