@@ -28,6 +28,7 @@ from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
 from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
 import wandb
+from allatom_design.eval.fampnn_utils import get_seq_des_model
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="draw_bb_samples", version_base="1.3.2")
@@ -147,9 +148,7 @@ def main(cfg: DictConfig):
 
     # === Load MPNN and structure prediction models === #
     if cfg.sc.run_mpnn_sc:
-        mpnn_cfg = OmegaConf.load(cfg.mpnn.mpnn_cfg)
-        mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.mpnn.overrides)  # override base mpnn config with mpnn.overrides
-        mpnn_model = load_mpnn(cfg.mpnn.mpnn_params_dir, mpnn_cfg, device=device)
+        seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     # === Get secondary structure info === #
@@ -170,15 +169,14 @@ def main(cfg: DictConfig):
         sc_pdbs = df.groupby("bin")["pdb"].apply(lambda x: x.sample(n=min(cfg.sc.max_samples_per_bin, len(x)))).tolist()
 
     if cfg.sc.run_mpnn_sc:
-        mpnn_sc_info = eval_metrics.run_self_consistency_eval(sc_pdbs,
-                                                              mpnn_model, mpnn_cfg,
-                                                              struct_pred_model,
-                                                              device,
-                                                              out_dir=cfg.out_dir,
-                                                              temp_dir=f"{cfg.out_dir}/tmp")
-        for pdb, v in mpnn_sc_info.items():
-            all_metrics[pdb]["mpnn_sc_info"] = v
-
+        sc_info = eval_metrics.run_self_consistency_eval(sc_pdbs,
+                                                         seq_des_model,
+                                                         struct_pred_model,
+                                                         device,
+                                                         out_dir=cfg.out_dir,
+                                                         temp_dir=f"{cfg.out_dir}/tmp")
+        for pdb, v in sc_info.items():
+            all_metrics[pdb]["sc_info"] = v
 
     # === Run nnTM evaluation === #
     if cfg.nntm_dataset is not None:
@@ -198,17 +196,16 @@ def main(cfg: DictConfig):
                 metrics_b[f"{k}"].append(v)
 
             # MPNN self-consistency metrics
-            if "mpnn_sc_info" in all_metrics[pdb]:
-                mpnn_sc_info = all_metrics[pdb]["mpnn_sc_info"]
-                for k, v in mpnn_sc_info["sc_metrics"].items():
+            if "sc_info" in all_metrics[pdb]:
+                for k, v in all_metrics[pdb]["sc_info"]["sc_metrics"].items():
                     # take mean and best across MPNN sequences
                     best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
-                    metrics_b[f"mpnn_{k}_best"].append(best_sc_metric.item())
+                    metrics_b[f"{cfg.seq_des_cfg.model_name}_{k}_best"].append(best_sc_metric.item())
 
                     if len(v) > 1:
                         # only log mean if there are multiple MPNN sequences per backbone
                         mean_sc_metric = torch.mean(v)
-                        metrics_b[f"mpnn_{k}_mean"].append(mean_sc_metric.item())
+                        metrics_b[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
 
             # nnTM metrics
             if "nntm_info" in all_metrics[pdb]:
@@ -219,16 +216,12 @@ def main(cfg: DictConfig):
         for k, v in metrics_b.items():
             metrics_b_avg[k] = np.mean(v)
 
-            # For MPNN metrics, get SE from bootstrapping
-            if "mpnn" in k:
-                metrics_b_avg[f"{k}_se"] = eval_metrics.bootstrap_se(v, n_samples=1000)
-
         bin_to_metrics[bin] = metrics_b_avg
 
     # === Calculate mean pairwise TM score by length === #
     for bin in set(bins):
         pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if b == bin]
-        coords_b = [load_feats_from_pdb(pdb, chain_residx_gap=None)["all_atom_positions"] for pdb in pdbs_b]
+        coords_b = [load_feats_from_pdb(pdb)["all_atom_positions"] for pdb in pdbs_b]
         bin_to_metrics[bin]["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(coords_b,
                                                                                     temp_dir=f"{cfg.out_dir}/tmp",
                                                                                     subsample_pairs=cfg.pairwise_tm_subsample)
@@ -237,18 +230,22 @@ def main(cfg: DictConfig):
     for sctm_cutoff in cfg.clustering.sctm_cutoffs:
         # Cluster by length bin
         for bin in set(bins):
-            pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if (b == bin) and ("mpnn_sc_info" in all_metrics[pdb])]
+            pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if (b == bin) and ("sc_info" in all_metrics[pdb])]
             if len(pdbs_b) == 0:
                 # skip if we don't have self-consistency info for any samples in this bin
                 continue
 
             # Cluster only on designable samples (scTM > sctm_cutoff)
-            designable_pdbs = [pdb for pdb in pdbs_b if all_metrics[pdb]["mpnn_sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff]
-            bin_to_metrics[bin][f"sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
+            designable_pdbs = [pdb for pdb in pdbs_b if (all_metrics[pdb]["sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff).any()]
+            bin_to_metrics[bin][f"{cfg.seq_des_cfg.model_name}_sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
 
             cluster_out_dir = Path(f"{cfg.out_dir}/clustering/bin{bin}_sctm{sctm_cutoff}")
-            bin_to_metrics[bin][f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{cfg.out_dir}/tmp",
-                                                                                                **cfg.clustering.foldseek_opts)
+            bin_to_metrics[bin][f"{cfg.seq_des_cfg.model_name}_sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(
+                designable_pdbs,
+                cluster_out_dir,
+                f"{cfg.out_dir}/tmp",
+                **cfg.clustering.foldseek_opts
+            )
 
 
     # === Compute KL(p||q) for secondary structure distributions === #

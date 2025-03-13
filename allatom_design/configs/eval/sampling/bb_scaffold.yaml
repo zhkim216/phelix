@@ -49,7 +49,8 @@ sc:
   max_samples_per_bin: 100  # maximum number of samples to evaluate per length bin
 
 # Dataset for nnTM calculation, path to directory containing PDBs
-nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered
+# nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered
+nntm_dataset: null
 
 # Pairwise TM-scores
 pairwise_tm_subsample: 1000  # number of pairs to subsample
@@ -70,15 +71,24 @@ ss_kld:
   bin_size: 10  # size of secondary structure percentage bins
   pseudocount: 0.01  # pseudocount for KL divergence calculation; set arbitrarily to 0.01
 
-# MPNN args
-mpnn:
-  mpnn_cfg: allatom_design/configs/mpnn/proteinmpnn.yaml
-  mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
-  overrides:
-    # num seqs per structure will be batch_size * number_of_batches
-    batch_size: 1
-    number_of_batches: 1
-    verbose: false
+# MPNN args - Update to match new structure
+seq_des_cfg:
+  model_name: "proteinmpnn"  # ["proteinmpnn", "fampnn"]
+  proteinmpnn:
+    mpnn_cfg: allatom_design/configs/seq_des/proteinmpnn.yaml
+    mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
+    overrides:
+      batch_size: 1
+      number_of_batches: 1
+      verbose: false
+  fampnn:
+    fampnn_cfg: allatom_design/configs/seq_des/fampnn.yaml
+    fampnn_ckpt: /media/scratch/huang_lab/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
+    overrides:
+      batch_size: 16
+      num_seqs_per_pdb: 1
+      num_steps: 50
+      noise_labels: 0.0
 
 # Structure prediction model args
 struct_pred_cfg:
