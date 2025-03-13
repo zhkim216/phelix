@@ -282,6 +282,10 @@ def main(cfg: DictConfig):
                 for pdb, v in nntm_info.items():
                     all_metrics[pdb]["nntm_info"] = v
 
+            # get RMSD between input motif and sampled structure
+            for pdb in sampled_pdbs:
+                all_metrics[pdb]["sampled_motif_bb_rmsd"] = eval_metrics.compute_motif_bb_rmsd(pdb, motif_info[pdb]["x_motif"], motif_info[pdb]["motif_mask"])
+
             # Save per-sample metrics
             with open(f"{saved_metrics_dir_i}/step_{global_step}_all_metrics.pkl", "wb") as f:
                 pickle.dump(all_metrics, f)
@@ -295,19 +299,33 @@ def main(cfg: DictConfig):
 
                 # self-consistency metrics
                 for k, v in sc_info[pdb]["sc_metrics"].items():
-                    mean_sc_metric = torch.mean(v)
                     best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
-                    sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
                     sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_best"].append(best_sc_metric.item())
+
+                    if len(v) > 1:
+                        # only report mean if we run multiple sequences per sample
+                        mean_sc_metric = torch.mean(v)
+                        sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
 
                 # nnTM metrics
                 if cfg.nntm_dataset is not None:
                     sample_metrics["nntm"].append(all_metrics[pdb]["nntm_info"])
 
+                # RMSD between input motif and sampled structure
+                sample_metrics["sampled_motif_bb_rmsd"].append(all_metrics[pdb]["sampled_motif_bb_rmsd"])
+
             # === Calculate metrics to log === #
             metrics = {}
-            metrics.update({f"scaffold_gen/mean/{scaffold_conditioning_type}/{k}": np.mean(v) for k, v in sample_metrics.items()})
-            metrics.update({f"scaffold_gen/median/{scaffold_conditioning_type}/{k}": np.median(v) for k, v in sample_metrics.items()})
+
+            # mean and median of all metrics
+            metrics.update({f"scaffold/mean/{scaffold_conditioning_type}/{k}": np.mean(v) for k, v in sample_metrics.items()})
+            metrics.update({f"scaffold/median/{scaffold_conditioning_type}/{k}": np.median(v) for k, v in sample_metrics.items()})
+
+            # for motif_bb_rmsd, calculate the number of success below 1 RMSD
+            motif_rmsd_key = f"{cfg.seq_des_cfg.model_name}_motif_bb_rmsd_best"
+            metrics[f"scaffold/success_count/{scaffold_conditioning_type}/motif_bb_rmsd"] = np.sum(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+            metrics[f"scaffold/success_rate/{scaffold_conditioning_type}/motif_bb_rmsd"] = np.mean(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+
 
             if not cfg.no_wandb:
                 metrics["trainer/global_step"] = global_step

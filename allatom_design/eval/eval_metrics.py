@@ -557,32 +557,6 @@ def metrics_per_chi_per_pos(pred, target, target_alt, chi_mask, threshold=20):
 
 ##########################################
 
-
-def compute_sidechain_metrics(coords: TensorType["b n 37 3", float],
-                              atom_mask: TensorType["b n 37", float],
-                              metrics_to_compute: List[str],
-                              ) -> Tuple[Dict[str, Any]]:
-    """
-    Compute metrics for sidechains in a given structure.
-
-    - metrics_to_compute: List of metrics to compute. Options are given below.
-
-    Metrics:
-    - sc_clashes: Number of sidechain clashes... # TODO: decide on this metric
-    - chi_angles: return chi angles for plotting or comparison
-    """
-    sidechain_metrics = {}
-
-    for metric in metrics_to_compute:
-        # if metric == "sc_clashes":
-        #     # Compute number of
-        continue
-
-
-
-    pass
-
-
 def get_sort_key_fn(metric_name: str) -> Callable[[float], float]:
     """
     Returns a key function for sorting based on the metric name.
@@ -1004,3 +978,33 @@ def fpd(
         gt_sigma = np.cov(gt_embeds, rowvar=False)
 
     return calculate_frechet_distance(samp_mu, samp_sigma, gt_mu, gt_sigma)
+
+
+
+def compute_motif_bb_rmsd(pdb_path: str,
+                          motif_coords: TensorType["n a 3", float],
+                          motif_mask: TensorType["n a", float]) -> float:
+    """
+    Given the path to a PDB of length n, and a motif with its mask, compute the RMSD between the motif and the PDB.
+
+    Following MotifBench, the RMSD is computed between the N, CA, C atoms of the motif and the PDB.
+    """
+    pdb_feats = data.load_feats_from_pdb(pdb_path)
+
+    x = pdb_feats["all_atom_positions"]  # [n 37 3]
+
+    # Construct a mask for the motif backbone atoms
+    bb_motif_atom_mask = torch.zeros_like(motif_mask)
+    atom_indices = [rc.atom_order["N"], rc.atom_order["CA"], rc.atom_order["C"]]  # Zheng et al. MotifBench only uses N, CA, C
+    bb_motif_atom_mask[..., atom_indices] = 1
+    bb_motif_atom_mask = bb_motif_atom_mask * motif_mask  # [n a]
+
+    if bb_motif_atom_mask.sum() == 0:
+        return np.nan
+
+    # Kabsch align the motif to the corresponding positions in the PDB
+    bb_rmsd = data.torch_rmsd_weighted(rearrange(x, "n a x -> 1 (n a) x"),
+                                       rearrange(motif_coords, "n a x -> 1 (n a) x"),
+                                       weights=rearrange(bb_motif_atom_mask, "n a -> 1 (n a)")).squeeze(0)
+
+    return bb_rmsd.item()
