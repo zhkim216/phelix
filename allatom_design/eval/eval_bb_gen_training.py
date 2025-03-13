@@ -197,7 +197,7 @@ def main(cfg: DictConfig):
             for k, v in ss_info[pdb].items():
                 sample_metrics[f"{k}"].append(v)
 
-            # MPNN self-consistency metrics
+            # self-consistency metrics
             for k, v in sc_info[pdb]["sc_metrics"].items():
                 # take mean and best across MPNN sequences
                 mean_sc_metric = torch.mean(v)
