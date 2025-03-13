@@ -27,7 +27,7 @@ class ScaffoldManager(nn.Module):
         self.dist_threshold = cfg.dist_threshold
 
         # Define conditioning types and their probabilities
-        self.conditioning_types = ["contiguous", "discontiguous", "none"]
+        self.conditioning_types = ["contiguous", "discontiguous", "unconditional"]
         self.conditioning_probs = torch.tensor([
             self.contiguous_p,
             self.discontiguous_p,
@@ -37,21 +37,29 @@ class ScaffoldManager(nn.Module):
         self.translation_scale = cfg.get("translation_scale", 1.0)
         self.se3_augment = cfg.get("se3_augment", True)
 
+        self.cond_type_override = None  # only use this conditioning type; for inference and evaluation
+
 
     @torch.compiler.disable
-    def forward(self,
-                example: Dict[str, TensorType["..."]],  # Removed batch dimension "b"
-                ) -> Dict[str, Any]:
+    def forward(self, example: Dict[str, TensorType["..."]],) -> Dict[str, Any]:
         atom_mask = example["atom_mask"]
         seq_mask = example["seq_mask"]
         x = example["x"]
 
         scaffold_mask = torch.zeros_like(atom_mask)    # 1 for unmasked, 0 for masked
-        seq_len = seq_mask.sum().long().item()  # Simplified to single example
+        seq_len = seq_mask.sum().long().item()
         device = scaffold_mask.device
 
-        # Choose a conditioning type
-        conditioning_type = self.conditioning_types[torch.multinomial(self.conditioning_probs, 1).item()]
+        if self.cond_type_override is None:
+            # choose a conditioning type (during training)
+            conditioning_type = self.conditioning_types[torch.multinomial(self.conditioning_probs, 1).item()]
+        else:
+            # use the override conditioning type (during inference)
+            assert not self.training, "Override conditioning type should not be set during training"
+            conditioning_type = self.cond_type_override
+
+        assert conditioning_type in self.conditioning_types, f"Unknown conditioning type: {conditioning_type}"
+
         if conditioning_type == "contiguous":
             # Scaffold a sequence-contiguous span
             span_len = torch.randint(1, min(self.max_span_len, seq_len) + 1, (1,), device=device).item()
@@ -97,6 +105,15 @@ class ScaffoldManager(nn.Module):
             x_recentered = apply_random_augmentation(x, transforms, seq_mask, atom_mask)
 
         return {"x_scaffold": x_scaffold, "scaffold_mask": scaffold_mask, "aatype_scaffold": aatype_scaffold, "x_recentered": x_recentered}
+
+
+    def set_conditioning_type(self, conditioning_type: str) -> None:
+        """
+        Set the conditioning type for the scaffold manager.
+        """
+        assert conditioning_type in self.conditioning_types, f"Unknown conditioning type: {conditioning_type}"
+        self.cond_type_override = conditioning_type
+        print(f"ScaffoldManager: set conditioning type to {conditioning_type}")
 
 
 def get_scaffold_manager(cfg: Optional[DictConfig]) -> Optional[ScaffoldManager]:

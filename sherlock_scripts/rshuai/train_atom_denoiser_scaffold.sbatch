@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=s3_a0
 #SBATCH -p bioe
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=2
+#SBATCH --nodes=4
+#SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -41,7 +41,7 @@ ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotation
 CLUSTER_SAMPLE=true
 
 # Run training script
-WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
+WANDB__SERVICE_WAIT=300 srun python3 allatom_design/train_atom_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \

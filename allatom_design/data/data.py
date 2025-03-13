@@ -27,7 +27,10 @@ def load_feats_from_pdb(pdb, chain_ids_override: str = None, max_conformers: int
     feats = {}
     protein_obj, chain_id_mapping = protein.read_pdb(pdb, chain_ids_override=chain_ids_override, max_conformers=max_conformers)
     for k, v in vars(protein_obj).items():
-        feats[k] = torch.Tensor(v)
+        if isinstance(v, list) and all(isinstance(item, np.ndarray) for item in v):
+            # convert list of numpy arrays to a single numpy array first if needed
+            v = np.array(v)
+        feats[k] = torch.tensor(v, dtype=torch.float32)
 
     feats["all_atom_positions"] = feats.pop("atom_positions")
     feats["all_atom_mask"] = feats.pop("atom_mask")
@@ -650,3 +653,8 @@ def get_scaffolding_inputs(sm: Optional["ScaffoldManager"],
         x_recentered = sm_outputs["x_recentered"]
 
     return x_scaffold, scaffold_mask, aatype_scaffold, x_recentered
+
+
+def get_length_from_pdb(pdb_file: str) -> Tuple[str, int]:
+    data = load_feats_from_pdb(pdb_file)
+    return pdb_file, len(data["aatype"])

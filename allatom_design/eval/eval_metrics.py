@@ -69,6 +69,7 @@ def run_self_consistency_eval(pdbs: List[str],
                               eval_codesign: bool = False,
                               temp_dir: Optional[str] = None,
                               override_metrics_to_compute: Optional[List[str]] = None,
+                              motif_info: dict = {},  # if evaluating motif scaffolding, maps from PDB path to scaffold coordinates and mask
                               ) -> Dict[str, Dict[str, TensorType]]:
     """
     Run self-consistency evaluation on a list of PDBs (MPNN -> struct_pred -> eval metrics).
@@ -114,6 +115,8 @@ def run_self_consistency_eval(pdbs: List[str],
         elif seq_des_model_name == "fampnn":
             fampnn_model, fampnn_cfg = seq_des_model["fampnn_model"], seq_des_model["fampnn_cfg"]
             fampnn_preds_dict = run_fampnn(fampnn_model, pdb_paths=pdbs, device=device, cfg=fampnn_cfg)
+            for pdb, fampnn_preds in fampnn_preds_dict.items():
+                sc_info[pdb]["fampnn_preds"] = fampnn_preds
 
     # === Run structure prediction === #
     if not eval_codesign:
@@ -124,7 +127,7 @@ def run_self_consistency_eval(pdbs: List[str],
                 mpnn_preds = sc_info[pdb]["mpnn_preds"]
                 sequences_list, residue_index_list, chain_index_list = mpnn_preds["mpnn_seqs"], mpnn_preds["residue_index"], mpnn_preds["chain_index"]
             elif seq_des_model_name == "fampnn":
-                fampnn_preds = fampnn_preds_dict[pdb]
+                fampnn_preds = sc_info[pdb]["fampnn_preds"]
                 sequences_list, residue_index_list, chain_index_list = fampnn_preds["pred_seqs"], fampnn_preds["residue_index"], fampnn_preds["chain_index"]
 
             if struct_model_name == "af2":
@@ -282,6 +285,7 @@ def run_self_consistency_eval(pdbs: List[str],
             sampled_pdb_feats["all_atom_mask"][None].expand(B, -1, -1),
             metrics_to_compute=metrics_to_compute,
             temp_dir=temp_dir,
+            motif_info=motif_info.get(pdb, {}),  # if evaluating motif scaffolding, pass in scaffold coordinates and mask
         )
         sc_info[pdb]["sc_metrics"] = metrics
 
@@ -421,6 +425,28 @@ def compute_structure_metrics(coords1: TensorType["b n 37 3"],
             structure_metrics["sc_aa_rmsd"] = data.torch_rmsd_weighted(rearrange(coords1, "b n a x -> b (n a) x"),
                                                                        rearrange(coords2, "b n a x -> b (n a) x"),
                                                                        weights=rearrange(atom_mask, "b n a -> b (n a)"))
+        elif metric == "motif_bb_rmsd":
+            # Align on motif N,CA,C atoms, compute RMSD between the input motif and the predicted motif
+            motif_mask = kwargs.get("motif_info", {}).get("motif_mask")  # [b n 37]
+
+            if motif_mask is None:
+                raise ValueError("motif_bb_rmsd requires motif_mask in kwargs['motif_info']")
+
+            # Extract N,CA,C mask for the motif
+            bb_motif_atom_mask = torch.zeros_like(atom_mask)
+            atom_indices = [rc.atom_order["N"], rc.atom_order["CA"], rc.atom_order["C"]]  # Zheng et al. MotifBench only uses N, CA, C
+            bb_motif_atom_mask[..., atom_indices] = 1
+            bb_motif_atom_mask = bb_motif_atom_mask * motif_mask  # [b n 37]
+
+            if bb_motif_atom_mask.sum() == 0:
+                structure_metrics["motif_bb_rmsd"] = torch.tensor(np.nan)[None].expand(B)  # no motif atoms to align
+                continue
+
+            # Align on motif backbone atoms
+            structure_metrics["motif_bb_rmsd"] = data.torch_rmsd_weighted(rearrange(coords1, "b n a x -> b (n a) x"),
+                                                                          rearrange(coords2, "b n a x -> b (n a) x"),
+                                                                          weights=rearrange(bb_motif_atom_mask, "b n a -> b (n a)"))
+
         elif metric.startswith("scn_rmsd_per_pos"):
             # Align on backbone atoms, compute sidechain RMSD
 
@@ -573,7 +599,7 @@ def get_sort_key_fn(metric_name: str) -> Callable[[float], float]:
     Returns:
     - function: A key function for sorting.
     """
-    if metric_name in ["sc_ca_rmsd", "sc_aa_rmsd"]:
+    if metric_name in ["sc_ca_rmsd", "sc_aa_rmsd", "motif_bb_rmsd"]:
         # Ascending order, min is best
         return lambda x: -x
     elif metric_name in ["sc_ca_tm"]:

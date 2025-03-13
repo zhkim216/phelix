@@ -21,7 +21,7 @@ from tqdm import tqdm
 
 import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import load_feats_from_pdb
+from allatom_design.data.data import get_length_from_pdb
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.eval.fampnn_utils import get_fampnn_batch
 from allatom_design.eval.folding_utils import get_struct_pred_model
@@ -132,7 +132,7 @@ def main(cfg: DictConfig):
     # If specified, pre-sort by length (descending)
     if cfg.presort_by_length:
         # determine lengths
-        results = Parallel(n_jobs=-1)(delayed(get_length)(f) for f in tqdm(pdb_files, desc="Loading PDBs to determine lengths"))
+        results = Parallel(n_jobs=-1)(delayed(get_length_from_pdb)(f) for f in tqdm(pdb_files, desc="Loading PDBs to determine lengths"))
         pdb_to_length = dict(results)
 
         # sort by length, longest first
@@ -285,11 +285,6 @@ def main(cfg: DictConfig):
         fcntl.flock(f, fcntl.LOCK_UN)
 
     pbar.close()
-
-
-def get_length(pdb_file: str) -> Tuple[str, int]:
-    data = load_feats_from_pdb(pdb_file)
-    return pdb_file, len(data["aatype"])
 
 
 def get_override_masks(batch: Dict[str, TensorType["b ..."]],
