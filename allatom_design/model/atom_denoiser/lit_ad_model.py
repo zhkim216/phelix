@@ -27,7 +27,7 @@ class LitAtomDenoiser(L.LightningModule):
             print(f"Using torch.compile to optimize model performance...")
             self.model = torch.compile(self.model)
 
-        self.use_phema = cfg.model.ema.use_phema
+        self.use_phema = cfg.model.get("ema", {}).get("use_phema", True)
         if self.use_phema:
             # Use EDM2 post-hoc EMA
             self.ema_tracker = PowerFunctionEMA(self.model)

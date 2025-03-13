@@ -47,7 +47,7 @@ autoguidance_cfg:
 
 seq_des_cfg:
   # MPNN args
-  model_name: "fampnn"  # ["proteinmpnn", "fampnn"]
+  model_name: "proteinmpnn"  # ["proteinmpnn", "fampnn"]
   proteinmpnn:
     mpnn_cfg: allatom_design/configs/seq_des/proteinmpnn.yaml
     mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn

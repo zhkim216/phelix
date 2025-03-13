@@ -1,7 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=s1_bb0
+#SBATCH --job-name=s3_a0
 #SBATCH -p bioe
-#SBATCH --gpus-per-node=1
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=2
+#SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #
@@ -30,32 +32,40 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=s1_bb3
-GROUP=ai_cath_scaffolding
+EXP_NAME=s3_a0
+GROUP=af3_monomer_scaffolding
 
 # Dataset paths
-# PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
-PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
+PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
+ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2/annotated_pdb_keys.csv
+CLUSTER_SAMPLE=true
+USE_FIRST_SAMPLE=false
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
-    num_workers=${SLURM_CPUS_PER_TASK} \
+    num_workers=${SLURM_CPUS_ON_NODE} \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
-    data.fixed_size=160 \
-    data.subset_length_range=[32,160] \
+    data.annotation_csvs=[${ANNOTATION_CSV}] \
+    data.cluster_sample=${CLUSTER_SAMPLE} \
+    data.fixed_size=256 \
+    data.subset_length_range=[32,256] \
+    data.use_struct_preds=true \
+    data.max_scrmsd=2.0 \
+    data.max_rel_rog=1.4 \
+    data.n_train_cluster_resample=10 \
     model.task=scaffold \
     scaffold_manager=scaffold_manager \
     denoiser.scaffold_module.enabled=false \
     denoiser.dit.scaffolding.use_concat=true \
-    train.batch_size=32 \
-    denoiser.training_batch_size_mult=16 \
+    denoiser.dit.depth=15 \
+    denoiser.dit.hidden_size=768 \
+    train.batch_size=64 \
     train.compile_model=true \
     denoiser=dit_denoiser \
-    trainer.check_val_every_n_epoch=1 \
-    trainer.strategy=ddp_find_unused_parameters_true \
+    trainer.check_val_every_n_epoch=4 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}

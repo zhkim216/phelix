@@ -115,9 +115,7 @@ def main(cfg: DictConfig):
         # Move to device
         batch = {k: batch[k].to(device) for k in model_input_keys}
 
-        # Save scaffolding motifs
-        scaffold_res_mask = batch["scaffold_mask"].any(dim=-1)  # shape [B, N]
-
+        # Save motifs
         motif_samples = {"aatype": batch["aatype_scaffold"],
                          "atom_positions": batch["x_scaffold"],
                          "atom_mask": batch["scaffold_mask"],
@@ -129,7 +127,7 @@ def main(cfg: DictConfig):
         motif_filenames = [f"{sample_out_dir}/motif_{pdb_stem}.pdb" for pdb_stem in pdb_names]
         write_batched_to_pdb(**feats, filenames=motif_filenames, mode="aa")
 
-        # Save centered examples
+        # Save centered examples from which motifs were drawn
         samples = {
             "x_bb_denoised": batch["x"][..., rc.bb_idxs, :].cpu(),
             "seq_mask": batch["seq_mask"].cpu(),
