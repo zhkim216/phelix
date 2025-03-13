@@ -36,7 +36,6 @@ class AtomDenoiser(nn.Module):
 
         # Data scaling parameters
         self.register_buffer("bb_std", torch.tensor(1.0))
-
         self.sigma_data = self.bb_std
 
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)

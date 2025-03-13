@@ -200,11 +200,13 @@ def main(cfg: DictConfig):
             # self-consistency metrics
             for k, v in sc_info[pdb]["sc_metrics"].items():
                 # take mean and best across MPNN sequences
-                mean_sc_metric = torch.mean(v)
                 best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
-
-                sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
                 sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_best"].append(best_sc_metric.item())
+
+                if len(v) > 1:
+                    # only report mean if we run multiple sequences per sample
+                    sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
+                    mean_sc_metric = torch.mean(v)
 
             # nntm metrics
             if cfg.nntm_dataset is not None:

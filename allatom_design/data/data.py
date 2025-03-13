@@ -268,6 +268,8 @@ def torch_rmsd_weighted(a: TensorType["b n x", float],
 
     Adapted from: https://github.com/sokrypton/ColabDesign/blob/main/colabdesign/af/loss.py#L445
     """
+    assert a.dim() == 3 and b.dim() == 3, "Input tensors must be 3D (batch, num_atoms, 3)"
+
     if weights is None:
         weights = torch.ones(a.shape[:-1], device=a.device, dtype=a.dtype)
     weights = weights / weights.sum(dim=-1, keepdim=True)  # normalize weights
