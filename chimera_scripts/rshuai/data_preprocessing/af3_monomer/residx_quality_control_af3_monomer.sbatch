@@ -26,4 +26,4 @@ python3 allatom_design/data/preprocessing/residx_quality_control_af3_monomer.py 
     --af3-mmcif-dir /scratch/hielab/talal/datasets/af3_pdb/${PHASE}_mmcifs \
     --save-dir /scratch/hielab/rshuai/datasets/af3_pdb_monomer/${PHASE}_mmcifs \
     --out-list-name ${PHASE}_pdb_keys.list \
-    --max-threads ${SLURM_CPUS_PER_TASK}
+    --max-threads ${SLURM_CPUS_ON_NODE}

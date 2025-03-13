@@ -22,7 +22,6 @@ from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import trim_to_max_len
-from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.datasets.sd_dataset import SDDataset
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.eval.folding_utils import get_struct_pred_model
@@ -100,14 +99,16 @@ def main(cfg: DictConfig):
     pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints")
     for sd_ckpt in pbar:
         match = pattern.search(Path(sd_ckpt).name)
-        epoch = int(match.group(1))
-        global_step = torch.load(sd_ckpt).get('global_step')
-
+        global_step, epoch = int(match.group(1)), int(match.group(2))  # extract step and epoch from checkpoint name
         pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
 
         # Skip if global_step is before start_step
         if (cfg.start_step is not None) and (global_step < cfg.start_step):
             continue
+
+        # Create output directory for this epoch
+        log_dir_i = f"{log_dir}/step_{global_step}_epoch_{epoch}"
+        Path(log_dir_i).mkdir(parents=True, exist_ok=True)
 
         # Load denoiser model and dataset
         lit_sd_model = LitSeqDenoiser.load_from_checkpoint(sd_ckpt).eval()
@@ -115,7 +116,7 @@ def main(cfg: DictConfig):
             lit_sd_model.cfg.data.update({k: v for k, v in cfg.data.items() if v is not None})  # override data config where specified
 
         # Load dataset based on model config
-        dataset = SDDataset(phase="eval", evaluation_mode= True, **lit_sd_model.cfg.data)
+        dataset = SDDataset(phase="eval", evaluation_mode=True, **lit_sd_model.cfg.data)
         val_dataloader = DataLoader(dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True, shuffle=False, drop_last=False)
         dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
 
@@ -234,18 +235,17 @@ def main(cfg: DictConfig):
         ### Co-design self-consistency eval ###
         if cfg.run_codes_sc:
             print("Running co-design self-consistency evaluation...")
-            codes_sc_dir = f"{log_dir}/codesign_sc"
-            sampled_pdbs_dir = f"{codes_sc_dir}/sampled_pdbs"
-            Path(sampled_pdbs_dir).mkdir(parents=True, exist_ok=True)
+            codes_sc_dir_i = f"{log_dir_i}/codesign_sc"
+            sampled_pdbs_dir_i = f"{codes_sc_dir_i}/sampled_pdbs"
+            Path(sampled_pdbs_dir_i).mkdir(parents=True, exist_ok=True)
 
             for S in cfg.num_steps_list:
                 print(f"Evaluating with num denoising steps S={S}")
                 cfg.timestep_schedule.num_steps = S
                 t_seq = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
 
-                # We set the seed for the same batch each time
-                g = torch.Generator()
-                g.manual_seed(cfg.seed)
+                # We set the seed to get the same batches each checkpoint
+                L.seed_everything(cfg.seed)
 
                 val_dataloader = DataLoader(
                     dataset,
@@ -253,8 +253,7 @@ def main(cfg: DictConfig):
                     num_workers=cfg.num_workers,
                     pin_memory=True,
                     shuffle=True,
-                    drop_last=False,
-                    generator=g
+                    drop_last=False
                 )
 
                 pdbs = []
@@ -267,7 +266,6 @@ def main(cfg: DictConfig):
 
                     B = x.shape[0]
                     cond_labels_in = {}
-                    cond_labels_in["crop_aug"] = batch["cond_labels_in"]["crop_aug"].to(device)  # we provide whether this example was cropped
 
                     # Define timesteps for sequence and sidechain diffusion
                     timesteps = t_seq[None].expand(B, -1).to(device)
@@ -303,7 +301,7 @@ def main(cfg: DictConfig):
                     }
 
                     # Save samples
-                    filenames = [f"{sampled_pdbs_dir}/epoch_{epoch}_S{S}_batch_{bi}_sample_{i}.pdb" for i in range(B)]
+                    filenames = [f"{sampled_pdbs_dir_i}/sample_{batch['pdb_key'][i]}_{i + bi * cfg.batch_size}.pdb" for i in range(B)]
                     SeqDenoiser.save_samples_to_pdb(samples, filenames)
                     pdbs.extend(filenames)
 
@@ -312,10 +310,10 @@ def main(cfg: DictConfig):
 
                 codes_sc_info = eval_metrics.run_self_consistency_eval(
                     pdbs,
-                    None, None,  # no MPNN model for co-design eval
+                    None,  # no MPNN model for co-design eval
                     struct_pred_model,
                     device,
-                    out_dir=codes_sc_dir,
+                    out_dir=codes_sc_dir_i,
                     eval_codesign=True,
                     temp_dir=f"{cfg.out_dir}/tmp")
 
