@@ -63,8 +63,8 @@ class UDiTDenoiser(BaseAtomDenoiser):
 
 
     def forward(self,
-                x_scaffold: TensorType["b n 33 3", float],
-                scaffold_mask: TensorType["b n 37 3", float],
+                x_motif: TensorType["b n 33 3", float],
+                motif_mask: TensorType["b n 37 3", float],
                 aatype_scaffold: TensorType["b n", int],
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],

@@ -607,7 +607,7 @@ def process_single_pdb(data, sm: Optional["ScaffoldManager"] = None):
     example['chain_ids'] = data['chain_ids']
 
     # Get scaffolding input with scaffold manager
-    example["x_scaffold"], example["scaffold_mask"], example["aatype_scaffold"], example["x"] = get_scaffolding_inputs(sm, example)
+    example["x_motif"], example["motif_mask"], example["aatype_scaffold"], example["x"] = get_scaffolding_inputs(sm, example)
 
     # Construct conditioning inputs
     cond_labels_in = {}
@@ -642,17 +642,17 @@ def get_scaffolding_inputs(sm: Optional["ScaffoldManager"],
     """
     x_recentered = example["x"]
     if sm is None:
-        x_scaffold = torch.zeros_like(example["x"])
-        scaffold_mask = torch.zeros_like(example["atom_mask"])
+        x_motif = torch.zeros_like(example["x"])
+        motif_mask = torch.zeros_like(example["atom_mask"])
         aatype_scaffold = torch.full_like(example["residue_index"], fill_value=rc.restype_order_with_x["X"])
     else:
         sm_outputs = sm(example)
-        x_scaffold = sm_outputs["x_scaffold"]
-        scaffold_mask = sm_outputs["scaffold_mask"]
+        x_motif = sm_outputs["x_motif"]
+        motif_mask = sm_outputs["motif_mask"]
         aatype_scaffold = sm_outputs["aatype_scaffold"]
         x_recentered = sm_outputs["x_recentered"]
 
-    return x_scaffold, scaffold_mask, aatype_scaffold, x_recentered
+    return x_motif, motif_mask, aatype_scaffold, x_recentered
 
 
 def get_length_from_pdb(pdb_file: str) -> Tuple[str, int]:

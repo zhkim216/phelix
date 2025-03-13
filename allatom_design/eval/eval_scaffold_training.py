@@ -175,7 +175,7 @@ def main(cfg: DictConfig):
                 # Pad each record, then stack
                 max_len = max(b["x"].shape[0] for b in batch_list)
                 model_input_keys = ["x", "seq_mask", "atom_mask", "missing_atom_mask", "residue_index",
-                                    "x_scaffold", "scaffold_mask", "aatype_scaffold"]
+                                    "x_motif", "motif_mask", "aatype_scaffold"]
                 batch_list = [pad_to_max_len({k: b[k].unsqueeze(0) for k in model_input_keys}, max_len) for b in batch_list]
                 batch_dict = {k: torch.cat([b[k] for b in batch_list], dim=0) for k in model_input_keys}
 
@@ -185,11 +185,11 @@ def main(cfg: DictConfig):
                 # Save motifs
                 motif_samples = {
                     "aatype": batch_dict["aatype_scaffold"],
-                    "atom_positions": batch_dict["x_scaffold"],
-                    "atom_mask": batch_dict["scaffold_mask"],
+                    "atom_positions": batch_dict["x_motif"],
+                    "atom_mask": batch_dict["motif_mask"],
                     "residue_index": batch_dict["residue_index"],
                     "chain_index": torch.zeros_like(batch_dict["residue_index"]),
-                    "b_factors": torch.ones_like(batch_dict["scaffold_mask"], dtype=torch.float32),
+                    "b_factors": torch.ones_like(batch_dict["motif_mask"], dtype=torch.float32),
                 }
                 feats_cpu = {k: v.cpu() for k, v in motif_samples.items()}
                 motif_filenames = []
@@ -210,8 +210,8 @@ def main(cfg: DictConfig):
 
                 # Build scaffold inputs
                 scaffold_inputs = {
-                    "x_scaffold": batch_dict["x_scaffold"],
-                    "scaffold_mask": batch_dict["scaffold_mask"],
+                    "x_motif": batch_dict["x_motif"],
+                    "motif_mask": batch_dict["motif_mask"],
                     "aatype_scaffold": batch_dict["aatype_scaffold"],
                 }
 
@@ -245,8 +245,8 @@ def main(cfg: DictConfig):
                     out_filenames.append(pdb_path)
 
                     # add motif info
-                    motif_info[pdb_path] = {"motif_mask": batch_dict["scaffold_mask"][j].cpu(),
-                                            "x_motif": batch_dict["x_scaffold"][j].cpu()}
+                    motif_info[pdb_path] = {"motif_mask": batch_dict["motif_mask"][j].cpu(),
+                                            "x_motif": batch_dict["x_motif"][j].cpu()}
                     length_j = batch_dict["seq_mask"][j].sum().long().item()
                     motif_info[pdb_path] = {k: v[:length_j].clone() for k, v in motif_info[pdb_path].items()}  # get rid of padding
 
@@ -304,7 +304,10 @@ def main(cfg: DictConfig):
                 if cfg.nntm_dataset is not None:
                     sample_metrics["nntm"].append(all_metrics[pdb]["nntm_info"])
 
-            metrics = {f"scaffold_gen/S{cfg.num_steps}/{scaffold_conditioning_type}/{k}": np.mean(v) for k, v in sample_metrics.items()}
+            # === Calculate metrics to log === #
+            metrics = {}
+            metrics.update({f"scaffold_gen/mean/{scaffold_conditioning_type}/{k}": np.mean(v) for k, v in sample_metrics.items()})
+            metrics.update({f"scaffold_gen/median/{scaffold_conditioning_type}/{k}": np.median(v) for k, v in sample_metrics.items()})
 
             if not cfg.no_wandb:
                 metrics["trainer/global_step"] = global_step
