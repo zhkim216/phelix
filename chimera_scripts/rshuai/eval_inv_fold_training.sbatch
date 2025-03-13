@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c2_aasd0_eval_inv_fold_nl0.0
+#SBATCH --job-name=eval_inv_fold_nl0.0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -25,7 +25,8 @@ AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Dataset paths
 # PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
+# PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
+PDB_PATH=/scratch/hielab/rshuai/datasets/af3_pdb_monomer
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -33,13 +34,14 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Model to evaluate
-MODEL_NAME=c2_aasd0
+MODEL_NAME=c6_aasd0
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
+NOISE_LABELS=0.0
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_inv_fold_nl0.0
-GROUP=chimera_c2
+EXP_NAME=${MODEL_NAME}_eval_inv_fold_nl${NOISE_LABELS}
+GROUP=chimera_c6
 
 # Run training script
 cd ${BASE_DIR}
@@ -48,7 +50,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
-    num_workers=${SLURM_CPUS_PER_TASK} \
+    num_workers=${SLURM_CPUS_ON_NODE} \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     struct_pred_cfg.model_name=esmfold \
@@ -57,10 +59,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     batch_size=64 \
     run_seq_recovery=false \
     run_codes_sc=true \
-    num_codes_sc_batches=1 \
+    num_codes_sc_batches=4 \
     temperature=0.1 \
-    noise_labels=0 \
-    num_steps_list=[20] \
+    noise_labels=${NOISE_LABELS} \
+    num_steps_list=[50] \
     data.pdb_path=${PDB_PATH} \
-    subset_length_range=[64,512] \
+    subset_length_range=[32,256] \
     hydra.run.dir=${HYDRA_DIR}
