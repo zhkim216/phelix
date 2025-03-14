@@ -7,21 +7,10 @@ from omegaconf import DictConfig
 from allatom_design.data.pdb_utils import *
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
-from allatom_design.interpolants.sd_interpolants.mar_interpolant import MAR
-from allatom_design.interpolants.sd_interpolants.sd_interpolant import \
-    SDInterpolant
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     DiTDenoiser
-from allatom_design.model.atom_denoiser.denoisers.esm_dit_denoiser import \
-    ESMDiTDenoiser
-from allatom_design.model.atom_denoiser.denoisers.mpnn_dit_denoiser import \
-    MPNNDiTDenoiser
-from allatom_design.model.atom_denoiser.denoisers.triangle_dit_denoiser import \
-    TriangleDiTDenoiser
-from allatom_design.model.atom_denoiser.denoisers.u_dit_denoiser import \
-    UDiTDenoiser
 
 
 class AtomDenoiser(nn.Module):
@@ -44,6 +33,7 @@ class AtomDenoiser(nn.Module):
     def setup(self):
         # Initialize denoiser pre-trained weights if needed
         self.denoiser.setup()
+
 
     def forward(self,
                 batch: Dict[str, TensorType["b ..."]],
@@ -335,13 +325,5 @@ def get_denoiser(cfg: DictConfig,
     """
     if cfg.name == "dit":
         return DiTDenoiser(cfg, sigma_data)
-    elif cfg.name == "u_dit":
-        return UDiTDenoiser(cfg, sigma_data)
-    elif cfg.name == "esm_dit":
-        return ESMDiTDenoiser(cfg, sigma_data)
-    elif cfg.name == "triangle_dit":
-        return TriangleDiTDenoiser(cfg, sigma_data)
-    elif cfg.name == "mpnn_dit":
-        return MPNNDiTDenoiser(cfg, sigma_data)
     else:
         raise ValueError(f"Unknown denoiser: {cfg.name}")
