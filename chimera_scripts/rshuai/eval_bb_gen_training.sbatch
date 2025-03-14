@@ -18,7 +18,10 @@ conda activate rshuai_allatom_design
 BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
 MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
+
+# FAMPNN options
 FAMPNN_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
+NOISE_LABELS=0.0
 
 # Set HF transformers cache
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -35,9 +38,8 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Denoiser path
-MODEL_NAME=u1_a1_phema
+MODEL_NAME=u1_a7
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
-NOISE_LABELS=0.0
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
@@ -57,7 +59,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     start_step=0 \
-    eval_every_n_ckpts=1 \
+    eval_every_n_ckpts=2 \
     batch_size=64 \
     nntm_dataset=${NNTM_DATASET} \
     length_range=[32,256] \
