@@ -13,8 +13,7 @@ from torchtyping import TensorType
 import allatom_design.data.residue_constants as rc
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
 from allatom_design.data import life
-from allatom_design.data.data import (cat_bb_scn, get_rc_tensor,
-                                      transform_sidechain_frame)
+from allatom_design.data.data import get_rc_tensor, transform_sidechain_frame
 from allatom_design.eval import sampling_utils
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant

@@ -14,7 +14,6 @@ from torch.utils.data import DataLoader
 from torchtyping import TensorType
 from tqdm import tqdm
 
-import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (FEATURES_LONG,
                                       center_random_augmentation,
@@ -47,7 +46,7 @@ class LitSDDataModule(L.LightningDataModule):
             pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys.csv"
 
             if not Path(pdb_keys_csv).exists():
-                # Backwards compatibility; load in PDB keys from list and save to CSV format
+                # Backwards compatibility; load in PDB keys from list and save to a CSV format that annotates lengths
                 pdb_keys_file = f"{self.pdb_path}/{phase}_pdb_keys.list"
                 with open(pdb_keys_file) as f:
                     pdb_keys = np.array(f.read().splitlines())
@@ -91,7 +90,6 @@ class LitSDDataModule(L.LightningDataModule):
         Called each epoch if reload_dataloaders_every_n_epochs > 0.
         """
         val_loader = self.get_dataloader(phase="eval")
-
         return val_loader
 
 
@@ -144,8 +142,6 @@ class SDDataset(data.Dataset):
         fixed_size: int,
         phase: str,
         overfit: int = -1,
-        short_epoch: bool = False,
-        n_random_subset: Optional[int] = None,
         se3_augment: bool = True,
         translation_scale: float = 1.0,
         overwrite_cache: bool = False,
@@ -181,29 +177,29 @@ class SDDataset(data.Dataset):
         self.evaluation_mode = evaluation_mode
         self.cluster_sample = cluster_sample
 
-        # Require cluster sampling for training on AF3 dataset
-        if pdb_path.endswith("af3_pdb") or pdb_path.endswith("af3_pdb_monomer"):
-            assert self.cluster_sample, "Cluster sampling must be enabled for AF3 dataset"
-        else:
-            assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
-
         # Read in PDB keys
         self.pdb_keys_csv = f"{self.pdb_path}/{phase}_pdb_keys.csv"
         self.pdb_keys_df = pd.read_csv(self.pdb_keys_csv)
 
+        # Subset to length range if specified
         if subset_length_range is not None:
             self.subset_to_length_range(*self.subset_length_range)
 
         # For training on AF3 datasets, we cluster sample the PDB keys
-        if self.cluster_sample:
+        if Path(pdb_path).stem in ["af3_pdb", "af3_pdb_monomer"]:
+            # require cluster sampling for training on AF3 dataset
+            assert self.cluster_sample, "Cluster sampling must be enabled for AF3 dataset"
+
             print(f"Cluster-resampling dataset...")
             self._cluster_sample_pdb_keys(phase=phase)
+        else:
+            assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
 
         # For efficiency set fixed size to max length in the eval or test dataset
         if self.evaluation_mode:
             self.fixed_size = self._get_max_len()
 
-        # Subsetting and overfitting
+        # For testing overfitting
         if overfit > 0 and phase == "train":
             # Overfit on a subset of the data
             n_data = len(self.pdb_keys_df)
@@ -211,23 +207,95 @@ class SDDataset(data.Dataset):
             indices = np.random.choice(n_data, overfit, replace=False).repeat(n_data // overfit)
             self.pdb_keys_df = self.pdb_keys_df.iloc[indices]
 
-        if short_epoch:
-            self.pdb_keys_df = self.pdb_keys_df.sample(min(500, len(self.pdb_keys_df)), replace=False)
-
-        if n_random_subset is not None:
-            self.pdb_keys_df = self.pdb_keys_df.sample(min(n_random_subset, len(self.pdb_keys_df)), replace=False)
-
 
     def __len__(self):
         return len(self.pdb_keys_df)
+
 
     def __getitem__(self, idx):
         pdb_key = self.pdb_keys_df["pdb_key"].iloc[idx]
         data = self.get_item(pdb_key)
         return data
 
-    def _multimer_contiguous_crop(self, chain_1_len: int, chain_2_len: int) -> TensorType["n", bool]:
 
+    def get_item(self, pdb_key):
+        data_file = self._get_data_file(pdb_key)
+        data = torch.load(data_file, weights_only=True)
+
+        example = {}
+
+        # Use raw coordinates
+        x = data["all_atom_positions"]  # [n, a, 3]
+        atom_mask = data["all_atom_mask"]  # [n, a]
+        seq_mask = data["seq_mask"]  # [n]
+
+        x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
+
+        # Center on CA, and if enabled, apply random rotation / translation
+        x = center_random_augmentation(x, seq_mask, atom_mask, translation_scale=self.translation_scale, apply_random_augmentation=self.se3_augment)
+
+        # per-channel mask for x, used for loss.
+        # We only mask out missing atoms from PDB files, not ghost atoms.
+        x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
+
+        # Construct example
+        example["x"] = x * atom_mask[..., None]
+        example["seq_mask"] = seq_mask
+        example["x_mask"] = x_mask
+        example["residue_index"] = data["residue_index"]
+        example["chain_index"] = data["chain_index"]
+        example["aatype"] = data["aatype"]  # not one-hot encoded
+        example["ghost_atom_mask"] = data["ghost_atom_mask"]
+        example["missing_atom_mask"] = data["missing_atom_mask"]
+        example["atom_mask"] = atom_mask
+        example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
+        example["interface_residue_mask"] = data["interface_residue_mask"]
+        example["chain_ids"] = data["chain_ids"]
+
+        # Crop example to fixed size
+        start_idx = None
+        multimer_crop_mask = None
+        if not self.evaluation_mode:
+            multimer_crop_mask, start_idx = self._crop_examples(example, multimer_crop_mask, start_idx)
+
+        # Make fixed size example
+        fixed_size_example = {}
+        for k, v in example.items():
+            fixed_size_example[k] = make_fixed_size_1d(v, fixed_size=self.fixed_size, start_idx=start_idx, multimer_crop_mask=multimer_crop_mask)
+
+        # Convert data types
+        example_out = {}
+        for k, v in fixed_size_example.items():
+            if k in FEATURES_LONG:
+                example_out[k] = v.long()
+            else:
+                example_out[k] = v.float()
+
+        # Add pdb_key
+        example_out["pdb_key"] = pdb_key
+
+        return example_out
+
+    def _crop_examples(self, example, multimer_crop_mask, start_idx):
+        # Calculate random cropping start index
+        orig_size = example["x"].shape[0]
+        extra_len = orig_size - self.fixed_size
+        if extra_len > 0:
+            if example['chain_ids'] is not None and len(example['chain_ids']) > 1:
+                if torch.rand(1) > self.spatial_crop_ratio:
+                    chain_1_len, chain_2_len = torch.sum(example['chain_index'] == 0), torch.sum(example['chain_index'] == 1)
+                    multimer_crop_mask = self._multimer_contiguous_crop(chain_1_len, chain_2_len)
+                else:
+                    multimer_crop_mask = self._multimer_spatial_crop(example['x'], example['interface_residue_mask'])
+            else:
+                start_idx = np.random.choice(np.arange(extra_len + 1))
+
+        return multimer_crop_mask, start_idx
+
+    def _multimer_contiguous_crop(self, chain_1_len: int, chain_2_len: int) -> TensorType["n", bool]:
+        """
+        AF3 multichain contiguous cropping implementation.
+        """
         #init crop masks w/ all false
         total_len = chain_1_len + chain_2_len
         crop_mask = torch.full((total_len,), False)
@@ -251,7 +319,9 @@ class SDDataset(data.Dataset):
         return crop_mask
 
     def _multimer_spatial_crop(self, x: TensorType["n a 3", bool], interface_residue_mask: TensorType["n", bool]):
-
+        """
+        AF3 multichain spatial cropping implementation.
+        """
         total_len = x.shape[0]
         crop_mask = torch.full((total_len,), False)  # Initialize crop mask with all False
         x_ca = x[:, 1, :]  # Get C-alpha positions of all residues
@@ -274,93 +344,10 @@ class SDDataset(data.Dataset):
         return crop_mask
 
 
-    def get_item(self, pdb_key):
-        data_file = self._get_data_file(pdb_key)
-        data = torch.load(data_file, weights_only=True)
-
-        example = {}
-
-        # Use raw coordinates
-        x = data["all_atom_positions"]  # [n, a, 3]
-        atom_mask = data["all_atom_mask"]  # [n, a]
-        seq_mask = data["seq_mask"]  # [n]
-
-        x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
-
-        if self.se3_augment:
-            # Center on CA and apply random rotation
-            x = center_random_augmentation(x, seq_mask, atom_mask, translation_scale=self.translation_scale)
-
-        # per-channel mask for x, used for loss.
-        # We only mask out missing atoms from PDB files, not ghost atoms.
-        x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
-
-        # Construct example
-        example["x"] = x * atom_mask[..., None]
-        example["seq_mask"] = seq_mask
-        example["x_mask"] = x_mask
-        example["residue_index"] = data["residue_index"]
-        example["chain_index"] = data["chain_index"]
-        example["aatype"] = data["aatype"]  # not one-hot encoded
-        example["ghost_atom_mask"] = data["ghost_atom_mask"]
-        example["missing_atom_mask"] = data["missing_atom_mask"]
-        example["atom_mask"] = atom_mask
-        example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
-        example['interface_residue_mask'] = data['interface_residue_mask']
-        example['chain_ids'] = data['chain_ids']
-
-        # Construct conditioning inputs
-        cond_labels_in = {}
-
-        # Condition on cropping
-        cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]
-
-        #Disable cropping for specified datasets
-        start_idx = None
-        multimer_crop_mask = None
-        if not self.evaluation_mode:
-            multimer_crop_mask, start_idx, cond_labels_in = self._crop_examples(example, cond_labels_in, multimer_crop_mask, start_idx)
-
-        # Make fixed size example
-        fixed_size_example = {}
-
-        for k, v in example.items():
-            fixed_size_example[k] = make_fixed_size_1d(v, fixed_size=self.fixed_size, start_idx=start_idx, multimer_crop_mask=multimer_crop_mask)
-
-        # Convert data types
-        example_out = {}
-        for k, v in fixed_size_example.items():
-            if k in FEATURES_LONG:
-                example_out[k] = v.long()
-            else:
-                example_out[k] = v.float()
-
-        # Add pdb_key
-        example_out["pdb_key"] = pdb_key
-
-        # Add conditioning labels
-        example_out["cond_labels_in"] = cond_labels_in
-
-        return example_out
-
-    def _crop_examples(self, example, cond_labels_in, multimer_crop_mask, start_idx):
-        # Calculate random cropping start index
-        orig_size = example["x"].shape[0]
-        extra_len = orig_size - self.fixed_size
-        if extra_len > 0:
-            if example['chain_ids'] is not None and len(example['chain_ids']) > 1:
-                if torch.rand(1) > self.spatial_crop_ratio:
-                    chain_1_len, chain_2_len = torch.sum(example['chain_index'] == 0), torch.sum(example['chain_index'] == 1)
-                    multimer_crop_mask = self._multimer_contiguous_crop(chain_1_len, chain_2_len)
-                else:
-                    multimer_crop_mask = self._multimer_spatial_crop(example['x'], example['interface_residue_mask'])
-            else:
-                start_idx = np.random.choice(np.arange(extra_len + 1))
-            cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["CROPPED"]
-
-        return multimer_crop_mask, start_idx, cond_labels_in
-
     def _cluster_sample_pdb_keys(self, phase: str):
+        """
+        Cluster sample the PDB keys to ensure that only one PDB key is selected from each cluster.
+        """
         if phase == "train":
             # randomly select one PDB key from each cluster
             print(f"Number of PDB keys before cluster sampling: {len(self.pdb_keys_df)}")
@@ -440,13 +427,6 @@ def compute_scale_factors(train_dataloader: DataLoader,
         x_scn = x[..., rc.non_bb_idxs, :]
         scn_mask = mask[..., rc.non_bb_idxs, :]
 
-        ### Center sidechain on CA
-        # x_scn = x_scn - x[..., 1:2, :]
-        # scn_missing_atom_mask = batch["missing_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are missing
-        # x_scn = torch.where(scn_missing_atom_mask[..., None].bool(), 0, x_scn)  # fill missing atoms with zeroes
-        # scn_ghost_atom_mask = batch["ghost_atom_mask"][..., rc.non_bb_idxs]  # 1 for atoms that are not in the residue type
-        # x_scn = torch.where(scn_ghost_atom_mask[..., None].bool(), 0, x_scn)  # fill ghost atoms with zeroes
-
         ### Transform sidechains to local coordinates
         x_scn, bb_frames_exists = transform_sidechain_frame(x_scn,
                                                             x[..., rc.bb_idxs, :],
@@ -474,6 +454,7 @@ def compute_scale_factors(train_dataloader: DataLoader,
     mean_scn, std_scn = xs_scn.mean().item(), xs_scn.std().item()
 
     return {"bb": (mean_bb, std_bb), "scn": (mean_scn, std_scn)}
+
 
 def get_pdb_data_file(pdb_path: str, phase: str, pdb_key: str) -> str:
     if pdb_path.endswith("ingraham_cath_dataset"):  # ingraham splits
@@ -511,7 +492,7 @@ def process_pdb_key(args):
 
     #specific to multimeric af3 dataset
     chain_ids_override = None
-    if pdb_path.endswith("af3_pdb"):
+    if Path(pdb_path).stem == "af3_pdb":
         chain_ids_override = pdb_key.split('_')[1]
 
     example = load_feats_from_pdb(pdb_data_file, chain_ids_override=chain_ids_override, max_conformers=1)
@@ -531,12 +512,12 @@ def get_lengths(pdb_keys: List[str], cache_dir: str) -> Dict[str, int]:
     num_workers = 8
     print(f"Computing sequence lengths using {num_workers} workers...")
     parallel = Parallel(n_jobs=num_workers, verbose=0)
-    jobs = [delayed(_get_seq_length)(pdb_key, cache_dir) for pdb_key in pdb_keys]
+    jobs = [delayed(_get_seq_length_from_cached)(pdb_key, cache_dir) for pdb_key in pdb_keys]
     results = parallel(tqdm(jobs, desc="Getting lengths", total=len(jobs)))
     return dict(results)
 
 
-def _get_seq_length(pdb_key: str, cache_dir: str) -> Tuple[str, int]:
+def _get_seq_length_from_cached(pdb_key: str, cache_dir: str) -> Tuple[str, int]:
     """
     Helper function for parallel processing of sequence lengths.
     Args:
@@ -588,4 +569,3 @@ def cached_example_to_pdb(pt_file: str, out_pdb_file: str, mode: str = "aa", con
         mode=mode,
         conect=conect,
     )
-

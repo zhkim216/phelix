@@ -363,7 +363,7 @@ class ADDataset(data.Dataset):
 
         x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
 
-        # Center on CA and apply random rotation (if enabled)
+        # Center on CA, and if enabled, apply random rotation / translation
         x = center_random_augmentation(x, seq_mask, atom_mask, translation_scale=self.translation_scale, apply_random_augmentation=self.se3_augment)
 
         # per-channel mask for x, used for loss.

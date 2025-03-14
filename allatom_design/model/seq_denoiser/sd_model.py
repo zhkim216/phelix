@@ -30,7 +30,6 @@ class SeqDenoiser(nn.Module):
     def __init__(self, cfg: DictConfig):
         super().__init__()
         self.cfg = cfg
-
         self.task = cfg.task
 
         # Data scaling parameters
@@ -72,13 +71,12 @@ class SeqDenoiser(nn.Module):
         - x: TensorType["b n a 3", float]
         - residue_index: TensorType["b n", int]
         - seq_mask: TensorType["b n", float]
-        - cond_labels_in: Dict[str, TensorType["b", int]]
         """
         # Copy batch to avoid modifying the original
         batch = copy.deepcopy(batch)
         outputs = {}
 
-        ## Apply interpolant to noise the inputs ##
+        ## Apply interpolant to mask the inputs ##
         if not skip_interpolant:
             interpolant_out = self.interpolant(batch, t)
             batch["x_noised"] = interpolant_out["x_noised"]
@@ -115,7 +113,6 @@ class SeqDenoiser(nn.Module):
                                         batch["residue_index"], batch['chain_index'],
                                         batch["seq_mask"], batch["missing_atom_mask"],
                                         batch["scn_mlm_mask"],
-                                        cond_labels_in=batch["cond_labels_in"],
                                         aux_inputs=aux_inputs)
 
         # Additional outputs for computing loss
@@ -200,7 +197,6 @@ class SeqDenoiser(nn.Module):
                        missing_atom_mask: TensorType["b n 37", float],  # 1 where atoms are missing
                        residue_index: TensorType["b n", int],
                        chain_index: TensorType["b n", int],
-                       cond_labels: Dict[str, TensorType["b", int]],
                        scn_override_mask: Optional[TensorType["b n", int]] = None,
                        aatype_override_mask: Optional[TensorType["b n", int]] = None,
                        scd_inputs: Dict[str, Any] = {}):
@@ -254,7 +250,6 @@ class SeqDenoiser(nn.Module):
                               seq_mask=seq_mask,
                               missing_atom_mask=missing_atom_mask,
                               chain_encoding=chain_index,
-                              cond_labels_in=cond_labels,
                               aux_inputs=aux_inputs,
                               is_sampling=True)
 
@@ -282,7 +277,6 @@ class SeqDenoiser(nn.Module):
                missing_atom_mask: TensorType["b n a 3", float],  # 1 where atoms are missing
                residue_index: TensorType["b n", int],
                chain_index:  TensorType["b n", int],
-               cond_labels: Dict[str, TensorType["b", int]],
                timesteps: TensorType["b s+1", float],  # timesteps for t_seq
                temperature: float,  # 0.0 for argmax / greedy sampling
                aatype_decoding_order_mode: str,
@@ -373,7 +367,6 @@ class SeqDenoiser(nn.Module):
                               seq_mask=seq_mask,
                               missing_atom_mask=missing_atom_mask,
                               chain_encoding=chain_index,
-                              cond_labels_in=cond_labels,
                               aux_inputs=aux_inputs,
                               is_sampling=True)
 
@@ -388,7 +381,7 @@ class SeqDenoiser(nn.Module):
 
         if torch.any((aatype_override_mask - scn_override_mask) > 0) and not seq_only:
             # If we have more sequence than sidechains, pack all sidechains to catch up to aatype_override_mask
-            xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index, cond_labels, scn_override_mask, aatype_override_mask, scd_inputs)
+            xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index, scn_override_mask, aatype_override_mask, scd_inputs)
             psce_t = aux_preds_pack["psce"]  # reflect confidence in packed sidechains
             scn_mlm_mask = seq_mlm_mask.clone()
 
@@ -457,7 +450,7 @@ class SeqDenoiser(nn.Module):
 
         if repack_last:
             # Repack the structure after sampling the sequence (ignoring the provided sidechains)
-            xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index, cond_labels,
+            xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index,
                                                         scn_override_mask,  # start from the provided sidechains
                                                         seq_mlm_mask,  # pack to the known sequence
                                                         scd_inputs)

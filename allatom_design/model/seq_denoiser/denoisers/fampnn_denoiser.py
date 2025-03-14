@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -19,7 +19,6 @@ from esm3.esm.models.esmc import ESMC
 from esm3.esm.sdk.api import LogitsConfig
 from esm3.esm.utils.sampling import _BatchedESMProteinTensor
 
-
 ESMC_INFO = {
     "esmc_300m": {"n_layer": 30, "n_channel": 960},
     "esmc_600m": {"n_layer": 36, "n_channel": 1152},
@@ -39,41 +38,7 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         # Sequence encoding: ESM-C
         self.use_esmc = cfg.get("esm", {}).get("use_esmc", False)
         if self.use_esmc:
-            # Load ESM-C model, frozen and in eval mode
-            self.esmc_name = cfg.esm.model_name
-            self.esmc = ESMC.from_pretrained(self.esmc_name, device=torch.device("cpu")).eval()
-            self.vocab = self.esmc.tokenizer.get_vocab()
-            for param in self.esmc.parameters():
-                param.requires_grad = False
-
-            self.esmc_combine = nn.Parameter(torch.zeros(ESMC_INFO[self.esmc_name]["n_layer"] + 1))  # hidden states + last layer embeddings
-            self.esmc_mlp = nn.Sequential(
-                nn.LayerNorm(ESMC_INFO[self.esmc_name]["n_channel"]),
-                nn.Linear(ESMC_INFO[self.esmc_name]["n_channel"], cfg.fampnn.n_channel),
-                nn.ReLU(),
-                nn.Linear(cfg.fampnn.n_channel, cfg.fampnn.n_channel),
-            )
-
-            # Build lookup tables
-            af_to_esm_idx = {}
-            esm_to_af_idx = {}
-
-            for aa, af_idx in rc.restype_order_with_x.items():
-                if aa == "X":
-                    # ESM-C does not use unknowns as mask tokens
-                    token_id = self.esmc.tokenizer.mask_token_id
-                else:
-                    token_id = self.esmc.tokenizer.convert_tokens_to_ids(aa)
-                af_to_esm_idx[af_idx] = token_id
-                esm_to_af_idx[token_id] = af_idx
-
-            self.register_buffer("af_to_esm", torch.zeros(len(af_to_esm_idx), dtype=torch.long, requires_grad=False))
-            for i in range(len(af_to_esm_idx)):
-                self.af_to_esm[i] = af_to_esm_idx[i]
-
-            self.register_buffer("esm_to_af", torch.full((max(esm_to_af_idx.keys()) + 1, ), fill_value=-1, dtype=torch.long, requires_grad=False))
-            for i in esm_to_af_idx.keys():
-                self.esm_to_af[i] = esm_to_af_idx[i]
+            self._setup_esmc(cfg)
 
         # Sequence design model: FAMPNN
         self.seq_design_module = FAMPNN(getattr(cfg, "fampnn", getattr(cfg, "minimpnn", None)))  # backwards compatibility
@@ -91,7 +56,6 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
                 seq_mask: TensorType["b n", float],
                 missing_atom_mask: TensorType["b n a", float],  # 1 denotes missing atoms
                 scn_mlm_mask: TensorType["b n", float],  # denotes masked sidechains
-                cond_labels_in: Dict[str, TensorType["b", int]] = {},
                 aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
                 is_sampling: bool = False,
                 ) -> Tuple[TensorType["b n a 3", float],  # x1 pred
@@ -111,18 +75,7 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         # Sequence encoding
         esmc_embed = None
         if self.use_esmc:
-            # make sure to apply mask
-            with torch.no_grad():
-                protein_tensor = self.af2_to_esmc(aatype_noised, seq_mask)
-                logits_output = self.esmc.logits(protein_tensor, LogitsConfig(sequence=True, return_embeddings=True, return_hidden_states=True))
-            esmc_embed = torch.cat([logits_output.hidden_states, logits_output.embeddings.unsqueeze(0)], dim=0)
-            esmc_embed = esmc_embed[:, :, 1:-1]  # remove CLS (first) and EOS (last, but possibly pad)
-
-            # preprocess ESM sequence embedding
-            esmc_embed = rearrange(esmc_embed, "l b n h -> b n l h")
-            esmc_embed = (self.esmc_combine.softmax(0).unsqueeze(0) @ esmc_embed).squeeze(2)
-            esmc_embed = self.esmc_mlp(esmc_embed)
-            esmc_embed = esmc_embed * seq_mask.unsqueeze(-1)  # zero out padding & EOS of shorter sequences
+            esmc_embed = self.run_esmc(aatype_noised, seq_mask)
 
         # Sequence design
         seq_logits, mpnn_feature_dict = self.seq_design_module(
@@ -221,6 +174,50 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         return aatype_pred, scaled_seq_probs
 
 
+    def _setup_esmc(self, cfg):
+        """
+        Set up the ESM-C model and related components.
+
+        Args:
+            cfg: Configuration object containing ESM-C settings
+        """
+        # Load ESM-C model, frozen and in eval mode
+        self.esmc_name = cfg.esm.model_name
+        self.esmc = ESMC.from_pretrained(self.esmc_name, device=torch.device("cpu")).eval()
+        self.vocab = self.esmc.tokenizer.get_vocab()
+        for param in self.esmc.parameters():
+            param.requires_grad = False
+
+        self.esmc_combine = nn.Parameter(torch.zeros(ESMC_INFO[self.esmc_name]["n_layer"] + 1))  # hidden states + last layer embeddings
+        self.esmc_mlp = nn.Sequential(
+            nn.LayerNorm(ESMC_INFO[self.esmc_name]["n_channel"]),
+            nn.Linear(ESMC_INFO[self.esmc_name]["n_channel"], cfg.fampnn.n_channel),
+            nn.ReLU(),
+            nn.Linear(cfg.fampnn.n_channel, cfg.fampnn.n_channel),
+        )
+
+        # Build lookup tables
+        af_to_esm_idx = {}
+        esm_to_af_idx = {}
+
+        for aa, af_idx in rc.restype_order_with_x.items():
+            if aa == "X":
+                # ESM-C does not use unknowns as mask tokens
+                token_id = self.esmc.tokenizer.mask_token_id
+            else:
+                token_id = self.esmc.tokenizer.convert_tokens_to_ids(aa)
+            af_to_esm_idx[af_idx] = token_id
+            esm_to_af_idx[token_id] = af_idx
+
+        self.register_buffer("af_to_esm", torch.zeros(len(af_to_esm_idx), dtype=torch.long, requires_grad=False))
+        for i in range(len(af_to_esm_idx)):
+            self.af_to_esm[i] = af_to_esm_idx[i]
+
+        self.register_buffer("esm_to_af", torch.full((max(esm_to_af_idx.keys()) + 1, ), fill_value=-1, dtype=torch.long, requires_grad=False))
+        for i in esm_to_af_idx.keys():
+            self.esm_to_af[i] = esm_to_af_idx[i]
+
+
     def af2_to_esmc(self, aatype: TensorType["b n", int], seq_mask: TensorType["b n", float]) -> _BatchedESMProteinTensor:
         esmc_aatype = self.af_to_esm[aatype]
         pad_token = self.esmc.tokenizer.pad_token_id
@@ -233,3 +230,31 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
         esmc_aatype[torch.arange(len(lengths)), lengths + 1] = self.esmc.tokenizer.eos_token_id
 
         return _BatchedESMProteinTensor(esmc_aatype)
+
+    def run_esmc(self,
+                 aatype: TensorType["b n", int],
+                 seq_mask: TensorType["b n", float]) -> TensorType["b n h", float]:
+        """
+        Process amino acid sequence through ESM-C model and return embeddings.
+
+        Args:
+            aatype: Amino acid types in AF2 indexing
+            seq_mask: Sequence mask (1 for valid positions, 0 for padding)
+
+        Returns:
+            esmc_embed: ESM-C embeddings for each residue
+        """
+        with torch.no_grad():
+            protein_tensor = self.af2_to_esmc(aatype, seq_mask)
+            logits_output = self.esmc.logits(protein_tensor, LogitsConfig(sequence=True, return_embeddings=True, return_hidden_states=True))
+
+        esmc_embed = torch.cat([logits_output.hidden_states, logits_output.embeddings.unsqueeze(0)], dim=0)
+        esmc_embed = esmc_embed[:, :, 1:-1]  # remove CLS (first) and EOS (last, but possibly pad)
+
+        # preprocess ESM sequence embedding
+        esmc_embed = rearrange(esmc_embed, "l b n h -> b n l h")
+        esmc_embed = (self.esmc_combine.softmax(0).unsqueeze(0) @ esmc_embed).squeeze(2)
+        esmc_embed = self.esmc_mlp(esmc_embed)
+        esmc_embed = esmc_embed * seq_mask.unsqueeze(-1)  # zero out padding & EOS of shorter sequences
+
+        return esmc_embed
