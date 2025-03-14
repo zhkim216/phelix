@@ -8,7 +8,7 @@ no_wandb: false
 # Inputs
 sd_ckpt:
 
-num_workers: 10
+num_workers: 8
 out_dir: null  # null to save in the model run directory
 overwrite_out_dir: true  # if true, delete existing output directory
 seed: 0

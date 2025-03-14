@@ -1,6 +1,6 @@
 sd_ckpt:
 
-num_workers: 10
+num_workers: 8
 out_dir: null  # null to save in the model run directory
 exp_name: test  # sampling experiment name
 overwrite_out_dir: true  # if true, delete existing output directory

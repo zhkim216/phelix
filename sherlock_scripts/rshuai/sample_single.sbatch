@@ -36,7 +36,7 @@ MODEL_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/b12_aasd6/checkpo
 # Run eval script
 cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/sample_single.py \
-    num_workers=${SLURM_CPUS_PER_TASK} \
+    num_workers=8 \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     hydra.run.dir=${HYDRA_DIR} \
     checkpoint_path=${MODEL_CKPT} \

@@ -8,7 +8,7 @@ group: "debug" # Wandb group name
 no_wandb: false # Disable wandb logging
 overfit: -1 # Number of examples to overfit to, -1 to disable
 cuda: True
-num_workers: 10 # Dataloader num workers
+num_workers: 8 # Dataloader num workers
 out_dir: "out_dir/rl_seq_denoiser"  # Output path for trained models
 
 ckpt_path:
