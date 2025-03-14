@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=c6_aasd1
-#SBATCH -p gpu_batch
-#SBATCH --gpus-per-node=2
-#SBATCH --cpus-per-task=16
+#SBATCH -p gpu_batch,evo_gpu_priority
+#SBATCH --gpus-per-node=4
+#SBATCH --cpus-per-task=32
 #SBATCH --time=120:00:00
 #
 # Send stdout and stderr to logs
@@ -42,7 +42,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.cluster_sample=true \
     data.subset_length_range=[16,9999] \
     train.batch_size=8 \
-    trainer.accumulate_grad_batches=8 \
+    trainer.accumulate_grad_batches=4 \
     train.compile_model=true \
     model.task=allatom_seq_des \
     denoiser=fampnn_denoiser \
@@ -52,6 +52,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.fampnn.n_layers=5 \
     denoiser.confidence_module.enabled=true \
     checkpointing.save_latest_every_n_steps=5000 \
-    trainer.check_val_every_n_epoch=20 \
+    trainer.check_val_every_n_epoch=10 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
