@@ -109,12 +109,12 @@ def run_self_consistency_eval(pdbs: List[str],
         seq_des_model_name = seq_des_model["model_name"]
         if seq_des_model_name == "proteinmpnn":
             mpnn_model, mpnn_cfg = seq_des_model["mpnn_model"], seq_des_model["mpnn_cfg"]
-            mpnn_preds_dict = run_mpnn(mpnn_model, pdb_paths=pdbs, device=device, cfg=mpnn_cfg)
+            mpnn_preds_dict = run_mpnn(mpnn_model, cfg=mpnn_cfg, pdb_paths=pdbs, device=device)
             for pdb, mpnn_preds in mpnn_preds_dict.items():
                 sc_info[pdb]["mpnn_preds"] = mpnn_preds
         elif seq_des_model_name == "fampnn":
             fampnn_model, fampnn_cfg = seq_des_model["fampnn_model"], seq_des_model["fampnn_cfg"]
-            fampnn_preds_dict = run_fampnn(fampnn_model, pdb_paths=pdbs, device=device, cfg=fampnn_cfg)
+            fampnn_preds_dict, _ = run_fampnn(fampnn_model, cfg=fampnn_cfg, pdb_paths=pdbs, device=device)
             for pdb, fampnn_preds in fampnn_preds_dict.items():
                 sc_info[pdb]["fampnn_preds"] = fampnn_preds
 

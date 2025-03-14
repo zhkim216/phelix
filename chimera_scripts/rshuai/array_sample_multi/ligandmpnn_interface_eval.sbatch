@@ -62,7 +62,7 @@ cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/ligandmpnn_eval.py \
     pdb_dir=${PDB_DIR} \
     pdb_key_list=${PDB_KEY_LIST} \
-    fixed_pos_csv=${FIXED_CSV} \
+    pos_constraint_csv=${FIXED_CSV} \
     out_base=${OUT_BASE} \
     method=${METHOD} \
     fraction=${T_SEQ} \
