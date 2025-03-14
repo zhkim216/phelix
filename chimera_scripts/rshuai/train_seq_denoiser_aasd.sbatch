@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c6_aasd0
+#SBATCH --job-name=c6_aasd1
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
@@ -21,7 +21,7 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=c6_aasd0
+EXP_NAME=c6_aasd1
 GROUP=seq_denoiser_c6
 
 # Set cache directories
@@ -47,7 +47,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     model.task=allatom_seq_des \
     denoiser=fampnn_denoiser \
     denoiser.per_residue_eps=true \
-    denoiser.augment_eps=0.3 \
+    denoiser.augment_eps=0.5 \
     denoiser.fampnn.use_gvp=true \
     denoiser.fampnn.n_layers=5 \
     denoiser.confidence_module.enabled=true \

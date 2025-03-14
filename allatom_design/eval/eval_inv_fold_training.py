@@ -176,6 +176,7 @@ def main(cfg: DictConfig):
                         repack_last=cfg.repack_last,
                         psce_threshold=cfg.psce_threshold,
                         noise_labels=cfg.noise_labels,
+                        add_noise=cfg.add_noise,
                         scd_inputs=scd_inputs,
                     )
 
@@ -287,6 +288,7 @@ def main(cfg: DictConfig):
                         repack_last=cfg.repack_last,
                         psce_threshold=cfg.psce_threshold,
                         noise_labels=cfg.noise_labels,
+                        add_noise=cfg.add_noise,
                         scd_inputs=scd_inputs,
                     )
 
