@@ -40,8 +40,6 @@ data:
     cluster_sample: false
     fixed_size: 128
     overfit: ${overfit}
-    short_epoch: false
-    n_random_subset: null
     subset_length_range: null
     se3_augment: true  # randomly rotate and translate data
     translation_scale: 1.0  # scale of the translation augmentation
