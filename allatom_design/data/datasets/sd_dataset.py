@@ -220,37 +220,12 @@ class SDDataset(data.Dataset):
 
     def get_item(self, pdb_key):
         data_file = self._get_data_file(pdb_key)
-        data = torch.load(data_file, weights_only=True)
-
-        example = {}
-
-        # Use raw coordinates
-        x = data["all_atom_positions"]  # [n, a, 3]
-        atom_mask = data["all_atom_mask"]  # [n, a]
-        seq_mask = data["seq_mask"]  # [n]
-
-        x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
+        data = torch.load(data_file, weights_only=True)  # load in cached load_feats_from_pdb() outputs
+        example = process_single_pdb(data, convert_types=False)  # process cached data
 
         # Center on CA, and if enabled, apply random rotation / translation
-        x = center_random_augmentation(x, seq_mask, atom_mask, translation_scale=self.translation_scale, apply_random_augmentation=self.se3_augment)
-
-        # per-channel mask for x, used for loss.
-        # We only mask out missing atoms from PDB files, not ghost atoms.
-        x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
-
-        # Construct example
-        example["x"] = x * atom_mask[..., None]
-        example["seq_mask"] = seq_mask
-        example["x_mask"] = x_mask
-        example["residue_index"] = data["residue_index"]
-        example["chain_index"] = data["chain_index"]
-        example["aatype"] = data["aatype"]  # not one-hot encoded
-        example["ghost_atom_mask"] = data["ghost_atom_mask"]
-        example["missing_atom_mask"] = data["missing_atom_mask"]
-        example["atom_mask"] = atom_mask
-        example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
-        example["interface_residue_mask"] = data["interface_residue_mask"]
-        example["chain_ids"] = data["chain_ids"]
+        example["x"] = center_random_augmentation(example["x"], example["seq_mask"], example["atom_mask"],
+                                                  translation_scale=self.translation_scale, apply_random_augmentation=self.se3_augment)
 
         # Crop example to fixed size
         start_idx = None
@@ -276,6 +251,7 @@ class SDDataset(data.Dataset):
 
         return example_out
 
+
     def _crop_examples(self, example, multimer_crop_mask, start_idx):
         # Calculate random cropping start index
         orig_size = example["x"].shape[0]
@@ -291,6 +267,7 @@ class SDDataset(data.Dataset):
                 start_idx = np.random.choice(np.arange(extra_len + 1))
 
         return multimer_crop_mask, start_idx
+
 
     def _multimer_contiguous_crop(self, chain_1_len: int, chain_2_len: int) -> TensorType["n", bool]:
         """
@@ -317,6 +294,7 @@ class SDDataset(data.Dataset):
             crop_mask[chain_2_crop_start: chain_2_crop_start + chain_2_crop] = True
 
         return crop_mask
+
 
     def _multimer_spatial_crop(self, x: TensorType["n a 3", bool], interface_residue_mask: TensorType["n", bool]):
         """
@@ -381,20 +359,54 @@ class SDDataset(data.Dataset):
         self.pdb_keys_df = self.pdb_keys_df[lengths.between(min_len, max_len)]
 
 
-    @staticmethod
-    def index_into_batch(batch: Dict[str, torch.Tensor], idxs: List) -> Dict[str, torch.Tensor]:
-        """
-        Helper method to index into a batch of data, because batch may contain nested dictionaries.
-        """
-        if isinstance(batch, dict):
-            return {key: SDDataset.index_into_batch(value, idxs) for key, value in batch.items()}
-        elif isinstance(batch, torch.Tensor):
-            return batch[idxs]
-        elif isinstance(batch, List):
-            return [batch[i] for i in idxs]
-        else:
-            data_type = type(batch)
-            raise ValueError(f"Unsupported data type {data_type} in batch. Expected a dict or torch.Tensor.")
+def process_single_pdb(data, convert_types=True):
+    """
+    Process raw PDB data into a standardized format.
+
+    Args:
+        data: Dictionary containing PDB data with keys like "all_atom_positions", "all_atom_mask", etc.
+        convert_types: Whether to convert data types (float/long) based on FEATURES_LONG
+
+    Returns:
+        Dictionary with processed data
+    """
+    example = {}
+
+    # Use raw coordinates
+    x = data["all_atom_positions"]  # [n, a, 3]
+    atom_mask = data["all_atom_mask"]  # [n, a]
+    seq_mask = data["seq_mask"]  # [n]
+    x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
+
+    # per-channel mask for x, used for loss.
+    # We only mask out missing atoms from PDB files, not ghost atoms.
+    x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
+
+    # Construct example
+    example["x"] = x * atom_mask[..., None]
+    example["seq_mask"] = seq_mask
+    example["x_mask"] = x_mask
+    example["residue_index"] = data["residue_index"]
+    example["chain_index"] = data["chain_index"]
+    example["aatype"] = data["aatype"]  # not one-hot encoded
+    example["ghost_atom_mask"] = data["ghost_atom_mask"]
+    example["missing_atom_mask"] = data["missing_atom_mask"]
+    example["atom_mask"] = atom_mask
+    example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
+    example["interface_residue_mask"] = data["interface_residue_mask"]
+    example["chain_ids"] = data["chain_ids"]
+
+    # Convert data types
+    if convert_types:
+        example_out = {}
+        for k, v in example.items():
+            if k in FEATURES_LONG:
+                example_out[k] = v.long()
+            else:
+                example_out[k] = v.float()
+        return example_out
+
+    return example
 
 
 def compute_scale_factors(train_dataloader: DataLoader,
@@ -569,3 +581,4 @@ def cached_example_to_pdb(pt_file: str, out_pdb_file: str, mode: str = "aa", con
         mode=mode,
         conect=conect,
     )
+

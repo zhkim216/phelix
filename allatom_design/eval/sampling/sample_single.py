@@ -1,7 +1,7 @@
 import math
 import os
 import re
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict, defaultdict
 from pathlib import Path
 from typing import Dict, List
 
@@ -15,14 +15,15 @@ from torchtyping import TensorType
 from tqdm import tqdm
 
 import allatom_design.data.conditioning_labels as cl
-from allatom_design.data.data import load_feats_from_pdb, process_single_pdb
+from allatom_design.data import residue_constants as rc
+from allatom_design.data.data import load_feats_from_pdb
+from allatom_design.data.datasets.sd_dataset import process_single_pdb
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.eval.folding_utils import get_struct_pred_model
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
-from allatom_design.data import residue_constants as rc
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="sample_single", version_base="1.3.2")
