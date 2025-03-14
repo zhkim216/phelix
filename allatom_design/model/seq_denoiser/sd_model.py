@@ -285,7 +285,7 @@ class SeqDenoiser(nn.Module):
                psce_threshold: Optional[float] = None,  # during design, only keep sidechains with psce below threshold; None to keep all
                scn_override_mask: Optional[TensorType["b n", int]] = None,
                aatype_override_mask: Optional[TensorType["b n", int]] = None,
-               restrict_pos_aatype: Optional[Tuple[TensorType["b n", float],
+               pos_restrict_aatype: Optional[Tuple[TensorType["b n", float],
                                                    TensorType["b n k", int]]] = None,  # restrict aatype sampling at certain positions
                omit_aas: Optional[List[str]] = None,  # omit certain amino acids from sampling, e.g. ["C", "G"]
                noise_labels: Optional[Union[float, TensorType["b n"]]] = None,  # per-residue noise label
@@ -312,7 +312,7 @@ class SeqDenoiser(nn.Module):
 
         # Handle aatype restrictions
         aux_inputs["omit_aas"] = omit_aas
-        aux_inputs["restrict_pos_aatype"] = restrict_pos_aatype
+        aux_inputs["pos_restrict_aatype"] = pos_restrict_aatype
 
         # Add in noise label
         aux_inputs["noise_labels"] = noise_labels

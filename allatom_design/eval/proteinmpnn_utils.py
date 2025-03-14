@@ -57,9 +57,9 @@ def load_mpnn(checkpoints_dir: str,
 
 
 def run_mpnn(model: ProteinMPNN,
+             cfg: DictConfig,
              pdb_paths: List[str],
-             device: str,
-             cfg: DictConfig) -> Dict[str,
+             device: str) -> Dict[str,
                                       Dict[str, torch.Tensor]]:
     """
     LigandMPNN code adapted for eval.

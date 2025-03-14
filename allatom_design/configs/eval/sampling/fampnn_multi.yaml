@@ -1,0 +1,54 @@
+# Run settings
+seed: 0
+batch_size: 16
+num_workers: 8
+
+# Parallelization: job array parameters
+array_id: null  # Set by Slurm array job. Null means run all.
+num_arrays: 1   # Number of total arrays. If array_id is null, this can remain 1.
+fix_missing: false  # if true, will load in output df and re-run missing entries
+
+# Inputs
+checkpoint_path: null
+out_dir: null
+
+pdb_dir: null
+pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
+pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
+
+# Positional constraints: supports columns in [pdb_name,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
+# e.g. 2fyzA,"A1-100,B1-100","A1-100"
+pos_constraint_csv: null
+
+presort_by_length: false  # sort pdbs by sequence length (longest first). Can be helpful for efficiency.
+run_self_consistency_eval: false
+
+sampling_cfg_overrides:
+  batch_size: 16
+  num_seqs_per_pdb: 16  # number of sequences to sample per pdb
+  num_steps: 50
+  noise_labels: 0.0
+
+# Sampling config
+seq_des_cfg:
+  model_name: "fampnn"
+  fampnn:
+    fampnn_cfg: allatom_design/configs/seq_des/fampnn_inference.yaml
+    fampnn_ckpt: /media/scratch/huang_lab/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
+    overrides: ${sampling_cfg_overrides}
+
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: "esmfold"
+  af2:
+    data_dir: /media/scratch/huang_lab/af2
+    num_models: 1
+    sample_models: true
+    num_recycles: 3
+    use_multimer: false
+  esmfold:
+    max_tokens_per_batch: 1024
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

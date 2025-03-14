@@ -62,7 +62,7 @@ seq_des_cfg:
       number_of_batches: 1
       verbose: false
   fampnn:
-    fampnn_cfg: allatom_design/configs/seq_des/fampnn.yaml
+    fampnn_cfg: allatom_design/configs/seq_des/fampnn_inference.yaml
     fampnn_ckpt: /media/scratch/huang_lab/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
     overrides:
       batch_size: 16

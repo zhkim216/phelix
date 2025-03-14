@@ -154,9 +154,9 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
             for aa in omit_aas:
                 seq_logits[..., rc.restype_order_with_x[aa]] = -1e9  # omit the specified aatypes
 
-        restrict_pos_aatype = aux_inputs.get("restrict_pos_aatype", None)
-        if restrict_pos_aatype is not None:
-            restrict_pos_mask, allowed_aatype_mask = restrict_pos_aatype  # (B, N), (B, N, K)
+        pos_restrict_aatype = aux_inputs.get("pos_restrict_aatype", None)
+        if pos_restrict_aatype is not None:
+            restrict_pos_mask, allowed_aatype_mask = pos_restrict_aatype  # (B, N), (B, N, K)
             restrict_pos_mask = restrict_pos_mask.unsqueeze(-1).expand_as(seq_logits)
             disallowed_positions = (restrict_pos_mask == 1.0) & (allowed_aatype_mask == 0.0)  # only allow specified aatypes
             seq_logits[disallowed_positions] = -1e9
