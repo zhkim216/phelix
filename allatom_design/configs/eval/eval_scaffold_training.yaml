@@ -10,7 +10,7 @@ seed: 0
 start_step: 0
 eval_every_n_ckpts: 1
 batch_size: 8
-num_workers: 10
+num_workers: 8
 
 # Denoiser
 denoiser_train_dir:

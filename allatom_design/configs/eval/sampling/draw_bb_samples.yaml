@@ -9,7 +9,7 @@ ad_ckpt:
 exp_name: baseline  # sampling experiment name
 
 cuda: true
-num_workers: 10
+num_workers: 8
 out_dir: null  # null to save in the model run directory
 seed: 0
 batch_size: 64

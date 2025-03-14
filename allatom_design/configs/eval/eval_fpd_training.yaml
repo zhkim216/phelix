@@ -10,7 +10,7 @@ seed: 0
 start_step: 0  # start evaluation after this step, 0 or null to start from the beginning
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 batch_size: 32
-num_workers: 10
+num_workers: 8
 
 # Paths
 fpd_embeddings_dir: /scratch/users/rshuai/datasets/ingraham_cath_dataset/fpd_embeddings
