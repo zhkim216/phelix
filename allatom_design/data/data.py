@@ -581,55 +581,6 @@ def transform_sidechain_frame(x_scn: TensorType["b n 33 3", float],
 
     return x_scn, bb_frames_exists
 
-def process_single_pdb(data, sm: Optional["ScaffoldManager"] = None):
-    example = {}
-
-    # Use raw coordinates
-    x = data["all_atom_positions"]  # [n, a, 3]
-    atom_mask = data["all_atom_mask"]  # [n, a]
-    seq_mask = data["seq_mask"]  # [n]
-    x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
-
-    # per-channel mask for x, used for loss.
-    # We only mask out missing atoms from PDB files, not ghost atoms.
-    x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
-
-    # Construct example
-    example["x"] = x * atom_mask[..., None]
-    example["seq_mask"] = seq_mask
-    example["x_mask"] = x_mask
-    example["residue_index"] = data["residue_index"]
-    example["chain_index"] = data["chain_index"]
-    example["aatype"] = data["aatype"]  # not one-hot encoded
-    example["ghost_atom_mask"] = data["ghost_atom_mask"]
-    example["missing_atom_mask"] = data["missing_atom_mask"]
-    example["atom_mask"] = atom_mask
-    example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
-    example['interface_residue_mask'] = data['interface_residue_mask']
-    example['chain_ids'] = data['chain_ids']
-
-    # Get scaffolding input with scaffold manager
-    example["x_motif"], example["motif_mask"], example["aatype_scaffold"], example["x"] = get_scaffolding_inputs(sm, example)
-
-    # Construct conditioning inputs
-    cond_labels_in = {}
-
-    # Add dataset source and crop aug label, set to experimental and uncropped by default
-    cond_labels_in["crop_aug"] = cl.DEFAULT_TOKEN["crop_aug"]
-
-    # Convert data types
-    example_out = {}
-
-    for k, v in example.items():
-        if k in FEATURES_LONG:
-            example_out[k] = v.long()
-        else:
-            example_out[k] = v.float()
-
-    # Add conditioning labels
-    example_out["cond_labels_in"] = cond_labels_in
-    return example_out
-
 
 def get_scaffolding_inputs(sm: Optional["ScaffoldManager"],
                            example: Dict[str, TensorType["..."]]) -> Tuple[TensorType["n 37 3"],

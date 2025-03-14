@@ -17,8 +17,8 @@ from scipy.stats import spearmanr
 from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (get_rc_tensor, load_feats_from_pdb,
-                                      process_single_pdb)
+from allatom_design.data.data import get_rc_tensor, load_feats_from_pdb
+from allatom_design.data.datasets.sd_dataset import process_single_pdb
 from allatom_design.eval import eval_metrics
 
 

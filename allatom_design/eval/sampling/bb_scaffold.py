@@ -21,9 +21,10 @@ from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.conditioning_labels import create_cond_labels_input
-from allatom_design.data.data import (load_feats_from_pdb, pad_to_max_len,
-                                      process_single_pdb)
+from allatom_design.data.data import load_feats_from_pdb, pad_to_max_len
 from allatom_design.data.datasets.ad_dataset import get_scaffold_manager
+from allatom_design.data.datasets.scaffold_manager import get_scaffold_manager
+from allatom_design.data.datasets.sd_dataset import process_single_pdb
 from allatom_design.data.pdb_utils import *
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.eval.folding_utils import get_struct_pred_model
@@ -32,7 +33,6 @@ from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
-from allatom_design.data.datasets.scaffold_manager import get_scaffold_manager
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="bb_scaffold", version_base="1.3.2")
