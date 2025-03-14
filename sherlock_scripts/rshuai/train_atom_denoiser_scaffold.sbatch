@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=s3_a0
-#SBATCH -p bioe
-#SBATCH --nodes=4
+#SBATCH -p possu
+#SBATCH --nodes=1
+#SBATCH --gpus-per-node=2
 #SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-task=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #

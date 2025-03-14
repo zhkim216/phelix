@@ -22,7 +22,10 @@ BASE_DIR=/home/users/rshuai/code/allatom-design
 HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 OUT_DIR=/scratch/users/rshuai/allatom_design
 MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
+
+# FAMPNN options
 FAMPNN_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
+NOISE_LABELS=0.0
 
 # Set HF transformers cache
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
@@ -40,7 +43,6 @@ OMEGAFOLD_CACHE=/scratch/users/rshuai/cache/omegafold/omegafold.pt
 # Denoiser path
 MODEL_NAME=ai_dit_12b_ema99
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
-NOISE_LABELS=0.0
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
