@@ -34,6 +34,7 @@ temperature: 0.1
 repack_last: true  # after design, repack the final sequence obtained
 psce_threshold: null  # only keep sidechains below this threshold during design; null to keep all
 noise_labels: null  # per-residue noise labels, float for same noise for each residue  # TODO: implement user-provided per-residue noise labels
+add_noise: false
 
 num_steps_list: [50]  # number of denoising steps for inverse folding
 timestep_schedule:

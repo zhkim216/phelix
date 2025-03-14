@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=eval_inv_fold_nl0.0
+#SBATCH --job-name=eval_inv_fold_nl0.3
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -36,11 +36,11 @@ OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 # Model to evaluate
 MODEL_NAME=c6_aasd0
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
-NOISE_LABELS=0.0
+NOISE_LABELS=0.3
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_inv_fold_nl${NOISE_LABELS}
+EXP_NAME=${MODEL_NAME}_eval_inv_fold_nl${NOISE_LABELS}_an
 GROUP=chimera_c6
 
 # Run training script
@@ -62,6 +62,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_inv_fold_training.py \
     num_codes_sc_batches=4 \
     temperature=0.1 \
     noise_labels=${NOISE_LABELS} \
+    add_noise=true \
     num_steps_list=[50] \
     data.pdb_path=${PDB_PATH} \
     subset_length_range=[32,256] \

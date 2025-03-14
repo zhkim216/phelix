@@ -170,14 +170,11 @@ class SeqDenoiser(nn.Module):
         B, N = seq_mask.shape
 
         if self.per_residue_eps:
-            # per-residue noise, based on pseudocode from Cho et al.
+            # per-residue noise. Unlike Cho et al., we sample noise stds from a uniform distribution and apply different noise to each atom in a residue
             if self.training and self.augment_eps > 0:
                 # training: randomly sample noise labels
-                r = torch.randn((B, N, 14, 3), device=seq_mask.device)  # random vector for each atom (this might differ from Cho et al.)
-                n = r / torch.norm(r, dim=-1, keepdim=True)
-                s = truncated_half_normal_like(seq_mask, self.augment_eps, self.max_eps) # per-residue noise label
-                noise = n * rearrange(s, "b n -> b n 1 1")
-                noise_labels = torch.abs(s)  # we enforce noise labels to be positive
+                noise_labels = torch.rand_like(seq_mask, device=seq_mask.device) * self.augment_eps  # sample std for each residue from uniform distribution
+                noise = torch.randn((B, N, 14, 3), device=seq_mask.device) * rearrange(noise_labels, "b n -> b n 1 1")  # random noise for each atom
             else:
                 # eval: assume no noise
                 noise, noise_labels = None, None
@@ -298,6 +295,7 @@ class SeqDenoiser(nn.Module):
                                                    TensorType["b n k", int]]] = None,  # restrict aatype sampling at certain positions
                omit_aas: Optional[List[str]] = None,  # omit certain amino acids from sampling, e.g. ["C", "G"]
                noise_labels: Optional[Union[float, TensorType["b n"]]] = None,  # per-residue noise label
+               add_noise: bool = False,
                scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
                ):
         """
@@ -324,6 +322,15 @@ class SeqDenoiser(nn.Module):
 
         # Add in noise label
         aux_inputs["noise_labels"] = noise_labels
+
+        # Add in noise to the input if requested
+        if add_noise:
+            assert noise_labels is not None and self.per_residue_eps
+            if type(noise_labels) is float:
+                noise_labels = torch.full((B, N), fill_value=noise_labels, device=seq_mask.device)  # assume constant noise label
+            noise = torch.randn((B, N, 14, 3), device=seq_mask.device) * rearrange(noise_labels, "b n -> b n 1 1")  # random noise for each atom
+            aux_inputs["noise"] = noise
+
 
         # Set up structure input dependent on structure mask
         x0 = x.clone()
