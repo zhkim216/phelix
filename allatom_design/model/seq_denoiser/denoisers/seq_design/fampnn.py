@@ -4,8 +4,6 @@ from typing import Optional, Union
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from einops import rearrange
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
