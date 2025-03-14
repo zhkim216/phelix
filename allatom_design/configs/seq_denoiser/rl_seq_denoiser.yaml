@@ -108,7 +108,7 @@ logging:
 
 checkpointing:
   save_latest_every_n_steps: 50000  # Save the full model every n steps
-  save_ema_every_n_steps: 20000  # Save the EMA model every n steps
+  save_phema_every_n_steps: 20000  # Save the EMA model every n steps
   save_top_k: 1
 
 

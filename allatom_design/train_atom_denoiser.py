@@ -35,11 +35,9 @@ def main(cfg: DictConfig):
     update_config(cfg)  # Conditionally update certain config values
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
-    # Create wandb dir
+    # Create wandb dir and set wandb cache directory
     wandb_dir = str(Path(cfg.out_dir, cfg.project))
     Path(wandb_dir, "wandb").mkdir(parents=True, exist_ok=True)
-
-    # Set wandb cache directory
     wandb_cache_dir = str(Path(cfg.out_dir, cfg.project, "cache", "wandb"))
     os.environ["WANDB_CACHE_DIR"] = wandb_cache_dir
 
@@ -126,17 +124,26 @@ def main(cfg: DictConfig):
                                                  save_top_k=-1,
                                                  every_n_train_steps=cfg.checkpointing.save_latest_every_n_steps,
                                                  filename="ad-step{step}-epoch{epoch:02d}",
-                                                 auto_insert_metric_name=False
-                                                 )
-    callbacks += [latest_checkpoint_callback]
+                                                 auto_insert_metric_name=False)
+
+    epoch_latest_checkpoint_callback = ModelCheckpoint(dirpath=ckpt_dir,
+                                                       monitor="epoch",
+                                                       mode="max",
+                                                       save_top_k=1,
+                                                       every_n_epochs=cfg.checkpointing.save_for_resuming_every_n_epochs,
+                                                       filename="ad-epoch{epoch:02d}",
+                                                       auto_insert_metric_name=False)
+
+    callbacks += [latest_checkpoint_callback, epoch_latest_checkpoint_callback]
 
     if cfg.model.ema.use_phema:
-        # Store EMA tracker
+        # For post-hoc EMA, we save snapshots to an ema_tracker directory so we can reconstruct the EMA profile afterwards
         ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
-                                              save_freq_steps=cfg.checkpointing.save_ema_every_n_steps)
+                                              save_freq_steps=cfg.checkpointing.save_phema_every_n_steps)
         callbacks.append(ema_checkpoint)
     else:
-        # EMA callback
+        # Otherwise, we directly save the EMA model to checkpoints/ema
+        # EMA callback to average model weights
         ema_decay = cfg.model.ema.ema_decay
         ema_callback = EMA(decay=ema_decay)
         callbacks.append(ema_callback)
@@ -157,19 +164,8 @@ def main(cfg: DictConfig):
         lr_monitor = LearningRateMonitor(logging_interval="step")
         callbacks.append(lr_monitor)
 
-    if cfg.model.override_bb_sigma_data is None:
-        # Automatically compute scale factors for sigma data
-        datamodule.prepare_data()
-        scale_factors = ad_dataset.compute_scale_factors(datamodule.train_dataloader(), n_examples=1000)
-        print(f"Computed scale factors: {scale_factors}")
-        sigma_data = scale_factors["bb"][1]
-    if cfg.model.override_bb_sigma_data is not None:
-        # override sigma_data if specified for consistent loss scaling
-        print(f"Overriding backbone sigma data with {cfg.model.override_bb_sigma_data}")
-        sigma_data = cfg.model.override_bb_sigma_data
-
-    # set scale factors in model
-    lit_model.model.set_sigma_data(sigma_data)
+    # Set sigma data in model
+    lit_model.model.set_sigma_data(cfg.model.sigma_data)
 
     # Train
     trainer = L.Trainer(logger=logger,

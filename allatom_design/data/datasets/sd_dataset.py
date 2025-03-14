@@ -1,6 +1,3 @@
-import multiprocessing
-import random
-from itertools import groupby
 from multiprocessing import Pool
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -495,10 +492,6 @@ def get_pdb_data_file(pdb_path: str, phase: str, pdb_key: str) -> str:
         pdb_data_file = f"{pdb_path}/{mmcif_phase}_mmcifs/{pdb_key}.cif"
     elif pdb_path.endswith("afdb"):  # AFDB augmentation dataset
         pdb_data_file = f"{pdb_path}/foldseek_cluster_reps/{pdb_key}.cif"
-    elif pdb_path.endswith("qfit-test-set/rcsb-pdb"):
-        pdb_data_file = f"{pdb_path}/all/{pdb_key}.pdb1"  # qfit dataset, use only pdb1s for now
-    elif pdb_path.endswith("rcsb_test_cases"):
-        pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
     elif Path(pdb_path).stem.startswith("casp"):
         pdb_data_file = f"{pdb_path}/pdbs/{pdb_key}.pdb"
     elif pdb_path.endswith("denovo100") or pdb_path.endswith("denovo200") or pdb_path.endswith("denovo300") or pdb_path.endswith("denovo400") or pdb_path.endswith("denovo500"):

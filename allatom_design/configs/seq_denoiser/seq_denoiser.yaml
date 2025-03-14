@@ -55,7 +55,7 @@ defaults:
 
 model:
   task: "allatom_seq_des"  # "seq_des", "allatom_seq_des"
-  override_sigma_data: [9.6, 0.64]  # override sigma data for [backbone, sidechain]
+  sigma_data: [9.6, 0.64]  # sigma data for [backbone, local sidechain]
   num_atoms_in: 37
   n_aatype: 21
   eps: 1.0e-8
@@ -107,9 +107,9 @@ logging:
   wandb_watch_freq: 5000  # Log gradients every n steps
 
 checkpointing:
-  save_latest_every_n_steps: 10000  # Save the full model every n steps
-  save_latest_every_n_epochs: 10  # Keep 1 latest copy of the model every n epochs, for resuming
-  save_ema_every_n_steps: 3000  # Save the EMA model every n steps
+  save_latest_every_n_steps: 10000  # Save the model every n steps
+  save_for_resuming_every_n_epochs: 10  # Keep 1 latest copy of the model every n epochs, for resuming
+  save_phema_every_n_steps: 3000  # If using post-hoc EMA, save snapshot every n steps
 
 hydra:
   run:
