@@ -1,0 +1,70 @@
+# Wandb configuration
+project: "allatom_design"  # Wandb project name
+wandb_id: "richardshuai"  # Wandb username
+exp_name: null
+group: "debug" # Wandb group name
+no_wandb: false
+
+# Run settings
+seed: 0
+batch_size: 16
+num_workers: 8
+
+# Inputs
+checkpoint_path: null
+pdb_dir: null
+pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
+pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
+presort_by_length: false  # sort pdbs by sequence length (longest first). Can be helpful for efficiency.
+subset_length_range: null  # only use pdbs with sequence length in this range
+num_pdbs: null  # only use this many pdbs; null to use all
+out_dir: null
+
+# Inverse folding options
+aatype_decoding_order_mode: "random"
+seq_only: true  # true to not pack sidechains during sampling
+num_steps: 50
+num_seqs_per_pdb: 1
+temperature: 0.1
+repack_last: true  # after design, repack the final sequence obtained
+psce_threshold: null  # only keep sidechains below this threshold during design; null to keep all
+noise_labels: null  # per-residue noise labels, float for same noise for each residue  # TODO: implement user-provided per-residue noise labels
+timestep_schedule:
+  num_steps: null  # will be filled in by num_steps
+  mode: "linear"
+  t_start: 0.0
+  t_end: 1.0
+
+scn_diffusion:
+  num_steps: 50
+  timestep_schedule:
+    num_steps: ${scn_diffusion.num_steps}
+    mode: "linear"
+    t_start: 0.0
+    t_end: 1.0
+  noise_schedule:
+    name: "step_scale"
+    c: 1.5
+  churn_cfg:
+    s_churn: 0
+    s_noise: 1.0
+    s_t_min: 0.01
+    s_t_max: 50.0
+    num_steps: ${scn_diffusion.num_steps}
+
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: esmfold
+  af2:
+    data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
+    num_models: 1
+    save_best: true  # save best plddt model
+    sample_models: true  # randomly sample models from the ensemble
+    num_recycles: 3
+    use_multimer: false
+  esmfold:
+    max_tokens_per_batch: 1024
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
