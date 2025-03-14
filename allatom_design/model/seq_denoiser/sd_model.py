@@ -35,8 +35,8 @@ class SeqDenoiser(nn.Module):
 
         # Data scaling parameters
         # scale sidechains separately from the backbone
-        self.register_buffer("bb_mean", torch.tensor(0.0))
         self.register_buffer("bb_std", torch.tensor(1.0))
+        self.register_buffer("bb_mean", torch.tensor(0.0))
 
         self.register_buffer("scn_mean", torch.tensor(0.0))
         self.register_buffer("scn_std", torch.tensor(1.0))
