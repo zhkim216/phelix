@@ -172,6 +172,7 @@ def run_fampnn(model: SeqDenoiser,
             psce_threshold=cfg.psce_threshold,
             omit_aas=cfg.omit_aas,
             noise_labels=cfg.noise_labels,
+            add_noise=cfg.add_noise,
             aatype_override_mask=batch["aatype_override_mask"],
             scn_override_mask=batch["scn_override_mask"],
             pos_restrict_aatype=pos_restrict_aatype,
@@ -353,7 +354,9 @@ def parse_fixed_pos_info(batch: Dict[str, TensorType["b ..."]],
     if pos_constraint_df is None:
         if verbose:
             print("No fixed positions specified, redesigning all positions.")
-        return aatype_override_mask, scn_override_mask
+        batch["aatype_override_mask"] = aatype_override_mask
+        batch["scn_override_mask"] = scn_override_mask
+        return batch
 
     for i, pdb_name in enumerate(pdb_names):
         if verbose:
@@ -431,7 +434,7 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
                                   pdb_names: List[str],
                                   batch_chain_id_mapping: List[Dict[str, int]],  # maps chain letter to chain index
                                   pos_constraint_df: Optional[pd.DataFrame],
-                                  verbose: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
+                                  verbose: bool = False) -> Tuple[torch.Tensor, torch.Tensor] | None:
     """
     Given a pos_constraint_df containing position restrictions for each PDB, return:
     - a mask indicating which positions have restricted amino acid sampling
@@ -448,7 +451,7 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
     if pos_constraint_df is None:
         if verbose:
             print("No amino acid restrictions specified, allowing all amino acids at all positions.")
-        return None, None
+        return None
 
     # Initialize masks for the entire batch
     restrict_pos_mask = torch.zeros((B, N), dtype=torch.float32, device=batch["seq_mask"].device)

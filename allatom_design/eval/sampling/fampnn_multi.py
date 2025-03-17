@@ -20,6 +20,7 @@ from allatom_design.data.data import get_length_from_pdb
 from allatom_design.eval import eval_metrics
 from allatom_design.eval.fampnn_utils import get_seq_des_model, run_fampnn
 from allatom_design.eval.folding_utils import get_struct_pred_model
+from allatom_design.eval.eval_path_utils import get_pdb_files
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="fampnn_multi", version_base="1.3.2")
@@ -65,16 +66,7 @@ def main(cfg: DictConfig):
         pos_constraint_df = pd.DataFrame(columns=["pdb_name"])
 
     ### Load in PDB files ###
-    if cfg.pdb_key_list is not None:
-        # Get PDBs with keys in the list
-        with open(cfg.pdb_key_list, "r") as f:
-            pdb_keys = f.read().splitlines()
-        pdb_files = [f"{cfg.pdb_dir}/{key}{cfg.pdb_key_ext}" for key in pdb_keys]
-    else:
-        # Get all PDBs with .pdb_key_ext extension in the directory
-        pdb_files = natsorted(list(glob.glob(f"{cfg.pdb_dir}/*")))
-        if len(pdb_files) == 0:
-            raise ValueError(f"No PDB files found in directory {cfg.pdb_dir}")
+    pdb_files = get_pdb_files(cfg.pdb_dir, cfg.pdb_key_list, cfg.pdb_key_ext)
 
     # Re-run missing PDBs
     if cfg.fix_missing:
