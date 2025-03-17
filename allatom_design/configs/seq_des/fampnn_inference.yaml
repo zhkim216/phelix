@@ -14,6 +14,7 @@ repack_last: true  # after design, repack the final sequence obtained
 psce_threshold: null  # only keep sidechains below this threshold during design; null to keep all
 omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
 noise_labels: null  # per-residue noise labels, float for same noise for each residue  # TODO: implement user-provided per-residue noise labels
+add_noise: false  # add noise equal to noise_labels to the input backbone
 
 timestep_schedule:
   num_steps: ${num_steps}

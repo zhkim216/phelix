@@ -170,7 +170,7 @@ class SeqDenoiser(nn.Module):
             # per-residue noise. Unlike Cho et al., we sample noise stds from a uniform distribution and apply different noise to each atom in a residue
             if self.training and self.augment_eps > 0:
                 # training: randomly sample noise labels
-                noise_labels = torch.rand_like(seq_mask, device=seq_mask.device) * self.augment_eps  # sample std for each residue from uniform distribution
+                noise_labels = torch.rand_like(seq_mask, device=seq_mask.device) * self.augment_eps  # sample std for each residue from uniform [0, augment_eps]
                 noise = torch.randn((B, N, 14, 3), device=seq_mask.device) * rearrange(noise_labels, "b n -> b n 1 1")  # random noise for each atom
             else:
                 # eval: assume no noise
@@ -319,12 +319,11 @@ class SeqDenoiser(nn.Module):
 
         # Add in noise to the input if requested
         if add_noise:
-            assert noise_labels is not None and self.per_residue_eps
+            assert noise_labels is not None, "Need noise labels to know how much noise to add to backbone for add_noise option"
             if type(noise_labels) is float:
                 noise_labels = torch.full((B, N), fill_value=noise_labels, device=seq_mask.device)  # assume constant noise label
             noise = torch.randn((B, N, 14, 3), device=seq_mask.device) * rearrange(noise_labels, "b n -> b n 1 1")  # random noise for each atom
             aux_inputs["noise"] = noise
-
 
         # Set up structure input dependent on structure mask
         x0 = x.clone()

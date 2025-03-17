@@ -1,0 +1,56 @@
+# Wandb configuration
+project: "allatom_design"  # Wandb project name
+wandb_id: "richardshuai"  # Wandb username
+exp_name: null # Wandb exp name
+group: "debug" # Wandb group name
+
+# Run settings
+no_wandb: false  # Disable wandb logging
+seed: 0
+start_step: 0  # start evaluation after this step, 0 or null to start from the beginning
+end_step: null  # end evaluation after this step (inclusive), null to evaluate until the end
+eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
+
+# Inputs
+input_cfg:
+  pdb_dir: null
+  pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
+  pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
+  subset_length_range: null # only evaluate on sequences within this length range
+  presort_by_length: false  # sort pdb keys by sequence length, potentially for efficiency
+  n_subsample: null  # randomly sample this many pdb keys, null to use all
+
+# Denoiser options
+denoiser_train_dir:
+out_dir: ${denoiser_train_dir}/eval_inv_fold_training
+
+sampling_cfg_overrides:
+  batch_size: 64
+  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+  num_steps: 50
+  noise_labels: 0.0
+  add_noise: false
+
+# Sampling config
+seq_des_cfg:
+  model_name: "fampnn"
+  fampnn:
+    fampnn_cfg: allatom_design/configs/seq_des/fampnn_inference.yaml
+    fampnn_ckpt: null  # overridden with training checkpoint paths
+    overrides: ${sampling_cfg_overrides}
+
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: "esmfold"
+  af2:
+    data_dir: /media/scratch/huang_lab/af2
+    num_models: 1
+    sample_models: true
+    num_recycles: 3
+    use_multimer: false
+  esmfold:
+    max_tokens_per_batch: 1024
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
