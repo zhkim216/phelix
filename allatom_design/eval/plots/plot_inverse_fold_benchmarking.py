@@ -59,7 +59,7 @@ def main(cfg: DictConfig):
         model_dfs[model_name]["length"] = [len(metrics[x]["sc_info"]["struct_preds"]["seq_mask"].squeeze()) for x in metrics.keys()]
         model_dfs[model_name]["sc_ca_rmsd"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_rmsd"].item() for x in metrics.keys()]
         model_dfs[model_name]["sc_tm"] = [metrics[x]["sc_info"]["sc_metrics"]["sc_ca_tm"].item() for x in metrics.keys()]
-        model_dfs[model_name]["avg_plddt"] = [metrics[x]["sc_info"]["struct_preds"]["avg_plddt"].item() for x in metrics.keys()]
+        model_dfs[model_name]["avg_ca_plddt"] = [metrics[x]["sc_info"]["struct_preds"]["avg_ca_plddt"].item() for x in metrics.keys()]
 
     model_dfs = {model_name: pd.DataFrame(model_dfs[model_name]) for model_name in cfg.line_plots.model_names}
 
@@ -914,8 +914,8 @@ def plot_success_rate_by_confidence(
 
 def create_latex_table(df: pd.DataFrame, model_names: list[str]) -> str:
     # Group data and compute medians
-    grouped = df.groupby(["model", "length"], as_index=False)[["sc_tm", "avg_plddt"]].median()
-    # grouped = df.groupby(["model", "length"], as_index=False)[["sc_tm", "sc_ca_rmsd", "avg_plddt"]].median()
+    grouped = df.groupby(["model", "length"], as_index=False)[["sc_tm", "avg_ca_plddt"]].median()
+    # grouped = df.groupby(["model", "length"], as_index=False)[["sc_tm", "sc_ca_rmsd", "avg_ca_plddt"]].median()
 
 
     # Define lengths to display
@@ -948,7 +948,7 @@ def create_latex_table(df: pd.DataFrame, model_names: list[str]) -> str:
                 continue
             sc_tm_val = sub_df["sc_tm"].values[0]
             # sc_rmsd_val = sub_df["sc_ca_rmsd"].values[0]
-            plddt_val = sub_df["avg_plddt"].values[0]
+            plddt_val = sub_df["avg_ca_plddt"].values[0]
             row_str.append(f"{sc_tm_val:.3f}")
             # row_str.append(f"{sc_rmsd_val:.3f}")
             row_str.append(f"{plddt_val:.2f}")

@@ -312,11 +312,10 @@ def main(cfg: DictConfig):
 
                 codes_sc_info = eval_metrics.run_self_consistency_eval(
                     pdbs,
-                    None,  # no MPNN model for co-design eval
+                    None,  # no MPNN model to use sequence from PDB
                     struct_pred_model,
                     device,
                     out_dir=codes_sc_dir_i,
-                    eval_codesign=True,
                     temp_dir=f"{cfg.out_dir}/tmp")
 
 

@@ -64,11 +64,10 @@ def main(cfg: DictConfig):
     if cfg.run_self_consistency_eval:
         codes_sc_info = eval_metrics.run_self_consistency_eval(
             aux["out_pdbs"],
-            None,
+            None,  # no MPNN model to use sequence from PDB
             struct_pred_model,
             device,
             out_dir=pred_out_dir,
-            eval_codesign=True,
             temp_dir=f"{pred_out_dir}/tmp"
         )
 

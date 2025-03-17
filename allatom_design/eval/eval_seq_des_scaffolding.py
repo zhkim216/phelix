@@ -241,13 +241,12 @@ def main(cfg: DictConfig):
         # Run self-consistency evaluations with ESMFold and AF2
         sc_info = eval_metrics.run_self_consistency_eval(
             pdbs,
-            None,  # no MPNN model for co-design
+            None,  # no MPNN model to use sequence from PDB
             struct_pred_model,
             device,
             out_dir=pred_out_dir,
-            eval_codesign=True,
             temp_dir=f"{pred_out_dir}/tmp",
-            override_metrics_to_compute=["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]
+            metrics_to_compute=["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]
         )
 
 
@@ -262,7 +261,7 @@ def main(cfg: DictConfig):
                 sc_metrics[k].append(v.item())
 
             # Add plddt info
-            sc_metrics["avg_plddt"].append(sc_info[pdb_path]["struct_preds"]["avg_plddt"].item())
+            sc_metrics["avg_ca_plddt"].append(sc_info[pdb_path]["struct_preds"]["avg_ca_plddt"].item())
 
         out_df_batch = pd.DataFrame(sc_metrics)
 
@@ -298,7 +297,7 @@ def main(cfg: DictConfig):
 
         metrics = {}
         for model in ["esmfold", "af2"]:
-            for sc_metric in ["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm", "avg_plddt"]:
+            for sc_metric in ["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm", "avg_ca_plddt"]:
                 metrics[f"{model}/{sc_metric}_mean"] = out_sc_df[f"{model}_{sc_metric}"].mean()
                 metrics[f"{model}/{sc_metric}_median"] = out_sc_df[f"{model}_{sc_metric}"].median()
 

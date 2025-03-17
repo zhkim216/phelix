@@ -122,9 +122,7 @@ def main(cfg: DictConfig):
             struct_pred_model,
             device,
             out_dir=pred_out_dir,
-            eval_codesign=True,
-            temp_dir=f"{pred_out_dir}/tmp",
-            override_metrics_to_compute=["sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm"]
+            temp_dir=f"{pred_out_dir}/tmp"
         )
 
         # Aggregate results
@@ -135,7 +133,7 @@ def main(cfg: DictConfig):
 
             for k, v in sc_info[pdb]["sc_metrics"].items():
                 out_metrics[f"{k}"].append(v.item())
-            out_metrics["avg_plddt"].append(sc_info[pdb]["struct_preds"]["avg_plddt"].item())
+            out_metrics["avg_ca_plddt"].append(sc_info[pdb]["struct_preds"]["avg_ca_plddt"].item())
     else:
         # If not running self-consistency evaluation, just append basic metrics to a CSV
         for j, pdb in enumerate(sampled_pdbs):

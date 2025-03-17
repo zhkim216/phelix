@@ -27,7 +27,7 @@ def main():
 
     # Filter for T=0.1, take only the first entry for each pdb_key
     sc_df = sc_df[sc_df["temperature"] == 0.1].drop_duplicates(subset=["pdb_key"], keep="first").reset_index(drop=True)
-    df_out = sc_df[["pdb_key", "temperature", "sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm", "avg_plddt", "phase"]]
+    df_out = sc_df[["pdb_key", "temperature", "sc_ca_rmsd", "sc_aa_rmsd", "sc_ca_tm", "avg_ca_plddt", "phase"]]
 
     # Additional info
     df_out["sample_name"] = sc_df["pdb_name"]  # in case we want to know which FAMPNN sample it is

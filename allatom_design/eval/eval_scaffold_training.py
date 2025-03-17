@@ -271,7 +271,7 @@ def main(cfg: DictConfig):
                                                              device,
                                                              out_dir=log_dir_i,
                                                              temp_dir=f"{log_dir_i}/tmp",
-                                                             override_metrics_to_compute=["sc_ca_rmsd", "sc_ca_tm", "motif_bb_rmsd"],
+                                                             metrics_to_compute=["sc_ca_rmsd", "sc_ca_tm", "motif_bb_rmsd"],
                                                              motif_info=motif_info
                                                              )
             for pdb, v in sc_info.items():

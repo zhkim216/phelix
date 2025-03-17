@@ -62,35 +62,43 @@ def compute_secondary_structure_content(pdbs: List[str]) -> Dict[str, Dict[str, 
 
 
 def run_self_consistency_eval(pdbs: List[str],
-                              seq_des_model: Dict[str, Any],  # contains sequence design model components
+                              seq_des_model: Optional[Dict[str, Any]],  # contains sequence design model components. If None, use sequences in PDBs
                               struct_pred_model: Dict[str, Any],  # contains struct pred model components
                               device: torch.device,
                               out_dir: str,
-                              eval_codesign: bool = False,
                               temp_dir: Optional[str] = None,
-                              override_metrics_to_compute: Optional[List[str]] = None,
+                              metrics_to_compute: List[str] = ["sc_ca_rmsd", "sc_ca_tm", "sc_aa_rmsd"],
                               motif_info: dict = {},  # if evaluating motif scaffolding, maps from PDB path to scaffold coordinates and mask
                               ) -> Dict[str, Dict[str, TensorType]]:
     """
-    Run self-consistency evaluation on a list of PDBs (MPNN -> struct_pred -> eval metrics).
+    Run self-consistency evaluation on a list of PDBs (sequence design -> structure prediction -> metrics).
 
-    The number of MPNN sequences per PDB is determined by the mpnn_cfg (batch_size * number of batches).
+    Parameters:
+    -----------
+    pdbs: List of PDB file paths to evaluate
+    seq_des_model: Dictionary with sequence design model components (proteinmpnn or fampnn).
+                   If None, uses the original PDB sequences.
+    struct_pred_model: Dictionary with structure prediction model components (af2, esmfold, or omegafold)
+    metrics_to_compute: Metrics to calculate, including:
+                        - sc_ca_rmsd: RMSD between CA atoms
+                        - sc_ca_tm: TM score between CA atoms
+                        - sc_aa_rmsd: RMSD between all atoms
+                        - motif_bb_rmsd: RMSD between input and predicted motif backbones
+                        - additional metrics for sidechains and chi angles
+    motif_info: Info for motif scaffolding evaluation (maps PDB path to coordinates and mask)
 
-    Returns a dictionary mapping from PDB file path to a dictionary containing:
-    - "mpnn_preds": MPNN predictions
-    - "struct_preds": structure predictions. Contains:
-        - "avg_plddt": average plddt-CA score
-    - "sc_metrics": Evaluation metrics
+    Returns:
+    --------
+    Dictionary mapping from PDB paths to results containing keys:
+    - mpnn_preds or fampnn_preds: Sequence design predictions (if seq_des_model provided)
+    - struct_preds: Structure prediction outputs with coordinates and confidence metrics
+    - sc_metrics: Calculated evaluation metrics
 
-    In out_dir, this function will create:
-    - out_dir/mpnn_preds: structure predicted PDBs
-    - out_dir/mpnn_ca_aligned_preds: structure predicted PDBs, CA aligned to the original PDBs
-
-    If eval_codesign is True, rather than use MPNN predictions, the sequences in the original PDBs will be used.
-    - In this case, mpnn_model and mpnn_cfg are not required, and "mpnn_preds" will not be included in the output.
-    - Also, the out directories will have the prefix "codesign_"
-
-    TODO: handle multichain residue index gap when reading in MPNN preds / sampled sequences. For ESMFold, gap should be 1000?
+    Files Created:
+    -------------
+    - {out_dir}/struct_preds/: Predicted structure PDB files
+    - {out_dir}/ca_aligned_struct_preds/: Structure PDBs aligned to originals using CA atoms
+    - {out_dir}/sc_info/: Output pt files containing all results for each PDB
     """
     sc_info = defaultdict(dict)
 
@@ -99,36 +107,37 @@ def run_self_consistency_eval(pdbs: List[str],
     struct_model_name = struct_pred_model["model_name"]
 
     # Create output directories
-    preds_dir = Path(out_dir, f"{'codesign_' if eval_codesign else 'mpnn_'}preds")
+    preds_dir = Path(out_dir, "struct_preds")
     preds_dir.mkdir(parents=True, exist_ok=True)
-    ca_aligned_preds_dir = Path(out_dir, f"{'codesign_' if eval_codesign else 'mpnn_'}ca_aligned_preds")
+    ca_aligned_preds_dir = Path(out_dir, f"ca_aligned_struct_preds")
     ca_aligned_preds_dir.mkdir(parents=True, exist_ok=True)
 
     # === Run sequence design === #
-    if not eval_codesign:
+    run_seq_des = seq_des_model is not None
+    if run_seq_des:
+        # Re-design sequences for each input PDB
         seq_des_model_name = seq_des_model["model_name"]
         if seq_des_model_name == "proteinmpnn":
             mpnn_model, mpnn_cfg = seq_des_model["mpnn_model"], seq_des_model["mpnn_cfg"]
             mpnn_preds_dict = run_mpnn(mpnn_model, cfg=mpnn_cfg, pdb_paths=pdbs, device=device)
             for pdb, mpnn_preds in mpnn_preds_dict.items():
-                sc_info[pdb]["mpnn_preds"] = mpnn_preds
+                sc_info[pdb]["seq_des_preds"] = mpnn_preds
         elif seq_des_model_name == "fampnn":
             fampnn_model, fampnn_cfg = seq_des_model["fampnn_model"], seq_des_model["fampnn_cfg"]
             fampnn_preds_dict, _ = run_fampnn(fampnn_model, cfg=fampnn_cfg, pdb_paths=pdbs, device=device)
             for pdb, fampnn_preds in fampnn_preds_dict.items():
-                sc_info[pdb]["fampnn_preds"] = fampnn_preds
+                sc_info[pdb]["seq_des_preds"] = fampnn_preds
 
     # === Run structure prediction === #
-    if not eval_codesign:
-        # For backbone eval, run structure prediction on the designed sequences for each PDB
+    if run_seq_des:
+        # Run structure prediction on the designed sequences for each PDB
         for pdb in tqdm(pdbs, desc=f"Running {struct_model_name}", leave=False):
             # Extract sequences
+            seq_des_preds = sc_info[pdb]["seq_des_preds"]
             if seq_des_model_name == "proteinmpnn":
-                mpnn_preds = sc_info[pdb]["mpnn_preds"]
-                sequences_list, residue_index_list, chain_index_list = mpnn_preds["mpnn_seqs"], mpnn_preds["residue_index"], mpnn_preds["chain_index"]
+                sequences_list, residue_index_list, chain_index_list = seq_des_preds["mpnn_seqs"], seq_des_preds["residue_index"], seq_des_preds["chain_index"]
             elif seq_des_model_name == "fampnn":
-                fampnn_preds = sc_info[pdb]["fampnn_preds"]
-                sequences_list, residue_index_list, chain_index_list = fampnn_preds["pred_seqs"], fampnn_preds["residue_index"], fampnn_preds["chain_index"]
+                sequences_list, residue_index_list, chain_index_list = seq_des_preds["pred_seqs"], seq_des_preds["residue_index"], seq_des_preds["chain_index"]
 
             if struct_model_name == "af2":
                 # === Run AlphaFold2 === #
@@ -162,8 +171,8 @@ def run_self_consistency_eval(pdbs: List[str],
                     "atom_positions": esm_preds["pred_coords"],
                     "atom_mask": esm_preds["atom_mask"],
                     "residue_index": esm_preds["residue_index"],
-                    "chain_index": torch.zeros_like(esm_preds["residue_index"]),
-                    "b_factors": None,
+                    "chain_index": esm_preds["chain_index"],
+                    "b_factors": esm_preds["plddt"],
                 }
 
                 B, _, _, _ = esm_preds["pred_coords"].shape
@@ -196,7 +205,7 @@ def run_self_consistency_eval(pdbs: List[str],
                 write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
 
     else:
-        # For allatom/co-design eval, run ESMFold on sequences directly from PDBs
+        # Run structure prediction on sequences directly from PDBs
         sequences_list, residue_index_list, chain_index_list = load_sequence_and_residx_from_pdbs(pdbs)
         if struct_model_name == "af2":
             # === Run AlphaFold2 === #
@@ -230,8 +239,8 @@ def run_self_consistency_eval(pdbs: List[str],
                     "atom_positions": esm_preds["pred_coords"][i],
                     "atom_mask": esm_preds["atom_mask"][i],
                     "residue_index": esm_preds["residue_index"][i],
-                    "chain_index": torch.zeros_like(esm_preds["residue_index"][i]),
-                    "b_factors": None,
+                    "chain_index": esm_preds["chain_index"][i],
+                    "b_factors": esm_preds["plddt"][i],
                 }
 
                 filename = f"{preds_dir}/esmfold_{Path(pdb).stem}.pdb"
@@ -261,14 +270,6 @@ def run_self_consistency_eval(pdbs: List[str],
                 write_to_pdb(**feats, filename=filename, mode="aa")
 
     # === Compute eval metrics === #
-    if not eval_codesign:
-        metrics_to_compute = ["sc_ca_rmsd", "sc_ca_tm"]
-    else:
-        metrics_to_compute = ["sc_ca_rmsd", "sc_ca_tm", "sc_aa_rmsd"]
-
-    if override_metrics_to_compute is not None:
-        metrics_to_compute = override_metrics_to_compute
-
     Path(ca_aligned_preds_dir).mkdir(parents=True, exist_ok=True)
     for pdb in tqdm(pdbs, desc="Computing metrics", leave=False):
         # Load in sampled structure
@@ -299,12 +300,18 @@ def run_self_consistency_eval(pdbs: List[str],
             "b_factors": None,
         }
 
-        if not eval_codesign:
+        if run_seq_des:
             filenames = [f"{ca_aligned_preds_dir}/{struct_model_name}_{Path(pdb).stem}_{i}.pdb" for i in range(B)]
         else:
-            assert B == 1, "We should only have one prediction per PDB for eval_codesign eval"
+            assert B == 1, "We should only have one prediction per PDB if we're using the original sequence in the PDB"
             filenames = [f"{ca_aligned_preds_dir}/{struct_model_name}_{Path(pdb).stem}.pdb"]
         write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
+
+    # Save results to pkl file
+    sc_info_path = Path(out_dir, "sc_info")
+    sc_info_path.mkdir(parents=True, exist_ok=True)
+    for pdb, info in sc_info.items():
+        torch.save(info, Path(sc_info_path, f"{Path(pdb).stem}.pt"))
 
     return sc_info
 

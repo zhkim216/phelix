@@ -33,12 +33,13 @@ def run_esmfold(sequence_list: List[str],
 
     Returns a dict containing:
     - pred_coords: (b n 37 3) predicted coordinates of atoms
-    = plddts: (b n) predicted pLDDTs
+    - plddt: (b n 37) predicted pLDDTs for all atoms
+    - ca_plddt: (b n) predicted pLDDTs for CA atoms
     - seq_mask: (b n) sequence mask
     - aatype: (b n) input amino acid types in AF2 format
     - atom_mask: (b n 37) atom mask corresponding to aatype
     - residue_index: (b n) residue index, usually just range(n)
-    - avg_plddt: (b) average pLDDT across sequence
+    - avg_ca_plddt: (b) average CA pLDDT across sequence
     """
     model = model.eval()
 
@@ -63,17 +64,20 @@ def run_esmfold(sequence_list: List[str],
     # positions is shape (l, b, n, 14, 3)
     pred_coords_atom14 = outputs.positions[-1]
     pred_coords_atom37 = data.atom14_aatype_to_atom37(pred_coords_atom14, outputs.aatype)
-    plddts = outputs.plddt[:, :, 1] * seq_mask
+    plddt = outputs.plddt * 100 * seq_mask[..., None]
+    ca_plddt = plddt[:, :, 1]
 
-    avg_plddt = (plddts * seq_mask).sum(dim=-1) / seq_mask.sum(dim=-1).clamp(min=1e-3)
+    # Calculate average CA pLDDT
+    avg_ca_plddt = (ca_plddt * seq_mask).sum(dim=-1) / seq_mask.sum(dim=-1).clamp(min=1e-3)
 
     esm_outputs = {
         "pred_coords": pred_coords_atom37,
-        "plddts": plddts,
+        "plddt": plddt,
+        "ca_plddt": ca_plddt,
         "seq_mask": seq_mask,
         "aatype": outputs.aatype,
         "residue_index": outputs.residue_index,
-        "avg_plddt": avg_plddt,
+        "avg_ca_plddt": avg_ca_plddt,
     }
     esm_outputs = {k: v.cpu() for k, v in esm_outputs.items()}
 
@@ -97,12 +101,13 @@ def run_esmfold_batched(sequences_list: List[str],
 
     Returns a dict containing:
     - pred_coords: (b n 37 3) predicted coordinates of atoms
-    - plddts: (b n) predicted pLDDTs
+    - plddt: (b n 37) predicted pLDDTs
+    - ca_plddt: (b n) predicted pLDDTs for CA atoms
     - seq_mask: (b n) sequence mask
     - aatype: (b n) input amino acid types in AF2 format
     - atom_mask: (b n 37) atom mask corresponding to aatype
     - residue_index: (b n) residue index, usually just range(n)
-    - avg_plddt: (b) average pLDDT across sequence
+    - avg_ca_plddt: (b) average CA pLDDT across sequence
     """
     model = model.eval()
     esm_outputs = defaultdict(list)
@@ -132,9 +137,9 @@ def run_esmfold_batched(sequences_list: List[str],
         seq_mask = inputs["attention_mask"]
         pred_coords_atom14 = outputs["positions"][-1]  # positions is shape (l, b, n, 14, 3)
         pred_coords_atom37 = data.atom14_aatype_to_atom37(pred_coords_atom14, outputs["aatype"])
-        plddts = outputs["plddt"][:, :, 1] * seq_mask  # get pLDDT for CA atoms
-        plddts = plddts * 100
-        avg_plddt = (plddts * seq_mask).sum(dim=-1) / seq_mask.sum(dim=-1).clamp(min=1e-3)
+        plddt = outputs["plddt"] * 100 * seq_mask[..., None]
+        ca_plddt = plddt[:, :, 1]   # get pLDDT for CA atoms
+        avg_ca_plddt = (ca_plddt * seq_mask).sum(dim=-1) / seq_mask.sum(dim=-1).clamp(min=1e-3)
 
         aatype, seq_mask = outputs.aatype.cpu(), seq_mask.cpu()
         atom_mask = torch.tensor(STANDARD_ATOM_MASK[aatype]) * seq_mask[..., None]
@@ -142,11 +147,13 @@ def run_esmfold_batched(sequences_list: List[str],
         # Create batch outputs
         esm_outputs_batch = {
             "pred_coords": pred_coords_atom37,
-            "plddts": plddts,
+            "plddt": plddt,
+            "ca_plddt": ca_plddt,
             "seq_mask": seq_mask,
             "aatype": aatype,
             "residue_index": residue_index,
-            "avg_plddt": avg_plddt[..., None],  # add sequence dimension for consistency
+            "chain_index": batch["chain_index"],
+            "avg_ca_plddt": avg_ca_plddt[..., None],  # add sequence dimension for consistency
             "atom_mask": atom_mask,    # add atom mask based on input aatypes for convenience
         }
         esm_outputs_batch = {k: v.cpu() for k, v in esm_outputs_batch.items()}
@@ -230,8 +237,8 @@ def create_batched_seq_dataset(all_sequences: List[str],
 
 def save_best_model(af_model, filename):
     aux = af_model._tmp["best"]["aux"]["all"]
-    plddts = np.mean(af_model._tmp["best"]["aux"]["all"]['plddt'], axis = -1)
-    best_model_idx = np.argmax(plddts)
+    plddt = np.mean(af_model._tmp["best"]["aux"]["all"]['plddt'], axis = -1)
+    best_model_idx = np.argmax(plddt)
     p = {k:aux[k][best_model_idx] for k in ["aatype","residue_index","atom_positions","atom_mask"]}
     p["b_factors"] = 100 * p["atom_mask"] * aux["plddt"][best_model_idx][...,None]
 
@@ -294,17 +301,19 @@ def run_af2(sequences_list: List[str],
     preds = [data.load_feats_from_pdb(pdb) for pdb in output_files]
 
     # Preprocess plddt-CA
-    plddts = [pred["b_factors"][:, 1] for pred in preds]
-    avg_plddts = [torch.mean(plddt, dim=0, keepdim=True) for plddt in plddts]  # keep sequence dim for consistency
+    plddt = [pred["b_factors"] for pred in preds]
+    ca_plddt = [pred["b_factors"][:, 1] for pred in preds]
+    avg_ca_plddt = [torch.mean(ca_plddt, dim=0, keepdim=True) for ca_plddt in ca_plddt]  # keep sequence dim for consistency
 
     # Prepare AF2 outputs
     af2_outputs = {
         "pred_coords": [pred["all_atom_positions"] for pred in preds],
-        "plddts": plddts,
+        "plddt": plddt,
+        "ca_plddt": ca_plddt,
         "seq_mask": [pred["seq_mask"] for pred in preds],
         "aatype": [pred["aatype"] for pred in preds],
         "residue_index": [pred["residue_index"].long() for pred in preds],
-        "avg_plddt": avg_plddts,
+        "avg_ca_plddt": avg_ca_plddt,
         "atom_mask": [pred["all_atom_mask"] for pred in preds],
     }
 
@@ -355,7 +364,7 @@ def run_omegafold(sequences_list: List[str],
                   deterministic: bool = True,
                   subbatch_size: Optional[int] = None,
                   **kwargs):
-    raise NotImplementedError("Multichain support is not implemented yet.")
+    raise NotImplementedError("OmegaFold not supported anymore; code needs to be updated")
     forward_config = argparse.Namespace(
         subbatch_size=subbatch_size,
         num_recycle=num_recycle,
@@ -374,11 +383,11 @@ def run_omegafold(sequences_list: List[str],
         atom37_mask = torch.tensor(STANDARD_ATOM_MASK[aatype]) * seq_mask[..., None]
 
         of_outputs["pred_coords"].append(atom37_coords)
-        of_outputs["plddts"].append(output["confidence"].detach().cpu())
+        of_outputs["plddt"].append(output["confidence"].detach().cpu())
         of_outputs["seq_mask"].append(seq_mask)
         of_outputs["aatype"].append(aatype)
         of_outputs["residue_index"].append(residue_index.detach().cpu())
-        of_outputs["avg_plddt"].append(output["confidence"].mean(dim=0, keepdim=True).detach().cpu())
+        of_outputs["avg_ca_plddt"].append(output["confidence"].mean(dim=0, keepdim=True).detach().cpu())
         of_outputs["atom_mask"].append(atom37_mask)
 
 

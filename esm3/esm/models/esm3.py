@@ -291,7 +291,7 @@ class ESM3(nn.Module, ESM3InferenceClient):
             function_tokens (torch.Tensor, optional): The function tokens.
             residue_annotation_tokens (torch.Tensor, optional): The residue annotation tokens.
             average_plddt (torch.Tensor, optional): The average plddt across the entire sequence.
-            per_res_plddt (torch.Tensor, optional): The per residue plddt, if you want to specify exact plddts, use this,
+            per_res_plddt (torch.Tensor, optional): The per residue plddt, if you want to specify exact plddt, use this,
                 otherwise, use average_plddt.
             structure_coords (torch.Tensor, optional): The structure coordinates, in the form of (B, L, 3, 3).
             chain_id (torch.Tensor, optional): The chain ID
