@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import torch
 from colabdesign import clear_mem
 from colabdesign.af import mk_af_model
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
 from tqdm import tqdm
 from transformers import AutoTokenizer, EsmForProteinFolding, EsmTokenizer
@@ -237,7 +237,7 @@ def create_batched_seq_dataset(all_sequences: List[str],
 
 def save_best_model(af_model, filename):
     aux = af_model._tmp["best"]["aux"]["all"]
-    plddt = np.mean(af_model._tmp["best"]["aux"]["all"]['plddt'], axis = -1)
+    plddt = np.mean(aux["plddt"], axis=-1)
     best_model_idx = np.argmax(plddt)
     p = {k:aux[k][best_model_idx] for k in ["aatype","residue_index","atom_positions","atom_mask"]}
     p["b_factors"] = 100 * p["atom_mask"] * aux["plddt"][best_model_idx][...,None]
@@ -278,8 +278,8 @@ def run_af2(sequences_list: List[str],
     for _, (seq, pdb, residue_index, chain_index) in enumerate(zip(sequences_list, pdbs, residue_index_list, chain_index_list)):
         output_pdb = f"{out_dir}/af2_{Path(pdb).stem}.pdb"
         assert len(chain_index_list[0].unique()) == 1, "Multi-chain prediction not supported yet"
-        af_model.prep_inputs(pdb, chains, ignore_missing=False)
-        # _prep_struct_pred(af_model, residue_index)
+        # af_model.prep_inputs(pdb, chains, ignore_missing=False)
+        _prep_struct_pred(af_model, residue_index)
 
         af_model.restart()
         af_model.set_opt("template", rm_ic=rm_template_interchain)
@@ -472,6 +472,9 @@ def get_struct_pred_model(cfg: DictConfig,
     """
     model_name = cfg.model_name
     struct_pred_model = {"model_name": model_name, "cfg": cfg, "device": device}
+
+    base_cfg = OmegaConf.load(cfg.base_cfg)
+    cfg = OmegaConf.merge(base_cfg, cfg)
 
     if model_name == "af2":
         clear_mem()
