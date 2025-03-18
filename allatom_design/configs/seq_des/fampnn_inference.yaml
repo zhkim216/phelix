@@ -4,6 +4,7 @@ defaults:
 batch_size: 16
 num_seqs_per_pdb: 1
 verbose: true
+num_workers: 8  # number of workers for data loading
 
 # Inverse folding options
 num_steps: 50

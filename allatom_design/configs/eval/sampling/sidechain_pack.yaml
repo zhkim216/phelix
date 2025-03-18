@@ -1,47 +1,35 @@
 sd_ckpt:
 
-num_workers: 8
-out_dir: null  # null to save in the model run directory
-exp_name: test  # sampling experiment name
-overwrite_out_dir: true  # if true, delete existing output directory
 seed: 0
-batch_size: 16
 
-# Data options for overriding denoiser config (null values default to denoiser config)
-data:
-    # pdb_path: /media/scratch/datasets/qfit-test-set/rcsb-pdb
-    # pdb_path: /media/scratch/datasets/rcsb_test_cases
-    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    n_random_subset: null
+# Inputs
+checkpoint_path: null  # path to the checkpoint to use for sampling
+out_dir: null  # null to save in the model run directory
+
+input_cfg:
+  pdb_dir: null
+  pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
+  pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
+  subset_length_range: null # only evaluate on sequences within this length range
+  presort_by_length: false  # sort pdb keys by sequence length, potentially for efficiency
+  n_subsample: null  # randomly sample this many pdb keys, null to use all
 
 # Sidechain packing run parameters
-num_pdbs: null  # number of structures to pack sidechains for, null for all
-num_samples_per_pdb: 1  # number of trajectories to run per structure
-subset_length_range: null
 n_traj: 0  # number of trajectories to randomly save
 limit_diff_traj_steps: 20  # limit the number of steps we save in the sidechain diffusion trajectory (evenly spaced)
-traj_conect: false
-partial_t_seq: null
-partial_t_scn: null
 
-# Sidechain diffusion parameters
-scn_diffusion:
-  num_steps: 50
-  timestep_schedule:
-    num_steps: ${scn_diffusion.num_steps}
-    mode: "linear"
-    t_start: 0.0
-    t_end: 1.0
-  noise_schedule:
-    name: "step_scale"
-    c: 1.5
-  churn_cfg:
-    s_churn: 0
-    s_noise: 1.0
-    s_t_min: 0.01
-    s_t_max: 50.0
-    num_steps: ${scn_diffusion.num_steps}
+sampling_cfg_overrides:
+  batch_size: 32
+  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+  noise_labels: 0.0
 
+# Sampling config
+seq_des_cfg:
+  model_name: "fampnn"
+  fampnn:
+    fampnn_cfg: allatom_design/configs/seq_des/fampnn_inference.yaml
+    fampnn_ckpt: ${checkpoint_path}
+    overrides: ${sampling_cfg_overrides}
 
 hydra:
   run:

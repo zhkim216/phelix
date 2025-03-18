@@ -10,17 +10,11 @@ import lightning as L
 import pandas as pd
 import torch
 import yaml
-from joblib import Parallel, delayed
-from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
-from torchtyping import TensorType
-from tqdm import tqdm
-
-from allatom_design.data.data import get_length_from_pdb
 from allatom_design.eval import eval_metrics
 from allatom_design.eval.fampnn_utils import get_seq_des_model, run_fampnn
 from allatom_design.eval.folding_utils import get_struct_pred_model
-from allatom_design.eval.eval_path_utils import get_pdb_files
+from allatom_design.eval.eval_setup_utils import get_pdb_files
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="fampnn_multi", version_base="1.3.2")
@@ -65,35 +59,16 @@ def main(cfg: DictConfig):
     else:
         pos_constraint_df = pd.DataFrame(columns=["pdb_name"])
 
-    ### Load in PDB files ###
-    pdb_files = get_pdb_files(cfg.pdb_dir, cfg.pdb_key_list, cfg.pdb_key_ext)
-
-    # Re-run missing PDBs
     if cfg.fix_missing:
+        # get list of PDBs to skip based on existing output CSV
         out_df = pd.read_csv(out_df_path)
-        pdb_keys = out_df["pdb_key"].unique()
-        pdb_files = [f for f in pdb_files if Path(f).stem not in pdb_keys]
+        existing_pdb_keys = out_df["pdb_key"].unique()
         out_df_path = f"{out_dir}/fampnn_outputs_missing.csv"  # save to a different file
+    else:
+        existing_pdb_keys = None
 
-    # Parallelization
-    if cfg.array_id is not None:
-        # Determine chunk size
-        array_id = cfg.array_id
-        num_arrays = cfg.num_arrays
-        chunk_size = math.ceil(len(pdb_files) / num_arrays)
-
-        start_idx = array_id * chunk_size
-        end_idx = min(start_idx + chunk_size, len(pdb_files))
-        pdb_files = pdb_files[start_idx:end_idx]
-
-    # If specified, pre-sort by length (descending)
-    if cfg.presort_by_length:
-        # determine lengths
-        results = Parallel(n_jobs=-1)(delayed(get_length_from_pdb)(f) for f in tqdm(pdb_files, desc="Loading PDBs to determine lengths"))
-        pdb_to_length = dict(results)
-
-        # sort by length, longest first
-        pdb_files = sorted(pdb_files, key=lambda x: pdb_to_length[x], reverse=True)
+    ### Load in PDB files ###
+    pdb_files = get_pdb_files(**cfg.input_cfg, skip_pdb_names=existing_pdb_keys)
 
     ### SAMPLING ###
     # Run FAMPNN
