@@ -261,7 +261,7 @@ def run_af2(sequences_list: List[str],
             num_models: int,
             sample_models: bool,
             num_recycles: int,
-            save_best: bool,
+            save_best: bool = True,
             rm_template_interchain: bool = False,
             chains: Optional[str] = None,
             **kwargs) -> Tuple[Dict[str, torch.Tensor],
@@ -278,18 +278,18 @@ def run_af2(sequences_list: List[str],
     for _, (seq, pdb, residue_index, chain_index) in enumerate(zip(sequences_list, pdbs, residue_index_list, chain_index_list)):
         output_pdb = f"{out_dir}/af2_{Path(pdb).stem}.pdb"
         assert len(chain_index_list[0].unique()) == 1, "Multi-chain prediction not supported yet"
-        # af_model.prep_inputs(pdb, chains, ignore_missing=False)
-        _prep_struct_pred(af_model, residue_index)
+        af_model.prep_inputs(pdb, chains, ignore_missing=False)
+        # _prep_struct_pred(af_model, residue_index)
 
         af_model.restart()
         af_model.set_opt("template", rm_ic=rm_template_interchain)
         af_model.predict(seq=seq,
-                         num_models=num_models if save_best else 1, #default to 1 model unless we are saving only the best
+                         num_models=num_models,
                          sample_models=sample_models,
                          num_recycles=num_recycles,
                          verbose=False)
 
-        af_model._save_results(save_best=save_best, best_metric='plddt', verbose=False)
+        af_model._save_results(save_best=save_best, best_metric="plddt", verbose=False)
 
         if save_best:
             save_best_model(af_model, output_pdb)
