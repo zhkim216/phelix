@@ -1,0 +1,33 @@
+# Wandb configuration
+project: "allatom_design"  # Wandb project name
+wandb_id: "richardshuai"  # Wandb username
+exp_name: null # Wandb exp name
+group: "debug" # Wandb group name
+
+# Run settings
+no_wandb: false  # Disable wandb logging
+out_dir: test_run_sc_eval
+seed: 0
+
+# Inputs
+input_cfg:
+  pdb_dir: null
+  pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
+  pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
+  subset_length_range: null # only evaluate on sequences within this length range
+  presort_by_length: false  # sort pdb keys by sequence length, potentially for efficiency
+  n_subsample: null  # randomly sample this many pdb keys, null to use all
+
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: "esmfold"
+  base_cfg: allatom_design/configs/struct_pred/struct_pred_base.yaml
+  # overrides to base config
+  af2:
+    data_dir: /media/scratch/huang_lab/af2
+  esmfold:
+    max_tokens_per_batch: 1024
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

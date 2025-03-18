@@ -471,11 +471,10 @@ def get_struct_pred_model(cfg: DictConfig,
             cache_dir: # directory to cache omegafold model
     """
     model_name = cfg.model_name
-    struct_pred_model = {"model_name": model_name, "cfg": cfg, "device": device}
-
     base_cfg = OmegaConf.load(cfg.base_cfg)
     cfg = OmegaConf.merge(base_cfg, cfg)
 
+    struct_pred_model = {"model_name": model_name, "cfg": cfg, "device": device}
     if model_name == "af2":
         clear_mem()
         af_model = mk_af_model(data_dir=cfg.af2.data_dir,
