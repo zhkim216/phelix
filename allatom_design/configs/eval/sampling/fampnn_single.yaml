@@ -29,14 +29,11 @@ seq_des_cfg:
 
 # Structure prediction model args
 struct_pred_cfg:
-  model_name: "esmfold"  # ["esmfold", "af2", "omegafold"]
+  model_name: "esmfold"
+  base_cfg: allatom_design/configs/struct_pred/struct_pred_base.yaml
+  # overrides to base config
   af2:
-    data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
-    num_models: 1  # only 1 model is currently supported
-    sample_models: true  # randomly sample models from the ensemble
-    save_best: false
-    num_recycles: 3
-    use_multimer: false
+    data_dir: /media/scratch/huang_lab/af2
   esmfold:
     max_tokens_per_batch: 1024
 

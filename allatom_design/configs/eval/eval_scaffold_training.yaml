@@ -70,24 +70,15 @@ seq_des_cfg:
       num_steps: 50
       noise_labels: 0.0
 
-# Structure prediction model
+# Structure prediction model args
 struct_pred_cfg:
   model_name: "esmfold"
+  base_cfg: allatom_design/configs/struct_pred/struct_pred_base.yaml
+  # overrides to base config
   af2:
     data_dir: /media/scratch/huang_lab/af2
-    num_models: 1
-    sample_models: true
-    num_recycles: 3
-    use_multimer: false
   esmfold:
     max_tokens_per_batch: 1024
-  omegafold:
-    num_pseudo_msa: 15
-    mask_rate: 0.12
-    num_recycle: 2
-    deterministic: true
-    subbatch_size: null
-    cache_file: /media/scratch/huang_lab/cache/omegafold/omegafold.pt
 
 # nnTM
 nntm_dataset: null
