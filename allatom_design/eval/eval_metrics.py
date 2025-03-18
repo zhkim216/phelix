@@ -272,40 +272,43 @@ def run_self_consistency_eval(pdbs: List[str],
     # === Compute eval metrics === #
     Path(ca_aligned_preds_dir).mkdir(parents=True, exist_ok=True)
     for pdb in tqdm(pdbs, desc="Computing metrics", leave=False):
-        # Load in sampled structure
-        sampled_pdb_feats = data.load_feats_from_pdb(pdb)
+        try:
+            # Load in sampled structure
+            sampled_pdb_feats = data.load_feats_from_pdb(pdb)
 
-        # Retrieve structure predictions
-        struct_preds = sc_info[pdb]["struct_preds"]
+            # Retrieve structure predictions
+            struct_preds = sc_info[pdb]["struct_preds"]
 
-        # Compute structure metrics
-        B, _, _, _ = struct_preds["pred_coords"].shape
-        metrics, pred_coords_ca_aligned = eval_metrics.compute_structure_metrics(
-            struct_preds["pred_coords"],
-            sampled_pdb_feats["all_atom_positions"][None].expand(B, -1, -1, -1),
-            sampled_pdb_feats["all_atom_mask"][None].expand(B, -1, -1),
-            metrics_to_compute=metrics_to_compute,
-            temp_dir=temp_dir,
-            motif_info=motif_info.get(pdb, {}),  # if evaluating motif scaffolding, pass in scaffold coordinates and mask
-        )
-        sc_info[pdb]["sc_metrics"] = metrics
+            # Compute structure metrics
+            B, _, _, _ = struct_preds["pred_coords"].shape
+            metrics, pred_coords_ca_aligned = eval_metrics.compute_structure_metrics(
+                struct_preds["pred_coords"],
+                sampled_pdb_feats["all_atom_positions"][None].expand(B, -1, -1, -1),
+                sampled_pdb_feats["all_atom_mask"][None].expand(B, -1, -1),
+                metrics_to_compute=metrics_to_compute,
+                temp_dir=temp_dir,
+                motif_info=motif_info.get(pdb, {}),  # if evaluating motif scaffolding, pass in scaffold coordinates and mask
+            )
+            sc_info[pdb]["sc_metrics"] = metrics
 
-        # Write aligned coords to pdb file
-        feats = {
-            "aatype": struct_preds["aatype"],
-            "atom_positions": pred_coords_ca_aligned,
-            "atom_mask": struct_preds["atom_mask"],
-            "residue_index": struct_preds["residue_index"],
-            "chain_index": torch.zeros_like(struct_preds["residue_index"]),
-            "b_factors": None,
-        }
+            # Write aligned coords to pdb file
+            feats = {
+                "aatype": struct_preds["aatype"],
+                "atom_positions": pred_coords_ca_aligned,
+                "atom_mask": struct_preds["atom_mask"],
+                "residue_index": struct_preds["residue_index"],
+                "chain_index": torch.zeros_like(struct_preds["residue_index"]),
+                "b_factors": None,
+            }
 
-        if run_seq_des:
-            filenames = [f"{ca_aligned_preds_dir}/{struct_model_name}_{Path(pdb).stem}_{i}.pdb" for i in range(B)]
-        else:
-            assert B == 1, "We should only have one prediction per PDB if we're using the original sequence in the PDB"
-            filenames = [f"{ca_aligned_preds_dir}/{struct_model_name}_{Path(pdb).stem}.pdb"]
-        write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
+            if run_seq_des:
+                filenames = [f"{ca_aligned_preds_dir}/{struct_model_name}_{Path(pdb).stem}_{i}.pdb" for i in range(B)]
+            else:
+                assert B == 1, "We should only have one prediction per PDB if we're using the original sequence in the PDB"
+                filenames = [f"{ca_aligned_preds_dir}/{struct_model_name}_{Path(pdb).stem}.pdb"]
+            write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
+        except:
+            print(f"Error processing {pdb}: there was an issue processing {pdb}, skipping...")
 
     # Save results to pkl file
     sc_info_path = Path(out_dir, "sc_info")
