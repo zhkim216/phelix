@@ -1,36 +1,22 @@
-import glob
 import os
-import pickle
-import re
-import shutil
 from collections import defaultdict
-from functools import partial
 from pathlib import Path
 
 import hydra
 import lightning as L
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import torch
 import wandb
 import yaml
-from natsort import natsorted
-from omegaconf import DictConfig, OmegaConf, open_dict
-from torch.utils.data import DataLoader
+from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import trim_to_max_len
-from allatom_design.data.datasets.sd_dataset import SDDataset
-from allatom_design.eval import eval_metrics, sampling_utils
-from allatom_design.eval.eval_path_utils import get_training_checkpoints, get_pdb_files
+from allatom_design.eval import eval_metrics
+from allatom_design.eval.eval_setup_utils import (get_pdb_files,
+                                                 get_training_checkpoints,
+                                                 wandb_setup)
 from allatom_design.eval.fampnn_utils import get_seq_des_model, run_fampnn
 from allatom_design.eval.folding_utils import get_struct_pred_model
-from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
-    NoiseSchedule
-from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
-from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 
 
 @hydra.main(config_path="../configs/eval", config_name="eval_seq_des_training", version_base="1.3.2")
@@ -45,30 +31,10 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.deterministic = True  # nonrandom CUDNN convolution algo, maybe slower
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
-    # Set up logging
-    if cfg.no_wandb:
-        log_dir = Path(cfg.out_dir, "debug")
-    else:
-        # Create wandb dir
-        wandb_dir = str(Path(cfg.out_dir))
-        Path(wandb_dir, "wandb").mkdir(parents=True, exist_ok=True)
-
-        # Set wandb cache directory
-        wandb_cache_dir = str(Path(cfg.out_dir, "cache", "wandb"))
-        os.environ["WANDB_CACHE_DIR"] = wandb_cache_dir
-
-        wandb.init(
-            project=cfg.project,
-            entity=cfg.wandb_id,
-            name=cfg.exp_name,
-            group=cfg.group,
-            config=cfg_dict,
-            dir=wandb_dir,
-        )
-        log_dir = Path(cfg.out_dir, wandb.run.name)  # base log dir
-
-    # Set up out directories
-    Path(log_dir).mkdir(parents=True, exist_ok=True)
+    # Set up wandb logging
+    log_dir = wandb_setup(no_wandb=cfg.no_wandb, out_dir=cfg.out_dir,
+                          project=cfg.project, wandb_id=cfg.wandb_id, exp_name=cfg.exp_name, group=cfg.group,
+                          cfg_dict=cfg_dict)
 
     # Preserve config
     with open(Path(log_dir, "config.yaml"), "w") as f:

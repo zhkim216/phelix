@@ -1,11 +1,14 @@
 import glob
+import math
 import re
 from pathlib import Path
+import os
 
 import numpy as np
 from joblib import Parallel, delayed
 from natsort import natsorted
 from tqdm import tqdm
+import wandb
 
 from allatom_design.data.data import get_length_from_pdb
 
@@ -16,7 +19,11 @@ def get_pdb_files(pdb_dir: str,
                   subset_length_range: tuple[int, int] | None = None,
                   presort_by_length: bool = False,
                   n_subsample: int | None = None,
-                  n_jobs: int = 8
+                  n_jobs: int = 8,
+                  # job array parameters for parallelization
+                  array_id: int | None = None,
+                  num_arrays: int | None = None,
+                  skip_pdb_names: list[str] | None = None,
                   ) -> list[str]:
     """
     Retrieve a list of PDB files from a directory, either by specifying a list of keys or by getting all files.
@@ -25,6 +32,10 @@ def get_pdb_files(pdb_dir: str,
         pdb_dir: Directory containing PDB files
         pdb_key_list: Optional path to a file containing PDB keys (one per line)
         pdb_key_ext: Optional extension to append to each key when pdb_key_list is provided
+        array_id: Set by Slurm array job. Null means run all.
+        num_arrays: Number of total arrays. If array_id is null, this can remain 1.
+        skip_pdb_names: List of PDB names to skip
+
 
     Returns:
         List of PDB file paths, naturally sorted if retrieving all files
@@ -44,6 +55,22 @@ def get_pdb_files(pdb_dir: str,
         print(f"Found {len(pdb_files)} PDB files in {pdb_dir}")
         if len(pdb_files) == 0:
             raise ValueError(f"No PDB files found in directory {pdb_dir}")
+
+    # Skip existing PDBs
+    if skip_pdb_names is not None:
+        skip_pdb_names = [f"{Path(pdb_key).stem}{pdb_key_ext}" for pdb_key in skip_pdb_names]  # in case pdb_keys instead of pdb_names is passed in, we add the extension
+        skip_pdb_names = set(skip_pdb_names)
+        pdb_files = [f for f in pdb_files if Path(f).name not in skip_pdb_names]
+
+    # Parallelization: split PDB files into chunks based on array id
+    if array_id is not None:
+        array_id = array_id
+        num_arrays = num_arrays
+        chunk_size = math.ceil(len(pdb_files) / num_arrays)
+
+        start_idx = array_id * chunk_size
+        end_idx = min(start_idx + chunk_size, len(pdb_files))
+        pdb_files = pdb_files[start_idx:end_idx]
 
     # Handle length-dependent options
     if (presort_by_length) or (subset_length_range is not None):
@@ -108,7 +135,7 @@ def get_training_checkpoints(
     else:
         print(f"Using non-EMA checkpoints from {denoiser_train_dir}/checkpoints")
         pattern = re.compile(f"{prefix}-step(\\d+)-epoch(\\d+)\\.ckpt$")
-        ckpts = glob.glob(f"{denoiser_train_dir / 'checkpoints' / '*.ckpt'}")
+        ckpts = glob.glob(f"{denoiser_train_dir}/checkpoints/*.ckpt")
 
     # Filter and sort checkpoints
     ckpts = natsorted([ckpt for ckpt in ckpts if pattern.search(Path(ckpt).name)])[::eval_every_n_ckpts]
@@ -127,3 +154,54 @@ def get_training_checkpoints(
         ckpts = filtered_ckpts
 
     return ckpts, pattern
+
+
+def wandb_setup(
+    no_wandb: bool,
+    out_dir: str,
+    project: str = None,
+    wandb_id: str = None,
+    exp_name: str = None,
+    group: str = None,
+    cfg_dict: dict = None,
+) -> Path:
+    """
+    Set up Weights & Biases (wandb) tracking and return the log directory.
+
+    Args:
+        no_wandb: If True, disable wandb logging
+        out_dir: Base output directory for logs
+        project: wandb project name
+        wandb_id: wandb entity ID
+        exp_name: Name of the experiment
+        group: Group name for the experiment
+        cfg_dict: Configuration dictionary to log
+
+    Returns:
+        Path: Log directory path
+    """
+    if no_wandb:
+        log_dir = Path(out_dir, "debug")
+    else:
+        # Create wandb dir
+        wandb_dir = str(Path(out_dir))
+        Path(wandb_dir, "wandb").mkdir(parents=True, exist_ok=True)
+
+        # Set wandb cache directory
+        wandb_cache_dir = str(Path(out_dir, "cache", "wandb"))
+        os.environ["WANDB_CACHE_DIR"] = wandb_cache_dir
+
+        wandb.init(
+            project=project,
+            entity=wandb_id,
+            name=exp_name,
+            group=group,
+            config=cfg_dict,
+            dir=wandb_dir,
+        )
+        log_dir = Path(out_dir, wandb.run.name)  # base log dir
+
+    # Set up out directories
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
+
+    return log_dir

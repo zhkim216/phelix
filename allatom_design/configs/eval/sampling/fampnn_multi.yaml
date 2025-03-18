@@ -3,18 +3,22 @@ seed: 0
 batch_size: 16
 num_workers: 8
 
-# Parallelization: job array parameters
-array_id: null  # Set by Slurm array job. Null means run all.
-num_arrays: 1   # Number of total arrays. If array_id is null, this can remain 1.
-fix_missing: false  # if true, will load in output df and re-run missing entries
-
 # Inputs
 checkpoint_path: null
 out_dir: null
+fix_missing: false  # if true, will load in output df and only re-run missing entries
 
-pdb_dir: null
-pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
-pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
+input_cfg:
+  pdb_dir: null
+  pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
+  pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
+  subset_length_range: null # only evaluate on sequences within this length range
+  presort_by_length: false  # sort pdb keys by sequence length, potentially for efficiency
+  n_subsample: null  # randomly sample this many pdb keys, null to use all
+
+  # Parallelization: job array parameters
+  array_id: null  # Set by Slurm array job. Null means run all.
+  num_arrays: 1   # Number of total arrays. If array_id is null, this can remain 1.
 
 # Positional constraints: supports columns in [pdb_name,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
 # e.g. 2fyzA,"A1-100,B1-100","A1-100"
@@ -34,7 +38,7 @@ seq_des_cfg:
   model_name: "fampnn"
   fampnn:
     fampnn_cfg: allatom_design/configs/seq_des/fampnn_inference.yaml
-    fampnn_ckpt: /media/scratch/huang_lab/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
+    fampnn_ckpt: ${checkpoint_path}
     overrides: ${sampling_cfg_overrides}
 
 # Structure prediction model args

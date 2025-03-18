@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 import torch
+from joblib import Parallel, delayed
 from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
 from tqdm import tqdm
@@ -138,95 +139,96 @@ def run_fampnn(model: SeqDenoiser,
     pbar = tqdm(total=len(pdb_paths_repeated), desc=f"FAMPNN: sampling S={cfg.num_steps} steps, {len(pdb_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
 
     input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
-    for i in range(0, len(pdb_paths_repeated), cfg.batch_size):
-        pdb_batch_files = pdb_paths_repeated[i:i+cfg.batch_size]
-        B = len(pdb_batch_files)
-        batch, pdb_names, batch_chain_id_mapping = get_fampnn_batch(pdb_batch_files, device=device)
+    with Parallel(n_jobs=cfg.num_workers) as parallel_pool:  # for loading PDBs in parallel
+        for i in range(0, len(pdb_paths_repeated), cfg.batch_size):
+            pdb_batch_files = pdb_paths_repeated[i:i+cfg.batch_size]
+            B = len(pdb_batch_files)
+            batch, pdb_names, batch_chain_id_mapping = get_fampnn_batch(pdb_batch_files, device=device, parallel_pool=parallel_pool)
 
-        # Prepare scd_inputs for this batch
-        scd_inputs = dict(scd_inputs_template)
-        scd_inputs["timesteps"] = t_scd[None].expand(B, -1).to(device)
+            # Prepare scd_inputs for this batch
+            scd_inputs = dict(scd_inputs_template)
+            scd_inputs["timesteps"] = t_scd[None].expand(B, -1).to(device)
 
-        # Prepare sampling timesteps
-        timesteps = t_seq[None].expand(B, -1).to(device)
+            # Prepare sampling timesteps
+            timesteps = t_seq[None].expand(B, -1).to(device)
 
-        # Handle fixed positions and conditioning; update batch with override masks and overridden aatypes
-        batch = parse_fixed_pos_info(batch, pdb_names, batch_chain_id_mapping, pos_constraint_df, verbose=cfg.verbose)
+            # Handle fixed positions and conditioning; update batch with override masks and overridden aatypes
+            batch = parse_fixed_pos_info(batch, pdb_names, batch_chain_id_mapping, pos_constraint_df, verbose=cfg.verbose)
 
-        # Restrict aatype sampling at certain positions
-        pos_restrict_aatype = parse_pos_restrict_aatype_info(batch, pdb_names, batch_chain_id_mapping, pos_constraint_df, verbose=cfg.verbose)
+            # Restrict aatype sampling at certain positions
+            pos_restrict_aatype = parse_pos_restrict_aatype_info(batch, pdb_names, batch_chain_id_mapping, pos_constraint_df, verbose=cfg.verbose)
 
-        # Run sampling
-        x_denoised, aatype_denoised, aux = model.sample(
-            batch["x"],
-            aatype=batch["aatype"],
-            seq_mask=batch["seq_mask"],
-            missing_atom_mask=batch["missing_atom_mask"],
-            residue_index=batch["residue_index"],
-            chain_index=batch["chain_index"],
-            timesteps=timesteps,
-            temperature=cfg.temperature,
-            aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
-            seq_only=cfg.seq_only,
-            repack_last=cfg.repack_last,
-            psce_threshold=cfg.psce_threshold,
-            omit_aas=cfg.omit_aas,
-            noise_labels=cfg.noise_labels,
-            add_noise=cfg.add_noise,
-            aatype_override_mask=batch["aatype_override_mask"],
-            scn_override_mask=batch["scn_override_mask"],
-            pos_restrict_aatype=pos_restrict_aatype,
-            scd_inputs=scd_inputs,
-        )
+            # Run sampling
+            x_denoised, aatype_denoised, aux = model.sample(
+                batch["x"],
+                aatype=batch["aatype"],
+                seq_mask=batch["seq_mask"],
+                missing_atom_mask=batch["missing_atom_mask"],
+                residue_index=batch["residue_index"],
+                chain_index=batch["chain_index"],
+                timesteps=timesteps,
+                temperature=cfg.temperature,
+                aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
+                seq_only=cfg.seq_only,
+                repack_last=cfg.repack_last,
+                psce_threshold=cfg.psce_threshold,
+                omit_aas=cfg.omit_aas,
+                noise_labels=cfg.noise_labels,
+                add_noise=cfg.add_noise,
+                aatype_override_mask=batch["aatype_override_mask"],
+                scn_override_mask=batch["scn_override_mask"],
+                pos_restrict_aatype=pos_restrict_aatype,
+                scd_inputs=scd_inputs,
+            )
 
-        batch_samples = {
-            "x_denoised": x_denoised,
-            "seq_mask": batch["seq_mask"],
-            "missing_atom_mask": batch["missing_atom_mask"],
-            "residue_index": batch["residue_index"],
-            "chain_index": batch["chain_index"],
-            "pred_aatype": aatype_denoised,
-            "psce": aux["psce"],
-            "seq_probs": aux["seq_probs"],
-            # save other useful info
-            "original_aatype": batch["aatype"],
-            "interface_residue_mask": batch["interface_residue_mask"],
-            "aatype_override_mask": batch["aatype_override_mask"],
-            "scn_override_mask": batch["scn_override_mask"],
-        }
+            batch_samples = {
+                "x_denoised": x_denoised,
+                "seq_mask": batch["seq_mask"],
+                "missing_atom_mask": batch["missing_atom_mask"],
+                "residue_index": batch["residue_index"],
+                "chain_index": batch["chain_index"],
+                "pred_aatype": aatype_denoised,
+                "psce": aux["psce"],
+                "seq_probs": aux["seq_probs"],
+                # save other useful info
+                "original_aatype": batch["aatype"],
+                "interface_residue_mask": batch["interface_residue_mask"],
+                "aatype_override_mask": batch["aatype_override_mask"],
+                "scn_override_mask": batch["scn_override_mask"],
+            }
 
-        batch_samples = {k: v.cpu() for k, v in batch_samples.items()}
+            batch_samples = {k: v.cpu() for k, v in batch_samples.items()}
 
-        # Store samples and remove padding
-        for j in range(B):
-            length_j = batch["seq_mask"][j].sum().long().item()
-            sample_j = {k: v[j, :length_j].clone() for k, v in batch_samples.items()}
-            pdb_path = pdb_batch_files[j]
-            input_pdb_to_samples[pdb_path].append(sample_j)
-
-        # Save outputs to disk
-        if out_dir is not None:
-            # Save as PDB
-            sample_stems = [f"{Path(pdb_name).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(pdb_names)]
-            batch_out_pdbs = [f"{sample_out_dir}/{sample_stem}.pdb" for sample_stem in sample_stems]  # output PDBs
-            SeqDenoiser.save_samples_to_pdb(batch_samples, batch_out_pdbs)
-            run_aux["out_pdbs"].extend(batch_out_pdbs)
-            run_aux["input_pdb_names"].extend(pdb_names)
-
-            # Save samples as pkl
+            # Store samples and remove padding
             for j in range(B):
                 length_j = batch["seq_mask"][j].sum().long().item()
                 sample_j = {k: v[j, :length_j].clone() for k, v in batch_samples.items()}
-                pkl_file = f"{sample_pkl_out_dir}/{sample_stems[j]}.pkl"
-                with open(pkl_file, "wb") as f:
-                    torch.save(sample_j, f)
-                run_aux["out_pkls"].append(pkl_file)
+                pdb_path = pdb_batch_files[j]
+                input_pdb_to_samples[pdb_path].append(sample_j)
 
-                # Keep explicit track of pred seqs for convenience
-                run_aux["pred_seqs"].append("".join([rc.restypes_with_x[aa] for aa in sample_j["pred_aatype"]]))
+            # Save outputs to disk
+            if out_dir is not None:
+                # Save as PDB
+                sample_stems = [f"{Path(pdb_name).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(pdb_names)]
+                batch_out_pdbs = [f"{sample_out_dir}/{sample_stem}.pdb" for sample_stem in sample_stems]  # output PDBs
+                SeqDenoiser.save_samples_to_pdb(batch_samples, batch_out_pdbs)
+                run_aux["out_pdbs"].extend(batch_out_pdbs)
+                run_aux["input_pdb_names"].extend(pdb_names)
+
+                # Save samples as pkl
+                for j in range(B):
+                    length_j = batch["seq_mask"][j].sum().long().item()
+                    sample_j = {k: v[j, :length_j].clone() for k, v in batch_samples.items()}
+                    pkl_file = f"{sample_pkl_out_dir}/{sample_stems[j]}.pkl"
+                    with open(pkl_file, "wb") as f:
+                        torch.save(sample_j, f)
+                    run_aux["out_pkls"].append(pkl_file)
+
+                    # Keep explicit track of pred seqs for convenience
+                    run_aux["pred_seqs"].append("".join([rc.restypes_with_x[aa] for aa in sample_j["pred_aatype"]]))
 
 
-        pbar.update(B)
+            pbar.update(B)
     pbar.close()
 
     # For each input pdb, aggregate all FAMPNN samples
@@ -247,15 +249,142 @@ def run_fampnn(model: SeqDenoiser,
     return preds, run_aux
 
 
-def get_fampnn_batch(pdb_batch_files: List[str], device: str) -> Tuple[Dict[str, TensorType["b n ..."]],
-                                                                       List[str],
-                                                                       List[Dict[str, int]],  # maps chain letters to chain index
-                                                                       ]:
+def run_fampnn_packing(model: SeqDenoiser,
+                       cfg: DictConfig,
+                       pdb_paths: list[str],
+                       device: str,
+                       pos_constraint_df: pd.DataFrame | None = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
+                       out_dir: str | None = None,
+                       ) -> Tuple[Dict[str, Dict[str, torch.Tensor]],
+                                  Dict]:
+    """
+    Given a list of PDB files, run FAMPNN sidechain packing on them.
+    """
+    if pos_constraint_df is not None:
+        raise NotImplementedError("Fixed positions are not yet supported for sidechain packing, but shouldn't be too hard to implement.")
+
+    # Set up output directory
+    run_aux = {}
+    run_aux["sample_info"] = []
+    if out_dir is not None:
+        sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
+        Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
+
+        run_aux["out_pdbs"] = []  # store paths to all output PDBs
+        run_aux["input_pdb_names"] = []  # store names of all input pdbs
+
+    # Set up sidechain diffusion inputs
+    t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)
+    noise_schedule = NoiseSchedule(cfg.scn_diffusion.noise_schedule)
+    churn_cfg = dict(cfg.scn_diffusion.churn_cfg)
+    scd_inputs_template = {
+        "num_steps": cfg.scn_diffusion.num_steps,
+        "timesteps": None,  # will be filled per batch
+        "noise_schedule": noise_schedule,
+        "churn_cfg": churn_cfg,
+        "return_scn_diffusion_aux": False
+    }
+
+    # Process PDBs in batches of size B
+    pdb_paths_repeated = np.repeat(pdb_paths, cfg.num_seqs_per_pdb)
+    pbar = tqdm(total=len(pdb_paths_repeated), desc=f"FAMPNN: packing with S_scd={cfg.scn_diffusion.num_steps} steps, {len(pdb_paths)} PDBs, {cfg.num_seqs_per_pdb} samples per PDB...")
+
+    input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
+    with Parallel(n_jobs=cfg.num_workers) as parallel_pool:  # for loading PDBs in parallel
+        for i in range(0, len(pdb_paths_repeated), cfg.batch_size):
+            pdb_batch_files = pdb_paths_repeated[i:i+cfg.batch_size]
+            B = len(pdb_batch_files)
+            batch, pdb_names, batch_chain_id_mapping = get_fampnn_batch(pdb_batch_files, device=device, parallel_pool=parallel_pool)
+
+            # Prepare scd_inputs for this batch
+            scd_inputs = dict(scd_inputs_template)
+            scd_inputs["timesteps"] = t_scd[None].expand(B, -1).to(device)
+
+            # Handle fixed positions and conditioning; update batch with override masks and overridden aatypes
+            batch = parse_fixed_pos_info(batch, pdb_names, batch_chain_id_mapping, pos_constraint_df, verbose=cfg.verbose)
+
+            # Run sidechain packing
+            x_denoised, _, aux = model.sidechain_pack(
+                x=batch["x"],
+                aatype=batch["aatype"],
+                seq_mask=batch["seq_mask"],
+                missing_atom_mask=batch["missing_atom_mask"],
+                residue_index=batch["residue_index"],
+                chain_index=batch["chain_index"],
+                scd_inputs=scd_inputs,
+            )
+            batch_samples = {"x_denoised": x_denoised,
+                            "seq_mask": batch["seq_mask"],
+                            "missing_atom_mask": batch["missing_atom_mask"],
+                            "pred_aatype": batch["aatype"],
+                            "psce": aux["psce"],
+                            "residue_index": batch["residue_index"],
+                            "chain_index": batch["chain_index"]}
+            batch_samples = {k: v.cpu() for k, v in batch_samples.items()}
+
+            # Store samples and remove padding
+            for j in range(B):
+                length_j = batch["seq_mask"][j].sum().long().item()
+                sample_j = {k: v[j, :length_j].clone() for k, v in batch_samples.items()}
+                pdb_path = pdb_batch_files[j]
+                input_pdb_to_samples[pdb_path].append(sample_j)
+
+            # Save outputs to disk
+            if out_dir is not None:
+                # Save as PDB
+                sample_stems = [f"{Path(pdb_name).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(pdb_names)]
+                batch_out_pdbs = [f"{sample_out_dir}/{sample_stem}.pdb" for sample_stem in sample_stems]  # output PDBs
+                SeqDenoiser.save_samples_to_pdb(batch_samples, batch_out_pdbs)
+
+                run_aux["out_pdbs"].extend(batch_out_pdbs)
+                run_aux["input_pdb_names"].extend(pdb_names)
+
+            # Also save useful sample info
+            aatype, seq_mask = batch["aatype"].cpu(), batch["seq_mask"].cpu()
+            atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK)[aatype] * seq_mask[..., None]
+            atom_mask = atom_mask * (1 - batch["missing_atom_mask"].cpu())  # handle atoms missing from the ground truth PDB
+            batch_sample_info = {"x_denoised": x_denoised,
+                                "x_in": batch["x"],
+                                "seq_mask": seq_mask,
+                                "atom_mask": atom_mask,
+                                "aatype": aatype}
+            batch_sample_info = {k: v.cpu() for k, v in batch_sample_info.items()}
+            run_aux["sample_info"].append(batch_sample_info)
+
+            pbar.update(B)
+    pbar.close()
+
+    # For each input pdb, aggregate all packed samples
+    preds = defaultdict(dict)
+    for pdb, samples_list in input_pdb_to_samples.items():
+        for k in samples_list[0].keys():
+            preds[pdb][k] = torch.stack([s[k] for s in samples_list])
+
+    # Also return padded batch info of all samples
+    max_len = max([v["x_denoised"].shape[1] for v in preds.values()])
+    run_aux["sample_info"] = [pad_to_max_len(batch_i, max_len) for batch_i in run_aux["sample_info"]]
+    run_aux["sample_info"] = {k: torch.cat([v[k] for v in run_aux["sample_info"]], dim=0) for k in run_aux["sample_info"][0].keys()}
+
+    return preds, run_aux
+
+
+def get_fampnn_batch(pdb_batch_files: List[str], device: str,
+                     parallel_pool: Parallel | None
+                     ) -> Tuple[Dict[str, TensorType["b n ..."]],
+                                List[str],
+                                List[Dict[str, int]],  # maps chain letters to chain index
+                                ]:
+    if parallel_pool is None:
+        # Load PDBs sequentially
+        batch_data = [load_feats_from_pdb(pdb_file) for pdb_file in pdb_batch_files]
+    else:
+        # Load PDBs in parallel
+        batch_data = parallel_pool(delayed(load_feats_from_pdb)(pdb_file) for pdb_file in pdb_batch_files)
+
     # Load and process all PDBs in this batch
     batch_list = []
     batch_chain_id_mapping = []
-    for pdb_file in pdb_batch_files:
-        data = load_feats_from_pdb(pdb_file)
+    for data in batch_data:
         single = process_single_pdb(data)
         batch_list.append(single)
 

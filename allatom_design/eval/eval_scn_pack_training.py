@@ -17,9 +17,13 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import trim_to_max_len, pad_to_max_len
+from allatom_design.data.data import pad_to_max_len, trim_to_max_len
 from allatom_design.data.datasets.sd_dataset import SDDataset
-from allatom_design.eval import eval_metrics, sampling_utils
+from allatom_design.eval import eval_metrics
+from allatom_design.eval.eval_setup_utils import (get_pdb_files,
+                                                 get_training_checkpoints,
+                                                 wandb_setup)
+from allatom_design.eval.fampnn_utils import (get_seq_des_model, run_fampnn_packing)
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
 
@@ -30,35 +34,15 @@ def main(cfg: DictConfig):
     """
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
-    # Create wandb dir
-    wandb_dir = str(Path(cfg.out_dir))
-    Path(wandb_dir, "wandb").mkdir(parents=True, exist_ok=True)
-
-    # Set wandb cache directory
-    wandb_cache_dir = str(Path(cfg.out_dir, "cache", "wandb"))
-    os.environ["WANDB_CACHE_DIR"] = wandb_cache_dir
-
     # Set seeds
     L.seed_everything(cfg.seed)
     torch.backends.cudnn.deterministic = True  # nonrandom CUDNN convolution algo, maybe slower
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
-    # Set up logging
-    if cfg.no_wandb:
-        log_dir = Path(cfg.out_dir, "debug")
-    else:
-        wandb.init(
-            project=cfg.project,
-            entity=cfg.wandb_id,
-            name=cfg.exp_name,
-            group=cfg.group,
-            config=cfg_dict,
-            dir=wandb_dir,
-        )
-        log_dir = Path(cfg.out_dir, wandb.run.name)  # base log dir
-
-    # Set up out directories
-    Path(log_dir).mkdir(parents=True, exist_ok=True)
+    # Set up wandb logging
+    log_dir = wandb_setup(no_wandb=cfg.no_wandb, out_dir=cfg.out_dir,
+                          project=cfg.project, wandb_id=cfg.wandb_id, exp_name=cfg.exp_name, group=cfg.group,
+                          cfg_dict=cfg_dict)
 
     # Preserve config
     with open(Path(log_dir, "config.yaml"), "w") as f:
@@ -68,106 +52,49 @@ def main(cfg: DictConfig):
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    ### Load in PDB files to eval on ###
+    pdb_files = get_pdb_files(**cfg.input_cfg)
+
     # Get checkpoints from denoiser training run
-    ema_ckpt_dir = f"{cfg.denoiser_train_dir}/checkpoints/ema"
-    if Path(ema_ckpt_dir).exists():
-        # Use EMA checkpoints if they exist
-        print(f"Using EMA checkpoints from {ema_ckpt_dir}")
-        pattern = re.compile(r"sd-step(\d+)-epoch(\d+)-ema(\d+\.\d+)\.ckpt$")  # match checkpoints of the form sd-step{step}-epoch{epoch}-ema{decay_rate}.ckpt
-        sd_ckpts = glob.glob(f"{ema_ckpt_dir}/*.ckpt")
-        sd_ckpts = natsorted([ckpt for ckpt in sd_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
-    else:
-        print(f"Using non-EMA checkpoints from {cfg.denoiser_train_dir}/checkpoints")
-        pattern = re.compile(r"sd-step(\d+)-epoch(\d+)\.ckpt$")  # Only match checkpoints of the form sd-step{step}-epoch{epoch}.ckpt
-        sd_ckpts = glob.glob(f"{cfg.denoiser_train_dir}/checkpoints/*.ckpt")
-        sd_ckpts = natsorted([ckpt for ckpt in sd_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
+    sd_ckpts, pattern = get_training_checkpoints(cfg.denoiser_train_dir, "seq_denoiser",
+                                                 cfg.eval_every_n_ckpts,
+                                                 cfg.start_step, cfg.end_step)
 
-
-    dataset = None  # we will load the dataset based on the model config
-
-    pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints")
+    pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints for sidechain packing...")
     for sd_ckpt in pbar:
         match = pattern.search(Path(sd_ckpt).name)
         global_step, epoch = int(match.group(1)), int(match.group(2))
         pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
 
-        # Skip if global_step is before start_step
-        if (cfg.start_step is not None) and (global_step < cfg.start_step):
-            continue
+        # Create output directory for this epoch
+        log_dir_i = f"{log_dir}/step_{global_step}_epoch_{epoch}"
+        Path(log_dir_i).mkdir(parents=True, exist_ok=True)
 
-        # Load denoiser model and dataset
-        lit_ad_model = LitSeqDenoiser.load_from_checkpoint(sd_ckpt).eval()
-        with open_dict(lit_ad_model.cfg.data):
-            lit_ad_model.cfg.data.update({k: v for k, v in cfg.data.items() if v is not None})  # override data config where specified
+        # Load in sequence design model
+        cfg.seq_des_cfg.fampnn.fampnn_ckpt = sd_ckpt
 
-        if dataset is None:
-            # Load dataset based on model config
-            dataset = SDDataset(phase="eval", evaluation_mode = True, **lit_ad_model.cfg.data)
-            val_dataloader = DataLoader(dataset, batch_size=cfg.batch_size, num_workers=cfg.num_workers, pin_memory=True, shuffle=False, drop_last=False)
-            dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
-
-        # Create sidechain diffusion inputs
-        scd_inputs = {"num_steps": None,  # filled in based on S_scd
-                     "timesteps": None,  # filled in based on batch size
-                     "noise_schedule": None,
-                     "churn_cfg": None,
-                     "return_scn_diffusion_aux": False
-                     }
-
-        ### BEGIN EVAL ###
         metrics = {}
 
-        for S_scd in cfg.scn_diffusion.num_steps_list:
+        for S_scd in cfg.num_steps_list:
             # Set up sidechain diffusion inputs
-            scd_inputs["num_steps"] = S_scd
-            cfg.scn_diffusion.timestep_schedule.num_steps = S_scd
-            t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)  # sidechain diffusion time
+            cfg.sampling_cfg_overrides.scn_diffusion.num_steps = S_scd
+            seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
 
             # Sidechain pack
-            sample_info = defaultdict(list)
+            _, aux = run_fampnn_packing(seq_des_model["fampnn_model"], seq_des_model["fampnn_cfg"],
+                                        pdb_paths=pdb_files, device=device)
+            sample_info = aux["sample_info"]
 
-            for batch in tqdm(val_dataloader, desc=f"Evaluating sidechain packing on validation set using {S_scd} denoising steps", leave=False):
-                batch = trim_to_max_len(batch)
-                x, aatype = batch["x"].to(device), batch["aatype"].to(device)
-                scd_inputs["timesteps"] = t_scd.expand(x.shape[0], -1).to(device)
-                seq_mask, missing_atom_mask = batch["seq_mask"].to(device), batch["missing_atom_mask"].to(device)
-                residue_index, chain_index = batch["residue_index"].to(device), batch["chain_index"].to(device)
-                cond_labels_in = {"crop_aug": batch["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
+            # Compute metrics
+            core_mask, surface_mask = eval_metrics.get_core_surface_mask(sample_info["x_in"], sample_info["atom_mask"])
+            sample_info["core_mask"] = core_mask
+            sample_info["surface_mask"] = surface_mask
+            scn_info, _ = eval_metrics.compute_structure_metrics(sample_info["x_in"], sample_info["x_denoised"],
+                                                                 sample_info["atom_mask"], aatype=sample_info["aatype"],
+                                                                 metrics_to_compute=["scn_rmsd_per_pos", "chi_metrics_per_pos"])
 
-                x_denoised, _, _ = lit_ad_model.model.sidechain_pack(
-                    x,
-                    aatype,
-                    seq_mask=seq_mask,
-                    missing_atom_mask=missing_atom_mask,
-                    residue_index=residue_index,
-                    chain_index=chain_index,
-                    cond_labels=cond_labels_in,
-                    scd_inputs=scd_inputs,
-                )
-
-                # Store sample info
-                seq_mask, aatype = seq_mask.cpu(), aatype.cpu()
-                core_mask, surface_mask = eval_metrics.get_core_surface_mask(x.cpu(), batch["atom_mask"].cpu())
-                sample_info_i = {"pdb_key": batch["pdb_key"], "seq_mask": seq_mask, "aatype": aatype, "core_mask": core_mask, "surface_mask": surface_mask}
-
-                # Compute sidechain RMSD per residue
-                atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK)[aatype] * seq_mask[..., None]
-                atom_mask = atom_mask * (1 - batch["missing_atom_mask"])  # handle atoms missing from the ground truth PDB
-
-                scn_info, _ = eval_metrics.compute_structure_metrics(x.cpu(), x_denoised.cpu(),
-                                                                     atom_mask, aatype=aatype,
-                                                                     metrics_to_compute=["scn_rmsd_per_pos", "chi_metrics_per_pos"])
-                for k, v in scn_info.items():
-                    sample_info_i[k] = v
-
-                # Pad sample_info for this batch back to max length
-                sample_info_i = pad_to_max_len(sample_info_i, max_len=dataset.fixed_size)
-
-                # Append sample info for this batch
-                for k, v in sample_info_i.items():
-                    sample_info[k].append(v)
-
-            sample_info = {k: torch.cat(v, dim=0) if k != "pdb_key" else v for k, v in sample_info.items()}
+            for k, v in scn_info.items():
+                sample_info[k] = v
 
             ### Compute sidechain metrics ###
             # Get average RMSD over all residues
@@ -198,11 +125,8 @@ def main(cfg: DictConfig):
                 metrics[f"S_scd{S_scd}/chi{ci+1}_acc_avg"] = chi_acc_avg[ci].item()
 
         # Save metrics
-        metrics_dir = f"{log_dir}/scn_pack_metrics"
-        Path(metrics_dir).mkdir(parents=True, exist_ok=True)
-
         metrics_df = pd.DataFrame(metrics, index=[0])
-        metrics_df.to_csv(f"{metrics_dir}/scn_pack_metrics_epoch{epoch}.csv", index=False)
+        metrics_df.to_csv(f"{log_dir_i}/scn_pack_metrics.csv", index=False)
 
         # Log metrics to wandb
         metrics = {f"scn_pack/{k}": v for k, v in metrics.items()}

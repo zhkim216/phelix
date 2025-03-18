@@ -13,20 +13,20 @@ import pandas as pd
 import torch
 import yaml
 from omegaconf import DictConfig, OmegaConf, open_dict
-from scipy.stats import spearmanr
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.data import pad_to_max_len, trim_to_max_len
 from allatom_design.data.datasets.sd_dataset import SDDataset
 from allatom_design.data.pdb_utils import write_batched_to_pdb
 from allatom_design.eval import eval_metrics, sampling_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
+from allatom_design.eval.fampnn_utils import get_seq_des_model, run_fampnn_packing
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
+from allatom_design.eval.eval_setup_utils import get_pdb_files
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="sidechain_pack", version_base="1.3.2")
@@ -41,45 +41,24 @@ def main(cfg: DictConfig):
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
 
-    # Latent denoiser
-    lit_sd_model = LitSeqDenoiser.load_from_checkpoint(cfg.sd_ckpt).eval()
-    device = lit_sd_model.device
-
-    # Create out dirs and preserve config
-    if cfg.out_dir is None:
-        model_run_dir = Path(cfg.sd_ckpt).parent.parent
-        model_name = Path(cfg.sd_ckpt).stem
-        cfg.out_dir = f"{model_run_dir}/sidechain_pack/{model_name}/{cfg.exp_name}"
-
-    if cfg.overwrite_out_dir and Path(cfg.out_dir).exists():
-        # Delete existing out_dir
-        print(f"Deleting pre-existing out_dir: {cfg.out_dir}")
-        shutil.rmtree(cfg.out_dir)
-
+    # Create out dir and preserve config
     Path(cfg.out_dir).mkdir(parents=True, exist_ok=True)
     with open(Path(cfg.out_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
+    # Load in sequence design model
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
+
+    ### Load in PDB files ###
+    pdb_files = get_pdb_files(**cfg.input_cfg)
+
+    ### Sampling ###
+    # Run FAMPNN
     sample_out_dir = Path(cfg.out_dir, "samples")
     traj_out_dir = Path(cfg.out_dir, "traj")
     Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
     Path(traj_out_dir).mkdir(parents=True, exist_ok=True)
-
-    # Load model config
-    with open_dict(lit_sd_model.cfg.data):
-        lit_sd_model.cfg.data.update({k: v for k, v in cfg.data.items() if v is not None})  # override data config where specified
-
-    # Load dataset based on model config
-    if lit_sd_model.cfg.data.overfit > 0:
-        # For debugging with overfitting models, we sidechain pack on the training set
-        dataset = SDDataset(phase="train", **lit_sd_model.cfg.data)
-    else:
-        dataset = SDDataset(phase="eval", evaluation_mode = True, **lit_sd_model.cfg.data)
-
-    if cfg.subset_length_range is not None:
-        dataset.subset_to_length_range(cfg.subset_length_range[0], cfg.subset_length_range[1])  # only eval on proteins within this length range
-    num_pdbs = cfg.num_pdbs if cfg.num_pdbs is not None else len(dataset)
-    val_dataloader = DataLoader(dataset, batch_size=num_pdbs, num_workers=cfg.num_workers, pin_memory=True, shuffle=True, drop_last=False)
 
     # Define some random examples to sample
     examples = next(iter(val_dataloader))
@@ -106,45 +85,6 @@ def main(cfg: DictConfig):
     sample_info = defaultdict(list)
 
     pbar = tqdm(range(0, len(example_indices), cfg.batch_size))
-    for bi in pbar:
-        idxs = example_indices[bi:bi + cfg.batch_size]
-        batch_i = SDDataset.index_into_batch(examples, idxs)
-        batch_i = trim_to_max_len(batch_i)
-
-        x, aatype = batch_i["x"].to(device), batch_i["aatype"].to(device)
-        scd_inputs["timesteps"] = t_scd[None].expand(x.shape[0], -1).to(device)
-        seq_mask, missing_atom_mask = batch_i["seq_mask"].to(device), batch_i["missing_atom_mask"].to(device)
-        residue_index, chain_index = batch_i["residue_index"].to(device), batch_i["chain_index"].to(device)
-        cond_labels_in = {"crop_aug": batch_i["cond_labels_in"]["crop_aug"].to(device)}  # we only provide whether cropping was applied
-
-        x_in = x.clone()
-
-        # Handle partial context packing for benchmarking
-        aatype_override_mask = seq_mask.clone()  # by default, pack with whole sequence
-        scn_override_mask = torch.zeros_like(seq_mask)  # by default, pack with whole sequence
-        seq_mask_packed = seq_mask.clone()  # denotes the residues that we've actually packed
-
-        # If specified in config, pack with partial sequence
-        assert (cfg.partial_t_seq is None) or (cfg.partial_t_scn is None), "Packing with partial sequence and partial sidechain simultaneously is not yet supported."
-        if cfg.partial_t_seq is not None:
-            # randomly mask out a portion of the sequence
-            lengths = seq_mask.sum(dim=-1).long()
-            num_to_mask = torch.floor(lengths * (1 - cfg.partial_t_seq)).long()
-            aatype_override_mask = seq_mask.clone()
-            for i in range(len(lengths)):
-                mask_indices = torch.randperm(lengths[i])[:num_to_mask[i]]
-                aatype_override_mask[i, mask_indices] = 0
-            seq_mask_packed = aatype_override_mask.clone()  # denotes the residues that we've actually packed
-        elif cfg.partial_t_scn is not None:
-            # randomly mask out a portion of sidechains
-            lengths = seq_mask.sum(dim=-1).long()
-            num_to_mask = torch.floor(lengths * (1 - cfg.partial_t_scn)).long()
-            scn_override_mask = seq_mask.clone()
-            for i in range(len(lengths)):
-                mask_indices = torch.randperm(lengths[i])[:num_to_mask[i]]
-                scn_override_mask[i, mask_indices] = 0
-            seq_mask_packed = (scn_override_mask == 0) * seq_mask  # denotes the residues that we've actually packed
-
         x_denoised, aatype_denoised, aux = lit_sd_model.model.sidechain_pack(
             x_in,
             aatype,
@@ -170,15 +110,14 @@ def main(cfg: DictConfig):
         seq_mask, aatype = seq_mask.cpu(), aatype.cpu()
         core_mask, surface_mask = eval_metrics.get_core_surface_mask(x.cpu(), batch_i["atom_mask"].cpu())
         sample_info_i = {"pdb_key": batch_i["pdb_key"], "seq_mask": seq_mask, "aatype": aatype, "core_mask": core_mask, "surface_mask": surface_mask, "psce": aux["psce"],
-                         "seq_mask_packed": seq_mask_packed.cpu()}
+                         "seq_mask_packed": seq_mask.cpu()}
 
         # Sidechain RMSD per residue
         atom_mask = batch_i["atom_mask"]
-        atom_mask[:, rc.atom_order["OXT"]] = 0  # remove OXT atoms from atom_mask
+        atom_mask[..., rc.atom_order["OXT"]] = 0  # remove OXT atoms from atom_mask
         scn_info, ca_aligned_coords1 = eval_metrics.compute_structure_metrics(x.cpu(), x_denoised.cpu(),
                                                                               atom_mask, aatype=aatype,
                                                                               metrics_to_compute=["scn_rmsd_per_pos",
-                                                                                                #   "scn_rmsd_per_pos_ligandmpnn",
                                                                                                   "chi_metrics_per_pos",
                                                                                                   "sce"])
         for k, v in scn_info.items():
@@ -243,28 +182,28 @@ def main(cfg: DictConfig):
 
     ### Compute sidechain metrics ###
     scn_metrics = {}
-    seq_mask_packed = sample_info["seq_mask_packed"]  # only compute over residues that we've packed
+    seq_mask = sample_info["seq_mask_packed"]  # only compute over residues that we've packed
 
     # Average RMSD per protein over proteins
-    scn_rmsd_avg = (sample_info["scn_rmsd_per_pos"] * seq_mask_packed).sum(dim=-1) / seq_mask_packed.sum(dim=-1)
+    scn_rmsd_avg = (sample_info["scn_rmsd_per_pos"] * seq_mask).sum(dim=-1) / seq_mask.sum(dim=-1)
     scn_metrics["scn_rmsd_avg"] = scn_rmsd_avg.mean().item()
     print(f"Average RMSD per protein: {scn_metrics['scn_rmsd_avg']:.3f}")
 
     # Average RMSD over all residues
-    scn_rmsd_avg_all = (sample_info["scn_rmsd_per_pos"] * seq_mask_packed).sum() / seq_mask_packed.sum()
+    scn_rmsd_avg_all = (sample_info["scn_rmsd_per_pos"] * seq_mask).sum() / seq_mask.sum()
     scn_metrics["scn_rmsd_avg_all"] = scn_rmsd_avg_all.item()
 
     # Average RMSD over all core and surface residues
     for key in ["core", "surface"]:
         mask = sample_info[f"{key}_mask"]
-        scn_rmsd_avg = (sample_info["scn_rmsd_per_pos"][mask] * seq_mask_packed[mask]).sum() / seq_mask_packed[mask].sum()
+        scn_rmsd_avg = (sample_info["scn_rmsd_per_pos"][mask] * seq_mask[mask]).sum() / seq_mask[mask].sum()
         scn_metrics[f"scn_rmsd_avg_{key}"] = scn_rmsd_avg.item()
 
     # Get average RMSD per residue
     for aa_idx, aa in enumerate(rc.restypes_with_x):
         aatype_mask = sample_info["aatype"] == aa_idx
         rmsd_i = sample_info["scn_rmsd_per_pos"][aatype_mask]
-        rmsd_avg_i = (rmsd_i * seq_mask_packed[aatype_mask]).sum() / seq_mask_packed[aatype_mask].sum()
+        rmsd_avg_i = (rmsd_i * seq_mask[aatype_mask]).sum() / seq_mask[aatype_mask].sum()
 
         print(f"Average RMSD for {aa}: {rmsd_avg_i:.3f} Å")
         scn_metrics[f"scn_rmsd_avg_{aa}"] = rmsd_avg_i.item()

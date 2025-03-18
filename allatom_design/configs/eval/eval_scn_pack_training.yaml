@@ -8,30 +8,39 @@ group: "eval_scn_pack_debug" # Wandb group name
 no_wandb: false  # Disable wandb logging
 seed: 0
 start_step: 0  # start evaluation after this epoch, 0 or null to start from the beginning
+end_step: null  # end evaluation after this step (inclusive), null to evaluate until the end
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
-batch_size: 64
-num_workers: 8
+
+# Inputs
+input_cfg:
+  pdb_dir: null
+  pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
+  pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
+  subset_length_range: null # only evaluate on sequences within this length range
+  presort_by_length: false  # sort pdb keys by sequence length, potentially for efficiency
+  n_subsample: null  # randomly sample this many pdb keys, null to use all
 
 # Denoiser options
 denoiser_train_dir:
 out_dir: ${denoiser_train_dir}/eval_scn_pack_training
+num_steps_list: [1, 50]
 
-# Data options for overriding denoiser config (null values default to denoiser config)
-data:
-    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    n_random_subset: null
-
-subset_length_range: [64, 256]  # only evaluate on sequences within this length range
-
-# Sidechain packing options
-scn_diffusion:
-  num_steps_list: [1, 20, 100]  # number of diffusion steps for sidechain packing
-  timestep_schedule:
+sampling_cfg_overrides:
+  batch_size: 64
+  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+  scn_diffusion:
     num_steps: null  # filled in by num_steps_list
-    mode: "linear"
-    t_start: 0.0
-    t_end: 1.0
+    noise_schedule:
+      name: "step_scale"
+      c: 1.0  # we don't use low temperature sampling for evaluation
 
+# Sampling config
+seq_des_cfg:
+  model_name: "fampnn"
+  fampnn:
+    fampnn_cfg: allatom_design/configs/seq_des/fampnn_inference.yaml
+    fampnn_ckpt: null  # overridden with training checkpoint paths
+    overrides: ${sampling_cfg_overrides}
 
 hydra:
   run:
