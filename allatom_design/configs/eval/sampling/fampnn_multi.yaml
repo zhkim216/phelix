@@ -32,6 +32,7 @@ sampling_cfg_overrides:
   num_seqs_per_pdb: 16  # number of sequences to sample per pdb
   num_steps: 50
   noise_labels: 0.0
+  add_noise: false
 
 # Sampling config
 seq_des_cfg:

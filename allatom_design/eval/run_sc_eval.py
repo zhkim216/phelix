@@ -68,9 +68,12 @@ def main(cfg: DictConfig):
 
     # Aggregate results
     sc_metrics = defaultdict(list)
-    for pdb in pdb_files:
-        for k, v in sc_info[pdb]["sc_metrics"].items():
-            sc_metrics[f"{k}"].append(v.item())
+    for pdb in sc_info.keys():
+        if "sc_metrics" in sc_info[pdb]:
+            for k, v in sc_info[pdb]["sc_metrics"].items():
+                sc_metrics[f"{k}"].append(v.item())
+        else:
+            print(f"Skipping {pdb} in aggregation...")
 
     # Update metrics
     out_metrics = {f"mean/{k}": np.mean(v) for k, v in sc_metrics.items()}
