@@ -14,7 +14,7 @@ from torchtyping import TensorType
 from allatom_design.model.atom_denoiser.ad_loss import ADLoss
 from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
 from allatom_design.model.lr_schedule import InverseSqrtLR, NoamLR
-from allatom_design.model.phema import PowerFunctionEMA
+from allatom_design.model.ema.phema import PowerFunctionEMA
 
 
 class LitAtomDenoiser(L.LightningModule):

@@ -15,7 +15,7 @@ from omegaconf import DictConfig, OmegaConf
 import allatom_design.data.datasets.sd_dataset as sd_dataset
 from allatom_design.checkpoint_utils import EMATrackerCheckpoint
 from allatom_design.data.datasets.sd_dataset import LitSDDataModule
-from allatom_design.model.ema import EMA, EMAModelCheckpoint
+from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
 
