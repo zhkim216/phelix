@@ -171,8 +171,6 @@ def main(cfg: DictConfig):
                         default_root_dir=cfg.logging.log_dir,
                         log_every_n_steps=cfg.logging.log_every_n_steps,
                         callbacks=callbacks,
-                        devices=len(os.environ["CUDA_VISIBLE_DEVICES"].split(",")),  # number of devices per node
-                        num_nodes=int(os.environ.get("SLURM_NNODES", 1)),  # number of nodes
                         **cfg.trainer
                         )
     trainer.fit(model=lit_model, datamodule=datamodule, ckpt_path=resumed_ckpt_path)
