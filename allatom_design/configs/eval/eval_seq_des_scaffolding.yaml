@@ -13,8 +13,8 @@ num_workers: 8
 # Inputs
 checkpoint_path: null
 pdb_dir: null
-pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
-pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
+pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
+pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
 presort_by_length: false  # sort pdbs by sequence length (longest first). Can be helpful for efficiency.
 subset_length_range: null  # only use pdbs with sequence length in this range
 num_pdbs: null  # only use this many pdbs; null to use all

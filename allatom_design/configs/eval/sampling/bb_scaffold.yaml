@@ -15,8 +15,8 @@ overwrite_out_dir: false
 ad_ckpt:
 exp_name: baseline
 pdb_dir: null
-pdb_key_list: null  # list of keys to use from the pdb_dir, null to use all .pdb files
-pdb_key_ext: ""  # if pdb_key_list does not have extensions, add this extension
+pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
+pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
 
 # Denoising steps
 num_steps: 500

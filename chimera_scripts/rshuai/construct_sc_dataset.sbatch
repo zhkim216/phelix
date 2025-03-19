@@ -30,10 +30,10 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 NOISE_LABELS=0.0
 MODEL_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
 PDB_DIR=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/train_mmcifs
-PDB_KEY_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/train_pdb_keys.list
+PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/train_pdb_keys.list
 OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/construct_sc_dataset/af3_pdb_monomer_L32_256_nl${NOISE_LABELS}
 
-# PDB_KEY_LIST=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys.list
+# PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/eval_pdb_keys.list
 # OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/construct_sc_dataset/ingraham_cath_L151_256_S50_val
 
 cd ${BASE_DIR}
@@ -45,8 +45,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/construct_sc_datase
     hydra.run.dir=${HYDRA_DIR} \
     checkpoint_path=${MODEL_CKPT} \
     pdb_dir=${PDB_DIR} \
-    pdb_key_list=${PDB_KEY_LIST} \
-    pdb_key_ext=.cif \
+    pdb_name_list=${PDB_NAME_LIST} \
+    pdb_name_ext=.cif \
     subset_length_range=[32,256] \
     presort_by_length=true \
     out_dir=${OUT_DIR} \

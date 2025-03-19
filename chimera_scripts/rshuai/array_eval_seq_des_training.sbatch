@@ -26,7 +26,7 @@ AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Inputs config
 # PDB_DIR=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_mmcifs
-# PDB_KEY_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_pdb_keys.list
+# PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_pdb_keys.list
 PDB_DIR=/scratch/hielab/rshuai/datasets/denovo250dev/pdbs
 
 # Set cache directories

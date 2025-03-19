@@ -14,8 +14,8 @@ from allatom_design.data.data import get_length_from_pdb
 
 
 def get_pdb_files(pdb_dir: str,
-                  pdb_key_list: str | None,
-                  pdb_key_ext: str | None,
+                  pdb_name_list: str | None,
+                  pdb_name_ext: str | None,
                   subset_length_range: tuple[int, int] | None = None,
                   presort_by_length: bool = False,
                   n_subsample: int | None = None,
@@ -26,12 +26,12 @@ def get_pdb_files(pdb_dir: str,
                   skip_pdb_names: list[str] | None = None,
                   ) -> list[str]:
     """
-    Retrieve a list of PDB files from a directory, either by specifying a list of keys or by getting all files.
+    Retrieve a list of PDB files from a directory, either by specifying a list of pdb_names or by getting all files.
 
     Args:
         pdb_dir: Directory containing PDB files
-        pdb_key_list: Optional path to a file containing PDB keys (one per line)
-        pdb_key_ext: Optional extension to append to each key when pdb_key_list is provided
+        pdb_name_list: Optional path to a file containing PDB keys (one per line)
+        pdb_name_ext: Optional extension to append to each key when pdb_name_list is provided
         array_id: Set by Slurm array job. Null means run all.
         num_arrays: Number of total arrays. If array_id is null, this can remain 1.
         skip_pdb_names: List of PDB names to skip
@@ -41,16 +41,16 @@ def get_pdb_files(pdb_dir: str,
         List of PDB file paths, naturally sorted if retrieving all files
 
     Raises:
-        ValueError: If no PDB files are found in the directory when pdb_key_list is None
+        ValueError: If no PDB files are found in the directory when pdb_name_list is None
     """
-    if pdb_key_list is not None:
+    if pdb_name_list is not None:
         # Get PDBs with keys in the list
-        with open(pdb_key_list, "r") as f:
+        with open(pdb_name_list, "r") as f:
             pdb_keys = f.read().splitlines()
-        pdb_files = [f"{pdb_dir}/{key}{pdb_key_ext}" for key in pdb_keys]
+        pdb_files = [f"{pdb_dir}/{key}{pdb_name_ext}" for key in pdb_keys]
         print(f"Found {len(pdb_files)} PDB files from key list")
     else:
-        # Get all PDBs with .pdb_key_ext extension in the directory
+        # Get all PDBs with .pdb_name_ext extension in the directory
         pdb_files = natsorted(list(glob.glob(f"{pdb_dir}/*")))
         print(f"Found {len(pdb_files)} PDB files in {pdb_dir}")
         if len(pdb_files) == 0:
@@ -58,7 +58,7 @@ def get_pdb_files(pdb_dir: str,
 
     # Skip existing PDBs
     if skip_pdb_names is not None:
-        skip_pdb_names = [f"{Path(pdb_key).stem}{pdb_key_ext}" for pdb_key in skip_pdb_names]  # in case pdb_keys instead of pdb_names is passed in, we add the extension
+        skip_pdb_names = [f"{Path(pdb_key).stem}{pdb_name_ext}" for pdb_key in skip_pdb_names]  # in case pdb_keys instead of pdb_names is passed in, we add the extension
         skip_pdb_names = set(skip_pdb_names)
         pdb_files = [f for f in pdb_files if Path(f).name not in skip_pdb_names]
 
