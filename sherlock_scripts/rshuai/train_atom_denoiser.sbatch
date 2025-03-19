@@ -1,10 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=u2_a0
 #SBATCH -p bioe
-#SBATCH --nodes=2
-#SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-task=1
-#SBATCH --cpus-per-task=8
+#SBATCH --gpus-per-node=2
+#SBATCH --cpus-per-task=16
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
