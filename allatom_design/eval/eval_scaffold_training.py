@@ -19,7 +19,7 @@ from tqdm import tqdm
 from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.data import (get_length_from_pdb, load_feats_from_pdb,
                                       pad_to_max_len)
-from allatom_design.data.datasets.scaffold_manager import get_scaffold_manager
+from allatom_design.data.scaffold_manager import get_scaffold_manager
 from allatom_design.data.datasets.sd_dataset import process_single_pdb
 from allatom_design.data.pdb_utils import *
 from allatom_design.eval.eval_utils import sampling_utils
