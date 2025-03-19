@@ -19,9 +19,9 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
 
 from allatom_design.data.data import load_feats_from_pdb
-from allatom_design.eval import eval_metrics
-from allatom_design.eval.folding_utils import get_struct_pred_model
-from allatom_design.eval.proteinmpnn_utils import load_mpnn
+from allatom_design.eval.eval_utils import eval_metrics
+from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
+from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
 
 
 @hydra.main(config_path="../configs/eval", config_name="eval_sample_sc", version_base="1.3.2")

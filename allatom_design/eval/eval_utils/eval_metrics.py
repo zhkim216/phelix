@@ -22,12 +22,12 @@ import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
-from allatom_design.eval import eval_metrics
-from allatom_design.eval.dssp_utils import annotate_sse, pdb_to_xyz
-from allatom_design.eval.fampnn_utils import run_fampnn
-from allatom_design.eval.folding_utils import (run_af2, run_esmfold_batched,
+from allatom_design.eval.eval_utils import eval_metrics
+from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
+from allatom_design.eval.eval_utils.fampnn_utils import run_fampnn
+from allatom_design.eval.eval_utils.folding_utils import (run_af2, run_esmfold_batched,
                                                run_omegafold)
-from allatom_design.eval.proteinmpnn_utils import run_mpnn
+from allatom_design.eval.eval_utils.proteinmpnn_utils import run_mpnn
 from ligandmpnn.model_utils import ProteinMPNN
 
 

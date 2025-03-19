@@ -11,10 +11,10 @@ import wandb
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
-from allatom_design.eval import eval_metrics
-from allatom_design.eval.eval_setup_utils import get_pdb_files, wandb_setup
-from allatom_design.eval.fampnn_utils import get_seq_des_model
-from allatom_design.eval.folding_utils import get_struct_pred_model
+from allatom_design.eval.eval_utils import eval_metrics
+from allatom_design.eval.eval_utils.eval_setup_utils import get_pdb_files, wandb_setup
+from allatom_design.eval.eval_utils.fampnn_utils import get_seq_des_model
+from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 
 
 @hydra.main(config_path="../configs/eval", config_name="run_sc_eval", version_base="1.3.2")

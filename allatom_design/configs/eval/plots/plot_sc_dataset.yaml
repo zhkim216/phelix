@@ -1,3 +1,0 @@
-csv_path: "/path/to/your/self_consistency_metrics.csv"
-out_dir: "/path/to/output/plots"
-subsample_n: 100

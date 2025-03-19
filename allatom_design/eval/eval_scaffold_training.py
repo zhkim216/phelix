@@ -22,9 +22,10 @@ from allatom_design.data.data import (get_length_from_pdb, load_feats_from_pdb,
 from allatom_design.data.datasets.scaffold_manager import get_scaffold_manager
 from allatom_design.data.datasets.sd_dataset import process_single_pdb
 from allatom_design.data.pdb_utils import *
-from allatom_design.eval import eval_metrics, sampling_utils
-from allatom_design.eval.fampnn_utils import get_seq_des_model
-from allatom_design.eval.folding_utils import get_struct_pred_model
+from allatom_design.eval.eval_utils import sampling_utils
+from allatom_design.eval.eval_utils import eval_metrics
+from allatom_design.eval.eval_utils.fampnn_utils import get_seq_des_model
+from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser

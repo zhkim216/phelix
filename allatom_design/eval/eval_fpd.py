@@ -15,11 +15,11 @@ from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from allatom_design.data.conditioning_labels import create_cond_labels_input
-from allatom_design.eval import sampling_utils
-from allatom_design.eval.esm3_utils import (create_esm3_embeddings,
+from allatom_design.eval.eval_utils import sampling_utils
+from allatom_design.eval.eval_utils.esm3_utils import (create_esm3_embeddings,
                                             load_esm3_embeddings)
-from allatom_design.eval.eval_metrics import fpd
-from allatom_design.eval.proteinmpnn_utils import (create_mpnn_embeddings,
+from allatom_design.eval.eval_utils.eval_metrics import fpd
+from allatom_design.eval.eval_utils.proteinmpnn_utils import (create_mpnn_embeddings,
                                                    load_mpnn,
                                                    load_mpnn_embeddings)
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \

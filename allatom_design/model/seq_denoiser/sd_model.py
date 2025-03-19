@@ -13,7 +13,7 @@ from tqdm import tqdm
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import cat_bb_scn, get_rc_tensor, stack_aux_traj
 from allatom_design.data.pdb_utils import *
-from allatom_design.eval import sampling_utils
+from allatom_design.eval.eval_utils import sampling_utils
 from allatom_design.interpolants.sd_interpolants.mar_interpolant import MAR
 from allatom_design.interpolants.sd_interpolants.sd_interpolant import \
     SDInterpolant

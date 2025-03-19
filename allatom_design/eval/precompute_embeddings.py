@@ -12,9 +12,9 @@ from huggingface_hub import login
 from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.data.datasets.ad_dataset import get_pdb_data_file
-from allatom_design.eval.esm3_utils import create_esm3_embeddings
-from allatom_design.eval.fampnn_utils import create_fampnn_embeddings
-from allatom_design.eval.proteinmpnn_utils import (create_mpnn_embeddings,
+from allatom_design.eval.eval_utils.esm3_utils import create_esm3_embeddings
+from allatom_design.eval.eval_utils.fampnn_utils import create_fampnn_embeddings
+from allatom_design.eval.eval_utils.proteinmpnn_utils import (create_mpnn_embeddings,
                                                    load_mpnn)
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from esm3.esm.models.esm3 import ESM3

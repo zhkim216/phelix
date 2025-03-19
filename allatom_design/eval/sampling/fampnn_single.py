@@ -8,9 +8,9 @@ import torch
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
-from allatom_design.eval import eval_metrics
-from allatom_design.eval.fampnn_utils import get_seq_des_model, run_fampnn
-from allatom_design.eval.folding_utils import get_struct_pred_model
+from allatom_design.eval.eval_utils import eval_metrics
+from allatom_design.eval.eval_utils.fampnn_utils import get_seq_des_model, run_fampnn
+from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="fampnn_single", version_base="1.3.2")
