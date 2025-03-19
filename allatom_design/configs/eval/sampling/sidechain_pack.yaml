@@ -1,5 +1,3 @@
-sd_ckpt:
-
 seed: 0
 
 # Inputs
@@ -15,13 +13,15 @@ input_cfg:
   n_subsample: null  # randomly sample this many pdb keys, null to use all
 
 # Sidechain packing run parameters
-n_traj: 0  # number of trajectories to randomly save
-limit_diff_traj_steps: 20  # limit the number of steps we save in the sidechain diffusion trajectory (evenly spaced)
-
 sampling_cfg_overrides:
-  batch_size: 32
+  batch_size: 16
   num_seqs_per_pdb: 1  # number of sequences to sample per pdb
   noise_labels: 0.0
+  scn_diffusion:
+    num_steps: 50
+    noise_schedule:
+      name: "step_scale"
+      c: 1.5
 
 # Sampling config
 seq_des_cfg:

@@ -1,7 +1,3 @@
-import glob
-import os
-import re
-from collections import defaultdict
 from pathlib import Path
 
 import hydra
@@ -11,20 +7,16 @@ import pandas as pd
 import torch
 import wandb
 import yaml
-from natsort import natsorted
-from omegaconf import DictConfig, OmegaConf, open_dict
-from torch.utils.data import DataLoader
+from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import pad_to_max_len, trim_to_max_len
-from allatom_design.data.datasets.sd_dataset import SDDataset
 from allatom_design.eval import eval_metrics
 from allatom_design.eval.eval_setup_utils import (get_pdb_files,
-                                                 get_training_checkpoints,
-                                                 wandb_setup)
-from allatom_design.eval.fampnn_utils import (get_seq_des_model, run_fampnn_packing)
-from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
+                                                  get_training_checkpoints,
+                                                  wandb_setup)
+from allatom_design.eval.fampnn_utils import (get_seq_des_model,
+                                              run_fampnn_packing)
 
 
 @hydra.main(config_path="../configs/eval", config_name="eval_scn_pack_training", version_base="1.3.2")
