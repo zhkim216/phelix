@@ -11,7 +11,7 @@ import yaml
 from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
 
-import allatom_design.model.phema as phema
+import allatom_design.model.ema.phema as phema
 from tqdm import tqdm
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser

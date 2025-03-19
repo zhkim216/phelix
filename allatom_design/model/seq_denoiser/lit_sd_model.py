@@ -13,7 +13,7 @@ from torch.optim.lr_scheduler import LinearLR
 from torchtyping import TensorType
 
 from allatom_design.model.lr_schedule import InverseSqrtLR, NoamLR
-from allatom_design.model.phema import PowerFunctionEMA
+from allatom_design.model.ema.phema import PowerFunctionEMA
 from allatom_design.model.seq_denoiser.sd_loss import SDLoss
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 
