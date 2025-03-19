@@ -109,7 +109,7 @@ def runner(
     mmcif_dir, af3_mmcif_dir, save_dir = Path(mmcif_dir), Path(af3_mmcif_dir), Path(save_dir)
 
     save_dir.mkdir(parents=True, exist_ok=True)
-    pdb_code, monomer_chain_id, _ = pdb_key.split("_")
+    pdb_code, monomer_chain_id = pdb_key.split("_")
 
     # Load in cif from mmCIF directory; for reading in resolution / rfree
     cif_fp = mmcif_dir / f"{pdb_code[1:3]}/{pdb_code}.cif"

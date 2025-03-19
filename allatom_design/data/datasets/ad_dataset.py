@@ -330,7 +330,7 @@ class ADDataset(data.Dataset):
         # Condition on cropping
         cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]
 
-        #Disable cropping for specified datasets
+        # Disable cropping for evals
         start_idx = None
         if not self.evaluation_mode:
             start_idx, cond_labels_in = self._crop_examples(example, cond_labels_in, start_idx)
