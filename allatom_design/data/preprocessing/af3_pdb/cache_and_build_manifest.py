@@ -19,7 +19,7 @@ from allatom_design.data.pdb_utils import write_to_pdb
 def main(cfg: DictConfig):
     """
     Reads PDB keys from .list files for each phase, caches the examples,
-    and writes a single CSV containing pdb_name, phase, and seq_length.
+    and writes a single CSV containing pdb_name, phase, seq_length, and cluster_id.
     """
     # Create the cache directory
     cache_dir = f"{cfg.pdb_path}/cached_examples"
@@ -43,8 +43,9 @@ def main(cfg: DictConfig):
         )
 
         pdb_key_to_length = get_lengths(pdb_keys, cache_dir)
+        pdb_key_to_cluster_id = get_cluster_ids(pdb_keys)
         for pdb_key in pdb_keys:
-            pdb_info.append({"pdb_key": pdb_key, "phase": phase, "seq_length": pdb_key_to_length[pdb_key]})
+            pdb_info.append({"pdb_key": pdb_key, "phase": phase, "seq_length": pdb_key_to_length[pdb_key], "cluster_id": pdb_key_to_cluster_id[pdb_key]})
 
     # Combine into a single DataFrame and write out
     df = pd.DataFrame(pdb_info)
@@ -80,6 +81,13 @@ def cache_examples(
             pass
 
     print("Caching completed.")
+
+
+def get_cluster_ids(pdb_keys: list[str]) -> Dict[str, int]:
+    """
+    Get cluster ID from each pdb key. In AF3 PDB, we stored the cluster ID in the pdb key.
+    """
+    return {pdb_key: pdb_key.split('_')[-1] for pdb_key in pdb_keys}
 
 
 def get_lengths(pdb_keys: List[str], cache_dir: str) -> Dict[str, int]:

@@ -23,14 +23,16 @@ def main():
             raise ValueError(f"Invalid phase: {phase}")
 
         chain_df = pd.read_csv(chain_clustering_csv, keep_default_na=False)
-        chain_df["pdb_key"] = chain_df["pdb_id"].str[:4] + "_"  + chain_df["chain_id"] + "_" + chain_df["cluster_id"].astype(str)
+        chain_df["pdb_key"] = chain_df["pdb_id"].str[:4] + "_"  + chain_df["chain_id"]
 
         # get dataframe with just pdb_key and phase columns
         phase_df = pd.DataFrame({
             "pdb_key": chain_df["pdb_key"],
-            "phase": phase
+            "phase": phase,
+            "cluster_id": chain_df["cluster_id"]
         })
 
+        phase_df = phase_df.drop_duplicates(subset=["pdb_key"])  # in validation, some pdb_id+chain_id+cluster_id are duplicated for some reason
         phase_to_df[phase] = phase_df
 
     # Save out all pdb_keys as a csv

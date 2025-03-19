@@ -253,7 +253,6 @@ class SDDataset(data.Dataset):
         if phase == "train":
             # randomly select one PDB key from each cluster
             print(f"Number of PDB keys before cluster sampling: {len(self.pdb_keys_df)}")
-            self.pdb_keys_df["cluster_id"] = self.pdb_keys_df["pdb_key"].str.split("_").str[-1]
             self.pdb_keys_df = self.pdb_keys_df.groupby("cluster_id", group_keys=False).apply(lambda g: g.sample(n=1)).reset_index(drop=True)
             print(f"Number of PDB keys after cluster sampling: {len(self.pdb_keys_df)}")
             print(f"First 10 PDB keys after cluster sampling: {self.pdb_keys_df['pdb_key'].head(10).tolist()}")
