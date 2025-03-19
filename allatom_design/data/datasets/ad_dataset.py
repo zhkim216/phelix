@@ -176,16 +176,12 @@ class ADDataset(data.Dataset):
         phase: str,
         run_eval2: bool,
         overfit: int = -1,
-        short_epoch: bool = False,
-        n_random_subset: Optional[int] = None,
         se3_augment: bool = True,
         translation_scale: float = 1.0,
         overwrite_cache: bool = False,
         subset_length_range: Optional[int] = None,
         max_scrmsd: Optional[float] = None,
         max_rel_rog: Optional[float] = None,
-        afdb_res_plddt_cutoff: float = 0.0,
-        spatial_crop_ratio: float = 0.5,
         evaluation_mode: bool = False,
         scaffold_manager_cfg: Optional[DictConfig] = None,
         n_train_cluster_resample: int = 1,
@@ -201,14 +197,11 @@ class ADDataset(data.Dataset):
         - phase: "train", "eval", or "test"
         - run_eval2: if True, run evals on a random subset of train (need train_pdb_keys_eval2.list, eval2_pdb_keys_eval2.list)
         - overfit: Number of examples to overfit on. -1 for all examples.
-        - short_epoch: If True, the dataset will only return 500 random examples.
-        - n_random_subset: If not None, the dataset will only return a random subset of n examples.
         - se3_augment: If True, apply SE3 augmentation to the data.
         - translation_scale: Scale of translation augmentation (when using raw coords or coords feats)
         - overwrite_cache: If True, overwrite the dataset cache. Useful if the dataset features have been updated.
         - subset_length_range: List with with [min, max] length of proteins to subset form training data
         - scrmsd: for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
-        - afdb_res_plddt_cutoff: If > 0, for AFDB dataset, cut out any residues with PLDDT < cutoff
         - n_train_cluster_resample: Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
         - use_struct_preds: if True, load from ESMFold structure predictions instead of crystal structures
         """
@@ -224,8 +217,6 @@ class ADDataset(data.Dataset):
         self.translation_scale = translation_scale
         self.overwrite_cache = overwrite_cache
         self.subset_length_range = subset_length_range
-        self.afdb_res_plddt_cutoff = afdb_res_plddt_cutoff
-        self.spatial_crop_ratio = spatial_crop_ratio
         self.evaluation_mode = evaluation_mode
         self.n_train_cluster_resample = n_train_cluster_resample
         self.use_struct_preds = use_struct_preds
@@ -285,12 +276,6 @@ class ADDataset(data.Dataset):
             indices = np.random.choice(n_data, overfit, replace=False).repeat(n_data // overfit)
             self.pdb_keys_df = self.pdb_keys_df.iloc[indices]
 
-        if short_epoch:
-            self.pdb_keys_df = self.pdb_keys_df.sample(min(500, len(self.pdb_keys_df)), replace=False)
-
-        if n_random_subset is not None:
-            self.pdb_keys_df = self.pdb_keys_df.sample(min(n_random_subset, len(self.pdb_keys_df)), replace=False)
-
 
     def __len__(self):
         return len(self.pdb_keys_df)
@@ -300,59 +285,10 @@ class ADDataset(data.Dataset):
         data = self.get_item(pdb_key)
         return data
 
-    def _multimer_contiguous_crop(self, chain_1_len: int, chain_2_len: int) -> TensorType["n", bool]:
-
-        #init crop masks w/ all false
-        total_len = chain_1_len + chain_2_len
-        crop_mask = torch.full((total_len,), False)
-
-        #determine crop sizes
-        chain_1_crop_max = min(chain_1_len, self.fixed_size)
-        chain_1_crop_min = min(chain_1_len, max(0, self.fixed_size - chain_2_len))
-        chain_1_crop = torch.randint(chain_1_crop_min, chain_1_crop_max + 1, (1,))
-        chain_2_crop = self.fixed_size - chain_1_crop
-
-        #use crop sizes to sample crop indices
-        chain_1_crop_start = torch.randint(0, total_len - self.fixed_size, (1,))
-        chain_1_crop_end = chain_1_crop_start + chain_1_crop
-        crop_mask[chain_1_crop_start: chain_1_crop_end] = True
-
-        #if chain 2 is inlcuded, add its residues to the mask
-        if chain_2_crop > 0:
-            chain_2_crop_start = torch.randint(chain_1_crop_end, total_len - chain_2_crop, (1,))
-            crop_mask[chain_2_crop_start: chain_2_crop_start + chain_2_crop] = True
-
-        return crop_mask
-
-    def _multimer_spatial_crop(self, x: TensorType["n a 3", bool], interface_residue_mask: TensorType["n", bool]):
-
-        total_len = x.shape[0]
-        crop_mask = torch.full((total_len,), False)  # Initialize crop mask with all False
-        x_ca = x[:, 1, :]  # Get C-alpha positions of all residues
-        interface_residue_idxs = torch.nonzero(interface_residue_mask).squeeze()
-
-        # Choose a random interface residue index
-        chosen_interface_residue_idx = torch.randint(0, len(interface_residue_idxs), (1,))
-        chosen_interface_residue_ca_pos = x[chosen_interface_residue_idx, 1, :]
-
-        # Calculate distances to the chosen residue's C-alpha position
-        d_interface = x_ca - chosen_interface_residue_ca_pos
-        d_interface = torch.sqrt(torch.sum(d_interface ** 2, dim=1))  # Euclidean distance
-
-        # Find the indices of the closest `self.fixed_size` residues
-        closest_residue_indices = torch.topk(-d_interface, k=self.fixed_size).indices
-
-        # Set the corresponding positions in `crop_mask` to True
-        crop_mask[closest_residue_indices] = True
-
-        return crop_mask
 
     def get_item(self, pdb_key):
         data_file = self._get_data_file(pdb_key)
         data = torch.load(data_file, weights_only=True)
-
-        # Remove any residues with PLDDT < cutoff
-        data = self._remove_low_plddt_residues(data)
 
         example = {}
 
@@ -396,15 +332,14 @@ class ADDataset(data.Dataset):
 
         #Disable cropping for specified datasets
         start_idx = None
-        multimer_crop_mask = None
         if not self.evaluation_mode:
-            multimer_crop_mask, start_idx, cond_labels_in = self._crop_examples(example, cond_labels_in, multimer_crop_mask, start_idx)
+            start_idx, cond_labels_in = self._crop_examples(example, cond_labels_in, start_idx)
 
         # Make fixed size example
         fixed_size_example = {}
 
         for k, v in example.items():
-            fixed_size_example[k] = make_fixed_size_1d(v, fixed_size=self.fixed_size, start_idx=start_idx, multimer_crop_mask=multimer_crop_mask)
+            fixed_size_example[k] = make_fixed_size_1d(v, fixed_size=self.fixed_size, start_idx=start_idx, multimer_crop_mask=None)
 
         # Convert data types
         example_out = {}
@@ -422,22 +357,15 @@ class ADDataset(data.Dataset):
 
         return example_out
 
-    def _crop_examples(self, example, cond_labels_in, multimer_crop_mask, start_idx):
+    def _crop_examples(self, example, cond_labels_in, start_idx):
         # Calculate random cropping start index
         orig_size = example["x"].shape[0]
         extra_len = orig_size - self.fixed_size
         if extra_len > 0:
-            if example['chain_ids'] is not None and len(example['chain_ids']) > 1:
-                if torch.rand(1) > self.spatial_crop_ratio:
-                    chain_1_len, chain_2_len = torch.sum(example['chain_index'] == 0), torch.sum(example['chain_index'] == 1)
-                    multimer_crop_mask = self._multimer_contiguous_crop(chain_1_len, chain_2_len)
-                else:
-                    multimer_crop_mask = self._multimer_spatial_crop(example['x'], example['interface_residue_mask'])
-            else:
-                start_idx = np.random.choice(np.arange(extra_len + 1))
+            start_idx = np.random.choice(np.arange(extra_len + 1))
             cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["CROPPED"]
 
-        return multimer_crop_mask, start_idx, cond_labels_in
+        return start_idx, cond_labels_in
 
     def _cluster_sample_pdb_keys(self, phase: str, n_train_cluster_resample: int):
         self.pdb_keys_df["cluster_id"] = self.pdb_keys_df["pdb_key"].str.split("_").str[-1]
@@ -503,35 +431,6 @@ class ADDataset(data.Dataset):
         """
         keep_pdb_keys = set(self.annotation_df[self.annotation_df["rel_rog"] <= max_rel_rog].index)
         self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["pdb_key"].isin(keep_pdb_keys)]
-
-
-    def _remove_low_plddt_residues(self, data: Dict[str, TensorType["n ..."]]) -> Dict[str, TensorType["n ..."]]:
-        """
-        If data comes from the afdb dataset, remove residues with plddt lower than self.afdb_res_plddt_cutoff.
-        """
-        if not self.pdb_path.endswith("afdb"):
-            return data
-
-        plddt_mask = data["b_factors"][:, 1] >= self.afdb_res_plddt_cutoff  # filter by C-alpha pLDDT
-        for k, v in data.items():
-            data[k] = v[plddt_mask]
-        return data
-
-
-    @staticmethod
-    def index_into_batch(batch: Dict[str, torch.Tensor], idxs: List) -> Dict[str, torch.Tensor]:
-        """
-        Helper method to index into a batch of data, because batch may contain nested dictionaries.
-        """
-        if isinstance(batch, dict):
-            return {key: ADDataset.index_into_batch(value, idxs) for key, value in batch.items()}
-        elif isinstance(batch, torch.Tensor):
-            return batch[idxs]
-        elif isinstance(batch, List):
-            return [batch[i] for i in idxs]
-        else:
-            data_type = type(batch)
-            raise ValueError(f"Unsupported data type {data_type} in batch. Expected a dict or torch.Tensor.")
 
 
 def get_lengths(pdb_keys: List[str], cache_dir: str) -> Dict[str, int]:

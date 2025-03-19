@@ -41,13 +41,10 @@ data:
     annotation_csvs: null
     fixed_size: 128
     overfit: ${overfit}
-    short_epoch: false
-    n_random_subset: null
     subset_length_range: null
     se3_augment: true  # randomly rotate and translate data
     translation_scale: 1.0  # scale of the translation augmentation
     overwrite_cache: false  # overwrite the cached dataset
-    afdb_res_plddt_cutoff: 0  # 0-100, only keep residues with pLDDT >= cutoff
     max_scrmsd: null  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
     max_rel_rog: null  # subset to only pdbs with relative radius of gyration <= max_rel_rog
     run_eval2: true

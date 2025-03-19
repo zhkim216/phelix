@@ -83,8 +83,6 @@ class SDDataset(data.Dataset):
         - fixed_size: Input fixed size.
         - phase: "train", "eval", or "test"
         - overfit: Number of examples to overfit on. -1 for all examples.
-        - short_epoch: If True, the dataset will only return 500 random examples.
-        - n_random_subset: If not None, the dataset will only return a random subset of n examples.
         - se3_augment: If True, apply SE3 augmentation to the data.
         - translation_scale: Scale of translation augmentation (when using raw coords or coords feats)
         - subset_length_range: List with with [min, max] length of proteins to subset form training data
