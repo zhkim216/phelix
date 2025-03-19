@@ -12,6 +12,6 @@ python /home/rshuai/research/huang_lab/allatom-design/allatom_design/eval/precom
   train_pdb_key_file=/media/scratch/datasets/ingraham_cath_dataset/train_pdb_keys.list \
   eval_pdb_key_file=/media/scratch/datasets/ingraham_cath_dataset/eval_pdb_keys.list \
   eval2_pdb_key_file=/media/scratch/datasets/ingraham_cath_dataset/eval2_pdb_keys.list \
-  pdb_key_ext='' \
+  pdb_name_ext='' \
   pdbs_dir=/media/scratch/datasets/ingraham_cath_dataset/pdb_store \
   out_dir=/media/scratch/datasets/ingraham_cath_dataset/fampnn_embeddings

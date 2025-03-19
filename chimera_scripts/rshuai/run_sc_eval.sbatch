@@ -26,7 +26,7 @@ AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Inputs config
 PDB_DIR=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_mmcifs
-PDB_KEY_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_pdb_keys.list
+PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_pdb_keys.list
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -49,8 +49,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/run_sc_eval.py \
     struct_pred_cfg.model_name=esmfold \
     out_dir=${OUT_DIR} \
     input_cfg.pdb_dir=${PDB_DIR} \
-    input_cfg.pdb_key_list=${PDB_KEY_LIST} \
-    input_cfg.pdb_key_ext=".cif" \
+    input_cfg.pdb_name_list=${PDB_NAME_LIST} \
+    input_cfg.pdb_name_ext=".cif" \
     input_cfg.subset_length_range=[32,256] \
     input_cfg.n_subsample=1024 \
     use_seq_design=true \

@@ -94,11 +94,11 @@ def main(cfg: DictConfig):
     }
 
     ### Load in PDB files ###
-    if cfg.pdb_key_list is not None:
+    if cfg.pdb_name_list is not None:
         # Get PDBs with keys in the list
-        with open(cfg.pdb_key_list, "r") as f:
+        with open(cfg.pdb_name_list, "r") as f:
             pdb_keys = f.read().splitlines()
-        pdb_files = [f"{cfg.pdb_dir}/{key}{cfg.pdb_key_ext}" for key in pdb_keys]
+        pdb_files = [f"{cfg.pdb_dir}/{key}{cfg.pdb_name_ext}" for key in pdb_keys]
     else:
         # Get all PDBs with .pdb extension in the directory
         pdb_files = natsorted(list(glob.glob(f"{cfg.pdb_dir}/*.pdb")))

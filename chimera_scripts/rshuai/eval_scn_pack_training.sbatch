@@ -24,7 +24,7 @@ cd ${BASE_DIR}
 
 # Inputs config
 PDB_DIR=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_mmcifs
-PDB_KEY_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_pdb_keys.list
+PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_pdb_keys.list
 
 # Model name to evaluate
 MODEL_NAME=c6_aasd1
@@ -44,8 +44,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scn_pack_training.py \
     group=${GROUP} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     input_cfg.pdb_dir=${PDB_DIR} \
-    input_cfg.pdb_key_list=${PDB_KEY_LIST} \
-    input_cfg.pdb_key_ext=".cif" \
+    input_cfg.pdb_name_list=${PDB_NAME_LIST} \
+    input_cfg.pdb_name_ext=".cif" \
     input_cfg.subset_length_range=[64,512] \
     start_step=0 \
     eval_every_n_ckpts=1 \

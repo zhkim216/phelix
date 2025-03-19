@@ -95,12 +95,12 @@ def main(cfg: DictConfig):
         ad_ckpts = natsorted([ckpt for ckpt in ad_ckpts if pattern.search(Path(ckpt).name)])[::cfg.eval_every_n_ckpts]
 
     # Gather PDBs to sample; apply length filtering / subsampling
-    if cfg.pdb_key_list is not None:
-        with open(cfg.pdb_key_list, "r") as f:
+    if cfg.pdb_name_list is not None:
+        with open(cfg.pdb_name_list, "r") as f:
             pdb_keys = f.read().splitlines()
-        pdb_files = [f"{cfg.pdb_dir}/{key}{cfg.pdb_key_ext}" for key in pdb_keys]
+        pdb_files = [f"{cfg.pdb_dir}/{key}{cfg.pdb_name_ext}" for key in pdb_keys]
     else:
-        pdb_files = natsorted(list(Path(cfg.pdb_dir).glob(f"*{cfg.pdb_key_ext}")))
+        pdb_files = natsorted(list(Path(cfg.pdb_dir).glob(f"*{cfg.pdb_name_ext}")))
         pdb_files = [str(x) for x in pdb_files]
 
     print(f"Found {len(pdb_files)} PDB(s) to scaffold from in {cfg.pdb_dir}")

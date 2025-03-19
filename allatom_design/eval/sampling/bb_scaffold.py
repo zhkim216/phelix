@@ -71,16 +71,16 @@ def main(cfg: DictConfig):
     Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
 
     # Load PDBs
-    if cfg.pdb_key_list is not None:
-        with open(cfg.pdb_key_list, "r") as f:
+    if cfg.pdb_name_list is not None:
+        with open(cfg.pdb_name_list, "r") as f:
             pdb_keys = f.read().splitlines()
-        pdbs = [f"{cfg.pdb_dir}/{key}{cfg.pdb_key_ext}" for key in pdb_keys]
+        pdbs = [f"{cfg.pdb_dir}/{key}{cfg.pdb_name_ext}" for key in pdb_keys]
     else:
-        pdbs = natsorted(list(Path(cfg.pdb_dir).glob(f"*{cfg.pdb_key_ext}")))
+        pdbs = natsorted(list(Path(cfg.pdb_dir).glob(f"*{cfg.pdb_name_ext}")))
         pdbs = [str(x) for x in pdbs]
 
     if len(pdbs) == 0:
-        raise ValueError(f"No PDB files found under {cfg.pdb_dir} with extension {cfg.pdb_key_ext}")
+        raise ValueError(f"No PDB files found under {cfg.pdb_dir} with extension {cfg.pdb_name_ext}")
 
     print(f"Loaded {len(pdbs)} PDB files.")
 
