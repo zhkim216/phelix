@@ -25,7 +25,7 @@ from allatom_design.data.data import (FEATURES_LONG,
                                       get_scaffolding_inputs,
                                       load_feats_from_pdb, make_fixed_size_1d)
 from allatom_design.data.datasets.multi_dataset import MultiDataset
-from allatom_design.data.datasets.scaffold_manager import get_scaffold_manager
+from allatom_design.data.scaffold_manager import get_scaffold_manager
 from allatom_design.data.pdb_utils import write_to_pdb
 
 

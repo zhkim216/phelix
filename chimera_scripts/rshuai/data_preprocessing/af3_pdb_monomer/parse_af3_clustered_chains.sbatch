@@ -20,7 +20,6 @@ cd ${BASE_DIR}
 
 # Run script
 PHASE=eval
-python3 allatom_design/data/preprocessing/parse_af3_clustered_chains.py \
-    --chain_clustering_csv /scratch/hielab/talal/datasets/af3_pdb/data_caches/data_caches/val_clusterings/protein_chain_cluster_mapping.csv \
-    --phase ${PHASE} \
-    --out_file $SCRATCH/datasets/af3_pdb_monomer/${PHASE}_pdb_keys_all.list
+python3 allatom_design/data/preprocessing/af3_pdb_monomer/parse_af3_clustered_chains.py \
+    --af3_data_cache_dir /scratch/hielab/talal/datasets/af3_pdb/data_caches/data_caches \
+    --out_dir /scratch/hielab/rshuai/datasets/af3_pdb_monomer/preprocessing/parse_af3_clustered_chains
