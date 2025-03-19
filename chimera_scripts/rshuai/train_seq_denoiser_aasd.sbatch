@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=c6_aasd1
-#SBATCH -p gpu_batch,evo_gpu_priority
-#SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=32
+#SBATCH --job-name=test
+#SBATCH -p gpu_batch
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-task=8
 #SBATCH --time=120:00:00
 #
 # Send stdout and stderr to logs
@@ -21,8 +21,8 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design
 WANDB_ID=richardshuai
 cd $BASE_DIR
 
-EXP_NAME=c6_aasd1
-GROUP=seq_denoiser_c6
+EXP_NAME=test_aasd_refactor
+GROUP=test
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -37,12 +37,12 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     group=${GROUP} \
     num_workers=8 \
     no_wandb=false \
-    data.fixed_size=1024 \
+    data.fixed_size=256 \
     data.pdb_path=${PDB_PATH} \
     data.cluster_sample=true \
     data.subset_length_range=[16,9999] \
-    train.batch_size=8 \
-    trainer.accumulate_grad_batches=4 \
+    train.batch_size=32 \
+    trainer.accumulate_grad_batches=1 \
     train.compile_model=true \
     model.task=allatom_seq_des \
     denoiser=fampnn_denoiser \
@@ -51,7 +51,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.fampnn.use_gvp=true \
     denoiser.fampnn.n_layers=5 \
     denoiser.confidence_module.enabled=true \
-    checkpointing.save_latest_every_n_steps=5000 \
-    trainer.check_val_every_n_epoch=10 \
+    checkpointing.save_latest_every_n_steps=10000 \
+    trainer.check_val_every_n_epoch=5 \
     hydra.run.dir=${HYDRA_DIR} \
     out_dir=${OUT_DIR}
