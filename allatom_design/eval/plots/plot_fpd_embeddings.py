@@ -13,8 +13,8 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 from sklearn.decomposition import PCA
 
-from allatom_design.eval.esm3_utils import load_esm3_embeddings
-from allatom_design.eval.eval_metrics import fpd
+from allatom_design.eval.eval_utils.esm3_utils import load_esm3_embeddings
+from allatom_design.eval.eval_utils.eval_metrics import fpd
 
 
 @hydra.main(version_base="1.3.2", config_path="../../configs/eval/plots", config_name="plot_fpd_embeddings")

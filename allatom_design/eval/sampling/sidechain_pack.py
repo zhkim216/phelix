@@ -11,9 +11,9 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.data import residue_constants as rc
-from allatom_design.eval import eval_metrics
-from allatom_design.eval.eval_setup_utils import get_pdb_files
-from allatom_design.eval.fampnn_utils import (get_seq_des_model,
+from allatom_design.eval.eval_utils import eval_metrics
+from allatom_design.eval.eval_utils.eval_setup_utils import get_pdb_files
+from allatom_design.eval.eval_utils.fampnn_utils import (get_seq_des_model,
                                               run_fampnn_packing)
 
 

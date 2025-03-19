@@ -19,11 +19,12 @@ from tqdm import tqdm
 from transformers import AutoTokenizer, EsmForProteinFolding
 
 from allatom_design.data.conditioning_labels import create_cond_labels_input
-from allatom_design.eval import eval_metrics, sampling_utils
-from allatom_design.eval.esm3_utils import (create_esm3_embeddings,
+from allatom_design.eval.eval_utils import sampling_utils
+from allatom_design.eval.eval_utils.esm3_utils import (create_esm3_embeddings,
                                             load_esm3_embeddings)
 from allatom_design.eval.eval_fpd import fpd_safe
-from allatom_design.eval.proteinmpnn_utils import (create_mpnn_embeddings,
+from allatom_design.eval.eval_utils import eval_metrics
+from allatom_design.eval.eval_utils.proteinmpnn_utils import (create_mpnn_embeddings,
                                                    load_mpnn,
                                                    load_mpnn_embeddings)
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \

@@ -19,16 +19,17 @@ from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 from allatom_design.data.conditioning_labels import create_cond_labels_input
-from allatom_design.eval import eval_metrics, sampling_utils
-from allatom_design.eval.folding_utils import get_struct_pred_model
-from allatom_design.eval.proteinmpnn_utils import load_mpnn
+from allatom_design.eval.eval_utils import sampling_utils
+from allatom_design.eval.eval_utils import eval_metrics
+from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
+from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
 import wandb
-from allatom_design.eval.fampnn_utils import get_seq_des_model
+from allatom_design.eval.eval_utils.fampnn_utils import get_seq_des_model
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="draw_bb_samples", version_base="1.3.2")
