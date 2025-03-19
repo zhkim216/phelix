@@ -12,7 +12,6 @@ from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 
-import allatom_design.data.datasets.ad_dataset as ad_dataset
 from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
                                              resume_ckpt_cfg)
 from allatom_design.data import residue_constants as rc
