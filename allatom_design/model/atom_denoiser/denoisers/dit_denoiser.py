@@ -29,18 +29,20 @@ from allatom_design.data import residue_constants as rc
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
-from allatom_design.interpolants.ad_interpolants.sd3_rf_interpolant import SD3_RF
+from allatom_design.interpolants.ad_interpolants.sd3_rf_interpolant import \
+    SD3_RF
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_utils import (
     DiTBlock, FinalLayer, LabelEmbedder, MultiHeadRMSNorm)
+from allatom_design.model.atom_denoiser.denoisers.pair_rep_utils import \
+    PairRepBuilder
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
 from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
     TimestepEmbedder
 from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import FAMPNN
 from openfold.model.primitives import Linear
-from allatom_design.model.atom_denoiser.denoisers.pair_rep_utils import PairRepBuilder
 
 
 class DiTDenoiser(BaseAtomDenoiser):
@@ -237,28 +239,12 @@ class DiTDenoiser(BaseAtomDenoiser):
             xt_bb_traj, x1_bb_traj = [], []
 
             # Extract sampling parameters
-            S = aux_inputs["num_steps"]
-            timesteps = aux_inputs["timesteps"]
-            churn_cfg = aux_inputs["churn_cfg"]
-            noise_schedule = aux_inputs["noise_schedule"]
-            autoguidance_cfg = aux_inputs["autoguidance_cfg"]
-
-            ## extract overrides
-            xt_bb_override = aux_inputs["xt_override"][..., rc.bb_idxs, :]
-            xt_bb_override_mask = aux_inputs["xt_override_mask"][..., rc.bb_idxs, :]
-
-            # If a backbone input is provided, run partial diffusion instead
-            if aux_inputs.get("x_bb_in", None) is not None:
-                xt_bb = aux_inputs["x_bb_in"]
-                S = aux_inputs["num_steps_partial"]
-
-                timesteps = timesteps[:, -(S + 1):]  # truncate timesteps to the partial diffusion range
-                xt_bb = self.interpolant.noise_x(xt_bb, timesteps[:, 0])  # noise samples to first of the truncated timesteps
-
-                xt_bb_override = xt_bb_override[-(S + 1):]
-                xt_bb_override_mask = xt_bb_override_mask[-(S + 1):]
-            else:
-                xt_bb = x0_bb
+            diffusion_inputs = aux_inputs["diffusion_inputs"]
+            S = diffusion_inputs["num_steps"]
+            timesteps = diffusion_inputs["timesteps"]
+            noise_schedule = diffusion_inputs["noise_schedule"]
+            churn_cfg = diffusion_inputs["churn_cfg"]
+            autoguidance_cfg = diffusion_inputs["autoguidance_cfg"]
 
             # Apply autoguidance
             use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])
@@ -281,22 +267,19 @@ class DiTDenoiser(BaseAtomDenoiser):
                                   residue_index=residue_index, seq_mask=seq_mask,
                                   cond_labels_in=cond_labels_in)
 
-            atom_mask = torch.ones(xt_bb.shape[:-1], device=seq_mask.device, dtype=seq_mask.dtype) * seq_mask.unsqueeze(-1)
+            xt_bb = x0_bb
             for i in tqdm(range(S), leave=False, desc="Sampling..."):
                 t = timesteps[:, i]
                 t_next = timesteps[:, i + 1]
 
                 xt_bb, t = self.interpolant.churn(xt_bb, t, churn_cfg=churn_cfg)  # Karras et al. stochastic sampling
-                xt_bb = xt_bb * (1 - xt_bb_override_mask[i]) + xt_bb_override[i] * xt_bb_override_mask[i]  # override xt for inputs
 
                 # Apply self-conditioning
                 if self.use_self_conditioning and i > 0:
-                    # aux_preds["x1_pred"] = apply_random_augmentation(aux_preds["x1_pred"], transforms, seq_mask, atom_mask)  # apply random augmentation to the self-conditioning inputs
                     denoiser_fn = partial(denoiser_fn, x_self_cond=aux_preds["x1_pred"])
 
                     # self-conditioning for autoguidance
                     if use_autoguidance:
-                        # aux_preds["x1_pred_ag"] = apply_random_augmentation(aux_preds["x1_pred_ag"], transforms, seq_mask, atom_mask)  # apply random augmentation to the self-conditioning inputs
                         autoguidance_cfg["autoguidance_fn"] = partial(autoguidance_cfg["autoguidance_fn"],
                                                                       x_self_cond=aux_preds["x1_pred_ag"])
 
@@ -308,7 +291,6 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                                cfg_cfg=None,
                                                                autoguidance_cfg=autoguidance_cfg,
                                                                aux_inputs=aux_inputs)
-                xt_bb = xt_bb * (1 - xt_bb_override_mask[i + 1]) + xt_bb_override[i + 1] * xt_bb_override_mask[i + 1]  # override xt for outputs  # TODO: should we override self-cond input too?
 
                 # Save current state
                 xt_bb_traj.append(xt_bb.cpu())
@@ -389,25 +371,6 @@ class DiTDenoiser(BaseAtomDenoiser):
             h_s = torch.zeros((B, N, self.fampnn.hidden_dim), device=x_motif.device)
 
         return h_s
-
-
-    def get_likelihoods(self,
-                        num_steps: int,
-                        x_bb: TensorType["b n 4 3"],
-                        aatype: TensorType["b n", int],
-                        seq_mask: TensorType["b n", float],
-                        atom_mask: TensorType["b n 4", float],
-                        residue_index: TensorType["b n", int],
-                        cond_labels_in: Dict[str, TensorType["b", int]] = {},):
-        denoiser_fn = partial(self.dit,
-                              aatype_scaffold=aatype,
-                              seq_mask=seq_mask,
-                              residue_index=residue_index,
-                              cond_labels_in=cond_labels_in)
-        x1_mask = atom_mask[..., None].expand_as(x_bb)
-        x1_mask = x1_mask * rearrange(seq_mask, "b n -> b n 1 1")
-        likelihood_aux = self.interpolant.get_likelihoods(denoiser_fn, x_bb, x1_mask, num_steps)
-        return likelihood_aux
 
 
 class DiT(nn.Module):
@@ -633,7 +596,6 @@ class DiT(nn.Module):
         x = precondition_out(x)  # output preconditioning
 
         return x, aux_preds
-
 
 
 def get_interpolant(cfg: DictConfig,

@@ -1,36 +1,25 @@
-import glob
 import os
 import pickle
-import re
-import shutil
 from collections import defaultdict
-from functools import partial
 from pathlib import Path
 
 import hydra
 import lightning as L
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-import yaml
-from natsort import natsorted
-from omegaconf import DictConfig, OmegaConf
-from tqdm import tqdm
-
-from allatom_design.data.conditioning_labels import create_cond_labels_input
-from allatom_design.eval.eval_utils import sampling_utils
-from allatom_design.eval.eval_utils import eval_metrics
-from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
-from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
-from allatom_design.data.data import load_feats_from_pdb
-from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
-    NoiseSchedule
-from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
-
 import wandb
+import yaml
+from omegaconf import DictConfig, OmegaConf
+
+from allatom_design.data.data import load_feats_from_pdb
+from allatom_design.eval.eval_utils import eval_metrics
+from allatom_design.eval.eval_utils.bb_gen_utils import (
+    get_bb_gen_model, run_bb_uncond_sampling)
+from allatom_design.eval.eval_utils.eval_setup_utils import wandb_setup
 from allatom_design.eval.eval_utils.fampnn_utils import get_seq_des_model
-from allatom_design.eval.eval_utils.bb_gen_utils import get_bb_gen_model
+from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
+
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="draw_bb_samples", version_base="1.3.2")
 def main(cfg: DictConfig):
@@ -41,102 +30,52 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.deterministic = True  # nonrandom CUDNN convolution algo, maybe slower
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
+    # Set up wandb logging / output directory
+    log_dir = wandb_setup(base_out_dir=cfg.base_out_dir, exp_name=cfg.exp_name, cfg_dict=cfg_dict, **cfg.wandb)
+
+    # Preserve config
+    with open(Path(log_dir, "config.yaml"), "w") as f:
+        yaml.safe_dump(cfg_dict, f)
+
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load in atom denoiser
     bb_gen_model = get_bb_gen_model(cfg.bb_gen_cfg, device=device)
-
-    # Create out dirs and preserve config
-    if cfg.out_dir is None:
-        model_run_dir = Path(cfg.ad_ckpt).parent.parent
-        model_name = Path(cfg.ad_ckpt).stem
-        cfg.out_dir = f"{model_run_dir}/draw_samples/{model_name}/{cfg.exp_name}"
-
-    Path(cfg.out_dir).mkdir(parents=True, exist_ok=True)
-    with open(Path(cfg.out_dir, "config.yaml"), "w") as f:
-        yaml.safe_dump(cfg_dict, f)
-
-    sample_out_dir = Path(cfg.out_dir, "samples")
-    traj_out_dir = Path(cfg.out_dir, "traj")
-    Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
-    Path(traj_out_dir).mkdir(parents=True, exist_ok=True)
+    sampling_cfg = bb_gen_model["sampling_cfg"]
 
     # Define the range of lengths to sample
     start, end = cfg.length_range
-    lengths_to_sample = np.arange(start, end + 1, cfg.length_step_size)
-    all_lengths = lengths_to_sample.repeat(cfg.n_samples_per_length)  # get the length of each protein we'll sample
-    save_traj_mask = np.tile(np.arange(cfg.n_samples_per_length) < cfg.n_traj_per_length, len(lengths_to_sample))  # get mask of the trajectories we'll save
-    save_traj_steps = np.linspace(0, cfg.num_steps - 1, cfg.limit_traj_steps, dtype=int)  # get the steps of the trajectories we'll save
+    lengths_to_sample = np.arange(start, end + 1, cfg.length_step_size).repeat(cfg.n_samples_per_length)  # get the length of each protein we'll sample
+
+    if cfg.save_traj.enabled:
+        save_traj_inputs = {
+            "save_traj_mask": np.tile(np.arange(cfg.n_samples_per_length) < cfg.save_traj.n_traj_per_length, len(lengths_to_sample)),  # for each protein, True if we should save the trajectory
+            "save_traj_steps": np.linspace(0, sampling_cfg.num_steps - 1, cfg.save_traj.limit_traj_steps, dtype=int),  # get the which diffusion timesteps we'll save along the trajectory
+            "traj_conect": cfg.save_traj.traj_conect,
+            "align_traj_to_last_step": cfg.save_traj.align_traj_to_last_step
+        }
+    else:
+        save_traj_inputs = None
 
     # === Sample structures === #
     print(f"Drawing {cfg.n_samples_per_length} samples each of lengths {start} to {end} with step size {cfg.length_step_size}")
-    pbar = tqdm(total=len(all_lengths))
 
-    for i in range(0, len(all_lengths), cfg.batch_size):
-        # Choose lengths and residue index
-        lengths = torch.tensor(all_lengths[i:i + cfg.batch_size], dtype=torch.long).to(lit_ad_model.device)
-        B = lengths.shape[0]
-        residue_index = torch.arange(lengths.max(), dtype=torch.long).to(lit_ad_model.device)
-        residue_index = residue_index[None].expand(B, -1)
-
-        # Create timesteps for backbone
-        t_bb = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
-        t_bb = t_bb[None].expand(B, -1).to(lit_ad_model.device)
-        timesteps = t_bb
-
-        # Create noise schedule for backbone
-        noise_schedule = NoiseSchedule(cfg.noise_schedule)
-
-        # Create churn config for backbone
-        churn_cfg = dict(cfg.churn_cfg)
-
-        cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, lit_ad_model.device)
-        x_bb_denoised, aux = lit_ad_model.model.sample(lengths,
-                                                       residue_index=residue_index,
-                                                       timesteps=timesteps,
-                                                       cond_labels=cond_labels_in,
-                                                       noise_schedule=noise_schedule,
-                                                       churn_cfg=churn_cfg,
-                                                       autoguidance_cfg=dict(cfg.autoguidance_cfg),
-                                                       )
-
-        samples = {"x_bb_denoised": x_bb_denoised,
-                   "seq_mask": aux["seq_mask"],
-                   "residue_index": residue_index}
-        samples = {k: v.cpu() if v is not None else v for k, v  in samples.items()}
-
-        # Save samples
-        filenames = [f"{sample_out_dir}/sample_len{lengths[j]}_{i + j}.pdb" for j in range(B)]
-        AtomDenoiser.save_samples_to_pdb(samples, filenames)
-
-        # Write trajectories to file
-        align_models_to_idx = None
-        if cfg.align_traj_to_last_step:
-            # align all predictions along the trajectory to the last step
-            align_models_to_idx = cfg.limit_traj_steps - 1
-
-        save_trajs_fn = partial(AtomDenoiser.save_trajs_to_pdb, aux, residue_index=residue_index, chain_index=torch.zeros_like(residue_index),
-                                save_traj_mask=save_traj_mask, save_traj_steps=save_traj_steps,
-                                traj_conect=cfg.traj_conect, align_models_to_idx=align_models_to_idx)
-        # save x1_bb traj
-        save_trajs_fn(x_traj_key="x1_bb_traj", filenames=[f"{traj_out_dir}/x1_traj_sample_len{lengths[j]}_{i + j}.pdb" for j in range(B)])
-
-        # save xt_bb traj
-        save_trajs_fn(x_traj_key="xt_bb_traj", filenames=[f"{traj_out_dir}/xt_traj_sample_len{lengths[j]}_{i + j}.pdb" for j in range(B)])
-
-        pbar.update(B)
-    pbar.close()
-
-    del lit_ad_model  # free up memory; we don't need denoiser anymore
+    # Run unconditional sampling
+    sampled_pdb_paths = run_bb_uncond_sampling(bb_gen_model["model"],
+                                               sampling_cfg,
+                                               lengths_to_sample,
+                                               device,
+                                               log_dir,
+                                               save_traj_inputs=save_traj_inputs)
 
     ### CALCULATE STRUCTURE METRICS ###
     all_metrics = defaultdict(dict)
-    pdbs = natsorted(glob.glob(f"{sample_out_dir}/*.pdb"))
 
     # === Get lengths and bins of sampled structures === #
-    lengths = [int(re.search(r"len(\d+)", pdb).groups()[-1]) for pdb in pdbs]
+    lengths = lengths_to_sample
+    pdbs = sampled_pdb_paths
     bins = [int(length / cfg.length_bin_size) * cfg.length_bin_size for length in lengths]  # bins are defined by their starting length
     for pdb, length, bin in zip(pdbs, lengths, bins):
         all_metrics[pdb]["length"] = length
@@ -169,14 +108,14 @@ def main(cfg: DictConfig):
                                                          seq_des_model,
                                                          struct_pred_model,
                                                          device,
-                                                         out_dir=cfg.out_dir,
-                                                         temp_dir=f"{cfg.out_dir}/tmp")
+                                                         out_dir=log_dir,
+                                                         temp_dir=f"{log_dir}/tmp")
         for pdb, v in sc_info.items():
             all_metrics[pdb]["sc_info"] = v
 
     # === Run nnTM evaluation === #
     if cfg.nntm_dataset is not None:
-        nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=cfg.out_dir)
+        nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=log_dir)
         for pdb, v in nntm_info.items():
             all_metrics[pdb]["nntm_info"] = v
 
@@ -219,7 +158,7 @@ def main(cfg: DictConfig):
         pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if b == bin]
         coords_b = [load_feats_from_pdb(pdb)["all_atom_positions"] for pdb in pdbs_b]
         bin_to_metrics[bin]["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(coords_b,
-                                                                                    temp_dir=f"{cfg.out_dir}/tmp",
+                                                                                    temp_dir=f"{log_dir}/tmp",
                                                                                     subsample_pairs=cfg.pairwise_tm_subsample)
 
     # === Run clustering analysis === #
@@ -235,11 +174,11 @@ def main(cfg: DictConfig):
             designable_pdbs = [pdb for pdb in pdbs_b if (all_metrics[pdb]["sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff).any()]
             bin_to_metrics[bin][f"{cfg.seq_des_cfg.model_name}_sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
 
-            cluster_out_dir = Path(f"{cfg.out_dir}/clustering/bin{bin}_sctm{sctm_cutoff}")
+            cluster_out_dir = Path(f"{log_dir}/clustering/bin{bin}_sctm{sctm_cutoff}")
             bin_to_metrics[bin][f"{cfg.seq_des_cfg.model_name}_sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(
                 designable_pdbs,
                 cluster_out_dir,
-                f"{cfg.out_dir}/tmp",
+                f"{log_dir}/tmp",
                 **cfg.clustering.foldseek_opts
             )
 
@@ -261,27 +200,27 @@ def main(cfg: DictConfig):
 
     ### SAVE METRICS ###
     # Save metrics to pickle file
-    with open(f"{cfg.out_dir}/all_metrics.pkl", "wb") as f:
+    with open(f"{log_dir}/all_metrics.pkl", "wb") as f:
         pickle.dump(all_metrics, f)
 
-    with open(f"{cfg.out_dir}/L_to_metrics.pkl", "wb") as f:
+    with open(f"{log_dir}/L_to_metrics.pkl", "wb") as f:
         pickle.dump(bin_to_metrics, f)
 
     # Set up wandb logging
-    if not cfg.no_wandb:
+    if not cfg.wandb.no_wandb:
         # Create wandb dir
-        wandb_dir = str(Path(cfg.out_dir))
+        wandb_dir = str(Path(log_dir))
         Path(wandb_dir, "wandb").mkdir(parents=True, exist_ok=True)
 
         # Set wandb cache directory
-        wandb_cache_dir = str(Path(cfg.out_dir, "cache", "wandb"))
+        wandb_cache_dir = str(Path(log_dir, "cache", "wandb"))
         os.environ["WANDB_CACHE_DIR"] = wandb_cache_dir
 
         wandb.init(
-            project=cfg.project,
-            entity=cfg.wandb_id,
+            project=cfg.wandb.project,
+            entity=cfg.wandb.wandb_id,
             name=cfg.exp_name,
-            group=cfg.group,
+            group=cfg.wandb.group,
             config=cfg_dict,
             dir=wandb_dir,
         )

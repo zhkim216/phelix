@@ -79,38 +79,14 @@ class AtomDenoiser(nn.Module):
     def sample(self,
                lengths: TensorType["b", int],
                residue_index: TensorType["b n", int],
-               timesteps: TensorType["b s+1", float],
-               xt_override: Optional[TensorType["s+1 b n a 3", float]] = None,
-               xt_override_mask: Optional[TensorType["s+1 b n a 3", float]] = None,
-               aatype_override: Optional[TensorType["s+1 b n", int]] = None,
-               aatype_override_mask: Optional[TensorType["s+1 b n", int]] = None,
-               cond_labels: Dict[str, TensorType["b", int]] = {},
-               noise_schedule: NoiseSchedule = None,
-               churn_cfg: Dict[str, float] = None,
-               autoguidance_cfg: Optional[Dict[str, Any]] = None,  # autoguidance config
+               diffusion_inputs: Dict[str, Any],
                scaffold_inputs: Optional[Dict[str, torch.Tensor]] = None,
+               cond_labels: Dict[str, TensorType["b", int]] = {},
                ) -> Tuple[TensorType["b n 4 3", float], Dict[str, torch.Tensor]]:
         """
         Sample from the model.
 
         Returns the final denoised coords and auxiliary outputs.
-
-        aux includes:
-        - seq_mask: TensorType["b n", float]
-        - x1_traj: TensorType["s b n a 3", float], s=num_steps
-        - xt_traj: TensorType["s b n a 3", float], s=num_steps
-
-        Sampling parameters:
-        - xt_override: override coords at each step with this tensor where xt_override_mask is 1.
-        - churn_cfg contains:
-            - s_churn: controls overall amount of stochasticity to add in sampling
-            - s_noise: std of noise to add with churn
-        - cond_labels: dictionary mapping from conditioning label to token ID for each batch element
-
-        - scaffold_inputs: dictionary containing scaffold information with keys:
-            - x_motif: TensorType["b n a 3", float], coordinates of scaffold atoms
-            - motif_mask: TensorType["b n a", float], mask indicating which atoms are part of the scaffold
-            - aatype_scaffold: TensorType["b n", int], input amino acid type for conditioning
         """
         B, N = residue_index.shape
 
@@ -121,7 +97,7 @@ class AtomDenoiser(nn.Module):
         seq_mask = (ranges < lengths[:, None]).float()
         aux["seq_mask"] = seq_mask.cpu()
 
-        # Initialize sequence / sidechain prior (all masked, time t=0)
+        # Initialize motif inputs
         if scaffold_inputs is None:
             x_motif = torch.zeros((B, N, rc.atom_type_num, 3), device=residue_index.device)
             motif_mask = torch.zeros((B, N, rc.atom_type_num), device=residue_index.device)
@@ -131,33 +107,10 @@ class AtomDenoiser(nn.Module):
             motif_mask = scaffold_inputs["motif_mask"]
             aatype_scaffold = scaffold_inputs["aatype_scaffold"]
 
-        num_steps = timesteps.shape[-1] - 1
+        # Construct diffusion inputs
+        aux_inputs = {}
+        aux_inputs["diffusion_inputs"] = diffusion_inputs
 
-        # Handle xt overrides
-        if xt_override is None:
-            # dummy values
-            xt_override = torch.zeros(1, device=residue_index.device).expand(num_steps + 1, B, N, rc.atom_type_num, 3)
-            xt_override_mask = torch.zeros(1, device=residue_index.device).expand(num_steps + 1, B, N, rc.atom_type_num, 3)
-
-        # Handle aatype overrides
-        if aatype_override is None:
-            # dummy values
-            aatype_override = torch.full((), fill_value=rc.restype_order_with_x["X"], device=residue_index.device).expand(num_steps + 1, B, N)
-            aatype_override_mask = torch.zeros(1, device=residue_index.device, dtype=torch.long).expand(num_steps + 1, B, N)
-
-        # Construct denoiser inputs
-        aux_inputs = {
-            "num_steps": num_steps,
-            "timesteps": timesteps,
-            "churn_cfg": churn_cfg,
-            "noise_schedule": noise_schedule,
-            "autoguidance_cfg": autoguidance_cfg,
-            # overrides
-            "xt_override": xt_override,
-            "xt_override_mask": xt_override_mask,
-            "aatype_override": aatype_override,
-            "aatype_override_mask": aatype_override_mask,
-        }
         x1_bb, aux_preds = self.denoiser(x_motif=x_motif,
                                          motif_mask=motif_mask,
                                          aatype_scaffold=aatype_scaffold,
@@ -169,19 +122,6 @@ class AtomDenoiser(nn.Module):
 
         aux.update(aux_preds["bb_diffusion_aux"])
         return x1_bb, aux
-
-
-    def get_backbone_likelihoods(self,
-                                 num_steps: int,
-                                 x: TensorType["b n a 3", float],
-                                 seq_mask: TensorType["b n", float],
-                                 residue_index: TensorType["b n", int],
-                                 atom_mask: TensorType["b n 4", float],
-                                 cond_labels: Dict[str, TensorType["b", int]]
-                                 ):
-        aatype = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])  # assume aatype are all masked for backbone-only
-        likelihood_aux = self.denoiser.get_likelihoods(num_steps, x, aatype, seq_mask, atom_mask, residue_index, cond_labels_in=cond_labels)
-        return likelihood_aux
 
 
     @staticmethod
@@ -274,47 +214,6 @@ class AtomDenoiser(nn.Module):
                 }
                 traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
                 write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
-
-
-    @staticmethod
-    def save_backbone_likelihood_traj(likelihood_aux: Dict[str, Any],
-                                      seq_mask: TensorType["b n", float],
-                                      residue_index: TensorType["b n", int],
-                                      chain_index: TensorType["b n", int],
-                                      save_traj_mask: List[bool],
-                                      save_traj_steps: List[int],
-                                      filenames: List[str],
-                                      traj_conect: bool,
-                                      align_models_to_idx: Optional[int] = None):
-        """
-        Save trajectories from backbone likelihood calculation to PDB files.
-        """
-        B = seq_mask.shape[0]
-        device = seq_mask.device
-        for i in range(B):
-            if save_traj_mask[i]:
-                x_bb_traj = likelihood_aux["likelihood_xt_traj"][i, save_traj_steps]
-                S, N, A, _ = x_bb_traj.shape
-                aatype_i = torch.full_like(seq_mask[i], fill_value=rc.restype_order["G"], dtype=torch.long)  # force aatype to glycine
-                aatype_traj = aatype_i[None].expand(S, -1)
-                atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * seq_mask[i, :, None]  # [S, N, A]
-
-                # Put backbone positions into atom37 format
-                S, N, _, X = x_bb_traj.shape
-                x_traj = torch.zeros((S, N, rc.atom_type_num, 3), device=device)
-                x_traj[:, :, rc.bb_idxs, :] = x_bb_traj
-
-                traj_feats = {
-                    "aatype": aatype_traj,
-                    "atom_positions": x_traj,
-                    "atom_mask": atom_mask,
-                    "residue_index": residue_index[i].unsqueeze(0).expand(S, -1),
-                    "chain_index": chain_index[i].unsqueeze(0).expand(S, -1),
-                    "b_factors": None
-                }
-                traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
-                write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
-
 
 
 def get_denoiser(cfg: DictConfig,

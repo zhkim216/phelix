@@ -1,3 +1,6 @@
+batch_size: 32
+
+# Diffusion inputs
 num_steps: 500
 timestep_schedule:
   num_steps: ${num_steps}
