@@ -17,10 +17,10 @@ conda activate rshuai_allatom_design
 # Define directories and paths
 BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
-MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
 
-# FAMPNN options
-FAMPNN_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
+# Sequence design model params
+MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
+FAMPNN_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt
 NOISE_LABELS=0.0
 
 # Set HF transformers cache
@@ -28,14 +28,9 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 
 cd ${BASE_DIR}
 
-# Dataset paths
-# NNTM_DATASET=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/pdb_store_renumbered
-NNTM_DATASET=null
-
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
-OMEGAFOLD_CACHE=/scratch/hielab/rshuai/cache/omegafold/omegafold.pt
 
 # Denoiser path
 MODEL_NAME=u1_a7
@@ -43,26 +38,19 @@ DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_bb_gen_nl${NOISE_LABELS}
+EXP_NAME=${MODEL_NAME}_eval_bb_gen_refactor_test
 GROUP=af3_monomer
 
 # Run eval script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
-    wandb_id=${WANDB_ID} \
+    wandb.wandb_id=${WANDB_ID} \
+    wandb.group=${GROUP} \
     exp_name=${EXP_NAME} \
-    group=${GROUP} \
-    num_workers=8 \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     seq_des_cfg.proteinmpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     seq_des_cfg.fampnn.fampnn_ckpt=${FAMPNN_CKPT} \
     seq_des_cfg.fampnn.overrides.noise_labels=${NOISE_LABELS} \
-    struct_pred_cfg.omegafold.cache_file=${OMEGAFOLD_CACHE} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     start_step=0 \
     eval_every_n_ckpts=2 \
-    batch_size=64 \
-    nntm_dataset=${NNTM_DATASET} \
-    length_range=[32,256] \
-    length_step_size=4 \
-    n_samples_per_length=8 \
     hydra.run.dir=${HYDRA_DIR}
