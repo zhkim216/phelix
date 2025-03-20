@@ -22,9 +22,9 @@ from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     FinalLayer
-from allatom_design.model.atom_denoiser.denoisers.dit_utils import \
+from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.dit_utils import \
     DenoisingMLPBlock
-from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
+from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.timestep_embedders import \
     TimestepEmbedder
 from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.sidechain_confidence import \
     SidechainConfidenceModule

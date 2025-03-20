@@ -1,15 +1,3 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
-# References:
-# GLIDE: https://github.com/openai/glide-text2im
-# MAE: https://github.com/facebookresearch/mae/blob/main/models_mae.py
-# --------------------------------------------------------
-
-import copy
 from collections import defaultdict
 from functools import partial
 from typing import Dict, Optional, Tuple
@@ -33,13 +21,13 @@ from allatom_design.interpolants.ad_interpolants.sd3_rf_interpolant import \
     SD3_RF
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
-from allatom_design.model.atom_denoiser.denoisers.dit_utils import (
+from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.dit_utils import (
     DiTBlock, FinalLayer, LabelEmbedder, MultiHeadRMSNorm)
-from allatom_design.model.atom_denoiser.denoisers.pair_rep_utils import \
+from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.pair_rep_utils import \
     PairRepBuilder
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
-from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
+from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.timestep_embedders import \
     TimestepEmbedder
 from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import FAMPNN
 from openfold.model.primitives import Linear

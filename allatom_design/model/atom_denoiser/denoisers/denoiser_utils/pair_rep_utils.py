@@ -9,7 +9,7 @@ from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
 
 from allatom_design.data.data import build_struct_pair_feat
-from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
+from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.timestep_embedders import \
     TimestepEmbedder
 from openfold.model.primitives import Linear
 
