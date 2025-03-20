@@ -36,7 +36,7 @@ def run_bb_uncond_sampling(model: AtomDenoiser,
                            lengths: list[int],
                            device: str,
                            out_dir: str,
-                           save_traj_inputs: dict[str, Any]) -> None:
+                           save_traj_inputs: dict[str, Any] | None = None) -> list[str]:
     """
     Run unconditional sampling from a backbone generation model.
     """

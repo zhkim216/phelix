@@ -1,4 +1,4 @@
-batch_size: 32
+batch_size: 64
 
 # Diffusion inputs
 num_steps: 500
