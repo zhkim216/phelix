@@ -1,46 +1,32 @@
 # Wandb configuration
-project: "allatom_design"
-wandb_id: "richardshuai"
-group: "debug"
-no_wandb: false
+wandb:
+  no_wandb: false  # Disable wandb logging
+  project: "allatom_design"  # Wandb project name
+  wandb_id: "richardshuai"  # Wandb username
+  group: "debug" # Wandb group name
 
-cuda: true
-num_workers: 8
-out_dir: null
-seed: 0
-batch_size: 8
-overwrite_out_dir: false
+# Outputs
+exp_name: null  # experiment name; used for wandb and output directory
+base_out_dir: test_draw_bb_samples  # outputs will be saved to base_out_dir/exp_name
 
 # Sampling run settings
-ad_ckpt:
-exp_name: baseline
-pdb_dir: null
-pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
-pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
+checkpoint_path: /media/scratch/huang_lab/allatom_design/allatom_design/u1_a7/checkpoints/ema/ad-step1625000-epoch2008-ema0.99.ckpt
+seed: 0
 
-# Denoising steps
-num_steps: 500
-timestep_schedule:
-  num_steps: ${num_steps}
-  mode: "linear"
-  t_start: 0.0
-  t_end: 1.0
-noise_schedule:
-  name: "linear"
-churn_cfg:
-  s_churn: 0
-  s_noise: 1.0
-  s_t_min: 0.01
-  s_t_max: 50.0
-  num_steps: ${num_steps}
+input_cfg:
+  pdb_dir: null
+  pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
+  pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
+  subset_length_range: null # only evaluate on sequences within this length range
+  presort_by_length: false  # sort pdb keys by sequence length, potentially for efficiency
+  n_subsample: null  # randomly sample this many pdb keys, null to use all
 
-# Conditioning
-cond_labels: null
-
-# Autoguidance
-autoguidance_cfg:
-  use_autoguidance: false
-  w: 1.0
+# Backbone sampling parameters
+bb_gen_cfg:
+  ckpt_path: ${checkpoint_path}
+  sampling_cfg: allatom_design/configs/bb_gen/bb_sampling_base.yaml
+  overrides:
+    num_steps: 500
 
 # Self-consistency evaluation
 sc:

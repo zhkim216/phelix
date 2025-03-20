@@ -361,6 +361,16 @@ def process_single_pdb_ad(data: dict, sm: ScaffoldManager | None = None, convert
     example['chain_ids'] = data['chain_ids']
 
     # Get scaffolding input with scaffold manager
-    example["x_motif"], example["motif_mask"], example["aatype_scaffold"], example["x"] = get_scaffolding_inputs(sm, example)
+    example["x_motif"], example["motif_mask"], example["aatype_motif"], example["x"] = get_scaffolding_inputs(sm, example)
+
+    # Convert data types
+    if convert_types:
+        example_out = {}
+        for k, v in example.items():
+            if k in FEATURES_LONG:
+                example_out[k] = v.long()
+            else:
+                example_out[k] = v.float()
+        return example_out
 
     return example

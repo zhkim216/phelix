@@ -59,7 +59,7 @@ class AtomDenoiser(nn.Module):
         # Denoise coords
         _, aux_preds = self.denoiser(batch["x_motif"],
                                      batch["motif_mask"],
-                                     batch["aatype_scaffold"],
+                                     batch["aatype_motif"],
                                      batch["residue_index"], batch["seq_mask"],
                                      cond_labels_in=batch["cond_labels_in"],
                                      aux_inputs=aux_inputs)
@@ -101,11 +101,11 @@ class AtomDenoiser(nn.Module):
         if scaffold_inputs is None:
             x_motif = torch.zeros((B, N, rc.atom_type_num, 3), device=residue_index.device)
             motif_mask = torch.zeros((B, N, rc.atom_type_num), device=residue_index.device)
-            aatype_scaffold = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
+            aatype_motif = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
         else:
             x_motif = scaffold_inputs["x_motif"]
             motif_mask = scaffold_inputs["motif_mask"]
-            aatype_scaffold = scaffold_inputs["aatype_scaffold"]
+            aatype_motif = scaffold_inputs["aatype_motif"]
 
         # Construct diffusion inputs
         aux_inputs = {}
@@ -113,7 +113,7 @@ class AtomDenoiser(nn.Module):
 
         x1_bb, aux_preds = self.denoiser(x_motif=x_motif,
                                          motif_mask=motif_mask,
-                                         aatype_scaffold=aatype_scaffold,
+                                         aatype_motif=aatype_motif,
                                          residue_index=residue_index,
                                          seq_mask=seq_mask,
                                          cond_labels_in=cond_labels,
@@ -132,19 +132,19 @@ class AtomDenoiser(nn.Module):
         Save samples from the denoiser to PDB files.
 
         Samples should contain the following keys:
-        - x_bb_denoised: Tensor["b n 4 3", float]
+        - x_bb: Tensor["b n 4 3", float]`
         - seq_mask: Tensor["b n", float]
         - residue_index: Tensor["b n", int]
         """
-        B, N, _, _= samples["x_bb_denoised"].shape
+        B, N, _, _= samples["x_bb"].shape
         residue_index = samples["residue_index"]
         seq_mask = samples["seq_mask"]
 
-        x_denoised = samples["x_bb_denoised"]
+        x_bb = samples["x_bb"]
 
         aatype = torch.full_like(residue_index, fill_value=rc.restype_order["G"], dtype=torch.long)  # force aatype to glycine
         final_atom37_positions = torch.zeros((B, N, 37, 3), device=aatype.device)
-        final_atom37_positions[:, :, rc.bb_idxs, :] = x_denoised
+        final_atom37_positions[:, :, rc.bb_idxs, :] = x_bb
         atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=aatype.device)[aatype] * seq_mask[..., None]
 
         feats = {

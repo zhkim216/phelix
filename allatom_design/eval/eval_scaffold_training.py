@@ -177,7 +177,7 @@ def main(cfg: DictConfig):
                 # Pad each record, then stack
                 max_len = max(b["x"].shape[0] for b in batch_list)
                 model_input_keys = ["x", "seq_mask", "atom_mask", "missing_atom_mask", "residue_index",
-                                    "x_motif", "motif_mask", "aatype_scaffold"]
+                                    "x_motif", "motif_mask", "aatype_motif"]
                 batch_list = [pad_to_max_len({k: b[k].unsqueeze(0) for k in model_input_keys}, max_len) for b in batch_list]
                 batch_dict = {k: torch.cat([b[k] for b in batch_list], dim=0) for k in model_input_keys}
 
@@ -186,7 +186,7 @@ def main(cfg: DictConfig):
 
                 # Save motifs
                 motif_samples = {
-                    "aatype": batch_dict["aatype_scaffold"],
+                    "aatype": batch_dict["aatype_motif"],
                     "atom_positions": batch_dict["x_motif"],
                     "atom_mask": batch_dict["motif_mask"],
                     "residue_index": batch_dict["residue_index"],
@@ -201,7 +201,7 @@ def main(cfg: DictConfig):
 
                 # Save centered
                 samples_centered = {
-                    "x_bb_denoised": batch_dict["x"][..., rc.bb_idxs, :].cpu(),  # just backbone coords
+                    "x_bb": batch_dict["x"][..., rc.bb_idxs, :].cpu(),  # just backbone coords
                     "seq_mask": batch_dict["seq_mask"].cpu(),
                     "residue_index": batch_dict["residue_index"].cpu(),
                 }
@@ -214,7 +214,7 @@ def main(cfg: DictConfig):
                 scaffold_inputs = {
                     "x_motif": batch_dict["x_motif"],
                     "motif_mask": batch_dict["motif_mask"],
-                    "aatype_scaffold": batch_dict["aatype_scaffold"],
+                    "aatype_motif": batch_dict["aatype_motif"],
                 }
 
                 # Timesteps
@@ -237,7 +237,7 @@ def main(cfg: DictConfig):
 
                 # Save final structures
                 samples_final = {
-                    "x_bb_denoised": x_bb_denoised.cpu(),
+                    "x_bb": x_bb_denoised.cpu(),
                     "seq_mask": batch_dict["seq_mask"].cpu(),
                     "residue_index": batch_dict["residue_index"].cpu(),
                 }
