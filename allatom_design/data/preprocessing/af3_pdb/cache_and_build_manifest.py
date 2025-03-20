@@ -18,7 +18,7 @@ def main(cfg: DictConfig):
     and writes a single CSV containing pdb_name, phase, seq_length, and cluster_id.
     """
     # Collect all entries in a list of dicts to concatenate later
-    pdb_info = []
+    manifest_info = []
 
     # For each phase, read pdb_keys, cache them, then compute lengths
     for phase in cfg.phases:
@@ -38,10 +38,10 @@ def main(cfg: DictConfig):
         pdb_key_to_length = get_lengths_from_cached(pdb_keys, cache_dir, num_workers=cfg.num_workers)
         pdb_key_to_cluster_id = get_cluster_ids(pdb_keys)
         for pdb_key in pdb_keys:
-            pdb_info.append({"pdb_key": pdb_key, "phase": phase, "seq_length": pdb_key_to_length[pdb_key], "cluster_id": pdb_key_to_cluster_id[pdb_key]})
+            manifest_info.append({"pdb_key": pdb_key, "phase": phase, "seq_length": pdb_key_to_length[pdb_key], "cluster_id": pdb_key_to_cluster_id[pdb_key]})
 
-    # Combine into a single DataFrame and write out
-    df = pd.DataFrame(pdb_info)
+    # Write out manifest to CSV
+    df = pd.DataFrame(manifest_info)
     out_csv = f"{cfg.pdb_path}/pdb_manifest.csv"
     df.to_csv(out_csv, index=False)
     print(f"Wrote dataset manifest to {out_csv}")

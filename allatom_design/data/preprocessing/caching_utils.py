@@ -14,7 +14,24 @@ def get_pdb_file_from_key(pdb_path: str, phase: str, pdb_key: str) -> str:
     """
     Based on the pdb_key, return the path to the PDB file.
     """
-    pdb_file = f"{pdb_path}/{phase}_mmcifs/{pdb_key[1:3]}/{pdb_key[:4]}-assembly1.cif"
+    dataset_name = Path(pdb_path).stem
+
+    if dataset_name == "af3_pdb":
+        # AF3 PDB dataset used for FAMPNN training
+        pdb_file = f"{pdb_path}/{phase}_mmcifs/{pdb_key[1:3]}/{pdb_key[:4]}-assembly1.cif"
+    elif dataset_name == "af3_pdb_monomer":
+        # AF3 PDB monomer dataset
+        pdb_file = f"{pdb_path}/preprocessing/residx_quality_control_af3_monomer/filtered_mmcifs/{pdb_key}.cif"
+    elif dataset_name == "augmented_af3_monomer_v1":
+        # Augmented AF3 monomer dataset
+        pdb_file = f"{pdb_path}/esmfold_preds/{pdb_key}.pdb"
+    elif dataset_name == "augmented_ingraham_cath_bugfree":
+        # Tianyu's augmented dataset
+        pdb_file = f"{pdb_path}/mpnn_esmfold/{pdb_key}"
+        if not Path(pdb_file).exists():
+            pdb_file = f"{pdb_path}/dne_mpnn/{pdb_key}"
+    else:
+        raise ValueError(f"Unknown dataset: {dataset_name}")
     if not Path(pdb_file).exists():
         raise FileNotFoundError(f"PDB file {pdb_file} not found")
     return pdb_file
