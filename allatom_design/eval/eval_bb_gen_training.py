@@ -161,7 +161,7 @@ def main(cfg: DictConfig):
         metrics.update({f"bb_gen/median/{k}": np.median(v) for k, v in sample_metrics.items()})
 
         # Log metrics to wandb
-        if not cfg.no_wandb:
+        if not cfg.wandb.no_wandb:
             metrics["trainer/global_step"] = global_step
             metrics["trainer/epoch"] = epoch
 
