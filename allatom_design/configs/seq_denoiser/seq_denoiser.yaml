@@ -1,15 +1,18 @@
 # Wandb configuration
-project: "allatom_design"  # Wandb project name
-wandb_id: "richardshuai"  # Wandb username
-exp_name: null # Wandb exp name
-group: "debug" # Wandb group name
+wandb:
+  no_wandb: false  # Disable wandb logging
+  project: "allatom_design"  # Wandb project name
+  wandb_id: "richardshuai"  # Wandb username
+  group: "debug" # Wandb group name
+
+# Outputs
+out_dir: "out_dir/train_seq_denoiser"  # Output path for trained models
+exp_name: null  # Wandb exp name
 
 # Run settings
-no_wandb: false # Disable wandb logging
 overfit: -1 # Number of examples to overfit to, -1 to disable
 cuda: True
 num_workers: 8 # Dataloader num workers
-out_dir: "out_dir/train_seq_denoiser"  # Output path for trained models
 
 train:
   seed: 0

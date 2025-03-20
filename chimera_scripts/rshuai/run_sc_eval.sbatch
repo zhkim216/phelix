@@ -41,9 +41,9 @@ OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/proteinmpnn_evals/a
 # Run training script
 cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/run_sc_eval.py \
-    wandb_id=${WANDB_ID} \
+    wandb.wandb_id=${WANDB_ID} \
+    wandb.group=${GROUP} \
     exp_name=${EXP_NAME} \
-    group=${GROUP} \
     seq_des_cfg.proteinmpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     struct_pred_cfg.model_name=esmfold \

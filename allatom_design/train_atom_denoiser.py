@@ -35,9 +35,9 @@ def main(cfg: DictConfig):
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
     # Create wandb dir and set wandb cache directory
-    wandb_dir = str(Path(cfg.out_dir, cfg.project))
+    wandb_dir = str(Path(cfg.out_dir, cfg.wandb.project))
     Path(wandb_dir, "wandb").mkdir(parents=True, exist_ok=True)
-    wandb_cache_dir = str(Path(cfg.out_dir, cfg.project, "cache", "wandb"))
+    wandb_cache_dir = str(Path(cfg.out_dir, cfg.wandb.project, "cache", "wandb"))
     os.environ["WANDB_CACHE_DIR"] = wandb_cache_dir
 
     # Set seeds
@@ -57,8 +57,8 @@ def main(cfg: DictConfig):
     local_rank = os.environ.get("LOCAL_RANK", None)
     print(f"Local rank: {local_rank}")
 
-    if cfg.no_wandb:
-        log_dir = Path(cfg.out_dir, cfg.project, "debug")
+    if cfg.wandb.no_wandb:
+        log_dir = Path(cfg.out_dir, cfg.wandb.project, "debug")
         results_dir = Path(log_dir, "results")
         results_dir.mkdir(parents=True, exist_ok=True)
         logger = False  # disables logging
@@ -66,17 +66,17 @@ def main(cfg: DictConfig):
         if local_rank is None:
             # If none, then we are either on node rank 0 or not using DDP
             wandb.init(
-                project=cfg.project,
-                entity=cfg.wandb_id,
+                project=cfg.wandb.project,
+                entity=cfg.wandb.wandb_id,
                 name=cfg.exp_name,
-                group=cfg.group,
+                group=cfg.wandb.group,
                 config=cfg_dict,
                 dir=wandb_dir,
             )
             os.environ["WANDB_RUN_NAME"] = wandb.run.name
 
         wandb_run_name = os.environ["WANDB_RUN_NAME"]
-        log_dir = Path(cfg.out_dir, cfg.project, wandb_run_name)  # base log dir
+        log_dir = Path(cfg.out_dir, cfg.wandb.project, wandb_run_name)  # base log dir
 
         # path for run outputs
         results_dir = Path(log_dir, "results")
@@ -84,8 +84,8 @@ def main(cfg: DictConfig):
 
         logger = WandbLogger(
             name=cfg.exp_name,
-            project=cfg.project,
-            entity=cfg.wandb_id,
+            project=cfg.wandb.project,
+            entity=cfg.wandb.wandb_id,
             experiment=wandb.run if local_rank is None else DummyExperiment(),
             save_dir=results_dir,
         )
@@ -114,7 +114,7 @@ def main(cfg: DictConfig):
     else:
         lit_model = LitAtomDenoiser(cfg)
 
-    if not cfg.no_wandb:
+    if not cfg.wandb.no_wandb:
         logger.watch(lit_model.model, log="all", log_freq=cfg.logging.wandb_watch_freq)
 
     # Define callbacks

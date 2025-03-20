@@ -40,8 +40,9 @@ DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_
 
 # Run eval script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scn_pack_training.py \
+    wandb.wandb_id=${WANDB_ID} \
+    wandb.group=${GROUP} \
     exp_name=${EXP_NAME} \
-    group=${GROUP} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \

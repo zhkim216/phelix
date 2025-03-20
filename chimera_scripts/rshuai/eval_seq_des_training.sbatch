@@ -44,9 +44,9 @@ GROUP=chimera_c6_eval_seq_des
 # Run training script
 cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
-    wandb_id=${WANDB_ID} \
+    wandb.wandb_id=${WANDB_ID} \
+    wandb.group=${GROUP} \
     exp_name=${EXP_NAME} \
-    group=${GROUP} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     struct_pred_cfg.model_name=af2 \

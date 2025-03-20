@@ -157,51 +157,54 @@ def get_training_checkpoints(
 
 
 def wandb_setup(
+    base_out_dir: str,
     no_wandb: bool,
-    out_dir: str,
-    project: str = None,
-    wandb_id: str = None,
-    exp_name: str = None,
-    group: str = None,
+    project: str | None,
+    wandb_id: str | None,
+    group: str | None,
+    exp_name: str | None,
     cfg_dict: dict = None,
-) -> Path:
+) -> str:
     """
     Set up Weights & Biases (wandb) tracking and return the log directory.
+    Log directory is set to base_out_dir/exp_name.
 
     Args:
         no_wandb: If True, disable wandb logging
-        out_dir: Base output directory for logs
         project: wandb project name
         wandb_id: wandb entity ID
-        exp_name: Name of the experiment
         group: Group name for the experiment
+        exp_name: Name of the experiment
+        base_out_dir: Base output directory for logs
         cfg_dict: Configuration dictionary to log
 
     Returns:
         Path: Log directory path
     """
-    if no_wandb:
-        log_dir = Path(out_dir, "debug")
-    else:
+    if exp_name is None:
+        exp_name = "debug"
+
+    # Set up log directory
+    log_dir = str(Path(base_out_dir, exp_name))
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
+
+    # Initialize wandb
+    if not no_wandb:
         # Create wandb dir
-        wandb_dir = str(Path(out_dir))
-        Path(wandb_dir, "wandb").mkdir(parents=True, exist_ok=True)
+        wandb_dir = str(Path(base_out_dir, "wandb"))
+        Path(wandb_dir).mkdir(parents=True, exist_ok=True)
 
         # Set wandb cache directory
-        wandb_cache_dir = str(Path(out_dir, "cache", "wandb"))
+        wandb_cache_dir = str(Path(base_out_dir, "cache", "wandb"))
         os.environ["WANDB_CACHE_DIR"] = wandb_cache_dir
 
         wandb.init(
             project=project,
             entity=wandb_id,
-            name=exp_name,
             group=group,
+            name=exp_name,
             config=cfg_dict,
             dir=wandb_dir,
         )
-        log_dir = Path(out_dir, wandb.run.name)  # base log dir
-
-    # Set up out directories
-    Path(log_dir).mkdir(parents=True, exist_ok=True)
 
     return log_dir

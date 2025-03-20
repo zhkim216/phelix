@@ -32,11 +32,12 @@ PDB_PATH=/scratch/hielab/talal/datasets/af3_pdb
 
 # Run training script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
-    wandb_id=${WANDB_ID} \
+    wandb.wandb_id=${WANDB_ID} \
+    wandb.group=${GROUP} \
+    wandb.no_wandb=false \
+    out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
-    group=${GROUP} \
     num_workers=8 \
-    no_wandb=false \
     data.fixed_size=256 \
     data.pdb_path=${PDB_PATH} \
     data.cluster_sample=true \
@@ -53,5 +54,4 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.confidence_module.enabled=true \
     checkpointing.save_latest_every_n_steps=10000 \
     trainer.check_val_every_n_epoch=5 \
-    hydra.run.dir=${HYDRA_DIR} \
-    out_dir=${OUT_DIR}
+    hydra.run.dir=${HYDRA_DIR}
