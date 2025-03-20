@@ -90,8 +90,6 @@ dit:
       max_bin: 30.0
       no_bins: 65
 
-
-
   # Scaffold conditioning
   scaffolding:
     h_s: ${model.denoiser.scaffold_module.fampnn.n_channel}

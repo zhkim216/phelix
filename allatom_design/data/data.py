@@ -128,23 +128,6 @@ def aa_to_bb_feats(feats: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     return bb_feats
 
 
-def renumber_and_add_chain_gap(residue_index: TensorType["n"],
-                               chain_index: TensorType["n"],
-                               chain_residx_gap: int = 200) -> TensorType["n"]:
-    """
-    Renumber residue indices to start from 1 and add a residue index gap between chains.
-    e.g. if chain A has 5 residues and chain B has 3 residues,
-    with chain_residx_gap=200, the residue indices for chain B will be 206, 207, 208.
-    """
-    # First, make residue indices are linearly ordered across chains
-    residue_index = torch.arange(1, residue_index.shape[0] + 1)
-
-    # Now add a gap to the residue index for each chain break
-    residue_index = residue_index + chain_residx_gap * chain_index
-
-    return residue_index
-
-
 def make_fixed_size_1d(data: TensorType["n ..."], fixed_size: int, start_idx: int, multimer_crop_mask: TensorType["n"] = None):
     data_len = data.shape[0]
     if data_len > fixed_size:
@@ -157,20 +140,6 @@ def make_fixed_size_1d(data: TensorType["n ..."], fixed_size: int, start_idx: in
         extra_shape = data.shape[1:]
         new_data = torch.cat([data, torch.zeros(pad_size, *extra_shape)], 0)
     return new_data
-
-def trim_to_max_len(batch: TensorType["b n ..."]):
-    max_len = int(max(torch.sum(batch['seq_mask'], dim=-1)))
-
-    trimmed_example = {}
-    for k, v in batch.items():
-
-        #features which aren't trimmed
-        if k in ['pdb_key','cond_labels_in','chain_ids']:
-            trimmed_example[k] = v
-        else:
-            trimmed_example[k] = v[:,:max_len,...]
-
-    return trimmed_example
 
 
 def pad_to_max_len(batch: Dict[str, TensorType["b n ..."]], max_len: int):
