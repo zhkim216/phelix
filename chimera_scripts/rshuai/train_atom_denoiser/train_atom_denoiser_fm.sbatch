@@ -32,7 +32,6 @@ GROUP=af3_monomer
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/af3_pdb_monomer
-ANNOTATION_CSV=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2/annotated_pdb_keys.csv
 CLUSTER_SAMPLE=true
 
 # Run training script
@@ -43,11 +42,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     num_workers=8 \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
-    data.annotation_csvs=[${ANNOTATION_CSV}] \
     data.cluster_sample=${CLUSTER_SAMPLE} \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
-    data.use_struct_preds=true \
     data.max_scrmsd=1.0 \
     data.max_rel_rog=1.4 \
     data.n_train_cluster_resample=50 \

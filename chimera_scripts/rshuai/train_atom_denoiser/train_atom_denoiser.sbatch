@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=u1_a7
+#SBATCH --job-name=u1_a7_refactor_test
 #SBATCH -p gpu_batch
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -27,12 +27,11 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=u1_a7
-GROUP=af3_monomer
+EXP_NAME=u1_a7_refactor_test
+GROUP=augmented_af3_monomer_v1
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/af3_pdb_monomer
-ANNOTATION_CSV=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2/annotated_pdb_keys.csv
+PDB_PATH=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1
 CLUSTER_SAMPLE=true
 
 # Run training script
@@ -43,11 +42,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     num_workers=8 \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
-    data.annotation_csvs=[${ANNOTATION_CSV}] \
     data.cluster_sample=${CLUSTER_SAMPLE} \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
-    data.use_struct_preds=true \
     data.max_scrmsd=2.0 \
     data.max_rel_rog=1.4 \
     data.n_train_cluster_resample=10 \

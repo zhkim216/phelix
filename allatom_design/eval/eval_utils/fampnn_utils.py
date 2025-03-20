@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import load_feats_from_pdb, pad_to_max_len
-from allatom_design.data.datasets.sd_dataset import process_single_pdb
+from allatom_design.data.datasets.sd_dataset import process_single_pdb_sd
 from allatom_design.eval.eval_utils import sampling_utils
 from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
@@ -385,7 +385,7 @@ def get_fampnn_batch(pdb_batch_files: List[str], device: str,
     batch_list = []
     batch_chain_id_mapping = []
     for data in batch_data:
-        single = process_single_pdb(data)
+        single = process_single_pdb_sd(data)
         batch_list.append(single)
 
         # store chain ID mapping for parsing fixed positions

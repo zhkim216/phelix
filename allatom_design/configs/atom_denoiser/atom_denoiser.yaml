@@ -38,19 +38,14 @@ data:
     pdb_paths: [/data/research/ingraham_cath_dataset] # /media/scratch/datasets/ingraham_cath_dataset
     dataset_weights: [1.0]  # probability of selecting each dataset
     cluster_sample: false  # use cluster sampling for training; must be true for af3 datasets
-    annotation_csvs: null
     fixed_size: 128
     overfit: ${overfit}
     subset_length_range: null
     se3_augment: true  # randomly rotate and translate data
     translation_scale: 1.0  # scale of the translation augmentation
-    overwrite_cache: false  # overwrite the cached dataset
     max_scrmsd: null  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
     max_rel_rog: null  # subset to only pdbs with relative radius of gyration <= max_rel_rog
-    run_eval2: true
     n_train_cluster_resample: 10  # Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
-    use_struct_preds: false
-    use_first_sample: false  # use only first MPNN sample; for ablation on ai cath
     scaffold_manager_cfg: ${scaffold_manager}
 
 # Model options

@@ -21,7 +21,6 @@ BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
 MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
 FPD_EMBEDDINGS_DIR=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/fpd_embeddings
-ANNOTATION_CSV=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations_for_eval2/annotated_pdb_keys.csv
 
 # Set HF variables
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -50,7 +49,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_fpd_training.py \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     mpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     fpd_embeddings_dir=${FPD_EMBEDDINGS_DIR} \
-    annotation_csv=${ANNOTATION_CSV} \
     use_esm3=true \
     start_step=0 \
     eval_every_n_ckpts=1 \

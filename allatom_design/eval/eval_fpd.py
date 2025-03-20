@@ -105,7 +105,6 @@ def main(cfg: DictConfig):
 
     # Filter by designability / radius of gyration
     if cfg.max_scrmsd is not None or cfg.max_rel_rog is not None:
-        assert cfg.annotation_csv is not None, "Must provide annotation csv to filter by designability / radius of gyration."
         if cfg.max_scrmsd is not None:
             print(f"Filtering by max scrmsd: {cfg.max_scrmsd}")
             df = df[df["sc_ca_rmsd"] <= cfg.max_scrmsd]

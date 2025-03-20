@@ -20,7 +20,7 @@ from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.data import (get_length_from_pdb, load_feats_from_pdb,
                                       pad_to_max_len)
 from allatom_design.data.scaffold_manager import get_scaffold_manager
-from allatom_design.data.datasets.sd_dataset import process_single_pdb
+from allatom_design.data.datasets.sd_dataset import process_single_pdb_sd
 from allatom_design.data.pdb_utils import *
 from allatom_design.eval.eval_utils import sampling_utils
 from allatom_design.eval.eval_utils import eval_metrics
@@ -170,7 +170,7 @@ def main(cfg: DictConfig):
                 pdb_names = []
                 for pdb_path in pdb_batch:
                     data = load_feats_from_pdb(pdb_path)
-                    single = process_single_pdb(data, sm)
+                    single = process_single_pdb_sd(data, sm)
                     batch_list.append(single)
                     pdb_names.append(Path(pdb_path).stem)
 
