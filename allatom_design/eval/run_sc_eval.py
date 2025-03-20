@@ -32,9 +32,7 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
     # Set up wandb logging
-    log_dir = wandb_setup(no_wandb=cfg.no_wandb, out_dir=cfg.out_dir,
-                          project=cfg.project, wandb_id=cfg.wandb_id, exp_name=cfg.exp_name, group=cfg.group,
-                          cfg_dict=cfg_dict)
+    log_dir = wandb_setup(base_out_dir=cfg.base_out_dir, exp_name=cfg.exp_name, cfg_dict=cfg_dict, **cfg.wandb)
 
     # Preserve config
     with open(Path(log_dir, "config.yaml"), "w") as f:
@@ -84,7 +82,7 @@ def main(cfg: DictConfig):
         pickle.dump(out_metrics, f)
 
     # Log metrics to wandb
-    if not cfg.no_wandb:
+    if not cfg.wandb.no_wandb:
         wandb.log(out_metrics, step=0)
 
 

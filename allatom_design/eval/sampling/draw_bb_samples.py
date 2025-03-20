@@ -27,10 +27,10 @@ from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
-from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
+
 import wandb
 from allatom_design.eval.eval_utils.fampnn_utils import get_seq_des_model
-
+from allatom_design.eval.eval_utils.bb_gen_utils import get_bb_gen_model
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="draw_bb_samples", version_base="1.3.2")
 def main(cfg: DictConfig):
@@ -43,21 +43,16 @@ def main(cfg: DictConfig):
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Load atom denoiser
-    lit_ad_model = LitAtomDenoiser.load_from_checkpoint(cfg.ad_ckpt).eval()
-    device = lit_ad_model.device
+    # Load in atom denoiser
+    bb_gen_model = get_bb_gen_model(cfg.bb_gen_cfg, device=device)
 
     # Create out dirs and preserve config
     if cfg.out_dir is None:
         model_run_dir = Path(cfg.ad_ckpt).parent.parent
         model_name = Path(cfg.ad_ckpt).stem
         cfg.out_dir = f"{model_run_dir}/draw_samples/{model_name}/{cfg.exp_name}"
-
-    if cfg.overwrite_out_dir and Path(cfg.out_dir).exists():
-        # delete existing out_dir
-        print(f"Deleting pre-existing out_dir: {cfg.out_dir}")
-        shutil.rmtree(cfg.out_dir)
 
     Path(cfg.out_dir).mkdir(parents=True, exist_ok=True)
     with open(Path(cfg.out_dir, "config.yaml"), "w") as f:

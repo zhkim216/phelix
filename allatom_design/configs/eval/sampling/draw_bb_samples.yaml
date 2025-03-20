@@ -19,6 +19,9 @@ overwrite_out_dir: false
 length_bin_size: 75  # bin lengths into intervals of this size for evaluation, starting from 0
 
 # Sampling run parameters
+bb_gen_cfg:
+  ad_ckpt: /media/scratch/huang_lab/allatom_design/allatom_design/u1_a7/checkpoints/ema/ad-step1625000-epoch2008-ema0.99.ckpt
+  sampling_cfg: allatom_design/configs/bb_gen/sampling_base.yaml
 length_range: [75,374]  # inclusive
 length_step_size: 5
 n_samples_per_length: 10
@@ -26,29 +29,6 @@ n_traj_per_length: 0  # number of trajectories to save per length
 limit_traj_steps: 0  # limit the number of steps we save in a trajectory (evenly spaced)
 traj_conect: false
 align_traj_to_last_step: false  # whether to align trajectories to the last step
-
-num_steps: 500
-timestep_schedule:
-  num_steps: ${num_steps}
-  mode: "linear"
-  t_start: 0.0
-  t_end: 1.0
-noise_schedule:
-  name: "linear"
-churn_cfg:
-  s_churn: 0
-  s_noise: 1.0
-  s_t_min: 0.01
-  s_t_max: 50.0
-  num_steps: ${num_steps}
-
-# Conditioning
-cond_labels: null
-
-# Autoguidance
-autoguidance_cfg:
-  use_autoguidance: false
-  w: 1.0
 
 # Self-consistency evaluation
 sc:

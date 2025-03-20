@@ -1,12 +1,15 @@
 # Wandb configuration
-project: "allatom_design"  # Wandb project name
-wandb_id: "richardshuai"  # Wandb username
-exp_name: null # Wandb exp name
-group: "debug" # Wandb group name
+wandb:
+  no_wandb: false  # Disable wandb logging
+  project: "allatom_design"  # Wandb project name
+  wandb_id: "richardshuai"  # Wandb username
+  group: "debug" # Wandb group name
+
+# Outputs
+exp_name: null  # experiment name; used for wandb and output directory
+base_out_dir: test_run_sc_eval  # outputs will be saved to base_out_dir/exp_name
 
 # Run settings
-no_wandb: false  # Disable wandb logging
-out_dir: test_run_sc_eval
 seed: 0
 use_seq_design: false
 

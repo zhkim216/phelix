@@ -1,0 +1,22 @@
+num_steps: 500
+timestep_schedule:
+  num_steps: ${num_steps}
+  mode: "linear"
+  t_start: 0.0
+  t_end: 1.0
+noise_schedule:
+  name: "linear"
+churn_cfg:
+  s_churn: 0
+  s_noise: 1.0
+  s_t_min: 0.01
+  s_t_max: 50.0
+  num_steps: ${num_steps}
+
+# Conditioning
+cond_labels: null
+
+# Autoguidance
+autoguidance_cfg:
+  use_autoguidance: false
+  w: 1.0

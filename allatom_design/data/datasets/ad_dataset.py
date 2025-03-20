@@ -187,9 +187,7 @@ class ADDataset(data.Dataset):
 
         # Construct conditioning inputs
         cond_labels_in = {}
-
-        # Condition on cropping
-        cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]
+        cond_labels_in["crop_aug"] = cl.TOKEN_TO_ID["crop_aug"]["UNCROPPED"]  # condition on cropping
 
         # Disable cropping for evals
         start_idx = None
@@ -229,8 +227,12 @@ class ADDataset(data.Dataset):
         return start_idx, cond_labels_in
 
     def _cluster_sample_pdb_keys(self, phase: str, n_train_cluster_resample: int):
+        """
+        For training on AF3 datasets, we apply stratified sampling by sampling one PDB key from each cluster.
+        """
         if phase == "train":
             # For training, randomly resample N times to get different clusters
+            # We do this because cluster sampling can be very short with AF3 datasets, which causes overhead
             print(f"Cluster-resampling dataset {self.n_train_cluster_resample} times...")
             pdb_keys_dfs = []
             for _ in range(n_train_cluster_resample):
@@ -339,7 +341,6 @@ def process_single_pdb_ad(data: dict, sm: ScaffoldManager | None = None, convert
     atom_mask = data["all_atom_mask"]  # [n, a]
     seq_mask = data["seq_mask"]  # [n]
     x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
-
 
     # per-channel mask for x, used for loss.
     # We only mask out missing atoms from PDB files, not ghost atoms.

@@ -1,11 +1,15 @@
 # Wandb configuration
-project: "allatom_design"  # Wandb project name
-wandb_id: "richardshuai"  # Wandb username
-exp_name: null # Wandb exp name
-group: "eval_scn_pack_debug" # Wandb group name
+wandb:
+  no_wandb: false  # Disable wandb logging
+  project: "allatom_design"  # Wandb project name
+  wandb_id: "richardshuai"  # Wandb username
+  group: "debug" # Wandb group name
+
+# Outputs
+exp_name: null  # experiment name; used for wandb and output directory
+base_out_dir: ${denoiser_train_dir}/eval_scn_pack_training  # outputs will be saved to base_out_dir/exp_name
 
 # Run settings
-no_wandb: false  # Disable wandb logging
 seed: 0
 start_step: 0  # start evaluation after this epoch, 0 or null to start from the beginning
 end_step: null  # end evaluation after this step (inclusive), null to evaluate until the end
@@ -22,9 +26,8 @@ input_cfg:
 
 # Denoiser options
 denoiser_train_dir:
-out_dir: ${denoiser_train_dir}/eval_scn_pack_training
-num_steps_list: [1, 50]
 
+num_steps_list: [1, 50]
 sampling_cfg_overrides:
   batch_size: 64
   num_seqs_per_pdb: 1  # number of sequences to sample per pdb
