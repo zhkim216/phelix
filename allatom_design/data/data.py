@@ -16,7 +16,7 @@ from allatom_design.data import residue_constants as rc
 from openfold.utils.feats import atom14_to_atom37
 from openfold.utils.rigid_utils import Rigid, Rotation
 
-FEATURES_LONG = ("residue_index", "chain_index", "aatype", "aatype_scaffold")
+FEATURES_LONG = ("residue_index", "chain_index", "aatype", "aatype_motif")
 
 def load_feats_from_pdb(pdb, chain_ids_override: str = None, max_conformers: int = 1):
     """
@@ -566,15 +566,15 @@ def get_scaffolding_inputs(sm: Optional["ScaffoldManager"],
     if sm is None:
         x_motif = torch.zeros_like(example["x"])
         motif_mask = torch.zeros_like(example["atom_mask"])
-        aatype_scaffold = torch.full_like(example["residue_index"], fill_value=rc.restype_order_with_x["X"])
+        aatype_motif = torch.full_like(example["residue_index"], fill_value=rc.restype_order_with_x["X"])
     else:
         sm_outputs = sm(example)
         x_motif = sm_outputs["x_motif"]
         motif_mask = sm_outputs["motif_mask"]
-        aatype_scaffold = sm_outputs["aatype_scaffold"]
+        aatype_motif = sm_outputs["aatype_motif"]
         x_recentered = sm_outputs["x_recentered"]
 
-    return x_motif, motif_mask, aatype_scaffold, x_recentered
+    return x_motif, motif_mask, aatype_motif, x_recentered
 
 
 def get_length_from_pdb(pdb_file: str) -> Tuple[str, int]:

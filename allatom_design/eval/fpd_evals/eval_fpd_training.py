@@ -230,7 +230,7 @@ def main(cfg: DictConfig):
 
             # Save samples
             samples = {
-                "x_bb_denoised": x_bb_denoised.cpu(),
+                "x_bb": x_bb_denoised.cpu(),
                 "seq_mask": aux["seq_mask"].cpu(),
                 "residue_index": residue_index.cpu(),
             }

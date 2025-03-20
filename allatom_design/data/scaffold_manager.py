@@ -91,7 +91,7 @@ class ScaffoldManager(nn.Module):
 
         # Only condition on backbone atoms  # TODO: support sidechain atoms
         motif_mask[:, rc.non_bb_idxs] = 0
-        aatype_scaffold = torch.full_like(example["residue_index"], fill_value=rc.restype_order_with_x["X"])  # TODO: fix for sequence conditioning
+        aatype_motif = torch.full_like(example["residue_index"], fill_value=rc.restype_order_with_x["X"])  # TODO: fix for sequence conditioning
 
         motif_mask = motif_mask * atom_mask  # unmask only existing atoms
         x_motif = x * motif_mask[..., None]
@@ -104,7 +104,7 @@ class ScaffoldManager(nn.Module):
                                                                 return_transforms=True)
             x_recentered = apply_random_augmentation(x, transforms, seq_mask, atom_mask)
 
-        return {"x_motif": x_motif, "motif_mask": motif_mask, "aatype_scaffold": aatype_scaffold, "x_recentered": x_recentered}
+        return {"x_motif": x_motif, "motif_mask": motif_mask, "aatype_motif": aatype_motif, "x_recentered": x_recentered}
 
 
     def set_conditioning_type(self, conditioning_type: str) -> None:
