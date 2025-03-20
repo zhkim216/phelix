@@ -36,7 +36,6 @@ GROUP=ai_cath
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
 PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
-ANNOTATION_CSV=null
 CLUSTER_SAMPLE=false
 USE_FIRST_SAMPLE=false
 
@@ -48,7 +47,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     num_workers=8 \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
-    data.annotation_csvs=[${ANNOTATION_CSV}] \
     data.cluster_sample=${CLUSTER_SAMPLE} \
     data.use_first_sample=${USE_FIRST_SAMPLE} \
     data.fixed_size=256 \

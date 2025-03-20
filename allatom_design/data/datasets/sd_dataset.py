@@ -145,7 +145,7 @@ class SDDataset(data.Dataset):
     def get_item(self, pdb_key):
         data_file = self._get_data_file(pdb_key)
         data = torch.load(data_file, weights_only=True)  # load in cached load_feats_from_pdb() outputs
-        example = process_single_pdb(data, convert_types=False)  # process cached data
+        example = process_single_pdb_sd(data, convert_types=False)  # process cached data
 
         # Center on CA, and if enabled, apply random rotation / translation
         example["x"] = center_random_augmentation(example["x"], example["seq_mask"], example["atom_mask"],
@@ -282,7 +282,7 @@ class SDDataset(data.Dataset):
         self.pdb_keys_df = self.pdb_keys_df[lengths.between(min_len, max_len)]
 
 
-def process_single_pdb(data, convert_types=True):
+def process_single_pdb_sd(data, convert_types=True):
     """
     Process raw PDB data into a standardized format.
 

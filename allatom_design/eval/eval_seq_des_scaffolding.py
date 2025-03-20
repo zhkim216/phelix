@@ -23,7 +23,7 @@ import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (get_length_from_pdb, load_feats_from_pdb,
                                       pad_to_max_len)
-from allatom_design.data.datasets.sd_dataset import process_single_pdb
+from allatom_design.data.datasets.sd_dataset import process_single_pdb_sd
 from allatom_design.eval.eval_utils import sampling_utils
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
@@ -150,7 +150,7 @@ def main(cfg: DictConfig):
         batch_chain_id_mapping = []
         for pdb_file in pdb_batch_files:
             data = load_feats_from_pdb(pdb_file)
-            single = process_single_pdb(data)
+            single = process_single_pdb_sd(data)
             batch_list.append(single)
 
             # store chain ID mapping if needed (not used in this snippet)

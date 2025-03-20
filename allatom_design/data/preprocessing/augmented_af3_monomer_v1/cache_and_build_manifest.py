@@ -16,12 +16,17 @@ def main(cfg: DictConfig):
     Here, we also build eval2 keys from train keys.
     """
     input_pdb_key_df = pd.read_csv(cfg.input_pdb_key_csv)
-    input_pdb_key_df["pdb_key"] = input_pdb_key_df["pdb_key"].str.rsplit("_", n=1).str[0]  # get rid of cluster id from pdb key
 
-    pdb_keys = input_pdb_key_df["pdb_key"].tolist()
-    phases = input_pdb_key_df["phase"].tolist()
+    # add cluster id to input_pdb_key_df
+    pdb_key_to_cluster_id = get_cluster_ids(input_pdb_key_df["pdb_key"].tolist())
+    input_pdb_key_df["cluster_id"] = input_pdb_key_df["pdb_key"].map(pdb_key_to_cluster_id)
+
+    # remove cluster id from pdb key
+    input_pdb_key_df["pdb_key"] = input_pdb_key_df["pdb_key"].str.rsplit("_", n=1).str[0]
 
     # Cache examples
+    pdb_keys = input_pdb_key_df["pdb_key"].tolist()
+    phases = input_pdb_key_df["phase"].tolist()
     pdb_key_to_pdb_file = {pdb_key: get_pdb_file_from_key(cfg.pdb_path, phase, pdb_key) for pdb_key, phase in zip(pdb_keys, phases)}
     cache_dir = cache_examples(
         pdb_key_to_pdb_file=pdb_key_to_pdb_file,
@@ -42,6 +47,14 @@ def main(cfg: DictConfig):
     out_csv = f"{cfg.pdb_path}/pdb_manifest.csv"
     manifest_df.to_csv(out_csv, index=False)
     print(f"Wrote dataset manifest to {out_csv}")
+
+
+
+def get_cluster_ids(pdb_keys: list[str]) -> dict[str, int]:
+    """
+    Get cluster ID from each pdb key. In augmented_af3_monomer_v1, we stored the cluster ID in the pdb key.
+    """
+    return {pdb_key: pdb_key.split('_')[-1] for pdb_key in pdb_keys}
 
 
 if __name__ == "__main__":

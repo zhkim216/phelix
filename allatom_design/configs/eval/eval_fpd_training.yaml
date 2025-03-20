@@ -24,7 +24,6 @@ pct_subsample_eval: 1.0
 # Filtering
 subset_length_range: null
 
-annotation_csv: null  # path to pdb key annotations file; required for max_scrmsd and max_rel_rog filtering
 max_scrmsd: null  # subset to only pdbs with scRMSD <= max_scrmsd
 max_rel_rog: null  # subset to only pdbs with relative radius of gyration <= max_rel_rog
 

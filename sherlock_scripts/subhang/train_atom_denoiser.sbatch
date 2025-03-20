@@ -38,11 +38,9 @@ GROUP=ai_cath
 # Dataset paths
 # PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
 PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
-ANNOTATION_CSV=null
 CLUSTER_SAMPLE=false
 
 # PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
-# ANNOTATION_CSV=/scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_key_annotations/annotated_pdb_keys.csv
 # CLUSTER_SAMPLE=true
 
 # Run training script
@@ -53,7 +51,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     num_workers=8 \
     no_wandb=false \
     data.pdb_paths=[${PDB_PATH}] \
-    data.annotation_csvs=[${ANNOTATION_CSV}] \
     data.cluster_sample=${CLUSTER_SAMPLE} \
     data.fixed_size=256 \
     data.subset_length_range=[32,256] \
