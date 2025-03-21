@@ -95,13 +95,13 @@ def run_fampnn(model: SeqDenoiser,
     run_aux = {}
     if out_dir is not None:
         sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
-        sample_pkl_out_dir = f"{out_dir}/samples_pkls"  # directory for pkls containing various sample info
+        sample_pt_out_dir = f"{out_dir}/sample_pts"  # directory for pts containing various sample info
         Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
-        Path(sample_pkl_out_dir).mkdir(parents=True, exist_ok=True)  # create output directory for samples
+        Path(sample_pt_out_dir).mkdir(parents=True, exist_ok=True)  # create output directory for samples
 
         run_aux["out_pdbs"] = []  # store paths to all output PDBs
         run_aux["input_pdb_names"] = []  # store names of all input pdbs
-        run_aux["out_pkls"] = []  # store paths to all output pkls
+        run_aux["out_pts"] = []  # store paths to all output pts
         run_aux["pred_seqs"] = []  # store predicted sequences as a string for each sample
 
     # Validate pos_constraint_df
@@ -215,14 +215,14 @@ def run_fampnn(model: SeqDenoiser,
                 run_aux["out_pdbs"].extend(batch_out_pdbs)
                 run_aux["input_pdb_names"].extend(pdb_names)
 
-                # Save samples as pkl
+                # Save samples as pt
                 for j in range(B):
                     length_j = batch["seq_mask"][j].sum().long().item()
                     sample_j = {k: v[j, :length_j].clone() for k, v in batch_samples.items()}
-                    pkl_file = f"{sample_pkl_out_dir}/{sample_stems[j]}.pkl"
-                    with open(pkl_file, "wb") as f:
+                    pt_file = f"{sample_pt_out_dir}/{sample_stems[j]}.pt"
+                    with open(pt_file, "wb") as f:
                         torch.save(sample_j, f)
-                    run_aux["out_pkls"].append(pkl_file)
+                    run_aux["out_pts"].append(pt_file)
 
                     # Keep explicit track of pred seqs for convenience
                     run_aux["pred_seqs"].append("".join([rc.restypes_with_x[aa] for aa in sample_j["pred_aatype"]]))
@@ -644,9 +644,9 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
 
 
 def parse_fixed_pos_str(fixed_pos_str: str,
-                          chain_id_mapping: Dict[str, int],
-                          residue_index: TensorType["n", int],
-                          chain_index: TensorType["n", int]) -> TensorType["k", int]:
+                        chain_id_mapping: Dict[str, int],
+                        residue_index: TensorType["n", int],
+                        chain_index: TensorType["n", int]) -> TensorType["k", int]:
     """
     Parse a list of fixed positions in the format ["A1", "A10-25", ...] and
     return the corresponding list of absolute indices.
