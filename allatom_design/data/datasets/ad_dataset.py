@@ -22,11 +22,11 @@ import allatom_design.data.conditioning_labels as cl
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (FEATURES_LONG,
                                       center_random_augmentation,
-                                      get_scaffolding_inputs,
-                                      load_feats_from_pdb, make_fixed_size_1d)
+                                      make_fixed_size_1d)
 from allatom_design.data.datasets.multi_dataset import MultiDataset
 from allatom_design.data.pdb_utils import write_to_pdb
-from allatom_design.data.scaffold_manager import get_scaffold_manager, ScaffoldManager
+from allatom_design.data.scaffold_manager import (ScaffoldManager,
+                                                  get_scaffold_manager)
 
 
 class LitADDataModule(L.LightningDataModule):
@@ -374,3 +374,29 @@ def process_single_pdb_ad(data: dict, sm: ScaffoldManager | None = None, convert
         return example_out
 
     return example
+
+
+def get_scaffolding_inputs(sm: Optional[ScaffoldManager],
+                           example: Dict[str, TensorType["..."]]) -> Tuple[TensorType["n 37 3"],
+                                                                           TensorType["n 37"],
+                                                                           TensorType["n"],
+                                                                           TensorType["n 37 3"]]:
+    """
+    Given a scaffold manager and example, return the scaffolded inputs.
+    Centers both the motif and the original coordinates on the CA of the scaffolding residues.
+
+    If sm is None, returns unconditional generation inputs.
+    """
+    x_recentered = example["x"]
+    if sm is None:
+        x_motif = torch.zeros_like(example["x"])
+        motif_mask = torch.zeros_like(example["atom_mask"])
+        aatype_motif = torch.full_like(example["residue_index"], fill_value=rc.restype_order_with_x["X"])
+    else:
+        sm_outputs = sm(example)
+        x_motif = sm_outputs["x_motif"]
+        motif_mask = sm_outputs["motif_mask"]
+        aatype_motif = sm_outputs["aatype_motif"]
+        x_recentered = sm_outputs["x_recentered"]
+
+    return x_motif, motif_mask, aatype_motif, x_recentered

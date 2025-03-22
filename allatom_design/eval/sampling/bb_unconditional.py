@@ -21,7 +21,7 @@ from allatom_design.eval.eval_utils.fampnn_utils import get_seq_des_model
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 
 
-@hydra.main(config_path="../../configs/eval/sampling", config_name="draw_bb_samples", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/sampling", config_name="bb_unconditional", version_base="1.3.2")
 def main(cfg: DictConfig):
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
@@ -63,11 +63,11 @@ def main(cfg: DictConfig):
     print(f"Drawing {cfg.n_samples_per_length} samples each of lengths {start} to {end} with step size {cfg.length_step_size}")
 
     # Run unconditional sampling
-    sampled_pdb_paths = run_bb_uncond_sampling(bb_gen_model["model"],
-                                               sampling_cfg,
-                                               lengths_to_sample,
-                                               device,
-                                               log_dir,
+    sampled_pdb_paths = run_bb_uncond_sampling(model=bb_gen_model["model"],
+                                               cfg=sampling_cfg,
+                                               device=device,
+                                               lengths=lengths_to_sample,
+                                               out_dir=log_dir,
                                                save_traj_inputs=save_traj_inputs)
 
     ### CALCULATE STRUCTURE METRICS ###

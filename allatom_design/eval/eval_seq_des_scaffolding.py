@@ -57,7 +57,7 @@ def main(cfg: DictConfig):
     out_dir = cfg.out_dir  # base output directory
     sample_out_dir = f"{out_dir}/samples"
     fasta_out_dir = f"{out_dir}/fastas"  # directory for sequences in FASTA format
-    sample_pkl_dir = f"{out_dir}/sample_pkls"  # directory for pkls containing various sample info
+    sample_pkl_dir = f"{out_dir}/sample_pts"  # directory for pkls containing various sample info
 
     Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
     Path(fasta_out_dir).mkdir(parents=True, exist_ok=True)

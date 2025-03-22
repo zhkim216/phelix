@@ -77,10 +77,10 @@ def main(cfg: DictConfig):
         L.seed_everything(cfg.seed)
 
         # Run backbone sampling
-        sampled_pdb_paths = run_bb_uncond_sampling(bb_gen_model["model"],
-                                                   bb_gen_model["sampling_cfg"],
-                                                   lengths_to_sample,
-                                                   device,
+        sampled_pdb_paths = run_bb_uncond_sampling(model=bb_gen_model["model"],
+                                                   cfg=bb_gen_model["sampling_cfg"],
+                                                   device=device,
+                                                   lengths=lengths_to_sample,
                                                    out_dir=log_dir_i)
 
         ### CALCULATE STRUCTURE METRICS ###

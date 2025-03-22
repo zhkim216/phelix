@@ -49,7 +49,7 @@ GROUP=${MODEL_NAME}_s0
 
 # Run eval script
 cd ${BASE_DIR}
-WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/draw_bb_samples.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/bb_unconditional.py \
     wandb_id=${WANDB_ID} \
     exp_name=${EXP_NAME} \
     group=${GROUP} \
