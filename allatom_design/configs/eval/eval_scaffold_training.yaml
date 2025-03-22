@@ -6,7 +6,7 @@ wandb:
   group: "debug" # Wandb group name
 
 # Outputs
-exp_name: null  # experiment name; used for wandb and output directory
+exp_name: eval_scaffold_training  # experiment name; used for wandb and output directory
 base_out_dir: ${denoiser_train_dir}/eval_scaffold_training  # outputs will be saved to base_out_dir/exp_name
 
 # Run settings
@@ -28,7 +28,7 @@ input_cfg:
   n_subsample: null  # randomly sample this many pdb keys, null to use all
 
 # Scaffolding options
-scaffold_conditioning_types: ["contiguous", "discontiguous", "unconditional"]
+scaffold_conditioning_types: ["contiguous", "discontiguous", "unconditional"]  # evaluate these conditioning types
 
 # Backbone generation options
 bb_gen_cfg:

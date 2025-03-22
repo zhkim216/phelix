@@ -310,7 +310,7 @@ def run_self_consistency_eval(pdbs: List[str],
         except:
             print(f"Error processing {pdb}: there was an issue processing {pdb}, skipping...")
 
-    # Save results to pkl file
+    # Save results to pt file
     sc_info_path = Path(out_dir, "sc_info")
     sc_info_path.mkdir(parents=True, exist_ok=True)
     for pdb, info in sc_info.items():

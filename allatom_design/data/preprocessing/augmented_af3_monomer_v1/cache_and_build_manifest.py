@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+from pathlib import Path
+
 import hydra
 import pandas as pd
 from omegaconf import DictConfig
@@ -35,6 +37,9 @@ def main(cfg: DictConfig):
         num_workers=cfg.num_workers
     )
 
+    # Also names of the original PDB files
+    input_pdb_key_df["pdb_name"] = input_pdb_key_df["pdb_key"].map(pdb_key_to_pdb_file).apply(lambda x: Path(x).name)
+
     # Build eval2 keys
     train_df = input_pdb_key_df[input_pdb_key_df["phase"] == "train"]
     eval2_df = train_df.sample(n=cfg.n_eval2, random_state=cfg.seed)
@@ -48,6 +53,11 @@ def main(cfg: DictConfig):
     manifest_df.to_csv(out_csv, index=False)
     print(f"Wrote dataset manifest to {out_csv}")
 
+    # Save out train, eval, and eval2 pdb names as separate lists
+    for phase in ["train", "eval", "eval2"]:
+        pdb_names = input_pdb_key_df[input_pdb_key_df["phase"] == phase]["pdb_name"]
+        pdb_names.to_csv(f"{cfg.pdb_path}/{phase}_pdb_names.list", index=False, header=False)
+        print(f"Wrote {phase} pdb names to {cfg.pdb_path}/{phase}_pdb_names.list")
 
 
 def get_cluster_ids(pdb_keys: list[str]) -> dict[str, int]:
