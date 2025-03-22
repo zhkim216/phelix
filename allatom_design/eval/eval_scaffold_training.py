@@ -56,7 +56,7 @@ def main(cfg: DictConfig):
                                                  cfg.start_step, cfg.end_step)
 
     ### Sample from each checkpoint ###
-    pbar = tqdm(ad_ckpts, desc=f"Sampling on {len(pdb_files)} PDB(s) with {len(ad_ckpts)} checkpoint(s)...")
+    pbar = tqdm(ad_ckpts, desc=f"Sampling on {len(pdb_files)} PDB(s) with {len(cfg.scaffold_conditioning_types)} conditioning types and {len(ad_ckpts)} checkpoint(s)...")
     for ad_ckpt in pbar:
         match = pattern.search(Path(ad_ckpt).name)
         global_step, epoch = int(match.group(1)), int(match.group(2))  # extract step and epoch from checkpoint name
@@ -75,19 +75,13 @@ def main(cfg: DictConfig):
             # create output directory for this epoch and conditioning type
             log_dir_i = f"{log_dir}/step_{global_step}_epoch_{epoch}/{scaffold_conditioning_type}"
             Path(log_dir_i).mkdir(parents=True, exist_ok=True)
-            motif_pdbs_dir_i = f"{log_dir_i}/motif_pdbs"
-            Path(motif_pdbs_dir_i).mkdir(parents=True, exist_ok=True)
-            centered_gt_pdbs_dir_i = f"{log_dir_i}/centered_gt_pdbs"
-            Path(centered_gt_pdbs_dir_i).mkdir(parents=True, exist_ok=True)
-            sampled_pdbs_dir_i = f"{log_dir_i}/sampled_pdbs"
-            Path(sampled_pdbs_dir_i).mkdir(parents=True, exist_ok=True)
             saved_metrics_dir_i = f"{log_dir_i}/metrics"
             Path(saved_metrics_dir_i).mkdir(parents=True, exist_ok=True)
 
             # Process PDBs in batches
             sampled_pdbs, motif_info = run_sm_sampling(model=bb_gen_model["model"],
                                                         sm=sm,
-                                                        cfg=cfg.bb_gen_cfg.sampling_cfg,
+                                                        cfg=bb_gen_model["sampling_cfg"],
                                                         device=device,
                                                         pdb_paths=pdb_files,
                                                         out_dir=log_dir_i)
@@ -119,7 +113,7 @@ def main(cfg: DictConfig):
                 for pdb, v in nntm_info.items():
                     all_metrics[pdb]["nntm_info"] = v
 
-            # get RMSD between input motif and sampled structure
+            # get RMSD between input motif and sampled structure (as opposed to the predicted structure)
             for pdb in sampled_pdbs:
                 all_metrics[pdb]["sampled_motif_bb_rmsd"] = eval_metrics.compute_motif_bb_rmsd(pdb, motif_info[pdb]["x_motif"], motif_info[pdb]["motif_mask"])
 
