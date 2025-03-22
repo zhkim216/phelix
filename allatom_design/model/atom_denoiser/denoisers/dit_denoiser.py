@@ -81,7 +81,7 @@ class DiTDenoiser(BaseAtomDenoiser):
         aux_preds = {}
 
         if self.use_scaffold_module:
-            h_s = self.process_scaffold(x_motif, motif_mask, aatype_motif, seq_mask, residue_index)
+            h_s = self.process_motif(x_motif, motif_mask, aatype_motif, seq_mask, residue_index)
         else:
             h_s = None
 
@@ -295,7 +295,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
 
     @torch.compiler.disable
-    def process_scaffold(self, x_motif, motif_mask,
+    def process_motif(self, x_motif, motif_mask,
                          aatype_motif, seq_mask, residue_index):
         B, N, A, _ = x_motif.shape
         # Find residues where motif_mask is nonzero in any atom

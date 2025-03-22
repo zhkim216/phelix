@@ -1,15 +1,13 @@
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional
 
-import numpy as np
 import torch
 import torch.nn as nn
-from einops import rearrange
 from omegaconf import DictConfig
-from scipy import stats
 from torchtyping import TensorType
 
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import center_random_augmentation, apply_random_augmentation
+from allatom_design.data.data import (apply_random_augmentation,
+                                      center_random_augmentation)
 
 
 class ScaffoldManager(nn.Module):
@@ -96,12 +94,12 @@ class ScaffoldManager(nn.Module):
         motif_mask = motif_mask * atom_mask  # unmask only existing atoms
         x_motif = x * motif_mask[..., None]
 
-         # Re-center on CA of motif residues
+        # Re-center on CA of motif residues
         x_recentered = x
         if self.se3_augment and (motif_mask[..., 1:2].any()):  # only center if there are any scaffolding residues
             x_motif, transforms = center_random_augmentation(x_motif, seq_mask, motif_mask,
-                                                                translation_scale=self.translation_scale,
-                                                                return_transforms=True)
+                                                             translation_scale=self.translation_scale,
+                                                             return_transforms=True)
             x_recentered = apply_random_augmentation(x, transforms, seq_mask, atom_mask)
 
         return {"x_motif": x_motif, "motif_mask": motif_mask, "aatype_motif": aatype_motif, "x_recentered": x_recentered}
@@ -126,4 +124,3 @@ def get_scaffold_manager(cfg: Optional[DictConfig]) -> Optional[ScaffoldManager]
         return ScaffoldManager(cfg)
     else:
         raise ValueError(f"Unknown scaffold manager: {cfg.name}")
-
