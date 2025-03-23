@@ -1,0 +1,77 @@
+# Wandb configuration
+wandb:
+  no_wandb: false  # Disable wandb logging
+  project: "allatom_design"  # Wandb project name
+  wandb_id: "richardshuai"  # Wandb username
+  group: "debug" # Wandb group name
+
+# Outputs
+exp_name: eval_scaffold_training  # experiment name; used for wandb and output directory
+base_out_dir: ${denoiser_train_dir}/eval_scaffold_training  # outputs will be saved to base_out_dir/exp_name
+
+# Run settings
+seed: 0
+start_step: 0  # start evaluation after this step, 0 or null to start from the beginning
+end_step: null  # end evaluation after this step (inclusive), null to evaluate until the end
+eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
+
+# Denoiser
+denoiser_train_dir:
+
+# PDB file inputs
+input_cfg:
+  pdb_dir: null
+  pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
+  pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
+  subset_length_range: null # only evaluate on sequences within this length range
+  presort_by_length: false  # sort pdb keys by sequence length, potentially for efficiency
+  n_subsample: null  # randomly sample this many pdb keys, null to use all
+
+# Scaffolding options
+scaffold_conditioning_types: ["contiguous", "discontiguous", "unconditional"]  # evaluate these conditioning types
+
+# Backbone generation options
+bb_gen_cfg:
+  ckpt_path: null  # overridden with training checkpoint paths
+  sampling_cfg: allatom_design/configs/bb_gen/bb_sampling_base.yaml
+  overrides:
+    num_steps: 500
+
+# Sequence design config
+seq_des_cfg:
+  # MPNN args
+  model_name: "proteinmpnn"  # ["proteinmpnn", "fampnn"]
+  proteinmpnn:
+    mpnn_cfg: allatom_design/configs/seq_des/proteinmpnn.yaml
+    mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
+    overrides:
+      # for proteinmpnn, num seqs per structure will be batch_size * number_of_batches
+      batch_size: 1
+      number_of_batches: 1
+      verbose: false
+  fampnn:
+    # FAMPNN args
+    fampnn_cfg: allatom_design/configs/seq_des/fampnn_inference.yaml
+    fampnn_ckpt: /media/scratch/huang_lab/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt
+    overrides:
+      batch_size: 16
+      num_seqs_per_pdb: 1
+      num_steps: 50
+      noise_labels: 0.0
+
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: "esmfold"
+  base_cfg: allatom_design/configs/struct_pred/struct_pred_base.yaml
+  # overrides to base config
+  af2:
+    data_dir: /media/scratch/huang_lab/af2
+  esmfold:
+    max_tokens_per_batch: 1024
+
+# Dataset for nnTM calculation, path to directory containing PDBs, null to skip nnTM calculation
+nntm_dataset: null
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

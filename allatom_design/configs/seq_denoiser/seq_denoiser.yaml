@@ -1,15 +1,18 @@
 # Wandb configuration
-project: "allatom_design"  # Wandb project name
-wandb_id: "talal-widatalla"  # Wandb username
-exp_name: null # Wandb exp name
-group: "debug" # Wandb group name
+wandb:
+  no_wandb: false  # Disable wandb logging
+  project: "allatom_design"  # Wandb project name
+  wandb_id: "richardshuai"  # Wandb username
+  group: "debug" # Wandb group name
+
+# Outputs
+out_dir: "out_dir/train_seq_denoiser"  # Output path for trained models
+exp_name: null  # Wandb exp name
 
 # Run settings
-no_wandb: false # Disable wandb logging
 overfit: -1 # Number of examples to overfit to, -1 to disable
 cuda: True
-num_workers: 10 # Dataloader num workers
-out_dir: "out_dir/train_seq_denoiser"  # Output path for trained models
+num_workers: 8 # Dataloader num workers
 
 train:
   seed: 0
@@ -18,13 +21,15 @@ train:
 
 # Some trainer options
 trainer:
-  strategy: ddp_find_unused_parameters_true  # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
+  strategy: ddp  # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
   max_epochs: 100000
   accumulate_grad_batches: 1
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
   check_val_every_n_epoch: 50  # How often to run validation
+  reload_dataloaders_every_n_epochs: null  # updated based on data.cluster_sample
+
 
 # Resuming training options
 resume:
@@ -35,15 +40,12 @@ resume:
 # Data options
 data:
     pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    designability_csv: null
+    cluster_sample: false
     fixed_size: 128
     overfit: ${overfit}
-    short_epoch: false
-    n_random_subset: null
     subset_length_range: null
     se3_augment: true  # randomly rotate and translate data
     translation_scale: 1.0  # scale of the translation augmentation
-    overwrite_cache: false  # overwrite the cached dataset
 
 # Model options
 defaults:
@@ -53,13 +55,17 @@ defaults:
 
 model:
   task: "allatom_seq_des"  # "seq_des", "allatom_seq_des"
-  override_sigma_data: [9.6, 0.64]  # override sigma data for [backbone, sidechain]
+  sigma_data: [9.6, 0.64]  # sigma data for [backbone, local sidechain]
   num_atoms_in: 37
   n_aatype: 21
   eps: 1.0e-8
   inf: 1.0e9
   denoiser: ${denoiser}
   interpolant: ${interpolant}
+  ema:
+    use_phema: false  # use post-hoc EMA
+    ema_decay: 0.99  # if not using phema, use this decay rate
+
 
 eval:
   eval_timesteps: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]  # Timesteps to evaluate at
@@ -101,10 +107,9 @@ logging:
   wandb_watch_freq: 5000  # Log gradients every n steps
 
 checkpointing:
-  save_latest_every_n_steps: 10000  # Save the full model every n steps
-  save_latest_every_n_epochs: 10  # Keep 1 latest copy of the model every n epochs (for resuming)
-  save_ema_every_n_steps: 3000  # Save the EMA model every n steps
-  save_top_k: 1
+  save_latest_every_n_steps: 10000  # Save the model every n steps
+  save_for_resuming_every_n_epochs: 10  # Keep 1 latest copy of the model every n epochs, for resuming
+  save_phema_every_n_steps: 3000  # If using post-hoc EMA, save snapshot every n steps
 
 hydra:
   run:

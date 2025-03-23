@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=c2_aasd0_eval_scn_pack
+#SBATCH --job-name=c6_aasd1_eval_scn_pack
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -22,15 +22,15 @@ WANDB_ID=richardshuai
 
 cd ${BASE_DIR}
 
-# Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset
-DESIGNABILITY_CSV=/scratch/hielab/rshuai/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
+# Inputs config
+PDB_DIR=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_mmcifs
+PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_pdb_keys.list
 
 # Model name to evaluate
-MODEL_NAME=c1_aasd1_eps0.3
+MODEL_NAME=c6_aasd1
 
 EXP_NAME=${MODEL_NAME}_eval_scn_pack
-GROUP=chimera_c1
+GROUP=chimera_c6
 
 # Set HF transformers cache
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -40,14 +40,14 @@ DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_
 
 # Run eval script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scn_pack_training.py \
+    wandb.wandb_id=${WANDB_ID} \
+    wandb.group=${GROUP} \
     exp_name=${EXP_NAME} \
-    group=${GROUP} \
-    num_workers=${SLURM_CPUS_ON_NODE} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
+    input_cfg.pdb_dir=${PDB_DIR} \
+    input_cfg.pdb_name_list=${PDB_NAME_LIST} \
+    input_cfg.pdb_name_ext=".cif" \
+    input_cfg.subset_length_range=[64,512] \
     start_step=0 \
     eval_every_n_ckpts=1 \
-    batch_size=64 \
-    data.pdb_path=${PDB_PATH} \
-    data.designability_csv=${DESIGNABILITY_CSV} \
-    subset_length_range=[64,512] \
     hydra.run.dir=${HYDRA_DIR}

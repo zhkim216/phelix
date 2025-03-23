@@ -2,7 +2,7 @@ import logging
 
 import torch
 import torch.nn as nn
-from einops import repeat
+from einops import repeat, rearrange
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
@@ -27,6 +27,9 @@ class ADLoss(nn.Module):
 
         # Define losses based on task
         self.loss_keys = {"bb/mse_loss"}
+
+        if self.task == "scaffold":
+            self.loss_keys.add("scaffold/mse_loss")
 
         # Handle autoguidance loss and loss weights
         self.loss_keys = self.loss_keys.union({"autoguidance/bb/mse_loss"})
@@ -76,6 +79,18 @@ class ADLoss(nn.Module):
                                                          mask=bb_mask_ag)
             aux["autoguidance/bb/mse_loss"] = aux["autoguidance/bb/mse_loss"] * loss_weight_bb_ag  # apply time step loss weight
 
+        # Compute scaffold loss
+        if self.task == "scaffold":
+            bb_scaffold_mask = batch["motif_mask"][..., rc.bb_idxs]
+            bb_scaffold_mask = repeat(bb_scaffold_mask, "b n a -> (m b) n a", m=M)
+            bb_mask = bb_mask * bb_scaffold_mask[..., None]
+
+            aux["scaffold/mse_loss"] = masked_mse(bb_pred,
+                                                  bb_target,
+                                                  mask=bb_mask)
+
+            aux_monitor["scaffold/unweighted_mse_loss"] = aux["scaffold/mse_loss"].mean().detach().clone()
+            aux["scaffold/mse_loss"] = aux["scaffold/mse_loss"] * loss_weight_bb  # apply time step loss weight
 
         # Aggregate losses
         total_loss = 0

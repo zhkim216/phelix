@@ -521,7 +521,8 @@ def parse_PDB(
     device: str = "cpu",
     chains: list = [],
     parse_all_atoms: bool = False,
-    parse_atoms_with_zero_occupancy: bool = False
+    parse_atoms_with_zero_occupancy: bool = False,
+    ca_only: bool = False
 ):
     """
     input_path : path for the input PDB
@@ -737,8 +738,9 @@ def parse_PDB(
         "NZ": 35,
         "OXT": 36,
     }
-
-    if not parse_all_atoms:
+    if ca_only:
+        atom_types = ["CA"]
+    elif not parse_all_atoms:
         atom_types = ["N", "CA", "C", "O"]
     else:
         atom_types = [
@@ -820,7 +822,10 @@ def parse_PDB(
     C_m = xyz_37_m[:, atom_order["C"]]
     O_m = xyz_37_m[:, atom_order["O"]]
 
-    mask = N_m * CA_m * C_m * O_m  # must all 4 atoms exist
+    if not ca_only:
+        mask = N_m * CA_m * C_m * O_m  # must all 4 atoms exist
+    else:
+        mask = CA_m
 
     b = CA - N
     c = C - CA

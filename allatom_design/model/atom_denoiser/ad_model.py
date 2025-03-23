@@ -7,20 +7,10 @@ from omegaconf import DictConfig
 from allatom_design.data.pdb_utils import *
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
-from allatom_design.interpolants.sd_interpolants.mar_interpolant import MAR
-from allatom_design.interpolants.sd_interpolants.sd_interpolant import SDInterpolant
 from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     DiTDenoiser
-from allatom_design.model.atom_denoiser.denoisers.esm_dit_denoiser import \
-    ESMDiTDenoiser
-from allatom_design.model.atom_denoiser.denoisers.triangle_dit_denoiser import \
-    TriangleDiTDenoiser
-from allatom_design.model.atom_denoiser.denoisers.mpnn_dit_denoiser import \
-    MPNNDiTDenoiser
-from allatom_design.model.atom_denoiser.denoisers.u_dit_denoiser import \
-    UDiTDenoiser
 
 
 class AtomDenoiser(nn.Module):
@@ -34,13 +24,10 @@ class AtomDenoiser(nn.Module):
         self.task = cfg.task
 
         # Data scaling parameters
-        self.register_buffer("bb_mean", torch.tensor(0.0))
         self.register_buffer("bb_std", torch.tensor(1.0))
-
         self.sigma_data = self.bb_std
 
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
-        self.sd_interpolant = get_interpolant(getattr(cfg, "sd_interpolant", None))
 
 
     def setup(self):
@@ -50,7 +37,6 @@ class AtomDenoiser(nn.Module):
 
     def forward(self,
                 batch: Dict[str, TensorType["b ..."]],
-                t_sd: Optional[TensorType["b", float]] = None,  # timestep of sequence design inputs
                 ) -> Dict[str, TensorType["b ..."]]:
         """
         batch should contain:
@@ -63,75 +49,44 @@ class AtomDenoiser(nn.Module):
         batch = copy.deepcopy(batch)
         outputs = {}
 
-        # Mask out sequence and sidechains with sd_interpolant
-        if self.sd_interpolant is None:
-            # don't noise
-            batch["xt_scn"] = batch["x"][..., rc.non_bb_idxs, :]
-            batch["aatype_noised"] = batch["aatype"]
-            batch["mlm_mask"] = torch.ones_like(batch["seq_mask"]) * batch["seq_mask"]
-        else:
-            interpolant_out = self.sd_interpolant(batch, t_sd)
-            batch["xt_scn"] = interpolant_out["x_noised"][..., rc.non_bb_idxs, :]
-            batch["aatype_noised"] = interpolant_out["aatype_noised"]
-            batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]
-
         # During training, keep track of certain additional features
         aux_inputs = {
             "x": batch["x"],  # ground truth coordinates
             "t_bb": batch.get("t_bb", None),  # scalar; fix t_bb if provided, usually for eval
-            "missing_atom_mask": batch["missing_atom_mask"]
+            "missing_atom_mask": batch["missing_atom_mask"],
         }
 
         # Denoise coords
-        _, aux_preds = self.denoiser(batch["xt_scn"], batch["aatype_noised"], t_sd,
-                                     batch["residue_index"], batch["seq_mask"], batch["seq_mlm_mask"],
+        _, aux_preds = self.denoiser(batch["x_motif"],
+                                     batch["motif_mask"],
+                                     batch["aatype_motif"],
+                                     batch["residue_index"], batch["seq_mask"],
                                      cond_labels_in=batch["cond_labels_in"],
                                      aux_inputs=aux_inputs)
 
         # Additional outputs for computing loss
         outputs.update(aux_preds)
 
+
         return outputs
 
 
-    def set_scale_factors(self,
-                          scale_factors: Dict[str, Tuple[float, float]]):
-        bb_mean, bb_std = scale_factors["bb"]
-        self.bb_mean.data = torch.tensor(bb_mean)
-        self.bb_std.data = torch.tensor(bb_std)
-        print(f"Setting bb_mean: {bb_mean}, bb_std: {bb_std}")
+    def set_sigma_data(self, sigma_data: float):
+        self.bb_std.data = torch.tensor(sigma_data)
+        print(f"Setting backbone sigma_data: {sigma_data}")
 
 
     def sample(self,
                lengths: TensorType["b", int],
                residue_index: TensorType["b n", int],
-               timesteps: TensorType["b s+1", float],
-               xt_override: Optional[TensorType["s+1 b n a 3", float]] = None,
-               xt_override_mask: Optional[TensorType["s+1 b n a 3", float]] = None,
-               aatype_override: Optional[TensorType["s+1 b n", int]] = None,
-               aatype_override_mask: Optional[TensorType["s+1 b n", int]] = None,
+               diffusion_inputs: Dict[str, Any],
+               scaffold_inputs: Optional[Dict[str, torch.Tensor]] = None,
                cond_labels: Dict[str, TensorType["b", int]] = {},
-               noise_schedule: NoiseSchedule = None,
-               churn_cfg: Dict[str, float] = None,
-               autoguidance_cfg: Optional[Dict[str, Any]] = None,  # autoguidance config
-               ) -> Tuple[TensorType["b n 4 3", float],
-                          Dict[str, torch.Tensor]]:
+               ) -> Tuple[TensorType["b n 4 3", float], Dict[str, torch.Tensor]]:
         """
         Sample from the model.
 
         Returns the final denoised coords and auxiliary outputs.
-
-        aux includes:
-        - seq_mask: TensorType["b n", float]
-        - x1_traj: TensorType["s b n a 3", float], s=num_steps
-        - xt_traj: TensorType["s b n a 3", float], s=num_steps
-
-        Sampling parameters:
-        - xt_override: override coords at each step with this tensor where xt_override_mask is 1.
-        - churn_cfg contains:
-            - s_churn: controls overall amount of stochasticity to add in sampling
-            - s_noise: std of noise to add with churn
-        - cond_labels: dictionary mapping from conditioning label to token ID for each batch element
         """
         B, N = residue_index.shape
 
@@ -142,58 +97,31 @@ class AtomDenoiser(nn.Module):
         seq_mask = (ranges < lengths[:, None]).float()
         aux["seq_mask"] = seq_mask.cpu()
 
-        # Initialize sequence / sidechain prior (all masked, time t=0)
-        t_sd = torch.zeros((B, ), device=residue_index.device)
-        xt_scn = torch.zeros((B, N, len(rc.non_bb_idxs), 3), device=residue_index.device)
-        aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
-        mlm_mask = torch.zeros_like(seq_mask)
+        # Initialize motif inputs
+        if scaffold_inputs is None:
+            x_motif = torch.zeros((B, N, rc.atom_type_num, 3), device=residue_index.device)
+            motif_mask = torch.zeros((B, N, rc.atom_type_num), device=residue_index.device)
+            aatype_motif = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
+        else:
+            x_motif = scaffold_inputs["x_motif"]
+            motif_mask = scaffold_inputs["motif_mask"]
+            aatype_motif = scaffold_inputs["aatype_motif"]
 
-        num_steps = timesteps.shape[-1] - 1
+        # Construct diffusion inputs
+        aux_inputs = {}
+        aux_inputs["diffusion_inputs"] = diffusion_inputs
 
-        # Handle xt overrides
-        if xt_override is None:
-            # dummy values
-            xt_override = torch.zeros(1, device=residue_index.device).expand(num_steps + 1, B, N, rc.atom_type_num, 3)
-            xt_override_mask = torch.zeros(1, device=residue_index.device).expand(num_steps + 1, B, N, rc.atom_type_num, 3)
-
-        # Handle aatype overrides
-        if aatype_override is None:
-            # dummy values
-            aatype_override = torch.full((), fill_value=rc.restype_order_with_x["X"], device=residue_index.device).expand(num_steps + 1, B, N)
-            aatype_override_mask = torch.zeros(1, device=residue_index.device, dtype=torch.long).expand(num_steps + 1, B, N)
-
-        # Construct denoiser inputs
-        aux_inputs = {
-            "num_steps": num_steps,
-            "timesteps": timesteps,
-            "churn_cfg": churn_cfg,
-            "noise_schedule": noise_schedule,
-            "autoguidance_cfg": autoguidance_cfg,
-            # overrides
-            "xt_override": xt_override,
-            "xt_override_mask": xt_override_mask,
-            "aatype_override": aatype_override,
-            "aatype_override_mask": aatype_override_mask,
-        }
-        x1_bb, aux_preds = self.denoiser(xt_scn=xt_scn,
-                                         aatype_noised=aatype_noised, t_sd=t_sd, residue_index=residue_index,
-                                         seq_mask=seq_mask, mlm_mask=mlm_mask, cond_labels_in=cond_labels, aux_inputs=aux_inputs, is_sampling=True)
+        x1_bb, aux_preds = self.denoiser(x_motif=x_motif,
+                                         motif_mask=motif_mask,
+                                         aatype_motif=aatype_motif,
+                                         residue_index=residue_index,
+                                         seq_mask=seq_mask,
+                                         cond_labels_in=cond_labels,
+                                         aux_inputs=aux_inputs,
+                                         is_sampling=True)
 
         aux.update(aux_preds["bb_diffusion_aux"])
         return x1_bb, aux
-
-
-    def get_backbone_likelihoods(self,
-                                 num_steps: int,
-                                 x: TensorType["b n a 3", float],
-                                 seq_mask: TensorType["b n", float],
-                                 residue_index: TensorType["b n", int],
-                                 atom_mask: TensorType["b n 4", float],
-                                 cond_labels: Dict[str, TensorType["b", int]]
-                                 ):
-        aatype = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])  # assume aatype are all masked for backbone-only
-        likelihood_aux = self.denoiser.get_likelihoods(num_steps, x, aatype, seq_mask, atom_mask, residue_index, cond_labels_in=cond_labels)
-        return likelihood_aux
 
 
     @staticmethod
@@ -204,19 +132,19 @@ class AtomDenoiser(nn.Module):
         Save samples from the denoiser to PDB files.
 
         Samples should contain the following keys:
-        - x_bb_denoised: Tensor["b n 4 3", float]
+        - x_bb: Tensor["b n 4 3", float]`
         - seq_mask: Tensor["b n", float]
         - residue_index: Tensor["b n", int]
         """
-        B, N, _, _= samples["x_bb_denoised"].shape
+        B, N, _, _= samples["x_bb"].shape
         residue_index = samples["residue_index"]
         seq_mask = samples["seq_mask"]
 
-        x_denoised = samples["x_bb_denoised"]
+        x_bb = samples["x_bb"]
 
         aatype = torch.full_like(residue_index, fill_value=rc.restype_order["G"], dtype=torch.long)  # force aatype to glycine
         final_atom37_positions = torch.zeros((B, N, 37, 3), device=aatype.device)
-        final_atom37_positions[:, :, rc.bb_idxs, :] = x_denoised
+        final_atom37_positions[:, :, rc.bb_idxs, :] = x_bb
         atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=aatype.device)[aatype] * seq_mask[..., None]
 
         feats = {
@@ -288,47 +216,6 @@ class AtomDenoiser(nn.Module):
                 write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
 
 
-    @staticmethod
-    def save_backbone_likelihood_traj(likelihood_aux: Dict[str, Any],
-                                      seq_mask: TensorType["b n", float],
-                                      residue_index: TensorType["b n", int],
-                                      chain_index: TensorType["b n", int],
-                                      save_traj_mask: List[bool],
-                                      save_traj_steps: List[int],
-                                      filenames: List[str],
-                                      traj_conect: bool,
-                                      align_models_to_idx: Optional[int] = None):
-        """
-        Save trajectories from backbone likelihood calculation to PDB files.
-        """
-        B = seq_mask.shape[0]
-        device = seq_mask.device
-        for i in range(B):
-            if save_traj_mask[i]:
-                x_bb_traj = likelihood_aux["likelihood_xt_traj"][i, save_traj_steps]
-                S, N, A, _ = x_bb_traj.shape
-                aatype_i = torch.full_like(seq_mask[i], fill_value=rc.restype_order["G"], dtype=torch.long)  # force aatype to glycine
-                aatype_traj = aatype_i[None].expand(S, -1)
-                atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK_WITH_X, device=device)[aatype_traj] * seq_mask[i, :, None]  # [S, N, A]
-
-                # Put backbone positions into atom37 format
-                S, N, _, X = x_bb_traj.shape
-                x_traj = torch.zeros((S, N, rc.atom_type_num, 3), device=device)
-                x_traj[:, :, rc.bb_idxs, :] = x_bb_traj
-
-                traj_feats = {
-                    "aatype": aatype_traj,
-                    "atom_positions": x_traj,
-                    "atom_mask": atom_mask,
-                    "residue_index": residue_index[i].unsqueeze(0).expand(S, -1),
-                    "chain_index": chain_index[i].unsqueeze(0).expand(S, -1),
-                    "b_factors": None
-                }
-                traj_feats = {k: v.cpu() if v is not None else v for k, v  in traj_feats.items()}
-                write_to_pdb_frames(**traj_feats, filename=filenames[i], mode="aa", conect=traj_conect, align_models_to_idx=align_models_to_idx)
-
-
-
 def get_denoiser(cfg: DictConfig,
                  sigma_data: TensorType[(), float]
                  ) -> BaseAtomDenoiser:
@@ -337,25 +224,5 @@ def get_denoiser(cfg: DictConfig,
     """
     if cfg.name == "dit":
         return DiTDenoiser(cfg, sigma_data)
-    elif cfg.name == "u_dit":
-        return UDiTDenoiser(cfg, sigma_data)
-    elif cfg.name == "esm_dit":
-        return ESMDiTDenoiser(cfg, sigma_data)
-    elif cfg.name == "triangle_dit":
-        return TriangleDiTDenoiser(cfg, sigma_data)
-    elif cfg.name == "mpnn_dit":
-        return MPNNDiTDenoiser(cfg, sigma_data)
     else:
         raise ValueError(f"Unknown denoiser: {cfg.name}")
-
-
-def get_interpolant(cfg: Optional[DictConfig]) -> SDInterpolant:
-    """
-    Get the interpolant specified in the config.
-    """
-    if cfg is None:
-        return None
-    elif cfg.name == "mar":
-        return MAR(cfg)
-    else:
-        raise ValueError(f"Unknown interpolant: {cfg.name}")
