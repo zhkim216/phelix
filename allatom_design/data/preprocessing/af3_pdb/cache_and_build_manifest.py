@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from omegaconf import DictConfig
 
-from allatom_design.data.preprocessing.caching_utils import (
+from allatom_design.data.preprocessing.preprocessing_utils import (
     cache_examples, get_lengths_from_cached, get_pdb_file_from_key)
 
 

@@ -1,0 +1,3 @@
+fampnn_multi_dir: /scratch/users/rshuai/datasets/augmented_af3_monomer_v2/fampnn_multi/S20_nl0.1_n4_L32_256
+af3_monomer_manifest: /scratch/users/rshuai/datasets/af3_pdb_monomer/pdb_manifest.csv
+out_dir: /scratch/users/rshuai/datasets/augmented_af3_monomer_v2/preprocessing/parse_fampnn_multi

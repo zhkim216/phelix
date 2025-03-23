@@ -1,5 +1,5 @@
-pdb_path: /scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1
-input_pdb_key_csv: /scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1/pdb_key_annotations/annotated_pdb_keys.csv
+pdb_path: /scratch/users/rshuai/datasets/augmented_af3_monomer_v2
+input_pdb_key_csv: /scratch/users/rshuai/datasets/augmented_af3_monomer_v2/preprocessing/parse_fampnn_multi/pdb_keys.csv
 
 overwrite_cache: false
 num_workers: 8

@@ -2,12 +2,16 @@
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import numpy as np
 import torch
+from Bio.PDB.MMCIFParser import FastMMCIFParser
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_to_pdb
+
+mmcif_parser = FastMMCIFParser(auth_chains=True, auth_residues=False, QUIET=True)
 
 
 def get_pdb_file_from_key(pdb_path: str, phase: str, pdb_key: str) -> str:
@@ -30,6 +34,9 @@ def get_pdb_file_from_key(pdb_path: str, phase: str, pdb_key: str) -> str:
         pdb_file = f"{pdb_path}/mpnn_esmfold/{pdb_key}"
         if not Path(pdb_file).exists():
             pdb_file = f"{pdb_path}/dne_mpnn/{pdb_key}"
+    elif dataset_name == "augmented_af3_monomer_v2":
+        # Augmented AF3 monomer dataset
+        pdb_file = f"{pdb_path}/fampnn_multi/S20_nl0.1_n4_L32_256/preds/ca_aligned_struct_preds/esmfold_{pdb_key}.pdb"
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
     if not Path(pdb_file).exists():
@@ -138,3 +145,37 @@ def cached_example_to_pdb(pt_file: str, out_pdb_file: str, mode: str = "aa", con
         mode=mode,
         conect=conect,
     )
+
+
+def get_radius_of_gyration_from_cached(pdb_keys: list[str], cache_dir: str, num_workers: int) -> dict[str, int]:
+    """
+    Computes radius of gyration for given PDB keys in parallel using joblib.
+    """
+    print(f"Computing radius of gyration using {num_workers} workers...")
+    cache_files = [f"{cache_dir}/{pdb_key}.pt" for pdb_key in pdb_keys]
+    parallel = Parallel(n_jobs=num_workers, verbose=0)
+    jobs = [delayed(_compute_radius_of_gyration_from_cached)(cache_file) for cache_file in cache_files]
+    results = parallel(tqdm(jobs, desc="Computing radius of gyration", total=len(jobs)))
+    return dict(zip(pdb_keys, results))
+
+
+def _compute_radius_of_gyration_from_cached(cache_file: str, min_dist=1e-3) -> float:
+    """
+    Computes the radius of gyration for a chain. Adapted from RFDiffusion code: https://github.com/RosettaCommons/RFdiffusion/blob/820bfdfaded8c260b962dc40a3171eae316b6ce0/rfdiffusion/potentials/potentials.py#L24
+    """
+    data = torch.load(cache_file, weights_only=True)
+
+    # Extract CA atom coordinates
+    Ca_coords = data["all_atom_positions"][:, 1, :]  # shape [n, 3]
+    Ca_mask = data["all_atom_mask"][:, 1]  # shape [n]
+    Ca = torch.tensor(Ca_coords, dtype=torch.float32)
+
+    centroid = torch.sum(Ca, dim=0, keepdim=True) / torch.sum(Ca_mask, dim=0, keepdim=True)[..., None]
+
+    dists = torch.norm((centroid - Ca), dim=-1)
+    dists = dists.clamp(min=min_dist)
+
+    rad_of_gyration = torch.sqrt(torch.sum(torch.square(dists) * Ca_mask) / torch.sum(Ca_mask))
+    return rad_of_gyration.item()
+
+
