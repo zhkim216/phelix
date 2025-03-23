@@ -11,8 +11,10 @@ import wandb
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
+from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.eval.eval_utils import eval_metrics
-from allatom_design.eval.eval_utils.eval_setup_utils import get_pdb_files, wandb_setup
+from allatom_design.eval.eval_utils.eval_setup_utils import (get_pdb_files,
+                                                             wandb_setup)
 from allatom_design.eval.eval_utils.fampnn_utils import get_seq_des_model
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 
@@ -54,6 +56,9 @@ def main(cfg: DictConfig):
     # Load in structure prediction model
     struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
+    ### CALCULATE STRUCTURE METRICS ###
+    per_pdb_metrics = defaultdict(dict)
+
     # Run self-consistency evaluation
     sc_info = eval_metrics.run_self_consistency_eval(
         pdb_files,
@@ -64,26 +69,63 @@ def main(cfg: DictConfig):
         temp_dir=f"{log_dir}/tmp"
     )
 
-    # Aggregate results
-    sc_metrics = defaultdict(list)
-    for pdb in sc_info.keys():
-        if "sc_metrics" in sc_info[pdb]:
-            for k, v in sc_info[pdb]["sc_metrics"].items():
-                sc_metrics[f"{k}"].append(v.item())
-        else:
-            print(f"Skipping {pdb} in aggregation...")
+    for pdb, v in sc_info.items():
+        per_pdb_metrics[pdb]["sc_info"] = v
 
-    # Update metrics
-    out_metrics = {f"mean/{k}": np.mean(v) for k, v in sc_metrics.items()}
-    out_metrics.update({f"median/{k}": np.median(v) for k, v in sc_metrics.items()})
+    # Get secondary structure info
+    ss_info = eval_metrics.compute_secondary_structure_content(pdb_files)
+    for pdb, v in ss_info.items():
+        per_pdb_metrics[pdb]["ss_info"] = v
 
-    # Dump to output directory
-    with open(os.path.join(log_dir, "metrics.pkl"), "wb") as f:
-        pickle.dump(out_metrics, f)
+    # Aggregate per-pdb metrics to map from {metric key: list of values}
+    sample_metrics = defaultdict(list)
+    for pdb in per_pdb_metrics:
+        # secondary structure metrics
+        for k, v in per_pdb_metrics[pdb]["ss_info"].items():
+            sample_metrics[k].append(v)
 
-    # Log metrics to wandb
+        # self-consistency metrics
+        for k, v in per_pdb_metrics[pdb]["sc_info"]["sc_metrics"].items():
+            best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
+            sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_best"].append(best_sc_metric.item())
+
+            if len(v) > 1:
+                # only report mean if we run multiple sequences per sample
+                sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
+                mean_sc_metric = torch.mean(v)
+
+    # Compute optional diversity metrics across entire set of PDBs
+    if cfg.compute_diversity_metrics:
+        # === Calculate mean pairwise TM score ===
+        coords = [load_feats_from_pdb(pdb)["all_atom_positions"] for pdb in pdb_files]
+        sample_metrics["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(
+            coords,
+            temp_dir=f"{log_dir}/tmp",
+            subsample_pairs=cfg.pairwise_tm_subsample,
+        )
+
+        # === Foldseek clustering analysis ===
+        for sctm_cutoff in cfg.clustering.sctm_cutoffs:
+            # Cluster only on designable samples (scTM > sctm_cutoff)
+            designable_pdbs = [pdb for pdb in pdb_files if (per_pdb_metrics[pdb]["sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff).any()]
+            sample_metrics[f"sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
+
+            cluster_out_dir = Path(f"{log_dir}/clustering/sctm{sctm_cutoff}")
+            sample_metrics[f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{log_dir}/tmp",
+                                                                                       **cfg.clustering.foldseek_opts)
+
+    # === Calculate metrics to log === #
+    metrics = {}
+    metrics.update({f"sc/mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
+    metrics.update({f"sc/median/{k}": np.median(v) for k, v in sample_metrics.items()})
+
+    # Save per-sample metrics
+    with open(f"{log_dir}/all_metrics.pkl", "wb") as f:
+        pickle.dump(per_pdb_metrics, f)
+
+    # Log aggregated metrics to wandb
     if not cfg.wandb.no_wandb:
-        wandb.log(out_metrics, step=0)
+        wandb.log(metrics)
 
 
 if __name__ == "__main__":

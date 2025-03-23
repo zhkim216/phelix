@@ -62,13 +62,13 @@ def main(cfg: DictConfig):
     if cfg.fix_missing:
         # get list of PDBs to skip based on existing output CSV
         out_df = pd.read_csv(out_df_path)
-        existing_pdb_keys = out_df["pdb_key"].unique()
+        existing_pdb_names = out_df["input_pdb_name"].unique()
         out_df_path = f"{out_dir}/fampnn_outputs_missing.csv"  # save to a different file
     else:
-        existing_pdb_keys = None
+        existing_pdb_names = None
 
     ### Load in PDB files ###
-    pdb_files = get_pdb_files(**cfg.input_cfg, skip_pdb_names=existing_pdb_keys)
+    pdb_files = get_pdb_files(**cfg.input_cfg, skip_pdb_names=existing_pdb_names)
 
     ### SAMPLING ###
     # Run FAMPNN
@@ -94,8 +94,8 @@ def main(cfg: DictConfig):
 
         # Aggregate results
         for j, pdb in enumerate(sampled_pdbs):
-            out_metrics["pdb_name"].append(Path(pdb).stem)
-            out_metrics["pdb_key"].append(Path(input_pdb_names[j]).stem)
+            out_metrics["pdb_name"].append(Path(pdb).name)
+            out_metrics["input_pdb_name"].append(Path(input_pdb_names[j]).name)
             out_metrics["pred_seq"].append(pred_seqs[j])
 
             for k, v in sc_info[pdb]["sc_metrics"].items():
@@ -104,8 +104,8 @@ def main(cfg: DictConfig):
     else:
         # If not running self-consistency evaluation, just append basic metrics to a CSV
         for j, pdb in enumerate(sampled_pdbs):
-            out_metrics["pdb_name"].append(Path(pdb).stem)
-            out_metrics["pdb_key"].append(Path(input_pdb_names[j]).stem)
+            out_metrics["pdb_name"].append(Path(pdb).name)
+            out_metrics["input_pdb_name"].append(Path(input_pdb_names[j]).name)
             out_metrics["pred_seq"].append(pred_seqs[j])
             out_metrics["design_number"].append(Path(pdb).stem.split("_")[-1])  # extract design number from filename
 
