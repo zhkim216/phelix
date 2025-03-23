@@ -36,6 +36,7 @@ DSSP_CSV=null  # null to disable secondary structure KLD computation
 
 # Denoiser checkpoint
 CHECKPOINT_PATH=/scratch/hielab/rshuai/allatom_design/allatom_design/u1_a7/checkpoints/ema/ad-step1625000-epoch2008-ema0.99.ckpt
+BASE_OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/u1_a7/bb_unconditional
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
@@ -49,6 +50,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/bb_unconditional.py
     wandb.group=${GROUP} \
     exp_name=${EXP_NAME} \
     checkpoint_path=${CHECKPOINT_PATH} \
+    base_out_dir=${BASE_OUT_DIR} \
     seq_des_cfg.proteinmpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     seq_des_cfg.fampnn.fampnn_ckpt=${FAMPNN_CKPT} \
     seq_des_cfg.fampnn.overrides.noise_labels=${NOISE_LABELS} \

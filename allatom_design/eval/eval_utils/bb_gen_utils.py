@@ -67,7 +67,8 @@ def run_bb_uncond_sampling(model: AtomDenoiser,
 
     sampled_pdb_paths = []
     lengths = torch.tensor(lengths, dtype=torch.long, device=device)
-    for i in tqdm(range(0, len(lengths), cfg.batch_size)):
+    pbar = tqdm(total=len(lengths), desc="Sampling backbones")
+    for i in range(0, len(lengths), cfg.batch_size):
         lengths_batch = lengths[i:i + cfg.batch_size]
         B = lengths_batch.shape[0]
         residue_index = torch.arange(lengths.max(), dtype=torch.long, device=device)  # assume residue index is 0 to max length
@@ -108,7 +109,8 @@ def run_bb_uncond_sampling(model: AtomDenoiser,
             save_trajs_fn(x_traj_key="x1_bb_traj", filenames=[f"{traj_out_dir}/x1_traj_sample_len{lengths_batch[j]}_{i + j}.pdb" for j in range(B)])
             save_trajs_fn(x_traj_key="xt_bb_traj", filenames=[f"{traj_out_dir}/xt_traj_sample_len{lengths_batch[j]}_{i + j}.pdb" for j in range(B)])
 
-
+        pbar.update(B)
+    pbar.close()
     return sampled_pdb_paths
 
 
@@ -182,7 +184,7 @@ def run_backbone_scaffolding(model: AtomDenoiser,
     Path(centered_gt_out_dir).mkdir(parents=True, exist_ok=True)
 
     sampled_pdb_paths = []
-    for motif_idx in range(0, len(motif_info_df)):
+    for motif_idx in tqdm(range(0, len(motif_info_df)), desc="Scaffolding backbones"):
         motif_info = motif_info_df.iloc[motif_idx]
         pdb_path = motif_info["pdb_path"]
         length = motif_info["length"]
@@ -197,6 +199,7 @@ def run_backbone_scaffolding(model: AtomDenoiser,
         contigs = parse_contigs_str(contigs_str, chain_id_mapping, example["residue_index"], example["chain_index"])
 
         # Build input batch
+        pbar = tqdm(total=num_to_sample, desc=f"Sampling backbones for motif {Path(pdb_path).stem}", leave=False)
         for i in range(0, num_to_sample, cfg.batch_size):
             B = min(cfg.batch_size, num_to_sample - i)
 
@@ -245,6 +248,9 @@ def run_backbone_scaffolding(model: AtomDenoiser,
             filenames = [f"{sample_out_dir}/sample{motif_idx}_{pdb_stem}_{i + j}.pdb" for j in range(B)]
             AtomDenoiser.save_samples_to_pdb(samples, filenames)
             sampled_pdb_paths.extend(filenames)
+
+            pbar.update(B)
+        pbar.close()
 
     return sampled_pdb_paths
 
@@ -384,6 +390,7 @@ def run_sm_sampling(model: AtomDenoiser,
     sampled_pdb_paths = []
     motif_info = {}  # map from pdb path to motif mask and coordinates
     with Parallel(n_jobs=cfg.num_workers) as parallel_pool:
+        pbar = tqdm(total=len(pdb_paths), desc="Sampling backbones")
         for i in range(0, len(pdb_paths), cfg.batch_size):
             pdb_batch_files = pdb_paths[i:i + cfg.batch_size]
             B = len(pdb_batch_files)
@@ -455,5 +462,8 @@ def run_sm_sampling(model: AtomDenoiser,
                                         "x_motif": batch["x_motif"][j].cpu()}
                 length_j = batch["seq_mask"][j].sum().long().item()
                 motif_info[pdb_path] = {k: v[:length_j].clone() for k, v in motif_info[pdb_path].items()}  # get rid of padding
+
+            pbar.update(B)
+        pbar.close()
 
     return sampled_pdb_paths, motif_info
