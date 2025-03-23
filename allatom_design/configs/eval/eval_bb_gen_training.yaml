@@ -53,18 +53,20 @@ seq_des_cfg:
       num_steps: 50
       noise_labels: 0.0
 
-# Pairwise TM-scores
-pairwise_tm_subsample: 2000  # number of pairs to subsample
+# Diversity evaluation config
+diversity_eval:
+  # Pairwise TM-scores
+  pairwise_tm_subsample: 2000  # number of pairs to subsample
 
-# Foldseek clustering analysis
-clustering:
-  sctm_cutoffs: [0.7, 0.8]
-  foldseek_opts:
-    alignment_type: 0  # 0 for structure-only
-    tmscore_threshold: 0.5
-    c: 0.0
-    s: 7.5
-    cluster_reassign: true
+  # Foldseek clustering analysis
+  clustering:
+    sctm_cutoffs: [0.7, 0.8]
+    foldseek_opts:
+      alignment_type: 0  # 0 for structure-only
+      tmscore_threshold: 0.5
+      c: 0.0
+      s: 7.5
+      cluster_reassign: true
 
 # Structure prediction model args
 struct_pred_cfg:

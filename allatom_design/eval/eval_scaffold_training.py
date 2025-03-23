@@ -75,88 +75,46 @@ def main(cfg: DictConfig):
             # create output directory for this epoch and conditioning type
             log_dir_i = f"{log_dir}/step_{global_step}_epoch_{epoch}/{scaffold_conditioning_type}"
             Path(log_dir_i).mkdir(parents=True, exist_ok=True)
-            saved_metrics_dir_i = f"{log_dir_i}/metrics"
-            Path(saved_metrics_dir_i).mkdir(parents=True, exist_ok=True)
 
             # Process PDBs in batches
             sampled_pdbs, motif_info = run_sm_sampling(model=bb_gen_model["model"],
-                                                        sm=sm,
-                                                        cfg=bb_gen_model["sampling_cfg"],
-                                                        device=device,
-                                                        pdb_paths=pdb_files,
-                                                        out_dir=log_dir_i)
+                                                       sm=sm,
+                                                       cfg=bb_gen_model["sampling_cfg"],
+                                                       device=device,
+                                                       pdb_paths=pdb_files,
+                                                       out_dir=log_dir_i)
 
             # === CALCULATE STRUCTURE METRICS ===
-            all_metrics = defaultdict(dict)
-
-            # Secondary structure
-            ss_info = eval_metrics.compute_secondary_structure_content(sampled_pdbs)
-            for pdb, v in ss_info.items():
-                all_metrics[pdb]["ss_info"] = v
-
-            # MPNN + structure prediction self-consistency
-            sc_info = eval_metrics.run_self_consistency_eval(sampled_pdbs,
-                                                             seq_des_model,
-                                                             struct_pred_model,
-                                                             device,
-                                                             out_dir=log_dir_i,
-                                                             temp_dir=f"{log_dir_i}/tmp",
-                                                             metrics_to_compute=["sc_ca_rmsd", "sc_ca_tm", "motif_bb_rmsd"],
-                                                             motif_info=motif_info
-                                                             )
-            for pdb, v in sc_info.items():
-                all_metrics[pdb]["sc_info"] = v
-
-            # nnTM
-            if cfg.nntm_dataset is not None:
-                nntm_info = eval_metrics.run_nntm_eval(sampled_pdbs, dataset=cfg.nntm_dataset, out_dir=log_dir_i)
-                for pdb, v in nntm_info.items():
-                    all_metrics[pdb]["nntm_info"] = v
+            per_pdb_info, sample_metrics = eval_metrics.compute_per_pdb_info(sampled_pdbs, seq_des_model, struct_pred_model, device,
+                                                                             out_dir=log_dir_i, temp_dir=f"{log_dir_i}/tmp",
+                                                                             sc_kwargs={"metrics_to_compute": ["sc_ca_rmsd", "sc_ca_tm", "motif_bb_rmsd"],
+                                                                                        "motif_info": motif_info},
+                                                                             nntm_dataset=cfg.nntm_dataset)
 
             # get RMSD between input motif and sampled structure (as opposed to the predicted structure)
             for pdb in sampled_pdbs:
-                all_metrics[pdb]["sampled_motif_bb_rmsd"] = eval_metrics.compute_motif_bb_rmsd(pdb, motif_info[pdb]["x_motif"], motif_info[pdb]["motif_mask"])
+                sampled_motif_bb_rmsd = eval_metrics.compute_motif_bb_rmsd(pdb, motif_info[pdb]["x_motif"], motif_info[pdb]["motif_mask"])
+                per_pdb_info[pdb]["sampled_motif_bb_rmsd"] = sampled_motif_bb_rmsd
+                sample_metrics["sampled_motif_bb_rmsd"].append(sampled_motif_bb_rmsd)
 
-            # Save per-sample metrics as pt
-            torch.save(all_metrics, f"{saved_metrics_dir_i}/step_{global_step}_all_metrics.pt")
+            # Save per-pdb info
+            torch.save(per_pdb_info, f"{log_dir_i}/per_pdb_info.pt")
 
-            # Aggregate metrics
-            sample_metrics = defaultdict(list)
-            for pdb in sampled_pdbs:
-                # secondary structure metrics
-                for k, v in ss_info[pdb].items():
-                    sample_metrics[f"{k}"].append(v)
-
-                # self-consistency metrics
-                for k, v in sc_info[pdb]["sc_metrics"].items():
-                    best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
-                    sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_best"].append(best_sc_metric.item())
-
-                    if len(v) > 1:
-                        # only report mean if we run multiple sequences per sample
-                        mean_sc_metric = torch.mean(v)
-                        sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
-
-                # nnTM metrics
-                if cfg.nntm_dataset is not None:
-                    sample_metrics["nntm"].append(all_metrics[pdb]["nntm_info"])
-
-                # RMSD between input motif and sampled structure
-                sample_metrics["sampled_motif_bb_rmsd"].append(all_metrics[pdb]["sampled_motif_bb_rmsd"])
-
-            # === Calculate metrics to log === #
+            # === Calculate a scalar for each metric to log === #
             metrics = {}
 
             # mean and median of all metrics
-            metrics.update({f"scaffold/mean/{scaffold_conditioning_type}/{k}": np.mean(v) for k, v in sample_metrics.items()})
-            metrics.update({f"scaffold/median/{scaffold_conditioning_type}/{k}": np.median(v) for k, v in sample_metrics.items()})
+            metrics.update({f"mean/{scaffold_conditioning_type}/{k}": np.mean(v) for k, v in sample_metrics.items()})
+            metrics.update({f"median/{scaffold_conditioning_type}/{k}": np.median(v) for k, v in sample_metrics.items()})
 
             # for motif_bb_rmsd, calculate the number of success below 1 RMSD
             motif_rmsd_key = f"{cfg.seq_des_cfg.model_name}_motif_bb_rmsd_best"
-            metrics[f"scaffold/success_count/{scaffold_conditioning_type}/motif_bb_rmsd"] = np.sum(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
-            metrics[f"scaffold/success_rate/{scaffold_conditioning_type}/motif_bb_rmsd"] = np.mean(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+            metrics[f"success_count/{scaffold_conditioning_type}/motif_bb_rmsd"] = np.sum(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+            metrics[f"success_rate/{scaffold_conditioning_type}/motif_bb_rmsd"] = np.mean(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
 
-
+            # Log metrics to wandb
+            metrics = {f"scaffold/{k}": v for k, v in metrics.items()}
+            torch.save(metrics, f"{log_dir_i}/metrics.pt")
             if not cfg.wandb.no_wandb:
                 metrics["trainer/global_step"] = global_step
                 metrics["trainer/epoch"] = epoch

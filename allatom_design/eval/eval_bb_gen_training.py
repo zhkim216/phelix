@@ -1,5 +1,3 @@
-import pickle
-from collections import defaultdict
 from pathlib import Path
 
 import hydra
@@ -11,7 +9,6 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.bb_gen_utils import (
     get_bb_gen_model, run_bb_uncond_sampling)
@@ -84,87 +81,28 @@ def main(cfg: DictConfig):
                                                    out_dir=log_dir_i)
 
         ### CALCULATE STRUCTURE METRICS ###
-        all_metrics = defaultdict(dict)
-        pdbs = sampled_pdb_paths
+        per_pdb_info, sample_metrics = eval_metrics.compute_per_pdb_info(sampled_pdb_paths, seq_des_model, struct_pred_model, device,
+                                                                         out_dir=log_dir_i, temp_dir=f"{log_dir_i}/tmp", nntm_dataset=cfg.nntm_dataset)
 
-        # Get secondary structure info
-        ss_info = eval_metrics.compute_secondary_structure_content(pdbs)
-        for pdb, v in ss_info.items():
-            all_metrics[pdb]["ss_info"] = v
+        # Save per-pdb info
+        torch.save(per_pdb_info, f"{log_dir_i}/per_pdb_info.pt")
 
-        # Run MPNN + structure prediction self-consistency evals
-        sc_info = eval_metrics.run_self_consistency_eval(pdbs,
-                                                         seq_des_model,
-                                                         struct_pred_model,
-                                                         device,
-                                                         out_dir=log_dir_i,
-                                                         temp_dir=f"{log_dir_i}/tmp")
-        for pdb, v in sc_info.items():
-            all_metrics[pdb]["sc_info"] = v
-
-        # Run nnTM evaluation
-        if cfg.nntm_dataset is not None:
-            nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=log_dir_i)
-
-            for pdb, v in nntm_info.items():
-                all_metrics[pdb]["nntm_info"] = v
-
-
-        ### SAVE METRICS ###
-        # Save all metrics to pickle file
-        with open(f"{log_dir_i}/all_metrics.pkl", "wb") as f:
-            pickle.dump(all_metrics, f)
-
-        # Aggregate per-pdb metrics
-        sample_metrics = defaultdict(list)
-        for pdb in pdbs:
-            # secondary structure metrics
-            for k, v in ss_info[pdb].items():
-                sample_metrics[f"{k}"].append(v)
-
-            # self-consistency metrics
-            for k, v in sc_info[pdb]["sc_metrics"].items():
-                # take mean and best across MPNN sequences
-                best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
-                sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_best"].append(best_sc_metric.item())
-
-                if len(v) > 1:
-                    # only report mean if we run multiple sequences per sample
-                    sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
-                    mean_sc_metric = torch.mean(v)
-
-            # nntm metrics
-            if cfg.nntm_dataset is not None:
-                sample_metrics["nntm"].append(nntm_info[pdb])
+        # === Calculate a scalar for each metric to log === #
+        metrics = {}
+        metrics.update({f"mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
+        metrics.update({f"median/{k}": np.median(v) for k, v in sample_metrics.items()})
 
         ### Compute metrics that require all samples ##
         if cfg.compute_diversity_metrics:
-            # === Calculate mean pairwise TM score === #
-            coords = [load_feats_from_pdb(pdb)["all_atom_positions"] for pdb in pdbs]
-            sample_metrics["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(coords,
-                                                                                    temp_dir=f"{log_dir_i}/tmp",
-                                                                                    subsample_pairs=cfg.pairwise_tm_subsample)
+            diversity_metrics = eval_metrics.run_diversity_eval(sampled_pdb_paths, per_pdb_info, cfg.diversity_eval, log_dir_i)
+            metrics.update(diversity_metrics)
 
-            # === Run clustering analysis === #
-            for sctm_cutoff in cfg.clustering.sctm_cutoffs:
-                # Cluster only on designable samples (scTM > sctm_cutoff)
-                designable_pdbs = [pdb for pdb in pdbs if (all_metrics[pdb]["sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff).any()]
-                sample_metrics[f"{cfg.seq_des_cfg.model_name}_sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
-
-                cluster_out_dir = Path(f"{log_dir_i}/clustering/sctm{sctm_cutoff}")
-                sample_metrics[f"{cfg.seq_des_cfg.model_name}_sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{log_dir_i}/tmp",
-                                                                                              **cfg.clustering.foldseek_opts)
-
-        # === Calculate metrics to log === #
-        metrics = {}
-        metrics.update({f"bb_gen/mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
-        metrics.update({f"bb_gen/median/{k}": np.median(v) for k, v in sample_metrics.items()})
-
-        # Log metrics to wandb
+        # Log aggregated metrics to wandb
+        metrics = {f"bb_gen/{k}": v for k, v in metrics.items()}
+        torch.save(metrics, f"{log_dir_i}/metrics.pt")
         if not cfg.wandb.no_wandb:
             metrics["trainer/global_step"] = global_step
             metrics["trainer/epoch"] = epoch
-
             wandb.log(metrics, step=global_step)
 
 

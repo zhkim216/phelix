@@ -57,73 +57,25 @@ def main(cfg: DictConfig):
     struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     ### CALCULATE STRUCTURE METRICS ###
-    per_pdb_metrics = defaultdict(dict)
+    per_pdb_info, sample_metrics = eval_metrics.compute_per_pdb_info(pdb_files, seq_des_model, struct_pred_model, device,
+                                                                     out_dir=log_dir, temp_dir=f"{log_dir}/tmp")
 
-    # Run self-consistency evaluation
-    sc_info = eval_metrics.run_self_consistency_eval(
-        pdb_files,
-        seq_des_model,
-        struct_pred_model,
-        device,
-        out_dir=log_dir,
-        temp_dir=f"{log_dir}/tmp"
-    )
+    # Save per-pdb info
+    torch.save(per_pdb_info, f"{log_dir}/per_pdb_info.pt")
 
-    for pdb, v in sc_info.items():
-        per_pdb_metrics[pdb]["sc_info"] = v
-
-    # Get secondary structure info
-    ss_info = eval_metrics.compute_secondary_structure_content(pdb_files)
-    for pdb, v in ss_info.items():
-        per_pdb_metrics[pdb]["ss_info"] = v
-
-    # Aggregate per-pdb metrics to map from {metric key: list of values}
-    sample_metrics = defaultdict(list)
-    for pdb in per_pdb_metrics:
-        # secondary structure metrics
-        for k, v in per_pdb_metrics[pdb]["ss_info"].items():
-            sample_metrics[k].append(v)
-
-        # self-consistency metrics
-        for k, v in per_pdb_metrics[pdb]["sc_info"]["sc_metrics"].items():
-            best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
-            sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_best"].append(best_sc_metric.item())
-
-            if len(v) > 1:
-                # only report mean if we run multiple sequences per sample
-                sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
-                mean_sc_metric = torch.mean(v)
-
-    # Compute optional diversity metrics across entire set of PDBs
-    if cfg.compute_diversity_metrics:
-        # === Calculate mean pairwise TM score ===
-        coords = [load_feats_from_pdb(pdb)["all_atom_positions"] for pdb in pdb_files]
-        sample_metrics["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(
-            coords,
-            temp_dir=f"{log_dir}/tmp",
-            subsample_pairs=cfg.pairwise_tm_subsample,
-        )
-
-        # === Foldseek clustering analysis ===
-        for sctm_cutoff in cfg.clustering.sctm_cutoffs:
-            # Cluster only on designable samples (scTM > sctm_cutoff)
-            designable_pdbs = [pdb for pdb in pdb_files if (per_pdb_metrics[pdb]["sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff).any()]
-            sample_metrics[f"sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
-
-            cluster_out_dir = Path(f"{log_dir}/clustering/sctm{sctm_cutoff}")
-            sample_metrics[f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{log_dir}/tmp",
-                                                                                       **cfg.clustering.foldseek_opts)
-
-    # === Calculate metrics to log === #
+    # === Calculate a scalar for each metric to log === #
     metrics = {}
-    metrics.update({f"sc/mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
-    metrics.update({f"sc/median/{k}": np.median(v) for k, v in sample_metrics.items()})
+    metrics.update({f"mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
+    metrics.update({f"median/{k}": np.median(v) for k, v in sample_metrics.items()})
 
-    # Save per-sample metrics
-    with open(f"{log_dir}/all_metrics.pkl", "wb") as f:
-        pickle.dump(per_pdb_metrics, f)
+    # Optionally compute diversity metrics across entire set of PDBs
+    if cfg.compute_diversity_metrics:
+        diversity_metrics = eval_metrics.run_diversity_eval(pdb_files, per_pdb_info, cfg.diversity_eval, log_dir)
+        metrics.update(diversity_metrics)
 
     # Log aggregated metrics to wandb
+    metrics = {f"sc_eval/{k}": v for k, v in metrics.items()}
+    torch.save(metrics, f"{log_dir}/metrics.pt")
     if not cfg.wandb.no_wandb:
         wandb.log(metrics)
 
