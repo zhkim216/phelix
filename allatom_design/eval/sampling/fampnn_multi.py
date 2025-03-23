@@ -60,10 +60,11 @@ def main(cfg: DictConfig):
         pos_constraint_df = pd.DataFrame(columns=["pdb_name"])
 
     if cfg.fix_missing:
+        # Option to fix missing PDBs in case something goes wrong on large-scale runs
         # get list of PDBs to skip based on existing output CSV
         out_df = pd.read_csv(out_df_path)
         existing_pdb_names = out_df["input_pdb_name"].unique()
-        out_df_path = f"{out_dir}/fampnn_outputs_missing.csv"  # save to a different file
+        out_df_path = f"{out_dir}/fampnn_outputs_fixed_missing.csv"  # save to a different file
     else:
         existing_pdb_names = None
 
