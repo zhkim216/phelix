@@ -58,7 +58,7 @@ def get_pdb_files(pdb_dir: str,
 
     # Skip existing PDBs
     if skip_pdb_names is not None:
-        skip_pdb_names = [f"{Path(pdb_key).stem}{pdb_name_ext}" for pdb_key in skip_pdb_names]  # in case pdb_keys instead of pdb_names is passed in, we add the extension
+        skip_pdb_names = [Path(pdb_file).name for pdb_file in skip_pdb_names]
         skip_pdb_names = set(skip_pdb_names)
         pdb_files = [f for f in pdb_files if Path(f).name not in skip_pdb_names]
 
