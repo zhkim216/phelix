@@ -5,7 +5,7 @@ import hydra
 import pandas as pd
 from omegaconf import DictConfig
 
-from allatom_design.data.preprocessing.caching_utils import (
+from allatom_design.data.preprocessing.preprocessing_utils import (
     cache_examples, get_lengths_from_cached, get_pdb_file_from_key)
 
 
@@ -44,7 +44,7 @@ def main(cfg: DictConfig):
 
     # Build manifest
     manifest_df = input_pdb_key_df.copy()
-    manifest_df["seq_length"] = pdb_key_to_length
+    manifest_df["seq_length"] = manifest_df["pdb_key"].map(pdb_key_to_length)
 
     # Write out manifest to CSV
     manifest_csv = f"{cfg.pdb_path}/pdb_manifest.csv"
