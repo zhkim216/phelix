@@ -36,12 +36,12 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 CHECKPOINT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt
 
 # Output directory
-OUT_DIR=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2/fampnn_multi/S20_nl0.1_n4_L32_256
+OUT_DIR=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2/fampnn_multi/S20_nl0.1_n4_L257_512
 
 # Run eval script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/fampnn_multi.py \
     input_cfg.pdb_dir=${PDB_DIR} \
-    input_cfg.subset_length_range=[32,256] \
+    input_cfg.subset_length_range=[257,512] \
     input_cfg.presort_by_length=true \
     input_cfg.array_id=${SLURM_ARRAY_TASK_ID} \
     input_cfg.num_arrays=200 \
