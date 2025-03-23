@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+from pathlib import Path
+
 import hydra
 import pandas as pd
 from omegaconf import DictConfig
@@ -29,6 +31,9 @@ def main(cfg: DictConfig):
         num_workers=cfg.num_workers
     )
 
+    # Also save names of the original PDB files
+    input_pdb_key_df["pdb_name"] = input_pdb_key_df["pdb_key"].map(pdb_key_to_pdb_file).apply(lambda x: Path(x).name)
+
     # Get sequence lengths
     pdb_key_to_length = get_lengths_from_cached(pdb_keys, cache_dir, num_workers=cfg.num_workers)
 
@@ -42,9 +47,15 @@ def main(cfg: DictConfig):
     manifest_df["seq_length"] = pdb_key_to_length
 
     # Write out manifest to CSV
-    out_csv = f"{cfg.pdb_path}/pdb_manifest.csv"
-    manifest_df.to_csv(out_csv, index=False)
-    print(f"Wrote dataset manifest to {out_csv}")
+    manifest_csv = f"{cfg.pdb_path}/pdb_manifest.csv"
+    manifest_df.to_csv(manifest_csv, index=False)
+    print(f"Wrote dataset manifest to {manifest_csv}")
+
+    # Save out the original PDB names for train, eval, and eval2 as separate lists
+    for phase in ["train", "eval", "eval2"]:
+        pdb_names = input_pdb_key_df[input_pdb_key_df["phase"] == phase]["pdb_name"]
+        pdb_names.to_csv(f"{cfg.pdb_path}/{phase}_pdb_names.list", index=False, header=False)
+        print(f"Wrote {phase} pdb names to {cfg.pdb_path}/{phase}_pdb_names.list")
 
 
 if __name__ == "__main__":
