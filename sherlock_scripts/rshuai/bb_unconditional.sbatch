@@ -35,7 +35,6 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Dataset paths for certain eval metrics
 NNTM_DATASET=null  # null to disable nntm computation
-DSSP_CSV=null  # null to disable secondary structure KLD computation
 
 # Denoiser checkpoint
 CHECKPOINT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/u1_a7/checkpoints/ema/ad-step1625000-epoch2008-ema0.99.ckpt
@@ -59,5 +58,4 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/bb_unconditional.py
     seq_des_cfg.fampnn.overrides.noise_labels=${NOISE_LABELS} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     nntm_dataset=${NNTM_DATASET} \
-    ss_kld.dssp_csv=${DSSP_CSV} \
     hydra.run.dir=${HYDRA_DIR}

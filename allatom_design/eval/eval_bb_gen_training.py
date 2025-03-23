@@ -105,6 +105,10 @@ def main(cfg: DictConfig):
             metrics["trainer/epoch"] = epoch
             wandb.log(metrics, step=global_step)
 
+    # Finish wandb logging
+    if not cfg.wandb.no_wandb:
+        wandb.finish()
+
 
 if __name__ == "__main__":
     main()
