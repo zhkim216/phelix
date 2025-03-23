@@ -78,6 +78,7 @@ def main(cfg: DictConfig):
     torch.save(metrics, f"{log_dir}/metrics.pt")
     if not cfg.wandb.no_wandb:
         wandb.log(metrics)
+        wandb.finish()
 
 
 if __name__ == "__main__":

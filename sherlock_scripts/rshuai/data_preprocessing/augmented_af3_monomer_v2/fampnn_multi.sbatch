@@ -7,8 +7,8 @@
 #SBATCH --array=0-199%10
 #
 # Send stdout and stderr to logs
-#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%j.out
-#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%j.err
+#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%A_%a.out
+#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%A_%a.err
 #
 ## Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh

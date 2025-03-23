@@ -71,168 +71,50 @@ def main(cfg: DictConfig):
                                                save_traj_inputs=save_traj_inputs)
 
     ### CALCULATE STRUCTURE METRICS ###
-    all_metrics = defaultdict(dict)
-
-    # === Get lengths and bins of sampled structures === #
-    lengths = lengths_to_sample
-    pdbs = sampled_pdb_paths
-    bins = [int(length / cfg.length_bin_size) * cfg.length_bin_size for length in lengths]  # bins are defined by their starting length
-    for pdb, length, bin in zip(pdbs, lengths, bins):
-        all_metrics[pdb]["length"] = length
-        all_metrics[pdb]["bin"] = bin
-
-    # === Load MPNN and structure prediction models === #
-    if cfg.sc.run_mpnn_sc:
+    if cfg.compute_self_consistency:
+        # Load in MPNN + structure prediction model for self-consistency evals
         seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
-    # === Get secondary structure info === #
-    ss_info = eval_metrics.compute_secondary_structure_content(pdbs)
-    for pdb, v in ss_info.items():
-        all_metrics[pdb]["ss_info"] = v
+        # First, get bin sampled structures into length bins
+        bins = [int(length / cfg.length_bin_size) * cfg.length_bin_size for length in lengths_to_sample]
+        bin_to_pdbs = defaultdict(list)
+        for pdb, b in zip(sampled_pdb_paths, bins):
+            bin_to_pdbs[b].append(pdb)
 
-    # === Run self-consistency evaluations === #
-    sc_pdbs, sc_bins = pdbs, bins
-    if cfg.sc.bin_range is not None:
-        # run self-consistency only on samples within the specified bin range
-        sc_subset = list(zip(*[(pdb, b) for pdb, b in zip(pdbs, bins) if cfg.sc.bin_range[0] <= b <= cfg.sc.bin_range[1]]))
-        sc_pdbs, sc_bins = sc_subset if len(sc_subset) > 0 else ([], [])
+        # Compute metrics for each length bin
+        for b in sorted(bin_to_pdbs.keys()):
+            pdbs_b = bin_to_pdbs[b]
+            log_dir_b = Path(log_dir, f"bin{b}")
+            Path(log_dir_b).mkdir(parents=True, exist_ok=True)
 
-    if cfg.sc.max_samples_per_bin is not None and len(sc_pdbs) > 0:
-        # randomly sample to limit the number of samples per bin
-        df = pd.DataFrame({"pdb": sc_pdbs, "bin": sc_bins})
-        sc_pdbs = df.groupby("bin")["pdb"].apply(lambda x: x.sample(n=min(cfg.sc.max_samples_per_bin, len(x)))).tolist()
+            ## Get per-pdb info
+            per_pdb_info_b, sample_metrics_b = eval_metrics.compute_per_pdb_info(pdbs_b, seq_des_model, struct_pred_model, device,
+                                                                                 out_dir=log_dir_b, temp_dir=f"{log_dir_b}/tmp", nntm_dataset=cfg.nntm_dataset)
 
-    if cfg.sc.run_mpnn_sc:
-        sc_info = eval_metrics.run_self_consistency_eval(sc_pdbs,
-                                                         seq_des_model,
-                                                         struct_pred_model,
-                                                         device,
-                                                         out_dir=log_dir,
-                                                         temp_dir=f"{log_dir}/tmp")
-        for pdb, v in sc_info.items():
-            all_metrics[pdb]["sc_info"] = v
+            # Save per-pdb info
+            torch.save(per_pdb_info_b, f"{log_dir_b}/per_pdb_info.pt")
 
-    # === Run nnTM evaluation === #
-    if cfg.nntm_dataset is not None:
-        nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=log_dir)
-        for pdb, v in nntm_info.items():
-            all_metrics[pdb]["nntm_info"] = v
+            # Calculate a scalar for each metric to log
+            metrics_b = {}
+            metrics_b.update({f"mean/{k}": np.mean(v) for k, v in sample_metrics_b.items()})
+            metrics_b.update({f"median/{k}": np.median(v) for k, v in sample_metrics_b.items()})
 
-    # === Aggregate metrics by length === #
-    bin_to_metrics = {}
-    for bin in set(bins):
-        pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if b == bin]
+            # Compute diversity metrics across all PDBs in bin
+            diversity_metrics = eval_metrics.run_diversity_eval(pdbs_b, per_pdb_info_b, cfg.diversity_eval, log_dir_b)
+            metrics_b.update(diversity_metrics)
 
-        metrics_b = defaultdict(list)
-        for pdb in pdbs_b:
-            # Secondary structure metrics
-            for k, v in all_metrics[pdb]["ss_info"].items():
-                metrics_b[f"{k}"].append(v)
+            # Log aggregated metrics to wandb
+            metrics_b = {f"bb_gen/{k}": v for k, v in metrics_b.items()}
+            torch.save(metrics_b, f"{log_dir_b}/metrics.pt")
+            if not cfg.wandb.no_wandb:
+                metrics_b["length_bin"] = b  # log the starting length of the bin
+                wandb.log(metrics_b, step=b)
 
-            # MPNN self-consistency metrics
-            if "sc_info" in all_metrics[pdb]:
-                for k, v in all_metrics[pdb]["sc_info"]["sc_metrics"].items():
-                    # take mean and best across MPNN sequences
-                    best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
-                    metrics_b[f"{cfg.seq_des_cfg.model_name}_{k}_best"].append(best_sc_metric.item())
-
-                    if len(v) > 1:
-                        # only log mean if there are multiple MPNN sequences per backbone
-                        mean_sc_metric = torch.mean(v)
-                        metrics_b[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
-
-            # nnTM metrics
-            if "nntm_info" in all_metrics[pdb]:
-                metrics_b["nntm"].append(all_metrics[pdb]["nntm_info"])
-
-        # Average metrics across samples
-        metrics_b_mean = {f"mean/{k}": np.mean(v) for k, v in metrics_b.items()}
-        metrics_b_median = {f"median/{k}": np.median(v) for k, v in metrics_b.items()}
-
-        bin_to_metrics[bin] = metrics_b_mean
-        bin_to_metrics[bin].update(metrics_b_median)
-
-    # === Calculate mean pairwise TM score by length === #
-    for bin in set(bins):
-        pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if b == bin]
-        coords_b = [load_feats_from_pdb(pdb)["all_atom_positions"] for pdb in pdbs_b]
-        bin_to_metrics[bin]["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(coords_b,
-                                                                                    temp_dir=f"{log_dir}/tmp",
-                                                                                    subsample_pairs=cfg.pairwise_tm_subsample)
-
-    # === Run clustering analysis === #
-    for sctm_cutoff in cfg.clustering.sctm_cutoffs:
-        # Cluster by length bin
-        for bin in set(bins):
-            pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if (b == bin) and ("sc_info" in all_metrics[pdb])]
-            if len(pdbs_b) == 0:
-                # skip if we don't have self-consistency info for any samples in this bin
-                continue
-
-            # Cluster only on designable samples (scTM > sctm_cutoff)
-            designable_pdbs = [pdb for pdb in pdbs_b if (all_metrics[pdb]["sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff).any()]
-            bin_to_metrics[bin][f"{cfg.seq_des_cfg.model_name}_sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
-
-            cluster_out_dir = Path(f"{log_dir}/clustering/bin{bin}_sctm{sctm_cutoff}")
-            bin_to_metrics[bin][f"{cfg.seq_des_cfg.model_name}_sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(
-                designable_pdbs,
-                cluster_out_dir,
-                f"{log_dir}/tmp",
-                **cfg.clustering.foldseek_opts
-            )
-
-
-    # === Compute KL(p||q) for secondary structure distributions === #
-    if cfg.ss_kld.dssp_csv is not None:
-        dssp_df = pd.read_csv(cfg.ss_kld.dssp_csv)
-        dssp_df["% Helix"] = dssp_df["% Helix"] * 100
-        dssp_df["% Strand"] = dssp_df["% Strand"] * 100
-        for bin in set(bins):
-            pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if b == bin]
-            dssp_df_b = dssp_df[(bin <= dssp_df["length"]) & (dssp_df["length"] <= bin + cfg.length_bin_size)]
-            ss_info_df_b = pd.DataFrame([all_metrics[pdb]["ss_info"] for pdb in pdbs_b], index=pdbs_b)
-
-            p_alpha, p_beta = dssp_df_b["% Helix"].tolist(), dssp_df_b["% Strand"].tolist()
-            q_alpha, q_beta = ss_info_df_b["pct_alpha"].tolist(), ss_info_df_b["pct_beta"].tolist()
-            bin_to_metrics[bin]["ss_kld"] = eval_metrics.compute_ss_kl(p_alpha, p_beta, q_alpha, q_beta,
-                                                                    bin_size=cfg.ss_kld.bin_size, pseudocount=cfg.ss_kld.pseudocount)
-
-
-    ### SAVE METRICS ###
-    # Save metrics to pickle file
-    with open(f"{log_dir}/all_metrics.pkl", "wb") as f:
-        pickle.dump(all_metrics, f)
-
-    with open(f"{log_dir}/L_to_metrics.pkl", "wb") as f:
-        pickle.dump(bin_to_metrics, f)
-
-    # Set up wandb logging
+    # Finish wandb logging
     if not cfg.wandb.no_wandb:
-        # Create wandb dir
-        wandb_dir = str(Path(log_dir))
-        Path(wandb_dir, "wandb").mkdir(parents=True, exist_ok=True)
-
-        # Set wandb cache directory
-        wandb_cache_dir = str(Path(log_dir, "cache", "wandb"))
-        os.environ["WANDB_CACHE_DIR"] = wandb_cache_dir
-
-        wandb.init(
-            project=cfg.wandb.project,
-            entity=cfg.wandb.wandb_id,
-            name=cfg.exp_name,
-            group=cfg.wandb.group,
-            config=cfg_dict,
-            dir=wandb_dir,
-        )
-
-        # Log metrics
-        for bin in sorted(bin_to_metrics.keys()):
-            metrics_b = bin_to_metrics[bin]
-            metrics_b["length_bin"] = bin
-            wandb.log(metrics_b, step=bin)
-
         wandb.finish()
+
 
 
 if __name__ == "__main__":

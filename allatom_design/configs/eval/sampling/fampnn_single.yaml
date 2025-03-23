@@ -24,7 +24,7 @@ seq_des_cfg:
   model_name: "fampnn"
   fampnn:
     fampnn_cfg: allatom_design/configs/seq_des/fampnn_inference.yaml
-    fampnn_ckpt: /media/scratch/huang_lab/allatom_design/allatom_design/c2_aasd2/post_hoc_ema_ckpts/ema-step300000-std0.220.ckpt
+    fampnn_ckpt: /media/scratch/huang_lab/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt
     overrides: ${sampling_cfg_overrides}
 
 # Structure prediction model args

@@ -69,8 +69,8 @@ def compute_per_pdb_info(pdbs: list[str],
         for pdb, info in nntm_info.items():
             per_pdb_info[pdb]["nntm_info"] = info
 
-    ### Aggregate per-pdb metrics to map from {metric key: list of values} ###
-    sample_metrics = defaultdict(list)
+    ### Aggregate per-pdb metrics ###
+    sample_metrics = defaultdict(list)  # maps from {metric key: list of values across all PDBs}
     for pdb in per_pdb_info:
         # secondary structure metrics
         for k, v in per_pdb_info[pdb]["ss_info"].items():
