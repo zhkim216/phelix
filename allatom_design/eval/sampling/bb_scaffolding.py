@@ -50,66 +50,25 @@ def main(cfg: DictConfig):
     sampled_pdb_paths = run_backbone_scaffolding(bb_gen_model["model"], bb_gen_model["sampling_cfg"], device, motif_info_df, log_dir)
 
     ### CALCULATE STRUCTURE METRICS ###
-    all_metrics = defaultdict(dict)
-    pdbs = sampled_pdb_paths
-
-    # Get secondary structure info
-    ss_info = eval_metrics.compute_secondary_structure_content(pdbs)
-    for pdb, v in ss_info.items():
-        all_metrics[pdb]["ss_info"] = v
-
-    # Run MPNN + structure prediction self-consistency evals
+    # Load in MPNN + structure prediction model for self-consistency evals
     seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
     struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
-    sc_info = eval_metrics.run_self_consistency_eval(pdbs,
-                                                    seq_des_model,
-                                                    struct_pred_model,
-                                                    device,
-                                                    out_dir=log_dir,
-                                                    temp_dir=f"{log_dir}/tmp")
-    for pdb, v in sc_info.items():
-        all_metrics[pdb]["sc_info"] = v
 
-    # Run nnTM evaluation
-    if cfg.nntm_dataset is not None:
-        nntm_info = eval_metrics.run_nntm_eval(pdbs, dataset=cfg.nntm_dataset, out_dir=log_dir)
+    per_pdb_info, sample_metrics = eval_metrics.compute_per_pdb_info(sampled_pdb_paths, seq_des_model, struct_pred_model, device,
+                                                                     out_dir=log_dir, temp_dir=f"{log_dir}/tmp",
+                                                                     nntm_dataset=cfg.nntm_dataset)
 
-        for pdb, v in nntm_info.items():
-            all_metrics[pdb]["nntm_info"] = v
+    # Save per-pdb info to pt file
+    torch.save(per_pdb_info, f"{log_dir}/per_pdb_info.pt")
 
-
-    ### SAVE METRICS ###
-    # Save all metrics to pt file
-    torch.save(all_metrics, f"{log_dir}/all_metrics.pt")
-
-    # Aggregate per-pdb metrics
-    sample_metrics = defaultdict(list)
-    for pdb in pdbs:
-        # secondary structure metrics
-        for k, v in ss_info[pdb].items():
-            sample_metrics[f"{k}"].append(v)
-
-        # self-consistency metrics
-        for k, v in sc_info[pdb]["sc_metrics"].items():
-            # take mean and best across MPNN sequences
-            best_sc_metric = max(v, key=eval_metrics.get_sort_key_fn(k))
-            sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_best"].append(best_sc_metric.item())
-
-            if len(v) > 1:
-                # only report mean if we run multiple sequences per sample
-                sample_metrics[f"{cfg.seq_des_cfg.model_name}_{k}_mean"].append(mean_sc_metric.item())
-                mean_sc_metric = torch.mean(v)
-
-        # nntm metrics
-        if cfg.nntm_dataset is not None:
-            sample_metrics["nntm"].append(nntm_info[pdb])
-
-    # === Calculate metrics to log === #
+    # === Calculate a scalar for each metric to log === #
     metrics = {}
-    metrics.update({f"bb_gen/mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
-    metrics.update({f"bb_gen/median/{k}": np.median(v) for k, v in sample_metrics.items()})
+    metrics.update({f"mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
+    metrics.update({f"median/{k}": np.median(v) for k, v in sample_metrics.items()})
 
     # Log metrics to wandb
+    metrics = {f"scaffold/{k}": v for k, v in metrics.items()}
+    torch.save(metrics, f"{log_dir}/metrics.pt")
     if not cfg.wandb.no_wandb:
         wandb.log(metrics)
 

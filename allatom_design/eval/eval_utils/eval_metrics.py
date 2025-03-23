@@ -28,7 +28,110 @@ from allatom_design.eval.eval_utils.fampnn_utils import run_fampnn
 from allatom_design.eval.eval_utils.folding_utils import (run_af2, run_esmfold_batched,
                                                run_omegafold)
 from allatom_design.eval.eval_utils.proteinmpnn_utils import run_mpnn
-from ligandmpnn.model_utils import ProteinMPNN
+
+
+def compute_per_pdb_info(pdbs: list[str],
+                         seq_des_model: dict[str, Any] | None,
+                         struct_pred_model: dict[str, Any],
+                         device: torch.device,
+                         out_dir: str,
+                         temp_dir: str | None = None,
+                         sc_kwargs: dict[str, Any] = {},
+                         nntm_dataset: str | None = None,
+                         ) -> tuple[dict[str, dict[str, TensorType]], dict[str, list[float]]]:
+    """
+    Compute per-PDB info for a set of PDBs.
+
+    Returns:
+    - per_pdb_info: maps from PDB path to various per-PDB info, including:
+        - ss_info: secondary structure info
+        - sc_info: self-consistency info
+        - nntm_info: nnTM info
+
+    - sample_metrics: maps from metric key to list of values across all PDBs
+    """
+    per_pdb_info = defaultdict(dict)
+
+    ### Compute per-PDB info ###
+    # Run self-consistency evaluation
+    sc_info = run_self_consistency_eval(pdbs, seq_des_model, struct_pred_model, device, out_dir, temp_dir, **sc_kwargs)
+    for pdb, info in sc_info.items():
+        per_pdb_info[pdb]["sc_info"] = info
+
+    # Get secondary structure info
+    ss_info = compute_secondary_structure_content(pdbs)
+    for pdb, info in ss_info.items():
+        per_pdb_info[pdb]["ss_info"] = info
+
+    # Run nnTM evaluation
+    if nntm_dataset is not None:
+        nntm_info = run_nntm_eval(pdbs, dataset=nntm_dataset, out_dir=out_dir)
+        for pdb, info in nntm_info.items():
+            per_pdb_info[pdb]["nntm_info"] = info
+
+    ### Aggregate per-pdb metrics to map from {metric key: list of values} ###
+    sample_metrics = defaultdict(list)
+    for pdb in per_pdb_info:
+        # secondary structure metrics
+        for k, v in per_pdb_info[pdb]["ss_info"].items():
+            sample_metrics[k].append(v)
+
+        # self-consistency metrics
+        for k, v in per_pdb_info[pdb]["sc_info"]["sc_metrics"].items():
+            # seq_des_model_prefix = seq_des_model["model_name"] if seq_des_model is not None else ""
+            seq_des_model_prefix = f"{seq_des_model['model_name']}_" if seq_des_model is not None else ""
+            best_sc_metric = max(v, key=get_sort_key_fn(k))
+            sample_metrics[f"{seq_des_model_prefix}{k}_best"].append(best_sc_metric.item())
+
+            if len(v) > 1:
+                # only report mean if we run multiple sequences per sample
+                mean_sc_metric = torch.mean(v)
+                sample_metrics[f"{seq_des_model_prefix}{k}_mean"].append(mean_sc_metric.item())
+
+        # nntm metrics
+        if nntm_dataset is not None:
+            sample_metrics["nntm"].append(nntm_info[pdb])
+
+    return per_pdb_info, sample_metrics
+
+
+def run_diversity_eval(pdbs: list[str],
+                       per_pdb_info: dict[str, dict[str, TensorType]],
+                       cfg: DictConfig,
+                       out_dir: str) -> dict[str, float]:
+    """
+    Run diversity evaluation on a list of PDBs.
+    Inputs:
+    - pdbs: list of PDB file paths
+    - per_pdb_info: per-PDB info computed by compute_per_pdb_info() for obtaining designable samples
+    - cfg: diversity evaluation config
+    - out_dir: output directory
+
+    Returns:
+    - diversity_metrics: maps from diversity metric key to float value
+    """
+    diversity_metrics = {}
+
+    # === Calculate mean pairwise TM score ===
+    coords = [load_feats_from_pdb(pdb)["all_atom_positions"] for pdb in pdbs]
+    diversity_metrics["pairwise_tm"] = eval_metrics.compute_pairwise_tm_score(
+        coords,
+        temp_dir=f"{out_dir}/tmp",
+        subsample_pairs=cfg.pairwise_tm_subsample,
+    )
+
+    # === Foldseek clustering analysis ===
+    for sctm_cutoff in cfg.clustering.sctm_cutoffs:
+        # Cluster only on designable samples (scTM > sctm_cutoff)
+        designable_pdbs = [pdb for pdb in pdbs if (per_pdb_info[pdb]["sc_info"]["sc_metrics"]["sc_ca_tm"] > sctm_cutoff).any()]
+        diversity_metrics[f"sctm{sctm_cutoff}_nsamples"] = len(designable_pdbs)
+
+        cluster_out_dir = Path(f"{out_dir}/clustering/sctm{sctm_cutoff}")
+        diversity_metrics[f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{out_dir}/tmp",
+                                                                                **cfg.clustering.foldseek_opts)
+        diversity_metrics[f"sctm{sctm_cutoff}_cluster_frac"] = diversity_metrics[f"sctm{sctm_cutoff}_ncluster"] / diversity_metrics[f"sctm{sctm_cutoff}_nsamples"]
+
+    return diversity_metrics
 
 
 def compute_secondary_structure_content(pdbs: List[str]) -> Dict[str, Dict[str, float]]:
