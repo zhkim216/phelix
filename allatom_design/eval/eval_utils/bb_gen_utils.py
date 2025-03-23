@@ -37,9 +37,12 @@ def get_bb_gen_model(cfg: DictConfig, device: str) -> dict[str, Any]:
     sampling_cfg = OmegaConf.load(cfg.sampling_cfg)
     sampling_cfg = OmegaConf.merge(sampling_cfg, cfg.overrides)
     bb_gen_model = {"model": lit_ad_model.model,
-                    "scaffold_manager": get_scaffold_manager(lit_ad_model.cfg.scaffold_manager).eval(),
+                    "scaffold_manager": get_scaffold_manager(lit_ad_model.cfg.scaffold_manager),
                     "sampling_cfg": sampling_cfg,
                     "device": device}
+
+    if bb_gen_model["scaffold_manager"] is not None:
+        bb_gen_model["scaffold_manager"] = bb_gen_model["scaffold_manager"].eval()
 
     return bb_gen_model
 

@@ -12,11 +12,11 @@ exp_name: null  # Wandb exp name
 # Run settings
 overfit: -1 # Number of examples to overfit to, -1 to disable
 cuda: True
-num_workers: 8 # Dataloader num workers
+num_workers: 8  # Dataloader num workers
 
 train:
   seed: 0
-  batch_size: 128
+  batch_size: 128  # multiplied by number of GPUs
   compile_model: false  # Compile the model before running, speeds up training a lot
 
 # Some trainer options
@@ -27,7 +27,7 @@ trainer:
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
-  check_val_every_n_epoch: 5  # How often to run validation
+  check_val_every_n_epoch: 4  # How often to run validation
   reload_dataloaders_every_n_epochs: null  # updated based on data.cluster_sample
 
 # Resuming training options
@@ -38,16 +38,16 @@ resume:
 
 # Data options
 data:
-    pdb_paths: [/data/research/ingraham_cath_dataset] # /media/scratch/datasets/ingraham_cath_dataset
+    pdb_paths: [/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1] # /media/scratch/datasets/ingraham_cath_dataset
     dataset_weights: [1.0]  # probability of selecting each dataset
-    cluster_sample: false  # use cluster sampling for training; must be true for af3 datasets
-    fixed_size: 128
+    cluster_sample: true  # use cluster sampling for training; must be true for af3 datasets
+    fixed_size: 256
     overfit: ${overfit}
-    subset_length_range: null
+    subset_length_range: [32, 256]
     se3_augment: true  # randomly rotate and translate data
     translation_scale: 1.0  # scale of the translation augmentation
-    max_scrmsd: null  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
-    max_rel_rog: null  # subset to only pdbs with relative radius of gyration <= max_rel_rog
+    max_scrmsd: 2.0  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
+    max_rel_rog: 1.4  # subset to only pdbs with relative radius of gyration <= max_rel_rog
     n_train_cluster_resample: 10  # Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
     scaffold_manager_cfg: ${scaffold_manager}
 

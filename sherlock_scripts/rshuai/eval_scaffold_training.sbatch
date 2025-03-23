@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=bb_unconditional
+#SBATCH --job-name=s3_a0_eval_scaffold
 #SBATCH -p possu,bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -33,29 +33,37 @@ AF2_DATA_DIR=/scratch/users/rshuai/model_params/af2
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
-# Dataset paths for certain eval metrics
-NNTM_DATASET=null  # null to disable nntm computation
-DSSP_CSV=null  # null to disable secondary structure KLD computation
+# Denoiser path
+MODEL_NAME=s3_a0
+DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
-# Denoiser checkpoint
-CHECKPOINT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/u1_a7/checkpoints/ema/ad-step1625000-epoch2008-ema0.99.ckpt
+# Input config
+PHASE=eval
+PDB_DIR=/scratch/users/rshuai/datasets/augmented_af3_monomer_v1/esmfold_preds
+PDB_NAME_LIST=/scratch/users/rshuai/datasets/augmented_af3_monomer_v1/${PHASE}_pdb_names.list
+SUBSET_LENGTH_RANGE="[32,256]"
+N_SUBSAMPLE=128
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=u1_a7_bb_unconditional_sherlock
-GROUP=bb_unconditional
+EXP_NAME=${MODEL_NAME}_eval_scaffold_training_sherlock_test
+GROUP=augmented_af3_monomer_v1
 
 # Run eval script
 cd ${BASE_DIR}
-WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/bb_unconditional.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scaffold_training.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
     exp_name=${EXP_NAME} \
-    checkpoint_path=${CHECKPOINT_PATH} \
+    denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     seq_des_cfg.proteinmpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     seq_des_cfg.fampnn.fampnn_ckpt=${FAMPNN_CKPT} \
     seq_des_cfg.fampnn.overrides.noise_labels=${NOISE_LABELS} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
-    nntm_dataset=${NNTM_DATASET} \
-    ss_kld.dssp_csv=${DSSP_CSV} \
+    input_cfg.pdb_dir=${PDB_DIR} \
+    input_cfg.pdb_name_list=${PDB_NAME_LIST} \
+    input_cfg.subset_length_range=${SUBSET_LENGTH_RANGE} \
+    input_cfg.n_subsample=${N_SUBSAMPLE} \
+    start_step=0 \
+    eval_every_n_ckpts=4 \
     hydra.run.dir=${HYDRA_DIR}

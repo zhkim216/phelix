@@ -14,7 +14,7 @@ checkpoint_path: /media/scratch/huang_lab/allatom_design/allatom_design/u1_a7/ch
 seed: 0
 
 # Length parameters
-length_range: [75,374]  # inclusive
+length_range: [75,224]  # inclusive
 length_step_size: 5
 n_samples_per_length: 10
 
@@ -37,7 +37,7 @@ save_traj:
 # Self-consistency evaluation
 sc:
   run_mpnn_sc: true  # run MPNN self-consistency eval
-  bin_range: [225, 374]  # only evaluate structures for length bins that start in this range (inclusive)
+  bin_range: [150, 225]  # only evaluate structures for length bins that start in this range (inclusive)
   max_samples_per_bin: 100  # maximum number of samples to evaluate per length bin
 
 # Dataset for nnTM calculation, path to directory containing PDBs

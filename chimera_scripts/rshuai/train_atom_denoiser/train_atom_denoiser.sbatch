@@ -27,7 +27,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=u1_a7_refactor_test
+EXP_NAME=u1_a7_refactor_test_defaults
 GROUP=augmented_af3_monomer_v1
 
 # Dataset paths
@@ -41,18 +41,11 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb.no_wandb=false \
     out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
-    num_workers=8 \
     data.pdb_paths=[${PDB_PATH}] \
     data.cluster_sample=${CLUSTER_SAMPLE} \
-    data.fixed_size=256 \
-    data.subset_length_range=[32,256] \
-    data.max_scrmsd=2.0 \
-    data.max_rel_rog=1.4 \
-    data.n_train_cluster_resample=10 \
+    denoiser=dit_denoiser \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
     train.batch_size=128 \
     train.compile_model=true \
-    denoiser=dit_denoiser \
-    trainer.check_val_every_n_epoch=4 \
     hydra.run.dir=${HYDRA_DIR}

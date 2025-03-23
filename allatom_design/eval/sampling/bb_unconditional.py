@@ -184,18 +184,19 @@ def main(cfg: DictConfig):
 
 
     # === Compute KL(p||q) for secondary structure distributions === #
-    dssp_df = pd.read_csv(cfg.ss_kld.dssp_csv)
-    dssp_df["% Helix"] = dssp_df["% Helix"] * 100
-    dssp_df["% Strand"] = dssp_df["% Strand"] * 100
-    for bin in set(bins):
-        pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if b == bin]
-        dssp_df_b = dssp_df[(bin <= dssp_df["length"]) & (dssp_df["length"] <= bin + cfg.length_bin_size)]
-        ss_info_df_b = pd.DataFrame([all_metrics[pdb]["ss_info"] for pdb in pdbs_b], index=pdbs_b)
+    if cfg.ss_kld.dssp_csv is not None:
+        dssp_df = pd.read_csv(cfg.ss_kld.dssp_csv)
+        dssp_df["% Helix"] = dssp_df["% Helix"] * 100
+        dssp_df["% Strand"] = dssp_df["% Strand"] * 100
+        for bin in set(bins):
+            pdbs_b = [pdb for pdb, b in zip(pdbs, bins) if b == bin]
+            dssp_df_b = dssp_df[(bin <= dssp_df["length"]) & (dssp_df["length"] <= bin + cfg.length_bin_size)]
+            ss_info_df_b = pd.DataFrame([all_metrics[pdb]["ss_info"] for pdb in pdbs_b], index=pdbs_b)
 
-        p_alpha, p_beta = dssp_df_b["% Helix"].tolist(), dssp_df_b["% Strand"].tolist()
-        q_alpha, q_beta = ss_info_df_b["pct_alpha"].tolist(), ss_info_df_b["pct_beta"].tolist()
-        bin_to_metrics[bin]["ss_kld"] = eval_metrics.compute_ss_kl(p_alpha, p_beta, q_alpha, q_beta,
-                                                                   bin_size=cfg.ss_kld.bin_size, pseudocount=cfg.ss_kld.pseudocount)
+            p_alpha, p_beta = dssp_df_b["% Helix"].tolist(), dssp_df_b["% Strand"].tolist()
+            q_alpha, q_beta = ss_info_df_b["pct_alpha"].tolist(), ss_info_df_b["pct_beta"].tolist()
+            bin_to_metrics[bin]["ss_kld"] = eval_metrics.compute_ss_kl(p_alpha, p_beta, q_alpha, q_beta,
+                                                                    bin_size=cfg.ss_kld.bin_size, pseudocount=cfg.ss_kld.pseudocount)
 
 
     ### SAVE METRICS ###

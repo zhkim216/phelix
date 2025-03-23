@@ -23,10 +23,8 @@ MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
 FAMPNN_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt
 NOISE_LABELS=0.0
 
-# Set HF transformers cache
-export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
-
-cd ${BASE_DIR}
+# Structure prediction model params
+AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -39,9 +37,10 @@ DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_eval_bb_gen_refactor_test
-GROUP=af3_monomer
+GROUP=augmented_af3_monomer_v1
 
 # Run eval script
+cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_bb_gen_training.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
