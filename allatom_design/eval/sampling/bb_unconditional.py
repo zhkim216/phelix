@@ -147,11 +147,11 @@ def main(cfg: DictConfig):
                 metrics_b["nntm"].append(all_metrics[pdb]["nntm_info"])
 
         # Average metrics across samples
-        metrics_b_avg = {}
-        for k, v in metrics_b.items():
-            metrics_b_avg[k] = np.mean(v)
+        metrics_b_mean = {f"mean/{k}": np.mean(v) for k, v in metrics_b.items()}
+        metrics_b_median = {f"median/{k}": np.median(v) for k, v in metrics_b.items()}
 
-        bin_to_metrics[bin] = metrics_b_avg
+        bin_to_metrics[bin] = metrics_b_mean
+        bin_to_metrics[bin].update(metrics_b_median)
 
     # === Calculate mean pairwise TM score by length === #
     for bin in set(bins):

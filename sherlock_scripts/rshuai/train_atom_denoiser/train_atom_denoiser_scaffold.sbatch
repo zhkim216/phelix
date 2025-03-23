@@ -38,7 +38,7 @@ PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v1
 CLUSTER_SAMPLE=true
 
 # Run training script
-WANDB__SERVICE_WAIT=300 srun python3 allatom_design/train_atom_denoiser.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
     wandb.no_wandb=false \
