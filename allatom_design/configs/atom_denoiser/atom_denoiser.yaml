@@ -1,19 +1,22 @@
 # Wandb configuration
-project: "allatom_design"  # Wandb project name
-wandb_id: null  # Wandb username
-exp_name: null # Wandb exp name
-group: "debug" # Wandb group name
+wandb:
+  no_wandb: false  # Disable wandb logging
+  project: "allatom_design"  # Wandb project name
+  wandb_id: "richardshuai"  # Wandb username
+  group: "debug" # Wandb group name
+
+# Outputs
+out_dir: "out_dir/train_atom_denoiser"  # Output path for trained models
+exp_name: null  # Wandb exp name
 
 # Run settings
-no_wandb: false # Disable wandb logging
 overfit: -1 # Number of examples to overfit to, -1 to disable
 cuda: True
-num_workers: 10 # Dataloader num workers
-out_dir: "out_dir/train_atom_denoiser"  # Output path for trained models
+num_workers: 8  # Dataloader num workers
 
 train:
   seed: 0
-  batch_size: 8
+  batch_size: 128  # multiplied by number of GPUs
   compile_model: false  # Compile the model before running, speeds up training a lot
 
 # Some trainer options
@@ -24,7 +27,8 @@ trainer:
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
-  check_val_every_n_epoch: 50  # How often to run validation
+  check_val_every_n_epoch: 4  # How often to run validation
+  reload_dataloaders_every_n_epochs: null  # updated based on data.cluster_sample
 
 # Resuming training options
 resume:
@@ -34,44 +38,50 @@ resume:
 
 # Data options
 data:
-    pdb_path: /data/research/ingraham_cath_dataset # /media/scratch/datasets/ingraham_cath_dataset
-    designability_csv: /data/research/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv # /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
-    fixed_size: 128
+    pdb_paths: [/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1] # /media/scratch/datasets/ingraham_cath_dataset
+    dataset_weights: [1.0]  # probability of selecting each dataset
+    cluster_sample: true  # use cluster sampling for training; must be true for af3 datasets
+    fixed_size: 256
     overfit: ${overfit}
-    short_epoch: false
-    n_random_subset: null
+    subset_length_range: [32, 256]
     se3_augment: true  # randomly rotate and translate data
-    translation_scale: 0.0  # scale of the translation augmentation
-    overwrite_cache: false  # overwrite the cached dataset
-    afdb_res_plddt_cutoff: 0  # 0-100, only keep residues with pLDDT >= cutoff
+    translation_scale: 1.0  # scale of the translation augmentation
+    max_scrmsd: 2.0  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
+    max_rel_rog: 1.4  # subset to only pdbs with relative radius of gyration <= max_rel_rog
+    n_train_cluster_resample: 10  # Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
+    scaffold_manager_cfg: ${scaffold_manager}
 
 # Model options
 defaults:
   - _self_
-  - denoiser: u_dit_denoiser
-  - sd_interpolant: mar_interpolant
+  - denoiser: dit_denoiser
+  - scaffold_manager: unconditional
 
 model:
-  task: "backbone"  # "backbone"
-  override_sigma_data: [9.6, 0.66]  # override sigma data for [backbone, sidechain]
+  task: "backbone"  # "backbone", "scaffold"
+  sigma_data: 10  # backbone sigma data
   eps: 1.0e-8
   inf: 1.0e9
+  n_aatype: 21
   denoiser: ${denoiser}
-  sd_interpolant: ${sd_interpolant}
+  ema:
+    use_phema: false  # use post-hoc EMA
+    ema_decay: 0.99  # if not using phema, use this decay rate
 
 eval:
   eval_timesteps_bb: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]  # backbone timesteps to evaluate at
-  eval_timesteps_seq: []  # seq timesteps to evaluate at
-
 
 loss:
   task: ${model.task}
   loss_weights:
     bb:
       mse_loss: 1.0
+    scaffold:
+      # if task is scaffolding, use a separate loss to reconstruct scaffold
+      mse_loss: 0.0
 
 optim:
-  optimizer: "adamw"
+  optimizer: "adam_inv_sqrt"
   adamw:
     lr: 1.0e-4
     warmup_steps: 1000
@@ -89,9 +99,9 @@ logging:
   wandb_watch_freq: 5000  # Log gradients every n steps
 
 checkpointing:
-  save_latest_every_n_steps: 50000  # Save the full model every n steps
-  save_ema_every_n_steps: 20000  # Save the EMA model every n steps
-  save_top_k: 1
+  save_latest_every_n_steps: 25000  # Save the model every n steps
+  save_for_resuming_every_n_epochs: 100  # Keep 1 latest copy of the model every n epochs, for resuming
+  save_phema_every_n_steps: 20000  # If using post-hoc EMA, save snapshot every n steps
 
 hydra:
   run:

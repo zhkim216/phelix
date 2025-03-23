@@ -1,101 +1,85 @@
 # Wandb configuration
-project: "allatom_design"  # Wandb project name
-wandb_id: "richardshuai"  # Wandb username
-exp_name: null  # Wandb exp name
-group: "eval_bb_gen_debug" # Wandb group name
+wandb:
+  no_wandb: false  # Disable wandb logging
+  project: "allatom_design"  # Wandb project name
+  wandb_id: "richardshuai"  # Wandb username
+  group: "debug" # Wandb group name
+
+# Outputs
+exp_name: null  # experiment name; used for wandb and output directory
+base_out_dir: ${denoiser_train_dir}/eval_bb_gen_training  # outputs will be saved to base_out_dir/exp_name
 
 # Run settings
-no_wandb: false  # Disable wandb logging
 seed: 0
 start_step: 0  # start evaluation after this epoch, 0 or null to start from the beginning
+end_step: null  # end evaluation after this epoch (inclusive), null to evaluate until the end
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
-batch_size: 32
-num_workers: 10
+compute_diversity_metrics: true  # whether to compute pairwise TM and clustering metrics
 
 # Denoiser options
 denoiser_train_dir:
-out_dir: ${denoiser_train_dir}/eval_bb_gen_training
-
-# Data options for overriding denoiser config (null values default to denoiser config)
-data:
-    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    designability_csv: /media/scratch/datasets/ingraham_cath_dataset/all_esmfold_native_with_cath_gapped_with_tm_with_seq.csv
-    n_random_subset: null
 
 # Sampling run parameters
-length_range: [64, 128]
-length_step_size: 8
-n_samples_per_length: 2
+length_range: [32, 256]
+length_step_size: 4
+n_samples_per_length: 8
 
 # Backbone generation options
-cond_labels: null
-
-num_steps_list: [500]  # number of diffusion steps for backbone generation
-num_steps: null  # filled in based on num_steps_list
-
-timestep_schedule:
-  num_steps: ${num_steps}
-  mode: "linear"
-  t_start: 0.0
-  t_end: 1.0
-noise_schedule:
-  name: "linear"
-churn_cfg:
-  s_churn: 0
-  s_noise: 1.0
-  s_t_min: 0.01
-  s_t_max: 50.0
-  num_steps: ${num_steps}
-s_max_override: null  # if not null, override s_max in interpolant
-
-autoguidance_cfg:
-  use_autoguidance: false
-  w: 1.0
-
-# MPNN args
-mpnn:
-  mpnn_cfg: allatom_design/configs/mpnn/proteinmpnn.yaml
-  mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
+bb_gen_cfg:
+  ckpt_path: null  # overridden with training checkpoint paths
+  sampling_cfg: allatom_design/configs/bb_gen/bb_sampling_base.yaml
   overrides:
-    # num seqs per structure will be batch_size * number_of_batches
-    batch_size: 1
-    number_of_batches: 1
-    verbose: false
+    num_steps: 500
 
-# Pairwise TM-scores
-pairwise_tm_subsample: 2000  # number of pairs to subsample
+# Sequence design config
+seq_des_cfg:
+  # MPNN args
+  model_name: "proteinmpnn"  # ["proteinmpnn", "fampnn"]
+  proteinmpnn:
+    mpnn_cfg: allatom_design/configs/seq_des/proteinmpnn.yaml
+    mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
+    overrides:
+      # for proteinmpnn, num seqs per structure will be batch_size * number_of_batches
+      batch_size: 1
+      number_of_batches: 1
+      verbose: false
+  fampnn:
+    # FAMPNN args
+    fampnn_cfg: allatom_design/configs/seq_des/fampnn_inference.yaml
+    fampnn_ckpt: /media/scratch/huang_lab/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt
+    overrides:
+      batch_size: 16
+      num_seqs_per_pdb: 1
+      num_steps: 50
+      noise_labels: 0.0
 
-# Foldseek clustering analysis
-clustering:
-  sctm_cutoffs: [0.7, 0.8]
-  foldseek_opts:
-    alignment_type: 0  # 0 for structure-only
-    tmscore_threshold: 0.5
-    c: 0.0
-    s: 7.5
-    cluster_reassign: true
+# Diversity evaluation config
+diversity_eval:
+  # Pairwise TM-scores
+  pairwise_tm_subsample: 2000  # number of pairs to subsample
+
+  # Foldseek clustering analysis
+  clustering:
+    sctm_cutoffs: [0.7, 0.8]
+    foldseek_opts:
+      alignment_type: 0  # 0 for structure-only
+      tmscore_threshold: 0.5
+      c: 0.0
+      s: 7.5
+      cluster_reassign: true
 
 # Structure prediction model args
 struct_pred_cfg:
-  model_name: "esmfold"  # ["esmfold", "af2", "omegafold"]
+  model_name: "esmfold"
+  base_cfg: allatom_design/configs/struct_pred/struct_pred_base.yaml
+  # overrides to base config
   af2:
-    data_dir: /media/scratch/huang_lab/af2  # directory containing "params/" with af2 model params
-    num_models: 1  # only 1 model is currently supported
-    sample_models: true  # randomly sample models from the ensemble
-    num_recycles: 3
-    use_multimer: false
+    data_dir: /media/scratch/huang_lab/af2
   esmfold:
     max_tokens_per_batch: 1024
-  omegafold:
-    num_pseudo_msa: 15
-    mask_rate: 0.12
-    num_recycle: 2  # performance saturates after around 10 recycles
-    deterministic: true
-    subbatch_size: null
-    cache_file: /media/scratch/huang_lab/cache/omegafold/omegafold.pt
 
 # Dataset for nnTM calculation, path to directory containing PDBs, null to skip nnTM calculation
-nntm_dataset: /media/scratch/datasets/ingraham_cath_dataset/pdb_store_renumbered
+nntm_dataset: null
 
 hydra:
   run:

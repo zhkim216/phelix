@@ -9,10 +9,11 @@ from einops import rearrange
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import DictConfig
 from torch.optim import Adam, AdamW
-from torch.optim.lr_scheduler import LinearLR, LRScheduler
+from torch.optim.lr_scheduler import LinearLR
 from torchtyping import TensorType
 
-from allatom_design.model.phema import PowerFunctionEMA
+from allatom_design.model.lr_schedule import InverseSqrtLR, NoamLR
+from allatom_design.model.ema.phema import PowerFunctionEMA
 from allatom_design.model.seq_denoiser.sd_loss import SDLoss
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 
@@ -27,8 +28,10 @@ class LitSeqDenoiser(L.LightningModule):
             print(f"Using torch.compile to optimize model performance...")
             self.model = torch.compile(self.model)
 
-        # Initialize EMA tracker after torch.compile
-        self.ema_tracker = PowerFunctionEMA(self.model)
+        self.use_phema = cfg.model.get("ema", {}).get("use_phema", True)
+        if self.use_phema:
+            # Use EDM2 post-hoc EMA
+            self.ema_tracker = PowerFunctionEMA(self.model)
 
         # Set up loss
         self.loss = SDLoss(cfg.loss)
@@ -45,9 +48,11 @@ class LitSeqDenoiser(L.LightningModule):
     def forward(self, batch, **kwargs):
         return self.model(batch, **kwargs)
 
+
     def on_train_start(self):
-        # Initialize EMA trackers at the start of training
-        self.ema_tracker.reset()
+        # Initialize EMA trackers at the start of training (if using phema)
+        if self.use_phema:
+            self.ema_tracker.reset()
 
 
     def training_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int):
@@ -62,8 +67,9 @@ class LitSeqDenoiser(L.LightningModule):
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         if (batch_idx + 1) % self.trainer.accumulate_grad_batches == 0:
-            # Update EMA tracker
-            self.ema_tracker.update(t=self.trainer.global_step)
+            if self.use_phema:
+                # Update EMA tracker
+                self.ema_tracker.update(t=self.trainer.global_step)
 
 
     def validation_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
@@ -170,34 +176,3 @@ class LitSeqDenoiser(L.LightningModule):
             if total_norm_key in grad_norms:
                 total_norm = grad_norms[total_norm_key]
                 self.log_dict({f"total_l{norm_type}_grad_norm": total_norm})
-
-
-class NoamLR(LRScheduler):
-    def __init__(self, optimizer, model_size, factor, warmup, last_epoch=-1):
-        self.model_size = model_size
-        self.factor = factor
-        self.warmup = warmup
-        super().__init__(optimizer, last_epoch)
-
-    def get_lr(self):
-        step = max(self.last_epoch, 1)
-        rate = self.factor * (self.model_size ** (-0.5) * min(step ** (-0.5), step * self.warmup ** (-1.5)))
-        return [rate for _ in self.base_lrs]
-
-
-class InverseSqrtLR(LRScheduler):
-    def __init__(self, optimizer, ref_lr: float, ref_steps: int, warmup_steps: int, last_epoch=-1):
-        self.ref_lr = ref_lr
-        self.ref_steps = ref_steps
-        self.warmup_steps = warmup_steps
-        super().__init__(optimizer, last_epoch)
-
-    def get_lr(self):
-        step = max(self.last_epoch, 1)
-        lr = self.ref_lr
-        if self.ref_steps > 0:
-            lr /= np.sqrt(max(step / self.ref_steps, 1))
-        if self.warmup_steps > 0:
-            lr *= min(step / self.warmup_steps, 1)
-
-        return [lr for _ in self.base_lrs]

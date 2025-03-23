@@ -13,9 +13,8 @@ from torchtyping import TensorType
 import allatom_design.data.residue_constants as rc
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
 from allatom_design.data import life
-from allatom_design.data.data import (cat_bb_scn, get_rc_tensor,
-                                      transform_sidechain_frame)
-from allatom_design.eval import sampling_utils
+from allatom_design.data.data import get_rc_tensor, transform_sidechain_frame
+from allatom_design.eval.eval_utils import sampling_utils
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
@@ -23,9 +22,9 @@ from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     FinalLayer
-from allatom_design.model.atom_denoiser.denoisers.dit_utils import \
+from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.dit_utils import \
     DenoisingMLPBlock
-from allatom_design.model.atom_denoiser.denoisers.timestep_embedders import \
+from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.timestep_embedders import \
     TimestepEmbedder
 from allatom_design.model.seq_denoiser.denoisers.sidechain_diffusion.sidechain_confidence import \
     SidechainConfidenceModule
@@ -99,6 +98,7 @@ class SidechainDiffusionModule(nn.Module):
             # Noise the ground truth local sidechains
             interpolant_out = self.scn_interpolant({"x": x_scn_local_gt_batched, "aatype": aatype_batched}, t=t_sd_batched)
             xt_scn_local_batched = interpolant_out["x_noised"]
+            x_scn_target_batched = interpolant_out["x_target"]
             t_batched = interpolant_out["t"]
             loss_weight_t_batched = interpolant_out["loss_weight_t"]
 
@@ -136,7 +136,7 @@ class SidechainDiffusionModule(nn.Module):
                     "psce": psce,
                     "sce_bins_cfg": self.confidence_module.sce_bins_cfg,
                     "scn_pred_rollout": x1_scn_local_rollout,  # compute loss in local frame
-                    "scn_target": x_scn_local_gt,
+                    "scn_target": x_scn_local_gt,  # compare rollout against ground truth
                     "bb_frames_exists": bb_frames_exists,
                 }
 
@@ -145,7 +145,7 @@ class SidechainDiffusionModule(nn.Module):
 
             # Cache intermediates for computing loss
             diffusion_aux["scn_pred"] = x1_scn_local_batched
-            diffusion_aux["scn_target"] = x_scn_local_gt_batched
+            diffusion_aux["scn_target"] = x_scn_target_batched  # diffusion target; for edm this is just the ground truth coordinates
             diffusion_aux["loss_weight_t"] = loss_weight_t_batched
             diffusion_aux["bb_frames_exists"] = bb_frames_exists_batched  # don't compute loss if bb frame doesn't exist
 
@@ -404,7 +404,7 @@ class SidechainMLP(nn.Module):
         x = x * seq_mask[..., None]  # zero out padding positions
 
         # Reshape back to coordinates
-        x = rearrange(x, "b n (a x) -> b n a x", x=3)
+        x = rearrange(x, "b n (a x) -> b n a x", x=3).float()
         x_scn = precondition_out(x)  # output preconditioning on sidechains
 
         return x_scn, aux_preds

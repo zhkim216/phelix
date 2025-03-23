@@ -7,10 +7,14 @@ defaults:
 task: ${model.task}
 drop_residx_p: 0.0
 
-esm_c:
-  use_esm_c: false
-  model_name: "esmc_300m"  # esmc_600m
+# Backbone noise options
+augment_eps: 0.0
+per_residue_eps: false
+max_eps: null  # for per_residue_eps, samples from half-normal truncated to this value
 
+esm:
+  use_esmc: false
+  model_name: "esmc_300m"  # esmc_600m
 
 fampnn:
   n_aatype: ${model.n_aatype}
@@ -18,16 +22,12 @@ fampnn:
   n_channel: 128
   n_layers: 3
   k_neighbors: 48
+  ablate_noise_labels: false
+  init_hV_with_hS: true
 
   model_type: "sidechain"
   dropout_p: 0.1
   return_embedding: "last"
-
-  # Backbone noise options
-  augment_eps: 0.0
-  per_residue_eps: false
-  max_eps: null  # for per_residue_eps, samples from half-normal truncated to this value
-  ablate_noise_labels: false
 
   gvp:
     out_dim: ${model.denoiser.fampnn.n_channel}
@@ -57,7 +57,6 @@ scn_diffusion_module:
   use_self_conditioning: true
   self_cond_p: 0.5
   training_batch_size_mult: 8  # batch size multiplier for diffusion module
-  translation_scale: ${data.translation_scale}
 
   scn_denoiser:
     num_atoms_in: ${model.num_atoms_in}

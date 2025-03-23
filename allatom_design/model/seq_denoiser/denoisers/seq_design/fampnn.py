@@ -4,8 +4,6 @@ from typing import Optional, Union
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from einops import rearrange
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
@@ -31,15 +29,10 @@ class FAMPNN(nn.Module):
         self.num_encoder_layers = cfg.n_layers
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
-
-        # Backbone noise options
-        self.augment_eps = cfg.augment_eps
-        self.per_residue_eps = cfg.get("per_residue_eps", False)
-        self.max_eps = getattr(cfg, "max_eps", None)
         self.ablate_noise_labels = getattr(cfg, "ablate_noise_labels", False)
+        self.init_hV_with_hS = getattr(cfg, "init_hV_with_hS", False)
 
-        self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors,
-                                        per_residue_eps=self.per_residue_eps, augment_eps=self.augment_eps, max_eps=self.max_eps)
+        self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
         self.W_s = nn.Embedding(self.n_aatype, self.hidden_dim)
         self.dropout = nn.Dropout(cfg.dropout_p)
@@ -90,8 +83,11 @@ class FAMPNN(nn.Module):
         atom_mask_noised: TensorType["b n a", float],  # denotes missing, ghost, and masked atoms
         residue_index: TensorType["b n", int],
         chain_encoding: TensorType["b n", int],
+        noise: Optional[TensorType["b n a x", float]] = None,  # amount of noise to add to each atom
         noise_labels: Optional[Union[float, TensorType["b n"]]] = None,
-        h_V_init: Optional[TensorType["b n h"]] = None):
+        h_S_init: Optional[TensorType["b n h"]] = None,
+        return_encoder_embeds: bool = False,
+        ):
 
         B, N, _, _ = denoised_coords.shape
         S = aatype_noised
@@ -100,18 +96,33 @@ class FAMPNN(nn.Module):
         X, atom14_mask = atom37_to_atom14(aatype_noised, denoised_coords, atom37_mask=atom_mask_noised)
         X = torch.where(atom14_mask[..., None].bool(), X, X[..., 1:2, :])  # replace missing/ghost/masked atoms with CA
 
-        # Prepare node and edge embeddings
-        E, E_idx, X, noise_labels = self.features(X, seq_mask, residue_index, chain_encoding, noise_labels)
+        # Add noise to input coordinates
+        if noise is not None:
+            X = X + noise
+        if noise_labels is None:
+            # assume 0 noise if not provided
+            noise_labels = torch.zeros_like(seq_mask)
+        elif isinstance(noise_labels, float):
+            # assume constant noise if provided as float
+            noise_labels = torch.ones_like(seq_mask) * noise_labels
 
-        #h_V is size [B,N,H]
-        if h_V_init is None:
-            h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
+        # Prepare node and edge embeddings
+        E, E_idx, X = self.features(X, seq_mask, residue_index, chain_encoding)
+
+        h_S = self.W_s(aatype_noised)  # [B, N, H]
+        if h_S_init is not None:
+            # add h_S_init to h_S
+            h_S = h_S + h_S_init
+
+        if self.init_hV_with_hS:
+            # Initialize h_V with sequence embeddings
+            h_V = h_S
         else:
-            h_V = h_V_init
+            h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
 
         h_E = self.W_e(E)
 
-        if self.per_residue_eps and (self.augment_eps > 0) and not self.ablate_noise_labels:
+        if not self.ablate_noise_labels:
             # add noise label to last dimension of h_V
             h_V[..., -1] = h_V[..., -1] + noise_labels
 
@@ -134,7 +145,6 @@ class FAMPNN(nn.Module):
         mask_fw = mask_1D * (1. - mask_attend)
 
         # Concatenate sequence embeddings to edge embeddings
-        h_S = self.W_s(aatype_noised)
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
 
         # edge embedding of encoder gets zeros for sequence added -> hidden dim = [Enc Embedding + Seq 0s ][128*2]
@@ -187,20 +197,19 @@ class FAMPNN(nn.Module):
             raise ValueError(f'Incorrect return embedding type specified: {self.return_embedding}, must be one of: encoder, decoder, gnn, or last!')
 
         mpnn_feature_dict = {"h_V": h_V_out, "h_ESV": h_ESV, "X": X, "atom14_mask": atom14_mask, "E_idx": E_idx, "S": S, "noise_labels": noise_labels}
+        if return_encoder_embeds:
+            mpnn_feature_dict["h_V_enc"] = h_V_enc
+
         return logits, mpnn_feature_dict
 
 
 class ProteinFeatures(nn.Module):
-    def __init__(self, edge_features, node_features, num_positional_embeddings=16,
-        num_rbf=16, top_k=30, per_residue_eps=False, augment_eps=0., max_eps=None, num_chain_embeddings=16,):
+    def __init__(self, edge_features, node_features, num_positional_embeddings=16, num_rbf=16, top_k=30, num_chain_embeddings=16,):
         """ Extract protein features """
         super(ProteinFeatures, self).__init__()
         self.edge_features = edge_features
         self.node_features = node_features
         self.top_k = top_k
-        self.per_residue_eps = per_residue_eps
-        self.max_eps = max_eps
-        self.augment_eps = augment_eps
         self.num_rbf = num_rbf
         self.num_positional_embeddings = num_positional_embeddings
 
@@ -235,28 +244,7 @@ class ProteinFeatures(nn.Module):
         RBF_A_B = self._rbf(D_A_B_neighbors)
         return RBF_A_B
 
-    def forward(self, X, mask, residue_idx, chain_labels,
-                noise_labels: Optional[Union[float, TensorType["b n"]]]):
-        if self.per_residue_eps:
-            # per-residue noise, based on pseudocode from Cho et al.
-            if self.training and self.augment_eps > 0:
-                # Training: randomly sample noise labels
-                r = torch.randn_like(X)  # random vector for each atom (this might differ from Cho et al.)
-                n = r / torch.norm(r, dim=-1, keepdim=True)
-                s = truncated_half_normal_like(mask, self.augment_eps, self.max_eps) # per-residue noise label
-                noise = n * rearrange(s, "b n -> b n 1 1")
-                noise_labels = torch.abs(s)  # DISCREPANCY: noise labels should be positive
-                X = X + noise
-            elif (noise_labels is None) or (self.augment_eps == 0):
-                # Inference: assume 0 noise if not provided
-                noise_labels = torch.zeros_like(mask)
-            elif isinstance(noise_labels, float):
-                # Inference: constant noise label for every residue
-                noise_labels = torch.ones_like(mask) * noise_labels
-        elif self.training and self.augment_eps > 0:
-            # training: add randomly sampled noise to input
-            X = X + self.augment_eps * torch.randn_like(X)
-
+    def forward(self, X, mask, residue_idx, chain_labels,):
         b = X[:,:,1,:] - X[:,:,0,:]
         c = X[:,:,2,:] - X[:,:,1,:]
         a = torch.cross(b, c, dim=-1)
@@ -305,7 +293,7 @@ class ProteinFeatures(nn.Module):
         E = torch.cat((E_positional, RBF_all), -1)
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
-        return E, E_idx, X, noise_labels
+        return E, E_idx, X
 
 class SidechainProteinFeatures(nn.Module):
     def __init__(self, edge_features, node_features, num_positional_embeddings=16,
@@ -519,15 +507,3 @@ class EncLayer(nn.Module):
         h_E = self.norm3(h_E + self.dropout3(h_message))
 
         return h_V, h_E
-
-
-def truncated_half_normal_like(x: TensorType["...", float],
-                               std: float, max_val: Optional[float]) -> TensorType["...", float]:
-    if max_val is None:
-        # return half-normal with no truncation
-        return torch.abs(torch.randn_like(x) * std)
-    u = torch.rand_like(x)
-    truncated_factor = torch.erf(torch.tensor(max_val / (math.sqrt(2) * std)))
-    u_scaled = u * truncated_factor
-    samples = std * math.sqrt(2) * torch.erfinv(u_scaled)
-    return samples

@@ -1,0 +1,15 @@
+# Example config for the plot_embeddings.py script
+# Adjust paths as needed
+# fpd_embeddings_dir: /scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings
+# sampled_embeddings_dir: /scratch/users/rshuai/allatom_design/allatom_design/ai_baseline_dit_12b/eval_fpd_training/ai_baseline_dit_12b_eval_fpd_training/step_500000
+fpd_embeddings_dir: /media/scratch/datasets/augmented_ingraham_cath_bugfree/fpd_embeddings
+sampled_embeddings_dir: /media/scratch/huang_lab/allatom_design/allatom_design/ai_baseline_dit_12b/eval_fpd_training/ai_baseline_dit_12b_eval_fpd_training/step_500000
+embedding_subdir: "esm3"
+
+raster:
+  plot_raster: false
+  pdb_dir: /media/scratch/datasets/augmented_ingraham_cath_bugfree/all_pdbs/
+  n_grid: 15
+
+# Where to save PCA/UMAP plots
+out_dir: out_dir/test_plot_fpd_embeddings

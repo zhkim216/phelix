@@ -110,7 +110,7 @@ class ConfidenceEncoder(nn.Module):
             self.sidechain_features = SidechainProteinFeatures(node_features=self.node_features,
                                                                edge_features=self.edge_features,
                                                                top_k=self.k_neighbors)
-            self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors, augment_eps=0.0)
+            self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors)
             self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
             self.W_s = nn.Embedding(self.n_aatype, self.hidden_dim)
             self.W_e2 = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
