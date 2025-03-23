@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=u2_a0
-#SBATCH -p bioe
+#SBATCH --job-name=s3_a0_test
+#SBATCH -p possu
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
 #SBATCH --time=96:00:00
@@ -30,17 +30,11 @@ cd ${BASE_DIR}
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
-EXP_NAME=u2_a0
-# GROUP=ai_cath
-GROUP=af3_monomer
+EXP_NAME=s3_a0_test
+GROUP=augmented_af3_monomer_v1
 
 # Dataset paths
-# PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset
-# PDB_PATH=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfree
-# CLUSTER_SAMPLE=false
-# USE_FIRST_SAMPLE=true
-
-PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
+PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v1
 CLUSTER_SAMPLE=true
 
 # Run training script
@@ -50,16 +44,15 @@ WANDB__SERVICE_WAIT=300 srun python3 allatom_design/train_atom_denoiser.py \
     wandb.no_wandb=false \
     out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
-    num_workers=8 \
     data.pdb_paths=[${PDB_PATH}] \
     data.cluster_sample=${CLUSTER_SAMPLE} \
-    data.fixed_size=256 \
-    data.subset_length_range=[32,256] \
-    data.max_scrmsd=2.0 \
-    data.max_rel_rog=1.4 \
-    data.n_train_cluster_resample=10 \
-    train.batch_size=32 \
-    train.compile_model=true \
+    model.task=scaffold \
+    scaffold_manager=scaffold_manager \
     denoiser=dit_denoiser \
-    denoiser.dit.pair_rep.enabled=true \
+    denoiser.scaffold_module.enabled=false \
+    denoiser.dit.scaffolding.use_concat=true \
+    denoiser.dit.depth=15 \
+    denoiser.dit.hidden_size=768 \
+    train.batch_size=64 \
+    train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}

@@ -23,10 +23,8 @@ MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
 FAMPNN_CKPT=/scratch/hielab/rshuai/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt
 NOISE_LABELS=0.0
 
-# Set HF transformers cache
-export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
-
-cd ${BASE_DIR}
+# Structure prediction model params
+AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -40,6 +38,8 @@ DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_
 PHASE=eval
 PDB_DIR=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1/esmfold_preds
 PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1/${PHASE}_pdb_names.list
+SUBSET_LENGTH_RANGE="[32,256]"
+N_SUBSAMPLE=128
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
@@ -47,6 +47,7 @@ EXP_NAME=${MODEL_NAME}_eval_scaffold_training_${PHASE}
 GROUP=eval_scaffold_training
 
 # Run eval script
+cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scaffold_training.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
@@ -58,8 +59,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scaffold_training.py \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
-    input_cfg.subset_length_range=[32,256] \
-    input_cfg.n_subsample=128 \
+    input_cfg.subset_length_range=${SUBSET_LENGTH_RANGE} \
+    input_cfg.n_subsample=${N_SUBSAMPLE} \
     start_step=0 \
     eval_every_n_ckpts=4 \
     hydra.run.dir=${HYDRA_DIR}
