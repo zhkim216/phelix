@@ -1,8 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=u1_a7_sherlock
-#SBATCH -p bioe
-#SBATCH --gpus-per-node=1
-#SBATCH --cpus-per-task=8
+#SBATCH --job-name=u4_a0
+#SBATCH -p possu
+#SBATCH --gpus-per-node=2
+#SBATCH --cpus-per-task=16
+#SBATCH --exclude=sh03-18n05
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -29,11 +30,11 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
 WANDB_ID=richardshuai
-EXP_NAME=u1_a7_sherlock
-GROUP=augmented_af3_monomer_v1
+EXP_NAME=u4_a0
+GROUP=augmented_af3_monomer_v2
 
 # Dataset paths
-PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v1
+PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2
 CLUSTER_SAMPLE=true
 
 # Run training script
