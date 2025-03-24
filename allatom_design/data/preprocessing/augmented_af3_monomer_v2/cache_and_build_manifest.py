@@ -54,7 +54,7 @@ def main(cfg: DictConfig):
     for phase in ["train", "eval", "eval2"]:
         pdb_names = df[df["phase"] == phase]["pdb_name"]
         pdb_names.to_csv(f"{cfg.pdb_path}/{phase}_pdb_names.list", index=False, header=False)
-        print(f"Wrote {phase} pdb names to {cfg.pdb_path}/{phase}_pdb_names.list")
+        print(f"Wrote {len(pdb_names)} {phase} pdb names to {cfg.pdb_path}/{phase}_pdb_names.list")
 
 
 if __name__ == "__main__":
