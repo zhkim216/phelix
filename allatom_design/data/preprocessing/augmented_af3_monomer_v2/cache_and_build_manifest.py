@@ -19,7 +19,6 @@ def main(cfg: DictConfig):
     """
     df = pd.read_csv(cfg.input_pdb_key_csv)
     df["pdb_key"] = df["pdb_name"].apply(lambda x: Path(x).stem)
-
     # Cache examples
     pdb_keys = df["pdb_key"].tolist()
     phases = df["phase"].tolist()
@@ -39,8 +38,9 @@ def main(cfg: DictConfig):
 
     # Build eval2 keys
     train_df = df[df["phase"] == "train"]
-    eval2_df = train_df.sample(n=cfg.n_eval2, random_state=cfg.seed)
-    df.loc[eval2_df.index, "phase"] = "eval2"
+    unique_train_pdb_names = train_df["input_pdb_name"].unique()
+    eval2_input_pdb_names = pd.Series(unique_train_pdb_names).sample(n=cfg.n_eval2, random_state=cfg.seed).tolist()  # sample n_eval2 train input pdb names
+    df.loc[df["input_pdb_name"].isin(eval2_input_pdb_names), "phase"] = "eval2"  # hold out eval2 keys by input pdb name, not just pdb key
 
     # Build manifest
     manifest_df = df.copy()
