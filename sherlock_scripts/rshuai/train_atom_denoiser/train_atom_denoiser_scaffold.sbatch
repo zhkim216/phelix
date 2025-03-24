@@ -1,8 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=s3_a0_test
+#SBATCH --job-name=s4_a1
 #SBATCH -p possu
-#SBATCH --gpus-per-node=2
-#SBATCH --cpus-per-task=16
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --exclude=sh03-18n05
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -29,11 +30,11 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
 WANDB_ID=richardshuai
-EXP_NAME=s3_a0_test
-GROUP=augmented_af3_monomer_v1
+EXP_NAME=s4_a1
+GROUP=augmented_af3_monomer_v2
 
 # Dataset paths
-PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v1
+PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2
 CLUSTER_SAMPLE=true
 
 # Run training script
@@ -46,6 +47,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     exp_name=${EXP_NAME} \
     data.pdb_paths=[${PDB_PATH}] \
     data.cluster_sample=${CLUSTER_SAMPLE} \
+    data.max_scrmsd=1.0 \
     model.task=scaffold \
     scaffold_manager=scaffold_manager \
     denoiser=dit_denoiser \
