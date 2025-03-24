@@ -311,9 +311,9 @@ def uniform_rand_rotation(batch_size):
 def center_random_augmentation(coords_in: TensorType["n a 3", float],
                                seq_mask: TensorType["n", float],
                                atom_mask: TensorType["n a", float],
-                               translation_scale=1.0,
-                               return_transforms=False,
-                               apply_random_augmentation: bool = True
+                               apply_random_augmentation: bool = True,
+                               translation_scale: float = 1.0,
+                               return_transforms: bool = False,
                                ):
     """
     Batched or unbatched.

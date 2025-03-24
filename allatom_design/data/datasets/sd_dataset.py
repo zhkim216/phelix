@@ -149,7 +149,8 @@ class SDDataset(data.Dataset):
 
         # Center on CA, and if enabled, apply random rotation / translation
         example["x"] = center_random_augmentation(example["x"], example["seq_mask"], example["atom_mask"],
-                                                  translation_scale=self.translation_scale, apply_random_augmentation=self.se3_augment)
+                                                  apply_random_augmentation=self.se3_augment,
+                                                  translation_scale=self.translation_scale)
 
         # Crop example to fixed size
         start_idx = None

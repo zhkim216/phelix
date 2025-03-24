@@ -179,11 +179,11 @@ class ADDataset(data.Dataset):
     def get_item(self, pdb_key):
         data_file = self._get_data_file(pdb_key)
         data = torch.load(data_file, weights_only=True)  # load in cached load_feats_from_pdb() outputs
-        example = process_single_pdb_ad(data, self.sm, convert_types=False)  # process cached data into an example
 
-        # Center on CA, and if enabled, apply random rotation / translation
-        example["x"] = center_random_augmentation(example["x"], example["seq_mask"], example["atom_mask"],
-                                                  translation_scale=self.translation_scale, apply_random_augmentation=self.se3_augment)
+         # process cached data into an example
+        example = process_single_pdb_ad(data, self.sm, convert_types=False,
+                                        se3_augment=self.se3_augment,
+                                        translation_scale=self.translation_scale)
 
         # Construct conditioning inputs
         cond_labels_in = {}
@@ -323,13 +323,18 @@ def compute_scale_factors(train_dataloader: DataLoader,
     return {"bb": (mean_bb, std_bb)}
 
 
-def process_single_pdb_ad(data: dict, sm: ScaffoldManager | None = None, convert_types: bool = True):
+def process_single_pdb_ad(data: dict, sm: ScaffoldManager | None = None,
+                          convert_types: bool = True,
+                          se3_augment: bool = True,
+                          translation_scale: float = 0.0):
     """
     Process raw PDB data into a standardized format.
 
     Args:
         data: Dictionary containing PDB data with keys like "all_atom_positions", "all_atom_mask", etc.
         convert_types: Whether to convert data types (float/long) based on FEATURES_LONG
+        se3_augment: Whether to apply SE3 augmentation to the data
+        translation_scale: Scale of translation augmentation
 
     Returns:
         Dictionary with processed data
@@ -360,7 +365,11 @@ def process_single_pdb_ad(data: dict, sm: ScaffoldManager | None = None, convert
     example['interface_residue_mask'] = data['interface_residue_mask']
     example['chain_ids'] = data['chain_ids']
 
-    # Get scaffolding input with scaffold manager
+    # Center on CA, and if enabled, apply random rotation / translation
+    example["x"] = center_random_augmentation(example["x"], example["seq_mask"], example["atom_mask"],
+                                              apply_random_augmentation=se3_augment, translation_scale=translation_scale)
+
+    # Get scaffolding input with scaffold manager; re-center x on motif if a motif is provided
     example["x_motif"], example["motif_mask"], example["aatype_motif"], example["x"] = get_scaffolding_inputs(sm, example)
 
     # Convert data types
