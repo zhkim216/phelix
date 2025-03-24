@@ -1,9 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=u2_a1_lr1e-3
 #SBATCH -p gpu_batch
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-task=1
+#SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #
