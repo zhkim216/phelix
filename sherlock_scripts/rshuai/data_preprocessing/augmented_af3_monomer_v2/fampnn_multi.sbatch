@@ -36,7 +36,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 CHECKPOINT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt
 
 # Output directory
-OUT_DIR=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2/fampnn_multi/S20_nl0.1_n4_L257_512
+OUT_DIR=/scratch/users/rshuai/datasets/fampnn_preds/augmented_af3_monomer_v2/S20_nl0.1_n4_L257_512
 
 # Run eval script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/fampnn_multi.py \
