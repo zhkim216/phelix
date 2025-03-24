@@ -123,7 +123,7 @@ def get_bb_example(pdb_path: str,
     Get a backbone generation model input from a PDB file.
     """
     data = load_feats_from_pdb(pdb_path)
-    single = process_single_pdb_ad(data, sm, convert_types=True)
+    single = process_single_pdb_ad(data, sm)
     single = {k: v.to(device) for k, v in single.items()}
     chain_id_mapping = data["chain_id_mapping"]
 
