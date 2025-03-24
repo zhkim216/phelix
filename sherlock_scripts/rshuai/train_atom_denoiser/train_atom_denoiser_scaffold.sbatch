@@ -23,13 +23,12 @@ conda activate allatom_design
 BASE_DIR=/home/users/rshuai/code/allatom-design
 HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 OUT_DIR=/scratch/users/rshuai/allatom_design
-WANDB_ID=richardshuai
-cd ${BASE_DIR}
 
 # Set cache directories
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
+WANDB_ID=richardshuai
 EXP_NAME=s3_a0_test
 GROUP=augmented_af3_monomer_v1
 
@@ -38,6 +37,7 @@ PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v1
 CLUSTER_SAMPLE=true
 
 # Run training script
+cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \

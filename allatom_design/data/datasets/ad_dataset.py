@@ -128,7 +128,7 @@ class ADDataset(data.Dataset):
         self.sm = get_scaffold_manager(scaffold_manager_cfg)  # for constructing scaffolding inputs
 
         # Require cluster sampling for training on AF3 dataset
-        if self.dataset_name in ["af3_pdb", "af3_pdb_monomer", "augmented_af3_monomer_v1"]:
+        if self.dataset_name in ["af3_pdb", "af3_pdb_monomer", "augmented_af3_monomer_v1", "augmented_af3_monomer_v2"]:
             assert self.cluster_sample, "Cluster sampling must be enabled for AF3 dataset"
         else:
             assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
