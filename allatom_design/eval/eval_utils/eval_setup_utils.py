@@ -101,6 +101,7 @@ def get_pdb_files(pdb_dir: str,
 
     # Optionally take a random subset, preserving order
     if n_subsample is not None:
+        n_subsample = min(n_subsample, len(pdb_files))
         chosen_indices = sorted(np.random.choice(len(pdb_files), n_subsample, replace=False))
         pdb_files = [pdb_files[i] for i in chosen_indices]
 
