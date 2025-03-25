@@ -44,9 +44,11 @@ data:
     fixed_size: 128
     overfit: ${overfit}
     subset_length_range: null
+    max_scrmsd: null
+    max_rel_rog: null
     se3_augment: true  # randomly rotate and translate data
     translation_scale: 1.0  # scale of the translation augmentation
-
+    n_train_cluster_resample: 1
 # Model options
 defaults:
   - _self_
