@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=aasd0_a1
+#SBATCH --job-name=aasd0_a2
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,7 +24,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=aasd0_a1
+EXP_NAME=aasd0_a2
 GROUP=augmented_af3_monomer_v2
 
 # Dataset paths
@@ -57,6 +57,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.fampnn.use_gvp=true \
     denoiser.fampnn.n_layers=5 \
     denoiser.confidence_module.enabled=true \
+    optim.optimizer=adam_inv_sqrt \
+    optim.adam_inv_sqrt.ref_lr=5.0e-5 \
+    optim.adam_inv_sqrt.ref_steps=10000 \
     train.compile_model=true \
     checkpointing.save_latest_every_n_steps=5000 \
     trainer.check_val_every_n_epoch=3 \
