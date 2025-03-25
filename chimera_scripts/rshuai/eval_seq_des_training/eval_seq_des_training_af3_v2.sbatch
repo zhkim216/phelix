@@ -32,15 +32,16 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Model to evaluate
-MODEL_NAME=c6_aasd1
+MODEL_NAME=aasd0_a0
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 NOISE_LABELS=0.0
 ADD_NOISE=false
+PHASE=eval
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_seq_des_aamv2_esmfold_nl${NOISE_LABELS}
-GROUP=chimera_c6_eval_seq_des
+EXP_NAME=${MODEL_NAME}_eval_seq_des_aamv2_esmfold_nl${NOISE_LABELS}_${PHASE}_designable
+GROUP=eval_seq_des_training_aamv2
 
 # Run training script
 cd ${BASE_DIR}
@@ -53,14 +54,13 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
     struct_pred_cfg.model_name=esmfold \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.manifest_kwargs.pdb_manifest_csv=${MANIFEST_CSV} \
-    input_cfg.manifest_kwargs.phase=eval \
+    input_cfg.manifest_kwargs.phase=${PHASE} \
     input_cfg.manifest_kwargs.subset_length_range=[32,256] \
     input_cfg.manifest_kwargs.scrmsd_range=[0.0,2.0] \
-    input_cfg.manifest_kwargs.rel_rog_range=[0.0,1.4] \
     input_cfg.n_subsample=100 \
-    start_step=120000 \
-    end_step=120000 \
-    eval_every_n_ckpts=1 \
+    start_step=0 \
+    end_step=150000 \
+    eval_every_n_ckpts=2 \
     sampling_cfg_overrides.add_noise=${ADD_NOISE} \
     sampling_cfg_overrides.noise_labels=${NOISE_LABELS} \
     hydra.run.dir=${HYDRA_DIR}
