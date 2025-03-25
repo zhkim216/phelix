@@ -196,15 +196,6 @@ def build_struct_pair_feat(
     return act
 
 
-def atom14_aatype_to_atom37(atom14_pos: TensorType["b n 14 3", float],
-                            aatype: TensorType["b n", int]
-                            ) -> TensorType["b n 37 3", float]:
-    feats = {}
-    feats["aatype"] = aatype
-    feats = data_transforms.make_atom14_masks(feats)
-    return atom14_to_atom37(atom14_pos, feats)
-
-
 def torch_kabsch(a: TensorType["b n x"],
                  b: TensorType["b n x"]
                  ) -> TensorType["b x x"]:
