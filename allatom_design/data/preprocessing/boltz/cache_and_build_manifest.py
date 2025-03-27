@@ -2,6 +2,7 @@
 import argparse
 import fcntl
 import glob
+import json
 from pathlib import Path
 
 import hydra
@@ -11,7 +12,7 @@ import torch.nn.functional as F
 from boltz.data import const
 from boltz.data.feature.featurizer import BoltzFeaturizer
 from boltz.data.tokenize.boltz import BoltzTokenizer
-from boltz.data.types import Connection, Input, Structure
+from boltz.data.types import Connection, Input, Structure, Manifest
 from boltz.data.write.mmcif import to_mmcif
 from joblib import Parallel, delayed
 from omegaconf import DictConfig
@@ -29,6 +30,10 @@ featurizer = BoltzFeaturizer()
 
 @hydra.main(config_path="../../../configs/data/preprocessing/boltz", config_name="cache_and_build_manifest", version_base="1.3.2")
 def main(cfg: DictConfig):
+    # Load in manifest
+    # manifest_file = f"{cfg.pdb_path}/rcsb_processed_targets/manifest.json"
+    # manifest = Manifest.load(Path(manifest_file))
+
     # Load in processed targets
     boltz_processed_files = glob.glob(f"{cfg.pdb_path}/rcsb_processed_targets/structures/*.npz")
 
@@ -41,7 +46,7 @@ def main(cfg: DictConfig):
 def cache_examples(npz_files: list[str], pdb_path: str, overwrite_cache: bool, num_workers: int):
     """
     Reads in PDB files and caches the examples to disk.
-    Cached files are stored as {pdb_id}.pt in {pdb_path}/cached_examples.
+    Cached files are stored as {pdb_id}.npz in {pdb_path}/cached_examples.
     """
     cache_dir = f"{pdb_path}/cached_examples"
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
@@ -60,19 +65,24 @@ def cache_examples(npz_files: list[str], pdb_path: str, overwrite_cache: bool, n
 
 def cache_npz_file(npz_file: str, pdb_path: str, cache_dir: str, overwrite_cache: bool):
     pdb_key = Path(npz_file).stem
-    out_file = f"{cache_dir}/{pdb_key}.pt"
+    # out_file = f"{cache_dir}/{pdb_key}.pt"
+    out_file = f"{cache_dir}/{pdb_key}.npz"
     if Path(out_file).exists() and not overwrite_cache:
         return  # Skip caching if file exists and overwrite_cache is False
+
     # DEBUG: no error handling
     # feats = load_feats_from_boltz_npz(npz_file)
     # if feats is None:
     #     return
     # torch.save(feats, out_file)
+    # np.savez_compressed(out_file, **feats)
+
     try:
         feats = load_feats_from_boltz_npz(npz_file)
         if feats is None:
             return
-        torch.save(feats, out_file)
+        # torch.save(feats, out_file)
+        np.savez_compressed(out_file, **feats)
     except Exception as e:
         # write to error file with a lock
         print(f"Error caching {npz_file}: {e}")
