@@ -51,6 +51,10 @@ def cache_examples(npz_files: list[str], pdb_path: str, overwrite_cache: bool, n
     jobs = [delayed(cache_npz_file)(npz_file, pdb_path, cache_dir, overwrite_cache) for npz_file in npz_files]
     list(parallel(tqdm(jobs, total=len(jobs), desc="Caching PDBs")))
     print("Caching completed.")
+
+    # # DEBUG: no parallelization
+    # for npz_file in npz_files:
+    #     cache_npz_file(npz_file, pdb_path, cache_dir, overwrite_cache)
     return cache_dir
 
 
@@ -59,8 +63,15 @@ def cache_npz_file(npz_file: str, pdb_path: str, cache_dir: str, overwrite_cache
     out_file = f"{cache_dir}/{pdb_key}.pt"
     if Path(out_file).exists() and not overwrite_cache:
         return  # Skip caching if file exists and overwrite_cache is False
+    # DEBUG: no error handling
+    # feats = load_feats_from_boltz_npz(npz_file)
+    # if feats is None:
+    #     return
+    # torch.save(feats, out_file)
     try:
         feats = load_feats_from_boltz_npz(npz_file)
+        if feats is None:
+            return
         torch.save(feats, out_file)
     except Exception as e:
         # write to error file with a lock
@@ -85,6 +96,9 @@ def load_feats_from_boltz_npz(npz_file: str) -> dict:
         interfaces=structure["interfaces"],
         mask=structure["mask"],
     )
+    if not structure.mask.any():
+        # no valid chains in structure
+        return None
     input_data = Input(structure=structure, msa={})  # do not load in MSAs
     tokenized = tokenizer.tokenize(input_data)
     boltz_feats = featurizer.process(tokenized, training=False)
@@ -126,7 +140,7 @@ def load_feats_from_boltz_npz(npz_file: str) -> dict:
     protein_token_mask = protein_token_mask & known_residue_mask  # only protein chains with known residues
 
     for k, v in feats.items():
-        feats[k] = v[protein_token_mask]
+        feats[k] = v[protein_token_mask].contiguous()
 
     # DEBUG: convert back to atom14 and double check that everything looks good
     atom14_coords, atom14_mask = atom37_to_atom14(feats["aatype"], feats["all_atom_positions"], feats["all_atom_mask"])
@@ -137,7 +151,7 @@ def load_feats_from_boltz_npz(npz_file: str) -> dict:
     if not (atom14_coords * atom14_mask[..., None] == protein_tokenwise_coords).all():
         raise ValueError(f"atom14_coords mismatch for {pdb_id}")
 
-    # Handle the distinction between missing atoms and ghost atoms in the atom mask
+    # Handle the distinction between missing atoms and ghost atoms in the atom masks
     ghost_atom_mask = 1 - torch.tensor(rc.restype_atom37_mask)[feats["aatype"]]  # 1 for atoms that are not in the residue type; ghost atoms
     missing_atom_mask = (1 - feats["all_atom_mask"]) * (1 - ghost_atom_mask)  # 1 for atoms that are missing in the PDB file; missing if not in atom_mask but not a ghost atom
 
@@ -146,37 +160,21 @@ def load_feats_from_boltz_npz(npz_file: str) -> dict:
     feats["interface_residue_mask"] = get_interface_residue_mask(feats["all_atom_positions"], feats["chain_index"])
     feats["chain_id_mapping"] = {chain_id: asym_id for chain_id, asym_id in zip(structure.chains["name"], structure.chains["asym_id"])}  # show all chain mappings, even invalid ones
 
-    # === Nucleic acid feats === #
-    # We use boltz vocabulary for nucleic acids
-    na_feats = {}
-    na_feats["atom_positions"] = tokenwise_feats["coords"]
-    na_feats["atom_mask"] = tokenwise_feats["atom_resolved_mask"]
-    na_feats["res_type"] = boltz_restypes
-    na_feats["residue_index"] = boltz_feats["residue_index"]
-    na_feats["chain_index"] = boltz_feats["asym_id"]
-    na_feats["seq_mask"] = torch.ones_like(na_feats["res_type"], dtype=torch.float32)
+    # Save boltz tokenwise feats
+    tokenwise_feats_out = {}
+    tokenwise_feats_out["atom_positions"] = tokenwise_feats["coords"]
+    tokenwise_feats_out["atom_mask"] = tokenwise_feats["atom_resolved_mask"]
+    tokenwise_feats_out["res_type"] = boltz_restypes
+    tokenwise_feats_out["residue_index"] = boltz_feats["residue_index"]
+    tokenwise_feats_out["chain_index"] = boltz_feats["asym_id"]
 
-    na_feats["ref_pos"] = tokenwise_feats["ref_pos"]
-    na_feats["ref_element"] = tokenwise_feats["ref_element"]
-    na_feats["ref_charge"] = tokenwise_feats["ref_charge"]
+    tokenwise_feats_out["mol_type"] = boltz_feats["mol_type"]  # [n]
+    tokenwise_feats_out["ref_pos"] = tokenwise_feats["ref_pos"]  # [n, a, 3]
+    tokenwise_feats_out["ref_element"] = tokenwise_feats["ref_element"]  # [n, a]
+    tokenwise_feats_out["ref_charge"] = tokenwise_feats["ref_charge"]  # [n, a]
+    tokenwise_feats_out["token_bonds"] = boltz_feats["token_bonds"].squeeze(-1).bool()  # [n, n]
 
-    # subset to nucleic acid tokens
-    dna_token_mask = boltz_feats["mol_type"] == const.chain_type_ids["DNA"]
-    known_dna_residue_mask = (boltz_restypes != const.token_ids[const.unk_token["DNA"]])
-    dna_token_mask = dna_token_mask & known_dna_residue_mask  # only dna chains with known residues
-
-    rna_token_mask = boltz_feats["mol_type"] == const.chain_type_ids["RNA"]
-    known_rna_residue_mask = (boltz_restypes != const.token_ids[const.unk_token["RNA"]])
-    rna_token_mask = rna_token_mask & known_rna_residue_mask  # only rna chains with known residues
-
-    na_token_mask = dna_token_mask | rna_token_mask  # either dna or rna
-
-    for k, v in na_feats.items():
-        na_feats[k] = v[na_token_mask]
-    feats["na_feats"] = na_feats
-
-    # === Save some other features === #
-    feats["boltz_feats"] = boltz_feats
+    feats["tokenwise_feats"] = tokenwise_feats_out
 
     return feats
 
