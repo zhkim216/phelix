@@ -31,7 +31,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 # Set experiment name and grouop
 WANDB_ID=richardshuai
 EXP_NAME=s4_a1
-GROUP=augmented_af3_monomer_v2
+GROUP=backbone
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2

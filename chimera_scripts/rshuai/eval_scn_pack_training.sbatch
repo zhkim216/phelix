@@ -30,7 +30,7 @@ PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_pdb_keys.list
 MODEL_NAME=c6_aasd1
 
 EXP_NAME=${MODEL_NAME}_eval_scn_pack
-GROUP=chimera_c6
+GROUP=seq_des
 
 # Set HF transformers cache
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface

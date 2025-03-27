@@ -44,7 +44,7 @@ N_SUBSAMPLE=128
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_eval_scaffold_training_${PHASE}
-GROUP=eval_scaffold_training
+GROUP=backbone
 
 # Run eval script
 cd ${BASE_DIR}

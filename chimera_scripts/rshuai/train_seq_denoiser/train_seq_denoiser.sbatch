@@ -22,7 +22,7 @@ WANDB_ID=richardshuai
 cd $BASE_DIR
 
 EXP_NAME=test_aasd_refactor
-GROUP=test
+GROUP=seq_des
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
