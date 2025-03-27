@@ -39,7 +39,7 @@ ADD_NOISE=false
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_eval_seq_des_denovo_L300_esmfold_nl${NOISE_LABELS}
-GROUP=chimera_c6_eval_seq_des
+GROUP=seq_des
 
 # Run training script
 cd ${BASE_DIR}

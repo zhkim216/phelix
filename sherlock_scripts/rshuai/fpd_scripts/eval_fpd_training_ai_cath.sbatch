@@ -31,7 +31,7 @@ FPD_EMBEDDINGS_DIR=/scratch/users/subhang/datasets/augmented_ingraham_cath_bugfr
 MODEL_NAME=ai_baseline_dit_12b
 EXP_NAME=${MODEL_NAME}_eval_fpd_training
 WANDB_ID=null
-GROUP=eval_fpd_training
+GROUP=backbone
 
 # Set HF variables
 export HUGGINGFACE_TOKEN=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

@@ -40,7 +40,7 @@ BASE_OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/u1_a7/bb_uncon
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=u1_a7_bb_unconditional
-GROUP=bb_unconditional
+GROUP=backbone
 
 # Run eval script
 cd ${BASE_DIR}

@@ -41,7 +41,7 @@ PHASE=eval
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_eval_seq_des_aamv2_esmfold_nl${NOISE_LABELS}_${PHASE}_designable
-GROUP=eval_seq_des_training_aamv2
+GROUP=seq_des
 
 # Run training script
 cd ${BASE_DIR}

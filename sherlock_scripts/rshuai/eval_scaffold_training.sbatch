@@ -47,7 +47,7 @@ N_SUBSAMPLE=128
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_eval_scaffold_training_sherlock_test
-GROUP=augmented_af3_monomer_v1
+GROUP=backbone
 
 # Run eval script
 cd ${BASE_DIR}

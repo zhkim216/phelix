@@ -40,7 +40,7 @@ DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_N
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_eval_bb_gen_sherlock_test
-GROUP=augmented_af3_monomer_v1
+GROUP=backbone
 
 # Run eval script
 cd ${BASE_DIR}

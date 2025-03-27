@@ -31,13 +31,13 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Denoiser path
-MODEL_NAME=u1_a7
+MODEL_NAME=u4_a1
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_bb_gen_refactor_test
-GROUP=augmented_af3_monomer_v1
+EXP_NAME=${MODEL_NAME}_eval_bb_gen
+GROUP=backbone
 
 # Run eval script
 cd ${BASE_DIR}
