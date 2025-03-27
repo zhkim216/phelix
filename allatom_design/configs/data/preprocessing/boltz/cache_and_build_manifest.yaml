@@ -1,4 +1,5 @@
 pdb_path: /scratch/hielab/rshuai/datasets/boltz
+debug_mode: false
 
 overwrite_cache: true
 num_workers: 16

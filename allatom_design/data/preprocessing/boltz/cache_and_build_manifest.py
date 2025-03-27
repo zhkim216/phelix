@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from boltz.data import const
 from boltz.data.feature.featurizer import BoltzFeaturizer
 from boltz.data.tokenize.boltz import BoltzTokenizer
-from boltz.data.types import Connection, Input, Structure, Manifest
+from boltz.data.types import Connection, Input, Manifest, Structure
 from boltz.data.write.mmcif import to_mmcif
 from joblib import Parallel, delayed
 from omegaconf import DictConfig
@@ -27,18 +27,22 @@ from allatom_design.data.data import (atom14_aatype_to_atom37,
 tokenizer = BoltzTokenizer()
 featurizer = BoltzFeaturizer()
 
+debug_mode = False
+
 
 @hydra.main(config_path="../../../configs/data/preprocessing/boltz", config_name="cache_and_build_manifest", version_base="1.3.2")
 def main(cfg: DictConfig):
-    # Load in manifest
+    # # Load in manifest
     # manifest_file = f"{cfg.pdb_path}/rcsb_processed_targets/manifest.json"
     # manifest = Manifest.load(Path(manifest_file))
+    global debug_mode
+    debug_mode = cfg.debug_mode
 
     # Load in processed targets
     boltz_processed_files = glob.glob(f"{cfg.pdb_path}/rcsb_processed_targets/structures/*.npz")
 
     # Sort files by size
-    boltz_processed_files.sort(key=lambda x: Path(x).stat().st_size)
+    boltz_processed_files.sort(key=lambda x: Path(x).stat().st_size, reverse=True)
 
     cache_examples(boltz_processed_files, cfg.pdb_path, cfg.overwrite_cache, cfg.num_workers)
 
@@ -51,15 +55,16 @@ def cache_examples(npz_files: list[str], pdb_path: str, overwrite_cache: bool, n
     cache_dir = f"{pdb_path}/cached_examples"
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
 
-    print(f"Caching examples to {cache_dir} with {num_workers} workers...")
-    parallel = Parallel(n_jobs=num_workers, verbose=0)
-    jobs = [delayed(cache_npz_file)(npz_file, pdb_path, cache_dir, overwrite_cache) for npz_file in npz_files]
-    list(parallel(tqdm(jobs, total=len(jobs), desc="Caching PDBs")))
-    print("Caching completed.")
-
-    # # DEBUG: no parallelization
-    # for npz_file in npz_files:
-    #     cache_npz_file(npz_file, pdb_path, cache_dir, overwrite_cache)
+    if not debug_mode:
+        print(f"Caching examples to {cache_dir} with {num_workers} workers...")
+        parallel = Parallel(n_jobs=num_workers, verbose=0)
+        jobs = [delayed(cache_npz_file)(npz_file, pdb_path, cache_dir, overwrite_cache) for npz_file in npz_files]
+        list(parallel(tqdm(jobs, total=len(jobs), desc="Caching PDBs")))
+        print("Caching completed.")
+    else:
+        # DEBUG: no parallelization
+        for npz_file in npz_files:
+            cache_npz_file(npz_file, pdb_path, cache_dir, overwrite_cache)
     return cache_dir
 
 
@@ -70,27 +75,27 @@ def cache_npz_file(npz_file: str, pdb_path: str, cache_dir: str, overwrite_cache
     if Path(out_file).exists() and not overwrite_cache:
         return  # Skip caching if file exists and overwrite_cache is False
 
-    # DEBUG: no error handling
-    # feats = load_feats_from_boltz_npz(npz_file)
-    # if feats is None:
-    #     return
-    # torch.save(feats, out_file)
-    # np.savez_compressed(out_file, **feats)
-
-    try:
+    if debug_mode:
         feats = load_feats_from_boltz_npz(npz_file)
         if feats is None:
             return
         # torch.save(feats, out_file)
         np.savez_compressed(out_file, **feats)
-    except Exception as e:
-        # write to error file with a lock
-        print(f"Error caching {npz_file}: {e}")
-        with open(f"{pdb_path}/error.txt", "a") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            f.write(f"{npz_file}: {e}\n")
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        return
+    else:
+        try:
+            feats = load_feats_from_boltz_npz(npz_file)
+            if feats is None:
+                return
+            # torch.save(feats, out_file)
+            np.savez_compressed(out_file, **feats)
+        except Exception as e:
+            # write to error file with a lock
+            print(f"Error caching {npz_file}: {e}")
+            with open(f"{pdb_path}/error.txt", "a") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                f.write(f"{npz_file}: {e}\n")
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            return
 
 
 def load_feats_from_boltz_npz(npz_file: str) -> dict:
@@ -106,11 +111,19 @@ def load_feats_from_boltz_npz(npz_file: str) -> dict:
         interfaces=structure["interfaces"],
         mask=structure["mask"],
     )
+    # Basic filtering
+    if (len(structure.chains) > 300) or (len(structure.residues) > 5000):
+        # skip structures with more than 300 chains or more than 100K residues
+        return None
+
     if not structure.mask.any():
         # no valid chains in structure
         return None
+
+    # print(len(structure.residues))
     input_data = Input(structure=structure, msa={})  # do not load in MSAs
     tokenized = tokenizer.tokenize(input_data)
+    return None
     boltz_feats = featurizer.process(tokenized, training=False)
     boltz_restypes = torch.tensor(tokenized.tokens["res_type"], dtype=torch.long)
 
@@ -143,6 +156,9 @@ def load_feats_from_boltz_npz(npz_file: str) -> dict:
     feats["ref_pos"] = ref_pos
     feats["ref_element"] = atom14_tokenwise_feats["ref_element"]
     feats["ref_charge"] = atom14_tokenwise_feats["ref_charge"]
+
+    if (torch.tensor(tokenized.tokens["token_idx"]) != torch.arange(len(tokenized.tokens["token_idx"]))).any():
+        raise ValueError(f"token_idx mismatch for {pdb_id}")
 
     # subset to protein tokens
     protein_token_mask = boltz_feats["mol_type"] == const.chain_type_ids["PROTEIN"]  # only protein chains
