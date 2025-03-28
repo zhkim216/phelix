@@ -14,6 +14,7 @@ from omegaconf import DictConfig, OmegaConf
 
 import allatom_design.data.datasets.sd_dataset as sd_dataset
 from allatom_design.checkpoint_utils import EMATrackerCheckpoint
+from allatom_design.data.datasets.boltz_sd_dataset import BoltzSDDataModule
 from allatom_design.data.datasets.sd_dataset import LitSDDataModule
 from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
@@ -42,12 +43,18 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
     # Set up LightningDataModule
-    datamodule = LitSDDataModule(
-        data_cfg=cfg.data,
-        batch_size=cfg.train.batch_size,
-        num_workers=cfg.num_workers,
-        cuda=cfg.cuda,
-    )
+    if Path(cfg.data.pdb_path).stem == "boltz":
+        # Load in Boltz datamodule
+        boltz_data_cfg = hydra.utils.instantiate(cfg.boltz_data)
+        datamodule = BoltzSDDataModule(boltz_data_cfg)
+    else:
+        # Standard SD data
+        datamodule = LitSDDataModule(
+            data_cfg=cfg.data,
+            batch_size=cfg.train.batch_size,
+            num_workers=cfg.num_workers,
+            cuda=cfg.cuda,
+        )
 
     # Init wandb only on node rank 0
     local_rank = os.environ.get("LOCAL_RANK", None)
