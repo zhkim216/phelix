@@ -123,7 +123,7 @@ def load_feats_from_boltz_npz(npz_file: str) -> dict:
     # print(len(structure.residues))
     input_data = Input(structure=structure, msa={})  # do not load in MSAs
     tokenized = tokenizer.tokenize(input_data)
-    return None
+
     boltz_feats = featurizer.process(tokenized, training=False)
     boltz_restypes = torch.tensor(tokenized.tokens["res_type"], dtype=torch.long)
 
@@ -205,31 +205,6 @@ def load_feats_from_boltz_npz(npz_file: str) -> dict:
     return feats
 
 
-def pad_atom_feats_to_tokenwise(boltz_feats: dict,
-                                max_atoms_per_token: int):
-    # Build padded atom idxs
-    n_atoms_per_token = boltz_feats["atom_to_token"].sum(dim=0)
-    # atom_idxs = torch.tensor(tokenized.tokens["atom_idx"])  # this does not work since doesn't account for removal of invalid chains
-    atom_idxs = torch.cat([torch.zeros(1), n_atoms_per_token.cumsum(dim=0)[:-1]]).int()
-    padded_atom_idxs = atom_idxs[:, None].expand(-1, max_atoms_per_token)
-    padded_atom_idxs = padded_atom_idxs + torch.arange(max_atoms_per_token)[None, :]  # [n, 14]
-    pad_mask = torch.arange(max_atoms_per_token)[None, :] < n_atoms_per_token[:, None]  # [n, 14]
-    padded_atom_idxs = padded_atom_idxs * pad_mask  # mask out ghost atoms
-
-    # Gather from each feature of interest
-    tokenwise_feats = {}
-    N = padded_atom_idxs.shape[0]
-    for k in ["coords", "atom_resolved_mask", "ref_pos", "ref_element", "ref_charge"]:
-        v = boltz_feats[k]
-        if k == "coords":
-            # coords is [1, n_atoms, 3]
-            v = v.squeeze(0)
-        data_shape = v.shape[1:]
-        gather_idxs = padded_atom_idxs.view(-1, *((1,) * len(data_shape))).expand(-1, *data_shape)
-        tokenwise_feats[k] = v.gather(0, gather_idxs).view(N, max_atoms_per_token, *data_shape)
-        tokenwise_feats[k] = tokenwise_feats[k] * pad_mask.view(N, max_atoms_per_token, *((1,) * len(data_shape)))
-
-    return tokenwise_feats
 
 
 if __name__ == "__main__":

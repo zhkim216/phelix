@@ -47,6 +47,42 @@ data:
     se3_augment: true  # randomly rotate and translate data
     translation_scale: 1.0  # scale of the translation augmentation
 
+boltz_data:
+  pdb_path: ${data.pdb_path}
+  tokenizer:
+    _target_: boltz.data.tokenize.boltz.BoltzTokenizer
+  featurizer:
+    _target_: allatom_design.data.featurizer.SDFeaturizer
+
+  filters:
+    - _target_: boltz.data.filter.dynamic.size.SizeFilter
+      min_chains: 1
+      max_chains: 300
+    - _target_: boltz.data.filter.dynamic.date.DateFilter
+      date: "2021-09-30"
+      ref: released
+    - _target_: boltz.data.filter.dynamic.resolution.ResolutionFilter
+      resolution: 9.0
+  sampler:
+    _target_: boltz.data.sample.cluster.ClusterSampler
+  cropper:
+    _target_: boltz.data.crop.boltz.BoltzCropper
+    min_neighborhood: 0
+    max_neighborhood: 40
+
+  max_tokens: 256
+  max_atoms: 4608
+  pad_to_max_tokens: true
+  pad_to_max_atoms: true
+  samples_per_epoch: 50000
+  batch_size: ${train.batch_size}
+  num_workers: ${num_workers}
+  random_seed: ${train.seed}
+  atoms_per_window_queries: 32
+  min_dist: 2.0
+  max_dist: 22.0
+  num_bins: 64
+
 # Model options
 defaults:
   - _self_
