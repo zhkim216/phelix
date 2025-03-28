@@ -9,6 +9,13 @@ use_self_conditioning: true
 self_cond_p: 0.9
 training_batch_size_mult: 1  # batch size multiplier for diffusion module
 
+# Diffusion conditioning
+pos_encoding: null    # one of ["absolute", "absolute_residx", "rotary", "rotary_residx", "af2"]
+rel_pos_encoding:
+  c_z: 256
+  relpos_k: 32
+
+
 scaffold_module:
   enabled: false  # true to condition on input scaffolds
   pretrained_weights_path: null
@@ -45,7 +52,6 @@ scaffold_module:
       dropout: ${model.denoiser.scaffold_module.fampnn.dropout_p}
       num_encoder_layers: ${model.denoiser.scaffold_module.fampnn.n_layers}
 
-
 # DiT
 dit:
   num_atoms_in: 4
@@ -56,8 +62,7 @@ dit:
   inf: ${model.inf}
 
   # Positional encoding
-  pos_encoding: rotary_residx  # one of ["absolute", "absolute_residx", "rotary", "rotary_residx"]
-
+  pos_encoding: ${denoiser.pos_encoding}
   # Conditioning
   cond_label_to_dropout_p:
     # map from condition label to label dropout probability (required for unconditional generation / classifier-free guidance)

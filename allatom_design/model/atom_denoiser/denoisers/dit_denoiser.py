@@ -23,12 +23,12 @@ from allatom_design.model.atom_denoiser.denoisers.denoiser import \
     BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.dit_utils import (
     DiTBlock, FinalLayer, LabelEmbedder, MultiHeadRMSNorm)
-from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.pair_rep_utils import \
-    PairRepBuilder
-from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
-    posemb_sincos_1d
+from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.pair_rep_utils import (
+    PairRepBuilder, RelativePositionalEncoding)
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.timestep_embedders import \
     TimestepEmbedder
+from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
+    posemb_sincos_1d
 from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import FAMPNN
 from openfold.model.primitives import Linear
 
@@ -49,6 +49,13 @@ class DiTDenoiser(BaseAtomDenoiser):
         self.use_scaffold_module = cfg.get("scaffold_module", {}).get("enabled", False)
         if self.use_scaffold_module:
             self.fampnn = FAMPNN(cfg.scaffold_module.fampnn)
+
+        # AF2-based positional encoding
+        self.pos_encoding = cfg.get("pos_encoding", None)
+        if self.pos_encoding == "af2":
+            self.pos_embed = RelativePositionalEncoding(cfg.rel_pos_encoding)
+            self.pair_bias_embedder = nn.Sequential(nn.LayerNorm(cfg.rel_pos_encoding.c_z),
+                                                    Linear(cfg.rel_pos_encoding.c_z, cfg.dit.num_heads, init="normal", bias=False))
 
         # Set up DiT
         self.interpolant = get_interpolant(cfg.interpolant, sigma_data)
@@ -85,6 +92,12 @@ class DiTDenoiser(BaseAtomDenoiser):
         else:
             h_s = None
 
+        if self.pos_encoding == "af2":
+            z = self.pos_embed(residue_index)
+            pair_bias = rearrange(self.pair_bias_embedder(z), "b i j h -> b h i j")
+        else:
+            pair_bias = None
+
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
             x_motif=x_motif,
             motif_mask=motif_mask,
@@ -92,6 +105,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             residue_index=residue_index,
             seq_mask=seq_mask,
             h_s=h_s,
+            pair_bias=pair_bias,
             cond_labels_in=cond_labels_in,
             aux_inputs=aux_inputs,
             is_sampling=is_sampling
@@ -109,6 +123,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                            residue_index: TensorType["b n", int],
                            seq_mask: TensorType["b n", float],
                            h_s: TensorType["b n h"],
+                           pair_bias: TensorType["b h n n", float] | None,
                            cond_labels_in: Dict[str, TensorType["b", int]] = {},
                            aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
                            is_sampling: bool = False
@@ -135,6 +150,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             scaffold_mask_batched = repeat(motif_mask, "b n a -> (m b) n a", m=M, b=B)
             aatype_scaffold_batched = repeat(aatype_motif, "b n -> (m b) n", m=M, b=B)
             h_s_batched = repeat(h_s, "b n h -> (m b) n h", m=M, b=B) if h_s is not None else None
+            pair_bias_batched = repeat(pair_bias, "b h i j -> (m b) h i j", m=M, b=B) if pair_bias is not None else None  # TODO: expand instead to save memory?
 
             # Evaluate at specific timesteps (for validation)
             t_bb = None
@@ -158,6 +174,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                            scaffold_mask_batched,
                                                            aatype_scaffold_batched,
                                                            h_s_batched,
+                                                           pair_bias_batched,
                                                            t_batched,
                                                            seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                            cond_labels_in=cond_labels_in_batched)
@@ -169,6 +186,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                    scaffold_mask_batched,
                                                    aatype_scaffold_batched,
                                                    h_s_batched,
+                                                   pair_bias_batched,
                                                    t_batched,
                                                    seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                    cond_labels_in=cond_labels_in_batched)
@@ -186,6 +204,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                              scaffold_mask_batched,
                                                              aatype_scaffold_batched,
                                                              h_s_batched,
+                                                             pair_bias_batched,
                                                              t_batched,
                                                              seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                              cond_labels_in=cond_labels_in_batched)
@@ -197,6 +216,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                      scaffold_mask_batched,
                                                      aatype_scaffold_batched,
                                                      h_s_batched,
+                                                     pair_bias_batched,
                                                      t_batched,
                                                      seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                      cond_labels_in=cond_labels_in_batched)
@@ -243,6 +263,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                               motif_mask=motif_mask,
                                                               aatype_motif=aatype_motif,
                                                               h_s=h_s,
+                                                              pair_bias=pair_bias,
                                                               residue_index=residue_index, seq_mask=seq_mask,
                                                               cond_labels_in=cond_labels_in)
 
@@ -252,6 +273,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                                   motif_mask=motif_mask,
                                   aatype_motif=aatype_motif,
                                   h_s=h_s,
+                                  pair_bias=pair_bias,
                                   residue_index=residue_index, seq_mask=seq_mask,
                                   cond_labels_in=cond_labels_in)
 
@@ -403,7 +425,7 @@ class DiT(nn.Module):
         self.x_embedder = Linear(self.in_channels, cfg.hidden_size, bias=True, init="glorot")  # "glorot" should match DiT Patchify init
 
         # Positional encodings
-        assert self.pos_encoding in ["absolute", "absolute_residx", "rotary", "rotary_residx"]
+        assert self.pos_encoding in ["absolute", "absolute_residx", "rotary", "rotary_residx", "af2"]
         if self.pos_encoding in ["absolute", "absolute_residx"]:
             self.pos_embed = posemb_sincos_1d
 
@@ -484,6 +506,7 @@ class DiT(nn.Module):
                 motif_mask: TensorType["b n 37", float],
                 aatype_motif: Optional[TensorType["b n", int]],
                 h_s: Optional[TensorType["b n h"]],
+                pair_bias: Optional[TensorType["b h n n", float]],
                 t: TensorType["b", float],
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
@@ -569,7 +592,7 @@ class DiT(nn.Module):
         # Blocks
         attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
         for bi, block in enumerate(self.blocks):
-            attn_bias = None
+            attn_bias = pair_bias
             if self.use_pair_repr:
                 to_pair_bias_fn = self.to_pair_biases[bi]
                 attn_bias = rearrange(to_pair_bias_fn(z), "b i j h -> b h i j")
