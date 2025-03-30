@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s4_a1
+#SBATCH --job-name=s4_a0
 #SBATCH -p possu
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
@@ -30,16 +30,19 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
 WANDB_ID=richardshuai
-EXP_NAME=s4_a1
+EXP_NAME=s4_a0
 GROUP=backbone
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2
 CLUSTER_SAMPLE=true
 
+RESUME_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/s4_a0/checkpoints/ad-epoch1399.ckpt
+
 # Run training script
 cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
+    resume.ckpt_path=${RESUME_CKPT} \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
     wandb.no_wandb=false \
