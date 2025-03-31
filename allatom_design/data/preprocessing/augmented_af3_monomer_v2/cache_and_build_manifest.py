@@ -18,6 +18,7 @@ def main(cfg: DictConfig):
     Here, we also build eval2 keys from train keys.
     """
     df = pd.read_csv(cfg.input_pdb_key_csv)
+    df["pdb_name"] = "esmfold_" + df["pdb_name"]  # add esmfold_ prefix since we're using ESMFold predictions
     df["pdb_key"] = df["pdb_name"].apply(lambda x: Path(x).stem)
     # Cache examples
     pdb_keys = df["pdb_key"].tolist()
