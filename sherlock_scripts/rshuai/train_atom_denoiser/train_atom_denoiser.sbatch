@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=u4_a1_fm0
+#SBATCH --job-name=u4_a1_t0_0.5
 #SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --exclude=sh03-18n05
+#SBATCH --nodelist=sh04-04n01
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -30,8 +30,8 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
 WANDB_ID=richardshuai
-EXP_NAME=u4_a1_fm0
-GROUP=backbone
+EXP_NAME=u4_a1_t0_0.5
+GROUP=augmented_af3_monomer_v2
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2
@@ -50,8 +50,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser=dit_denoiser \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
-    denoiser/interpolant=sd3_rf_interpolant \
-    denoiser.interpolant.training_t_schedule=mode \
+    +denoiser.interpolant.training_noise_cfg.lognormal.t_boundaries=[0.0,0.5] \
     train.batch_size=128 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}
