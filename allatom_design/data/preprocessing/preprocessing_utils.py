@@ -36,7 +36,7 @@ def get_pdb_file_from_key(pdb_path: str, phase: str, pdb_key: str) -> str:
             pdb_file = f"{pdb_path}/dne_mpnn/{pdb_key}"
     elif dataset_name == "augmented_af3_monomer_v2":
         # Augmented AF3 monomer dataset
-        pdb_file = f"{pdb_path}/esmfold_preds/esmfold_{pdb_key}.pdb"
+        pdb_file = f"{pdb_path}/esmfold_preds/{pdb_key}.pdb"
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
     if not Path(pdb_file).exists():
