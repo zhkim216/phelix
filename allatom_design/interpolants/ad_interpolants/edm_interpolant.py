@@ -205,6 +205,17 @@ class EDM(ADInterpolant):
         return xt_next, aux_preds
 
 
+    def get_x1_pred(self,
+                    denoiser_pred: TensorType["b n a 3", float],
+                    xt: TensorType["b n a 3", float],
+                    t: TensorType["b", float]
+                    ) -> TensorType["b n a 3", float]:
+        """
+        Given a prediction from the denoiser, return the prediction of x1 at time t.
+        """
+        return denoiser_pred  # we directly predict x1 for EDM
+
+
     def get_likelihoods(self,
                         f: Callable,
                         x1: TensorType["b n a 3", float],
