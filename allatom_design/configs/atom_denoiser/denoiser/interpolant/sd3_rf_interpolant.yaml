@@ -8,7 +8,7 @@ training_t_schedule_cfg:
     location: 0
     scale: 1
   mode:
-    s: 0  # between -1 and 2 / (pi - 2)
+    s: 0  # between -1 and 2 / (pi - 2), s=0 is uniform
   proteina:
     alpha: 1.9
     beta: 1.0

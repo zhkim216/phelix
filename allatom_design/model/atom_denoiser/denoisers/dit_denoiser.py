@@ -169,7 +169,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                 # Apply self-conditioning
                 with torch.no_grad():
-                    x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched,
+                    denoiser_pred_batched, aux_preds = denoiser_fn(xt_bb_batched,
                                                            x_scaffold_batched,
                                                            scaffold_mask_batched,
                                                            aatype_scaffold_batched,
@@ -179,9 +179,9 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                            seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                            cond_labels_in=cond_labels_in_batched)
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
-                denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched)
+                denoiser_fn = partial(denoiser_fn, x_self_cond=self.interpolant.get_x1_pred(denoiser_pred_batched, xt_bb_batched, t_batched))
 
-            x1_bb_batched, aux_preds = denoiser_fn(xt_bb_batched,
+            denoiser_pred_batched, aux_preds = denoiser_fn(xt_bb_batched,
                                                    x_scaffold_batched,
                                                    scaffold_mask_batched,
                                                    aatype_scaffold_batched,
@@ -199,7 +199,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                 denoiser_fn = self.guiding_model
                 if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                     with torch.no_grad():
-                        x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched,
+                        denoiser_pred_batched_guide, _ = denoiser_fn(xt_bb_batched,
                                                              x_scaffold_batched,
                                                              scaffold_mask_batched,
                                                              aatype_scaffold_batched,
@@ -209,9 +209,9 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                              seq_mask=seq_mask_batched, residue_index=residue_index_batched,
                                                              cond_labels_in=cond_labels_in_batched)
                     torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
-                    denoiser_fn = partial(denoiser_fn, x_self_cond=x1_bb_batched_guide)
+                    denoiser_fn = partial(denoiser_fn, x_self_cond=self.interpolant.get_x1_pred(denoiser_pred_batched_guide, xt_bb_batched, t_batched))
 
-                x1_bb_batched_guide, _ = denoiser_fn(xt_bb_batched,
+                denoiser_pred_batched_guide, _ = denoiser_fn(xt_bb_batched,
                                                      x_scaffold_batched,
                                                      scaffold_mask_batched,
                                                      aatype_scaffold_batched,
@@ -223,7 +223,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
                 # add to autoguidance outputs
                 diffusion_aux["autoguidance_aux"] = {
-                    "bb_pred": x1_bb_batched_guide,
+                    "bb_pred": denoiser_pred_batched_guide,
                     "bb_target": x_bb_target_batched,  # diffusion target; for edm this is just the ground truth coordinates
                     "loss_weight_t": loss_weight_t_batched
                 }
@@ -232,7 +232,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             x1_bb = None  # during training, we return the batched version in diffusion_aux
 
             # Cache intermediates for computing loss
-            diffusion_aux["bb_pred"] = x1_bb_batched
+            diffusion_aux["bb_pred"] = denoiser_pred_batched
             diffusion_aux["bb_target"] = x_bb_target_batched  # diffusion target; for edm this is just the ground truth coordinates
             diffusion_aux["loss_weight_t"] = loss_weight_t_batched
 
