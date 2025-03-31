@@ -10,7 +10,7 @@ self_cond_p: 0.9
 training_batch_size_mult: 1  # batch size multiplier for diffusion module
 
 # Diffusion conditioning
-pos_encoding: null    # one of ["absolute", "absolute_residx", "rotary", "rotary_residx", "af2"]
+pos_encoding: rotary_residx    # one of ["absolute", "absolute_residx", "rotary", "rotary_residx", "af2"]
 rel_pos_encoding:
   c_z: 256
   relpos_k: 32
