@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=u4_a0
+#SBATCH --job-name=u4_a1_fm0
 #SBATCH -p possu
-#SBATCH --gpus-per-node=2
-#SBATCH --cpus-per-task=16
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-task=8
 #SBATCH --exclude=sh03-18n05
 #SBATCH --time=96:00:00
 #
@@ -30,7 +30,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
 WANDB_ID=richardshuai
-EXP_NAME=u4_a0
+EXP_NAME=u4_a1_fm0
 GROUP=backbone
 
 # Dataset paths
@@ -38,7 +38,6 @@ PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2
 CLUSTER_SAMPLE=true
 
 # Run training script
-cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
@@ -47,9 +46,12 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     exp_name=${EXP_NAME} \
     data.pdb_paths=[${PDB_PATH}] \
     data.cluster_sample=${CLUSTER_SAMPLE} \
+    data.max_scrmsd=1.0 \
     denoiser=dit_denoiser \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
-    train.batch_size=64 \
+    denoiser/interpolant=sd3_rf_interpolant \
+    denoiser.interpolant.training_t_schedule=mode \
+    train.batch_size=128 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}
