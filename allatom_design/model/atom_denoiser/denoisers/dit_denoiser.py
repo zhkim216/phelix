@@ -408,12 +408,10 @@ class DiT(nn.Module):
         self.c = self.num_atoms_in * 3  # 3 xyz coordinates per atom
         self.in_channels = self.c * 2 if self.use_self_conditioning else self.c  # 2x for self-conditioning
 
-        if self.scaffolding.use_seq:
-            # +n_aatype for seq conditioning
-            self.in_channels = self.in_channels + cfg.n_aatype
         if self.scaffolding.use_concat:
-            # +self.c for conditioning on scaffold via concatenation
-            self.in_channels = self.in_channels + self.c
+            # +condition on motif + one-hot sequence conditioning
+            self.in_channels = self.in_channels + rc.atom_type_num * 3
+            self.in_channels = self.in_channels + cfg.n_aatype
 
         self.out_channels = self.c
         self.n_aatype = cfg.n_aatype
@@ -540,16 +538,15 @@ class DiT(nn.Module):
 
         x = rearrange(x_noised, "b n a x -> b n (a x)")
 
-        # Concatenate one-hot sequence conditioning
-        if self.scaffolding.use_seq:
-            aatype_oh = F.one_hot(aatype_motif, num_classes=self.n_aatype).float()
-            x = torch.cat([x, aatype_oh], dim=-1)
-
         # Concatenate scaffold conditioning
         if self.scaffolding.use_concat:
-            x_motif = x_motif * motif_mask[..., None]  # zero out non-scaffold positions
-            x_motif = rearrange(x_motif[..., rc.bb_idxs, :], "b n a x -> b n (a x)")
+            x_motif = x_motif * motif_mask[..., None]  # zero out non-motif positions
+            x_motif = rearrange(x_motif, "b n a x -> b n (a x)")
             x = torch.cat([x, x_motif], dim=-1)
+
+            # also concatenate one-hot sequence conditioning
+            aatype_oh = F.one_hot(aatype_motif, num_classes=self.n_aatype).float()
+            x = torch.cat([x, aatype_oh], dim=-1)
 
         # Begin DiT forward pass
         x = self.x_embedder(x)

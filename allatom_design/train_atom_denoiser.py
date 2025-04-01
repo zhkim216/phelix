@@ -197,6 +197,10 @@ def update_config(cfg: DictConfig) -> None:
         # don't reload dataloaders every epoch
         cfg.trainer.reload_dataloaders_every_n_epochs = 0
 
+    # Scaffolding
+    if cfg.model.task == "scaffold":
+        cfg.data.evaluate_scaffolding = True
+
 
 if __name__ == "__main__":
     main()
