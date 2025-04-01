@@ -36,7 +36,7 @@ class LitADDataModule(L.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.cuda = cuda
-
+        self.evaluate_scaffolding = data_cfg.get("evaluate_scaffolding", False)
         # Data configs
         self.pdb_paths = data_cfg.pdb_paths
 
@@ -52,7 +52,25 @@ class LitADDataModule(L.LightningDataModule):
         """
         Called each epoch if reload_dataloaders_every_n_epochs > 0.
         """
-        return [self.get_dataloader(phase="eval"), self.get_dataloader(phase="eval2")]
+        val_dataloaders = [self.get_dataloader(phase="eval"), self.get_dataloader(phase="eval2")]
+        if self.evaluate_scaffolding:
+            scaffold_dataloaders = self._get_val_scaffold_dataloaders()
+            val_dataloaders.extend(scaffold_dataloaders)
+        return val_dataloaders
+
+
+    def _get_val_scaffold_dataloaders(self) -> List[DataLoader]:
+        """
+        Get the dataloaders for the scaffold validation set.
+        """
+        scaffold_dataloaders = []
+        for motif_type in ["backbone", "allatom"]:
+            scaffold_dataset = ADDataset(pdb_path=self.pdb_paths[0], phase="eval2", **self.data_cfg)
+            scaffold_dataset.sm.set_motif_type(motif_type)
+            dataloader = DataLoader(scaffold_dataset, batch_size=self.batch_size, num_workers=self.num_workers, pin_memory=self.cuda, shuffle=False, drop_last=False)
+            scaffold_dataloaders.append(dataloader)
+
+        return scaffold_dataloaders
 
 
     def get_dataloader(self, phase: str) -> DataLoader:
@@ -104,7 +122,7 @@ class ADDataset(data.Dataset):
         Args:
         - pdb_path: Path to the dataset of PDBs.
         - fixed_size: Input fixed size.
-        - phase: "train", "eval", or "test"
+        - phase: "train", "eval", "eval2", or "test"
         - overfit: Number of examples to overfit on. -1 for all examples.
         - se3_augment: If True, apply SE3 augmentation to the data.
         - translation_scale: Scale of translation augmentation (when using raw coords or coords feats)
@@ -126,6 +144,8 @@ class ADDataset(data.Dataset):
         self.n_train_cluster_resample = n_train_cluster_resample
 
         self.sm = get_scaffold_manager(scaffold_manager_cfg)  # for constructing scaffolding inputs
+        if phase != "train":
+            self.sm.eval()
 
         # Require cluster sampling for training on AF3 dataset
         if self.dataset_name in ["af3_pdb", "af3_pdb_monomer", "augmented_af3_monomer_v1", "augmented_af3_monomer_v2"]:

@@ -6,6 +6,9 @@ max_span_len: 20
 max_discontiguous_res: 20
 dist_threshold: 12.0
 
+# Sidechain options
+sidechain_dropout_p: 0.5  # chance of dropping out all sidechains; otherwise drops out sidechains with probability p from uniform distribution
+
 translation_scale: ${data.translation_scale}
 se3_augment: ${data.se3_augment}
 

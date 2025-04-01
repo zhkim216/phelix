@@ -50,6 +50,7 @@ data:
     max_rel_rog: 1.4  # subset to only pdbs with relative radius of gyration <= max_rel_rog
     n_train_cluster_resample: 10  # Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
     scaffold_manager_cfg: ${scaffold_manager}
+    evaluate_scaffolding: false  # automatically set to true if model.task is "scaffold"
 
 # Model options
 defaults:
@@ -76,8 +77,8 @@ loss:
   loss_weights:
     bb:
       mse_loss: 1.0
-    scaffold:
-      # if task is scaffolding, use a separate loss to reconstruct scaffold
+    motif:
+      # if task is scaffolding, use a separate loss to reconstruct motif
       mse_loss: 0.0
 
 optim:

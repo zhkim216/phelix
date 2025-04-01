@@ -32,10 +32,15 @@ class ScaffoldManager(nn.Module):
             1.0 - (self.contiguous_p + self.discontiguous_p)
         ])
 
+        # Sidechain options
+        self.sidechain_dropout_p = cfg.get("sidechain_dropout_p", 1.0)  # 1.0 means backbone-only conditioning
+
         self.translation_scale = cfg.get("translation_scale", 1.0)
         self.se3_augment = cfg.get("se3_augment", True)
 
+        # Override conditioning type
         self.cond_type_override = None  # only use this conditioning type; for inference and evaluation
+        self.motif_type = "random"  # ["backbone", "allatom", "random"]
 
 
     @torch.compiler.disable
@@ -43,6 +48,7 @@ class ScaffoldManager(nn.Module):
         atom_mask = example["atom_mask"]
         seq_mask = example["seq_mask"]
         x = example["x"]
+        aatype = example["aatype"]
 
         motif_mask = torch.zeros_like(atom_mask)    # 1 for unmasked, 0 for masked
         seq_len = seq_mask.sum().long().item()
@@ -87,12 +93,17 @@ class ScaffoldManager(nn.Module):
                 selected_indices = neighbor_indices[torch.randperm(len(neighbor_indices))[:n_to_select]]
                 motif_mask[selected_indices] = 1
 
-        # Only condition on backbone atoms  # TODO: support sidechain atoms
-        motif_mask[:, rc.non_bb_idxs] = 0
-        aatype_motif = torch.full_like(example["residue_index"], fill_value=rc.restype_order_with_x["X"])  # TODO: fix for sequence conditioning
-
         motif_mask = motif_mask * atom_mask  # unmask only existing atoms
+
+        # Sidechain / aatype conditioning
+        scn_mask = self.get_motif_scn_mask(motif_mask)
+
+        # Apply motif masks
+        motif_mask[:, rc.non_bb_idxs] = motif_mask[:, rc.non_bb_idxs] * scn_mask[:, None]  # mask out some sidechains
         x_motif = x * motif_mask[..., None]
+
+        # where we keep the sidechain, use the original aatype
+        aatype_motif = torch.where(scn_mask.bool(), aatype, torch.full_like(example["residue_index"], fill_value=rc.restype_order_with_x["X"]))
 
         # Re-center on CA of motif residues
         x_recentered = x
@@ -105,6 +116,38 @@ class ScaffoldManager(nn.Module):
         return {"x_motif": x_motif, "motif_mask": motif_mask, "aatype_motif": aatype_motif, "x_recentered": x_recentered}
 
 
+    def get_motif_scn_mask(self, motif_mask: TensorType["n a", float]) -> TensorType["n", float]:
+        """
+        Get mask denoting which sidechains within the motif to condition on. 1 if we should condition on the sidechain, 0 otherwise.
+        """
+        N, _ = motif_mask.shape
+        motif_residue_mask = motif_mask.any(dim=-1)
+
+        if self.motif_type == "random":
+            # Randomly mask out sidechains
+            if torch.rand(1) < self.sidechain_dropout_p:
+                # Only condition on backbone atoms
+                scn_mask = torch.zeros(N, device=motif_mask.device)
+            else:
+                # Condition on sidechain atoms and their aatypes
+                p = torch.rand(1)  # for this example, choose a random probability to keep sidechains of each sidechain
+                scn_mask = torch.rand(N, device=motif_mask.device) < p
+                scn_mask = scn_mask * motif_residue_mask  # subset sidechain mask to current motif residues
+
+        else:
+            assert not self.training, "Motif type should only be set during inference"
+            if self.motif_type == "backbone":
+                # use only backbone for motif conditioning
+                scn_mask = torch.zeros(N, device=motif_mask.device) * motif_residue_mask
+            elif self.motif_type == "allatom":
+                # use all sidechains for motif conditioning
+                scn_mask = torch.ones(N, device=motif_mask.device) * motif_residue_mask
+            else:
+                raise ValueError(f"Unknown motif type: {self.motif_type}")
+
+        return scn_mask.float()
+
+
     def set_conditioning_type(self, conditioning_type: str) -> None:
         """
         Set the conditioning type for the scaffold manager.
@@ -112,6 +155,23 @@ class ScaffoldManager(nn.Module):
         assert conditioning_type in self.conditioning_types, f"Unknown conditioning type: {conditioning_type}"
         self.cond_type_override = conditioning_type
         print(f"ScaffoldManager: set conditioning type to {conditioning_type}")
+
+
+    def set_motif_type(self, motif_type: str) -> None:
+        """
+        Set the motif type for the scaffold manager.
+        """
+        assert motif_type in ["backbone", "allatom", "random"], f"Unknown motif type: {motif_type}"
+        self.motif_type = motif_type
+        print(f"ScaffoldManager: set motif type to {motif_type}")
+
+
+    def reset(self) -> None:
+        """
+        Reset the scaffold manager to its original state.
+        """
+        self.cond_type_override = None
+        self.motif_type = "random"
 
 
 def get_scaffold_manager(cfg: Optional[DictConfig]) -> Optional[ScaffoldManager]:

@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=s4_a0
+#SBATCH --job-name=s4_a3
 #SBATCH -p possu
-#SBATCH --gpus-per-node=2
-#SBATCH --cpus-per-task=16
-#SBATCH --exclude=sh03-18n05
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --nodelist=sh04-10n01
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -30,19 +30,15 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
 WANDB_ID=richardshuai
-EXP_NAME=s4_a0
+EXP_NAME=s4_a3
 GROUP=backbone
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2
 CLUSTER_SAMPLE=true
 
-RESUME_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/s4_a0/checkpoints/ad-epoch1399.ckpt
-
 # Run training script
-cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
-    resume.ckpt_path=${RESUME_CKPT} \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
     wandb.no_wandb=false \
@@ -50,6 +46,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     exp_name=${EXP_NAME} \
     data.pdb_paths=[${PDB_PATH}] \
     data.cluster_sample=${CLUSTER_SAMPLE} \
+    data.max_scrmsd=1.0 \
     model.task=scaffold \
     scaffold_manager=scaffold_manager \
     denoiser=dit_denoiser \
@@ -57,6 +54,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser.dit.scaffolding.use_concat=true \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
-    train.batch_size=64 \
+    train.batch_size=128 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}

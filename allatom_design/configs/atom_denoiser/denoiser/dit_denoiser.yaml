@@ -100,7 +100,6 @@ dit:
     h_s: ${model.denoiser.scaffold_module.fampnn.n_channel}
     use_h_s: ${denoiser.scaffold_module.enabled}
     use_concat: false
-    use_seq: false
 
 
 autoguidance:
