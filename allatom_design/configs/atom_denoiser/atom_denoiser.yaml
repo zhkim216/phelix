@@ -100,7 +100,7 @@ logging:
 
 checkpointing:
   save_latest_every_n_steps: 25000  # Save the model every n steps
-  save_for_resuming_every_n_epochs: 100  # Keep 1 latest copy of the model every n epochs, for resuming
+  save_for_resuming_every_n_epochs: 25  # Keep 1 latest copy of the model every n epochs, for resuming
   save_phema_every_n_steps: 20000  # If using post-hoc EMA, save snapshot every n steps
 
 hydra:
