@@ -19,7 +19,7 @@ def get_cfg_from_ckpt(ckpt_path: str,
 
     Also returns the model checkpoint.
     """
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     cfg_dict = ckpt["hyper_parameters"]["cfg"]
     cfg = OmegaConf.create(cfg_dict)
 

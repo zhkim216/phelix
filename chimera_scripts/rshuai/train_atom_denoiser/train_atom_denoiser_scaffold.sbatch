@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s4_a2_v2
+#SBATCH --job-name=s4_a4
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,12 +24,15 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=s4_a2_v2
+EXP_NAME=s4_a4
 GROUP=backbone
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2
 CLUSTER_SAMPLE=true
+
+# Pretrained weights
+PRETRAINED_FAMPNN_PATH=/scratch/hielab/rshuai/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt
 
 # Run training script
 cd ${BASE_DIR}
@@ -47,6 +50,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     scaffold_manager=scaffold_manager \
     denoiser=dit_denoiser \
     denoiser.scaffold_module.enabled=true \
+    pretrained_module_paths.fampnn=${PRETRAINED_FAMPNN_PATH} \
     denoiser.dit.scaffolding.use_concat=true \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
