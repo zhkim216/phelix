@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s4_a5
+#SBATCH --job-name=s4_a6
 #SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -30,7 +30,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
 WANDB_ID=richardshuai
-EXP_NAME=s4_a5
+EXP_NAME=s4_a6
 GROUP=backbone
 
 # Dataset paths
@@ -57,6 +57,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     scaffold_manager.sidechain_dropout_p=0.5 \
     denoiser=dit_denoiser \
     denoiser.scaffold_module.enabled=true \
+    denoiser.scaffold_module.freeze=false \
     pretrained_module_paths.fampnn=${PRETRAINED_FAMPNN_PATH} \
     denoiser.dit.scaffolding.use_concat=true \
     denoiser.dit.depth=15 \

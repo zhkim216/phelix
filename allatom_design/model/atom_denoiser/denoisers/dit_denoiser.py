@@ -71,8 +71,9 @@ class DiTDenoiser(BaseAtomDenoiser):
             self.fampnn.load_state_dict(state_dict)
 
             # set to eval mode and freeze weights
-            self.fampnn.eval()
-            self.fampnn.requires_grad_(False)
+            if self.cfg.scaffold_module.freeze:
+                self.fampnn.eval()
+                self.fampnn.requires_grad_(False)
 
 
     def forward(self,
