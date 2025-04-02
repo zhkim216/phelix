@@ -90,6 +90,10 @@ class LitAtomDenoiser(L.LightningModule):
 
             _, aux = self.loss(outputs, batch, return_aux=True)
             aux = {k: v for k, v in aux.items() if "total" not in k}  # trim out total loss
+            if phase_suffix in ["2/backbone_scaffold", "2/allatom_scaffold"]:
+                # trim out unweighted losses for scaffolding dataloaders
+                aux = {k: v for k, v in aux.items() if "unweighted" not in k}
+
             self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_tbb{t}")
 
 
