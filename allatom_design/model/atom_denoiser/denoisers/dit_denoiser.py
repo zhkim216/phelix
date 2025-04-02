@@ -31,6 +31,7 @@ from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
 from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import FAMPNN
 from openfold.model.primitives import Linear
+from allatom_design.checkpoint_utils import repair_state_dict
 
 
 class DiTDenoiser(BaseAtomDenoiser):
@@ -64,7 +65,14 @@ class DiTDenoiser(BaseAtomDenoiser):
     def setup(self):
         if self.use_scaffold_module and self.cfg.scaffold_module.pretrained_weights_path is not None:
             # Load in pretrained fampnn weights
-            self.fampnn.load_state_dict(torch.load(self.cfg.scaffold_module.pretrained_weights_path))
+            state_dict = torch.load(self.cfg.scaffold_module.pretrained_weights_path, map_location="cpu")["state_dict"]
+            state_dict = repair_state_dict(state_dict)
+            state_dict = {k.replace("model.denoiser.seq_design_module.", ""): v for k, v in state_dict.items() if k.startswith("model.denoiser.seq_design_module.")}
+            self.fampnn.load_state_dict(state_dict)
+
+            # set to eval mode and freeze weights
+            self.fampnn.eval()
+            self.fampnn.requires_grad_(False)
 
 
     def forward(self,
@@ -367,7 +375,7 @@ class DiTDenoiser(BaseAtomDenoiser):
         packed_inputs["chain_encoding"] = torch.zeros_like(packed_inputs["residue_index"])  # TODO: add chain index to backbone diffusion
 
         # Run scaffold module on packed inputs and scatter back to original size
-        h_V = self.run_scaffold_module(packed_inputs)
+        h_V = self.run_scaffold_module(packed_inputs).float()
         h_s = torch.zeros((B, N, h_V.shape[-1]), device=h_V.device)  # [b n h]
         row_idx = torch.arange(B, device=h_V.device)[:, None].expand(-1, M)
         mask = motif_pad_mask.bool()
