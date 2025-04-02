@@ -50,13 +50,6 @@ class DiTDenoiser(BaseAtomDenoiser):
         if self.use_scaffold_module:
             self.fampnn = FAMPNN(cfg.scaffold_module.fampnn)
 
-        # AF2-based positional encoding
-        self.pos_encoding = cfg.get("pos_encoding", None)
-        if self.pos_encoding == "af2":
-            self.pos_embed = RelativePositionalEncoding(cfg.rel_pos_encoding)
-            self.pair_bias_embedder = nn.Sequential(nn.LayerNorm(cfg.rel_pos_encoding.c_z),
-                                                    Linear(cfg.rel_pos_encoding.c_z, cfg.dit.num_heads, init="normal", bias=False))
-
         # Set up DiT
         self.interpolant = get_interpolant(cfg.interpolant, sigma_data)
         self.dit = DiT(cfg.dit, self.interpolant)
@@ -87,16 +80,9 @@ class DiTDenoiser(BaseAtomDenoiser):
                            Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
+        h_s = None
         if self.use_scaffold_module:
             h_s = self.process_motif(x_motif, motif_mask, aatype_motif, seq_mask, residue_index)
-        else:
-            h_s = None
-
-        if self.pos_encoding == "af2":
-            z = self.pos_embed(residue_index)
-            pair_bias = rearrange(self.pair_bias_embedder(z), "b i j h -> b h i j")
-        else:
-            pair_bias = None
 
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
             x_motif=x_motif,
@@ -105,7 +91,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             residue_index=residue_index,
             seq_mask=seq_mask,
             h_s=h_s,
-            pair_bias=pair_bias,
+            pair_bias=None,
             cond_labels_in=cond_labels_in,
             aux_inputs=aux_inputs,
             is_sampling=is_sampling
@@ -149,6 +135,8 @@ class DiTDenoiser(BaseAtomDenoiser):
             x_scaffold_batched = repeat(x_motif, "b n a x -> (m b) n a x", m=M, b=B)
             scaffold_mask_batched = repeat(motif_mask, "b n a -> (m b) n a", m=M, b=B)
             aatype_scaffold_batched = repeat(aatype_motif, "b n -> (m b) n", m=M, b=B)
+
+            # repeat conditioning inputs
             h_s_batched = repeat(h_s, "b n h -> (m b) n h", m=M, b=B) if h_s is not None else None
             pair_bias_batched = repeat(pair_bias, "b h i j -> (m b) h i j", m=M, b=B) if pair_bias is not None else None  # TODO: expand instead to save memory?
 
@@ -317,39 +305,119 @@ class DiTDenoiser(BaseAtomDenoiser):
 
 
     @torch.compiler.disable
-    def process_motif(self, x_motif, motif_mask,
-                         aatype_motif, seq_mask, residue_index):
+    def pack_motif_inputs(self, x_motif: TensorType["b n 37 3", float],
+                          motif_mask: TensorType["b n 37", float],
+                          aatype_motif: TensorType["b n", int],
+                          seq_mask: TensorType["b n", float],
+                          residue_index: TensorType["b n", int]):
+        """
+        Packs motif inputs to a compact format for computational efficiency.
+        """
         B, N, A, _ = x_motif.shape
-        # Find residues where motif_mask is nonzero in any atom
-        has_scaffold = motif_mask.any(dim=(-1))  # [b n]
 
-        # Get indices of residues with scaffold information
-        scaffold_indices = [torch.where(has_scaffold[bi])[0] for bi in range(B)]
-        max_scaffolds = max(len(indices) for indices in scaffold_indices)
+        # Get indices of residues with motif info
+        motif_residue_mask = motif_mask.any(dim=-1)  # [b n]
+        motif_indices = [torch.where(motif_residue_mask[bi])[0] for bi in range(B)]
+        total_motif_residues = torch.sum(motif_residue_mask)
 
-        if max_scaffolds > 0:  # Only process if we have any scaffold positions
+        if total_motif_residues == 0:
+            return None
+
+        # Pack inputs
+        packed_x = []
+        packed_motif_mask = []  # renamed from packed_mask for clarity
+        packed_seq_mask = []
+        packed_aatype = []
+        packed_residue_index = []
+
+        packed_bis = []  # keep track of batch indices for packed inputs
+
+        for bi, indices in enumerate(motif_indices):
+            if len(indices) > 0:
+                packed_bis.append(bi)
+                packed_x.append(x_motif[bi, indices])
+                packed_motif_mask.append(motif_mask[bi, indices])
+                packed_seq_mask.append(seq_mask[bi, indices])
+                packed_aatype.append(aatype_motif[bi, indices])
+                packed_residue_index.append(residue_index[bi, indices])
+
+        # Pad to max length
+        packed_x = torch.nn.utils.rnn.pad_sequence(packed_x, batch_first=True)  # [b' m 37 3]
+        packed_motif_mask = torch.nn.utils.rnn.pad_sequence(packed_motif_mask, batch_first=True)  # [b' m 37]
+        packed_seq_mask = torch.nn.utils.rnn.pad_sequence(packed_seq_mask, batch_first=True)  # [b' m]
+        packed_aatype = torch.nn.utils.rnn.pad_sequence(packed_aatype, batch_first=True)  # [b' m]
+        packed_residue_index = torch.nn.utils.rnn.pad_sequence(packed_residue_index, batch_first=True)  # [b' m]
+
+        # Create chain encoding (all zeros for now)
+        packed_chain_encoding = torch.zeros_like(packed_residue_index)
+
+        packed_inputs = {
+            "x": packed_x,
+            "motif_mask": packed_motif_mask,
+            "seq_mask": packed_seq_mask,
+            "aatype": packed_aatype,
+            "residue_index": packed_residue_index,
+            "chain_encoding": packed_chain_encoding,
+            "batch_indices": packed_bis,
+            "motif_indices": motif_indices
+        }
+
+        return packed_inputs
+
+
+    def run_scaffold_module(self, x_motif, motif_mask, aatype_motif, seq_mask, residue_index):
+        """
+        Runs the scaffold module on the packed inputs.
+        """
+        packed_inputs = self.pack_motif(x_motif, motif_mask, aatype_motif, seq_mask, residue_index)
+
+        # Run motif module on packed inputs
+        _, mpnn_feature_dict = self.fampnn(
+            denoised_coords=packed_inputs["x"],
+            aatype_noised=packed_inputs["aatype"],
+            seq_mask=packed_inputs["seq_mask"],
+            atom_mask_noised=packed_inputs["motif_mask"],
+            residue_index=packed_inputs["residue_index"],
+            chain_encoding=packed_inputs["chain_encoding"]
+        )
+        hV = mpnn_feature_dict["h_V"]  # [b' m h]
+
+
+
+
+    @torch.compiler.disable
+    def process_motif(self, x_motif, motif_mask,
+                      aatype_motif, seq_mask, residue_index):
+        B, N, A, _ = x_motif.shape
+
+        # Get indices of residues with motif info
+        motif_residue_mask = motif_mask.any(dim=-1)  # [b n]
+        motif_indices = [torch.where(motif_residue_mask[bi])[0] for bi in range(B)]
+        total_motif_residues = torch.sum(motif_residue_mask)
+
+        if total_motif_residues > 0:  # Only process if we have any motif residues
             # Pack inputs to FAMPNN
             packed_x = []
-            packed_scaffold_mask = []  # renamed from packed_mask for clarity
+            packed_motif_mask = []  # renamed from packed_mask for clarity
             packed_seq_mask = []
             packed_aatype = []
             packed_residue_index = []
 
             packed_bis = []  # keep track of batch indices for packed inputs
 
-            for bi, indices in enumerate(scaffold_indices):
+            for bi, indices in enumerate(motif_indices):
                 if len(indices) > 0:
                     packed_bis.append(bi)
 
                     packed_x.append(x_motif[bi, indices])
-                    packed_scaffold_mask.append(motif_mask[bi, indices])
+                    packed_motif_mask.append(motif_mask[bi, indices])
                     packed_seq_mask.append(seq_mask[bi, indices])
                     packed_aatype.append(aatype_motif[bi, indices])
                     packed_residue_index.append(residue_index[bi, indices])
 
             # Pad to max length
             packed_x = torch.nn.utils.rnn.pad_sequence(packed_x, batch_first=True)  # [b' m 37 3]
-            packed_scaffold_mask = torch.nn.utils.rnn.pad_sequence(packed_scaffold_mask, batch_first=True)  # [b' m 37]
+            packed_motif_mask = torch.nn.utils.rnn.pad_sequence(packed_motif_mask, batch_first=True)  # [b' m 37]
             packed_seq_mask = torch.nn.utils.rnn.pad_sequence(packed_seq_mask, batch_first=True)  # [b' m]
             packed_aatype = torch.nn.utils.rnn.pad_sequence(packed_aatype, batch_first=True)  # [b' m]
             packed_residue_index = torch.nn.utils.rnn.pad_sequence(packed_residue_index, batch_first=True)  # [b' m]
@@ -357,12 +425,12 @@ class DiTDenoiser(BaseAtomDenoiser):
             # Create chain encoding (all zeros for now)
             packed_chain_encoding = torch.zeros_like(packed_residue_index)
 
-            # Run scaffold module on packed inputs
+            # Run motif module on packed inputs
             _, mpnn_feature_dict = self.fampnn(
                 denoised_coords=packed_x,
                 aatype_noised=packed_aatype,
                 seq_mask=packed_seq_mask,
-                atom_mask_noised=packed_scaffold_mask,
+                atom_mask_noised=packed_motif_mask,
                 residue_index=packed_residue_index,
                 chain_encoding=packed_chain_encoding
             )
@@ -373,11 +441,11 @@ class DiTDenoiser(BaseAtomDenoiser):
 
             # Scatter back to original size. j is the row in hV, while bi is the original batch index.
             for j, bi in enumerate(packed_bis):
-                idx = scaffold_indices[bi]
+                idx = motif_indices[bi]
                 h_s[bi, idx] = hV[j, :len(idx)]
 
         else:
-            # If no scaffold positions, set h_s to zero and skip FAMPNN
+            # If no motif positions, set h_s to zero and skip FAMPNN
             h_s = torch.zeros((B, N, self.fampnn.hidden_dim), device=x_motif.device)
 
         return h_s
