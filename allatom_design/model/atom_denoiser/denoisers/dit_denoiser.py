@@ -82,7 +82,7 @@ class DiTDenoiser(BaseAtomDenoiser):
 
         h_s = None
         if self.use_scaffold_module:
-            h_s = self.process_motif(x_motif, motif_mask, aatype_motif, seq_mask, residue_index)
+            h_s = self.embed_motif(x_motif, motif_mask, aatype_motif, seq_mask, residue_index)
 
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
             x_motif=x_motif,
@@ -305,148 +305,73 @@ class DiTDenoiser(BaseAtomDenoiser):
 
 
     @torch.compiler.disable
-    def pack_motif_inputs(self, x_motif: TensorType["b n 37 3", float],
-                          motif_mask: TensorType["b n 37", float],
-                          aatype_motif: TensorType["b n", int],
-                          seq_mask: TensorType["b n", float],
-                          residue_index: TensorType["b n", int]):
+    def run_scaffold_module(self, packed_inputs: TensorType["b m ..."]) -> TensorType["b m h", float]:
         """
-        Packs motif inputs to a compact format for computational efficiency.
+        Runs the scaffold module on packed motif inputs. Returns embedding of motif residues.
         """
-        B, N, A, _ = x_motif.shape
-
-        # Get indices of residues with motif info
-        motif_residue_mask = motif_mask.any(dim=-1)  # [b n]
-        motif_indices = [torch.where(motif_residue_mask[bi])[0] for bi in range(B)]
-        total_motif_residues = torch.sum(motif_residue_mask)
-
-        if total_motif_residues == 0:
-            return None
-
-        # Pack inputs
-        packed_x = []
-        packed_motif_mask = []  # renamed from packed_mask for clarity
-        packed_seq_mask = []
-        packed_aatype = []
-        packed_residue_index = []
-
-        packed_bis = []  # keep track of batch indices for packed inputs
-
-        for bi, indices in enumerate(motif_indices):
-            if len(indices) > 0:
-                packed_bis.append(bi)
-                packed_x.append(x_motif[bi, indices])
-                packed_motif_mask.append(motif_mask[bi, indices])
-                packed_seq_mask.append(seq_mask[bi, indices])
-                packed_aatype.append(aatype_motif[bi, indices])
-                packed_residue_index.append(residue_index[bi, indices])
-
-        # Pad to max length
-        packed_x = torch.nn.utils.rnn.pad_sequence(packed_x, batch_first=True)  # [b' m 37 3]
-        packed_motif_mask = torch.nn.utils.rnn.pad_sequence(packed_motif_mask, batch_first=True)  # [b' m 37]
-        packed_seq_mask = torch.nn.utils.rnn.pad_sequence(packed_seq_mask, batch_first=True)  # [b' m]
-        packed_aatype = torch.nn.utils.rnn.pad_sequence(packed_aatype, batch_first=True)  # [b' m]
-        packed_residue_index = torch.nn.utils.rnn.pad_sequence(packed_residue_index, batch_first=True)  # [b' m]
-
-        # Create chain encoding (all zeros for now)
-        packed_chain_encoding = torch.zeros_like(packed_residue_index)
-
-        packed_inputs = {
-            "x": packed_x,
-            "motif_mask": packed_motif_mask,
-            "seq_mask": packed_seq_mask,
-            "aatype": packed_aatype,
-            "residue_index": packed_residue_index,
-            "chain_encoding": packed_chain_encoding,
-            "batch_indices": packed_bis,
-            "motif_indices": motif_indices
-        }
-
-        return packed_inputs
-
-
-    def run_scaffold_module(self, x_motif, motif_mask, aatype_motif, seq_mask, residue_index):
-        """
-        Runs the scaffold module on the packed inputs.
-        """
-        packed_inputs = self.pack_motif(x_motif, motif_mask, aatype_motif, seq_mask, residue_index)
-
-        # Run motif module on packed inputs
+        # Run motif embedding module on packed inputs
         _, mpnn_feature_dict = self.fampnn(
-            denoised_coords=packed_inputs["x"],
-            aatype_noised=packed_inputs["aatype"],
+            denoised_coords=packed_inputs["x_motif"],
+            aatype_noised=packed_inputs["aatype_motif"],
             seq_mask=packed_inputs["seq_mask"],
             atom_mask_noised=packed_inputs["motif_mask"],
             residue_index=packed_inputs["residue_index"],
             chain_encoding=packed_inputs["chain_encoding"]
         )
-        hV = mpnn_feature_dict["h_V"]  # [b' m h]
+        h_V = mpnn_feature_dict["h_V"]  # [b m h]
+        return h_V
 
 
+    def embed_motif(self,
+                    x_motif: TensorType["b n 37 3", float],
+                    motif_mask: TensorType["b n 37", float],
+                    aatype_motif: TensorType["b n", int],
+                    seq_mask: TensorType["b n", float],
+                    residue_index: TensorType["b n", int]) -> TensorType["b n h", float]:
+        """
+        Embeds motif residues and returns per-residue embeddings with embeddings for each motif residue, and 0 otherwise.
 
-
-    @torch.compiler.disable
-    def process_motif(self, x_motif, motif_mask,
-                      aatype_motif, seq_mask, residue_index):
+        First, packs motifs into a compact format of shape [b m], where m is the max number of motif residues in the batch.
+        Then, runs the scaffold module on the packed motifs and scatters the result back to the original size.
+        """
         B, N, A, _ = x_motif.shape
 
-        # Get indices of residues with motif info
+        # Get size of packed motifs
         motif_residue_mask = motif_mask.any(dim=-1)  # [b n]
-        motif_indices = [torch.where(motif_residue_mask[bi])[0] for bi in range(B)]
-        total_motif_residues = torch.sum(motif_residue_mask)
+        M = motif_residue_mask.sum(dim=-1).max()  # we pad to the max motif length M in this batch
+        if M == 0:
+            # if no motif residues, return zero embedding
+            h_V = torch.zeros((B, N, self.fampnn.hidden_dim), device=x_motif.device)
+            return h_V
 
-        if total_motif_residues > 0:  # Only process if we have any motif residues
-            # Pack inputs to FAMPNN
-            packed_x = []
-            packed_motif_mask = []  # renamed from packed_mask for clarity
-            packed_seq_mask = []
-            packed_aatype = []
-            packed_residue_index = []
+        ### Pack motif residues into a compact format ###
+        # construct motif indices, which are indices of the motif residues for each batch element (zero-padded)
+        row_idx = torch.arange(B, device=x_motif.device)[:, None].expand(-1, N)
+        col_idx = (motif_residue_mask.cumsum(dim=-1) * motif_residue_mask) - 1  # get where motif residues are, and -1 to get zero-indexed col idxs
+        mask_idx = torch.arange(N, device=x_motif.device)[None].expand(B, -1)    # index into motif_residue_mask
 
-            packed_bis = []  # keep track of batch indices for packed inputs
+        motif_indices = torch.zeros((B, M), device=x_motif.device, dtype=torch.long)
+        motif_indices[row_idx[motif_residue_mask], col_idx[motif_residue_mask]] = mask_idx[motif_residue_mask]
+        motif_pad_mask = torch.zeros_like(motif_indices).float()  # denotes padding of motif_indices
+        motif_pad_mask[row_idx[motif_residue_mask], col_idx[motif_residue_mask]] = 1.0
 
-            for bi, indices in enumerate(motif_indices):
-                if len(indices) > 0:
-                    packed_bis.append(bi)
+        # use motif indices to gather into packed inputs
+        packed_inputs = {"x_motif": x_motif, "motif_mask": motif_mask, "aatype_motif": aatype_motif, "seq_mask": seq_mask, "residue_index": residue_index}
+        for k, v in packed_inputs.items():
+            data_shape = v.shape[2:]
+            gather_idxs = (motif_indices + (torch.arange(B, device=x_motif.device)[:, None] * N)).view(-1)  # get flat indices of motif residues
+            gather_idxs = gather_idxs.view(-1, *((1,) * len(data_shape))).expand(-1, *data_shape)
+            packed_v = v.view(-1, *data_shape).gather(0, gather_idxs).view(B, M, *data_shape)
+            packed_v = (packed_v * motif_pad_mask.view(B, M, *((1,) * len(data_shape)))).type(v.dtype)
+            packed_inputs[k] = packed_v
+        packed_inputs["chain_encoding"] = torch.zeros_like(packed_inputs["residue_index"])  # TODO: add chain index to backbone diffusion
 
-                    packed_x.append(x_motif[bi, indices])
-                    packed_motif_mask.append(motif_mask[bi, indices])
-                    packed_seq_mask.append(seq_mask[bi, indices])
-                    packed_aatype.append(aatype_motif[bi, indices])
-                    packed_residue_index.append(residue_index[bi, indices])
-
-            # Pad to max length
-            packed_x = torch.nn.utils.rnn.pad_sequence(packed_x, batch_first=True)  # [b' m 37 3]
-            packed_motif_mask = torch.nn.utils.rnn.pad_sequence(packed_motif_mask, batch_first=True)  # [b' m 37]
-            packed_seq_mask = torch.nn.utils.rnn.pad_sequence(packed_seq_mask, batch_first=True)  # [b' m]
-            packed_aatype = torch.nn.utils.rnn.pad_sequence(packed_aatype, batch_first=True)  # [b' m]
-            packed_residue_index = torch.nn.utils.rnn.pad_sequence(packed_residue_index, batch_first=True)  # [b' m]
-
-            # Create chain encoding (all zeros for now)
-            packed_chain_encoding = torch.zeros_like(packed_residue_index)
-
-            # Run motif module on packed inputs
-            _, mpnn_feature_dict = self.fampnn(
-                denoised_coords=packed_x,
-                aatype_noised=packed_aatype,
-                seq_mask=packed_seq_mask,
-                atom_mask_noised=packed_motif_mask,
-                residue_index=packed_residue_index,
-                chain_encoding=packed_chain_encoding
-            )
-
-            # Unpack outputs back to original size
-            hV = mpnn_feature_dict["h_V"]  # [b' m h]
-            h_s = torch.zeros((B, N, hV.shape[-1]), device=hV.device)  # [b n h]
-
-            # Scatter back to original size. j is the row in hV, while bi is the original batch index.
-            for j, bi in enumerate(packed_bis):
-                idx = motif_indices[bi]
-                h_s[bi, idx] = hV[j, :len(idx)]
-
-        else:
-            # If no motif positions, set h_s to zero and skip FAMPNN
-            h_s = torch.zeros((B, N, self.fampnn.hidden_dim), device=x_motif.device)
+        # Run scaffold module on packed inputs and scatter back to original size
+        h_V = self.run_scaffold_module(packed_inputs)
+        h_s = torch.zeros((B, N, h_V.shape[-1]), device=h_V.device)  # [b n h]
+        row_idx = torch.arange(B, device=h_V.device)[:, None].expand(-1, M)
+        mask = motif_pad_mask.bool()
+        h_s[row_idx[mask], motif_indices[mask]] = h_V[mask]
 
         return h_s
 
