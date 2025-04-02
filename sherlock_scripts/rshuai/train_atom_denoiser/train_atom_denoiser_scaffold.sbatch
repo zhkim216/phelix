@@ -51,6 +51,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     model.task=scaffold \
     trainer.strategy=ddp_find_unused_parameters_true \
     scaffold_manager=scaffold_manager \
+    scaffold_manager.sidechain_dropout_p=1.0 \
     denoiser=dit_denoiser \
     denoiser.scaffold_module.enabled=true \
     denoiser.dit.scaffolding.use_concat=true \
