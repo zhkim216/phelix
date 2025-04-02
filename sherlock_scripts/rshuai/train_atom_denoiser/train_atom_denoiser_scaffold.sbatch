@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s4_a3
+#SBATCH --job-name=s4_a2_v2
 #SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -30,7 +30,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
 WANDB_ID=richardshuai
-EXP_NAME=s4_a3
+EXP_NAME=s4_a2_v2
 GROUP=backbone
 
 # Dataset paths
@@ -38,6 +38,7 @@ PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2
 CLUSTER_SAMPLE=true
 
 # Run training script
+cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
@@ -48,12 +49,15 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     data.cluster_sample=${CLUSTER_SAMPLE} \
     data.max_scrmsd=1.0 \
     model.task=scaffold \
+    trainer.strategy=ddp_find_unused_parameters_true \
     scaffold_manager=scaffold_manager \
     denoiser=dit_denoiser \
-    denoiser.scaffold_module.enabled=false \
+    denoiser.scaffold_module.enabled=true \
     denoiser.dit.scaffolding.use_concat=true \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
-    train.batch_size=128 \
+    train.batch_size=16 \
+    denoiser.training_batch_size_mult=8 \
+    data.n_train_cluster_resample=2 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}
