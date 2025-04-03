@@ -1,3 +1,5 @@
+import gzip
+import json
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -12,8 +14,8 @@ from boltz.data.crop.cropper import Cropper
 from boltz.data.feature.pad import pad_to_max
 from boltz.data.sample.sampler import Sample, Sampler
 from boltz.data.tokenize.tokenizer import Tokenized, Tokenizer
-from boltz.data.types import (MSA, Connection, Input, Manifest, Record,
-                              Structure)
+from boltz.data.types import Connection, Input, Manifest, Record, Structure
+from einops import rearrange
 from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader
@@ -34,9 +36,9 @@ class BoltzSDDataModule(L.LightningDataModule):
         self.pdb_path = cfg.pdb_path
 
         # Load in manifest
-        manifest = Manifest.load(Path(f"{self.pdb_path}/rcsb_processed_targets/manifest.json"))
+        manifest = self._load_manifest_from_file()
 
-        # Load in validation split  # TODO: do we need load in test split too?
+        # Load in validation split  # TODO: do we need to load in the test split too? boltz does not do this.
         with open(f"{self.pdb_path}/splits/validation_ids.txt", "r") as f:
             val_split = {x.lower() for x in f.read().splitlines()}
 
@@ -110,6 +112,25 @@ class BoltzSDDataModule(L.LightningDataModule):
         return val_loader
 
 
+    def _load_manifest_from_file(self) -> Manifest:
+        """
+        Load manifest from file. Preferentially loads from a compressed file, but it if it is not found, will read in an uncompressed json and
+        cache the result.
+        """
+        manifest_path = f"{self.pdb_path}/rcsb_processed_targets/manifest.json.gz"
+        if Path(manifest_path).exists():
+            print(f"Loading in manifest from {manifest_path}...")
+            with gzip.open(manifest_path, "rt") as f:
+                data = json.load(f)
+            records = [Record.from_dict(r) for r in tqdm(data, desc="Loading records...")]
+            manifest = Manifest(records=records)
+        else:
+            manifest_path = f"{self.pdb_path}/rcsb_processed_targets/manifest.json"
+            print(f"Loading in manifest from {manifest_path}...")
+            manifest = Manifest.load(Path(manifest_path))
+        print(f"Loaded manifest with {len(manifest.records)} records.")
+        return manifest
+
 
 class SDDataset(data.Dataset):
     """Base iterable dataset."""
@@ -163,6 +184,41 @@ class SDDataset(data.Dataset):
             The sampled data features.
 
         """
+        # Load in Boltz features for this sample
+        input_data, boltz_feats = self._load_boltz_feats(idx)
+
+        # Convert Boltz features to OpenFold features
+        try:
+            openfold_feats = self._to_openfold_feats(input_data, boltz_feats)
+        except Exception as e:
+            print(f"Failed to convert Boltz features to OpenFold features for {boltz_feats['pdb_key']} with error {e}. Skipping.")
+            return self.__getitem__(idx)
+
+        # Process OpenFold features into an example
+        example = process_single_pdb(openfold_feats)
+
+        # TODO: SE3 augmentation?
+
+        # Add pdb key
+        example["pdb_key"] = boltz_feats["pdb_key"]
+
+        return example
+
+
+    def __len__(self) -> int:
+        """Get the length of the dataset.
+
+        Returns
+        -------
+        int
+            The length of the dataset.
+
+        """
+        return self.samples_per_epoch
+
+
+    def _load_boltz_feats(self, idx: int) -> tuple[Input, dict[str, torch.Tensor]]:
+        """Load Boltz features for a given index."""
         dataset = self.dataset
 
         # Get a sample from the dataset
@@ -205,7 +261,7 @@ class SDDataset(data.Dataset):
 
         # Compute features
         try:
-            features = dataset.featurizer.process(
+            boltz_feats = dataset.featurizer.process(
                 tokenized,
                 atoms_per_window_queries=self.atoms_per_window_queries,
                 min_dist=self.min_dist,
@@ -218,42 +274,20 @@ class SDDataset(data.Dataset):
             print(f"Featurizer failed on {sample.record.id} with error {e}. Skipping.")
             return self.__getitem__(idx)
 
-        # Convert Boltz features to seq denoiser features
-        try:
-            sd_features = self._to_sd_features(input_data, tokenized, features)
-        except Exception as e:
-            print(f"Failed to convert Boltz features to seq denoiser features for {sample.record.id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
-
-        sd_features["pdb_key"] = sample.record.id
-        return sd_features
+        boltz_feats["pdb_key"] = sample.record.id
+        return input_data, boltz_feats
 
 
-    def __len__(self) -> int:
-        """Get the length of the dataset.
-
-        Returns
-        -------
-        int
-            The length of the dataset.
-
-        """
-        return self.samples_per_epoch
-
-
-    def _to_sd_features(self,
-                        input_data: Input,
-                        boltz_tokenized: Tokenized,
-                        boltz_feats: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Convert Boltz features to seq denoiser features."""
+    def _to_openfold_feats(self,
+                           input_data: Input,
+                           boltz_feats: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Convert Boltz features to OpenFold features."""
         boltz_restypes = boltz_feats["res_type"].argmax(dim=-1)
 
         # Pad all tokens to atom23 format (max between 14 for proteins and 23 for nucleic acids)
         tokenwise_feats = pad_atom_feats_to_tokenwise(boltz_feats, max_atoms_per_token=23)
 
-        # TODO: se3 augmentation?
-
-        # === Protein feats === #
+        # === Protein features === #
         # convert atom mask and coords from atom14 to atom37
         atom14_tokenwise_feats = {k: v[:, :14] for k, v in tokenwise_feats.items()}
         openfold_restypes = torch.tensor([conversion.boltz_token_id_to_restype_id[x.item()] for x in boltz_restypes])  # convert to openfold restypes vocab
@@ -282,15 +316,6 @@ class SDDataset(data.Dataset):
 
         for k, v in feats.items():
             feats[k] = v[protein_token_mask].contiguous()
-
-        # DEBUG: convert back to atom14 and double check that everything looks good
-        atom14_coords, atom14_mask = atom37_to_atom14(feats["aatype"], feats["all_atom_positions"], feats["all_atom_mask"])
-        protein_tokenwise_mask = atom14_tokenwise_feats["atom_resolved_mask"][protein_token_mask]
-        protein_tokenwise_coords = atom14_tokenwise_feats["coords"][protein_token_mask] * protein_tokenwise_mask[..., None]
-        if not (atom14_mask == protein_tokenwise_mask).all():
-            raise ValueError(f"atom14_mask mismatch")
-        if not (atom14_coords * atom14_mask[..., None] == protein_tokenwise_coords).all():
-            raise ValueError(f"atom14_coords mismatch")
 
         # Handle the distinction between missing atoms and ghost atoms in the atom masks
         ghost_atom_mask = 1 - torch.tensor(rc.restype_atom37_mask)[feats["aatype"]]  # 1 for atoms that are not in the residue type; ghost atoms
@@ -433,3 +458,43 @@ def pad_atom_feats_to_tokenwise(boltz_feats: dict,
         tokenwise_feats[k] = tokenwise_feats[k] * pad_mask.view(N, max_atoms_per_token, *((1,) * len(data_shape)))
 
     return tokenwise_feats
+
+
+def process_single_pdb(data):
+    """
+    Given output of Boltz featurization and conversion to OpenFold features, process into a single example.
+    """
+    example = {}
+
+    # Use raw coordinates
+    x = data["all_atom_positions"]  # [n, a, 3]
+    atom_mask = data["all_atom_mask"]  # [n, a]
+    seq_mask = data["seq_mask"]  # [n]
+    x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
+
+    # per-channel mask for x, used for loss.
+    # We only mask out missing atoms from PDB files, not ghost atoms.
+    x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
+
+    # Construct example
+    example["x"] = x * atom_mask[..., None]
+    example["seq_mask"] = seq_mask
+    example["x_mask"] = x_mask
+    example["residue_index"] = data["residue_index"]
+    example["chain_index"] = data["chain_index"]
+    example["aatype"] = data["aatype"]  # not one-hot encoded
+    example["ghost_atom_mask"] = data["ghost_atom_mask"]
+    example["missing_atom_mask"] = data["missing_atom_mask"]
+    example["atom_mask"] = atom_mask
+    example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
+    example["interface_residue_mask"] = data["interface_residue_mask"]
+
+    # Convert data types
+    example_out = {}
+    for k, v in example.items():
+        if k in FEATURES_LONG:
+            example_out[k] = v.long()
+        else:
+            example_out[k] = v.float()
+
+    return example_out
