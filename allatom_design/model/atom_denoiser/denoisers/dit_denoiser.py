@@ -65,13 +65,14 @@ class DiTDenoiser(BaseAtomDenoiser):
     def setup(self):
         if self.use_scaffold_module and self.cfg.scaffold_module.pretrained_weights_path is not None:
             # Load in pretrained fampnn weights
-            state_dict = torch.load(self.cfg.scaffold_module.pretrained_weights_path, map_location="cpu")["state_dict"]
-            state_dict = repair_state_dict(state_dict)
-            state_dict = {k.replace("model.denoiser.seq_design_module.", ""): v for k, v in state_dict.items() if k.startswith("model.denoiser.seq_design_module.")}
-            self.fampnn.load_state_dict(state_dict)
+            if not self.cfg.scaffold_module.get("ablate_pretrained_weights", False):
+                state_dict = torch.load(self.cfg.scaffold_module.pretrained_weights_path, map_location="cpu")["state_dict"]
+                state_dict = repair_state_dict(state_dict)
+                state_dict = {k.replace("model.denoiser.seq_design_module.", ""): v for k, v in state_dict.items() if k.startswith("model.denoiser.seq_design_module.")}
+                self.fampnn.load_state_dict(state_dict)
 
             # set to eval mode and freeze weights
-            if self.cfg.scaffold_module.freeze:
+            if self.cfg.scaffold_module.get("freeze", True):
                 self.fampnn.eval()
                 self.fampnn.requires_grad_(False)
 
