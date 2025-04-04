@@ -13,6 +13,7 @@ training_batch_size_mult: 1  # batch size multiplier for diffusion module
 scaffold_module:
   enabled: false  # true to condition on input scaffolds
   pretrained_weights_path: ${pretrained_module_paths.fampnn}
+  ablate_pretrained_weights: false
   freeze: true
   fampnn:
     n_aatype: ${model.n_aatype}

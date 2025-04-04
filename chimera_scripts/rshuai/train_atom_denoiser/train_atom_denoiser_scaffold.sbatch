@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s4_a4
+#SBATCH --job-name=ablate_pretrained
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,7 +24,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=s4_a4
+EXP_NAME=s4_a7
 GROUP=backbone
 
 # Dataset paths
@@ -48,10 +48,12 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     model.task=scaffold \
     trainer.strategy=ddp_find_unused_parameters_true \
     scaffold_manager=scaffold_manager \
-    scaffold_manager.sidechain_dropout_p=1.0 \
+    scaffold_manager.sidechain_dropout_p=0.5 \
     denoiser=dit_denoiser \
     denoiser.scaffold_module.enabled=true \
     pretrained_module_paths.fampnn=${PRETRAINED_FAMPNN_PATH} \
+    denoiser.scaffold_module.ablate_pretrained_weights=true \
+    denoiser.scaffold_module.freeze=true \
     denoiser.dit.scaffolding.use_concat=true \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
