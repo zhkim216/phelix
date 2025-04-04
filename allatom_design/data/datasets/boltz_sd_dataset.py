@@ -283,6 +283,7 @@ class SDDataset(data.Dataset):
                            boltz_feats: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Convert Boltz features to OpenFold features."""
         boltz_restypes = boltz_feats["res_type"].argmax(dim=-1)
+        seq_mask = torch.ones_like(boltz_restypes, dtype=torch.float32) * (boltz_restypes != const.token_ids["<pad>"])  # TODO: handle seq mask more carefully
 
         # Pad all tokens to atom23 format (max between 14 for proteins and 23 for nucleic acids)
         tokenwise_feats = pad_atom_feats_to_tokenwise(boltz_feats, max_atoms_per_token=23)
@@ -302,7 +303,7 @@ class SDDataset(data.Dataset):
         feats["aatype"] = openfold_restypes
         feats["residue_index"] = boltz_feats["residue_index"]
         feats["chain_index"] = boltz_feats["asym_id"]
-        feats["seq_mask"] = torch.ones_like(feats["aatype"], dtype=torch.float32)
+        feats["seq_mask"] = seq_mask
 
         feats["target_feat"] = F.one_hot(feats["aatype"], num_classes=len(rc.restypes_with_x)).float()
         feats["ref_pos"] = ref_pos
