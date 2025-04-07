@@ -25,8 +25,8 @@ MPNN_PARAMS_DIR=/scratch/hielab/rshuai/model_params/mpnn
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Inputs config
-PDB_DIR=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_mmcifs
-PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/af3_pdb_monomer/eval_pdb_keys.list
+PDB_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/c6_aasd1/eval_seq_des_training/c6_aasd1_eval_seq_des_nl0.1/step_120000_epoch_344/samples
+MODEL_NAME=esmfold
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
@@ -34,9 +34,9 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=proteinmpnn_af3_pdb_monomer_L32_256
-GROUP=proteinmpnn
-OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/proteinmpnn_evals/af3_pdb_monomer/eval
+EXP_NAME=c6_aasd1_eval_seq_des_nl0.1_${MODEL_NAME}
+GROUP=seq_des
+BASE_OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/chroma_evals/af3_pdb_monomer
 
 # Run training script
 cd ${BASE_DIR}
@@ -46,12 +46,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/run_sc_eval.py \
     exp_name=${EXP_NAME} \
     seq_des_cfg.proteinmpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
-    struct_pred_cfg.model_name=esmfold \
-    out_dir=${OUT_DIR} \
+    struct_pred_cfg.model_name=${MODEL_NAME} \
+    base_out_dir=${BASE_OUT_DIR} \
     input_cfg.pdb_dir=${PDB_DIR} \
-    input_cfg.pdb_name_list=${PDB_NAME_LIST} \
-    input_cfg.pdb_name_ext=".cif" \
     input_cfg.subset_length_range=[32,256] \
     input_cfg.n_subsample=1024 \
-    use_seq_design=true \
+    use_seq_design=false \
     hydra.run.dir=${HYDRA_DIR}
