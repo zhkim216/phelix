@@ -124,7 +124,7 @@ class SidechainDiffusionModule(nn.Module):
                     self.train()
 
                 # Run confidence module
-                mpnn_feature_dict_in = {k: v.detach() for k, v in mpnn_feature_dict.items()}
+                mpnn_feature_dict_in = {k: v.detach() for k, v in mpnn_feature_dict.items() if isinstance(v, torch.Tensor)}
                 psce_logits, psce = self.confidence_module(x1_scn_local_rollout.detach(),
                                                            mpnn_feature_dict_in,
                                                            aatype.detach(),
