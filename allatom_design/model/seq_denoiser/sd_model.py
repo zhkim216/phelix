@@ -269,6 +269,10 @@ class SeqDenoiser(nn.Module):
 
         return xt, aatype_t, aux
 
+    def potts_sample(self):
+
+        pass
+
 
     def sample(self,
                x: TensorType["b n a 3", float],
@@ -290,6 +294,7 @@ class SeqDenoiser(nn.Module):
                omit_aas: Optional[List[str]] = None,  # omit certain amino acids from sampling, e.g. ["C", "G"]
                noise_labels: Optional[Union[float, TensorType["b n"]]] = None,  # per-residue noise label
                add_noise: bool = False,
+               use_potts_sampling: bool = False,
                scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
                ):
         """
@@ -346,6 +351,10 @@ class SeqDenoiser(nn.Module):
         aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps, mlm_mask_prev=seq_mlm_mask)
         aux_inputs["lengths"] = seq_mask.sum(dim=-1)
         aux_inputs["temperature"] = temperature
+
+        if use_potts_sampling:
+            assert self.denoiser.use_potts, "Denoiser must be trained with Potts decoder to use Potts sampling"
+            return self.potts_sample()
 
         # Initialize trajectories
         xt_traj = []
