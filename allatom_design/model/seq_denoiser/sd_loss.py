@@ -33,11 +33,11 @@ class SDLoss(nn.Module):
 
         # Define losses based on task
         if self.task == "seq_des":
-            self.loss_keys = {"seq_loss"}
+            self.loss_keys = {"seq_loss", "potts_composite_loss"}
         elif self.task == "scn_pack":
             self.loss_keys = {"scn/mse_loss"}
         elif self.task == "allatom_seq_des":
-            self.loss_keys = {"seq_loss", "scn/mse_loss", "psce_loss"}
+            self.loss_keys = {"seq_loss", "scn/mse_loss", "psce_loss", "potts_composite_loss"}
         else:
             raise ValueError(f"Unrecognized task: {self.task}")
 
@@ -69,7 +69,9 @@ class SDLoss(nn.Module):
 
             if outputs.get("potts_decoder_aux") is not None:
                 potts_decoder_aux = outputs["potts_decoder_aux"]
-                aux["potts_composite_loss"] = potts_composite_loss(batch["aatype"], potts_decoder_aux, self.cfg.potts.label_smoothing)
+                aux["potts_composite_loss"] = potts_composite_loss(batch["aatype"], potts_decoder_aux,
+                                                                   self.cfg.potts.label_smoothing,
+                                                                   self.cfg.potts.per_token_avg)
 
         if self.use_scn_diffusion_loss and eval_pack:
             # We use sidechain diffusion auxiliary outputs to compute loss
@@ -258,6 +260,7 @@ def psce_loss(psce_logits: TensorType["b n 33 n_bins", float],
 def potts_composite_loss(S: TensorType["b n", int],
                          potts_decoder_aux: dict[str, TensorType["b ...", float]],
                          label_smoothing: float,
+                         per_token_avg: bool,
                          ) -> TensorType["b", float]:
 
     # Log composite likelihood
@@ -277,4 +280,15 @@ def potts_composite_loss(S: TensorType["b n", int],
         * torch.sum(mask_p_ij * logp_ij, dim=-1)
         / (2.0 * torch.sum(mask_p_ij, dim=-1) + 1e-3)
     )
-    return logp_i
+
+    # Get loss per sample
+    mask = potts_decoder_aux["mask_i"]
+    if per_token_avg:
+        # average loss per token
+        loss = (-logp_i * mask).sum(dim=-1) / mask.sum(dim=-1).clamp(min=1e-8)
+    else:
+        # divide by constant N to get loss on roughly the same scale as per_token_avg
+        N = mask.shape[1]
+        loss = -(logp_i * mask).sum(dim=-1) / N
+
+    return loss

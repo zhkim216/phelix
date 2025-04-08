@@ -98,6 +98,7 @@ loss:
 
   potts:
     label_smoothing: 0.1
+    per_token_avg: false
 
 optim:
   optimizer: "noam"
