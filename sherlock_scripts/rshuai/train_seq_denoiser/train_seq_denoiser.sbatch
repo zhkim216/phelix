@@ -1,34 +1,40 @@
 #!/bin/bash
-#SBATCH --job-name=test
-#SBATCH -p gpu_batch
+#SBATCH --job-name=aasd1_a0
+#SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=120:00:00
+#SBATCH --nodelist=sh04-04n01,sh04-10n01
+#SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
-#SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%j.out
-#SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%j.err
+#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%j.out
+#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%j.err
 #
 ## Write batch script to logs
-scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
+scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
-## Load modules and set environment variables:
-source ~/.rshuai_bash_profile
-conda activate rshuai_allatom_design
-BASE_DIR=/home/talal/rshuai/allatom-design
-HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
-OUT_DIR=/scratch/hielab/rshuai/allatom_design
-WANDB_ID=richardshuai
+## Load modules and conda environment
+ml python
+module load gcc/12.4.0
+module load cuda/12.1
+source /home/groups/possu/miniconda/etc/profile.d/conda.sh
+conda activate allatom_design
+
+# Define directories
+BASE_DIR=/home/users/rshuai/code/allatom-design
+HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
+OUT_DIR=/scratch/users/rshuai/allatom_design
 
 # Set cache directories
-export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
+export TORCH_HOME=/scratch/users/rshuai/cache/torch
+export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
 EXP_NAME=aasd1_a0
 GROUP=seq_des
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/af3_pdb_monomer
+PDB_PATH=/scratch/users/rshuai/datasets/af3_pdb_monomer
 
 # Run training script
 cd ${BASE_DIR}
@@ -42,8 +48,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.pdb_path=${PDB_PATH} \
     data.cluster_sample=true \
     data.subset_length_range=[32,512] \
-    train.batch_size=64 \
-    trainer.accumulate_grad_batches=1 \
+    train.batch_size=32 \
+    trainer.accumulate_grad_batches=2 \
     train.compile_model=true \
     model.task=allatom_seq_des \
     denoiser=fampnn_denoiser \
@@ -51,6 +57,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.augment_eps=0.3 \
     denoiser.fampnn.use_gvp=false \
     denoiser.fampnn.n_layers=3 \
+    denoiser.fampnn.potts.use_potts=false \
     denoiser.confidence_module.enabled=true \
     checkpointing.save_latest_every_n_steps=10000 \
     trainer.check_val_every_n_epoch=10 \
