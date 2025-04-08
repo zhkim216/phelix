@@ -28,7 +28,8 @@ input_cfg:
   n_subsample: null  # randomly sample this many pdb keys, null to use all
 
 # Scaffolding options
-scaffold_conditioning_types: ["contiguous", "discontiguous", "unconditional"]  # evaluate these conditioning types
+backbone_conditioning_types: ["contiguous", "discontiguous", "unconditional"]  # evaluate these conditioning types
+allatom_conditioning_types: ["discontiguous"]  # evaluate these conditioning types
 
 # Backbone generation options
 bb_gen_cfg:
