@@ -50,7 +50,7 @@ class LitSDDataModule(L.LightningDataModule):
         dataset = SDDataset(phase=phase, **self.data_cfg)
         dataloader = DataLoader(dataset,
                                 batch_size=self.batch_size,
-                                num_workers=self.num_workers if phase == "train" else 0,
+                                num_workers=self.num_workers,
                                 pin_memory=False,
                                 shuffle=(phase == "train"),
                                 drop_last=(phase == "train")
