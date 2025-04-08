@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=aasd1_a1
+#SBATCH --job-name=aasd1_a0
 #SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -30,7 +30,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=aasd1_a1
+EXP_NAME=aasd1_a0
 GROUP=seq_des
 
 # Dataset paths
@@ -57,7 +57,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.augment_eps=0.3 \
     denoiser.fampnn.use_gvp=false \
     denoiser.fampnn.n_layers=3 \
-    denoiser.fampnn.potts.use_potts=true \
+    denoiser.fampnn.potts.use_potts=false \
     denoiser.confidence_module.enabled=true \
     checkpointing.save_latest_every_n_steps=10000 \
     trainer.check_val_every_n_epoch=10 \
