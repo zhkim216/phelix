@@ -13,6 +13,7 @@ from allatom_design.model.seq_denoiser.denoisers.seq_design.gvp.gvp_modules impo
     GVPEncoder
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
+import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 
 
 class FAMPNN(nn.Module):
@@ -65,6 +66,21 @@ class FAMPNN(nn.Module):
         # GVP embeds vector features with scalar features
         if self.use_gvp:
             self.vector_encoder = GVPEncoder(cfg.gvp)
+
+        # Potts decoder
+        self.use_potts = cfg.get("potts", {}).get("use_potts", False)
+        if self.use_potts:
+            self.parameterization = cfg.potts.parameterization
+            self.num_factors = cfg.potts.num_factors
+            self.decoder_S_potts = potts.GraphPotts(
+                dim_nodes=self.node_features,
+                dim_edges=self.edge_features * 4,
+                num_states=self.n_aatype,
+                parameterization=self.parameterization,
+                num_factors=self.num_factors,
+                symmetric_J=cfg.potts.symmetric_J,
+                dropout=cfg.dropout_p,
+            )
 
         # Output layers
         self.W_out = nn.Linear(self.hidden_dim, self.n_aatype, bias=True)
@@ -184,6 +200,18 @@ class FAMPNN(nn.Module):
             h_V_flattened = self.vector_encoder(X, aatype_noised, E_idx, h_V, h_ESV, padding_mask, atom14_mask)
             h_V = h_V_flattened.reshape(B, N, -1)
 
+        # Potts model
+        if self.use_potts:
+            mask_ij = mask_bw.squeeze(-1)
+            h, J = self.decoder_S_potts(h_V, h_ESV, E_idx, seq_mask, mask_ij)
+            potts_decoder_aux = {
+                "h": h,
+                "J": J,
+                "edge_idx": E_idx,
+                "mask_i": seq_mask,
+                "mask_ij": mask_ij,
+            }
+
         logits = self.W_out(h_V)
 
         h_V_out = None
@@ -199,6 +227,9 @@ class FAMPNN(nn.Module):
         mpnn_feature_dict = {"h_V": h_V_out, "h_ESV": h_ESV, "X": X, "atom14_mask": atom14_mask, "E_idx": E_idx, "S": S, "noise_labels": noise_labels}
         if return_encoder_embeds:
             mpnn_feature_dict["h_V_enc"] = h_V_enc
+
+        if self.use_potts:
+            mpnn_feature_dict["potts_decoder_aux"] = potts_decoder_aux
 
         return logits, mpnn_feature_dict
 

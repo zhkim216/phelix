@@ -49,6 +49,12 @@ fampnn:
     dropout: ${model.denoiser.fampnn.dropout_p}
     num_encoder_layers: ${model.denoiser.fampnn.n_layers}
 
+  potts:
+    use_potts: false
+    parameterization: "factor"
+    num_factors: null
+    symmetric_J: true
+
 scn_diffusion_module:
   hidden_size: 256
 
