@@ -40,3 +40,9 @@ scn_diffusion:
     s_t_min: 0.01
     s_t_max: 50.0
     num_steps: ${scn_diffusion.num_steps}
+
+potts_sampling_cfg:
+  regularization: "LCP"
+  potts_sweeps: 500
+  potts_proposal: "dlmc"
+  potts_temperature: 0.01  # this is the default in Chroma

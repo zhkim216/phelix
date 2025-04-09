@@ -405,8 +405,8 @@ class GraphPotts(nn.Module):
 
     def sample(
         self,
-        node_h: torch.Tensor,
-        edge_h: torch.Tensor,
+        h: torch.Tensor,
+        J: torch.Tensor,
         edge_idx: torch.LongTensor,
         mask_i: torch.Tensor,
         mask_ij: torch.Tensor,
@@ -427,10 +427,10 @@ class GraphPotts(nn.Module):
         """Sample from Potts model with Chromatic Gibbs sampling.
 
         Args:
-            node_h (torch.Tensor): Node features with shape
-            `(num_batch, num_nodes, dim_nodes)`.
-            edge_h (torch.Tensor): Edge features with shape
-                `(num_batch, num_nodes, num_neighbors, dim_edges)`.
+            h: Potts model fields :math:`h_i(s_i)` with shape
+                `(num_batch, num_nodes, num_states)`.
+            J: Potts model couplings :math:`J_{ij}(s_i, s_j)` with shape
+                `(num_batch, num_nodes, num_neighbors, num_states, num_states)`.
             edge_idx (torch.LongTensor): Edge indices with shape
                 `(num_batch, num_nodes, num_neighbors)`.
             mask_i (torch.Tensor): Node mask with shape `(num_batch, num_nodes)`.
@@ -482,10 +482,7 @@ class GraphPotts(nn.Module):
             U (torch.Tensor): Sampled energies with shape `(num_batch)`. Lower
                 is more favorable.
         """
-        B, N, _ = node_h.shape
-
-        # Compute parameters
-        h, J = self.forward(node_h, edge_h, edge_idx, mask_i, mask_ij)
+        B, N, _ = h.shape
 
         if symmetry_order is not None:
             h, J, edge_idx, mask_i, mask_ij = fold_symmetry(
@@ -966,7 +963,7 @@ def _potts_proposal_dlmc(
 ):
     # Compute energy gap
     U, U_i = compute_potts_energy(S, h, J, edge_idx)
-    print(U)
+    # print(U)
     U_i = U_i
     if penalty_func is not None:
         O = F.one_hot(S, h.shape[0 - 1]).float()
