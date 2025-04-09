@@ -1,7 +1,8 @@
 import copy
 import math
+from collections import defaultdict
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -10,6 +11,7 @@ from omegaconf import DictConfig
 from torchtyping import TensorType
 from tqdm import tqdm
 
+import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import cat_bb_scn, get_rc_tensor, stack_aux_traj
 from allatom_design.data.pdb_utils import *
@@ -21,6 +23,7 @@ from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import \
     FAMPNNDenoiser
+from chroma.layers import complexity
 
 
 class SeqDenoiser(nn.Module):
@@ -269,10 +272,6 @@ class SeqDenoiser(nn.Module):
 
         return xt, aatype_t, aux
 
-    def potts_sample(self):
-
-        pass
-
 
     def sample(self,
                x: TensorType["b n a 3", float],
@@ -294,8 +293,9 @@ class SeqDenoiser(nn.Module):
                omit_aas: Optional[List[str]] = None,  # omit certain amino acids from sampling, e.g. ["C", "G"]
                noise_labels: Optional[Union[float, TensorType["b n"]]] = None,  # per-residue noise label
                add_noise: bool = False,
-               use_potts_sampling: bool = False,
                scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
+               use_potts_sampling: bool = False,
+               potts_sampling_cfg: Dict[str, Any] = {},
                ):
         """
         scd_inputs should contain the following keys:
@@ -351,10 +351,6 @@ class SeqDenoiser(nn.Module):
         aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps, mlm_mask_prev=seq_mlm_mask)
         aux_inputs["lengths"] = seq_mask.sum(dim=-1)
         aux_inputs["temperature"] = temperature
-
-        if use_potts_sampling:
-            assert self.denoiser.use_potts, "Denoiser must be trained with Potts decoder to use Potts sampling"
-            return self.potts_sample()
 
         # Initialize trajectories
         xt_traj = []
@@ -412,6 +408,19 @@ class SeqDenoiser(nn.Module):
         num_partial = seq_mlm_mask.sum(dim=-1).long()
         timesteps_K = torch.ceil(timesteps * (aux_inputs["lengths"][:, None] - num_partial[:,None])).long()  # timestep schedule is defined relative to masked residues
         timesteps_K += num_partial[:,None]
+
+        if use_potts_sampling:
+            assert self.denoiser.seq_design_module.use_potts, "Denoiser must be trained with Potts decoder to use Potts sampling"
+            return self.potts_sample(
+                potts_sampling_cfg=potts_sampling_cfg,
+                denoiser_fn=denoiser_fn,
+                xt=xt,
+                aatype_t=aatype_t,
+                seq_mask=seq_mask,
+                seq_mlm_mask=seq_mlm_mask,
+                scn_mlm_mask=scn_mlm_mask,
+                omit_aas=omit_aas,
+            )
 
         for i in tqdm(range(S), leave=False, desc="Sampling..."):
             # get next K residues to unmask
@@ -482,6 +491,78 @@ class SeqDenoiser(nn.Module):
         return xt, aatype_t, aux
 
 
+    def potts_sample(self,
+                     potts_sampling_cfg: Dict[str, Any],
+                     denoiser_fn: Callable,
+                     xt: TensorType["b n a 3", float],
+                     aatype_t: TensorType["b n", int],
+                     seq_mask: TensorType["b n", float],
+                     seq_mlm_mask: TensorType["b n", float],
+                     scn_mlm_mask: TensorType["b n", float],
+                     omit_aas: Optional[List[str]] = None,
+                     ):
+        if seq_mlm_mask.sum() != 0 and scn_mlm_mask.sum() != 0:
+            raise NotImplementedError("For now, sequence and sidechain must be fully masked for Potts sampling")
+
+        regularization = potts_sampling_cfg["regularization"]
+        potts_sweeps = potts_sampling_cfg["potts_sweeps"]
+        potts_proposal = potts_sampling_cfg["potts_proposal"]
+        potts_temperature = potts_sampling_cfg["potts_temperature"]
+
+        B, N = aatype_t.shape
+        logits_init = torch.zeros((B, N, len(rc.restypes_with_x)), device=aatype_t.device).float()
+
+        # Handle banned amino acids
+        ban_S = {"X"}
+        if omit_aas is not None:
+            ban_S = ban_S | set(omit_aas)
+        ban_S = [rc.restype_order_with_x[aa] for aa in ban_S]
+
+        # Initialize random sequence and sampling masks
+        mask_sample, _, S_init = potts.init_sampling_masks(
+            logits_init, mask_sample=(1 - seq_mlm_mask), S=aatype_t, ban_S=ban_S
+        )
+
+        # Complexity regularization
+        penalty_func = None
+        mask_ij_coloring = None
+        edge_idx_coloring = None
+        symmetry_order = None
+        if regularization == "LCP":
+            # C_complexity = (
+            #     C
+            #     if symmetry_order is None
+            #     else C[:, : C.shape[1] // symmetry_order]
+            # )
+            C_complexity = seq_mask.clone()  # TODO: is C for multi-chain?
+            penalty_func = lambda _S: complexity.complexity_lcp(_S, C_complexity)
+            # edge_idx_coloring, mask_ij_coloring = complexity.graph_lcp(C, edge_idx, mask_ij)
+
+        _, _, aux_preds = denoiser_fn(xt, aatype_t, scn_mlm_mask=scn_mlm_mask)
+        potts_decoder_aux = aux_preds["potts_decoder_aux"]
+
+        S_sample, _ = self.denoiser.seq_design_module.decoder_S_potts.sample(
+            potts_decoder_aux["h"],
+            potts_decoder_aux["J"],
+            potts_decoder_aux["edge_idx"],
+            potts_decoder_aux["mask_i"],
+            potts_decoder_aux["mask_ij"],
+            S=S_init,
+            mask_sample=mask_sample,
+            temperature=potts_temperature,
+            num_sweeps=potts_sweeps,
+            penalty_func=penalty_func,
+            proposal=potts_proposal,
+            rejection_step=(potts_proposal == "chromatic"),
+            verbose=False,
+            edge_idx_coloring=edge_idx_coloring,
+            mask_ij_coloring=mask_ij_coloring,
+        )
+        aux = defaultdict(lambda: None)  # TODO: temporary
+        xt = xt.clone()  # TODO: temporary
+        return xt, S_sample, aux
+
+
     @staticmethod
     def save_samples_to_pdb(samples: Dict[str, TensorType["b ..."]],
                             filenames: List[str],
@@ -510,7 +591,8 @@ class SeqDenoiser(nn.Module):
 
         # Set b-factors to predicted Sidechain Error (PSCE)
         b_factors = torch.zeros_like(atom_mask, dtype=torch.float32).cpu()
-        b_factors[..., rc.non_bb_idxs] = samples["psce"].cpu()
+        if samples.get("psce") is not None:
+            b_factors[..., rc.non_bb_idxs] = samples["psce"].cpu()
 
         feats = {
             "aatype": aatype,
