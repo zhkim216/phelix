@@ -1,38 +1,39 @@
 #!/bin/bash
-#SBATCH --job-name=eval_seq_des
-#SBATCH -p gpu_batch
+#SBATCH --job-name=aasd1_a1_v1_eval_seq_des
+#SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#
-# Send stdout and stderr to logs
-#SBATCH --output=/scratch/hielab/rshuai/slurm_log_files/job_%j.out
-#SBATCH --error=/scratch/hielab/rshuai/slurm_log_files/job_%j.err
-#
-## Write batch script to logs
-scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
+#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%j.out
+#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%j.err
 
-## Load modules and set environment variables:
-source ~/.rshuai_bash_profile
-conda activate rshuai_allatom_design
+# Write batch script to logs
+scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
-# Set base directories
-BASE_DIR=/home/talal/rshuai/allatom-design
-HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
+# Load modules and set environment variables
+ml python
+module load gcc/12.4.0
+module load cuda/12.1
+source /home/groups/possu/miniconda/etc/profile.d/conda.sh
+conda activate allatom_design
+
+# Define directories and paths
+BASE_DIR=/home/users/rshuai/code/allatom-design
+HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 
 # Model params
-AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
+AF2_DATA_DIR=/scratch/users/rshuai/model_params/af2
 
 # Inputs config
-PDB_DIR=/scratch/hielab/rshuai/datasets/denovo250dev/pdbs
+PDB_DIR=/scratch/users/rshuai/datasets/denovo250dev/pdbs
 
 # Set cache directories
-export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
-export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
+export HF_HOME=/scratch/users/rshuai/cache/huggingface
+export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to evaluate
 MODEL_NAME=aasd1_a1_v1
-DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
+DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 NOISE_LABELS=0.5
 
 # Wandb settings / experiment name
