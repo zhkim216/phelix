@@ -108,13 +108,13 @@ def main(cfg: DictConfig):
             metrics = {}
 
             # mean and median of all metrics
-            metrics.update({f"mean/{motif_type}_{conditioning_type}/{k}": np.mean(v) for k, v in sample_metrics.items()})
-            metrics.update({f"median/{motif_type}_{conditioning_type}/{k}": np.median(v) for k, v in sample_metrics.items()})
+            metrics.update({f"mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
+            metrics.update({f"median/{k}": np.median(v) for k, v in sample_metrics.items()})
 
             # for motif_bb_rmsd, calculate the number of success below 1 RMSD
             motif_rmsd_key = f"{cfg.seq_des_cfg.model_name}_motif_bb_rmsd_best"
-            metrics[f"success_count/{motif_type}_{conditioning_type}/motif_bb_rmsd"] = np.sum(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
-            metrics[f"success_rate/{motif_type}_{conditioning_type}/motif_bb_rmsd"] = np.mean(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+            metrics[f"success_count/motif_bb_rmsd"] = np.sum(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+            metrics[f"success_rate/motif_bb_rmsd"] = np.mean(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
 
             # Log metrics to wandb
             metrics = {f"{motif_type}_{conditioning_type}/{k}": v for k, v in metrics.items()}
