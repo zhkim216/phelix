@@ -88,7 +88,7 @@ class LitSeqDenoiser(L.LightningModule):
                 t_seq = torch.full((B, ), fill_value=eval_t).to(self.device)
                 outputs = self(batch, t=t_seq)
                 _, aux = self.loss(outputs, batch, eval_total = False, return_aux=True)
-                aux = {k: v for k, v in aux.items() if "seq" in k}  # trim aux to sequence metrics
+                aux = {k: v for k, v in aux.items() if ("seq" in k) or ("potts" in k)}  # trim aux to sequence metrics
                 self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_t{eval_t}")
 
                 # aggregate across timesteps

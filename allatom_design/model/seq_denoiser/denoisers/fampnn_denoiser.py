@@ -98,7 +98,8 @@ class FAMPNNDenoiser(BaseSeqDenoiser):
             "scaled_seq_probs": scaled_seq_probs,
             'seq_mask': seq_mask,
             'seq_mlm_mask': aux_inputs.get("seq_mlm_mask", None),  # used during training
-            'scn_mlm_mask': aux_inputs.get('scn_mlm_mask', None)  # used during training
+            'scn_mlm_mask': aux_inputs.get('scn_mlm_mask', None),  # used during training
+            "potts_decoder_aux": mpnn_feature_dict.get("potts_decoder_aux", None),
         }
 
         # Sidechain diffusion

@@ -31,20 +31,20 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Denoiser path
-MODEL_NAME=s3_a0
+MODEL_NAME=s4_a7
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Input config
 PHASE=eval
-PDB_DIR=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1/esmfold_preds
-PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1/${PHASE}_pdb_names.list
+PDB_DIR=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2/esmfold_preds
+PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2/${PHASE}_pdb_names.list
 SUBSET_LENGTH_RANGE="[32,256]"
 N_SUBSAMPLE=128
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=${MODEL_NAME}_eval_scaffold_training_${PHASE}
-GROUP=eval_scaffold_training
+GROUP=backbone
 
 # Run eval script
 cd ${BASE_DIR}

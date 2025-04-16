@@ -33,7 +33,7 @@ export TORCH_HOME=/scratch/users/rshuai/subhang/cache/torch
 # Set experiment name and grouop
 WANDB_ID=null
 EXP_NAME=ai_dit_12b_ema99
-GROUP=ai_cath
+GROUP=backbone
 
 # Dataset paths
 # PDB_PATH=/scratch/users/rshuai/datasets/ingraham_cath_dataset

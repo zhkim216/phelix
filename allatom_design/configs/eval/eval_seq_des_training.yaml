@@ -23,6 +23,14 @@ input_cfg:
   subset_length_range: null # only evaluate on sequences within this length range
   presort_by_length: false  # sort pdb keys by sequence length, potentially for efficiency
   n_subsample: null  # randomly sample this many pdb keys, null to use all
+  manifest_kwargs:
+    pdb_manifest_csv: null
+    phase: "eval"
+    subset_length_range: [32, 256]
+    scrmsd_range: [null, 2.0]
+    rel_rog_range: [null, 1.4]
+    cluster_sample_first: true
+    pdb_name_prefix: "esmfold_"  # prefix to add to manifest pdb_name to get the pdb files
 
 # Denoiser options
 denoiser_train_dir:

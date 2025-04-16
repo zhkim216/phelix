@@ -43,7 +43,7 @@ BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/u1_a7/bb_uncond
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=u1_a7_bb_unconditional_sherlock
-GROUP=bb_unconditional
+GROUP=backbone
 
 # Run eval script
 cd ${BASE_DIR}

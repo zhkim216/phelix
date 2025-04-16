@@ -31,7 +31,7 @@ FPD_EMBEDDINGS_DIR=/scratch/users/rshuai/datasets/af3_pdb_monomer/fpd_embeddings
 MODEL_NAME=u1_a2
 EXP_NAME=${MODEL_NAME}_eval_fpd_training
 WANDB_ID=null
-GROUP=eval_fpd_training
+GROUP=backbone
 
 # Set HF variables
 export HUGGINGFACE_TOKEN=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

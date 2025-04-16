@@ -90,8 +90,11 @@ def main(cfg: DictConfig):
         # Aggregate results
         sc_metrics = defaultdict(list)
         for pdb in sampled_pdbs:
-            for k, v in sc_info[pdb]["sc_metrics"].items():
-                sc_metrics[f"{k}"].append(v.item())
+            if "sc_metrics" in sc_info[pdb]:
+                for k, v in sc_info[pdb]["sc_metrics"].items():
+                    sc_metrics[f"{k}"].append(v.item())
+            else:
+                print(f"No self-consistency metrics for {pdb}, skipping...")
 
         # Update metrics
         out_metrics = {f"seq_des/mean/{k}": np.mean(v) for k, v in sc_metrics.items()}

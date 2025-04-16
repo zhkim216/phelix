@@ -50,6 +50,7 @@ data:
     max_rel_rog: 1.4  # subset to only pdbs with relative radius of gyration <= max_rel_rog
     n_train_cluster_resample: 10  # Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
     scaffold_manager_cfg: ${scaffold_manager}
+    evaluate_scaffolding: false  # automatically set to true if model.task is "scaffold"
 
 # Model options
 defaults:
@@ -68,6 +69,9 @@ model:
     use_phema: false  # use post-hoc EMA
     ema_decay: 0.99  # if not using phema, use this decay rate
 
+pretrained_module_paths:
+  fampnn: null  # used for scaffold module; null to disable
+
 eval:
   eval_timesteps_bb: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]  # backbone timesteps to evaluate at
 
@@ -76,8 +80,8 @@ loss:
   loss_weights:
     bb:
       mse_loss: 1.0
-    scaffold:
-      # if task is scaffolding, use a separate loss to reconstruct scaffold
+    motif:
+      # if task is scaffolding, use a separate loss to reconstruct motif
       mse_loss: 0.0
 
 optim:
@@ -100,7 +104,7 @@ logging:
 
 checkpointing:
   save_latest_every_n_steps: 25000  # Save the model every n steps
-  save_for_resuming_every_n_epochs: 100  # Keep 1 latest copy of the model every n epochs, for resuming
+  save_for_resuming_every_n_epochs: 25  # Keep 1 latest copy of the model every n epochs, for resuming
   save_phema_every_n_steps: 20000  # If using post-hoc EMA, save snapshot every n steps
 
 hydra:

@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=s3_a0_eval_bb_gen
-#SBATCH -p possu,bioe
+#SBATCH --job-name=s4_a3_eval_bb_gen
+#SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -34,13 +34,13 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Denoiser path
-MODEL_NAME=s3_a0
+MODEL_NAME=s4_a3
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_bb_gen_sherlock_test
-GROUP=augmented_af3_monomer_v1
+EXP_NAME=${MODEL_NAME}_eval_bb_gen
+GROUP=backbone
 
 # Run eval script
 cd ${BASE_DIR}
