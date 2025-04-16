@@ -26,7 +26,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 EXP_NAME=u2_a1_lr1e-3
-GROUP=af3_monomer
+GROUP=backbone
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/af3_pdb_monomer

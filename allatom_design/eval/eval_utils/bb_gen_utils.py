@@ -116,9 +116,9 @@ def run_bb_uncond_sampling(model: AtomDenoiser,
 
 def get_bb_example(pdb_path: str,
                    sm: ScaffoldManager | None,
-                   device: str) -> tuple[dict[str, TensorType["n a 3", float]],
-                                         str,
-                                         dict[str, int]]:
+                   device: str = "cpu") -> tuple[dict[str, TensorType["n a 3", float]],
+                                                 str,
+                                                 dict[str, int]]:
     """
     Get a backbone generation model input from a PDB file.
     """
@@ -145,10 +145,10 @@ def get_bb_batch(pdb_batch_files: list[str],
     """
     if parallel_pool is None:
         # Load PDBs sequentially
-        batch_examples, pdb_names, chain_id_mapping = zip(*[get_bb_example(pdb_path, sm, device) for pdb_path in pdb_batch_files])
+        batch_examples, pdb_names, chain_id_mapping = zip(*[get_bb_example(pdb_path, sm) for pdb_path in pdb_batch_files])
     else:
         # Load PDBs in parallel
-        batch_examples, pdb_names, chain_id_mapping = zip(*parallel_pool(delayed(get_bb_example)(pdb_path, sm, device) for pdb_path in pdb_batch_files))
+        batch_examples, pdb_names, chain_id_mapping = zip(*parallel_pool(delayed(get_bb_example)(pdb_path, sm) for pdb_path in pdb_batch_files))
 
     # Pad all examples to the max length and stack
     model_input_keys = list(batch_examples[0].keys())

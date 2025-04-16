@@ -12,9 +12,9 @@ from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 
-import allatom_design.data.datasets.sd_dataset as sd_dataset
-from allatom_design.checkpoint_utils import EMATrackerCheckpoint
 from allatom_design.data.datasets.boltz_sd_dataset import BoltzSDDataModule
+from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
+                                             repair_state_dict)
 from allatom_design.data.datasets.sd_dataset import LitSDDataModule
 from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
@@ -108,6 +108,15 @@ def main(cfg: DictConfig):
 
     # Set up model
     lit_model = LitSeqDenoiser(cfg)
+
+    # Load only model weights from the pretrained checkpoint
+    if cfg.finetuning.enabled:
+        print(f"Loading model weights from {cfg.finetuning.ckpt_path}")
+        checkpoint = torch.load(cfg.finetuning.ckpt_path, map_location="cpu")
+        state_dict = checkpoint["state_dict"]
+        if not cfg.train.compile_model:
+            state_dict = repair_state_dict(state_dict)
+        lit_model.load_state_dict(state_dict, strict=True)
 
     if not cfg.wandb.no_wandb:
         logger.watch(lit_model.model, log="all", log_freq=cfg.logging.wandb_watch_freq)

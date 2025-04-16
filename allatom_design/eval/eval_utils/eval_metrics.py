@@ -129,7 +129,7 @@ def run_diversity_eval(pdbs: list[str],
         cluster_out_dir = Path(f"{out_dir}/clustering/sctm{sctm_cutoff}")
         diversity_metrics[f"sctm{sctm_cutoff}_ncluster"] = eval_metrics.foldseek_cluster(designable_pdbs, cluster_out_dir, f"{out_dir}/tmp",
                                                                                 **cfg.clustering.foldseek_opts)
-        diversity_metrics[f"sctm{sctm_cutoff}_cluster_frac"] = diversity_metrics[f"sctm{sctm_cutoff}_ncluster"] / diversity_metrics[f"sctm{sctm_cutoff}_nsamples"]
+        diversity_metrics[f"sctm{sctm_cutoff}_cluster_frac"] = diversity_metrics[f"sctm{sctm_cutoff}_ncluster"] / max(diversity_metrics[f"sctm{sctm_cutoff}_nsamples"], 1)
 
     return diversity_metrics
 

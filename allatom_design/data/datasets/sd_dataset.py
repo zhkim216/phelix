@@ -73,8 +73,11 @@ class SDDataset(data.Dataset):
         se3_augment: bool = True,
         translation_scale: float = 1.0,
         subset_length_range: Optional[int] = None,
+        max_scrmsd: Optional[float] = None,
+        max_rel_rog: Optional[float] = None,
         spatial_crop_ratio: float = 0.5,
         evaluation_mode: bool = False,
+        n_train_cluster_resample: int = 1,
         **kwargs
     ):
         """
@@ -99,6 +102,13 @@ class SDDataset(data.Dataset):
         self.spatial_crop_ratio = spatial_crop_ratio
         self.evaluation_mode = evaluation_mode
         self.cluster_sample = cluster_sample
+        self.n_train_cluster_resample = n_train_cluster_resample
+
+        # Require cluster sampling for training on AF3 dataset
+        if Path(pdb_path).stem in ["af3_pdb", "af3_pdb_monomer", "augmented_af3_monomer_v2"]:
+            assert self.cluster_sample, "Cluster sampling must be enabled for AF3 dataset"
+        else:
+            assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
 
         # Read in PDB keys for this phase
         self.pdb_keys_csv = f"{self.pdb_path}/pdb_manifest.csv"
@@ -109,15 +119,18 @@ class SDDataset(data.Dataset):
         if subset_length_range is not None:
             self.subset_to_length_range(*self.subset_length_range)
 
-        # For training on AF3 datasets, we cluster sample the PDB keys
-        if Path(pdb_path).stem in ["af3_pdb", "af3_pdb_monomer"]:
-            # require cluster sampling for training on AF3 dataset
-            assert self.cluster_sample, "Cluster sampling must be enabled for AF3 dataset"
+        # Subset based on scRMSD
+        # TODO: implement dynamic filtering class?
+        if max_scrmsd is not None:
+            self.subset_by_scrmsd(max_scrmsd)
 
-            print(f"Cluster-resampling dataset...")
-            self._cluster_sample_pdb_keys(phase=phase)
-        else:
-            assert not self.cluster_sample, "Cluster sampling must be disabled for non-AF3 dataset"
+        # Subset based on relative radius of gyration
+        if max_rel_rog is not None:
+            self.subset_by_rel_rog(max_rel_rog)
+
+        # For training on AF3 datasets, we cluster sample the PDB keys
+        if self.cluster_sample:
+            self._cluster_sample_pdb_keys(phase=phase, n_train_cluster_resample=self.n_train_cluster_resample)
 
         # For efficiency set fixed size to max length in the eval or test dataset
         if self.evaluation_mode:
@@ -247,16 +260,24 @@ class SDDataset(data.Dataset):
         return crop_mask
 
 
-    def _cluster_sample_pdb_keys(self, phase: str):
+    def _cluster_sample_pdb_keys(self, phase: str, n_train_cluster_resample: int):
         """
         Cluster sample the PDB keys to ensure that only one PDB key is selected from each cluster.
         """
         if phase == "train":
-            # randomly select one PDB key from each cluster
-            print(f"Number of PDB keys before cluster sampling: {len(self.pdb_keys_df)}")
-            self.pdb_keys_df = self.pdb_keys_df.groupby("cluster_id", group_keys=False).apply(lambda g: g.sample(n=1)).reset_index(drop=True)
-            print(f"Number of PDB keys after cluster sampling: {len(self.pdb_keys_df)}")
-            print(f"First 10 PDB keys after cluster sampling: {self.pdb_keys_df['pdb_key'].head(10).tolist()}")
+            # For training, randomly resample N times to get different clusters
+            # We do this because cluster sampling can be very short with AF3 datasets, which causes overhead
+            print(f"Cluster-resampling dataset {self.n_train_cluster_resample} times...")
+            pdb_keys_dfs = []
+            for _ in range(n_train_cluster_resample):
+                pdb_keys_df = self.pdb_keys_df.copy()
+                # randomly select one PDB key from each cluster
+                pdb_keys_df = pdb_keys_df.groupby("cluster_id", group_keys=False).apply(lambda g: g.sample(n=1)).reset_index(drop=True)
+                pdb_keys_dfs.append(pdb_keys_df)
+            self.pdb_keys_df = pd.concat(pdb_keys_dfs, ignore_index=True)
+        elif phase in ["eval", "eval2"]:
+            # For eval, only take the first PDB in each cluster for deterministic evaluation
+            self.pdb_keys_df = self.pdb_keys_df.groupby("cluster_id", as_index=False).first().reset_index(drop=True)
 
 
     def _get_data_file(self, pdb_key: str) -> str:
@@ -281,6 +302,20 @@ class SDDataset(data.Dataset):
         """
         lengths = self.pdb_keys_df["seq_length"]
         self.pdb_keys_df = self.pdb_keys_df[lengths.between(min_len, max_len)]
+
+
+    def subset_by_scrmsd(self, max_scrmsd: float):
+        """
+        Subsets the dataset to only include proteins with scRMSD <= max_scrmsd.
+        """
+        self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["sc_ca_rmsd"] <= max_scrmsd]
+
+
+    def subset_by_rel_rog(self, max_rel_rog: float):
+        """
+        Subsets the dataset to only include proteins with relative radius of gyration <= max_rel_rog.
+        """
+        self.pdb_keys_df = self.pdb_keys_df[self.pdb_keys_df["rel_rog"] <= max_rel_rog]
 
 
 def process_single_pdb_sd(data, convert_types=True):

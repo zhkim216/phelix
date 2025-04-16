@@ -11,19 +11,22 @@ from tqdm import tqdm
 import wandb
 
 from allatom_design.data.data import get_length_from_pdb
+import pandas as pd
 
 
 def get_pdb_files(pdb_dir: str,
                   pdb_name_list: str | None,
-                  pdb_name_ext: str | None,
+                  pdb_name_ext: str | None = None,
                   subset_length_range: tuple[int, int] | None = None,
                   presort_by_length: bool = False,
                   n_subsample: int | None = None,
                   n_jobs: int = 8,
-                  # job array parameters for parallelization
+                  # slurm array parameters for parallelization
                   array_id: int | None = None,
                   num_arrays: int | None = None,
                   skip_pdb_names: list[str] | None = None,
+                  # if providing a pdb manifest, set options here
+                  manifest_kwargs: dict = {},
                   ) -> list[str]:
     """
     Retrieve a list of PDB files from a directory, either by specifying a list of pdb_names or by getting all files.
@@ -36,6 +39,10 @@ def get_pdb_files(pdb_dir: str,
         num_arrays: Number of total arrays. If array_id is null, this can remain 1.
         skip_pdb_names: List of PDB names to skip
 
+        # if providing a pdb manifest, set options here
+        manifest_kwargs:
+            pdb_manifest_csv: Optional path to a CSV file containing PDB keys and other metadata
+
 
     Returns:
         List of PDB file paths, naturally sorted if retrieving all files
@@ -43,7 +50,11 @@ def get_pdb_files(pdb_dir: str,
     Raises:
         ValueError: If no PDB files are found in the directory when pdb_name_list is None
     """
-    if pdb_name_list is not None:
+    pdb_manifest_csv = manifest_kwargs.get("pdb_manifest_csv")
+    assert not (pdb_name_list is not None and pdb_manifest_csv is not None), "Cannot provide both pdb_name_list and pdb_manifest_csv"
+    if pdb_manifest_csv is not None:
+        pdb_files = load_pdb_files_from_manifest(pdb_dir, **manifest_kwargs)
+    elif pdb_name_list is not None:
         # Get PDBs with keys in the list
         with open(pdb_name_list, "r") as f:
             pdb_keys = f.read().splitlines()
@@ -90,11 +101,52 @@ def get_pdb_files(pdb_dir: str,
 
     # Optionally take a random subset, preserving order
     if n_subsample is not None:
+        n_subsample = min(n_subsample, len(pdb_files))
         chosen_indices = sorted(np.random.choice(len(pdb_files), n_subsample, replace=False))
         pdb_files = [pdb_files[i] for i in chosen_indices]
 
     print(f"Using {len(pdb_files)} PDB files")
 
+    return pdb_files
+
+
+def load_pdb_files_from_manifest(pdb_dir: str, **manifest_kwargs) -> list[str]:
+    """
+    Load PDB files from a manifest CSV file.
+
+    Optional filters:
+        phase: str
+        subset_length_range: tuple[int, int]
+        scrmsd_range: tuple[float, float]
+        rel_rog_range: tuple[float, float]
+        cluster_sample_first: bool
+    """
+    pdb_keys_df = pd.read_csv(manifest_kwargs["pdb_manifest_csv"])
+    if manifest_kwargs.get("phase") is not None:
+        pdb_keys_df = pdb_keys_df[pdb_keys_df["phase"] == manifest_kwargs["phase"]]
+    if manifest_kwargs.get("subset_length_range") is not None:
+        min_len, max_len = manifest_kwargs["subset_length_range"]
+        pdb_keys_df = pdb_keys_df[pdb_keys_df["seq_length"].between(min_len, max_len)]
+    if manifest_kwargs.get("scrmsd_range") is not None:
+        min_scrmsd, max_scrmsd = manifest_kwargs["scrmsd_range"]
+        if min_scrmsd is None:
+            min_scrmsd = -np.inf
+        if max_scrmsd is None:
+            max_scrmsd = np.inf
+        pdb_keys_df = pdb_keys_df[pdb_keys_df["sc_ca_rmsd"].between(min_scrmsd, max_scrmsd)]
+    if manifest_kwargs.get("rel_rog_range") is not None:
+        min_rel_rog, max_rel_rog = manifest_kwargs["rel_rog_range"]
+        if min_rel_rog is None:
+            min_rel_rog = -np.inf
+        if max_rel_rog is None:
+            max_rel_rog = np.inf
+        pdb_keys_df = pdb_keys_df[pdb_keys_df["rel_rog"].between(min_rel_rog, max_rel_rog)]
+
+    if manifest_kwargs.get("cluster_sample_first") is not None:
+        # always take first for reproducibility
+        pdb_keys_df = pdb_keys_df.groupby("cluster_id", as_index=False).first().reset_index(drop=True)
+
+    pdb_files = [f"{pdb_dir}/{manifest_kwargs.get('pdb_name_prefix', '')}{pdb_name}" for pdb_name in pdb_keys_df["pdb_name"].tolist()]
     return pdb_files
 
 

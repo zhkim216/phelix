@@ -9,6 +9,7 @@ from omegaconf import DictConfig
 from scipy.stats import pearsonr, spearmanr
 from torchtyping import TensorType
 
+import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.data import residue_constants as rc
 
 
@@ -32,11 +33,11 @@ class SDLoss(nn.Module):
 
         # Define losses based on task
         if self.task == "seq_des":
-            self.loss_keys = {"seq_loss"}
+            self.loss_keys = {"seq_loss", "potts_composite_loss"}
         elif self.task == "scn_pack":
             self.loss_keys = {"scn/mse_loss"}
         elif self.task == "allatom_seq_des":
-            self.loss_keys = {"seq_loss", "scn/mse_loss", "psce_loss"}
+            self.loss_keys = {"seq_loss", "scn/mse_loss", "psce_loss", "potts_composite_loss"}
         else:
             raise ValueError(f"Unrecognized task: {self.task}")
 
@@ -65,6 +66,12 @@ class SDLoss(nn.Module):
             aux["seq_loss"] = masked_cross_entropy(outputs["seq_logits"], batch["aatype"], seq_loss_mask,
                                                    seq_loss_cfg=self.cfg.seq_loss)
             aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], batch["aatype"], seq_loss_mask).mean().detach().clone()
+
+            if outputs.get("potts_decoder_aux") is not None:
+                potts_decoder_aux = outputs["potts_decoder_aux"]
+                aux["potts_composite_loss"] = potts_composite_loss(batch["aatype"], potts_decoder_aux,
+                                                                   self.cfg.potts.label_smoothing,
+                                                                   self.cfg.potts.per_token_avg)
 
         if self.use_scn_diffusion_loss and eval_pack:
             # We use sidechain diffusion auxiliary outputs to compute loss
@@ -246,5 +253,42 @@ def psce_loss(psce_logits: TensorType["b n 33 n_bins", float],
     logprobs = F.log_softmax(psce_logits, dim=-1)
     cel = -(logprobs * sce_binned).sum(dim=-1)
     loss = (cel * mask).sum(dim=[1, 2]) / mask.sum(dim=[1, 2]).clamp(min=1e-8)
+
+    return loss
+
+
+def potts_composite_loss(S: TensorType["b n", int],
+                         potts_decoder_aux: dict[str, TensorType["b ...", float]],
+                         label_smoothing: float,
+                         per_token_avg: bool,
+                         ) -> TensorType["b", float]:
+
+    # Log composite likelihood
+    logp_ij, mask_p_ij = potts.log_composite_likelihood(
+        S,
+        potts_decoder_aux["h"],
+        potts_decoder_aux["J"],
+        potts_decoder_aux["edge_idx"],
+        potts_decoder_aux["mask_i"],
+        potts_decoder_aux["mask_ij"],
+        smoothing_alpha=label_smoothing,
+    )
+
+    # Map into approximate local likelihoods
+    logp_i = (
+        potts_decoder_aux["mask_i"]
+        * torch.sum(mask_p_ij * logp_ij, dim=-1)
+        / (2.0 * torch.sum(mask_p_ij, dim=-1) + 1e-3)
+    )
+
+    # Get loss per sample
+    mask = potts_decoder_aux["mask_i"]
+    if per_token_avg:
+        # average loss per token
+        loss = (-logp_i * mask).sum(dim=-1) / mask.sum(dim=-1).clamp(min=1e-8)
+    else:
+        # divide by constant N to get loss on roughly the same scale as per_token_avg
+        N = mask.shape[1]
+        loss = -(logp_i * mask).sum(dim=-1) / N
 
     return loss

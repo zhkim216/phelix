@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=u4_a1
+#SBATCH --job-name=u4_a2
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,8 +24,8 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=u4_a1
-GROUP=augmented_af3_monomer_v2
+EXP_NAME=u4_a2
+GROUP=backbone
 
 # Dataset paths
 PDB_PATH=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2
@@ -45,6 +45,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser=dit_denoiser \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
+    denoiser.pos_encoding=af2 \
     train.batch_size=128 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}

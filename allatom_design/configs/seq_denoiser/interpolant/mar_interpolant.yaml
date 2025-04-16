@@ -8,7 +8,7 @@ training_noise_cfg:
     t_min: 0.0
     t_max: 1.0
   constant_t:
-    t: 1.0
+    t: 0.0
   uniform_squared_t:
     t_min: 0.0
     t_max: 1.0

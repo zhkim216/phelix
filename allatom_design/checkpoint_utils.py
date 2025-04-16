@@ -19,7 +19,7 @@ def get_cfg_from_ckpt(ckpt_path: str,
 
     Also returns the model checkpoint.
     """
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     cfg_dict = ckpt["hyper_parameters"]["cfg"]
     cfg = OmegaConf.create(cfg_dict)
 
@@ -47,10 +47,6 @@ def resume_ckpt_cfg(current_cfg: DictConfig) -> DictConfig:
 
     # use the current cfg instead of the checkpoint cfg
     cfg = current_cfg if resume_opts.use_current_cfg else lit_model_cfg
-
-    # set a temporary exp_name if not provided to avoid overwriting the resumed experiment
-    with open_dict(resume_opts):
-        resume_opts.overrides.exp_name = resume_opts.overrides.get("exp_name", f"{lit_model_cfg.exp_name}_resumed")
 
     with open_dict(cfg):
         # retain resume info in new cfg

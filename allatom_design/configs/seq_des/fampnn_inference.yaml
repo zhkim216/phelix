@@ -16,6 +16,7 @@ psce_threshold: null  # only keep sidechains below this threshold during design;
 omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
 noise_labels: null  # per-residue noise labels, float for same noise for each residue  # TODO: implement user-provided per-residue noise labels
 add_noise: false  # add noise equal to noise_labels to the input backbone
+use_potts_sampling: false
 
 timestep_schedule:
   num_steps: ${num_steps}
@@ -39,3 +40,9 @@ scn_diffusion:
     s_t_min: 0.01
     s_t_max: 50.0
     num_steps: ${scn_diffusion.num_steps}
+
+potts_sampling_cfg:
+  regularization: "LCP"
+  potts_sweeps: 500
+  potts_proposal: "dlmc"
+  potts_temperature: 0.01  # this is the default in Chroma

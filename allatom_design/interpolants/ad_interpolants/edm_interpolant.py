@@ -36,6 +36,10 @@ class EDM(ADInterpolant):
 
         self.training_noise_cfg = cfg.training_noise_cfg[self.training_noise_schedule]
 
+        # Get t_min and t_max from training_noise_cfg
+        self.t_min = self.training_noise_cfg.get("t_min", None)
+        self.t_max = self.training_noise_cfg.get("t_max", None)
+
 
     @torch.compiler.disable
     def forward(self,
@@ -100,6 +104,19 @@ class EDM(ADInterpolant):
             sigmas = torch.exp(log_sigmas)
             sigmas = self.sigma_data * sigmas
             t = self.sigma_inv(sigmas)
+
+            # If boundaries is present in training_noise_cfg, resample out-of-bound timesteps until they lie within boundaries
+            if self.t_min is not None and self.t_max is not None:
+                out_of_bounds = (t < self.t_min) | (t > self.t_max)
+                while out_of_bounds.any():
+                    num_out_of_bounds = out_of_bounds.sum()
+                    log_sigmas_new = torch.randn(num_out_of_bounds, device=device) * self.training_noise_cfg.psigma_std + self.training_noise_cfg.psigma_mean
+                    sigmas_new = torch.exp(log_sigmas_new)
+                    sigmas_new = self.sigma_data * sigmas_new
+                    t_new = self.sigma_inv(sigmas_new)
+                    t[out_of_bounds] = t_new
+                    out_of_bounds = (t < self.t_min) | (t > self.t_max)
+
         elif self.training_noise_schedule == "uniform_sigma":
             sigmas = torch.rand(n, device=device) * (self.s_max - self.s_min) + self.s_min
             sigmas = self.sigma_data * sigmas
@@ -203,6 +220,17 @@ class EDM(ADInterpolant):
         aux_preds["x1_pred"] = x1_pred
 
         return xt_next, aux_preds
+
+
+    def get_x1_pred(self,
+                    denoiser_pred: TensorType["b n a 3", float],
+                    xt: TensorType["b n a 3", float],
+                    t: TensorType["b", float]
+                    ) -> TensorType["b n a 3", float]:
+        """
+        Given a prediction from the denoiser, return the prediction of x1 at time t.
+        """
+        return denoiser_pred  # we directly predict x1 for EDM
 
 
     def get_likelihoods(self,

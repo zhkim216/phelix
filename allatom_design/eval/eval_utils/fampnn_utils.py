@@ -3,6 +3,7 @@ Utils for sampling from FAMPNN.
 """
 import re
 from collections import defaultdict
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -139,7 +140,8 @@ def run_fampnn(model: SeqDenoiser,
     pbar = tqdm(total=len(pdb_paths_repeated), desc=f"FAMPNN: sampling S={cfg.num_steps} steps, {len(pdb_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
 
     input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
-    with Parallel(n_jobs=cfg.num_workers) as parallel_pool:  # for loading PDBs in parallel
+    parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
+    with parallel_context as parallel_pool:
         for i in range(0, len(pdb_paths_repeated), cfg.batch_size):
             pdb_batch_files = pdb_paths_repeated[i:i+cfg.batch_size]
             B = len(pdb_batch_files)
@@ -179,6 +181,8 @@ def run_fampnn(model: SeqDenoiser,
                 scn_override_mask=batch["scn_override_mask"],
                 pos_restrict_aatype=pos_restrict_aatype,
                 scd_inputs=scd_inputs,
+                use_potts_sampling=cfg.use_potts_sampling,
+                potts_sampling_cfg=cfg.potts_sampling_cfg,
             )
 
             batch_samples = {
@@ -197,7 +201,7 @@ def run_fampnn(model: SeqDenoiser,
                 "scn_override_mask": batch["scn_override_mask"],
             }
 
-            batch_samples = {k: v.cpu() for k, v in batch_samples.items()}
+            batch_samples = {k: v.cpu() for k, v in batch_samples.items() if v is not None}
 
             # Store samples and remove padding
             for j in range(B):
@@ -290,7 +294,9 @@ def run_fampnn_packing(model: SeqDenoiser,
     pbar = tqdm(total=len(pdb_paths_repeated), desc=f"FAMPNN: packing with S_scd={cfg.scn_diffusion.num_steps} steps, {len(pdb_paths)} PDBs, {cfg.num_seqs_per_pdb} samples per PDB...")
 
     input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
-    with Parallel(n_jobs=cfg.num_workers) as parallel_pool:  # for loading PDBs in parallel
+
+    parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
+    with parallel_context as parallel_pool:
         for i in range(0, len(pdb_paths_repeated), cfg.batch_size):
             pdb_batch_files = pdb_paths_repeated[i:i+cfg.batch_size]
             B = len(pdb_batch_files)

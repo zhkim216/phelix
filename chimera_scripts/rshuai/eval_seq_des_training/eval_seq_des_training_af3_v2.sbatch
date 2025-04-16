@@ -24,22 +24,24 @@ HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
 
 # Inputs config
-PDB_DIR=/scratch/hielab/rshuai/datasets/denovo250dev/pdbs
+PDB_DIR=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2/esmfold_preds
+MANIFEST_CSV=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2/pdb_manifest.csv
 
 # Set cache directories
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Model to evaluate
-MODEL_NAME=c6_aasd1
+MODEL_NAME=aasd0_a0
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
-NOISE_LABELS=0.5
-ADD_NOISE=true
+NOISE_LABELS=0.0
+ADD_NOISE=false
+PHASE=eval
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_seq_des_nl${NOISE_LABELS}_an_denovo250dev
-GROUP=chimera_c6_eval_seq_des
+EXP_NAME=${MODEL_NAME}_eval_seq_des_aamv2_esmfold_nl${NOISE_LABELS}_${PHASE}_designable
+GROUP=seq_des
 
 # Run training script
 cd ${BASE_DIR}
@@ -49,12 +51,16 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
     exp_name=${EXP_NAME} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
-    struct_pred_cfg.model_name=af2 \
+    struct_pred_cfg.model_name=esmfold \
     input_cfg.pdb_dir=${PDB_DIR} \
-    input_cfg.subset_length_range=[300,300] \
+    input_cfg.manifest_kwargs.pdb_manifest_csv=${MANIFEST_CSV} \
+    input_cfg.manifest_kwargs.phase=${PHASE} \
+    input_cfg.manifest_kwargs.subset_length_range=[32,256] \
+    input_cfg.manifest_kwargs.scrmsd_range=[0.0,2.0] \
+    input_cfg.n_subsample=100 \
     start_step=0 \
-    end_step=200000 \
-    eval_every_n_ckpts=1 \
+    end_step=150000 \
+    eval_every_n_ckpts=2 \
     sampling_cfg_overrides.add_noise=${ADD_NOISE} \
     sampling_cfg_overrides.noise_labels=${NOISE_LABELS} \
     hydra.run.dir=${HYDRA_DIR}

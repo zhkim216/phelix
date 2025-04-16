@@ -13,7 +13,7 @@ from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
-                                             resume_ckpt_cfg)
+                                             resume_ckpt_cfg, get_cfg_from_ckpt)
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.datasets.ad_dataset import LitADDataModule
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
@@ -196,6 +196,18 @@ def update_config(cfg: DictConfig) -> None:
     else:
         # don't reload dataloaders every epoch
         cfg.trainer.reload_dataloaders_every_n_epochs = 0
+
+    # Scaffolding
+    if cfg.model.task == "scaffold":
+        cfg.data.evaluate_scaffolding = True
+
+    # Handle pretrained module configs  # TODO: is there any better way to handle this?
+    if cfg.pretrained_module_paths.fampnn:
+        # ensure that the pretrained FAMPNN config is used for the scaffold module
+        print(f"Using pretrained FAMPNN config and weights from {cfg.pretrained_module_paths.fampnn}")
+        fampnn_cfg, _ = get_cfg_from_ckpt(cfg.pretrained_module_paths.fampnn)
+        OmegaConf.resolve(fampnn_cfg.denoiser.fampnn)
+        cfg.model.denoiser.scaffold_module.fampnn = fampnn_cfg.denoiser.fampnn
 
 
 if __name__ == "__main__":

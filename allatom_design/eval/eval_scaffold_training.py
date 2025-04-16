@@ -56,7 +56,9 @@ def main(cfg: DictConfig):
                                                  cfg.start_step, cfg.end_step)
 
     ### Sample from each checkpoint ###
-    pbar = tqdm(ad_ckpts, desc=f"Sampling on {len(pdb_files)} PDB(s) with {len(cfg.scaffold_conditioning_types)} conditioning types and {len(ad_ckpts)} checkpoint(s)...")
+    motif_conditioning_types = [("backbone", x) for x in cfg.backbone_conditioning_types] + [("allatom", x) for x in cfg.allatom_conditioning_types]
+
+    pbar = tqdm(ad_ckpts, desc=f"Sampling on {len(pdb_files)} PDB(s) with {len(motif_conditioning_types)} motif conditioning types and {len(ad_ckpts)} checkpoint(s)...")
     for ad_ckpt in pbar:
         match = pattern.search(Path(ad_ckpt).name)
         global_step, epoch = int(match.group(1)), int(match.group(2))  # extract step and epoch from checkpoint name
@@ -68,12 +70,14 @@ def main(cfg: DictConfig):
         sm = bb_gen_model["scaffold_manager"]
 
         # Evaluate separately for each scaffold conditioning type
-        for scaffold_conditioning_type in cfg.scaffold_conditioning_types:
+        for motif_conditioning_type in motif_conditioning_types:
+            motif_type, conditioning_type = motif_conditioning_type
             L.seed_everything(cfg.seed)  # reset seed for each checkpoint and conditioning type
-            sm.set_conditioning_type(scaffold_conditioning_type)  # set the conditioning type for the scaffold manager
+            sm.set_motif_type(motif_type)  # backbone or allatom
+            sm.set_conditioning_type(conditioning_type)  # e.g. discontiguous or contiguous
 
             # create output directory for this epoch and conditioning type
-            log_dir_i = f"{log_dir}/step_{global_step}_epoch_{epoch}/{scaffold_conditioning_type}"
+            log_dir_i = f"{log_dir}/step_{global_step}_epoch_{epoch}/{motif_type}_{conditioning_type}"
             Path(log_dir_i).mkdir(parents=True, exist_ok=True)
 
             # Process PDBs in batches
@@ -104,16 +108,16 @@ def main(cfg: DictConfig):
             metrics = {}
 
             # mean and median of all metrics
-            metrics.update({f"mean/{scaffold_conditioning_type}/{k}": np.mean(v) for k, v in sample_metrics.items()})
-            metrics.update({f"median/{scaffold_conditioning_type}/{k}": np.median(v) for k, v in sample_metrics.items()})
+            metrics.update({f"mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
+            metrics.update({f"median/{k}": np.median(v) for k, v in sample_metrics.items()})
 
             # for motif_bb_rmsd, calculate the number of success below 1 RMSD
             motif_rmsd_key = f"{cfg.seq_des_cfg.model_name}_motif_bb_rmsd_best"
-            metrics[f"success_count/{scaffold_conditioning_type}/motif_bb_rmsd"] = np.sum(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
-            metrics[f"success_rate/{scaffold_conditioning_type}/motif_bb_rmsd"] = np.mean(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+            metrics[f"success_count/motif_bb_rmsd"] = np.sum(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+            metrics[f"success_rate/motif_bb_rmsd"] = np.mean(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
 
             # Log metrics to wandb
-            metrics = {f"scaffold/{k}": v for k, v in metrics.items()}
+            metrics = {f"{motif_type}_{conditioning_type}/{k}": v for k, v in metrics.items()}
             torch.save(metrics, f"{log_dir_i}/metrics.pt")
             if not cfg.wandb.no_wandb:
                 metrics["trainer/global_step"] = global_step
