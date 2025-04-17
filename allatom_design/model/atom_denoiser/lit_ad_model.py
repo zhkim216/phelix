@@ -79,7 +79,7 @@ class LitAtomDenoiser(L.LightningModule):
         _, aux = self.loss(outputs, batch, return_aux=True)
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
 
-        B = batch["seq_mask"].shape[0]
+        B = batch["diffusion_inputs"]["seq_mask"].shape[0]
 
         # Log metrics per timestep
         ts = list(self.cfg.eval.eval_timesteps_bb)

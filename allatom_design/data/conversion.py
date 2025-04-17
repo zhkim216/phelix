@@ -2,7 +2,7 @@
 Convert between OpenFold and Boltz representations.
 """
 from allatom_design.data import residue_constants as rc
-from boltz.data import const
+from allatom_design.data import const
 
 
 

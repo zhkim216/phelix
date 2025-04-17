@@ -15,7 +15,7 @@ from omegaconf import DictConfig, OmegaConf
 from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
                                              resume_ckpt_cfg, get_cfg_from_ckpt)
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.datasets.ad_dataset import LitADDataModule
+from allatom_design.data.datasets.boltz_ad_dataset import BoltzADDataModule
 from allatom_design.model.atom_denoiser.lit_ad_model import LitAtomDenoiser
 from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
 
@@ -46,12 +46,8 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
     # Set up LightningDataModule
-    datamodule = LitADDataModule(
-        data_cfg=cfg.data,
-        batch_size=cfg.train.batch_size,
-        num_workers=cfg.num_workers,
-        cuda=cfg.cuda,
-    )
+    data_cfg = hydra.utils.instantiate(cfg.data)
+    datamodule = BoltzADDataModule(data_cfg)
 
     # Init wandb
     local_rank = os.environ.get("LOCAL_RANK", None)
@@ -190,16 +186,9 @@ def update_config(cfg: DictConfig) -> None:
         # Autoguidance model parameters are not always used
         cfg.trainer.strategy = "ddp_find_unused_parameters_true"
 
-    if cfg.data.cluster_sample:
-        # if we're using cluster sampling, we want to reload the dataloader every epoch
-        cfg.trainer.reload_dataloaders_every_n_epochs = 1
-    else:
-        # don't reload dataloaders every epoch
-        cfg.trainer.reload_dataloaders_every_n_epochs = 0
-
-    # Scaffolding
-    if cfg.model.task == "scaffold":
-        cfg.data.evaluate_scaffolding = True
+    # # Scaffolding
+    # if cfg.model.task == "scaffold":
+    #     cfg.data.evaluate_scaffolding = True
 
     # Handle pretrained module configs  # TODO: is there any better way to handle this?
     if cfg.pretrained_module_paths.fampnn:

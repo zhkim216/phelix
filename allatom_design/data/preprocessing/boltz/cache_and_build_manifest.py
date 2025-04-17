@@ -9,10 +9,10 @@ import hydra
 import numpy as np
 import torch
 import torch.nn.functional as F
-from boltz.data import const
+from allatom_design.data import const
 from boltz.data.feature.featurizer import BoltzFeaturizer
 from boltz.data.tokenize.boltz import BoltzTokenizer
-from boltz.data.types import Connection, Input, Manifest, Structure
+from allatom_design.data.types import Connection, Input, Manifest, Structure
 from boltz.data.write.mmcif import to_mmcif
 from joblib import Parallel, delayed
 from omegaconf import DictConfig
