@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=u4_a2
+#SBATCH --job-name=u5_a0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,11 +24,11 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=u4_a2
+EXP_NAME=u5_a0
 GROUP=backbone
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2
+PDB_PATH=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2_boltz
 CLUSTER_SAMPLE=true
 
 # Run training script

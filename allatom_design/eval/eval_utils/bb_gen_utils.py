@@ -75,13 +75,13 @@ def run_bb_uncond_sampling(model: AtomDenoiser,
         residue_index = residue_index[None].expand(B, -1)
 
         # Set up backbone diffusion inputs
-        diffusion_inputs = {}
-        diffusion_inputs["num_steps"] = cfg.num_steps
+        diffusion_params = {}
+        diffusion_params["num_steps"] = cfg.num_steps
         t_bb = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)  # timesteps for backbone diffusion
-        diffusion_inputs["timesteps"] = t_bb[None].expand(B, -1).to(device)
-        diffusion_inputs["noise_schedule"] = NoiseSchedule(cfg.noise_schedule)  # noise schedule, used for step_scale
-        diffusion_inputs["churn_cfg"] = dict(cfg.churn_cfg)  # churn config for stochastic sampling
-        diffusion_inputs["autoguidance_cfg"] = dict(cfg.autoguidance_cfg)  # autoguidance config
+        diffusion_params["timesteps"] = t_bb[None].expand(B, -1).to(device)
+        diffusion_params["noise_schedule"] = NoiseSchedule(cfg.noise_schedule)  # noise schedule, used for step_scale
+        diffusion_params["churn_cfg"] = dict(cfg.churn_cfg)  # churn config for stochastic sampling
+        diffusion_params["autoguidance_cfg"] = dict(cfg.autoguidance_cfg)  # autoguidance config
 
         # Create conditioning labels
         cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, device)
@@ -89,7 +89,7 @@ def run_bb_uncond_sampling(model: AtomDenoiser,
         # Sample backbones
         x_bb_denoised, aux = model.sample(lengths=lengths_batch,
                                           residue_index=residue_index,
-                                          diffusion_inputs=diffusion_inputs,
+                                          diffusion_params=diffusion_params,
                                           cond_labels=cond_labels_in)
         samples = {"x_bb": x_bb_denoised,
                    "seq_mask": aux["seq_mask"],
@@ -221,13 +221,13 @@ def run_backbone_scaffolding(model: AtomDenoiser,
             write_batched_to_pdb(**feats, filenames=motif_filenames, mode="aa")
 
             # Set up backbone diffusion inputs
-            diffusion_inputs = {}
-            diffusion_inputs["num_steps"] = cfg.num_steps
+            diffusion_params = {}
+            diffusion_params["num_steps"] = cfg.num_steps
             t_bb = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)  # timesteps for backbone diffusion
-            diffusion_inputs["timesteps"] = t_bb[None].expand(B, -1).to(device)
-            diffusion_inputs["noise_schedule"] = NoiseSchedule(cfg.noise_schedule)  # noise schedule, used for step_scale
-            diffusion_inputs["churn_cfg"] = dict(cfg.churn_cfg)  # churn config for stochastic sampling
-            diffusion_inputs["autoguidance_cfg"] = dict(cfg.autoguidance_cfg)  # autoguidance config
+            diffusion_params["timesteps"] = t_bb[None].expand(B, -1).to(device)
+            diffusion_params["noise_schedule"] = NoiseSchedule(cfg.noise_schedule)  # noise schedule, used for step_scale
+            diffusion_params["churn_cfg"] = dict(cfg.churn_cfg)  # churn config for stochastic sampling
+            diffusion_params["autoguidance_cfg"] = dict(cfg.autoguidance_cfg)  # autoguidance config
 
             # Create conditioning labels
             cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, device)
@@ -235,7 +235,7 @@ def run_backbone_scaffolding(model: AtomDenoiser,
             # Sample backbones
             x_bb_denoised, _ = model.sample(lengths=torch.ones(B, device=device) * length,
                                             residue_index=torch.arange(length, device=device).expand(B, -1),
-                                            diffusion_inputs=diffusion_inputs,
+                                            diffusion_params=diffusion_params,
                                             scaffold_inputs=batch_scaffold_inputs,
                                             cond_labels=cond_labels_in)
 
@@ -420,13 +420,13 @@ def run_sm_sampling(model: AtomDenoiser,
 
             ### Sample backbones ###
             # Set up backbone diffusion inputs
-            diffusion_inputs = {}
-            diffusion_inputs["num_steps"] = cfg.num_steps
+            diffusion_params = {}
+            diffusion_params["num_steps"] = cfg.num_steps
             t_bb = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)  # timesteps for backbone diffusion
-            diffusion_inputs["timesteps"] = t_bb[None].expand(B, -1).to(device)
-            diffusion_inputs["noise_schedule"] = NoiseSchedule(cfg.noise_schedule)  # noise schedule, used for step_scale
-            diffusion_inputs["churn_cfg"] = dict(cfg.churn_cfg)  # churn config for stochastic sampling
-            diffusion_inputs["autoguidance_cfg"] = dict(cfg.autoguidance_cfg)  # autoguidance config
+            diffusion_params["timesteps"] = t_bb[None].expand(B, -1).to(device)
+            diffusion_params["noise_schedule"] = NoiseSchedule(cfg.noise_schedule)  # noise schedule, used for step_scale
+            diffusion_params["churn_cfg"] = dict(cfg.churn_cfg)  # churn config for stochastic sampling
+            diffusion_params["autoguidance_cfg"] = dict(cfg.autoguidance_cfg)  # autoguidance config
 
             # Create conditioning labels
             cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, device)
@@ -441,7 +441,7 @@ def run_sm_sampling(model: AtomDenoiser,
             # Sample backbones
             x_bb_denoised, _ = model.sample(lengths=batch["seq_mask"].sum(dim=-1),
                                             residue_index=batch["residue_index"],  # this uses the true residue index from PDBs
-                                            diffusion_inputs=diffusion_inputs,
+                                            diffusion_params=diffusion_params,
                                             scaffold_inputs=scaffold_inputs,
                                             cond_labels=cond_labels_in)
             samples = {

@@ -1,0 +1,37 @@
+name: motif_selector
+
+# Probabilities for selecting each motif type
+p:
+  # Token-level motif selection
+  unconditional: 0.25
+  protein_contiguous: 0.25
+  protein_discontiguous: 0.5
+
+atom_p:
+  # Atom-level motif selection
+  all: 0.5
+  protein_sidechain: 0.0
+  protein_backbone: 0.5
+
+
+# Configs
+protein_contiguous:
+  max_span_len: 20
+
+protein_discontiguous:
+  max_discontiguous_res: 20
+  dist_threshold: 12.0
+
+
+# contiguous_p: 0.25
+# discontiguous_p: 0.5
+# max_span_len: 20
+# max_discontiguous_res: 20
+# dist_threshold: 12.0
+
+# # Sidechain options
+# sidechain_dropout_p: 0.5  # chance of dropping out all sidechains; otherwise drops out sidechains with probability p from uniform distribution
+
+# # translation_scale: ${data.translation_scale}
+# # se3_augment: ${data.se3_augment}
+

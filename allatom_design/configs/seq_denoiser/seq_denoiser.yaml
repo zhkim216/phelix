@@ -60,7 +60,7 @@ boltz_data:
   tokenizer:
     _target_: boltz.data.tokenize.boltz.BoltzTokenizer
   featurizer:
-    _target_: allatom_design.data.featurizer.SDFeaturizer
+    _target_: allatom_design.data.featurizer.SimpleBoltzFeaturizer
 
   filters:
     - _target_: boltz.data.filter.dynamic.size.SizeFilter

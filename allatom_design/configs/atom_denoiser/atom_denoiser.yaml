@@ -28,7 +28,6 @@ trainer:
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
   check_val_every_n_epoch: 4  # How often to run validation
-  reload_dataloaders_every_n_epochs: null  # updated based on data.cluster_sample
 
 # Resuming training options
 resume:
@@ -36,27 +35,72 @@ resume:
   use_current_cfg: false  # whether to override the config in the checkpoint with the current config
   overrides: {}  # add any specific overrides to apply to the config
 
-# Data options
+# # Data options
+# data:
+#     pdb_paths: [/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1] # /media/scratch/datasets/ingraham_cath_dataset
+#     dataset_weights: [1.0]  # probability of selecting each dataset
+#     cluster_sample: true  # use cluster sampling for training; must be true for af3 datasets
+#     fixed_size: 256
+#     overfit: ${overfit}
+#     subset_length_range: [32, 256]
+#     se3_augment: true  # randomly rotate and translate data
+#     translation_scale: 1.0  # scale of the translation augmentation
+#     max_scrmsd: 2.0  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
+#     max_rel_rog: 1.4  # subset to only pdbs with relative radius of gyration <= max_rel_rog
+#     n_train_cluster_resample: 10  # Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
+#     scaffold_manager_cfg: ${scaffold_manager}
+#     evaluate_scaffolding: false  # automatically set to true if model.task is "scaffold"
+
+
 data:
-    pdb_paths: [/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1] # /media/scratch/datasets/ingraham_cath_dataset
-    dataset_weights: [1.0]  # probability of selecting each dataset
-    cluster_sample: true  # use cluster sampling for training; must be true for af3 datasets
-    fixed_size: 256
-    overfit: ${overfit}
-    subset_length_range: [32, 256]
-    se3_augment: true  # randomly rotate and translate data
-    translation_scale: 1.0  # scale of the translation augmentation
-    max_scrmsd: 2.0  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
-    max_rel_rog: 1.4  # subset to only pdbs with relative radius of gyration <= max_rel_rog
-    n_train_cluster_resample: 10  # Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
-    scaffold_manager_cfg: ${scaffold_manager}
-    evaluate_scaffolding: false  # automatically set to true if model.task is "scaffold"
+  pdb_path: /media/scratch/datasets/augmented_af3_monomer_v2_boltz
+
+  tokenizer:
+    _target_: boltz.data.tokenize.boltz.BoltzTokenizer
+  featurizer:
+    _target_: allatom_design.data.feature.featurizer.SimpleBoltzFeaturizer
+
+  filters:
+    - _target_: boltz.data.filter.dynamic.size.SizeFilter
+      min_chains: 1
+      max_chains: 1
+    - _target_: boltz.data.filter.dynamic.max_residues.MaxResiduesFilter
+      min_residues: 32
+      max_residues: 256
+    - _target_: allatom_design.data.filter.rel_rog.RelRogFilter
+      max_rel_rog: 1.4
+    - _target_: allatom_design.data.filter.self_consistency.SelfConsistencyFilter
+      max_scrmsd: 2.0
+
+  sampler:
+    _target_: boltz.data.sample.cluster.ClusterSampler
+  cropper:
+    _target_: allatom_design.data.crop.identity.IdentityCropper
+
+  max_tokens: 256
+  max_atoms: 4608
+  pad_to_max_tokens: true
+  pad_to_max_atoms: true
+  samples_per_epoch: 50000
+  batch_size: ${train.batch_size}
+  num_workers: ${num_workers}
+  random_seed: ${train.seed}
+  atoms_per_window_queries: 32
+  min_dist: 2.0
+  max_dist: 22.0
+  num_bins: 64
+
+  se3_augment_cfg:
+    enabled: true
+    translation_scale: 1.0
+
+  motif_selector_cfg: ${motif_selector}
 
 # Model options
 defaults:
   - _self_
   - denoiser: dit_denoiser
-  - scaffold_manager: unconditional
+  - motif_selector: unconditional
 
 model:
   task: "backbone"  # "backbone", "scaffold"

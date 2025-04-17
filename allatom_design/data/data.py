@@ -11,7 +11,7 @@ from torchtyping import TensorType
 
 import allatom_design.data.conditioning_labels as cl
 import openfold.data.data_transforms as data_transforms
-from allatom_design.data import protein
+from allatom_design.data import const, protein
 from allatom_design.data import residue_constants as rc
 from openfold.utils.feats import atom14_to_atom37
 from openfold.utils.rigid_utils import Rigid, Rotation
@@ -332,6 +332,7 @@ def center_random_augmentation(coords_in: TensorType["n a 3", float],
 
     if not apply_random_augmentation:
         # Return centered coordinates without random augmentation
+        coords_in = coords_in * M[..., None]
         return coords_in.squeeze(0) if input_dim == 3 else coords_in
 
     # Apply random rotation
@@ -545,3 +546,136 @@ def transform_sidechain_frame(x_scn: TensorType["b n 33 3", float],
 def get_length_from_pdb(pdb_file: str) -> Tuple[str, int]:
     data = load_feats_from_pdb(pdb_file)
     return pdb_file, len(data["aatype"])
+
+
+
+# =============================================== Boltz-1 specific functions =============================================== #
+def pad_atom_feats_to_tokenwise(boltz_feats: dict,
+                                max_atoms_per_token: int):
+    # Build padded atom idxs
+    n_atoms_per_token = boltz_feats["atom_to_token"].sum(dim=0)
+    # atom_idxs = torch.tensor(tokenized.tokens["atom_idx"])  # this does not work since doesn't account for removal of invalid chains
+    atom_idxs = torch.cat([torch.zeros(1), n_atoms_per_token.cumsum(dim=0)[:-1]]).int()
+    padded_atom_idxs = atom_idxs[:, None].expand(-1, max_atoms_per_token)
+    padded_atom_idxs = padded_atom_idxs + torch.arange(max_atoms_per_token)[None, :]  # [n, 14]
+    pad_mask = torch.arange(max_atoms_per_token)[None, :] < n_atoms_per_token[:, None]  # [n, 14]
+    padded_atom_idxs = padded_atom_idxs * pad_mask  # mask out ghost atoms
+
+    # Gather from each feature of interest
+    tokenwise_feats = {}
+    N = padded_atom_idxs.shape[0]
+    for k in ["coords", "atom_resolved_mask", "ref_pos", "ref_element", "ref_charge"]:
+        v = boltz_feats[k]
+        if k == "coords":
+            # coords is [1, n_atoms, 3]
+            v = v.squeeze(0)
+        data_shape = v.shape[1:]
+        gather_idxs = padded_atom_idxs.view(-1, *((1,) * len(data_shape))).expand(-1, *data_shape)
+        tokenwise_feats[k] = v.gather(0, gather_idxs).view(N, max_atoms_per_token, *data_shape)
+        tokenwise_feats[k] = tokenwise_feats[k] * pad_mask.view(N, max_atoms_per_token, *((1,) * len(data_shape)))
+
+    return tokenwise_feats
+
+
+def get_atom_feat_masks(feats: dict[str, torch.Tensor]) -> dict[str, TensorType["n_atoms", float]]:
+    """
+    Get masks for sidechain and backbone atoms.
+
+    Returns:
+    - sidechain_mask: 1 if atom is sidechain atom of a known protein residue, 0 otherwise
+    - backbone_mask: 1 if atom is backbone atom of a known protein residue, 0 otherwise
+    """
+    # residue-type ID for each token, then broadcast to atoms
+    token_idx_per_atom = feats["atom_to_token"].argmax(dim=-1)
+    restype_id_per_atom = feats["res_type"].argmax(dim=-1)[token_idx_per_atom]
+    restype_id_per_atom = restype_id_per_atom * feats["atom_resolved_mask"]
+
+    # get atom number within each token
+    n_atoms = feats["atom_to_token"].shape[0]
+    token_start_idxs = torch.cat([torch.zeros(1), feats["atom_to_token"].sum(dim=0).cumsum(dim=0)[:-1]]).long()
+    atom_num_per_token = torch.arange(n_atoms) - token_start_idxs[token_idx_per_atom]
+    atom_num_per_token = atom_num_per_token * feats["atom_resolved_mask"]
+
+    # get sidechain mask
+    sidechain_mask = const.restype_atom_scn[restype_id_per_atom, atom_num_per_token]
+    backbone_mask = const.restype_atom_bb[restype_id_per_atom, atom_num_per_token]
+
+    return {"sidechain_mask": sidechain_mask, "backbone_mask": backbone_mask}
+
+
+def atom_center_random_augmentation(X: TensorType["b n_atoms 3", float],
+                                    M: TensorType["b n_atoms", float],
+                                    apply_random_augmentation: bool = True,
+                                    translation_scale: float = 1.0,
+                                    return_transforms: bool = False):
+    """
+    Center on all unmasked atoms, then apply random rotation and translation.
+    Analogous to center_random_augmentation, but for all atoms.
+    """
+    input_dim = X.dim()
+    if input_dim == 2:
+        # unbatched; add batch dimension
+        X = X.unsqueeze(0)
+        M = M.unsqueeze(0)
+
+    # Center coords
+    X_mean = (X * M[..., None]).sum(dim=1, keepdim=True) / M.sum(dim=1, keepdim=True)  # [b 1 3]
+    X = X - X_mean
+
+    if not apply_random_augmentation:
+        # Return centered coordinates without random augmentation
+        X = X * M[..., None]
+        return X.squeeze(0) if input_dim == 2 else X
+
+    # Apply random rotation
+    random_rot = uniform_rand_rotation(X.shape[0]).to(X.device)
+    X = torch.einsum("b a i, b i j -> b a j", X, random_rot)
+
+    # Apply random translation
+    random_trans = torch.randn_like(X_mean) * translation_scale
+    X = X + random_trans
+
+    # Zero out with atom mask (missing atoms + padding)
+    X = X * M[..., None]
+
+    transforms = (X_mean, random_rot, random_trans)
+    if input_dim == 2:
+        # unbatched; remove batch dimension
+        X = X.squeeze(0)
+        transforms = tuple(t.squeeze(0) for t in transforms)
+
+    if return_transforms:
+        return X, transforms
+
+    return X
+
+
+def atom_apply_random_augmentation(X: TensorType["b n_atoms 3", float],
+                                   M: TensorType["b n_atoms", float],
+                                   transforms: Tuple[TensorType["b 1 3", float], TensorType["b 3 3", float], TensorType["b 1 3", float]]
+                                   ):
+    """
+    Apply random rotation and translation to atoms. Analogous to apply_random_augmentation, but for packed atom representation.
+    """
+    input_dim = X.dim()
+    if input_dim == 2:
+        # unbatched; add batch dimension
+        X = X.unsqueeze(0)
+        M = M.unsqueeze(0)
+        transforms = tuple(t.unsqueeze(0) for t in transforms)
+
+    X_mean, random_rot, random_trans = transforms
+
+    # Apply transforms
+    X = X - X_mean
+    X = torch.einsum("b a i, b i j -> b a j", X, random_rot)
+    X = X + random_trans
+
+    # Zero out with atom mask (missing atoms + padding)
+    X = X * M[..., None]
+
+    if input_dim == 2:
+        # unbatched; remove batch dimension
+        X = X.squeeze(0)
+
+    return X

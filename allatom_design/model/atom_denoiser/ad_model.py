@@ -5,10 +5,6 @@ import torch.nn as nn
 from omegaconf import DictConfig
 
 from allatom_design.data.pdb_utils import *
-from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
-    NoiseSchedule
-from allatom_design.model.atom_denoiser.denoisers.denoiser import \
-    BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     DiTDenoiser
 
@@ -38,31 +34,20 @@ class AtomDenoiser(nn.Module):
     def forward(self,
                 batch: Dict[str, TensorType["b ..."]],
                 ) -> Dict[str, TensorType["b ..."]]:
-        """
-        batch should contain:
-        - x: TensorType["b n a 3", float]
-        - residue_index: TensorType["b n", int]
-        - seq_mask: TensorType["b n", float]
-        - cond_labels_in: Dict[str, TensorType["b", int]]
-        """
-        # Copy batch to avoid modifying the original
-        batch = copy.deepcopy(batch)
         outputs = {}
+        # Deepcopy batch to avoid modifying original batch
+        batch = copy.deepcopy(batch)
+        diffusion_inputs = batch["diffusion_inputs"]
 
         # During training, keep track of certain additional features
-        aux_inputs = {
-            "x": batch["x"],  # ground truth coordinates
-            "t_bb": batch.get("t_bb", None),  # scalar; fix t_bb if provided, usually for eval
-            "missing_atom_mask": batch["missing_atom_mask"],
-        }
+        x = batch["diffusion_inputs"]["x"]
+        B = x.shape[0]
+        t_bb = batch.get("t_bb", None)  # scalar; fix t_bb if provided, usually for eval
+        diffusion_inputs["t_bb"] = torch.full((B, ), t_bb, device=x.device) if t_bb is not None else None
 
         # Denoise coords
-        _, aux_preds = self.denoiser(batch["x_motif"],
-                                     batch["motif_mask"],
-                                     batch["aatype_motif"],
-                                     batch["residue_index"], batch["seq_mask"],
-                                     cond_labels_in=batch["cond_labels_in"],
-                                     aux_inputs=aux_inputs)
+        _, aux_preds = self.denoiser(batch["motif_inputs"],
+                                     diffusion_inputs=diffusion_inputs)
 
         # Additional outputs for computing loss
         outputs.update(aux_preds)
@@ -79,7 +64,7 @@ class AtomDenoiser(nn.Module):
     def sample(self,
                lengths: TensorType["b", int],
                residue_index: TensorType["b n", int],
-               diffusion_inputs: Dict[str, Any],
+               diffusion_params: Dict[str, Any],
                scaffold_inputs: Optional[Dict[str, torch.Tensor]] = None,
                cond_labels: Dict[str, TensorType["b", int]] = {},
                ) -> Tuple[TensorType["b n 4 3", float], Dict[str, torch.Tensor]]:
@@ -107,17 +92,13 @@ class AtomDenoiser(nn.Module):
             motif_mask = scaffold_inputs["motif_mask"]
             aatype_motif = scaffold_inputs["aatype_motif"]
 
-        # Construct diffusion inputs
-        aux_inputs = {}
-        aux_inputs["diffusion_inputs"] = diffusion_inputs
-
         x1_bb, aux_preds = self.denoiser(x_motif=x_motif,
                                          motif_mask=motif_mask,
                                          aatype_motif=aatype_motif,
                                          residue_index=residue_index,
                                          seq_mask=seq_mask,
                                          cond_labels_in=cond_labels,
-                                         aux_inputs=aux_inputs,
+                                         diffusion_inputs=diffusion_inputs,
                                          is_sampling=True)
 
         aux.update(aux_preds["bb_diffusion_aux"])
@@ -218,7 +199,7 @@ class AtomDenoiser(nn.Module):
 
 def get_denoiser(cfg: DictConfig,
                  sigma_data: TensorType[(), float]
-                 ) -> BaseAtomDenoiser:
+                 ) -> nn.Module:
     """
     Get the denoiser specified in the config.
     """

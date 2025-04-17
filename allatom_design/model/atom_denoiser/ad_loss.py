@@ -5,8 +5,7 @@ import torch.nn as nn
 from einops import repeat, rearrange
 from omegaconf import DictConfig
 from torchtyping import TensorType
-
-from allatom_design.data import residue_constants as rc
+from allatom_design.data import const
 
 
 class ADLoss(nn.Module):
@@ -55,8 +54,7 @@ class ADLoss(nn.Module):
 
         bb_pred = bb_diff_outputs["bb_pred"]
         bb_target = bb_diff_outputs["bb_target"]
-        M = bb_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
-        bb_mask = repeat(batch["x_mask"][..., rc.bb_idxs, :], "b n a x -> (m b) n a x", m=M)
+        bb_mask = bb_diff_outputs["atom_mask"][..., const.bb_idxs, None].expand_as(bb_pred)
 
         aux["bb/mse_loss"] = masked_mse(bb_pred,
                                         bb_target,
@@ -71,8 +69,7 @@ class ADLoss(nn.Module):
 
             bb_pred_ag = guidance_outputs["bb_pred"]
             bb_target_ag = guidance_outputs["bb_target"]
-            M = bb_pred_ag.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
-            bb_mask_ag = repeat(batch["x_mask"][..., rc.bb_idxs, :], "b n a x -> (m b) n a x", m=M)
+            bb_mask_ag = guidance_outputs["atom_mask"][..., const.bb_idxs, None].expand_as(bb_pred_ag)
 
             aux["autoguidance/bb/mse_loss"] = masked_mse(bb_pred_ag,
                                                          bb_target_ag,

@@ -1,6 +1,6 @@
 from collections import defaultdict
 from functools import partial
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import torch
@@ -13,14 +13,13 @@ from tqdm import tqdm
 
 import allatom_design.data.conditioning_labels as cl
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
-from allatom_design.data import residue_constants as rc
+from allatom_design.checkpoint_utils import repair_state_dict
+from allatom_design.data import const
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
 from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
 from allatom_design.interpolants.ad_interpolants.sd3_rf_interpolant import \
     SD3_RF
-from allatom_design.model.atom_denoiser.denoisers.denoiser import \
-    BaseAtomDenoiser
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.dit_utils import (
     DiTBlock, FinalLayer, LabelEmbedder, MultiHeadRMSNorm)
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.pair_rep_utils import (
@@ -31,10 +30,9 @@ from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
 from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import FAMPNN
 from openfold.model.primitives import Linear
-from allatom_design.checkpoint_utils import repair_state_dict
 
 
-class DiTDenoiser(BaseAtomDenoiser):
+class DiTDenoiser(nn.Module):
     def __init__(self,
                  cfg: DictConfig,
                  sigma_data: Tuple[TensorType[(), float]]):
@@ -78,33 +76,23 @@ class DiTDenoiser(BaseAtomDenoiser):
 
 
     def forward(self,
-                x_motif: TensorType["b n 37 3", float],
-                motif_mask: TensorType["b n 37", float],
-                aatype_motif: TensorType["b n", int],
-                residue_index: TensorType["b n", int],
-                seq_mask: TensorType["b n", float],
-                cond_labels_in: Dict[str, TensorType["b", int]] = {},
-                aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
+                motif_inputs: dict[str, TensorType["b n ..."]],
+                diffusion_inputs: dict[str, TensorType["b ..."]],
                 is_sampling: bool = False,
+                diffusion_params: dict[str, Any] | None = None,  # required only for sampling
                 ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred
                            Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
-        h_s = None
+        conditioning_inputs = {"h_s": None}
         if self.use_scaffold_module:
-            h_s = self.embed_motif(x_motif, motif_mask, aatype_motif, seq_mask, residue_index)
+            conditioning_inputs["h_s"] = self.embed_motif(motif_inputs)
 
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
-            x_motif=x_motif,
-            motif_mask=motif_mask,
-            aatype_motif=aatype_motif,
-            residue_index=residue_index,
-            seq_mask=seq_mask,
-            h_s=h_s,
-            pair_bias=None,
-            cond_labels_in=cond_labels_in,
-            aux_inputs=aux_inputs,
-            is_sampling=is_sampling
+            diffusion_inputs=diffusion_inputs,
+            conditioning_inputs=conditioning_inputs,
+            is_sampling=is_sampling,
+            diffusion_params=diffusion_params
         )
 
         aux_preds["bb_diffusion_aux"] = bb_diffusion_aux
@@ -113,50 +101,38 @@ class DiTDenoiser(BaseAtomDenoiser):
 
 
     def backbone_diffusion(self,
-                           x_motif: TensorType["b n 37 3", float],
-                           motif_mask: TensorType["b n 37", float],
-                           aatype_motif: TensorType["b n", int],
-                           residue_index: TensorType["b n", int],
-                           seq_mask: TensorType["b n", float],
-                           h_s: TensorType["b n h"],
-                           pair_bias: TensorType["b h n n", float] | None,
-                           cond_labels_in: Dict[str, TensorType["b", int]] = {},
-                           aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
-                           is_sampling: bool = False
+                        #    x_motif: TensorType["b n 37 3", float],
+                        #    motif_mask: TensorType["b n 37", float],
+                        #    aatype_motif: TensorType["b n", int],
+                        #    residue_index: TensorType["b n", int],
+                        #    seq_mask: TensorType["b n", float],
+                        #    h_s: TensorType["b n h"],
+                        #    pair_bias: TensorType["b h n n", float] | None,
+                           diffusion_inputs: dict[str, TensorType["b ..."]],
+                           conditioning_inputs: dict[str, TensorType["b ..."]],
+                           is_sampling: bool,
+                           diffusion_params: dict[str, Any] | None,
                            ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
                                       Dict[str, TensorType["b ..."]]]:
-        B, N = seq_mask.shape
+        B, N = diffusion_inputs["seq_mask"].shape
         diffusion_aux = defaultdict(lambda: None)
 
         if not is_sampling:
             ### TRAINING ###
-
             # Get ground truth backbone coordinates
-            x_bb_gt = aux_inputs["x"][..., rc.bb_idxs, :]
+            diffusion_inputs["x_bb"] = diffusion_inputs["x"][..., const.bb_idxs, :]
 
             # Repeat inputs for batch multiplier  # TODO: randomly augment these too
             M = self.cfg.training_batch_size_mult
-            x_bb_gt_batched = repeat(x_bb_gt, "b n a x -> (m b) n a x", m=M, b=B)
-            residue_index_batched = repeat(residue_index, "b n -> (m b) n", m=M, b=B)
-            seq_mask_batched = repeat(seq_mask, "b n -> (m b) n", m=M, b=B)
-            cond_labels_in_batched = {label: repeat(cond_labels_in[label], "b -> (m b)", m=M, b=B) for label in cond_labels_in}
-
-            # repeat scaffolding inputs
-            x_scaffold_batched = repeat(x_motif, "b n a x -> (m b) n a x", m=M, b=B)
-            scaffold_mask_batched = repeat(motif_mask, "b n a -> (m b) n a", m=M, b=B)
-            aatype_scaffold_batched = repeat(aatype_motif, "b n -> (m b) n", m=M, b=B)
+            diffusion_inputs_batched = {k: v[None].expand(M, *v.shape) if v is not None else None for k, v in diffusion_inputs.items()}
+            diffusion_inputs_batched = {k: v.reshape(M * B, *v.shape[2:]) if v is not None else None for k, v in diffusion_inputs_batched.items()}
 
             # repeat conditioning inputs
-            h_s_batched = repeat(h_s, "b n h -> (m b) n h", m=M, b=B) if h_s is not None else None
-            pair_bias_batched = repeat(pair_bias, "b h i j -> (m b) h i j", m=M, b=B) if pair_bias is not None else None  # TODO: expand instead to save memory?
-
-            # Evaluate at specific timesteps (for validation)
-            t_bb = None
-            if aux_inputs["t_bb"] is not None:
-                t_bb = torch.full((M * B, ), aux_inputs["t_bb"], device=x_bb_gt.device)
+            conditioning_inputs_batched = {k: v[None].expand(M, *v.shape) if v is not None else None for k, v in conditioning_inputs.items()}
+            conditioning_inputs_batched = {k: v.reshape(M * B, *v.shape[2:]) if v is not None else None for k, v in conditioning_inputs_batched.items()}
 
             # Noise the ground truth backbone
-            interpolant_out = self.interpolant({"x": x_bb_gt_batched, "aatype": None}, t=t_bb)
+            interpolant_out = self.interpolant({"x": diffusion_inputs_batched["x_bb"], "aatype": None}, t=diffusion_inputs_batched["t_bb"])
             x_bb_target_batched = interpolant_out["x_target"]
             xt_bb_batched = interpolant_out["x_noised"]
             t_batched = interpolant_out["t"]
@@ -168,26 +144,16 @@ class DiTDenoiser(BaseAtomDenoiser):
                 # Apply self-conditioning
                 with torch.no_grad():
                     denoiser_pred_batched, aux_preds = denoiser_fn(xt_bb_batched,
-                                                           x_scaffold_batched,
-                                                           scaffold_mask_batched,
-                                                           aatype_scaffold_batched,
-                                                           h_s_batched,
-                                                           pair_bias_batched,
-                                                           t_batched,
-                                                           seq_mask=seq_mask_batched, residue_index=residue_index_batched,
-                                                           cond_labels_in=cond_labels_in_batched)
+                                                                   t_batched,
+                                                                   seq_mask=diffusion_inputs_batched["seq_mask"],
+                                                                   residue_index=diffusion_inputs_batched["residue_index"])
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                 denoiser_fn = partial(denoiser_fn, x_self_cond=self.interpolant.get_x1_pred(denoiser_pred_batched, xt_bb_batched, t_batched))
 
             denoiser_pred_batched, aux_preds = denoiser_fn(xt_bb_batched,
-                                                   x_scaffold_batched,
-                                                   scaffold_mask_batched,
-                                                   aatype_scaffold_batched,
-                                                   h_s_batched,
-                                                   pair_bias_batched,
-                                                   t_batched,
-                                                   seq_mask=seq_mask_batched, residue_index=residue_index_batched,
-                                                   cond_labels_in=cond_labels_in_batched)
+                                                           t_batched,
+                                                           seq_mask=diffusion_inputs_batched["seq_mask"],
+                                                           residue_index=diffusion_inputs_batched["residue_index"])
 
             # Train autoguidance model
             diffusion_aux["autoguidance_aux"] = None
@@ -198,32 +164,23 @@ class DiTDenoiser(BaseAtomDenoiser):
                 if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                     with torch.no_grad():
                         denoiser_pred_batched_guide, _ = denoiser_fn(xt_bb_batched,
-                                                             x_scaffold_batched,
-                                                             scaffold_mask_batched,
-                                                             aatype_scaffold_batched,
-                                                             h_s_batched,
-                                                             pair_bias_batched,
-                                                             t_batched,
-                                                             seq_mask=seq_mask_batched, residue_index=residue_index_batched,
-                                                             cond_labels_in=cond_labels_in_batched)
+                                                                     t_batched,
+                                                                     seq_mask=diffusion_inputs_batched["seq_mask"],
+                                                                     residue_index=diffusion_inputs_batched["residue_index"])
                     torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                     denoiser_fn = partial(denoiser_fn, x_self_cond=self.interpolant.get_x1_pred(denoiser_pred_batched_guide, xt_bb_batched, t_batched))
 
                 denoiser_pred_batched_guide, _ = denoiser_fn(xt_bb_batched,
-                                                     x_scaffold_batched,
-                                                     scaffold_mask_batched,
-                                                     aatype_scaffold_batched,
-                                                     h_s_batched,
-                                                     pair_bias_batched,
-                                                     t_batched,
-                                                     seq_mask=seq_mask_batched, residue_index=residue_index_batched,
-                                                     cond_labels_in=cond_labels_in_batched)
+                                                             t_batched,
+                                                             seq_mask=diffusion_inputs_batched["seq_mask"],
+                                                             residue_index=diffusion_inputs_batched["residue_index"])
 
                 # add to autoguidance outputs
                 diffusion_aux["autoguidance_aux"] = {
                     "bb_pred": denoiser_pred_batched_guide,
                     "bb_target": x_bb_target_batched,  # diffusion target; for edm this is just the ground truth coordinates
-                    "loss_weight_t": loss_weight_t_batched
+                    "loss_weight_t": loss_weight_t_batched,
+                    "atom_mask": diffusion_inputs_batched["atom_mask"]
                 }
 
             # Outputs
@@ -233,6 +190,7 @@ class DiTDenoiser(BaseAtomDenoiser):
             diffusion_aux["bb_pred"] = denoiser_pred_batched
             diffusion_aux["bb_target"] = x_bb_target_batched  # diffusion target; for edm this is just the ground truth coordinates
             diffusion_aux["loss_weight_t"] = loss_weight_t_batched
+            diffusion_aux["atom_mask"] = diffusion_inputs_batched["atom_mask"]
 
         else:
             ### SAMPLING ###
@@ -245,12 +203,11 @@ class DiTDenoiser(BaseAtomDenoiser):
             xt_bb_traj, x1_bb_traj = [], []
 
             # Extract sampling parameters
-            diffusion_inputs = aux_inputs["diffusion_inputs"]
-            S = diffusion_inputs["num_steps"]
-            timesteps = diffusion_inputs["timesteps"]
-            noise_schedule = diffusion_inputs["noise_schedule"]
-            churn_cfg = diffusion_inputs["churn_cfg"]
-            autoguidance_cfg = diffusion_inputs["autoguidance_cfg"]
+            S = diffusion_params["num_steps"]
+            timesteps = diffusion_params["timesteps"]
+            noise_schedule = diffusion_params["noise_schedule"]
+            churn_cfg = diffusion_params["churn_cfg"]
+            autoguidance_cfg = diffusion_params["autoguidance_cfg"]
 
             # Apply autoguidance
             use_autoguidance = (autoguidance_cfg is not None) and (autoguidance_cfg["use_autoguidance"])
@@ -298,7 +255,7 @@ class DiTDenoiser(BaseAtomDenoiser):
                                                                noise_schedule=noise_schedule,
                                                                cfg_cfg=None,
                                                                autoguidance_cfg=autoguidance_cfg,
-                                                               aux_inputs=aux_inputs)
+                                                               diffusion_inputs=diffusion_inputs)
 
                 # Save current state
                 xt_bb_traj.append(xt_bb.cpu())
@@ -396,11 +353,6 @@ class DiT(nn.Module):
         self.cfg = cfg
         self.interpolant = interpolant
 
-        # Set up pair representation builder
-        self.use_pair_repr = cfg.get("pair_rep", {}).get("enabled", False)
-        if self.use_pair_repr:
-            self.pair_rep_builder = PairRepBuilder(cfg.pair_rep)
-
         # Set up DiT model
         self.num_atoms_in = cfg.num_atoms_in
         self.use_self_conditioning = cfg.use_self_conditioning
@@ -410,11 +362,6 @@ class DiT(nn.Module):
         # Input and output channels
         self.c = self.num_atoms_in * 3  # 3 xyz coordinates per atom
         self.in_channels = self.c * 2 if self.use_self_conditioning else self.c  # 2x for self-conditioning
-
-        if self.scaffolding.use_concat:
-            # +condition on motif + one-hot sequence conditioning
-            self.in_channels = self.in_channels + rc.atom_type_num * 3
-            self.in_channels = self.in_channels + cfg.n_aatype
 
         self.out_channels = self.c
         self.n_aatype = cfg.n_aatype
@@ -439,23 +386,11 @@ class DiT(nn.Module):
         # Time embeddings
         self.t_embedder = TimestepEmbedder(cfg.hidden_size)
 
-        # Conditioning
-        self.cond_label_to_dropout_p = getattr(cfg, "cond_label_to_dropout_p", {})
-        self.cond_labels = [k for k, v in self.cond_label_to_dropout_p.items() if v is not None]
-        self.cond_embedders = nn.ModuleDict({
-            label: LabelEmbedder(num_classes=cl.COND_NUM_CLASSES[label],
-                                 hidden_size=cfg.hidden_size,
-                                 dropout_prob=self.cond_label_to_dropout_p[label]) for label in self.cond_labels
-        })
-
-        # Scaffold conditioning via per-residue embeddings
-        if self.scaffolding.use_h_s:
-            self.h_s_embedder = Linear(self.scaffolding.h_s, cfg.hidden_size)
-
         # QK-normalization from SD3
         self.qk_normlayer = None
         if cfg.qk_rmsnorm:
             self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
+
         # Blocks
         self.blocks = nn.ModuleList([
             DiTBlock(cfg.hidden_size, cfg.num_heads,
@@ -465,12 +400,7 @@ class DiT(nn.Module):
                      qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
                      ) for _ in range(cfg.depth)
         ])
-        if self.use_pair_repr:
-            self.to_pair_biases = nn.ModuleList([
-                nn.Sequential(nn.LayerNorm(cfg.pair_rep.c_z),
-                              Linear(cfg.pair_rep.c_z, cfg.num_heads, init="normal", bias=False))  # openfold initialization
-                for _ in range(cfg.depth)
-            ])
+
         self.final_layer = FinalLayer(cfg.hidden_size, self.out_channels)
         self.initialize_weights()
 
@@ -503,35 +433,17 @@ class DiT(nn.Module):
 
     def forward(self,
                 x_noised: TensorType["b n 4 3", float],
-                x_motif: TensorType["b n 37 3", float],
-                motif_mask: TensorType["b n 37", float],
-                aatype_motif: Optional[TensorType["b n", int]],
-                h_s: Optional[TensorType["b n h"]],
-                pair_bias: Optional[TensorType["b h n n", float]],
                 t: TensorType["b", float],
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
                 x_self_cond: Optional[TensorType["b n 4 3", float]] = None,
-                cond_labels_in: Dict[str, TensorType["b", int]] = {}
                 ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
                            Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
-        if self.use_pair_repr:
-            # Keep original x_noised and x_self_cond before preconditioning
-            x_noised_orig = x_noised
-            x_self_cond_orig = x_self_cond
-
         # Preconditioning
         precondition_in, precondition_out = self.interpolant.setup_preconditioning(x_noised, x_self_cond, t)
         x_noised, x_self_cond, t = precondition_in()  # input preconditioning
-
-        # Construct pair representation
-        if self.use_pair_repr:
-            # Get pair representation
-            z = self.pair_rep_builder(x_noised_orig[..., rc.atom_order["CA"], :],
-                                      x_self_cond_orig[..., rc.atom_order["CA"], :] if x_self_cond_orig is not None else None,
-                                      residue_index, seq_mask, t)
 
         # Concatenate self-conditioning
         if self.use_self_conditioning:
@@ -540,16 +452,6 @@ class DiT(nn.Module):
             x_noised = torch.cat([x_noised, x_self_cond], dim=-1)
 
         x = rearrange(x_noised, "b n a x -> b n (a x)")
-
-        # Concatenate scaffold conditioning
-        if self.scaffolding.use_concat:
-            x_motif = x_motif * motif_mask[..., None]  # zero out non-motif positions
-            x_motif = rearrange(x_motif, "b n a x -> b n (a x)")
-            x = torch.cat([x, x_motif], dim=-1)
-
-            # also concatenate one-hot sequence conditioning
-            aatype_oh = F.one_hot(aatype_motif, num_classes=self.n_aatype).float()
-            x = torch.cat([x, aatype_oh], dim=-1)
 
         # Begin DiT forward pass
         x = self.x_embedder(x)
@@ -563,40 +465,15 @@ class DiT(nn.Module):
         t = self.t_embedder(t)
         c = t
 
-        for label_name in self.cond_labels:
-            if label_name not in cond_labels_in:
-                # default to placeholder token
-                B = x_noised.shape[0]
-                labels_in = torch.full((B, ), cl.PLACEHOLDER_TOKEN_ID, dtype=torch.long, device=x_noised.device)
-            else:
-                labels_in = cond_labels_in[label_name]
-
-            # convert placeholder tokens to labels
-            if self.cond_embedders[label_name].has_unconditional_token:
-                # if the label supports unconditional tokens, default to unconditional generation
-                token_id = cl.COND_NUM_CLASSES[label_name]  # last token is the unconditional token
-            else:
-                # otherwise, we provide a default token ID
-                token_id = cl.DEFAULT_TOKEN_ID[label_name]
-            labels_in = torch.where(labels_in == cl.PLACEHOLDER_TOKEN_ID, token_id, labels_in)
-
-            # embed the label
-            c = c + self.cond_embedders[label_name](labels_in, self.training)
-
-        # Scaffold conditioning
         c = c.unsqueeze(1).expand((-1, x.shape[1], -1))  # expand to sequence length
-        if self.scaffolding.use_h_s:
-            h_s = self.h_s_embedder(h_s)
-            c = c + h_s
+        # if self.scaffolding.use_h_s:
+        #     h_s = self.h_s_embedder(h_s)
+        #     c = c + h_s
 
         # Blocks
         attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
-        for bi, block in enumerate(self.blocks):
-            attn_bias = pair_bias
-            if self.use_pair_repr:
-                to_pair_bias_fn = self.to_pair_biases[bi]
-                attn_bias = rearrange(to_pair_bias_fn(z), "b i j h -> b h i j")
-            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=attn_bias, per_token_conditioning=True)
+        for block in self.blocks:
+            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True)
 
         # Final layer
         x = self.final_layer(x, c, per_token_conditioning=True)

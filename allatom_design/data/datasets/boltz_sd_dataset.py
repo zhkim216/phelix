@@ -9,12 +9,12 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn.functional as F
-from boltz.data import const
+from allatom_design.data import const
 from boltz.data.crop.cropper import Cropper
 from boltz.data.feature.pad import pad_to_max
 from boltz.data.sample.sampler import Sample, Sampler
 from boltz.data.tokenize.tokenizer import Tokenized, Tokenizer
-from boltz.data.types import Connection, Input, Manifest, Record, Structure
+from allatom_design.data.types import Connection, Input, Manifest, Record, Structure
 from einops import rearrange
 from omegaconf import DictConfig
 from torch.utils import data
@@ -25,8 +25,8 @@ from allatom_design.data import conversion
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (FEATURES_LONG, atom14_aatype_to_atom37,
                                       atom37_to_atom14,
-                                      get_interface_residue_mask)
-from allatom_design.data.featurizer import SDFeaturizer
+                                      get_interface_residue_mask, pad_atom_feats_to_tokenwise)
+from allatom_design.data.feature.featurizer import SimpleBoltzFeaturizer
 
 
 class BoltzSDDataModule(L.LightningDataModule):
@@ -197,6 +197,8 @@ class SDDataset(data.Dataset):
         # Process OpenFold features into an example
         example = process_single_pdb(openfold_feats)
 
+        raise NotImplementedError("This dataset is currently bugged, needs more work")
+
         # TODO: SE3 augmentation?
 
         # Add pdb key
@@ -214,7 +216,10 @@ class SDDataset(data.Dataset):
             The length of the dataset.
 
         """
-        return self.samples_per_epoch
+        if self.phase == "train":
+            # Train set is infinite
+            return self.samples_per_epoch
+        return len(self.dataset.manifest.records)
 
 
     def _load_boltz_feats(self, idx: int) -> tuple[Input, dict[str, torch.Tensor]]:
@@ -388,7 +393,7 @@ class BoltzDataset:
     sampler: Sampler
     cropper: Cropper
     tokenizer: Tokenizer
-    featurizer: SDFeaturizer
+    featurizer: SimpleBoltzFeaturizer
 
 
 def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
@@ -432,33 +437,6 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
         collated[key] = values
 
     return collated
-
-
-def pad_atom_feats_to_tokenwise(boltz_feats: dict,
-                                max_atoms_per_token: int):
-    # Build padded atom idxs
-    n_atoms_per_token = boltz_feats["atom_to_token"].sum(dim=0)
-    # atom_idxs = torch.tensor(tokenized.tokens["atom_idx"])  # this does not work since doesn't account for removal of invalid chains
-    atom_idxs = torch.cat([torch.zeros(1), n_atoms_per_token.cumsum(dim=0)[:-1]]).int()
-    padded_atom_idxs = atom_idxs[:, None].expand(-1, max_atoms_per_token)
-    padded_atom_idxs = padded_atom_idxs + torch.arange(max_atoms_per_token)[None, :]  # [n, 14]
-    pad_mask = torch.arange(max_atoms_per_token)[None, :] < n_atoms_per_token[:, None]  # [n, 14]
-    padded_atom_idxs = padded_atom_idxs * pad_mask  # mask out ghost atoms
-
-    # Gather from each feature of interest
-    tokenwise_feats = {}
-    N = padded_atom_idxs.shape[0]
-    for k in ["coords", "atom_resolved_mask", "ref_pos", "ref_element", "ref_charge"]:
-        v = boltz_feats[k]
-        if k == "coords":
-            # coords is [1, n_atoms, 3]
-            v = v.squeeze(0)
-        data_shape = v.shape[1:]
-        gather_idxs = padded_atom_idxs.view(-1, *((1,) * len(data_shape))).expand(-1, *data_shape)
-        tokenwise_feats[k] = v.gather(0, gather_idxs).view(N, max_atoms_per_token, *data_shape)
-        tokenwise_feats[k] = tokenwise_feats[k] * pad_mask.view(N, max_atoms_per_token, *((1,) * len(data_shape)))
-
-    return tokenwise_feats
 
 
 def process_single_pdb(data):
