@@ -9,24 +9,25 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn.functional as F
-from allatom_design.data import const
-from boltz.data.crop.cropper import Cropper
-from boltz.data.feature.pad import pad_to_max
-from boltz.data.sample.sampler import Sample, Sampler
-from boltz.data.tokenize.tokenizer import Tokenized, Tokenizer
-from allatom_design.data.types import Connection, Input, Manifest, Record, Structure
 from einops import rearrange
 from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from allatom_design.data import conversion
+from allatom_design.data import const, conversion
 from allatom_design.data import residue_constants as rc
+from allatom_design.data.crop.cropper import Cropper
 from allatom_design.data.data import (FEATURES_LONG, atom14_aatype_to_atom37,
                                       atom37_to_atom14,
-                                      get_interface_residue_mask, pad_atom_feats_to_tokenwise)
+                                      get_interface_residue_mask,
+                                      pad_atom_feats_to_tokenwise)
 from allatom_design.data.feature.featurizer import SimpleBoltzFeaturizer
+from allatom_design.data.feature.pad import pad_to_max
+from allatom_design.data.sample.sampler import Sample, Sampler
+from allatom_design.data.tokenize.tokenizer import Tokenizer
+from allatom_design.data.types import (Connection, Input, Manifest, Record,
+                                       Structure)
 
 
 class BoltzSDDataModule(L.LightningDataModule):

@@ -12,8 +12,8 @@ import hydra
 import pandas as pd
 import rdkit
 import rdkit.Chem
-from boltz.data.filter.static.ligand import ExcludedLigands
-from boltz.data.filter.static.polymer import (ClashingChainsFilter,
+from allatom_design.data.filter.static.ligand import ExcludedLigands
+from allatom_design.data.filter.static.polymer import (ClashingChainsFilter,
                                               ConsecutiveCA,
                                               MinimumLengthFilter,
                                               UnknownFilter)

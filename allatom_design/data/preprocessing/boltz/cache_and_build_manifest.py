@@ -9,20 +9,19 @@ import hydra
 import numpy as np
 import torch
 import torch.nn.functional as F
-from allatom_design.data import const
-from boltz.data.feature.featurizer import BoltzFeaturizer
-from boltz.data.tokenize.boltz import BoltzTokenizer
-from allatom_design.data.types import Connection, Input, Manifest, Structure
-from boltz.data.write.mmcif import to_mmcif
+from allatom_design.data.feature.featurizer import BoltzFeaturizer
+from allatom_design.data.tokenize.boltz import BoltzTokenizer
+from allatom_design.data.write.mmcif import to_mmcif
 from joblib import Parallel, delayed
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from allatom_design.data import conversion
+from allatom_design.data import const, conversion
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (atom14_aatype_to_atom37,
                                       atom37_to_atom14,
                                       get_interface_residue_mask)
+from allatom_design.data.types import Connection, Input, Manifest, Structure
 
 tokenizer = BoltzTokenizer()
 featurizer = BoltzFeaturizer()

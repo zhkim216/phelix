@@ -2,7 +2,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from boltz.data.types import Tokenized
+from allatom_design.data.types import Tokenized
 from omegaconf import DictConfig
 from allatom_design.data import const
 from torchtyping import TensorType

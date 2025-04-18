@@ -1,4 +1,4 @@
-from boltz.data.filter.dynamic.filter import DynamicFilter
+from allatom_design.data.filter.dynamic.filter import DynamicFilter
 
 from allatom_design.data.types import Record
 

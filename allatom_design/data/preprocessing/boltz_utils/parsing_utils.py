@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from boltz.data.filter.static.filter import StaticFilter
+from allatom_design.data.filter.static.filter import StaticFilter
 from allatom_design.data.types import ChainInfo, InterfaceInfo, Record, Target
 
 from allatom_design.data.preprocessing.boltz_utils.mmcif import parse_mmcif

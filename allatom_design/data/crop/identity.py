@@ -2,8 +2,9 @@ from dataclasses import replace
 from typing import Optional
 
 import numpy as np
-from boltz.data.crop.cropper import Cropper
-from boltz.data.types import Tokenized
+from allatom_design.data.crop.cropper import Cropper
+
+from allatom_design.data.types import Tokenized
 
 
 class IdentityCropper(Cropper):
