@@ -3,15 +3,14 @@ from typing import Optional
 
 import numpy as np
 import torch
-from boltz.data.feature.featurizer import (compute_frames_nonpolymer,
-                                           select_subset_from_mask)
-from boltz.data.feature.pad import pad_dim
-from boltz.data.tokenize.boltz import Tokenized
-from boltz.model.modules.utils import center_random_augmentation
 from torch import Tensor, from_numpy
 from torch.nn.functional import one_hot
 
 from allatom_design.data import const
+from allatom_design.data.feature.featurizer import (compute_frames_nonpolymer,
+                                                    select_subset_from_mask)
+from allatom_design.data.feature.pad import pad_dim
+from allatom_design.data.tokenize.boltz import Tokenized
 
 
 class SimpleBoltzFeaturizer:
@@ -421,7 +420,7 @@ def process_atom_features(
     r_set_to_rep_atom = one_hot(r_set_to_rep_atom, num_classes=len(atom_data))
 
     # Apply random roto-translation to the input atoms
-    ref_pos = center_random_augmentation(
+    ref_pos = boltz_center_random_augmentation(
         ref_pos[None], resolved_mask[None], centering=False
     )[0]
 
@@ -473,3 +472,59 @@ def process_atom_features(
         "frames_idx": frames,
         "frame_resolved_mask": frame_resolved_mask,
     }
+
+
+def boltz_center_random_augmentation(
+    atom_coords,
+    atom_mask,
+    s_trans=1.0,
+    augmentation=True,
+    centering=True,
+    return_second_coords=False,
+    second_coords=None,
+):
+    """Center and randomly augment the input coordinates.
+
+    Parameters
+    ----------
+    atom_coords : Tensor
+        The atom coordinates.
+    atom_mask : Tensor
+        The atom mask.
+    s_trans : float, optional
+        The translation factor, by default 1.0
+    augmentation : bool, optional
+        Whether to add rotational and translational augmentation the input, by default True
+    centering : bool, optional
+        Whether to center the input, by default True
+
+    Returns
+    -------
+    Tensor
+        The augmented atom coordinates.
+
+    """
+    if centering:
+        atom_mean = torch.sum(
+            atom_coords * atom_mask[:, :, None], dim=1, keepdim=True
+        ) / torch.sum(atom_mask[:, :, None], dim=1, keepdim=True)
+        atom_coords = atom_coords - atom_mean
+
+        if second_coords is not None:
+            # apply same transformation also to this input
+            second_coords = second_coords - atom_mean
+
+    if augmentation:
+        atom_coords, second_coords = randomly_rotate(
+            atom_coords, return_second_coords=True, second_coords=second_coords
+        )
+        random_trans = torch.randn_like(atom_coords[:, 0:1, :]) * s_trans
+        atom_coords = atom_coords + random_trans
+
+        if second_coords is not None:
+            second_coords = second_coords + random_trans
+
+    if return_second_coords:
+        return atom_coords, second_coords
+
+    return atom_coords
