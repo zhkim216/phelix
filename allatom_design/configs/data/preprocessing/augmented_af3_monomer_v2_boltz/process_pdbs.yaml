@@ -3,5 +3,8 @@ augmented_af3_monomer_v2_path: /media/scratch/datasets/augmented_af3_monomer_v2
 out_dir: /media/scratch/datasets/augmented_af3_monomer_v2_boltz/preprocessing/process_pdbs
 pdb_path: /media/scratch/datasets/augmented_af3_monomer_v2_boltz # output dataset directory
 
-ccd_pkl: /media/scratch/datasets/boltz/ccd.pkl
 num_workers: 8
+
+# Redis host and port for CCD data
+redis_host: localhost   # or the host running redis‑server
+redis_port: 7777

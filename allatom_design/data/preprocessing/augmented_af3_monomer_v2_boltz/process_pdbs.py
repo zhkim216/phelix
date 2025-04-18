@@ -4,6 +4,7 @@ import json
 import pickle
 import shutil
 from dataclasses import asdict, replace
+from functools import partial
 from pathlib import Path
 
 import gemmi
@@ -18,11 +19,12 @@ from boltz.data.filter.static.polymer import (ClashingChainsFilter,
                                               UnknownFilter)
 from joblib import Parallel, delayed
 from omegaconf import DictConfig
+from p_tqdm import p_umap
+from redis import Redis
 from tqdm import tqdm
 
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     fetch, finalize, process_structure)
-from allatom_design.data.types import DesignabilityInfo, Manifest
 
 
 @hydra.main(config_path="../../../configs/data/preprocessing/augmented_af3_monomer_v2_boltz", config_name="process_pdbs", version_base="1.3.2")
@@ -40,8 +42,8 @@ def main(cfg: DictConfig):
 
     manifest_df = pd.read_csv(f"{cfg.pdb_path}/manifest.csv")
 
-    ### Boltz processing ###
-    # First, convert all pdbs into mmcif format
+    # ───────────────────────────── Boltz processing ────────────────────────────
+    # Convert all pdbs into mmcif format first
     use_parallel = cfg.num_workers > 1
     pdb_paths = glob.glob(f"{cfg.augmented_af3_monomer_v2_path}/esmfold_preds/*.pdb")
     mmcif_dir = f"{cfg.out_dir}/mmcifs"
@@ -58,7 +60,7 @@ def main(cfg: DictConfig):
     # For this dataset, we'll manually assign clusters based on the manifest.csv file
     clusters = {}
 
-    # Construct static filters
+    # Static filters
     filters = [
         ExcludedLigands(),
         MinimumLengthFilter(min_len=4, max_len=5000),
@@ -67,11 +69,8 @@ def main(cfg: DictConfig):
         ClashingChainsFilter(freq=0.3, dist=1.7),
     ]
 
-    # Load in CCD resource
-    pickle_option = rdkit.Chem.PropertyPickleOptions.AllProps
-    rdkit.Chem.SetDefaultPickleProperties(pickle_option)
-    with open(cfg.ccd_pkl, "rb") as f:
-        ccd_resource = pickle.load(f)
+    # Load or seed CCD resource in Redis
+    resource = Resource(host=cfg.redis_host, port=cfg.redis_port)
 
     # Fetch data
     data = fetch(datadir=Path(mmcif_dir), max_file_size=None)
@@ -79,16 +78,26 @@ def main(cfg: DictConfig):
     # Run processing
     processed_targets_dir = f"{cfg.pdb_path}/processed_targets"
     Path(processed_targets_dir).mkdir(parents=True, exist_ok=True)
-
     if use_parallel:
-        with Parallel(n_jobs=cfg.num_workers) as parallel_pool:
-            jobs = [delayed(process_structure)(pdb, ccd_resource, processed_targets_dir, filters, clusters) for pdb in data]
-            list(parallel_pool(tqdm(jobs, total=len(jobs), desc="Processing mmCIFs")))
+        fn = partial(
+            process_structure,
+            resource=resource,
+            outdir=Path(processed_targets_dir),
+            filters=filters,
+            clusters=clusters,
+        )
+        p_umap(fn, data, num_cpus=cfg.num_workers, desc="Processing mmCIFs")
     else:
         for pdb in tqdm(data, desc="Processing mmCIFs"):
-            process_structure(pdb, ccd_resource, processed_targets_dir, filters, clusters)
+            process_structure(
+                pdb,
+                resource=resource,
+                outdir=Path(processed_targets_dir),
+                filters=filters,
+                clusters=clusters,
+            )
 
-    # Run post-processing to create manifest.json
+    # Post‑processing to create manifest.json
     finalize(outdir=Path(processed_targets_dir))
 
     # Based on manifest.csv, load in designability info and add to manifest.json
@@ -100,6 +109,8 @@ def update_manifest_from_csv(manifest_path: str, manifest_df: pd.DataFrame) -> N
     """
     Add designability info, cluster ID, and phase from manifest_df to records in manifest_path.
     """
+    from allatom_design.data.types import DesignabilityInfo, Manifest
+
     # Load manifest
     manifest = Manifest.load(Path(manifest_path))
 
@@ -161,13 +172,30 @@ def pdb_to_mmcif(pdb_path: str, mmcif_out: Path) -> None:
     # Set sequence for each entity based on the sequence in the model, since we do not have SEQRES in these files
     for raw_chain in structure[0].subchains():
         model_sequence = raw_chain.extract_sequence()
-
         subchain_id = raw_chain.subchain_id()
         entities[subchain_id].full_sequence = model_sequence
 
     # Write mmCIF file
     mmcif_doc = structure.make_mmcif_document()
     mmcif_doc.write_file(str(mmcif_out))
+
+
+# ───────────────────────────── helper classes & funcs ──────────────────────────
+class Resource:
+    """Lightweight handle to CCD data stored once in Redis."""
+
+    def __init__(self, host: str, port: int) -> None:
+        self._redis = Redis(host=host, port=port)
+
+    def get(self, key: str):
+        value = self._redis.get(key)
+        return None if value is None else pickle.loads(value)  # noqa: S301
+
+    def __getitem__(self, key: str):
+        out = self.get(key)
+        if out is None:
+            raise KeyError(key)
+        return out
 
 
 if __name__ == "__main__":

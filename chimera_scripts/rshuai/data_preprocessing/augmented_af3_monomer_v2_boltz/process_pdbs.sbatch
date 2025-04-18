@@ -19,10 +19,11 @@ BASE_DIR=/home/talal/rshuai/allatom-design
 cd ${BASE_DIR}
 
 # Run script
-PHASE=eval
+CCD_DIR=/scratch/hielab/rshuai/datasets/boltz
+CCD_FILENAME=ccd.rdb
+redis-server --dir ${CCD_DIR} --dbfilename ${CCD_FILENAME} --port 7777 &
 python3 allatom_design/data/preprocessing/augmented_af3_monomer_v2_boltz/process_pdbs.py \
     augmented_af3_monomer_v2_path=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2 \
     out_dir=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2_boltz/preprocessing/process_pdbs \
     pdb_path=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2_boltz \
-    ccd_pkl=/scratch/hielab/rshuai/datasets/boltz/ccd.pkl \
     num_workers=16
