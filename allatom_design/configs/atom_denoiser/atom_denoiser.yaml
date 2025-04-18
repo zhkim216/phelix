@@ -27,7 +27,7 @@ trainer:
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
-  check_val_every_n_epoch: 4  # How often to run validation
+  check_val_every_n_epoch: 5  # How often to run validation
 
 # Resuming training options
 resume:
@@ -81,7 +81,7 @@ data:
   max_atoms: null  # currently unused
   pad_to_max_tokens: true
   pad_to_max_atoms: true
-  samples_per_epoch: 100000
+  samples_per_epoch: 128000
   batch_size: ${train.batch_size}
   num_workers: ${num_workers}
   random_seed: ${train.seed}

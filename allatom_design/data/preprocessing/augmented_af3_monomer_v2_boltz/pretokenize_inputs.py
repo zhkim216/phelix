@@ -63,6 +63,10 @@ def tokenize_structure_to_disk(processed_structure_file: str, out_dir: str, toke
         print(f"Error tokenizing structure {processed_structure_file}: {e}. Skipping.")
         return
 
+    if len(tokenized.tokens) == 0:
+        print(f"Tokenized structure {processed_structure_file} has no tokens. Skipping.")
+        return
+
     try:
         tokenized = add_tokenwise_atom_feats(tokenized, featurizer)
     except Exception as e:
