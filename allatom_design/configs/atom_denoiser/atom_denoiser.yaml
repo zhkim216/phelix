@@ -56,7 +56,7 @@ data:
   pdb_path: /media/scratch/datasets/augmented_af3_monomer_v2_boltz
 
   tokenizer:
-    _target_: boltz.data.tokenize.boltz.BoltzTokenizer
+    _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
   featurizer:
     _target_: allatom_design.data.feature.featurizer.SimpleBoltzFeaturizer
 
@@ -78,7 +78,7 @@ data:
     _target_: allatom_design.data.crop.identity.IdentityCropper
 
   max_tokens: 256
-  max_atoms: 4608
+  max_atoms: null  # currently unused
   pad_to_max_tokens: true
   pad_to_max_atoms: true
   samples_per_epoch: 100000

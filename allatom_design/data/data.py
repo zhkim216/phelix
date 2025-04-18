@@ -551,7 +551,7 @@ def get_length_from_pdb(pdb_file: str) -> Tuple[str, int]:
 
 # =============================================== Boltz-1 specific functions =============================================== #
 def pad_atom_feats_to_tokenwise(boltz_feats: dict,
-                                max_atoms_per_token: int):
+                                max_atoms_per_token: int) -> dict[str, TensorType["n a ..."]]:
     # Build padded atom idxs
     n_atoms_per_token = boltz_feats["atom_to_token"].sum(dim=0)
     # atom_idxs = torch.tensor(tokenized.tokens["atom_idx"])  # this does not work since doesn't account for removal of invalid chains
