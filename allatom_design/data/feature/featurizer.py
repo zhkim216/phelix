@@ -1,14 +1,15 @@
+import math
 import random
 from typing import Optional
 
 import numpy as np
 import torch
+from boltz.model.modules.utils import \
+    center_random_augmentation as boltz_center_random_augmentation
 from torch import Tensor, from_numpy
 from torch.nn.functional import one_hot
 
 from allatom_design.data import const
-from allatom_design.data.feature.featurizer import (compute_frames_nonpolymer,
-                                                    select_subset_from_mask)
 from allatom_design.data.feature.pad import pad_dim
 from allatom_design.data.tokenize.boltz import Tokenized
 
@@ -474,57 +475,110 @@ def process_atom_features(
     }
 
 
-def boltz_center_random_augmentation(
-    atom_coords,
-    atom_mask,
-    s_trans=1.0,
-    augmentation=True,
-    centering=True,
-    return_second_coords=False,
-    second_coords=None,
-):
-    """Center and randomly augment the input coordinates.
+def compute_frames_nonpolymer(
+    data: Tokenized,
+    coords,
+    resolved_mask,
+    atom_to_token,
+    frame_data: list,
+    resolved_frame_data: list,
+) -> tuple[list, list]:
+    """Get the frames for non-polymer tokens.
 
     Parameters
     ----------
-    atom_coords : Tensor
-        The atom coordinates.
-    atom_mask : Tensor
-        The atom mask.
-    s_trans : float, optional
-        The translation factor, by default 1.0
-    augmentation : bool, optional
-        Whether to add rotational and translational augmentation the input, by default True
-    centering : bool, optional
-        Whether to center the input, by default True
+    data : Tokenized
+        The tokenized data.
+    frame_data : list
+        The frame data.
+    resolved_frame_data : list
+        The resolved frame data.
 
     Returns
     -------
-    Tensor
-        The augmented atom coordinates.
+    tuple[list, list]
+        The frame data and resolved frame data.
 
     """
-    if centering:
-        atom_mean = torch.sum(
-            atom_coords * atom_mask[:, :, None], dim=1, keepdim=True
-        ) / torch.sum(atom_mask[:, :, None], dim=1, keepdim=True)
-        atom_coords = atom_coords - atom_mean
-
-        if second_coords is not None:
-            # apply same transformation also to this input
-            second_coords = second_coords - atom_mean
-
-    if augmentation:
-        atom_coords, second_coords = randomly_rotate(
-            atom_coords, return_second_coords=True, second_coords=second_coords
+    frame_data = np.array(frame_data)
+    resolved_frame_data = np.array(resolved_frame_data)
+    asym_id_token = data.tokens["asym_id"]
+    asym_id_atom = data.tokens["asym_id"][atom_to_token]
+    token_idx = 0
+    atom_idx = 0
+    for id in np.unique(data.tokens["asym_id"]):
+        mask_chain_token = asym_id_token == id
+        mask_chain_atom = asym_id_atom == id
+        num_tokens = mask_chain_token.sum()
+        num_atoms = mask_chain_atom.sum()
+        if (
+            data.tokens[token_idx]["mol_type"] != const.chain_type_ids["NONPOLYMER"]
+            or num_atoms < 3
+        ):
+            token_idx += num_tokens
+            atom_idx += num_atoms
+            continue
+        dist_mat = (
+            (
+                coords.reshape(-1, 3)[mask_chain_atom][:, None, :]
+                - coords.reshape(-1, 3)[mask_chain_atom][None, :, :]
+            )
+            ** 2
+        ).sum(-1) ** 0.5
+        resolved_pair = 1 - (
+            resolved_mask[mask_chain_atom][None, :]
+            * resolved_mask[mask_chain_atom][:, None]
+        ).astype(np.float32)
+        resolved_pair[resolved_pair == 1] = math.inf
+        indices = np.argsort(dist_mat + resolved_pair, axis=1)
+        frames = (
+            np.concatenate(
+                [
+                    indices[:, 1:2],
+                    indices[:, 0:1],
+                    indices[:, 2:3],
+                ],
+                axis=1,
+            )
+            + atom_idx
         )
-        random_trans = torch.randn_like(atom_coords[:, 0:1, :]) * s_trans
-        atom_coords = atom_coords + random_trans
+        frame_data[token_idx : token_idx + num_atoms, :] = frames
+        resolved_frame_data[token_idx : token_idx + num_atoms] = resolved_mask[
+            frames
+        ].all(axis=1)
+        token_idx += num_tokens
+        atom_idx += num_atoms
+    frames_expanded = coords.reshape(-1, 3)[frame_data]
 
-        if second_coords is not None:
-            second_coords = second_coords + random_trans
+    mask_collinear = compute_collinear_mask(
+        frames_expanded[:, 1] - frames_expanded[:, 0],
+        frames_expanded[:, 1] - frames_expanded[:, 2],
+    )
+    return frame_data, resolved_frame_data & mask_collinear
 
-    if return_second_coords:
-        return atom_coords, second_coords
 
-    return atom_coords
+def compute_collinear_mask(v1, v2):
+    norm1 = np.linalg.norm(v1, axis=1, keepdims=True)
+    norm2 = np.linalg.norm(v2, axis=1, keepdims=True)
+    v1 = v1 / (norm1 + 1e-6)
+    v2 = v2 / (norm2 + 1e-6)
+    mask_angle = np.abs(np.sum(v1 * v2, axis=1)) < 0.9063
+    mask_overlap1 = norm1.reshape(-1) > 1e-2
+    mask_overlap2 = norm2.reshape(-1) > 1e-2
+    return mask_angle & mask_overlap1 & mask_overlap2
+
+
+def select_subset_from_mask(mask, p):
+    num_true = np.sum(mask)
+    v = np.random.geometric(p) + 1
+    k = min(v, num_true)
+
+    true_indices = np.where(mask)[0]
+
+    # Randomly select k indices from the true_indices
+    selected_indices = np.random.choice(true_indices, size=k, replace=False)
+
+    new_mask = np.zeros_like(mask)
+    new_mask[selected_indices] = 1
+
+    return new_mask
