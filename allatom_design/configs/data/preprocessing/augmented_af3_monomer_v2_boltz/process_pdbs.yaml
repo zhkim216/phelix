@@ -8,3 +8,5 @@ num_workers: 8
 # Redis host and port for CCD data
 redis_host: localhost   # or the host running redis‑server
 redis_port: 7777
+
+ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl  # if redis_host is null, use this path to load CCD data instead

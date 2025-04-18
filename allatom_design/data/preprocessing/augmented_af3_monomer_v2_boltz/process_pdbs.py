@@ -65,12 +65,14 @@ def main(cfg: DictConfig):
         ExcludedLigands(),
         MinimumLengthFilter(min_len=4, max_len=5000),
         UnknownFilter(),
-        ConsecutiveCA(max_dist=10.0),
         ClashingChainsFilter(freq=0.3, dist=1.7),
     ]
 
     # Load or seed CCD resource in Redis
-    resource = Resource(host=cfg.redis_host, port=cfg.redis_port)
+    if cfg.redis_host is not None:
+        resource = Resource(host=cfg.redis_host, port=cfg.redis_port)
+    else:
+        resource = pickle.load(open(cfg.ccd_pkl_path, "rb"))
 
     # Fetch data
     data = fetch(datadir=Path(mmcif_dir), max_file_size=None)
