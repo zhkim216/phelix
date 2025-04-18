@@ -495,6 +495,11 @@ TokenBond = [
     ("token_2", np.dtype("i4")),
 ]
 
+TokenwiseAtomFeats = [
+    ("coords", np.dtype("3f4")),
+    ("atom_resolved_mask", np.dtype("?")),
+]
+
 
 @dataclass(frozen=True)
 class Tokenized:
@@ -504,3 +509,4 @@ class Tokenized:
     bonds: np.ndarray
     structure: Structure
     msa: dict[str, MSA]
+    tokenwise_atom_feats: np.ndarray | None = None

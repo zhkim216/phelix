@@ -11,10 +11,9 @@ import torch
 import torch.nn.functional as F
 from allatom_design.data import const
 from boltz.data.crop.cropper import Cropper
-from boltz.data.feature.pad import pad_to_max
+from boltz.data.feature.pad import pad_to_max, pad_dim
 from boltz.data.sample.sampler import Sample, Sampler
-from boltz.data.tokenize.tokenizer import Tokenized, Tokenizer
-from einops import rearrange
+from allatom_design.data.tokenize.tokenizer import Tokenizer
 from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader
@@ -24,8 +23,7 @@ from tqdm import tqdm
 from allatom_design.data.data import pad_atom_feats_to_tokenwise, get_atom_feat_masks, atom_center_random_augmentation, atom_apply_random_augmentation
 from allatom_design.data.feature.featurizer import SimpleBoltzFeaturizer
 from allatom_design.data.motif_selector import get_motif_selector
-from allatom_design.data.types import (Connection, Input, Manifest, Record,
-                                       Structure, Tokenized)
+from allatom_design.data.types import Manifest, Record, Tokenized, Structure, Connection
 
 
 class BoltzADDataModule(L.LightningDataModule):
@@ -191,7 +189,7 @@ class ADDataset(data.Dataset):
         # Load in data and tokenize (+ possible cropping)
         record_id, tokenized = self._load_and_tokenize_input(idx)
 
-        # Featurize input tokens for diffusion (atom14 protein tokens)
+        # Featurize input tokens for diffusion (atom23 protein tokens)
         example["diffusion_inputs"] = self._featurize_diffusion_inputs(idx, record_id, tokenized)
 
         # Featurize motif
@@ -296,28 +294,21 @@ class ADDataset(data.Dataset):
         # Subset tokenized data to only include protein tokens
         tokenized = subset_tokenized(tokenized, protein_token_mask)
 
-        # Featurize protein tokens
-        try:
-            protein_feats = self.dataset.featurizer.process(tokenized,
-                                                            atoms_per_window_queries=self.atoms_per_window_queries,
-                                                            min_dist=self.min_dist,
-                                                            max_dist=self.max_dist,
-                                                            num_bins=self.num_bins,
-                                                            max_tokens=self.max_tokens if self.pad_to_max_tokens else None,
-                                                            max_atoms=self.max_atoms if self.pad_to_max_atoms else None,
-                                                            )
-        except Exception as e:
-            print(f"Featurizer failed to featurize protein tokens on {record_id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
-
-        protein_tokenwise_feats = pad_atom_feats_to_tokenwise(protein_feats, max_atoms_per_token=14)  # aggregate to tokenwise and pad to atom14
-
         # Construct diffusion features
         diffusion_feats = {}
-        diffusion_feats["x"] = protein_tokenwise_feats["coords"]
-        diffusion_feats["atom_mask"] = protein_tokenwise_feats["atom_resolved_mask"]
-        diffusion_feats["residue_index"] = protein_feats["residue_index"]
-        diffusion_feats["seq_mask"] = protein_feats["token_pad_mask"]
+        diffusion_feats["x"] = tokenized.tokenwise_atom_feats["coords"]
+        diffusion_feats["atom_mask"] = tokenized.tokenwise_atom_feats["atom_resolved_mask"]
+        diffusion_feats["residue_index"] = tokenized.tokens["res_idx"]
+        diffusion_feats["seq_mask"] = np.ones_like(diffusion_feats["residue_index"])  # denotes padding
+
+        # Convert to torch
+        diffusion_feats = {k: torch.from_numpy(v.copy()) for k, v in diffusion_feats.items()}
+
+        # Pad to max tokens
+        pad_len = self.max_tokens - diffusion_feats["x"].shape[0]
+        for k, v in diffusion_feats.items():
+            diffusion_feats[k] = pad_dim(v, 0, pad_len)
+
         return diffusion_feats
 
 
@@ -348,15 +339,8 @@ class ADDataset(data.Dataset):
             record = self.dataset.manifest.records[idx]
             sample = Sample(record=record, chain_id=None, interface_id=None)
 
-        # Get the structure
-        input_data = load_input(sample.record, dataset.pdb_path)
-
-        # Tokenize structure
-        try:
-            tokenized = dataset.tokenizer.tokenize(input_data)
-        except Exception as e:
-            print(f"Tokenizer failed on {sample.record.id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
+        # Load pre-tokenized data
+        tokenized = load_tokenized(sample.record, dataset.pdb_path)
 
         # Compute crop
         try:
@@ -381,24 +365,13 @@ class ADDataset(data.Dataset):
         return sample.record.id, tokenized
 
 
-def load_input(record: Record, pdb_path: str) -> Input:
-    """Load the given input data.
-
-    Parameters
-    ----------
-    record : Record
-        The record to load.
-    pdb_path : str
-        The path to the data directory.
-
-    Returns
-    -------
-    Input
-        The loaded input.
-
+def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
     """
-    # Load the structure
-    structure = np.load(f"{pdb_path}/processed_targets/structures/{record.id}.npz")
+    Load tokenized data for a given record.
+    We pre-tokenize the input structure with tokenwise atom feats so we can speed up dataloading.
+    """
+    tokenized = np.load(f"{pdb_path}/processed_targets/tokenized/{record.id}.npz", allow_pickle=True)
+    structure = tokenized["structure"].item()
     structure = Structure(
         atoms=structure["atoms"],
         bonds=structure["bonds"],
@@ -408,8 +381,7 @@ def load_input(record: Record, pdb_path: str) -> Input:
         interfaces=structure["interfaces"],
         mask=structure["mask"],
     )
-
-    return Input(structure, msa={})  # we don't load in the MSAs
+    return Tokenized(tokens=tokenized["tokens"], bonds=tokenized["bonds"], structure=structure, msa={}, tokenwise_atom_feats=tokenized["tokenwise_atom_feats"])
 
 
 def subset_tokenized(tokenized: Tokenized,

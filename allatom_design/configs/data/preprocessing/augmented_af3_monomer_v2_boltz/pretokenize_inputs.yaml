@@ -1,0 +1,9 @@
+pdb_path: /media/scratch/datasets/augmented_af3_monomer_v2_boltz
+num_workers: 8
+
+# Tokenizer and featurizer for pretokenizing inputs
+tokenizer:
+  _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
+
+featurizer:
+  _target_: allatom_design.data.feature.featurizer.SimpleBoltzFeaturizer
