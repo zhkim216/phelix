@@ -81,7 +81,7 @@ data:
   max_atoms: 4608
   pad_to_max_tokens: true
   pad_to_max_atoms: true
-  samples_per_epoch: 50000
+  samples_per_epoch: 100000
   batch_size: ${train.batch_size}
   num_workers: ${num_workers}
   random_seed: ${train.seed}
