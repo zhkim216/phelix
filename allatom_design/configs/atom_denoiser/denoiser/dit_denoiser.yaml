@@ -4,56 +4,17 @@ defaults:
   - _self_
   - interpolant: edm_interpolant
 
+task: ${model.task}
+
 # Diffusion settings
 use_self_conditioning: true
 self_cond_p: 0.9
 training_batch_size_mult: 1  # batch size multiplier for diffusion module
 
-# Diffusion conditioning
-scaffold_module:
-  enabled: false  # true to condition on input scaffolds
-  pretrained_weights_path: ${pretrained_module_paths.fampnn}
-  ablate_pretrained_weights: false
-  freeze: true
-  fampnn:
-    n_aatype: ${model.n_aatype}
-    use_gvp: false
-    n_channel: 128
-    n_layers: 5
-    k_neighbors: 48
-    ablate_noise_labels: false
-    init_hV_with_hS: true
-
-    model_type: "sidechain"
-    dropout_p: 0.1
-    return_embedding: "last"
-
-    gvp:
-      out_dim: ${model.denoiser.scaffold_module.fampnn.n_channel}
-      node_hidden_dim_scalar: 128
-      node_hidden_dim_vector: 16
-      edge_hidden_dim_scalar: 512
-      edge_hidden_dim_vector: 1
-      rotate_out: false
-      graph_embedding:
-        mpnn_n_channel: ${model.denoiser.scaffold_module.fampnn.n_channel}
-        top_k_neighbors: ${model.denoiser.scaffold_module.fampnn.k_neighbors}
-        num_positional_embeddings: 16
-        n_aatype: ${model.n_aatype}
-        remove_edges_without_coords: true
-        node_hidden_dim_scalar: ${model.denoiser.scaffold_module.fampnn.gvp.node_hidden_dim_scalar}
-        node_hidden_dim_vector: ${model.denoiser.scaffold_module.fampnn.gvp.node_hidden_dim_vector}
-        edge_hidden_dim_scalar: ${model.denoiser.scaffold_module.fampnn.gvp.edge_hidden_dim_scalar}
-        edge_hidden_dim_vector: ${model.denoiser.scaffold_module.fampnn.gvp.edge_hidden_dim_vector}
-      dropout: ${model.denoiser.scaffold_module.fampnn.dropout_p}
-      num_encoder_layers: ${model.denoiser.scaffold_module.fampnn.n_layers}
-
 # DiT
 dit:
   num_atoms_in: 4
   use_self_conditioning: ${denoiser.use_self_conditioning}
-  condition_on_seq: false
-  condition_on_scaffold: ${denoiser.scaffold_module.enabled}
   n_aatype: 21
   inf: ${model.inf}
 
@@ -75,27 +36,17 @@ dit:
   mlp_dropout: 0.1
   mlp_ratio: 4.0
 
-  # Pair representation
-  pair_rep:
-    enabled: false
-    use_self_conditioning: ${denoiser.use_self_conditioning}
-    c_z: 256
-    hidden_size: ${denoiser.dit.hidden_size}
 
-    rel_pos:
-      c_z: ${denoiser.dit.pair_rep.c_z}
-      relpos_k: 32
-    distogram:
-      # TODO: might want different distogram bins for self-conditioning, like Proteina?
-      min_bin: 1.0
-      max_bin: 30.0
-      no_bins: 65
-
-  # Scaffold conditioning
-  scaffolding:
-    h_s: ${model.denoiser.scaffold_module.fampnn.n_channel}
-    use_h_s: ${denoiser.scaffold_module.enabled}
-    use_concat: false
+motif_embedder:
+  atom_s: 128
+  atom_z: 16
+  token_s: ${denoiser.dit.hidden_size}
+  atoms_per_window_queries: 32
+  atoms_per_window_keys: 128
+  atom_feature_dim: 389
+  atom_encoder_depth: 3
+  atom_encoder_heads: 4
+  no_atom_encoder: false
 
 
 autoguidance:

@@ -52,7 +52,8 @@ class BoltzADDataModule(L.LightningDataModule):
         datasets = {}
         for phase in ["train", "eval", "eval2"]:
             manifest = Manifest(records=records[phase])
-            datasets[phase] = BoltzDataset(self.pdb_path, manifest, 1.0, cfg.sampler, cfg.cropper, cfg.tokenizer, cfg.featurizer)
+            datasets[phase] = BoltzDataset(self.pdb_path, manifest, 1.0, cfg.sampler, cfg.cropper, cfg.tokenizer, cfg.featurizer,
+                                           cfg.motif_cropper)
 
         # Print dataset sizes
         for phase in ["train", "eval", "eval2"]:
@@ -60,14 +61,9 @@ class BoltzADDataModule(L.LightningDataModule):
 
         dataset_wrapper_fn = partial(ADDataset,
                                      samples_per_epoch=cfg.samples_per_epoch,
-                                     max_atoms=cfg.max_atoms,
                                      max_tokens=cfg.max_tokens,
-                                     pad_to_max_atoms=cfg.pad_to_max_atoms,
-                                     pad_to_max_tokens=cfg.pad_to_max_tokens,
-                                     atoms_per_window_queries=cfg.atoms_per_window_queries,
-                                     min_dist=cfg.min_dist,
-                                     max_dist=cfg.max_dist,
-                                     num_bins=cfg.num_bins,
+                                     max_atoms=cfg.max_atoms,
+                                     **cfg.motif_feats,
                                      motif_selector_cfg=cfg.motif_selector_cfg,
                                      se3_augment_cfg=cfg.se3_augment_cfg,
                                      )
@@ -134,35 +130,37 @@ class ADDataset(data.Dataset):
         self,
         dataset: "BoltzDataset",
         samples_per_epoch: int,
-        max_atoms: int,
         max_tokens: int,
-        pad_to_max_atoms: bool = False,
-        pad_to_max_tokens: bool = False,
-        atoms_per_window_queries: int = 32,
-        min_dist: float = 2.0,
-        max_dist: float = 22.0,
-        num_bins: int = 64,
-        phase: str = "train",
-        motif_selector_cfg: Optional[DictConfig] = None,
-        se3_augment_cfg: Optional[DictConfig] = None,
+        max_atoms: int,
+        phase: str,
+        motif_max_tokens: int | None,
+        motif_max_atoms: int | None,
+        motif_atoms_per_window_queries: int | None,
+        motif_min_dist: float | None,
+        motif_max_dist: float | None,
+        motif_num_bins: int | None,
+        motif_selector_cfg: DictConfig | None = None,
+        se3_augment_cfg: DictConfig | None = None,
     ) -> None:
         """Initialize the training dataset."""
         super().__init__()
         self.dataset = dataset
         self.probs = dataset.prob
         self.samples_per_epoch = samples_per_epoch
+
         self.max_tokens = max_tokens
         self.max_atoms = max_atoms
-        self.pad_to_max_tokens = pad_to_max_tokens
-        self.pad_to_max_atoms = pad_to_max_atoms
-        self.atoms_per_window_queries = atoms_per_window_queries
-        self.min_dist = min_dist
-        self.max_dist = max_dist
-        self.num_bins = num_bins
         self.phase = phase
-
         self.se3_augment_cfg = se3_augment_cfg
-        self.ms = get_motif_selector(motif_selector_cfg)  # for selecting motifs
+
+        # Motif featurization options
+        self.motif_max_tokens = motif_max_tokens
+        self.motif_max_atoms = motif_max_atoms
+        self.motif_atoms_per_window_queries = motif_atoms_per_window_queries
+        self.motif_min_dist = motif_min_dist
+        self.motif_max_dist = motif_max_dist
+        self.motif_num_bins = motif_num_bins
+        self.ms = get_motif_selector(motif_selector_cfg)  # for selecting motif tokens and atoms
 
         if self.phase == "train":
             records = dataset.manifest.records
@@ -244,37 +242,47 @@ class ADDataset(data.Dataset):
         if self.ms is not None:
             motif_token_mask = self.ms(tokenized)
 
-        # No motif selector or empty motif; create dummy tokenized data with first residue
         is_dummy_motif = False
         if self.ms is None or motif_token_mask.sum() == 0:
+            # If no motif selector or empty motif, create dummy tokenized data with the first residue
             motif_token_mask = torch.zeros(len(tokenized.tokens))
             motif_token_mask[0] = 1
             is_dummy_motif = True
 
-        # Featurize (possibly dummy) motif
         tokenized_motif = subset_tokenized(tokenized, motif_token_mask)
+
+        # Crop motif to the max number of motif tokens / atoms
+        try:
+            tokenized_motif = self.dataset.motif_cropper.crop(tokenized_motif,
+                                                              max_atoms=self.motif_max_atoms,
+                                                              max_tokens=self.motif_max_tokens,
+                                                              random=np.random)
+        except Exception as e:
+            print(f"Motif cropper failed on {record_id} with error {e}. Skipping.")
+            return self.__getitem__(idx)
+
+        # Featurize (possibly dummy) motif
         try:
             motif_feats = self.dataset.featurizer.process(tokenized_motif,
-                                                          atoms_per_window_queries=self.atoms_per_window_queries,
-                                                          min_dist=self.min_dist,
-                                                          max_dist=self.max_dist,
-                                                          num_bins=self.num_bins,
-                                                          max_tokens=None,
-                                                          max_atoms=None)
+                                                          atoms_per_window_queries=self.motif_atoms_per_window_queries,
+                                                          min_dist=self.motif_min_dist,
+                                                          max_dist=self.motif_max_dist,
+                                                          num_bins=self.motif_num_bins,
+                                                          max_tokens=self.motif_max_tokens,
+                                                          max_atoms=self.motif_max_atoms)
 
             motif_feats["motif_coords"] = motif_feats.pop("coords").squeeze(0)  # coords has a batch dimension of 1 for some reason
         except Exception as e:
             print(f"Featurizer failed to featurize motif tokens on {record_id} with error {e}. Skipping.")
             return self.__getitem__(idx)
 
-        # Create motif atom mask
+        # Create motif atom mask by selecting motif atoms
         motif_feats.update(get_atom_feat_masks(motif_feats))
-
-        # Select motif atoms
         if self.ms is not None:
             motif_feats["motif_atom_mask"] = self.ms.select_motif_atoms(motif_feats)
         else:
             motif_feats["motif_atom_mask"] = torch.zeros_like(motif_feats["atom_resolved_mask"])
+        motif_feats["motif_coords"] = motif_feats["motif_coords"] * motif_feats["motif_atom_mask"].unsqueeze(-1)  # zero out masked atoms
 
         if is_dummy_motif:
             motif_feats = {k: v.new_zeros((0, *v.shape[1:])) for k, v in motif_feats.items()}  # create dummy features of shape (0, ...)
@@ -405,7 +413,10 @@ def subset_tokenized(tokenized: Tokenized,
     token_bonds = token_bonds[np.isin(token_bonds["token_1"], indices)]
     token_bonds = token_bonds[np.isin(token_bonds["token_2"], indices)]
 
-    tokenized = replace(tokenized, tokens=token_data, bonds=token_bonds)
+    # Subset tokenwise atom features
+    tokenwise_atom_feats = tokenized.tokenwise_atom_feats[token_mask]
+
+    tokenized = replace(tokenized, tokens=token_data, bonds=token_bonds, tokenwise_atom_feats=tokenwise_atom_feats)
     return tokenized
 
 
@@ -419,6 +430,7 @@ class BoltzDataset:
     cropper: Cropper
     tokenizer: Tokenizer
     featurizer: SimpleBoltzFeaturizer
+    motif_cropper: Cropper
 
 
 def ad_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
