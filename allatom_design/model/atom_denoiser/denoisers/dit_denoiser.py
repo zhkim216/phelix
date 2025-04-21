@@ -11,9 +11,7 @@ from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
 from tqdm import tqdm
 
-import allatom_design.data.conditioning_labels as cl
 import allatom_design.model.atom_denoiser.denoisers.pos_embed.rotary_embedding_torch as rope
-from allatom_design.checkpoint_utils import repair_state_dict
 from allatom_design.data import const
 from allatom_design.interpolants.ad_interpolants.ad_interpolant import \
     ADInterpolant
@@ -21,9 +19,9 @@ from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
 from allatom_design.interpolants.ad_interpolants.sd3_rf_interpolant import \
     SD3_RF
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.dit_utils import (
-    DiTBlock, FinalLayer, LabelEmbedder, MultiHeadRMSNorm)
-from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.pair_rep_utils import (
-    PairRepBuilder, RelativePositionalEncoding)
+    DiTBlock, FinalLayer, MultiHeadRMSNorm)
+from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.motif_embedders import \
+    MotifEmbedder
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.timestep_embedders import \
     TimestepEmbedder
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
@@ -42,12 +40,13 @@ class DiTDenoiser(nn.Module):
         super().__init__()
 
         self.cfg = cfg
+        self.task = cfg.task
         self.use_self_conditioning = cfg.use_self_conditioning
 
         # Set up scaffolding module
-        self.use_scaffold_module = cfg.get("scaffold_module", {}).get("enabled", False)
-        if self.use_scaffold_module:
-            self.fampnn = FAMPNN(cfg.scaffold_module.fampnn)
+        self.motif_embedder = None
+        if self.task == "scaffold":
+            self.motif_embedder = MotifEmbedder(**cfg.motif_embedder)
 
         # Set up DiT
         self.interpolant = get_interpolant(cfg.interpolant, sigma_data)
@@ -61,18 +60,7 @@ class DiTDenoiser(nn.Module):
 
 
     def setup(self):
-        if self.use_scaffold_module and self.cfg.scaffold_module.pretrained_weights_path is not None:
-            # Load in pretrained fampnn weights
-            if not self.cfg.scaffold_module.get("ablate_pretrained_weights", False):
-                state_dict = torch.load(self.cfg.scaffold_module.pretrained_weights_path, map_location="cpu")["state_dict"]
-                state_dict = repair_state_dict(state_dict)
-                state_dict = {k.replace("model.denoiser.seq_design_module.", ""): v for k, v in state_dict.items() if k.startswith("model.denoiser.seq_design_module.")}
-                self.fampnn.load_state_dict(state_dict)
-
-            # set to eval mode and freeze weights
-            if self.cfg.scaffold_module.get("freeze", True):
-                self.fampnn.eval()
-                self.fampnn.requires_grad_(False)
+        pass
 
 
     def forward(self,
@@ -84,9 +72,9 @@ class DiTDenoiser(nn.Module):
                            Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
-        conditioning_inputs = {"h_s": None}
-        if self.use_scaffold_module:
-            conditioning_inputs["h_s"] = self.embed_motif(motif_inputs)
+        conditioning_inputs = {"motif_embed_1d": None}
+        if self.motif_embedder is not None:
+            conditioning_inputs["motif_embed_1d"] = self.motif_embedder(motif_inputs)
 
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
             diffusion_inputs=diffusion_inputs,
@@ -101,13 +89,6 @@ class DiTDenoiser(nn.Module):
 
 
     def backbone_diffusion(self,
-                        #    x_motif: TensorType["b n 37 3", float],
-                        #    motif_mask: TensorType["b n 37", float],
-                        #    aatype_motif: TensorType["b n", int],
-                        #    residue_index: TensorType["b n", int],
-                        #    seq_mask: TensorType["b n", float],
-                        #    h_s: TensorType["b n h"],
-                        #    pair_bias: TensorType["b h n n", float] | None,
                            diffusion_inputs: dict[str, TensorType["b ..."]],
                            conditioning_inputs: dict[str, TensorType["b ..."]],
                            is_sampling: bool,
@@ -271,78 +252,6 @@ class DiTDenoiser(nn.Module):
         return x1_bb, diffusion_aux
 
 
-    @torch.compiler.disable
-    def run_scaffold_module(self, packed_inputs: TensorType["b m ..."]) -> TensorType["b m h", float]:
-        """
-        Runs the scaffold module on packed motif inputs. Returns embedding of motif residues.
-        """
-        # Run motif embedding module on packed inputs
-        _, mpnn_feature_dict = self.fampnn(
-            denoised_coords=packed_inputs["x_motif"],
-            aatype_noised=packed_inputs["aatype_motif"],
-            seq_mask=packed_inputs["seq_mask"],
-            atom_mask_noised=packed_inputs["motif_mask"],
-            residue_index=packed_inputs["residue_index"],
-            chain_encoding=packed_inputs["chain_encoding"]
-        )
-        h_V = mpnn_feature_dict["h_V"]  # [b m h]
-        return h_V
-
-
-    def embed_motif(self,
-                    x_motif: TensorType["b n 37 3", float],
-                    motif_mask: TensorType["b n 37", float],
-                    aatype_motif: TensorType["b n", int],
-                    seq_mask: TensorType["b n", float],
-                    residue_index: TensorType["b n", int]) -> TensorType["b n h", float]:
-        """
-        Embeds motif residues and returns per-residue embeddings with embeddings for each motif residue, and 0 otherwise.
-
-        First, packs motifs into a compact format of shape [b m], where m is the max number of motif residues in the batch.
-        Then, runs the scaffold module on the packed motifs and scatters the result back to the original size.
-        """
-        B, N, A, _ = x_motif.shape
-
-        # Get size of packed motifs
-        motif_residue_mask = motif_mask.any(dim=-1)  # [b n]
-        M = motif_residue_mask.sum(dim=-1).max()  # we pad to the max motif length M in this batch
-        if M == 0:
-            # if no motif residues, return zero embedding
-            h_V = torch.zeros((B, N, self.fampnn.hidden_dim), device=x_motif.device)
-            return h_V
-
-        ### Pack motif residues into a compact format ###
-        # construct motif indices, which are indices of the motif residues for each batch element (zero-padded)
-        row_idx = torch.arange(B, device=x_motif.device)[:, None].expand(-1, N)
-        col_idx = (motif_residue_mask.cumsum(dim=-1) * motif_residue_mask) - 1  # get where motif residues are, and -1 to get zero-indexed col idxs
-        mask_idx = torch.arange(N, device=x_motif.device)[None].expand(B, -1)    # index into motif_residue_mask
-
-        motif_indices = torch.zeros((B, M), device=x_motif.device, dtype=torch.long)
-        motif_indices[row_idx[motif_residue_mask], col_idx[motif_residue_mask]] = mask_idx[motif_residue_mask]
-        motif_pad_mask = torch.zeros_like(motif_indices).float()  # denotes padding of motif_indices
-        motif_pad_mask[row_idx[motif_residue_mask], col_idx[motif_residue_mask]] = 1.0
-
-        # use motif indices to gather into packed inputs
-        packed_inputs = {"x_motif": x_motif, "motif_mask": motif_mask, "aatype_motif": aatype_motif, "seq_mask": seq_mask, "residue_index": residue_index}
-        for k, v in packed_inputs.items():
-            data_shape = v.shape[2:]
-            gather_idxs = (motif_indices + (torch.arange(B, device=x_motif.device)[:, None] * N)).view(-1)  # get flat indices of motif residues
-            gather_idxs = gather_idxs.view(-1, *((1,) * len(data_shape))).expand(-1, *data_shape)
-            packed_v = v.view(-1, *data_shape).gather(0, gather_idxs).view(B, M, *data_shape)
-            packed_v = (packed_v * motif_pad_mask.view(B, M, *((1,) * len(data_shape)))).type(v.dtype)
-            packed_inputs[k] = packed_v
-        packed_inputs["chain_encoding"] = torch.zeros_like(packed_inputs["residue_index"])  # TODO: add chain index to backbone diffusion
-
-        # Run scaffold module on packed inputs and scatter back to original size
-        h_V = self.run_scaffold_module(packed_inputs).float()
-        h_s = torch.zeros((B, N, h_V.shape[-1]), device=h_V.device)  # [b n h]
-        row_idx = torch.arange(B, device=h_V.device)[:, None].expand(-1, M)
-        mask = motif_pad_mask.bool()
-        h_s[row_idx[mask], motif_indices[mask]] = h_V[mask]
-
-        return h_s
-
-
 class DiT(nn.Module):
     def __init__(self, cfg: DictConfig, interpolant: ADInterpolant):
         """
@@ -356,8 +265,6 @@ class DiT(nn.Module):
         # Set up DiT model
         self.num_atoms_in = cfg.num_atoms_in
         self.use_self_conditioning = cfg.use_self_conditioning
-
-        self.scaffolding = cfg.scaffolding  # scaffold conditioning config
 
         # Input and output channels
         self.c = self.num_atoms_in * 3  # 3 xyz coordinates per atom
@@ -462,13 +369,8 @@ class DiT(nn.Module):
             x = x + self.pos_embed(x, residue_index=residue_index.float())
 
         # Conditioning
-        t = self.t_embedder(t)
-        c = t
-
+        c = self.t_embedder(t)
         c = c.unsqueeze(1).expand((-1, x.shape[1], -1))  # expand to sequence length
-        # if self.scaffolding.use_h_s:
-        #     h_s = self.h_s_embedder(h_s)
-        #     c = c + h_s
 
         # Blocks
         attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)

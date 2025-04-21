@@ -35,26 +35,8 @@ resume:
   use_current_cfg: false  # whether to override the config in the checkpoint with the current config
   overrides: {}  # add any specific overrides to apply to the config
 
-# # Data options
-# data:
-#     pdb_paths: [/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v1] # /media/scratch/datasets/ingraham_cath_dataset
-#     dataset_weights: [1.0]  # probability of selecting each dataset
-#     cluster_sample: true  # use cluster sampling for training; must be true for af3 datasets
-#     fixed_size: 256
-#     overfit: ${overfit}
-#     subset_length_range: [32, 256]
-#     se3_augment: true  # randomly rotate and translate data
-#     translation_scale: 1.0  # scale of the translation augmentation
-#     max_scrmsd: 2.0  # for training on only designable structures; subset to only pdbs with scRMSD <= max_scrmsd
-#     max_rel_rog: 1.4  # subset to only pdbs with relative radius of gyration <= max_rel_rog
-#     n_train_cluster_resample: 10  # Number of times to resample the training dataset when cluster sampling, since epochs can be very short with cluster sampling
-#     scaffold_manager_cfg: ${scaffold_manager}
-#     evaluate_scaffolding: false  # automatically set to true if model.task is "scaffold"
-
-
 data:
   pdb_path: /media/scratch/datasets/augmented_af3_monomer_v2_boltz
-
   tokenizer:
     _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
   featurizer:
@@ -77,18 +59,27 @@ data:
   cropper:
     _target_: allatom_design.data.crop.identity.IdentityCropper
 
-  max_tokens: 256
-  max_atoms: null  # currently unused
-  pad_to_max_tokens: true
-  pad_to_max_atoms: true
   samples_per_epoch: 128000
   batch_size: ${train.batch_size}
   num_workers: ${num_workers}
   random_seed: ${train.seed}
-  atoms_per_window_queries: 32
-  min_dist: 2.0
-  max_dist: 22.0
-  num_bins: 64
+
+  # Backbone diffusion featurization options
+  max_tokens: 256
+  max_atoms: null  # currently unused
+
+  # Motif featurization options
+  motif_feats:
+    motif_max_tokens: 32
+    motif_max_atoms: 288
+    motif_atoms_per_window_queries: 32
+    motif_min_dist: 2.0
+    motif_max_dist: 22.0
+    motif_num_bins: 64
+
+  motif_cropper:
+    _target_: allatom_design.data.crop.random_uid.RandomUIDCropper
+
 
   se3_augment_cfg:
     enabled: true
@@ -112,9 +103,6 @@ model:
   ema:
     use_phema: false  # use post-hoc EMA
     ema_decay: 0.99  # if not using phema, use this decay rate
-
-pretrained_module_paths:
-  fampnn: null  # used for scaffold module; null to disable
 
 eval:
   eval_timesteps_bb: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]  # backbone timesteps to evaluate at

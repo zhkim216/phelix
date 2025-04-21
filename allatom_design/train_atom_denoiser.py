@@ -190,14 +190,6 @@ def update_config(cfg: DictConfig) -> None:
     # if cfg.model.task == "scaffold":
     #     cfg.data.evaluate_scaffolding = True
 
-    # Handle pretrained module configs  # TODO: is there any better way to handle this?
-    if cfg.pretrained_module_paths.fampnn:
-        # ensure that the pretrained FAMPNN config is used for the scaffold module
-        print(f"Using pretrained FAMPNN config and weights from {cfg.pretrained_module_paths.fampnn}")
-        fampnn_cfg, _ = get_cfg_from_ckpt(cfg.pretrained_module_paths.fampnn)
-        OmegaConf.resolve(fampnn_cfg.denoiser.fampnn)
-        cfg.model.denoiser.scaffold_module.fampnn = fampnn_cfg.denoiser.fampnn
-
 
 if __name__ == "__main__":
     main()
