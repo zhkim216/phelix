@@ -13,6 +13,7 @@ training_batch_size_mult: 1  # batch size multiplier for diffusion module
 
 # DiT
 dit:
+  task: ${model.task}
   num_atoms_in: 4
   use_self_conditioning: ${denoiser.use_self_conditioning}
   n_aatype: 21

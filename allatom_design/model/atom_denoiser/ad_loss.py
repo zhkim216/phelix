@@ -78,13 +78,18 @@ class ADLoss(nn.Module):
 
         # Compute motif loss
         if self.task == "scaffold":
-            bb_scaffold_mask = batch["motif_mask"][..., rc.bb_idxs]
-            bb_scaffold_mask = repeat(bb_scaffold_mask, "b n a -> (m b) n a", m=M)
-            bb_mask = bb_mask * bb_scaffold_mask[..., None]
+            # For now, assume diffusion token residue index is same as motif token residue index
+            motif_residx = torch.where(bb_diff_outputs["motif_inputs_batched"]["token_pad_mask"].bool(),   # set pad residx to -9999
+                                       bb_diff_outputs["motif_inputs_batched"]["residue_index"], -9999)
+            diffusion_motif_mask = (bb_diff_outputs["diffusion_inputs_batched"]["residue_index"].unsqueeze(-1) == motif_residx.unsqueeze(1)).any(dim=-1)  # look for matching residx
 
-            aux["motif/mse_loss"] = masked_mse(bb_pred,
-                                                  bb_target,
-                                                  mask=bb_mask)
+            motif_bb_pred = bb_pred * diffusion_motif_mask[..., None, None]
+            motif_bb_target = bb_target * diffusion_motif_mask[..., None, None]
+            motif_bb_mask = bb_mask * diffusion_motif_mask[..., None, None]
+
+            aux["motif/mse_loss"] = masked_mse(motif_bb_pred,
+                                               motif_bb_target,
+                                               mask=motif_bb_mask)
 
             aux_monitor["motif/unweighted_mse_loss"] = aux["motif/mse_loss"].mean().detach().clone()
             aux["motif/mse_loss"] = aux["motif/mse_loss"] * loss_weight_bb  # apply time step loss weight

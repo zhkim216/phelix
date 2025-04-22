@@ -72,13 +72,12 @@ class DiTDenoiser(nn.Module):
                            Dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
-        conditioning_inputs = {"motif_embed_1d": None}
         if self.motif_embedder is not None:
-            conditioning_inputs["motif_embed_1d"] = self.motif_embedder(motif_inputs)
+            motif_inputs["motif_embed_1d"] = self.motif_embedder(motif_inputs)
 
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
             diffusion_inputs=diffusion_inputs,
-            conditioning_inputs=conditioning_inputs,
+            motif_inputs=motif_inputs,
             is_sampling=is_sampling,
             diffusion_params=diffusion_params
         )
@@ -90,7 +89,7 @@ class DiTDenoiser(nn.Module):
 
     def backbone_diffusion(self,
                            diffusion_inputs: dict[str, TensorType["b ..."]],
-                           conditioning_inputs: dict[str, TensorType["b ..."]],
+                           motif_inputs: dict[str, TensorType["b ..."]],
                            is_sampling: bool,
                            diffusion_params: dict[str, Any] | None,
                            ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
@@ -109,8 +108,8 @@ class DiTDenoiser(nn.Module):
             diffusion_inputs_batched = {k: v.reshape(M * B, *v.shape[2:]) if v is not None else None for k, v in diffusion_inputs_batched.items()}
 
             # repeat conditioning inputs
-            conditioning_inputs_batched = {k: v[None].expand(M, *v.shape) if v is not None else None for k, v in conditioning_inputs.items()}
-            conditioning_inputs_batched = {k: v.reshape(M * B, *v.shape[2:]) if v is not None else None for k, v in conditioning_inputs_batched.items()}
+            motif_inputs_batched = {k: v[None].expand(M, *v.shape) if v is not None else None for k, v in motif_inputs.items()}
+            motif_inputs_batched = {k: v.reshape(M * B, *v.shape[2:]) if v is not None else None for k, v in motif_inputs_batched.items()}
 
             # Noise the ground truth backbone
             interpolant_out = self.interpolant({"x": diffusion_inputs_batched["x_bb"], "aatype": None}, t=diffusion_inputs_batched["t_bb"])
@@ -127,14 +126,16 @@ class DiTDenoiser(nn.Module):
                     denoiser_pred_batched, aux_preds = denoiser_fn(xt_bb_batched,
                                                                    t_batched,
                                                                    seq_mask=diffusion_inputs_batched["seq_mask"],
-                                                                   residue_index=diffusion_inputs_batched["residue_index"])
+                                                                   residue_index=diffusion_inputs_batched["residue_index"],
+                                                                   motif_inputs=motif_inputs_batched)
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                 denoiser_fn = partial(denoiser_fn, x_self_cond=self.interpolant.get_x1_pred(denoiser_pred_batched, xt_bb_batched, t_batched))
 
             denoiser_pred_batched, aux_preds = denoiser_fn(xt_bb_batched,
                                                            t_batched,
                                                            seq_mask=diffusion_inputs_batched["seq_mask"],
-                                                           residue_index=diffusion_inputs_batched["residue_index"])
+                                                           residue_index=diffusion_inputs_batched["residue_index"],
+                                                           motif_inputs=motif_inputs_batched)
 
             # Train autoguidance model
             diffusion_aux["autoguidance_aux"] = None
@@ -147,21 +148,25 @@ class DiTDenoiser(nn.Module):
                         denoiser_pred_batched_guide, _ = denoiser_fn(xt_bb_batched,
                                                                      t_batched,
                                                                      seq_mask=diffusion_inputs_batched["seq_mask"],
-                                                                     residue_index=diffusion_inputs_batched["residue_index"])
+                                                                     residue_index=diffusion_inputs_batched["residue_index"],
+                                                                     motif_inputs=motif_inputs_batched)
                     torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                     denoiser_fn = partial(denoiser_fn, x_self_cond=self.interpolant.get_x1_pred(denoiser_pred_batched_guide, xt_bb_batched, t_batched))
 
                 denoiser_pred_batched_guide, _ = denoiser_fn(xt_bb_batched,
                                                              t_batched,
                                                              seq_mask=diffusion_inputs_batched["seq_mask"],
-                                                             residue_index=diffusion_inputs_batched["residue_index"])
+                                                             residue_index=diffusion_inputs_batched["residue_index"],
+                                                             motif_inputs=motif_inputs_batched)
 
                 # add to autoguidance outputs
                 diffusion_aux["autoguidance_aux"] = {
                     "bb_pred": denoiser_pred_batched_guide,
                     "bb_target": x_bb_target_batched,  # diffusion target; for edm this is just the ground truth coordinates
                     "loss_weight_t": loss_weight_t_batched,
-                    "atom_mask": diffusion_inputs_batched["atom_mask"]
+                    "atom_mask": diffusion_inputs_batched["atom_mask"],
+                    "motif_inputs_batched": motif_inputs_batched,
+                    "diffusion_inputs_batched": diffusion_inputs_batched
                 }
 
             # Outputs
@@ -172,6 +177,8 @@ class DiTDenoiser(nn.Module):
             diffusion_aux["bb_target"] = x_bb_target_batched  # diffusion target; for edm this is just the ground truth coordinates
             diffusion_aux["loss_weight_t"] = loss_weight_t_batched
             diffusion_aux["atom_mask"] = diffusion_inputs_batched["atom_mask"]
+            diffusion_aux["motif_inputs_batched"] = motif_inputs_batched
+            diffusion_aux["diffusion_inputs_batched"] = diffusion_inputs_batched
 
         else:
             ### SAMPLING ###
@@ -273,6 +280,9 @@ class DiT(nn.Module):
         self.out_channels = self.c
         self.n_aatype = cfg.n_aatype
 
+        # Use motif conditioning
+        self.use_motif_conditioning = cfg.get("task", "backbone") == "scaffold"
+
         # Model parameters
         self.num_heads = cfg.num_heads
         self.pos_encoding = cfg.pos_encoding
@@ -337,12 +347,12 @@ class DiT(nn.Module):
         nn.init.constant_(self.final_layer.linear.bias, 0)
 
 
-
     def forward(self,
                 x_noised: TensorType["b n 4 3", float],
                 t: TensorType["b", float],
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
+                motif_inputs: dict[str, TensorType["b ..."]],
                 x_self_cond: Optional[TensorType["b n 4 3", float]] = None,
                 ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
                            Dict[str, TensorType["b ..."]]]:
@@ -363,6 +373,13 @@ class DiT(nn.Module):
         # Begin DiT forward pass
         x = self.x_embedder(x)
 
+        if self.use_motif_conditioning:
+            # For now, concatenate motif as extra tokens
+            N = x.shape[1]
+            x = torch.cat([x, motif_inputs["motif_embed_1d"]], dim=1)
+            seq_mask = torch.cat([seq_mask, motif_inputs["token_pad_mask"]], dim=1)
+            residue_index = torch.cat([residue_index, motif_inputs["residue_index"]], dim=1)
+
         if self.pos_encoding == "absolute":
             x = x + self.pos_embed(x)
         elif self.pos_encoding == "absolute_residx":
@@ -380,6 +397,10 @@ class DiT(nn.Module):
         # Final layer
         x = self.final_layer(x, c, per_token_conditioning=True)
         x = x * seq_mask[..., None]  # zero out padding positions
+
+        if self.use_motif_conditioning:
+            # Remove motif conditioning tokens
+            x = x[:, :N, :]
 
         # Reshape back to coordinates
         x = rearrange(x, "b n (a x) -> b n a x", x=3).float()  # ensure we're not in bf16
