@@ -7,7 +7,6 @@ p:
   protein_contiguous: 0.25
   protein_discontiguous: 0.5
 
-
 restype_mask_p:
   all: 1.0  # mask out all restypes
   uniform: 0.0  # mask out uniformly

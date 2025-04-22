@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s5_a0_test
+#SBATCH --job-name=s5_a1
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,7 +24,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=s5_a0_test
+EXP_NAME=s5_a1
 GROUP=backbone
 
 # Dataset paths
@@ -36,13 +36,12 @@ cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
-    wandb.no_wandb=true \
+    wandb.no_wandb=false \
     out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
     data.pdb_path=${PDB_PATH} \
     data.filters.3.max_scrmsd=1.0 \
-    model.task=scaffold \
-    motif_selector=motif_selector \
+    task=scaffold \
     motif_selector.atom_p.all=0.0 \
     motif_selector.atom_p.protein_sidechain=0.0 \
     motif_selector.atom_p.protein_backbone=1.0 \
@@ -51,6 +50,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser.dit.hidden_size=768 \
     train.batch_size=16 \
     denoiser.training_batch_size_mult=8 \
-    data.samples_per_epoch=128000 \
+    data.samples_per_epoch=16000 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}
