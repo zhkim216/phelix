@@ -6,8 +6,10 @@ import boltz.model.layers.initialize as init
 import torch
 import torch.nn as nn
 from boltz.model.modules.encoders import get_indexing_matrix, single_to_keys
-from boltz.model.modules.transformers import AtomTransformer
 from boltz.model.modules.utils import LinearNoBias
+
+from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.boltz_transformers import \
+    AtomTransformer
 
 
 class MotifEmbedder(nn.Module):
@@ -175,7 +177,6 @@ class AtomAttentionEncoder(nn.Module):
             attn_window_keys=atoms_per_window_keys,
             depth=atom_encoder_depth,
             heads=atom_encoder_heads,
-            activation_checkpointing=False,
         )
 
         self.atom_to_token_trans = nn.Sequential(
@@ -183,7 +184,7 @@ class AtomAttentionEncoder(nn.Module):
             nn.ReLU(),
         )
 
-    @torch.compiler.disable
+
     def forward(
         self,
         feats,
@@ -262,7 +263,7 @@ class AtomAttentionEncoder(nn.Module):
 
         q = self.atom_encoder(
             q=q,
-            mask=atom_mask,
+            mask=atom_mask.float(),
             c=c,
             p=p,
             to_keys=to_keys,

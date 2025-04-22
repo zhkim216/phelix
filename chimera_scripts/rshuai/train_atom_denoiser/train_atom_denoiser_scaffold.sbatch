@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s5_a0
+#SBATCH --job-name=s5_a0_test
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,7 +24,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=s5_a0
+EXP_NAME=s5_a0_test
 GROUP=backbone
 
 # Dataset paths
@@ -36,7 +36,7 @@ cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
-    wandb.no_wandb=false \
+    wandb.no_wandb=true \
     out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
     data.pdb_path=${PDB_PATH} \
