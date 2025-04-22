@@ -286,6 +286,8 @@ class ADDataset(data.Dataset):
             motif_feats["motif_atom_mask"] = self.ms.select_motif_atoms(motif_feats)
         else:
             motif_feats["motif_atom_mask"] = torch.zeros_like(motif_feats["atom_resolved_mask"])
+
+        # Apply motif atom mask
         motif_feats["motif_coords"] = motif_feats["motif_coords"] * motif_feats["motif_atom_mask"].unsqueeze(-1)  # zero out masked atoms
 
         if is_dummy_motif:
