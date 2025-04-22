@@ -26,12 +26,8 @@ class RandomUIDCropper(Cropper):
         max_tokens: int,
         max_atoms: int
     ) -> Tokenized:
-        """Identity cropper.
-
-        Returns
-        -------
-        Tokenized
-            The original data.
+        """
+        TODO: this can technically leak a bit of information about number of atoms per residue?
         """
         # Get UIDs
         uid_pairs = np.stack([data.tokens["asym_id"], data.tokens["res_idx"]], axis=1)

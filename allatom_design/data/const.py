@@ -368,9 +368,10 @@ chunk_size_threshold = 384
 ####################################################################################################
 max_num_atoms = max(len(ref_atoms[res]) for res in ref_atoms)
 
+# Proteins
 # Create lookup tables for backbone and sidechain atom masks for known protein residues
-bb_atoms = ["N", "CA", "C", "O"]
-bb_idxs = [0, 1, 2, 3]  # same for all residues
+prot_bb_atoms = ["N", "CA", "C", "O"]
+prot_bb_atom14_idxs = [0, 1, 2, 3]  # same for all residues
 
 restype_atom_bb = torch.zeros(num_tokens, max_num_atoms) # 1 if atom is backbone atom, 0 otherwise, shape: (num_tokens, max_num_atoms)
 restype_atom_scn = torch.zeros(num_tokens, max_num_atoms) # 1 if atom is sidechain atom, 0 otherwise, shape: (num_tokens, max_num_atoms)
@@ -381,8 +382,13 @@ for res3, atom_list in ref_atoms.items():
         continue
     id = token_ids[res3]
     for i, atom in enumerate(atom_list):
-        if atom in bb_atoms:
+        if atom in prot_bb_atoms:
             restype_atom_bb[id, i] = 1
         else:
             restype_atom_scn[id, i] = 1
 
+# Nucleic acids
+rna_bb_atoms = ["P", "OP1", "OP2", "O5'", "C5'", "C4'", "O4'", "C3'", "O3'", "C2'", "O2'", "C1'"]
+dna_bb_atoms = ["P", "OP1", "OP2", "O5'", "C5'", "C4'", "O4'", "C3'", "O3'", "C2'", "C1'"]
+
+bb_atoms = {"PROTEIN": prot_bb_atoms, "DNA": dna_bb_atoms, "RNA": rna_bb_atoms}

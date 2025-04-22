@@ -18,6 +18,7 @@ class AtomDenoiser(nn.Module):
         self.cfg = cfg
 
         self.task = cfg.task
+        self.requires_motif = self.task in ["scaffold"]
 
         # Data scaling parameters
         self.register_buffer("bb_std", torch.tensor(1.0))
@@ -38,6 +39,7 @@ class AtomDenoiser(nn.Module):
         # Deepcopy batch to avoid modifying original batch
         batch = copy.deepcopy(batch)
         diffusion_inputs = batch["diffusion_inputs"]
+        motif_inputs = batch["motif_inputs"] if self.requires_motif else None
 
         # During training, keep track of certain additional features
         x = batch["diffusion_inputs"]["x"]
@@ -46,7 +48,7 @@ class AtomDenoiser(nn.Module):
         diffusion_inputs["t_bb"] = torch.full((B, ), t_bb, device=x.device) if t_bb is not None else None
 
         # Denoise coords
-        _, aux_preds = self.denoiser(batch["motif_inputs"],
+        _, aux_preds = self.denoiser(motif_inputs,
                                      diffusion_inputs=diffusion_inputs)
 
         # Additional outputs for computing loss

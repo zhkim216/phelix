@@ -100,7 +100,7 @@ class DiTDenoiser(nn.Module):
         if not is_sampling:
             ### TRAINING ###
             # Get ground truth backbone coordinates
-            diffusion_inputs["x_bb"] = diffusion_inputs["x"][..., const.bb_idxs, :]
+            diffusion_inputs["x_bb"] = diffusion_inputs["x"][..., const.prot_bb_atom14_idxs, :]
 
             # Repeat inputs for batch multiplier  # TODO: randomly augment these too
             M = self.cfg.training_batch_size_mult
