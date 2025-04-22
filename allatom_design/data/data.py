@@ -625,7 +625,13 @@ def atom_center_random_augmentation(X: TensorType["b n_atoms 3", float],
     if not apply_random_augmentation:
         # Return centered coordinates without random augmentation
         X = X * M[..., None]
-        return X.squeeze(0) if input_dim == 2 else X
+        transforms = (X_mean, torch.eye(3).to(X.device), torch.zeros_like(X_mean))
+        if input_dim == 2:
+            X = X.squeeze(0)
+            transforms = tuple(t.squeeze(0) for t in transforms)
+        if return_transforms:
+            return X, transforms
+        return X
 
     # Apply random rotation
     random_rot = uniform_rand_rotation(X.shape[0]).to(X.device)

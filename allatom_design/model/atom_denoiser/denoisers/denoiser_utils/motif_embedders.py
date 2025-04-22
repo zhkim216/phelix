@@ -183,6 +183,7 @@ class AtomAttentionEncoder(nn.Module):
             nn.ReLU(),
         )
 
+    @torch.compiler.disable
     def forward(
         self,
         feats,

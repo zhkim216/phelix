@@ -10,7 +10,6 @@ out_dir: "out_dir/train_atom_denoiser"  # Output path for trained models
 exp_name: null  # Wandb exp name
 
 # Run settings
-overfit: -1 # Number of examples to overfit to, -1 to disable
 cuda: True
 num_workers: 8  # Dataloader num workers
 
@@ -59,6 +58,8 @@ data:
   cropper:
     _target_: allatom_design.data.crop.identity.IdentityCropper
 
+  # Dataset options
+  overfit: -1 # Number of examples to overfit to, -1 to disable
   samples_per_epoch: 128000
   batch_size: ${train.batch_size}
   num_workers: ${num_workers}
@@ -79,7 +80,6 @@ data:
 
   motif_cropper:
     _target_: allatom_design.data.crop.random_uid.RandomUIDCropper
-
 
   se3_augment_cfg:
     enabled: true

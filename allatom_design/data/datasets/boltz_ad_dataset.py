@@ -48,6 +48,10 @@ class BoltzADDataModule(L.LightningDataModule):
             records[phase] = [record for record in records[phase] if all(f.filter(record) for f in cfg.filters)]
             print(f"Number of {phase} records after applying filters: {len(records[phase])}")
 
+        # Overfit
+        if cfg.overfit > 0:
+            records["train"] = records["train"][:cfg.overfit]
+
         # Create datasets
         datasets = {}
         for phase in ["train", "eval", "eval2"]:
@@ -193,7 +197,7 @@ class ADDataset(data.Dataset):
         # Featurize input tokens for diffusion (atom23 protein tokens)
         example["diffusion_inputs"] = self._featurize_diffusion_inputs(idx, record_id, tokenized)
 
-        # Featurize motif
+        # Featurize motif (length 0 if unconditional or empty motif)
         example["motif_inputs"] = self._featurize_motif(idx, record_id, tokenized)
 
         # Apply random augmentation
@@ -205,7 +209,7 @@ class ADDataset(data.Dataset):
 
     def _apply_se3_augmentation(self, example: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         N, A, _ = example["diffusion_inputs"]["x"].shape
-        if len(example["motif_inputs"]["motif_coords"]) > 0:
+        if example["motif_inputs"]["token_pad_mask"].sum() > 0:
             # Conditional: center on motif atoms
             x_motif, transforms = atom_center_random_augmentation(example["motif_inputs"]["motif_coords"],
                                                                   example["motif_inputs"]["motif_atom_mask"],
@@ -285,7 +289,7 @@ class ADDataset(data.Dataset):
         motif_feats["motif_coords"] = motif_feats["motif_coords"] * motif_feats["motif_atom_mask"].unsqueeze(-1)  # zero out masked atoms
 
         if is_dummy_motif:
-            motif_feats = {k: v.new_zeros((0, *v.shape[1:])) for k, v in motif_feats.items()}  # create dummy features of shape (0, ...)
+            motif_feats = {k: torch.zeros_like(v) for k, v in motif_feats.items()}  # create dummy features
 
         return motif_feats
 

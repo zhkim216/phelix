@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=ablate_pretrained
+#SBATCH --job-name=s5_a0
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,15 +24,12 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=s4_a7
+EXP_NAME=s5_a0
 GROUP=backbone
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2
+PDB_PATH=/scratch/hielab/rshuai/datasets/augmented_af3_monomer_v2_boltz
 CLUSTER_SAMPLE=true
-
-# Pretrained weights
-PRETRAINED_FAMPNN_PATH=/scratch/hielab/rshuai/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt
 
 # Run training script
 cd ${BASE_DIR}
@@ -42,23 +39,18 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb.no_wandb=false \
     out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
-    data.pdb_paths=[${PDB_PATH}] \
-    data.cluster_sample=${CLUSTER_SAMPLE} \
-    data.max_scrmsd=1.0 \
+    data.pdb_path=${PDB_PATH} \
+    data.filters.3.max_scrmsd=1.0 \
     model.task=scaffold \
-    trainer.strategy=ddp_find_unused_parameters_true \
-    scaffold_manager=scaffold_manager \
-    scaffold_manager.sidechain_dropout_p=0.5 \
+    motif_selector=motif_selector \
+    motif_selector.atom_p.all=0.0 \
+    motif_selector.atom_p.protein_sidechain=0.0 \
+    motif_selector.atom_p.protein_backbone=1.0 \
     denoiser=dit_denoiser \
-    denoiser.scaffold_module.enabled=true \
-    pretrained_module_paths.fampnn=${PRETRAINED_FAMPNN_PATH} \
-    denoiser.scaffold_module.ablate_pretrained_weights=true \
-    denoiser.scaffold_module.freeze=true \
-    denoiser.dit.scaffolding.use_concat=true \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
     train.batch_size=16 \
     denoiser.training_batch_size_mult=8 \
-    data.n_train_cluster_resample=2 \
+    data.samples_per_epoch=128000 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}
