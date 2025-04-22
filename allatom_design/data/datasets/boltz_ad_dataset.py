@@ -9,8 +9,6 @@ import lightning as L
 import numpy as np
 import torch
 import torch.nn.functional as F
-from allatom_design.data.feature.pad import pad_dim, pad_to_max
-from allatom_design.data.sample.sampler import Sample, Sampler
 from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader
@@ -20,10 +18,12 @@ from tqdm import tqdm
 from allatom_design.data import const
 from allatom_design.data.crop.cropper import Cropper
 from allatom_design.data.data import (atom_apply_random_augmentation,
-                                      atom_center_random_augmentation,
-                                      get_atom_feat_masks)
+                                      atom_center_random_augmentation)
 from allatom_design.data.feature.featurizer import SimpleBoltzFeaturizer
-from allatom_design.data.motif_selector import get_motif_selector
+from allatom_design.data.feature.motif_featurizer import MotifFeaturizer
+from allatom_design.data.feature.pad import pad_dim, pad_to_max
+from allatom_design.data.motif_selector import MotifSelector
+from allatom_design.data.sample.sampler import Sample, Sampler
 from allatom_design.data.tokenize.tokenizer import Tokenizer
 from allatom_design.data.types import (Connection, Manifest, Record, Structure,
                                        Tokenized)
@@ -34,6 +34,7 @@ class BoltzADDataModule(L.LightningDataModule):
         super().__init__()
         self.cfg = cfg
         self.pdb_path = cfg.pdb_path
+        self.task = cfg.task
 
         # Load in manifest and records for each phase
         manifest = self._load_manifest_from_file()
@@ -56,8 +57,8 @@ class BoltzADDataModule(L.LightningDataModule):
         datasets = {}
         for phase in ["train", "eval", "eval2"]:
             manifest = Manifest(records=records[phase])
-            datasets[phase] = BoltzDataset(self.pdb_path, manifest, 1.0, cfg.sampler, cfg.cropper, cfg.tokenizer, cfg.featurizer,
-                                           cfg.motif_cropper)
+            datasets[phase] = BoltzDataset(cfg.task, self.pdb_path, manifest, 1.0, cfg.sampler, cfg.cropper, cfg.tokenizer, cfg.featurizer,
+                                           cfg.motif_cropper, cfg.motif_featurizer, cfg.motif_selector)
 
         # Print dataset sizes
         for phase in ["train", "eval", "eval2"]:
@@ -68,7 +69,6 @@ class BoltzADDataModule(L.LightningDataModule):
                                      max_tokens=cfg.max_tokens,
                                      max_atoms=cfg.max_atoms,
                                      **cfg.motif_feats,
-                                     motif_selector_cfg=cfg.motif_selector_cfg,
                                      se3_augment_cfg=cfg.se3_augment_cfg,
                                      )
         self._train_set = dataset_wrapper_fn(dataset=datasets["train"], phase="train")
@@ -140,10 +140,7 @@ class ADDataset(data.Dataset):
         motif_max_tokens: int | None,
         motif_max_atoms: int | None,
         motif_atoms_per_window_queries: int | None,
-        motif_min_dist: float | None,
-        motif_max_dist: float | None,
         motif_num_bins: int | None,
-        motif_selector_cfg: DictConfig | None = None,
         se3_augment_cfg: DictConfig | None = None,
     ) -> None:
         """Initialize the training dataset."""
@@ -158,21 +155,16 @@ class ADDataset(data.Dataset):
         self.se3_augment_cfg = se3_augment_cfg
 
         # Motif featurization options
+        self.requires_motif = self.dataset.task in ["scaffold"]
         self.motif_max_tokens = motif_max_tokens
         self.motif_max_atoms = motif_max_atoms
         self.motif_atoms_per_window_queries = motif_atoms_per_window_queries
-        self.motif_min_dist = motif_min_dist
-        self.motif_max_dist = motif_max_dist
         self.motif_num_bins = motif_num_bins
-        self.ms = get_motif_selector(motif_selector_cfg)  # for selecting motif tokens and atoms
 
         if self.phase == "train":
             records = dataset.manifest.records
             iterator = dataset.sampler.sample(records, np.random)
             self.samples = iterator
-        else:
-            if self.ms is not None:
-                self.ms.eval()
 
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
@@ -198,7 +190,8 @@ class ADDataset(data.Dataset):
         example["diffusion_inputs"] = self._featurize_diffusion_inputs(idx, record_id, tokenized)
 
         # Featurize motif (length 0 if unconditional or empty motif)
-        example["motif_inputs"] = self._featurize_motif(idx, record_id, tokenized)
+        if self.requires_motif:
+            example["motif_inputs"] = self._featurize_motif(idx, record_id, tokenized)
 
         # Apply random augmentation
         example = self._apply_se3_augmentation(example)
@@ -209,7 +202,7 @@ class ADDataset(data.Dataset):
 
     def _apply_se3_augmentation(self, example: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         N, A, _ = example["diffusion_inputs"]["x"].shape
-        if example["motif_inputs"]["token_pad_mask"].sum() > 0:
+        if self.requires_motif and example["motif_inputs"]["token_pad_mask"].sum() > 0:
             # Conditional: center on motif atoms
             x_motif, transforms = atom_center_random_augmentation(example["motif_inputs"]["motif_coords"],
                                                                   example["motif_inputs"]["motif_atom_mask"],
@@ -243,12 +236,12 @@ class ADDataset(data.Dataset):
         Featurize motif.
         """
         # Select motif tokens and subset tokenized data
-        if self.ms is not None:
-            motif_token_mask = self.ms(tokenized)
+        if self.requires_motif:
+            motif_token_mask = self.dataset.motif_selector.select_motif_tokens(tokenized)
 
         is_dummy_motif = False
-        if self.ms is None or motif_token_mask.sum() == 0:
-            # If no motif selector or empty motif, create dummy tokenized data with the first residue
+        if motif_token_mask.sum() == 0:
+            # If empty motif, create dummy tokenized data with the first residue
             motif_token_mask = torch.zeros(len(tokenized.tokens))
             motif_token_mask[0] = 1
             is_dummy_motif = True
@@ -267,28 +260,16 @@ class ADDataset(data.Dataset):
 
         # Featurize (possibly dummy) motif
         try:
-            motif_feats = self.dataset.featurizer.process(tokenized_motif,
-                                                          atoms_per_window_queries=self.motif_atoms_per_window_queries,
-                                                          min_dist=self.motif_min_dist,
-                                                          max_dist=self.motif_max_dist,
-                                                          num_bins=self.motif_num_bins,
-                                                          max_tokens=self.motif_max_tokens,
-                                                          max_atoms=self.motif_max_atoms)
-
-            motif_feats["motif_coords"] = motif_feats.pop("coords").squeeze(0)  # coords has a batch dimension of 1 for some reason
+            motif_feats = self.dataset.motif_featurizer.process(tokenized_motif,
+                                                                atoms_per_window_queries=self.motif_atoms_per_window_queries,
+                                                                num_bins=self.motif_num_bins,
+                                                                max_tokens=self.motif_max_tokens,
+                                                                max_atoms=self.motif_max_atoms,
+                                                                motif_selector=self.dataset.motif_selector,
+                                                                )
         except Exception as e:
             print(f"Featurizer failed to featurize motif tokens on {record_id} with error {e}. Skipping.")
             return self.__getitem__(idx)
-
-        # Create motif atom mask by selecting motif atoms
-        motif_feats.update(get_atom_feat_masks(motif_feats))
-        if self.ms is not None:
-            motif_feats["motif_atom_mask"] = self.ms.select_motif_atoms(motif_feats)
-        else:
-            motif_feats["motif_atom_mask"] = torch.zeros_like(motif_feats["atom_resolved_mask"])
-
-        # Apply motif atom mask
-        motif_feats["motif_coords"] = motif_feats["motif_coords"] * motif_feats["motif_atom_mask"].unsqueeze(-1)  # zero out masked atoms
 
         if is_dummy_motif:
             motif_feats = {k: torch.zeros_like(v) for k, v in motif_feats.items()}  # create dummy features
@@ -429,6 +410,7 @@ def subset_tokenized(tokenized: Tokenized,
 @dataclass
 class BoltzDataset:
     """Data holder."""
+    task: str
     pdb_path: str
     manifest: Manifest
     prob: float
@@ -437,7 +419,8 @@ class BoltzDataset:
     tokenizer: Tokenizer
     featurizer: SimpleBoltzFeaturizer
     motif_cropper: Cropper
-
+    motif_featurizer: MotifFeaturizer
+    motif_selector: MotifSelector
 
 def ad_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     """Collate atom denoiser features into a batch.

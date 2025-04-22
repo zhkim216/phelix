@@ -35,6 +35,7 @@ resume:
   overrides: {}  # add any specific overrides to apply to the config
 
 data:
+  task: ${task}
   pdb_path: /media/scratch/datasets/augmented_af3_monomer_v2_boltz
   tokenizer:
     _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
@@ -64,6 +65,9 @@ data:
   batch_size: ${train.batch_size}
   num_workers: ${num_workers}
   random_seed: ${train.seed}
+  se3_augment_cfg:
+    enabled: true
+    translation_scale: 1.0
 
   # Backbone diffusion featurization options
   max_tokens: 256
@@ -74,27 +78,27 @@ data:
     motif_max_tokens: 32
     motif_max_atoms: 288
     motif_atoms_per_window_queries: 32
-    motif_min_dist: 2.0
-    motif_max_dist: 22.0
     motif_num_bins: 64
 
   motif_cropper:
     _target_: allatom_design.data.crop.random_uid.RandomUIDCropper
 
-  se3_augment_cfg:
-    enabled: true
-    translation_scale: 1.0
+  motif_featurizer:
+    _target_: allatom_design.data.feature.motif_featurizer.MotifFeaturizer
 
-  motif_selector_cfg: ${motif_selector}
+  motif_selector:
+    _target_: allatom_design.data.motif_selector.MotifSelector
+    cfg: ${motif_selector}
 
 # Model options
 defaults:
   - _self_
   - denoiser: dit_denoiser
-  - motif_selector: unconditional
+  - motif_selector: motif_selector
 
+task: "backbone"  # "backbone", "scaffold"
 model:
-  task: "backbone"  # "backbone", "scaffold"
+  task: ${task}
   sigma_data: 10  # backbone sigma data
   eps: 1.0e-8
   inf: 1.0e9

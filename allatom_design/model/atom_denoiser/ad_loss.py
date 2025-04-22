@@ -54,7 +54,7 @@ class ADLoss(nn.Module):
 
         bb_pred = bb_diff_outputs["bb_pred"]
         bb_target = bb_diff_outputs["bb_target"]
-        bb_mask = bb_diff_outputs["atom_mask"][..., const.bb_idxs, None].expand_as(bb_pred)
+        bb_mask = bb_diff_outputs["atom_mask"][..., const.prot_bb_atom14_idxs, None].expand_as(bb_pred)
 
         aux["bb/mse_loss"] = masked_mse(bb_pred,
                                         bb_target,
@@ -69,7 +69,7 @@ class ADLoss(nn.Module):
 
             bb_pred_ag = guidance_outputs["bb_pred"]
             bb_target_ag = guidance_outputs["bb_target"]
-            bb_mask_ag = guidance_outputs["atom_mask"][..., const.bb_idxs, None].expand_as(bb_pred_ag)
+            bb_mask_ag = guidance_outputs["atom_mask"][..., const.prot_bb_atom14_idxs, None].expand_as(bb_pred_ag)
 
             aux["autoguidance/bb/mse_loss"] = masked_mse(bb_pred_ag,
                                                          bb_target_ag,
