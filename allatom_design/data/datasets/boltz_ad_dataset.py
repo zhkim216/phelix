@@ -236,8 +236,7 @@ class ADDataset(data.Dataset):
         Featurize motif.
         """
         # Select motif tokens and subset tokenized data
-        if self.requires_motif:
-            motif_token_mask = self.dataset.motif_selector.select_motif_tokens(tokenized)
+        motif_token_mask = self.dataset.motif_selector.select_motif_tokens(tokenized)
 
         is_dummy_motif = False
         if motif_token_mask.sum() == 0:
