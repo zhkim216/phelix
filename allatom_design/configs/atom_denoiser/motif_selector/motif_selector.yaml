@@ -18,7 +18,6 @@ residx_mask_p:
   none: 0.25
   uniform: 0.5  # mask out with probability from U[0, 1]
 
-
 atom_p:
   # Atom-level motif selection
   all: 0.5  # select all atoms

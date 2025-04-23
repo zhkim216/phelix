@@ -19,7 +19,7 @@ from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
 from allatom_design.interpolants.ad_interpolants.sd3_rf_interpolant import \
     SD3_RF
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.dit_utils import (
-    DiTBlock, FinalLayer, MultiHeadRMSNorm)
+    DiTBlock, FinalLayer, MultiHeadRMSNorm, MMDiTBlock)
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.motif_embedders import \
     MotifEmbedder
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.timestep_embedders import \
@@ -300,13 +300,18 @@ class DiT(nn.Module):
             self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
 
         # Blocks
+        if self.use_motif_conditioning:
+            # Multi-modal DiT block for separate weights for backbone and motif
+            block = MMDiTBlock
+        else:
+            block = DiTBlock
+
         self.blocks = nn.ModuleList([
-            DiTBlock(cfg.hidden_size, cfg.num_heads,
-                     mlp_dropout=cfg.mlp_dropout, mlp_ratio=cfg.mlp_ratio,
-                     inf=cfg.inf,
-                     rotary_emb=self.rotary_emb,
-                     qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer,
-                     ) for _ in range(cfg.depth)
+            block(cfg.hidden_size, cfg.num_heads,
+                  mlp_dropout=cfg.mlp_dropout, mlp_ratio=cfg.mlp_ratio,
+                  inf=cfg.inf,
+                  rotary_emb=self.rotary_emb,
+                  qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer) for _ in range(cfg.depth)
         ])
 
         self.final_layer = FinalLayer(cfg.hidden_size, self.out_channels)
@@ -328,8 +333,13 @@ class DiT(nn.Module):
 
         # Zero-out adaLN modulation layers in DiT blocks:
         for block in self.blocks:
-            nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-            nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
+            if isinstance(block, MMDiTBlock):
+                for i in range(block.n_modalities):
+                    nn.init.constant_(block.adaLN_modulations[i][-1].weight, 0)
+                    nn.init.constant_(block.adaLN_modulations[i][-1].bias, 0)
+            else:
+                nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
+                nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
 
         # Zero-out output layers:
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
@@ -364,10 +374,14 @@ class DiT(nn.Module):
         # Begin DiT forward pass
         x = self.x_embedder(x)
 
+        # Motif conditioning
         residx_mask = None
+        token_modality_idxs = None
         if self.use_motif_conditioning:
             # For now, concatenate motif as extra tokens
             N = x.shape[1]
+            token_modality_idxs = torch.tensor([0, seq_mask.shape[1]], device=x.device)  # starting index for backbone and motif tokens
+
             x = torch.cat([x, motif_inputs["motif_embed_1d"]], dim=1)
             seq_mask = torch.cat([seq_mask, motif_inputs["token_pad_mask"]], dim=1)
             residx_mask = torch.cat([torch.ones_like(residue_index), motif_inputs["residx_mask"]], dim=1)  # for preventing RoPE from being applied to motif tokens
@@ -387,15 +401,17 @@ class DiT(nn.Module):
         attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
         for block in self.blocks:
             x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True,
-                      rope_mask=residx_mask)
+                      rope_mask=residx_mask, token_modality_idxs=token_modality_idxs)
+
+        # Remove motif conditioning tokens
+        if self.use_motif_conditioning:
+            x = x[:, :N, :]
+            c = c[:, :N, :]
+            seq_mask = seq_mask[:, :N]
 
         # Final layer
         x = self.final_layer(x, c, per_token_conditioning=True)
         x = x * seq_mask[..., None]  # zero out padding positions
-
-        if self.use_motif_conditioning:
-            # Remove motif conditioning tokens
-            x = x[:, :N, :]
 
         # Reshape back to coordinates
         x = rearrange(x, "b n (a x) -> b n a x", x=3).float()  # ensure we're not in bf16

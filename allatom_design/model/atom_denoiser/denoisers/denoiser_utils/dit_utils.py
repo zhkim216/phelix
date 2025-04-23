@@ -38,10 +38,11 @@ class DiTBlock(nn.Module):
                     TensorType["b n h", float]  # per-token conditioning
                     ],
                 residx: TensorType["b n", float],
-                attn_mask: TensorType["b n n", float],
-                attn_bias: Optional[TensorType["b n n", float]],
+                attn_mask: TensorType["b h n n", float],
+                attn_bias: Optional[TensorType["b h n n", float]],
                 per_token_conditioning: bool = False,  # whether c is per-token or per-sequence
-                rope_mask: TensorType["b n", float] | None = None
+                rope_mask: TensorType["b n", float] | None = None,
+                **kwargs
                 ):
         if not per_token_conditioning:
             assert c.dim() == 2, "Per-sequence conditioning requires shape [B, H] for c"
@@ -52,6 +53,73 @@ class DiTBlock(nn.Module):
         x = x + gate_msa * self.attn(modulate(self.norm1(x), shift_msa, scale_msa), residx=residx, attn_mask=attn_mask,
                                      attn_bias=attn_bias, rope_mask=rope_mask)
         x = x + gate_mlp * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+        return x
+
+
+class MMDiTBlock(nn.Module):
+    """
+    A multi-modal DiT block with two separate sets of weights.
+    Based on Stable Diffusion 3 MMDiT architecture.
+    """
+    def __init__(self, hidden_size, num_heads, mlp_dropout: float, mlp_ratio=4.0, **block_kwargs):
+        super().__init__()
+
+        self.n_modalities = 2
+        self.norm1s = nn.ModuleList([nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6) for _ in range(self.n_modalities)])
+        self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
+        self.norm2s = nn.ModuleList([nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6) for _ in range(self.n_modalities)])
+
+        mlp_hidden_dim = int(hidden_size * mlp_ratio)
+        approx_gelu = lambda: nn.GELU(approximate="tanh")
+        self.mlps = nn.ModuleList([Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=mlp_dropout) for _ in range(self.n_modalities)])
+        self.adaLN_modulations = nn.ModuleList([nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, 6 * hidden_size, bias=True)
+        ) for _ in range(self.n_modalities)])
+
+
+    def forward(self,
+                x,
+                c: Union[
+                    TensorType["b h", float],  # per-sequence conditioning
+                    TensorType["b n h", float]  # per-token conditioning
+                    ],
+                residx: TensorType["b n", float],
+                attn_mask: TensorType["b h n n", float],
+                attn_bias: Optional[TensorType["b h n n", float]],
+                token_modality_idxs: TensorType["b n_modalities", int],  # starting index for each modality
+                rope_mask: TensorType["b n", float] | None,
+                per_token_conditioning: bool = False,  # whether c is per-token or per-sequence
+                ):
+        if not per_token_conditioning:
+            assert c.dim() == 2, "Per-sequence conditioning requires shape [B, H] for c"
+            c = c.unsqueeze(1).expand((-1, x.shape[1], -1))
+        assert c.dim() == 3
+        token_modality_idxs = torch.cat([token_modality_idxs, torch.tensor([x.shape[1]], device=x.device)])  # add end index
+
+        # Apply modulation and pre-norm per modality
+        modulation_cache = {}
+        for i in range(self.n_modalities):
+            start, end = token_modality_idxs[i], token_modality_idxs[i + 1]
+            x_i = x[:, start:end, :]
+            c_i = c[:, start:end, :]
+            shift_msa_i, scale_msa_i, gate_msa_i, shift_mlp_i, scale_mlp_i, gate_mlp_i = self.adaLN_modulations[i](c_i).chunk(6, dim=-1)
+            x_modulated = modulate(self.norm1s[i](x_i), shift_msa_i, scale_msa_i)
+            modulation_cache[i] = {"x_modulated": x_modulated, "gate_msa": gate_msa_i, "shift_mlp": shift_mlp_i, "scale_mlp": scale_mlp_i, "gate_mlp": gate_mlp_i}
+
+        # Apply joint attention
+        x_attn_in = torch.cat([modulation_cache[i]["x_modulated"] for i in range(self.n_modalities)], dim=1)
+        gate_msa = torch.cat([modulation_cache[i]["gate_msa"] for i in range(self.n_modalities)], dim=1)
+        x = x + gate_msa * self.attn(x_attn_in, residx=residx, attn_mask=attn_mask, attn_bias=attn_bias, rope_mask=rope_mask)
+
+        # Apply MLP per modality
+        x_out = []
+        for i in range(self.n_modalities):
+            start, end = token_modality_idxs[i], token_modality_idxs[i + 1]
+            x_i = x[:, start:end, :]
+            x_i = x_i + modulation_cache[i]["gate_mlp"] * self.mlps[i](modulate(self.norm2s[i](x_i), modulation_cache[i]["shift_mlp"], modulation_cache[i]["scale_mlp"]))
+            x_out.append(x_i)
+        x = torch.cat(x_out, dim=1)
         return x
 
 
