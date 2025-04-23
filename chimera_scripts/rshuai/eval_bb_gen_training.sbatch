@@ -31,7 +31,7 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Denoiser path
-MODEL_NAME=u4_a1
+MODEL_NAME=u5_a1
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
