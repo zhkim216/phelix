@@ -40,7 +40,7 @@ class DiTDenoiser(nn.Module):
         super().__init__()
 
         self.cfg = cfg
-        self.task = cfg.task
+        self.task = cfg.get("task", "backbone")
         self.use_self_conditioning = cfg.use_self_conditioning
 
         # Set up scaffolding module
@@ -184,8 +184,8 @@ class DiTDenoiser(nn.Module):
             ### SAMPLING ###
 
             # Sample backbone from prior
-            A = len(rc.bb_idxs)
-            x0_bb = self.interpolant.sample_prior((B, N, A, 3), seq_mask.device)
+            A = len(const.prot_bb_atoms)
+            x0_bb = self.interpolant.sample_prior((B, N, A, 3), diffusion_inputs["seq_mask"].device)
 
             # Store trajectory
             xt_bb_traj, x1_bb_traj = [], []
@@ -202,23 +202,15 @@ class DiTDenoiser(nn.Module):
             if use_autoguidance:
                 assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
                 autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model,
-                                                              x_motif=x_motif,
-                                                              motif_mask=motif_mask,
-                                                              aatype_motif=aatype_motif,
-                                                              h_s=h_s,
-                                                              pair_bias=pair_bias,
-                                                              residue_index=residue_index, seq_mask=seq_mask,
-                                                              cond_labels_in=cond_labels_in)
+                                                              residue_index=diffusion_inputs["residue_index"],
+                                                              seq_mask=diffusion_inputs["seq_mask"],
+                                                              motif_inputs=motif_inputs)
 
             # Run integration steps
             denoiser_fn = partial(self.dit,
-                                  x_motif=x_motif,
-                                  motif_mask=motif_mask,
-                                  aatype_motif=aatype_motif,
-                                  h_s=h_s,
-                                  pair_bias=pair_bias,
-                                  residue_index=residue_index, seq_mask=seq_mask,
-                                  cond_labels_in=cond_labels_in)
+                                  residue_index=diffusion_inputs["residue_index"],
+                                  seq_mask=diffusion_inputs["seq_mask"],
+                                  motif_inputs=motif_inputs)
 
             xt_bb = x0_bb
             for i in tqdm(range(S), leave=False, desc="Sampling..."):
@@ -242,8 +234,7 @@ class DiTDenoiser(nn.Module):
                                                                t=t, t_next=t_next,
                                                                noise_schedule=noise_schedule,
                                                                cfg_cfg=None,
-                                                               autoguidance_cfg=autoguidance_cfg,
-                                                               diffusion_inputs=diffusion_inputs)
+                                                               autoguidance_cfg=autoguidance_cfg,)
 
                 # Save current state
                 xt_bb_traj.append(xt_bb.cpu())

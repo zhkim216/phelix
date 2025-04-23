@@ -37,12 +37,8 @@ def get_bb_gen_model(cfg: DictConfig, device: str) -> dict[str, Any]:
     sampling_cfg = OmegaConf.load(cfg.sampling_cfg)
     sampling_cfg = OmegaConf.merge(sampling_cfg, cfg.overrides)
     bb_gen_model = {"model": lit_ad_model.model,
-                    "scaffold_manager": get_scaffold_manager(lit_ad_model.cfg.scaffold_manager),
                     "sampling_cfg": sampling_cfg,
                     "device": device}
-
-    if bb_gen_model["scaffold_manager"] is not None:
-        bb_gen_model["scaffold_manager"] = bb_gen_model["scaffold_manager"].eval()
 
     return bb_gen_model
 
@@ -83,14 +79,11 @@ def run_bb_uncond_sampling(model: AtomDenoiser,
         diffusion_params["churn_cfg"] = dict(cfg.churn_cfg)  # churn config for stochastic sampling
         diffusion_params["autoguidance_cfg"] = dict(cfg.autoguidance_cfg)  # autoguidance config
 
-        # Create conditioning labels
-        cond_labels_in = create_cond_labels_input(B, cfg.cond_labels, device)
-
         # Sample backbones
         x_bb_denoised, aux = model.sample(lengths=lengths_batch,
                                           residue_index=residue_index,
                                           diffusion_params=diffusion_params,
-                                          cond_labels=cond_labels_in)
+                                          motif_inputs=None)
         samples = {"x_bb": x_bb_denoised,
                    "seq_mask": aux["seq_mask"],
                    "residue_index": residue_index}

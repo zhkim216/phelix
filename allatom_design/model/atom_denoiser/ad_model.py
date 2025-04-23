@@ -67,8 +67,7 @@ class AtomDenoiser(nn.Module):
                lengths: TensorType["b", int],
                residue_index: TensorType["b n", int],
                diffusion_params: Dict[str, Any],
-               scaffold_inputs: Optional[Dict[str, torch.Tensor]] = None,
-               cond_labels: Dict[str, TensorType["b", int]] = {},
+               motif_inputs: dict[str, TensorType["b n ..."]] | None = None,
                ) -> Tuple[TensorType["b n 4 3", float], Dict[str, torch.Tensor]]:
         """
         Sample from the model.
@@ -84,24 +83,17 @@ class AtomDenoiser(nn.Module):
         seq_mask = (ranges < lengths[:, None]).float()
         aux["seq_mask"] = seq_mask.cpu()
 
-        # Initialize motif inputs
-        if scaffold_inputs is None:
-            x_motif = torch.zeros((B, N, rc.atom_type_num, 3), device=residue_index.device)
-            motif_mask = torch.zeros((B, N, rc.atom_type_num), device=residue_index.device)
-            aatype_motif = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"])
-        else:
-            x_motif = scaffold_inputs["x_motif"]
-            motif_mask = scaffold_inputs["motif_mask"]
-            aatype_motif = scaffold_inputs["aatype_motif"]
+        # Construct diffusion inputs
+        diffusion_inputs = {
+            "seq_mask": seq_mask,
+            "residue_index": residue_index,
+        }
 
-        x1_bb, aux_preds = self.denoiser(x_motif=x_motif,
-                                         motif_mask=motif_mask,
-                                         aatype_motif=aatype_motif,
-                                         residue_index=residue_index,
-                                         seq_mask=seq_mask,
-                                         cond_labels_in=cond_labels,
+        # Initialize motif inputs
+        x1_bb, aux_preds = self.denoiser(motif_inputs=motif_inputs,
                                          diffusion_inputs=diffusion_inputs,
-                                         is_sampling=True)
+                                         is_sampling=True,
+                                         diffusion_params=diffusion_params)
 
         aux.update(aux_preds["bb_diffusion_aux"])
         return x1_bb, aux
