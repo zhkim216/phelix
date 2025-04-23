@@ -50,6 +50,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser=dit_denoiser \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
+    denoiser.dit.use_mmdit=true \
     train.batch_size=16 \
     denoiser.training_batch_size_mult=8 \
     data.samples_per_epoch=16000 \

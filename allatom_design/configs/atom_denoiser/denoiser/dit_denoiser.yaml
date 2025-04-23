@@ -27,6 +27,9 @@ dit:
     # null to disable conditioning, 0 to disable label dropout
     crop_aug: 0.0
 
+  # Multi-modal DiT
+  use_mmdit: false
+
   # QK normalization
   qk_rmsnorm: true
 
