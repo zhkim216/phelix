@@ -56,73 +56,6 @@ class DiTBlock(nn.Module):
         return x
 
 
-class MMDiTBlock(nn.Module):
-    """
-    A multi-modal DiT block with two separate sets of weights.
-    Based on Stable Diffusion 3 MMDiT architecture.
-    """
-    def __init__(self, hidden_size, num_heads, mlp_dropout: float, mlp_ratio=4.0, **block_kwargs):
-        super().__init__()
-
-        self.n_modalities = 2
-        self.norm1s = nn.ModuleList([nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6) for _ in range(self.n_modalities)])
-        self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
-        self.norm2s = nn.ModuleList([nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6) for _ in range(self.n_modalities)])
-
-        mlp_hidden_dim = int(hidden_size * mlp_ratio)
-        approx_gelu = lambda: nn.GELU(approximate="tanh")
-        self.mlps = nn.ModuleList([Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=mlp_dropout) for _ in range(self.n_modalities)])
-        self.adaLN_modulations = nn.ModuleList([nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(hidden_size, 6 * hidden_size, bias=True)
-        ) for _ in range(self.n_modalities)])
-
-
-    def forward(self,
-                x,
-                c: Union[
-                    TensorType["b h", float],  # per-sequence conditioning
-                    TensorType["b n h", float]  # per-token conditioning
-                    ],
-                residx: TensorType["b n", float],
-                attn_mask: TensorType["b h n n", float],
-                attn_bias: Optional[TensorType["b h n n", float]],
-                token_modality_idxs: TensorType["b n_modalities", int],  # starting index for each modality
-                rope_mask: TensorType["b n", float] | None,
-                per_token_conditioning: bool = False,  # whether c is per-token or per-sequence
-                ):
-        if not per_token_conditioning:
-            assert c.dim() == 2, "Per-sequence conditioning requires shape [B, H] for c"
-            c = c.unsqueeze(1).expand((-1, x.shape[1], -1))
-        assert c.dim() == 3
-        token_modality_idxs = torch.cat([token_modality_idxs, torch.tensor([x.shape[1]], device=x.device)])  # add end index
-
-        # Apply modulation and pre-norm per modality
-        modulation_cache = {}
-        for i in range(self.n_modalities):
-            start, end = token_modality_idxs[i], token_modality_idxs[i + 1]
-            x_i = x[:, start:end, :]
-            c_i = c[:, start:end, :]
-            shift_msa_i, scale_msa_i, gate_msa_i, shift_mlp_i, scale_mlp_i, gate_mlp_i = self.adaLN_modulations[i](c_i).chunk(6, dim=-1)
-            x_modulated = modulate(self.norm1s[i](x_i), shift_msa_i, scale_msa_i)
-            modulation_cache[i] = {"x_modulated": x_modulated, "gate_msa": gate_msa_i, "shift_mlp": shift_mlp_i, "scale_mlp": scale_mlp_i, "gate_mlp": gate_mlp_i}
-
-        # Apply joint attention
-        x_attn_in = torch.cat([modulation_cache[i]["x_modulated"] for i in range(self.n_modalities)], dim=1)
-        gate_msa = torch.cat([modulation_cache[i]["gate_msa"] for i in range(self.n_modalities)], dim=1)
-        x = x + gate_msa * self.attn(x_attn_in, residx=residx, attn_mask=attn_mask, attn_bias=attn_bias, rope_mask=rope_mask)
-
-        # Apply MLP per modality
-        x_out = []
-        for i in range(self.n_modalities):
-            start, end = token_modality_idxs[i], token_modality_idxs[i + 1]
-            x_i = x[:, start:end, :]
-            x_i = x_i + modulation_cache[i]["gate_mlp"] * self.mlps[i](modulate(self.norm2s[i](x_i), modulation_cache[i]["shift_mlp"], modulation_cache[i]["scale_mlp"]))
-            x_out.append(x_i)
-        x = torch.cat(x_out, dim=1)
-        return x
-
-
 class FinalLayer(nn.Module):
     """
     The final layer of DiT.
@@ -316,3 +249,180 @@ class DenoisingMLPBlock(nn.Module):
         shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(3, dim=-1)
         x = x + gate_mlp * self.mlp(modulate(self.norm1(x), shift_mlp, scale_mlp))
         return x
+
+
+#################################################################################
+#                              Multi-modal DiT Block                            #
+#################################################################################
+class MMDiTBlock(nn.Module):
+    """
+    A multi-modal DiT block with two separate sets of weights.
+    Based on Stable Diffusion 3 MMDiT architecture.
+    """
+    def __init__(self, hidden_size, num_heads, mlp_dropout: float, mlp_ratio=4.0, **block_kwargs):
+        super().__init__()
+
+        self.n_modalities = 2
+        self.norm1s = nn.ModuleList([nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6) for _ in range(self.n_modalities)])
+        self.attn = MMDiT_Attention(hidden_size, num_heads=num_heads, qkv_bias=True, n_modalities=self.n_modalities, **block_kwargs)
+        self.norm2s = nn.ModuleList([nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6) for _ in range(self.n_modalities)])
+
+        mlp_hidden_dim = int(hidden_size * mlp_ratio)
+        approx_gelu = lambda: nn.GELU(approximate="tanh")
+        self.mlps = nn.ModuleList([Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=mlp_dropout) for _ in range(self.n_modalities)])
+        self.adaLN_modulations = nn.ModuleList([nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(hidden_size, 6 * hidden_size, bias=True)
+        ) for _ in range(self.n_modalities)])
+
+
+    def forward(self,
+                x,
+                c: Union[
+                    TensorType["b h", float],  # per-sequence conditioning
+                    TensorType["b n h", float]  # per-token conditioning
+                    ],
+                residx: TensorType["b n", float],
+                attn_mask: TensorType["b h n n", float],
+                attn_bias: Optional[TensorType["b h n n", float]],
+                token_modality_idxs: TensorType["b n_modalities", int],  # starting index for each modality
+                rope_mask: TensorType["b n", float] | None,
+                per_token_conditioning: bool = False,  # whether c is per-token or per-sequence
+                ):
+        if not per_token_conditioning:
+            assert c.dim() == 2, "Per-sequence conditioning requires shape [B, H] for c"
+            c = c.unsqueeze(1).expand((-1, x.shape[1], -1))
+        assert c.dim() == 3
+        token_modality_idxs = torch.cat([token_modality_idxs, torch.tensor([x.shape[1]], device=x.device)])  # add end index
+
+        # Apply modulation and pre-norm per modality
+        modulation_cache = {}
+        for i in range(self.n_modalities):
+            start, end = token_modality_idxs[i], token_modality_idxs[i + 1]
+            x_i = x[:, start:end, :]
+            c_i = c[:, start:end, :]
+            shift_msa_i, scale_msa_i, gate_msa_i, shift_mlp_i, scale_mlp_i, gate_mlp_i = self.adaLN_modulations[i](c_i).chunk(6, dim=-1)
+            x_modulated = modulate(self.norm1s[i](x_i), shift_msa_i, scale_msa_i)
+            modulation_cache[i] = {"x_modulated": x_modulated, "gate_msa": gate_msa_i, "shift_mlp": shift_mlp_i, "scale_mlp": scale_mlp_i, "gate_mlp": gate_mlp_i}
+
+        # Apply joint attention
+        gate_msa = torch.cat([modulation_cache[i]["gate_msa"] for i in range(self.n_modalities)], dim=1)
+        x = x + gate_msa * self.attn([modulation_cache[i]["x_modulated"] for i in range(self.n_modalities)],
+                                     residx=residx, attn_mask=attn_mask, attn_bias=attn_bias, rope_mask=rope_mask)
+
+        # Apply MLP per modality
+        x_out = []
+        for i in range(self.n_modalities):
+            start, end = token_modality_idxs[i], token_modality_idxs[i + 1]
+            x_i = x[:, start:end, :]
+            x_i = x_i + modulation_cache[i]["gate_mlp"] * self.mlps[i](modulate(self.norm2s[i](x_i), modulation_cache[i]["shift_mlp"], modulation_cache[i]["scale_mlp"]))
+            x_out.append(x_i)
+        x = torch.cat(x_out, dim=1)
+        return x
+
+
+
+
+class MMDiT_Attention(nn.Module):
+    """
+    Adapated from https://github.com/huggingface/pytorch-image-models/blob/main/timm/models/vision_transformer.py to deal with attention masking.
+    Adapted for multi-modal DiT blocks. Specifically, we use separate sets of qkv projections for each modality.
+    """
+    fused_attn: Final[bool]
+
+    def __init__(
+            self,
+            dim: int,
+            num_heads: int = 8,
+            qkv_bias: bool = False,
+            qk_norm: bool = False,
+            attn_drop: float = 0.,
+            proj_drop: float = 0.,
+            norm_layer: nn.Module = nn.LayerNorm,
+            inf: float = 1e9,
+            rotary_emb: Optional[rope.RotaryEmbedding] = None,
+            n_modalities: int = 2,
+    ) -> None:
+        super().__init__()
+        assert dim % num_heads == 0, 'dim should be divisible by num_heads'
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.scale = self.head_dim ** -0.5
+        self.fused_attn = use_fused_attn()
+        self.n_modalities = n_modalities
+        self.qkvs = nn.ModuleList([nn.Linear(dim, dim * 3, bias=qkv_bias) for _ in range(self.n_modalities)])
+        self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+        self.inf = inf  # for masked attention
+        self.rotary_emb = rotary_emb
+
+
+    def forward(self,
+                xs: list[torch.Tensor],
+                residx: TensorType["b n", float],
+                attn_mask: TensorType["b h n n", float],
+                attn_bias: Optional[TensorType["b h n n", float]],
+                rope_mask: TensorType["b n", float] | None,
+                ) -> torch.Tensor:
+        assert len(xs) == self.n_modalities, f"Expected {self.n_modalities} modalities in MMDiT_Attention, got {len(xs)}"
+
+        # Apply separate qkv projections per modality
+        qs, ks, vs = [], [], []
+        for i in range(self.n_modalities):
+            x_i = xs[i]
+            B, N, C = x_i.shape
+            qkv_i = self.qkvs[i](x_i).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+            q_i, k_i, v_i = qkv_i.unbind(0)
+            q_i, k_i = self.q_norm(q_i), self.k_norm(k_i)
+            qs.append(q_i)
+            ks.append(k_i)
+            vs.append(v_i)
+
+        # Concatenate qs, ks, vs back along sequence dimension
+        q = torch.cat(qs, dim=-2)
+        k = torch.cat(ks, dim=-2)
+        v = torch.cat(vs, dim=-2)
+
+
+        # Apply RoPE
+        if self.rotary_emb is not None:
+            if rope_mask is not None:
+                # Only apply RoPE to non-rope-masked tokens
+                q = torch.where(rope_mask[:, None, :, None].bool(),
+                                self.rotary_emb.rotate_queries_or_keys(q, residx), q)
+                k = torch.where(rope_mask[:, None, :, None].bool(),
+                                self.rotary_emb.rotate_queries_or_keys(k, residx), k)
+            else:
+                q = self.rotary_emb.rotate_queries_or_keys(q, residx)
+                k = self.rotary_emb.rotate_queries_or_keys(k, residx)
+
+        # Attention bias / mask
+        if attn_bias is None:
+            attn_bias = torch.zeros_like(attn_mask)
+        attn_bias = torch.where(attn_mask.bool(), attn_bias, -self.inf)
+
+        # Compute attention
+        if self.fused_attn:
+            x = F.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=attn_bias,
+                dropout_p=self.attn_drop.p if self.training else 0.,
+            )
+        else:
+            q = q * self.scale
+            attn = q @ k.transpose(-2, -1)
+            attn = attn + attn_bias
+            attn = attn.softmax(dim=-1)
+            attn = self.attn_drop(attn)
+            x = attn @ v
+
+        B, _, N, _ = q.shape
+        x = x.transpose(1, 2).reshape(B, N, -1)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
