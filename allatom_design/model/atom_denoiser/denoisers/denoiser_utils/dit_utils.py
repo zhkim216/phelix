@@ -40,7 +40,8 @@ class DiTBlock(nn.Module):
                 residx: TensorType["b n", float],
                 attn_mask: TensorType["b n n", float],
                 attn_bias: Optional[TensorType["b n n", float]],
-                per_token_conditioning: bool = False  # whether c is per-token or per-sequence
+                per_token_conditioning: bool = False,  # whether c is per-token or per-sequence
+                rope_mask: TensorType["b n", float] | None = None
                 ):
         if not per_token_conditioning:
             assert c.dim() == 2, "Per-sequence conditioning requires shape [B, H] for c"
@@ -48,7 +49,8 @@ class DiTBlock(nn.Module):
         assert c.dim() == 3
 
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=-1)
-        x = x + gate_msa * self.attn(modulate(self.norm1(x), shift_msa, scale_msa), residx=residx, attn_mask=attn_mask, attn_bias=attn_bias)
+        x = x + gate_msa * self.attn(modulate(self.norm1(x), shift_msa, scale_msa), residx=residx, attn_mask=attn_mask,
+                                     attn_bias=attn_bias, rope_mask=rope_mask)
         x = x + gate_mlp * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
         return x
 
@@ -125,20 +127,32 @@ class Attention(nn.Module):
                 x: torch.Tensor,
                 residx: TensorType["b n", float],
                 attn_mask: TensorType["b h n n", float],
-                attn_bias: Optional[TensorType["b h n n", float]]
+                attn_bias: Optional[TensorType["b h n n", float]],
+                rope_mask: TensorType["b n", float] | None
                 ) -> torch.Tensor:
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
         q, k = self.q_norm(q), self.k_norm(k)
 
+        # Apply RoPE
         if self.rotary_emb is not None:
-            q = self.rotary_emb.rotate_queries_or_keys(q, residx)
-            k = self.rotary_emb.rotate_queries_or_keys(k, residx)
+            if rope_mask is not None:
+                # Only apply RoPE to non-rope-masked tokens
+                q = torch.where(rope_mask[:, None, :, None].bool(),
+                                self.rotary_emb.rotate_queries_or_keys(q, residx), q)
+                k = torch.where(rope_mask[:, None, :, None].bool(),
+                                self.rotary_emb.rotate_queries_or_keys(k, residx), k)
+            else:
+                q = self.rotary_emb.rotate_queries_or_keys(q, residx)
+                k = self.rotary_emb.rotate_queries_or_keys(k, residx)
 
+        # Attention bias / mask
         if attn_bias is None:
             attn_bias = torch.zeros_like(attn_mask)
         attn_bias = torch.where(attn_mask.bool(), attn_bias, -self.inf)
+
+        # Compute attention
         if self.fused_attn:
             x = F.scaled_dot_product_attention(
                 q, k, v,

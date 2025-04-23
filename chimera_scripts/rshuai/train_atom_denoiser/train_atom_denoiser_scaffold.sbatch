@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s5_a1
+#SBATCH --job-name=s5_a1_no_residx
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -24,7 +24,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=s5_a1
+EXP_NAME=s5_a1_no_residx
 GROUP=backbone
 
 # Dataset paths

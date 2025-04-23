@@ -364,12 +364,15 @@ class DiT(nn.Module):
         # Begin DiT forward pass
         x = self.x_embedder(x)
 
+        residx_mask = None
         if self.use_motif_conditioning:
             # For now, concatenate motif as extra tokens
             N = x.shape[1]
             x = torch.cat([x, motif_inputs["motif_embed_1d"]], dim=1)
             seq_mask = torch.cat([seq_mask, motif_inputs["token_pad_mask"]], dim=1)
+            residx_mask = torch.cat([torch.ones_like(residue_index), motif_inputs["residx_mask"]], dim=1)  # for preventing RoPE from being applied to motif tokens
             residue_index = torch.cat([residue_index, motif_inputs["residue_index"]], dim=1)
+            residue_index = residue_index * residx_mask  # mask out residx
 
         if self.pos_encoding == "absolute":
             x = x + self.pos_embed(x)
@@ -383,7 +386,8 @@ class DiT(nn.Module):
         # Blocks
         attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
         for block in self.blocks:
-            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True)
+            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True,
+                      rope_mask=residx_mask)
 
         # Final layer
         x = self.final_layer(x, c, per_token_conditioning=True)
