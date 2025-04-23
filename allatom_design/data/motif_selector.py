@@ -28,6 +28,12 @@ class MotifSelector():
             self.restype_mask_type.append(restype_mask_type)
             self.restype_mask_probs.append(restype_mask_prob)
 
+        # Parse residue index mask probabilities
+        self.residx_mask_type, self.residx_mask_probs = [], []
+        for residx_mask_type, residx_mask_prob in cfg.residx_mask_p.items():
+            self.residx_mask_type.append(residx_mask_type)
+            self.residx_mask_probs.append(residx_mask_prob)
+
         # Parse motif atom selection probabilities
         self.motif_atom_type, self.motif_atom_probs = [], []
         for motif_atom_type, motif_atom_prob in cfg.atom_p.items():
@@ -77,7 +83,22 @@ class MotifSelector():
 
 
     def create_residx_mask(self, tokenized: Tokenized) -> TensorType["n", float]:
-        pass
+        """
+        Creates a mask of which residue indices to mask out. 0 if we should mask, 1 if we should keep.
+        """
+        residx_mask_type = self.residx_mask_type[torch.multinomial(torch.tensor(self.residx_mask_probs), 1).item()]
+
+        if residx_mask_type == "all":
+            residx_mask = torch.zeros(len(tokenized.tokens))
+        elif residx_mask_type == "none":
+            residx_mask = torch.ones(len(tokenized.tokens))
+        elif residx_mask_type == "uniform":
+            keep_p = torch.rand(1).item()
+            residx_mask = (torch.rand(len(tokenized.tokens)) < keep_p).float()
+        else:
+            raise ValueError(f"Unknown residx mask type: {residx_mask_type}")
+
+        return residx_mask
 
 
     def select_motif_atoms(self, feats: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:

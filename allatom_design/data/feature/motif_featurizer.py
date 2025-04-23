@@ -54,13 +54,16 @@ class MotifFeaturizer:
         """
         if motif_selector is not None:
             restype_mask = motif_selector.create_restype_mask(data)
+            residx_mask = motif_selector.create_residx_mask(data)
         else:
             restype_mask = torch.zeros(len(data.tokens))
+            residx_mask = torch.ones(len(data.tokens))
 
         # Compute token features
         token_features = process_motif_token_features(
             data,
             restype_mask,
+            residx_mask,
             max_tokens,
         )
 
@@ -79,7 +82,7 @@ class MotifFeaturizer:
             **atom_features,
         }
 
-        # Create motif atom mask
+        # Create motif atom mask from atom features
         feats["motif_atom_mask"] = motif_selector.select_motif_atoms(feats)
 
         # Apply motif atom mask, making sure to zero out missing atoms
@@ -93,13 +96,8 @@ class MotifFeaturizer:
 def process_motif_token_features(
     data: Tokenized,
     restype_mask: TensorType["n", float],
+    residx_mask: TensorType["n", float],
     max_tokens: Optional[int] = None,
-    binder_pocket_conditioned_prop: Optional[float] = 0.0,
-    binder_pocket_cutoff: Optional[float] = 6.0,
-    binder_pocket_sampling_geometric_p: Optional[float] = 0.0,
-    only_ligand_binder_pocket: Optional[bool] = False,
-    inference_binder: Optional[list[int]] = None,
-    inference_pocket: Optional[list[tuple[int, int]]] = None,
 ) -> dict[str, Tensor]:
     """Get the token features.
 
@@ -180,6 +178,9 @@ def process_motif_token_features(
             disto_mask = pad_dim(disto_mask, 0, pad_len)
             pocket_feature = pad_dim(pocket_feature, 0, pad_len)
 
+            restype_mask = pad_dim(restype_mask, 0, pad_len)
+            residx_mask = pad_dim(residx_mask, 0, pad_len)
+
     token_features = {
         "token_index": token_index,
         "residue_index": residue_index,
@@ -194,6 +195,8 @@ def process_motif_token_features(
         "token_resolved_mask": resolved_mask,
         "token_disto_mask": disto_mask,
         "pocket_feature": pocket_feature,
+        "restype_mask": restype_mask,
+        "residx_mask": residx_mask,
     }
     return token_features
 
