@@ -1,5 +1,7 @@
 import os
+import pickle
 from collections import defaultdict
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -9,10 +11,10 @@ import torch.nn.functional as F
 from einops import rearrange
 from torchtyping import TensorType
 
-import allatom_design.data.conditioning_labels as cl
 import openfold.data.data_transforms as data_transforms
 from allatom_design.data import const, protein
 from allatom_design.data import residue_constants as rc
+from allatom_design.data.types import Tokenized
 from openfold.utils.feats import atom14_to_atom37
 from openfold.utils.rigid_utils import Rigid, Rotation
 
@@ -685,3 +687,46 @@ def atom_apply_random_augmentation(X: TensorType["b n_atoms 3", float],
         X = X.squeeze(0)
 
     return X
+
+
+def subset_tokenized(tokenized: Tokenized,
+                     token_mask: TensorType["n", float]) -> Tokenized:
+    """
+    Subset tokenized data to only include tokens that are 1 in the token_mask.
+    """
+    # Subset tokens
+    if isinstance(token_mask, torch.Tensor):
+        token_mask = token_mask.numpy()
+
+    token_mask = token_mask.astype(bool)
+    token_data = tokenized.tokens[token_mask]
+
+    # Subset bonds within the cropped tokens
+    indices = token_data["token_idx"]
+    token_bonds = tokenized.bonds
+    token_bonds = token_bonds[np.isin(token_bonds["token_1"], indices)]
+    token_bonds = token_bonds[np.isin(token_bonds["token_2"], indices)]
+
+    # Subset tokenwise atom features
+    if tokenized.tokenwise_atom_feats is not None:
+        tokenwise_atom_feats = tokenized.tokenwise_atom_feats[token_mask]
+    else:
+        tokenwise_atom_feats = None
+
+    tokenized = replace(tokenized, tokens=token_data, bonds=token_bonds, tokenwise_atom_feats=tokenwise_atom_feats)
+    return tokenized
+
+
+def to(obj, device: torch.device):
+  """
+  Move object to device. Source: https://github.com/pytorch/pytorch/issues/69431
+  """
+  if torch.is_tensor(obj):
+    return obj.to(device)
+  if isinstance(obj, dict):
+    return {k : to(v, device) for k, v in obj.items()}
+  if isinstance(obj, tuple):
+    return tuple(to(v, device) for v in obj)
+  if isinstance(obj, list):
+    return [to(v, device) for v in obj]
+  return obj

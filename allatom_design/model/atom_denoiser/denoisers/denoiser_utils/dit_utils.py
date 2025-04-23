@@ -321,8 +321,6 @@ class MMDiTBlock(nn.Module):
         return x
 
 
-
-
 class MMDiT_Attention(nn.Module):
     """
     Adapated from https://github.com/huggingface/pytorch-image-models/blob/main/timm/models/vision_transformer.py to deal with attention masking.

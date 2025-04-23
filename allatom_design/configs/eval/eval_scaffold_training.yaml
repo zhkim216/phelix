@@ -27,9 +27,38 @@ input_cfg:
   presort_by_length: false  # sort pdb keys by sequence length, potentially for efficiency
   n_subsample: null  # randomly sample this many pdb keys, null to use all
 
+# PDB file processing
+pdb_processing_cfg:
+  redis_host: null
+  redis_port: null
+  ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
+
 # Scaffolding options
-backbone_conditioning_types: ["contiguous", "discontiguous", "unconditional"]  # evaluate these conditioning types
-allatom_conditioning_types: ["discontiguous"]  # evaluate these conditioning types
+motif_conditioning_type_cfgs:
+  # - name: unconditional
+  #   motif_type: unconditional
+  #   restype_mask_type: all
+  #   residx_mask_type: none
+  #   motif_atom_type: protein_backbone
+
+  - name: protein_backbone_contiguous
+    motif_type: protein_contiguous
+    restype_mask_type: all
+    residx_mask_type: none
+    motif_atom_type: protein_backbone
+
+  - name: protein_backbone_discontiguous
+    motif_type: protein_discontiguous
+    restype_mask_type: all
+    residx_mask_type: none
+    motif_atom_type: protein_backbone
+
+  - name: protein_backbone_discontiguous_noresidx
+    motif_type: protein_discontiguous
+    restype_mask_type: all
+    residx_mask_type: all
+    motif_atom_type: protein_backbone
+
 
 # Backbone generation options
 bb_gen_cfg:

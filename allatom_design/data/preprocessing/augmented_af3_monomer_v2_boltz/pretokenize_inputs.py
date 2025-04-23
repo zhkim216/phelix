@@ -5,7 +5,6 @@ from pathlib import Path
 
 import hydra
 import numpy as np
-from allatom_design.data.tokenize.tokenizer import Tokenizer
 from joblib import Parallel, delayed
 from omegaconf import DictConfig
 from tqdm import tqdm
@@ -13,6 +12,9 @@ from tqdm import tqdm
 from allatom_design.data import const
 from allatom_design.data.data import pad_atom_feats_to_tokenwise
 from allatom_design.data.feature.featurizer import SimpleBoltzFeaturizer
+from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
+    load_input
+from allatom_design.data.tokenize.tokenizer import Tokenizer
 from allatom_design.data.types import (Connection, Input, Structure, Tokenized,
                                        TokenwiseAtomFeats)
 
@@ -94,34 +96,6 @@ def add_tokenwise_atom_feats(tokenized: Tokenized, featurizer: SimpleBoltzFeatur
     tokenized = replace(tokenized, tokenwise_atom_feats=tokenwise_atom_feats)
     return tokenized
 
-
-def load_input(structure_path: str) -> Input:
-    """Load the given input data.
-
-    Parameters
-    ----------
-    structure_path : str
-        The path to the structure file.
-
-    Returns
-    -------
-    Input
-        The loaded input.
-
-    """
-    # Load the structure
-    structure = np.load(structure_path)
-    structure = Structure(
-        atoms=structure["atoms"],
-        bonds=structure["bonds"],
-        residues=structure["residues"],
-        chains=structure["chains"],
-        connections=structure["connections"].astype(Connection),
-        interfaces=structure["interfaces"],
-        mask=structure["mask"],
-    )
-
-    return Input(structure, msa={})  # we don't load in the MSAs
 
 
 if __name__ == "__main__":

@@ -1,14 +1,25 @@
+"""
+Contains various utils from Boltz-1 rcsb.py for parsing mmCIF files.
+Adapted and extended for use in allatom_design by Richard Shuai.
+"""
+
+
 import json
+import pickle
 import traceback
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Optional
 
+import gemmi
 import numpy as np
-from allatom_design.data.filter.static.filter import StaticFilter
-from allatom_design.data.types import ChainInfo, InterfaceInfo, Record, Target
+from redis import Redis
 
+from allatom_design.data.filter.static.filter import StaticFilter
 from allatom_design.data.preprocessing.boltz_utils.mmcif import parse_mmcif
+from allatom_design.data.types import (ChainInfo, Connection, Input,
+                                       InterfaceInfo, Record, Structure,
+                                       Target)
 
 
 def process_structure(
@@ -17,7 +28,8 @@ def process_structure(
     outdir: str,
     filters: list[StaticFilter],
     clusters: dict,
-) -> None:
+    return_struct_path: bool = False,
+) -> None | str:
     """Process a target.
 
     Parameters
@@ -40,6 +52,8 @@ def process_structure(
     record_path = outdir / "records" / f"{data.id}.json"
 
     if struct_path.exists() and record_path.exists():
+        if return_struct_path:
+            return str(struct_path)
         return
 
     try:
@@ -80,6 +94,9 @@ def process_structure(
     # Dump record
     with record_path.open("w") as f:
         json.dump(asdict(record), f)
+
+    if return_struct_path:
+        return str(struct_path)
 
 
 def finalize(outdir: Path) -> None:
@@ -123,12 +140,13 @@ class PDB:
     path: str
 
 
-def fetch(datadir: Path, max_file_size: Optional[int] = None) -> list[PDB]:
+def fetch(mmcif_files: list[str | Path], max_file_size: Optional[int] = None) -> list[PDB]:
     """Fetch the PDB files."""
     data = []
     excluded = 0
-    for file in datadir.rglob("*.cif*"):
+    for file in mmcif_files:
         # The clustering file is annotated by pdb_entity id
+        file = Path(file)
         pdb_id = str(file.stem).lower()
 
         # Check file size and skip if too large
@@ -206,3 +224,78 @@ def parse(data: PDB, resource: dict, clusters: dict) -> Target:
 
     return Target(structure=structure, record=record)
 
+
+def pdb_to_mmcif(pdb_path: str, mmcif_out: Path) -> None:
+    """
+    Convert a PDB file to mmCIF format using gemmi.
+    """
+    if Path(mmcif_out).exists():
+        return
+
+    structure = gemmi.read_structure(pdb_path)
+    structure.setup_entities()
+
+    # Create mapping from subchain id to entity
+    entities: dict[str, gemmi.Entity] = {}
+    for entity in structure.entities:
+        entity: gemmi.Entity
+        if entity.entity_type.name == "Water":
+            continue
+        for subchain_id in entity.subchains:
+            entities[subchain_id] = entity
+
+    # Set sequence for each entity based on the sequence in the model, since we do not have SEQRES in these files
+    for raw_chain in structure[0].subchains():
+        model_sequence = raw_chain.extract_sequence()
+        subchain_id = raw_chain.subchain_id()
+        entities[subchain_id].full_sequence = model_sequence
+
+    # Write mmCIF file
+    mmcif_doc = structure.make_mmcif_document()
+    mmcif_doc.write_file(str(mmcif_out))
+
+
+class Resource:
+    """Lightweight handle to CCD data stored once in Redis."""
+
+    def __init__(self, host: str, port: int) -> None:
+        self._redis = Redis(host=host, port=port)
+
+    def get(self, key: str):
+        value = self._redis.get(key)
+        return None if value is None else pickle.loads(value)  # noqa: S301
+
+    def __getitem__(self, key: str):
+        out = self.get(key)
+        if out is None:
+            raise KeyError(key)
+        return out
+
+
+def load_input(structure_path: str) -> Input:
+    """Load the given input data.
+
+    Parameters
+    ----------
+    structure_path : str
+        The path to the structure file.
+
+    Returns
+    -------
+    Input
+        The loaded input.
+
+    """
+    # Load the structure
+    structure = np.load(structure_path)
+    structure = Structure(
+        atoms=structure["atoms"],
+        bonds=structure["bonds"],
+        residues=structure["residues"],
+        chains=structure["chains"],
+        connections=structure["connections"].astype(Connection),
+        interfaces=structure["interfaces"],
+        mask=structure["mask"],
+    )
+
+    return Input(structure, msa={})  # we don't load in the MSAs

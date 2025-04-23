@@ -5,6 +5,7 @@ import numpy as np
 from allatom_design.data.crop.cropper import Cropper
 
 from allatom_design.data.types import Tokenized
+from allatom_design.data.data import subset_tokenized
 
 
 class RandomUIDCropper(Cropper):
@@ -51,14 +52,5 @@ class RandomUIDCropper(Cropper):
         keep_mask = np.isin(uids, uids_to_keep)
 
         # Filter tokens and tokenwise atom features
-        token_data = data.tokens[keep_mask]
-        tokenwise_atom_feats = data.tokenwise_atom_feats[keep_mask]
-
-        # Filter bonds
-        indices = token_data["token_idx"]
-        token_bonds = data.bonds
-        token_bonds = token_bonds[np.isin(token_bonds["token_1"], indices)]
-        token_bonds = token_bonds[np.isin(token_bonds["token_2"], indices)]
-
-        data = replace(data, tokens=token_data, bonds=token_bonds, tokenwise_atom_feats=tokenwise_atom_feats)
+        data = subset_tokenized(data, keep_mask)
         return data

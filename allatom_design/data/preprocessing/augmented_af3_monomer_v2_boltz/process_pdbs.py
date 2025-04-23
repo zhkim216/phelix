@@ -7,24 +7,20 @@ from dataclasses import asdict, replace
 from functools import partial
 from pathlib import Path
 
-import gemmi
 import hydra
 import pandas as pd
-import rdkit
 import rdkit.Chem
 from allatom_design.data.filter.static.ligand import ExcludedLigands
 from allatom_design.data.filter.static.polymer import (ClashingChainsFilter,
-                                              ConsecutiveCA,
-                                              MinimumLengthFilter,
-                                              UnknownFilter)
+                                                       MinimumLengthFilter,
+                                                       UnknownFilter)
 from joblib import Parallel, delayed
 from omegaconf import DictConfig
 from p_tqdm import p_umap
-from redis import Redis
 from tqdm import tqdm
 
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
-    fetch, finalize, process_structure)
+    fetch, finalize, process_structure, pdb_to_mmcif, Resource)
 
 
 @hydra.main(config_path="../../../configs/data/preprocessing/augmented_af3_monomer_v2_boltz", config_name="process_pdbs", version_base="1.3.2")
@@ -75,7 +71,8 @@ def main(cfg: DictConfig):
         resource = pickle.load(open(cfg.ccd_pkl_path, "rb"))
 
     # Fetch data
-    data = fetch(datadir=Path(mmcif_dir), max_file_size=None)
+    mmcif_files = Path(mmcif_dir).rglob("*.cif")
+    data = fetch(mmcif_files, max_file_size=None)
 
     # Run processing
     processed_targets_dir = f"{cfg.pdb_path}/processed_targets"
@@ -150,54 +147,6 @@ def update_manifest_from_csv(manifest_path: str, manifest_df: pd.DataFrame) -> N
     # Save manifest records back to file
     with open(manifest_path, "w") as f:
         json.dump(new_records, f)
-
-
-def pdb_to_mmcif(pdb_path: str, mmcif_out: Path) -> None:
-    """
-    Convert a PDB file to mmCIF format using gemmi.
-    """
-    if Path(mmcif_out).exists():
-        return
-
-    structure = gemmi.read_structure(pdb_path)
-    structure.setup_entities()
-
-    # Create mapping from subchain id to entity
-    entities: dict[str, gemmi.Entity] = {}
-    for entity in structure.entities:
-        entity: gemmi.Entity
-        if entity.entity_type.name == "Water":
-            continue
-        for subchain_id in entity.subchains:
-            entities[subchain_id] = entity
-
-    # Set sequence for each entity based on the sequence in the model, since we do not have SEQRES in these files
-    for raw_chain in structure[0].subchains():
-        model_sequence = raw_chain.extract_sequence()
-        subchain_id = raw_chain.subchain_id()
-        entities[subchain_id].full_sequence = model_sequence
-
-    # Write mmCIF file
-    mmcif_doc = structure.make_mmcif_document()
-    mmcif_doc.write_file(str(mmcif_out))
-
-
-# ───────────────────────────── helper classes & funcs ──────────────────────────
-class Resource:
-    """Lightweight handle to CCD data stored once in Redis."""
-
-    def __init__(self, host: str, port: int) -> None:
-        self._redis = Redis(host=host, port=port)
-
-    def get(self, key: str):
-        value = self._redis.get(key)
-        return None if value is None else pickle.loads(value)  # noqa: S301
-
-    def __getitem__(self, key: str):
-        out = self.get(key)
-        if out is None:
-            raise KeyError(key)
-        return out
 
 
 if __name__ == "__main__":
