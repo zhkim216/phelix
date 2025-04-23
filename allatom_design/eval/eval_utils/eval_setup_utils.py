@@ -1,17 +1,20 @@
 import glob
 import math
+import os
+import pickle
 import re
 from pathlib import Path
-import os
 
 import numpy as np
+import pandas as pd
+import wandb
 from joblib import Parallel, delayed
 from natsort import natsorted
 from tqdm import tqdm
-import wandb
 
 from allatom_design.data.data import get_length_from_pdb
-import pandas as pd
+from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
+    Resource, fetch, pdb_to_mmcif, process_structure)
 
 
 def get_pdb_files(pdb_dir: str,
@@ -108,6 +111,49 @@ def get_pdb_files(pdb_dir: str,
     print(f"Using {len(pdb_files)} PDB files")
 
     return pdb_files
+
+
+def process_pdb_files(pdb_files: list[str],
+                      processed_pdb_dir: str,
+                      redis_host: str | None = None,
+                      redis_port: int | None = None,
+                      ccd_pkl_path: str | None = None) -> list[str]:
+    """
+    Process PDB files.
+    Returns paths to processed structure files (.npz format).
+    """
+    # Make directories where we'll store preprocessed PDB files
+    mmcif_dir = f"{processed_pdb_dir}/converted_mmcifs"
+    Path(mmcif_dir).mkdir(parents=True, exist_ok=True)
+
+    # Handle PDB -> mmCIF conversion if necessary
+    mmcif_files = []
+    for pdb_file in tqdm(pdb_files, desc="Processing PDB files"):
+        if Path(pdb_file).suffix != ".cif":
+            # assume PDB file, convert to mmCIF and save to processed_pdb_dir/converted_mmcifs
+            mmcif_file = Path(mmcif_dir, Path(pdb_file).name.replace(".pdb", ".cif"))
+            pdb_to_mmcif(pdb_file, mmcif_file)
+        else:
+            mmcif_file = pdb_file
+        mmcif_files.append(mmcif_file)
+
+    # Load or seed CCD resource in Redis
+    if redis_host is not None:
+        resource = Resource(host=redis_host, port=redis_port)
+    else:
+        resource = pickle.load(open(ccd_pkl_path, "rb"))
+
+    # Fetch data
+    data = fetch(mmcif_files, max_file_size=None)
+
+    # Process each PDB file
+    processed_struct_files = []
+    for pdb in tqdm(data, desc="Processing mmCIFs"):
+        processed_struct_file = process_structure(pdb, resource=resource, outdir=Path(processed_pdb_dir), filters=[], clusters={}, return_struct_path=True)
+        processed_struct_files.append(processed_struct_file)
+
+    return processed_struct_files
+
 
 
 def load_pdb_files_from_manifest(pdb_dir: str, **manifest_kwargs) -> list[str]:

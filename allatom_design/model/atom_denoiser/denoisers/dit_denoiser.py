@@ -300,7 +300,7 @@ class DiT(nn.Module):
             self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
 
         # Blocks
-        if self.use_motif_conditioning and cfg.use_mmdit:
+        if self.use_motif_conditioning and cfg.get("use_mmdit", False):
             # Multi-modal DiT block for separate weights for backbone and motif
             block = MMDiTBlock
         else:

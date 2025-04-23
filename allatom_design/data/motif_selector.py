@@ -29,10 +29,16 @@ class MotifSelector():
             self.restype_mask_probs.append(restype_mask_prob)
 
         # Parse residue index mask probabilities
+        # DEBUG: backwards compatibility
         self.residx_mask_type, self.residx_mask_probs = [], []
-        for residx_mask_type, residx_mask_prob in cfg.residx_mask_p.items():
-            self.residx_mask_type.append(residx_mask_type)
-            self.residx_mask_probs.append(residx_mask_prob)
+        if "residx_mask_p" in cfg:
+            for residx_mask_type, residx_mask_prob in cfg.residx_mask_p.items():
+                self.residx_mask_type.append(residx_mask_type)
+                self.residx_mask_probs.append(residx_mask_prob)
+        else:
+            # do not mask out residue indices
+            self.residx_mask_type.append("none")
+            self.residx_mask_probs.append(1.0)
 
         # Parse motif atom selection probabilities
         self.motif_atom_type, self.motif_atom_probs = [], []
@@ -40,12 +46,37 @@ class MotifSelector():
             self.motif_atom_type.append(motif_atom_type)
             self.motif_atom_probs.append(motif_atom_prob)
 
+        # For inference / evaluation, set motif_cond_type_cfg to force motif selection
+        self.motif_cond_type_cfg = None
+
+
+    def set_motif_cond_type_cfg(self, motif_cond_type_cfg: DictConfig):
+        """
+        Set the motif conditioning type configuration. e.g. in hydra config:
+
+          - name: protein_backbone_discontiguous_noresidx
+            motif_type: protein_discontiguous
+            restype_mask_type: all
+            residx_mask_type: all
+            motif_atom_type: protein_backbone
+        """
+        print(f" ===== Setting motif conditioning type ===== ")
+        for k, v in motif_cond_type_cfg.items():
+            print(f"{k}: {v}")
+        print(f" ========================================= ")
+        self.motif_cond_type_cfg = motif_cond_type_cfg
+
 
     def select_motif_tokens(self, tokenized: Tokenized) -> TensorType["n", float]:
         """
         Selects a motif from tokenized data.
         """
-        motif_type = self.motif_type[torch.multinomial(torch.tensor(self.motif_probs), 1).item()]
+        if self.motif_cond_type_cfg is None:
+            # Randomly sample motif type
+            motif_type = self.motif_type[torch.multinomial(torch.tensor(self.motif_probs), 1).item()]
+        else:
+            # Use motif type from motif conditioning type configuration
+            motif_type = self.motif_cond_type_cfg.motif_type
 
         if motif_type == "unconditional":
             return select_unconditional(tokenized)
@@ -60,10 +91,14 @@ class MotifSelector():
     def create_restype_mask(self, tokenized: Tokenized) -> TensorType["n", float]:
         """
         Create a mask denoting which restypes to mask out. 0 if we should mask, 1 if we should keep.
-
         Non-polymer restypes are always kept (1).
         """
-        restype_mask_type = self.restype_mask_type[torch.multinomial(torch.tensor(self.restype_mask_probs), 1).item()]
+        if self.motif_cond_type_cfg is None:
+            # Randomly sample restype mask type
+            restype_mask_type = self.restype_mask_type[torch.multinomial(torch.tensor(self.restype_mask_probs), 1).item()]
+        else:
+            # Use restype mask type from motif conditioning type configuration
+            restype_mask_type = self.motif_cond_type_cfg.restype_mask_type
 
         if restype_mask_type == "all":
             # Mask out all restypes
@@ -86,7 +121,12 @@ class MotifSelector():
         """
         Creates a mask of which residue indices to mask out. 0 if we should mask, 1 if we should keep.
         """
-        residx_mask_type = self.residx_mask_type[torch.multinomial(torch.tensor(self.residx_mask_probs), 1).item()]
+        if self.motif_cond_type_cfg is None:
+            # Randomly sample residx mask type
+            residx_mask_type = self.residx_mask_type[torch.multinomial(torch.tensor(self.residx_mask_probs), 1).item()]
+        else:
+            # Use residx mask type from motif conditioning type configuration
+            residx_mask_type = self.motif_cond_type_cfg.residx_mask_type
 
         if residx_mask_type == "all":
             residx_mask = torch.zeros(len(tokenized.tokens))
@@ -105,7 +145,12 @@ class MotifSelector():
         """
         Given features subsetted to motif tokens, select atoms for the motif.
         """
-        motif_atom_type = self.motif_atom_type[torch.multinomial(torch.tensor(self.motif_atom_probs), 1).item()]
+        if self.motif_cond_type_cfg is None:
+            # Randomly sample motif atom type
+            motif_atom_type = self.motif_atom_type[torch.multinomial(torch.tensor(self.motif_atom_probs), 1).item()]
+        else:
+            # Use motif atom type from motif conditioning type configuration
+            motif_atom_type = self.motif_cond_type_cfg.motif_atom_type
 
         if motif_atom_type == "all":
             return select_all_atoms(feats)

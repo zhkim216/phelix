@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 import lightning as L
 import numpy as np
@@ -18,7 +18,8 @@ from tqdm import tqdm
 from allatom_design.data import const
 from allatom_design.data.crop.cropper import Cropper
 from allatom_design.data.data import (atom_apply_random_augmentation,
-                                      atom_center_random_augmentation)
+                                      atom_center_random_augmentation,
+                                      subset_tokenized)
 from allatom_design.data.feature.featurizer import SimpleBoltzFeaturizer
 from allatom_design.data.feature.motif_featurizer import MotifFeaturizer
 from allatom_design.data.feature.pad import pad_dim, pad_to_max
@@ -187,11 +188,11 @@ class ADDataset(data.Dataset):
         record_id, tokenized = self._load_and_tokenize_input(idx)
 
         # Featurize input tokens for diffusion (atom23 protein tokens)
-        example["diffusion_inputs"] = self._featurize_diffusion_inputs(idx, record_id, tokenized)
+        example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, self.max_tokens, is_sampling=False)
 
         # Featurize motif (length 0 if unconditional or empty motif)
         if self.requires_motif:
-            example["motif_inputs"] = self._featurize_motif(idx, record_id, tokenized)
+            example["motif_inputs"] = self._featurize_motif_inputs(idx, record_id, tokenized)
 
         # Apply random augmentation
         example = self._apply_se3_augmentation(example)
@@ -228,85 +229,27 @@ class ADDataset(data.Dataset):
         return example
 
 
-    def _featurize_motif(self,
+    def _featurize_motif_inputs(self,
                          idx: int,
                          record_id: str,
                          tokenized: Tokenized) -> dict[str, torch.Tensor]:
         """
         Featurize motif.
         """
-        # Select motif tokens and subset tokenized data
-        motif_token_mask = self.dataset.motif_selector.select_motif_tokens(tokenized)
-
-        is_dummy_motif = False
-        if motif_token_mask.sum() == 0:
-            # If empty motif, create dummy tokenized data with the first residue
-            motif_token_mask = torch.zeros(len(tokenized.tokens))
-            motif_token_mask[0] = 1
-            is_dummy_motif = True
-
-        tokenized_motif = subset_tokenized(tokenized, motif_token_mask)
-
-        # Crop motif to the max number of motif tokens / atoms
+        motif_data_kwargs = {
+            "motif_max_tokens": self.motif_max_tokens,
+            "motif_max_atoms": self.motif_max_atoms,
+            "motif_atoms_per_window_queries": self.motif_atoms_per_window_queries,
+            "motif_num_bins": self.motif_num_bins,
+        }
         try:
-            tokenized_motif = self.dataset.motif_cropper.crop(tokenized_motif,
-                                                              max_atoms=self.motif_max_atoms,
-                                                              max_tokens=self.motif_max_tokens,
-                                                              random=np.random)
-        except Exception as e:
-            print(f"Motif cropper failed on {record_id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
-
-        # Featurize (possibly dummy) motif
-        try:
-            motif_feats = self.dataset.motif_featurizer.process(tokenized_motif,
-                                                                atoms_per_window_queries=self.motif_atoms_per_window_queries,
-                                                                num_bins=self.motif_num_bins,
-                                                                max_tokens=self.motif_max_tokens,
-                                                                max_atoms=self.motif_max_atoms,
-                                                                motif_selector=self.dataset.motif_selector,
-                                                                )
+            motif_feats = featurize_motif_inputs(tokenized, self.dataset.motif_selector, self.dataset.motif_cropper, self.dataset.motif_featurizer, motif_data_kwargs)
         except Exception as e:
             print(f"Featurizer failed to featurize motif tokens on {record_id} with error {e}. Skipping.")
             return self.__getitem__(idx)
 
-        if is_dummy_motif:
-            motif_feats = {k: torch.zeros_like(v) for k, v in motif_feats.items()}  # create dummy features
 
         return motif_feats
-
-
-    def _featurize_diffusion_inputs(self,
-                                    idx: int,
-                                    record_id: str,
-                                    tokenized: Tokenized) -> dict[str, torch.Tensor]:
-        """
-        Featurize protein tokens into diffusion inputs.
-        """
-        # Get mask for protein tokens
-        protein_token_mask = tokenized.tokens["mol_type"] == const.chain_type_ids["PROTEIN"]
-        known_residue_mask = tokenized.tokens["res_type"] != const.token_ids[const.unk_token["PROTEIN"]]
-        protein_token_mask = protein_token_mask * known_residue_mask
-
-        # Subset tokenized data to only include protein tokens
-        tokenized = subset_tokenized(tokenized, protein_token_mask)
-
-        # Construct diffusion features
-        diffusion_feats = {}
-        diffusion_feats["x"] = tokenized.tokenwise_atom_feats["coords"]
-        diffusion_feats["atom_mask"] = tokenized.tokenwise_atom_feats["atom_resolved_mask"]
-        diffusion_feats["residue_index"] = tokenized.tokens["res_idx"]
-        diffusion_feats["seq_mask"] = np.ones_like(diffusion_feats["residue_index"])  # denotes padding
-
-        # Convert to torch
-        diffusion_feats = {k: torch.from_numpy(v.copy()) for k, v in diffusion_feats.items()}
-
-        # Pad to max tokens
-        pad_len = self.max_tokens - diffusion_feats["x"].shape[0]
-        for k, v in diffusion_feats.items():
-            diffusion_feats[k] = pad_dim(v, 0, pad_len)
-
-        return diffusion_feats
 
 
     def __len__(self) -> int:
@@ -381,29 +324,77 @@ def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
     return Tokenized(tokens=tokenized["tokens"], bonds=tokenized["bonds"], structure=structure, msa={}, tokenwise_atom_feats=tokenized["tokenwise_atom_feats"])
 
 
-def subset_tokenized(tokenized: Tokenized,
-                     token_mask: TensorType["n", float]) -> Tokenized:
+def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int, is_sampling: bool) -> dict[str, torch.Tensor]:
     """
-    Subset tokenized data to only include tokens that are 1 in the token_mask.
+    Featurize protein tokens into diffusion inputs.
     """
-    # Subset tokens
-    if isinstance(token_mask, torch.Tensor):
-        token_mask = token_mask.numpy()
+    # Get mask for protein tokens
+    protein_token_mask = tokenized.tokens["mol_type"] == const.chain_type_ids["PROTEIN"]
+    known_residue_mask = tokenized.tokens["res_type"] != const.token_ids[const.unk_token["PROTEIN"]]
+    protein_token_mask = protein_token_mask * known_residue_mask
 
-    token_mask = token_mask.astype(bool)
-    token_data = tokenized.tokens[token_mask]
+    # Subset tokenized data to only include protein tokens
+    tokenized = subset_tokenized(tokenized, protein_token_mask)
 
-    # Subset bonds within the cropped tokens
-    indices = token_data["token_idx"]
-    token_bonds = tokenized.bonds
-    token_bonds = token_bonds[np.isin(token_bonds["token_1"], indices)]
-    token_bonds = token_bonds[np.isin(token_bonds["token_2"], indices)]
+    # Construct diffusion features
+    diffusion_feats = {}
+    diffusion_feats["residue_index"] = tokenized.tokens["res_idx"]
+    diffusion_feats["seq_mask"] = np.ones_like(diffusion_feats["residue_index"])  # denotes padding
+    if not is_sampling:
+        # During training, featurize with ground truth coords and atom mask
+        diffusion_feats["x"] = tokenized.tokenwise_atom_feats["coords"]
+        diffusion_feats["atom_mask"] = tokenized.tokenwise_atom_feats["atom_resolved_mask"]
 
-    # Subset tokenwise atom features
-    tokenwise_atom_feats = tokenized.tokenwise_atom_feats[token_mask]
+    # Convert to torch
+    diffusion_feats = {k: torch.from_numpy(v.copy()) for k, v in diffusion_feats.items()}
 
-    tokenized = replace(tokenized, tokens=token_data, bonds=token_bonds, tokenwise_atom_feats=tokenwise_atom_feats)
-    return tokenized
+    # Pad to max tokens
+    pad_len = max_tokens - len(diffusion_feats["seq_mask"])
+    for k, v in diffusion_feats.items():
+        diffusion_feats[k] = pad_dim(v, 0, pad_len)
+
+    return diffusion_feats
+
+
+def featurize_motif_inputs(tokenized: Tokenized,
+                    motif_selector: MotifSelector,
+                    motif_cropper: Cropper,
+                    motif_featurizer: MotifFeaturizer,
+                    motif_data_kwargs: dict[str, Any],
+                    motif_cond_type_cfg: DictConfig | None = None):
+    """
+    Featurize a motif given a tokenized structure and motif selector, cropper, and featurizer.
+    """
+    # Select motif tokens and subset tokenized data
+    motif_token_mask = motif_selector.select_motif_tokens(tokenized)
+
+    is_dummy_motif = False
+    if motif_token_mask.sum() == 0:
+        # If empty motif, create dummy tokenized data with the first residue
+        motif_token_mask = torch.zeros(len(tokenized.tokens))
+        motif_token_mask[0] = 1
+        is_dummy_motif = True
+
+    tokenized_motif = subset_tokenized(tokenized, motif_token_mask)
+
+    # Crop motif to the max number of motif tokens / atoms
+    tokenized_motif = motif_cropper.crop(tokenized_motif,
+                                         max_atoms=motif_data_kwargs["motif_max_atoms"],
+                                         max_tokens=motif_data_kwargs["motif_max_tokens"],
+                                         random=np.random)
+
+    # Featurize (possibly dummy) motif
+    motif_feats = motif_featurizer.process(tokenized_motif,
+                                           atoms_per_window_queries=motif_data_kwargs["motif_atoms_per_window_queries"],
+                                           num_bins=motif_data_kwargs["motif_num_bins"],
+                                           max_tokens=motif_data_kwargs["motif_max_tokens"],
+                                           max_atoms=motif_data_kwargs["motif_max_atoms"],
+                                           motif_selector=motif_selector)
+
+    if is_dummy_motif:
+        motif_feats = {k: torch.zeros_like(v) for k, v in motif_feats.items()}  # create dummy features
+
+    return motif_feats
 
 
 @dataclass

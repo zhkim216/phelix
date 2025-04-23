@@ -13,9 +13,9 @@ from tqdm import tqdm
 
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.bb_gen_utils import (
-    get_bb_gen_model, run_sm_sampling)
+    get_bb_gen_model, run_motif_cond_type_sampling)
 from allatom_design.eval.eval_utils.eval_setup_utils import (
-    get_pdb_files, get_training_checkpoints, wandb_setup)
+    get_pdb_files, get_training_checkpoints, wandb_setup, process_pdb_files)
 from allatom_design.eval.eval_utils.fampnn_utils import get_seq_des_model
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 
@@ -50,15 +50,18 @@ def main(cfg: DictConfig):
     ### Load in PDB files to eval on ###
     pdb_files = get_pdb_files(**cfg.input_cfg)
 
+    # Process PDB files into .npz structure format
+    processed_struct_files = process_pdb_files(pdb_files, processed_pdb_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg)
+
     # Get checkpoints from denoiser training run
     ad_ckpts, pattern = get_training_checkpoints(cfg.denoiser_train_dir, "atom_denoiser",
                                                  cfg.eval_every_n_ckpts,
                                                  cfg.start_step, cfg.end_step)
 
     ### Sample from each checkpoint ###
-    motif_conditioning_types = [("backbone", x) for x in cfg.backbone_conditioning_types] + [("allatom", x) for x in cfg.allatom_conditioning_types]
+    motif_cond_type_cfgs = cfg.motif_conditioning_type_cfgs
 
-    pbar = tqdm(ad_ckpts, desc=f"Sampling on {len(pdb_files)} PDB(s) with {len(motif_conditioning_types)} motif conditioning types and {len(ad_ckpts)} checkpoint(s)...")
+    pbar = tqdm(ad_ckpts, desc=f"Sampling on {len(processed_struct_files)} PDB(s) with {len(motif_cond_type_cfgs)} motif conditioning types and {len(ad_ckpts)} checkpoint(s)...")
     for ad_ckpt in pbar:
         match = pattern.search(Path(ad_ckpt).name)
         global_step, epoch = int(match.group(1)), int(match.group(2))  # extract step and epoch from checkpoint name
@@ -67,39 +70,37 @@ def main(cfg: DictConfig):
         # Load in backbone generation model
         cfg.bb_gen_cfg.ckpt_path = ad_ckpt
         bb_gen_model = get_bb_gen_model(cfg.bb_gen_cfg, device=device)
-        sm = bb_gen_model["scaffold_manager"]
 
         # Evaluate separately for each scaffold conditioning type
-        for motif_conditioning_type in motif_conditioning_types:
-            motif_type, conditioning_type = motif_conditioning_type
+        for motif_cond_type_cfg in motif_cond_type_cfgs:
             L.seed_everything(cfg.seed)  # reset seed for each checkpoint and conditioning type
-            sm.set_motif_type(motif_type)  # backbone or allatom
-            sm.set_conditioning_type(conditioning_type)  # e.g. discontiguous or contiguous
 
             # create output directory for this epoch and conditioning type
-            log_dir_i = f"{log_dir}/step_{global_step}_epoch_{epoch}/{motif_type}_{conditioning_type}"
+            log_dir_i = f"{log_dir}/step_{global_step}_epoch_{epoch}/{motif_cond_type_cfg['name']}"
             Path(log_dir_i).mkdir(parents=True, exist_ok=True)
 
             # Process PDBs in batches
-            sampled_pdbs, motif_info = run_sm_sampling(model=bb_gen_model["model"],
-                                                       sm=sm,
-                                                       cfg=bb_gen_model["sampling_cfg"],
-                                                       device=device,
-                                                       pdb_paths=pdb_files,
-                                                       out_dir=log_dir_i)
+            sampled_pdbs, motif_info = run_motif_cond_type_sampling(model=bb_gen_model["model"],
+                                                                    data_cfg=bb_gen_model["data_cfg"],
+                                                                    cfg=bb_gen_model["sampling_cfg"],
+                                                                    motif_cond_type_cfg=motif_cond_type_cfg,
+                                                                    device=device,
+                                                                    struct_file_paths=processed_struct_files,
+                                                                    out_dir=log_dir_i)
 
             # === CALCULATE STRUCTURE METRICS ===
             per_pdb_info, sample_metrics = eval_metrics.compute_per_pdb_info(sampled_pdbs, seq_des_model, struct_pred_model, device,
                                                                              out_dir=log_dir_i, temp_dir=f"{log_dir_i}/tmp",
-                                                                             sc_kwargs={"metrics_to_compute": ["sc_ca_rmsd", "sc_ca_tm", "motif_bb_rmsd"],
+                                                                            #  sc_kwargs={"metrics_to_compute": ["sc_ca_rmsd", "sc_ca_tm", "motif_bb_rmsd"],
+                                                                             sc_kwargs={"metrics_to_compute": ["sc_ca_rmsd", "sc_ca_tm"],
                                                                                         "motif_info": motif_info},
                                                                              nntm_dataset=cfg.nntm_dataset)
 
-            # get RMSD between input motif and sampled structure (as opposed to the predicted structure)
-            for pdb in sampled_pdbs:
-                sampled_motif_bb_rmsd = eval_metrics.compute_motif_bb_rmsd(pdb, motif_info[pdb]["x_motif"], motif_info[pdb]["motif_mask"])
-                per_pdb_info[pdb]["sampled_motif_bb_rmsd"] = sampled_motif_bb_rmsd
-                sample_metrics["sampled_motif_bb_rmsd"].append(sampled_motif_bb_rmsd)
+            # # get RMSD between input motif and sampled structure (as opposed to the predicted structure)
+            # for pdb in sampled_pdbs:
+            #     sampled_motif_bb_rmsd = eval_metrics.compute_motif_bb_rmsd(pdb, motif_info[pdb]["x_motif"], motif_info[pdb]["motif_mask"])
+            #     per_pdb_info[pdb]["sampled_motif_bb_rmsd"] = sampled_motif_bb_rmsd
+            #     sample_metrics["sampled_motif_bb_rmsd"].append(sampled_motif_bb_rmsd)
 
             # Save per-pdb info
             torch.save(per_pdb_info, f"{log_dir_i}/per_pdb_info.pt")
@@ -111,13 +112,13 @@ def main(cfg: DictConfig):
             metrics.update({f"mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
             metrics.update({f"median/{k}": np.median(v) for k, v in sample_metrics.items()})
 
-            # for motif_bb_rmsd, calculate the number of success below 1 RMSD
-            motif_rmsd_key = f"{cfg.seq_des_cfg.model_name}_motif_bb_rmsd_best"
-            metrics[f"success_count/motif_bb_rmsd"] = np.sum(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
-            metrics[f"success_rate/motif_bb_rmsd"] = np.mean(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+            # # for motif_bb_rmsd, calculate the number of success below 1 RMSD
+            # motif_rmsd_key = f"{cfg.seq_des_cfg.model_name}_motif_bb_rmsd_best"
+            # metrics[f"success_count/motif_bb_rmsd"] = np.sum(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+            # metrics[f"success_rate/motif_bb_rmsd"] = np.mean(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
 
             # Log metrics to wandb
-            metrics = {f"{motif_type}_{conditioning_type}/{k}": v for k, v in metrics.items()}
+            metrics = {f"{motif_cond_type_cfg['name']}/{k}": v for k, v in metrics.items()}
             torch.save(metrics, f"{log_dir_i}/metrics.pt")
             if not cfg.wandb.no_wandb:
                 metrics["trainer/global_step"] = global_step
