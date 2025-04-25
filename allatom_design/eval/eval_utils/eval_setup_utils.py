@@ -64,8 +64,11 @@ def get_pdb_files(pdb_dir: str,
     elif pdb_name_list is not None:
         # Get PDBs with keys in the list
         with open(pdb_name_list, "r") as f:
-            pdb_keys = f.read().splitlines()
-        pdb_files = [f"{pdb_dir}/{key}{pdb_name_ext}" for key in pdb_keys]
+            pdb_names = f.read().splitlines()
+        if pdb_name_ext:
+            # replace extension with pdb_name_ext
+            pdb_names = [f"{Path(name).with_suffix(pdb_name_ext)}" for name in pdb_names]
+        pdb_files = [f"{pdb_dir}/{name}" for name in pdb_names]
         print(f"Found {len(pdb_files)} PDB files from key list")
     else:
         # Get all PDBs with .pdb_name_ext extension in the directory
@@ -90,6 +93,7 @@ def get_pdb_files(pdb_dir: str,
         pdb_files = pdb_files[start_idx:end_idx]
 
     # Handle length-dependent options
+    # TOOD: this needs to be rewritten to handle boltz feats
     if (presort_by_length) or (subset_length_range is not None):
         results = Parallel(n_jobs=n_jobs)(
             delayed(get_length_from_pdb)(f) for f in tqdm(pdb_files, desc="Loading PDBs to determine lengths")

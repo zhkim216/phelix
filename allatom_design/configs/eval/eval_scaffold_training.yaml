@@ -49,11 +49,11 @@ pdb_processing_cfg:
 
 # Scaffolding options
 motif_conditioning_type_cfgs:
-  # - name: unconditional
-  #   motif_type: unconditional
-  #   restype_mask_type: all
-  #   residx_mask_type: none
-  #   motif_atom_type: protein_backbone
+  - name: unconditional
+    motif_type: unconditional
+    restype_mask_type: all
+    residx_mask_type: none
+    motif_atom_type: protein_backbone
 
   - name: protein_backbone_contiguous
     motif_type: protein_contiguous
@@ -69,6 +69,12 @@ motif_conditioning_type_cfgs:
 
   - name: protein_backbone_discontiguous_noresidx
     motif_type: protein_discontiguous
+    restype_mask_type: all
+    residx_mask_type: all
+    motif_atom_type: protein_backbone
+
+  - name: protein_backbone_contiguous_noresidx
+    motif_type: protein_contiguous
     restype_mask_type: all
     residx_mask_type: all
     motif_atom_type: protein_backbone

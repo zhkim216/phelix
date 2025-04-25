@@ -44,8 +44,8 @@ def main(cfg: DictConfig):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load in MPNN + structure prediction model for self-consistency evals
-    # seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
-    # struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
+    seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
+    struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     ### Load in PDB files to eval on ###
     pdb_files = get_pdb_files(**cfg.input_cfg)
@@ -86,21 +86,20 @@ def main(cfg: DictConfig):
                                                                     motif_cond_type_cfg=motif_cond_type_cfg,
                                                                     device=device,
                                                                     struct_file_paths=processed_struct_files,
+                                                                    software_path=cfg.software_path,
                                                                     out_dir=log_dir_i)
 
             # === CALCULATE STRUCTURE METRICS ===
             per_pdb_info, sample_metrics = eval_metrics.compute_per_pdb_info(sampled_pdbs, seq_des_model, struct_pred_model, device,
                                                                              out_dir=log_dir_i, temp_dir=f"{log_dir_i}/tmp",
-                                                                            #  sc_kwargs={"metrics_to_compute": ["sc_ca_rmsd", "sc_ca_tm", "motif_bb_rmsd"],
-                                                                             sc_kwargs={"metrics_to_compute": ["sc_ca_rmsd", "sc_ca_tm"],
+                                                                             sc_kwargs={"metrics_to_compute": ["sc_ca_rmsd", "sc_ca_tm", "motif_bb_rmsd"],
                                                                                         "motif_info": motif_info},
                                                                              nntm_dataset=cfg.nntm_dataset)
 
-            # # get RMSD between input motif and sampled structure (as opposed to the predicted structure)
-            # for pdb in sampled_pdbs:
-            #     sampled_motif_bb_rmsd = eval_metrics.compute_motif_bb_rmsd(pdb, motif_info[pdb]["x_motif"], motif_info[pdb]["motif_mask"])
-            #     per_pdb_info[pdb]["sampled_motif_bb_rmsd"] = sampled_motif_bb_rmsd
-            #     sample_metrics["sampled_motif_bb_rmsd"].append(sampled_motif_bb_rmsd)
+            # get RMSD between input motif and sampled structure (as opposed to the predicted structure)
+            for pdb in sampled_pdbs:
+                master_df = motif_info[pdb]["master_df"]
+                sample_metrics["sampled_motif_ca_rmsd"].append(master_df.iloc[0]["rmsd"] if master_df is not None else np.nan)
 
             # Save per-pdb info
             torch.save(per_pdb_info, f"{log_dir_i}/per_pdb_info.pt")
@@ -112,10 +111,10 @@ def main(cfg: DictConfig):
             metrics.update({f"mean/{k}": np.mean(v) for k, v in sample_metrics.items()})
             metrics.update({f"median/{k}": np.median(v) for k, v in sample_metrics.items()})
 
-            # # for motif_bb_rmsd, calculate the number of success below 1 RMSD
-            # motif_rmsd_key = f"{cfg.seq_des_cfg.model_name}_motif_bb_rmsd_best"
-            # metrics[f"success_count/motif_bb_rmsd"] = np.sum(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
-            # metrics[f"success_rate/motif_bb_rmsd"] = np.mean(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+            # for motif_bb_rmsd, calculate the number of success below 1 RMSD
+            motif_rmsd_key = f"{cfg.seq_des_cfg.model_name}_motif_bb_rmsd_best"
+            metrics[f"success_count/motif_bb_rmsd"] = np.sum(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
+            metrics[f"success_rate/motif_bb_rmsd"] = np.mean(np.array(sample_metrics[motif_rmsd_key]) < 1.0)
 
             # Log metrics to wandb
             metrics = {f"{motif_cond_type_cfg['name']}/{k}": v for k, v in metrics.items()}
