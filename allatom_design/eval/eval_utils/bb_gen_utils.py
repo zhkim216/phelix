@@ -424,6 +424,7 @@ def run_motif_cond_type_sampling(model: AtomDenoiser,
                                  cfg: DictConfig,
                                  device: str,
                                  struct_file_paths: list[str],
+                                 software_path: str,
                                  out_dir: str) -> tuple[list[str], dict[str, Any]]:
     """
     Run motif-conditioned sampling from a backbone generation model based on the motif conditioning type config.
@@ -436,6 +437,8 @@ def run_motif_cond_type_sampling(model: AtomDenoiser,
     Path(motif_out_dir).mkdir(parents=True, exist_ok=True)
     centered_gt_out_dir = Path(out_dir, "centered_gt")  # stores centered ground truth examples from which motifs were drawn
     Path(centered_gt_out_dir).mkdir(parents=True, exist_ok=True)
+    master_search_dir = Path(out_dir, "master_search")  # stores master search results
+    Path(master_search_dir).mkdir(parents=True, exist_ok=True)
 
     # Set motif selection type
     data_cfg["motif_selector"].set_motif_cond_type_cfg(motif_cond_type_cfg)
@@ -455,15 +458,12 @@ def run_motif_cond_type_sampling(model: AtomDenoiser,
             # Save motifs
             motif_feats_out = batch["motif_inputs"]
             motif_feats_out["coords"] = batch["motif_inputs"]["motif_coords"]
-            motif_filenames = [f"{motif_out_dir}/motif_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]
-            write_feats_to_mmcif(motif_feats_out, filenames=motif_filenames)
+            batch_motif_paths = [f"{motif_out_dir}/motif_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]
+            write_feats_to_mmcif(motif_feats_out, filenames=batch_motif_paths)
 
             # Save centered examples from which motifs were drawn
-            centered_filenames = [f"{centered_gt_out_dir}/centered_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]
-            write_batched_structures_to_mmcif(input_structures, centered_filenames)
-
-            # DEBUG
-            eval_metrics.motif_master_search(motif_filenames[0], centered_filenames[0], out_dir, "/media/scratch/software")
+            batch_centered_paths = [f"{centered_gt_out_dir}/centered_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]
+            write_batched_structures_to_mmcif(input_structures, batch_centered_paths)
 
             ### Sample backbones ###
             # Set up backbone diffusion params
@@ -483,21 +483,30 @@ def run_motif_cond_type_sampling(model: AtomDenoiser,
             samples = {
                 "x_bb": x_bb_denoised.cpu(),
                 "seq_mask": batch["diffusion_inputs"]["seq_mask"].cpu(),
-                "residue_index": batch["diffusion_inputs"]["residue_index"].cpu(),
+                "residue_index": batch["diffusion_inputs"]["residue_index"].cpu() + 1,  # 1-indexed for saving to PDB
             }
 
             # Save samples
-            filenames = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{i + j}.pdb" for j in range(B)]
-            AtomDenoiser.save_samples_to_pdb(samples, filenames)
-            sampled_pdb_paths.extend(filenames)
+            batch_sampled_paths = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{i + j}.pdb" for j in range(B)]
+            AtomDenoiser.save_samples_to_pdb(samples, batch_sampled_paths)
+            sampled_pdb_paths.extend(batch_sampled_paths)
 
-            # # Add motif info
-            # for j, pdb_path in enumerate(filenames):
-            #     # add motif info
-            #     motif_info[pdb_path] = {"motif_mask": batch["motif_mask"][j].cpu(),
-            #                             "x_motif": batch["x_motif"][j].cpu()}
-            #     length_j = batch["seq_mask"][j].sum().long().item()
-            #     motif_info[pdb_path] = {k: v[:length_j].clone() for k, v in motif_info[pdb_path].items()}  # get rid of padding
+            if motif_cond_type_cfg["motif_type"] != "unconditional":
+                # Get motif indices within sampled structures
+                master_dfs = []
+                for j, pdb_path in enumerate(batch_sampled_paths):
+                    master_df = eval_metrics.motif_master_search(batch_motif_paths[j], batch_sampled_paths[j], f"{master_search_dir}/temp", software_path=software_path)
+                    master_df.to_csv(f"{master_search_dir}/master_hits_{batch['pdb_key'][j]}_{i + j}.tsv", sep="\t", index=False)
+                    master_dfs.append(master_df)
+            else:
+                master_dfs = [None] * B
+
+            # Add motif info
+            for j, pdb_path in enumerate(batch_sampled_paths):
+                # add motif and centered ground truth paths
+                motif_info[pdb_path] = {"motif_path": batch_motif_paths[j],
+                                        "centered_path": batch_centered_paths[j],
+                                        "master_df": master_dfs[j]}
 
             pbar.update(B)
         pbar.close()

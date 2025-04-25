@@ -1,3 +1,4 @@
+import ast
 import math
 import shutil
 import subprocess
@@ -16,19 +17,20 @@ from omegaconf import DictConfig
 from scipy import linalg
 from torchtyping import TensorType
 from tqdm import tqdm
-import ast
 
 import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
+from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
+    mmcif_to_pdb
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.fampnn_utils import run_fampnn
-from allatom_design.eval.eval_utils.folding_utils import (run_af2, run_esmfold_batched,
-                                               run_omegafold)
+from allatom_design.eval.eval_utils.folding_utils import (run_af2,
+                                                          run_esmfold_batched,
+                                                          run_omegafold)
 from allatom_design.eval.eval_utils.proteinmpnn_utils import run_mpnn
-from allatom_design.data.preprocessing.boltz_utils.parsing_utils import mmcif_to_pdb
 
 
 def compute_per_pdb_info(pdbs: list[str],
@@ -540,17 +542,33 @@ def compute_structure_metrics(coords1: TensorType["b n 37 3"],
                                                                        rearrange(coords2, "b n a x -> b (n a) x"),
                                                                        weights=rearrange(atom_mask, "b n a -> b (n a)"))
         elif metric == "motif_bb_rmsd":
+            # Compute RMSD between motif indices in the prediction against the input motif
+            # TODO: move this out of compute_structure_metrics? it doesn't rely on coords2 and assumes coords1 is the predicted structure
+            # Get motif indices
+            master_df = kwargs.get("motif_info", {}).get("master_df")
+            if master_df is None:
+                structure_metrics["motif_bb_rmsd"] = torch.tensor(np.nan)[None].expand(B)  # no motif atoms to align
+                continue
+
+            # Get motif indices for top hit and parse into a mask
+            motif_indices = master_df.iloc[0]["indices"]
+            motif_mask = atom_mask.new_zeros((atom_mask.shape[0], atom_mask.shape[1]))  # [b n]
+            for motif_range in motif_indices:
+                motif_mask[..., motif_range[0]:motif_range[1] + 1] = 1  # end point is inclusive
+
+            # Load in motif coords and expand motif coords to same size as sample
+            motif_path = kwargs.get("motif_info", {}).get("motif_path")
+            motif_feats = data.load_feats_from_pdb(motif_path)
+            motif_coords = torch.zeros_like(coords1)
+            motif_coords[motif_mask.bool()] = motif_feats["all_atom_positions"]
+            motif_atom_mask = torch.zeros_like(atom_mask)
+            motif_atom_mask[motif_mask.bool()] = motif_feats["all_atom_mask"]
+
             # Align on motif N,CA,C atoms, compute RMSD between the input motif and the predicted motif
-            motif_mask = kwargs.get("motif_info", {}).get("motif_mask")  # [b n 37]
-
-            if motif_mask is None:
-                raise ValueError("motif_bb_rmsd requires motif_mask in kwargs['motif_info']")
-
-            # Extract N,CA,C mask for the motif
             bb_motif_atom_mask = torch.zeros_like(atom_mask)
             atom_indices = [rc.atom_order["N"], rc.atom_order["CA"], rc.atom_order["C"]]  # Zheng et al. MotifBench only uses N, CA, C
             bb_motif_atom_mask[..., atom_indices] = 1
-            bb_motif_atom_mask = bb_motif_atom_mask * motif_mask  # [b n 37]
+            bb_motif_atom_mask = bb_motif_atom_mask * motif_atom_mask
 
             if bb_motif_atom_mask.sum() == 0:
                 structure_metrics["motif_bb_rmsd"] = torch.tensor(np.nan)[None].expand(B)  # no motif atoms to align
@@ -558,7 +576,7 @@ def compute_structure_metrics(coords1: TensorType["b n 37 3"],
 
             # Align on motif backbone atoms
             structure_metrics["motif_bb_rmsd"] = data.torch_rmsd_weighted(rearrange(coords1, "b n a x -> b (n a) x"),
-                                                                          rearrange(coords2, "b n a x -> b (n a) x"),
+                                                                          rearrange(motif_coords, "b n a x -> b (n a) x"),
                                                                           weights=rearrange(bb_motif_atom_mask, "b n a -> b (n a)"))
 
         elif metric.startswith("scn_rmsd_per_pos"):
@@ -1052,9 +1070,12 @@ def compute_motif_bb_rmsd(pdb_path: str,
 def motif_master_search(motif_pdb_path: str,
                         target_pdb_path: str,
                         temp_dir: str,
-                        software_path: str) -> float:
+                        software_path: str) -> pd.DataFrame:
     """
     Run motif master search querying a motif PDB against a target PDB.
+
+    TODO: for very small motifs (e.g. 1-2 residues), we might get multiple top hits. How should we handle this?
+    For now, we'll use the first hit from the df.
     """
     Path(temp_dir).mkdir(parents=True, exist_ok=True)
     unique_id = uuid.uuid4().hex  # for temp files
@@ -1107,12 +1128,16 @@ def motif_master_search(motif_pdb_path: str,
     subprocess.run(command, check=True)
 
     # Parse hits
-    df = pd.read_csv(match_out,
-                     sep=r"\s+",        # regex: one or more whitespace
-                     header=None,
-                     names=["rmsd", "pds_path", "indices"],
-                     engine="python")
-    df["indices"] = df["indices"].apply(ast.literal_eval)
+    rows = []
+    with open(match_out, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rmsd, pds_path, indices = line.split(maxsplit=2)
+            rows.append({"rmsd": float(rmsd), "pds_path": pds_path, "indices": ast.literal_eval(indices)})
+
+    df = pd.DataFrame(rows, columns=["rmsd", "pds_path", "indices"])
 
     # Clean up temp files
     Path(query_path).unlink(missing_ok=True)

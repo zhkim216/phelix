@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s4_a3_eval_scaffold
+#SBATCH --job-name=s5_a2_noresidx_eval_scaffold
 #SBATCH -p possu,bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -20,6 +20,7 @@ conda activate allatom_design
 # Define directories and paths
 BASE_DIR=/home/users/rshuai/code/allatom-design
 HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
+SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, redis
 
 # Sequence design model params
 MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
@@ -34,13 +35,14 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Denoiser path
-MODEL_NAME=s4_a3
+MODEL_NAME=s5_a2_noresidx
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Input config
 PHASE=eval
-PDB_DIR=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2/esmfold_preds
-PDB_NAME_LIST=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2/${PHASE}_pdb_names.list
+PDB_DIR=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2_boltz/preprocessing/process_pdbs/mmcifs
+PDB_NAME_LIST=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2_boltz/${PHASE}_pdb_names.list
+PDB_NAME_EXT=.cif
 SUBSET_LENGTH_RANGE="[32,256]"
 N_SUBSAMPLE=128
 
@@ -54,6 +56,7 @@ cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scaffold_training.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
+    software_path=${SOFTWARE_PATH} \
     exp_name=${EXP_NAME} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     seq_des_cfg.proteinmpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \
@@ -62,6 +65,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scaffold_training.py \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
+    input_cfg.pdb_name_ext=${PDB_NAME_EXT} \
     input_cfg.subset_length_range=${SUBSET_LENGTH_RANGE} \
     input_cfg.n_subsample=${N_SUBSAMPLE} \
     start_step=0 \
