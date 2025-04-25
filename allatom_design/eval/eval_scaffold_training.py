@@ -44,8 +44,8 @@ def main(cfg: DictConfig):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Load in MPNN + structure prediction model for self-consistency evals
-    seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
-    struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
+    # seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
+    # struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     ### Load in PDB files to eval on ###
     pdb_files = get_pdb_files(**cfg.input_cfg)

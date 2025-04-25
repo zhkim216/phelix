@@ -46,12 +46,12 @@ def main(cfg: DictConfig):
     Path(mmcif_dir).mkdir(parents=True, exist_ok=True)
     if use_parallel:
         with Parallel(n_jobs=cfg.num_workers) as parallel_pool:
-            jobs = [delayed(pdb_to_mmcif)(pdb_path, Path(mmcif_dir, Path(pdb_path).name.replace(".pdb", ".cif"))) for pdb_path in pdb_paths]
+            jobs = [delayed(pdb_to_mmcif)(pdb_path, Path(mmcif_dir, Path(pdb_path).name.replace(".pdb", ".cif")), assign_label_seq_id=False) for pdb_path in pdb_paths]
             list(parallel_pool(tqdm(jobs, total=len(jobs), desc="Converting PDBs to mmCIFs")))
     else:
         for pdb_path in tqdm(pdb_paths, desc="Converting PDBs to mmCIFs"):
             mmcif_out = Path(mmcif_dir, Path(pdb_path).name.replace(".pdb", ".cif"))
-            pdb_to_mmcif(pdb_path, mmcif_out)
+            pdb_to_mmcif(pdb_path, mmcif_out, assign_label_seq_id=False)
 
     # For this dataset, we'll manually assign clusters based on the manifest.csv file
     clusters = {}

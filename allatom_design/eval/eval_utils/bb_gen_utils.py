@@ -28,8 +28,9 @@ from allatom_design.data.pdb_utils import write_batched_to_pdb
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     load_input
 from allatom_design.data.types import Structure, Tokenized
-from allatom_design.data.write.mmcif import write_batched_structures_to_mmcif, write_feats_to_mmcif
-from allatom_design.eval.eval_utils import sampling_utils
+from allatom_design.data.write.mmcif import (write_batched_structures_to_mmcif,
+                                             write_feats_to_mmcif)
+from allatom_design.eval.eval_utils import eval_metrics, sampling_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
 from allatom_design.model.atom_denoiser.ad_model import AtomDenoiser
@@ -460,6 +461,9 @@ def run_motif_cond_type_sampling(model: AtomDenoiser,
             # Save centered examples from which motifs were drawn
             centered_filenames = [f"{centered_gt_out_dir}/centered_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]
             write_batched_structures_to_mmcif(input_structures, centered_filenames)
+
+            # DEBUG
+            eval_metrics.motif_master_search(motif_filenames[0], centered_filenames[0], out_dir, "/media/scratch/software")
 
             ### Sample backbones ###
             # Set up backbone diffusion params
