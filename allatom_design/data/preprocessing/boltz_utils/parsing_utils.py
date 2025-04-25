@@ -225,7 +225,8 @@ def parse(data: PDB, resource: dict, clusters: dict) -> Target:
     return Target(structure=structure, record=record)
 
 
-def pdb_to_mmcif(pdb_path: str, mmcif_out: Path) -> None:
+def pdb_to_mmcif(pdb_path: str, mmcif_out: Path,
+                 assign_label_seq_id: bool) -> None:
     """
     Convert a PDB file to mmCIF format using gemmi.
     """
@@ -235,24 +236,75 @@ def pdb_to_mmcif(pdb_path: str, mmcif_out: Path) -> None:
     structure = gemmi.read_structure(pdb_path)
     structure.setup_entities()
 
-    # Create mapping from subchain id to entity
-    entities: dict[str, gemmi.Entity] = {}
-    for entity in structure.entities:
-        entity: gemmi.Entity
-        if entity.entity_type.name == "Water":
-            continue
-        for subchain_id in entity.subchains:
-            entities[subchain_id] = entity
+    if assign_label_seq_id:
+        # automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
+        structure.assign_label_seq_id()
+    else:
+        # Set sequence for each entity based on the sequence in the model, since we do not have SEQRES in these files
 
-    # Set sequence for each entity based on the sequence in the model, since we do not have SEQRES in these files
-    for raw_chain in structure[0].subchains():
-        model_sequence = raw_chain.extract_sequence()
-        subchain_id = raw_chain.subchain_id()
-        entities[subchain_id].full_sequence = model_sequence
+        # create mapping from subchain id to entity
+        entities: dict[str, gemmi.Entity] = {}
+        for entity in structure.entities:
+            entity: gemmi.Entity
+            if entity.entity_type.name == "Water":
+                continue
+            for subchain_id in entity.subchains:
+                entities[subchain_id] = entity
+
+        # set sequence for each entity
+        for raw_chain in structure[0].subchains():
+            model_sequence = raw_chain.extract_sequence()
+            subchain_id = raw_chain.subchain_id()
+            entities[subchain_id].full_sequence = model_sequence
 
     # Write mmCIF file
     mmcif_doc = structure.make_mmcif_document()
     mmcif_doc.write_file(str(mmcif_out))
+
+
+def mmcif_to_pdb(mmcif_path: str, pdb_out: Path, assign_label_seq_id: bool) -> None:
+    """
+    Convert a mmCIF file to a PDB file using gemmi.
+    """
+    if Path(pdb_out).exists():
+        return
+
+    structure = gemmi.read_structure(mmcif_path)
+    structure.setup_entities()
+
+
+def mmcif_to_pdb(mmcif_path: str, pdb_out: Path, assign_label_seq_id: bool) -> None:
+    """
+    Convert a mmCIF file to PDB format using gemmi.
+    """
+    if Path(pdb_out).exists():
+        return
+
+    structure = gemmi.read_structure(mmcif_path)
+    structure.setup_entities()
+
+    if assign_label_seq_id:
+        # automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
+        structure.assign_label_seq_id()
+    else:
+        # Set sequence for each entity based on the sequence in the model, since we do not have SEQRES in these files
+        entities: dict[str, gemmi.Entity] = {}
+        for entity in structure.entities:
+            entity: gemmi.Entity
+            if entity.entity_type.name == "Water":
+                continue
+            for subchain_id in entity.subchains:
+                entities[subchain_id] = entity
+
+        for raw_chain in structure[0].subchains():
+            model_sequence = raw_chain.extract_sequence()
+            subchain_id = raw_chain.subchain_id()
+            entities[subchain_id].full_sequence = model_sequence
+
+    # Write PDB file
+    pdb_str = structure.make_pdb_string()
+    with open(pdb_out, "w") as f:
+        f.write(pdb_str)
 
 
 class Resource:

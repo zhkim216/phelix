@@ -13,6 +13,7 @@ import pandas as pd
 import wandb
 from joblib import Parallel, delayed
 from natsort import natsorted
+from omegaconf import DictConfig
 from tqdm import tqdm
 
 from allatom_design.data.data import get_length_from_pdb
@@ -118,11 +119,9 @@ def get_pdb_files(pdb_dir: str,
 
 def process_pdb_files(pdb_files: list[str],
                       processed_pdb_dir: str,
-                      software_path: str,
-                      redis_host: str | None = None,
-                      redis_port: int | None = None,
-                      ccd_rdb_path: str | None = None,
-                      ccd_pkl_path: str | None = None) -> list[str]:
+                      pdb_to_cif_conversion_cfg: DictConfig,
+                      ccd_cfg: DictConfig,
+                      ) -> list[str]:
     """
     Process PDB files.
     Returns paths to processed structure files (.npz format).
@@ -137,17 +136,17 @@ def process_pdb_files(pdb_files: list[str],
         if Path(pdb_file).suffix != ".cif":
             # assume PDB file, convert to mmCIF and save to processed_pdb_dir/converted_mmcifs
             mmcif_file = Path(mmcif_dir, Path(pdb_file).name.replace(".pdb", ".cif"))
-            pdb_to_mmcif(pdb_file, mmcif_file)
+            pdb_to_mmcif(pdb_file, mmcif_file, assign_label_seq_id=pdb_to_cif_conversion_cfg.assign_label_seq_id)
         else:
             mmcif_file = pdb_file
         mmcif_files.append(mmcif_file)
 
     # Load or seed CCD resource in Redis
-    if redis_host is not None:
-        start_redis(redis_host, redis_port, software_path, ccd_rdb_path)
-        resource = Resource(host=redis_host, port=redis_port)
+    if ccd_cfg.redis_host is not None:
+        start_redis(ccd_cfg.redis_host, ccd_cfg.redis_port, ccd_cfg.software_path, ccd_cfg.ccd_rdb_path)
+        resource = Resource(host=ccd_cfg.redis_host, port=ccd_cfg.redis_port)
     else:
-        resource = pickle.load(open(ccd_pkl_path, "rb"))
+        resource = pickle.load(open(ccd_cfg.ccd_pkl_path, "rb"))
 
     # Fetch data
     data = fetch(mmcif_files, max_file_size=None)

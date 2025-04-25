@@ -112,11 +112,11 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
     for chain in structure.chains:
         # Define the model assembly
         chain_idx = chain["asym_id"]
-        chain_tag = str(chain["name"])
+        label_asym_id = chr(chain_idx + 65)  # rename to A,B,C, etc.
         asym = AsymUnit(
             entities_map[chain_idx],
-            details="Model subunit %s" % chain_tag,
-            id=chain_tag,
+            details="Model subunit %s" % label_asym_id,
+            id=label_asym_id,
         )
         asym_unit_map[chain_idx] = asym
     modeled_assembly = Assembly(asym_unit_map.values(), name="Modeled assembly")
@@ -313,8 +313,12 @@ def write_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
             # Map from label_seq_id to auth_seq_id
             auth_seq_ids = feats_i["residue_index"][feats_i["token_pad_mask"].bool()].tolist()  # treat input residue indices as auth_seq_ids
             auth_seq_id_map = {label_seq_id + 1: auth_seq_id for label_seq_id, auth_seq_id in enumerate(auth_seq_ids)}
-            asym = AsymUnit(entities_map[chain_id], auth_seq_id_map=auth_seq_id_map)
+
+            # Set chain_tag to A,B,C, etc., 0 indexed
+            chain_tag = chr(chain_id + 65)
+            asym = AsymUnit(entities_map[chain_id], auth_seq_id_map=auth_seq_id_map, id=chain_tag)
             asym_unit_map[chain_id] = asym
+
         modeled_assembly = Assembly(asym_unit_map.values(), name="Modeled assembly")
 
         class _MyModel(AbInitioModel):

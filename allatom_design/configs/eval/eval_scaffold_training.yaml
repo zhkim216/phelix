@@ -6,7 +6,7 @@ wandb:
   group: "debug" # Wandb group name
 
 # Software path
-software_path: /media/scratch/software
+software_path: /oak/stanford/groups/possu/rshuai/software
 
 # Outputs
 exp_name: eval_scaffold_training  # experiment name; used for wandb and output directory
@@ -32,14 +32,20 @@ input_cfg:
 
 # PDB file processing
 pdb_processing_cfg:
-  # If using redis
-  software_path: ${software_path}
-  redis_host: null  # localhost
-  redis_port: 7777
-  ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
+  # if we have to convert PDBs to mmCIFs
+  pdb_to_cif_conversion_cfg:
+    assign_label_seq_id: false  # if true, automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
 
-  # If redis host is not null, use this path to load the chemical component dictionary
-  ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
+  # CCD
+  ccd_cfg:
+    # If using redis
+    software_path: ${software_path}
+    redis_host: localhost  # null to disable
+    redis_port: 7777
+    ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
+
+    # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)
+    ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
 
 # Scaffolding options
 motif_conditioning_type_cfgs:

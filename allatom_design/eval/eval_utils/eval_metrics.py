@@ -14,9 +14,9 @@ from Bio.PDB import PDBParser
 from einops import rearrange
 from omegaconf import DictConfig
 from scipy import linalg
-from scipy.stats import entropy
 from torchtyping import TensorType
 from tqdm import tqdm
+import ast
 
 import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
@@ -28,6 +28,7 @@ from allatom_design.eval.eval_utils.fampnn_utils import run_fampnn
 from allatom_design.eval.eval_utils.folding_utils import (run_af2, run_esmfold_batched,
                                                run_omegafold)
 from allatom_design.eval.eval_utils.proteinmpnn_utils import run_mpnn
+from allatom_design.data.preprocessing.boltz_utils.parsing_utils import mmcif_to_pdb
 
 
 def compute_per_pdb_info(pdbs: list[str],
@@ -829,82 +830,6 @@ def run_tm_align_coords_batch(a: TensorType["b n 3", float],
     return tm_scores_a, tm_scores_b
 
 
-def compute_ss_kl(p_alpha: List[float], p_beta: List[float],
-                  q_alpha: List[float], q_beta: List[float],
-                  bin_size: int, pseudocount: float) -> float:
-    """
-    Compute an approximate to the empirical KL-divergence between the ground truth distribution p
-    and the sampled distribution q for secondary structure (helix and strand percentages).
-
-    We bin SS into a 2D grid, and only sum over the lower-triangular part of the grid since helix+strand <= 100%.
-
-    Inputs should be in units of percentage (0-100).
-
-    Parameters:
-    - p_alpha: helix percentages for the ground truth distribution p.
-    - p_beta: strand percentages for the ground truth distribution p.
-    - q_alpha: helix percentages for the sampled distribution q.
-    - q_beta: strand percentages for the sampled distribution q.
-    - bin_size (int, optional): Size of each bin for helix and strand proportions (default: 10).
-    - pseudocount (float, optional): Value to add to each histogram bin to avoid zero probabilities (default: 1.0).
-
-    Returns:
-    - kl_div (float): The KL divergence value KL(p || q)
-    """
-    p_alpha, p_beta, q_alpha, q_beta = np.array(p_alpha), np.array(p_beta), np.array(q_alpha), np.array(q_beta)
-
-    # Define histogram bins
-    bins = np.arange(0, 101, bin_size)
-    if bins[-1] < 100:
-        bins = np.append(bins, 100)
-
-    # 2D histogram for ground truth distribution
-    p_counts, _, _ = np.histogram2d(p_beta, p_alpha, bins=[bins, bins])
-    p_counts = np.flipud(p_counts)  # flip so that 0,0 is in the bottom-left corner
-    p_counts += pseudocount
-    p_probs = p_counts / p_counts.sum()
-
-    # 2D histogram for sampled distribution
-    q_counts, _, _ = np.histogram2d(q_beta, q_alpha, bins=[bins, bins])
-    q_counts = np.flipud(q_counts)  # flip so that 0,0 is in the bottom-left corner
-    q_counts += pseudocount
-    q_probs = q_counts / q_counts.sum()
-
-    # Compute KL divergence on the lower-triangular part of the matrix, including the diagonal
-    tril_indices = np.tril_indices(len(bins) - 1)
-    p_probs_flat = p_probs[tril_indices]
-    q_probs_flat = q_probs[tril_indices]
-    kl_div = entropy(p_probs_flat, q_probs_flat)
-
-    return kl_div
-
-
-def bootstrap_se(data: List[float], n_samples: int) -> float:
-    """
-    Perform bootstrapping on the provided data to compute the standard error.
-
-    Args:
-        data (List[float]): The data to bootstrap.
-        num_samples (int): Number of bootstrap samples.
-
-    Returns:
-        float: The bootstrapped standard error.
-    """
-    if len(data) == 0:
-        return np.nan
-
-    data_array = np.array(data)
-    bootstrap_means = np.empty(n_samples)
-
-    for i in range(n_samples):
-        # Resample with replacement
-        resampled = np.random.choice(data_array, size=len(data_array), replace=True)
-        bootstrap_means[i] = np.mean(resampled)
-
-    boot_se = np.std(bootstrap_means, ddof=1)
-    return boot_se
-
-
 def foldseek_cluster(pdbs: List[str],
                      out_dir: str,
                      temp_dir: str,
@@ -1121,3 +1046,79 @@ def compute_motif_bb_rmsd(pdb_path: str,
                                        weights=rearrange(bb_motif_atom_mask, "n a -> 1 (n a)")).squeeze(0)
 
     return bb_rmsd.item()
+
+
+
+def motif_master_search(motif_pdb_path: str,
+                        target_pdb_path: str,
+                        temp_dir: str,
+                        software_path: str) -> float:
+    """
+    Run motif master search querying a motif PDB against a target PDB.
+    """
+    Path(temp_dir).mkdir(parents=True, exist_ok=True)
+    unique_id = uuid.uuid4().hex  # for temp files
+
+    # Convert CIF to PDB if necessary
+    query_path = f"{temp_dir}/{Path(motif_pdb_path).stem}_query_{unique_id}.pdb"
+    target_path = f"{temp_dir}/{Path(target_pdb_path).stem}_target_{unique_id}.pdb"
+    if Path(motif_pdb_path).suffix == ".cif":
+        mmcif_to_pdb(motif_pdb_path, query_path, assign_label_seq_id=False)
+    else:
+        shutil.copy(motif_pdb_path, query_path)
+
+    if Path(target_pdb_path).suffix == ".cif":
+        mmcif_to_pdb(target_pdb_path, target_path, assign_label_seq_id=False)
+    else:
+        shutil.copy(target_pdb_path, target_path)
+
+    # Create PDS databases for query
+    query_pds_path = f"{temp_dir}/{Path(query_path).stem}.pds"
+    command = [
+        f"{software_path}/master-v1.6/bin/createPDS",
+        "--type", "query",
+        "--pdb", query_path,
+        "--pds", query_pds_path
+    ]
+    subprocess.run(command, check=True)
+
+    # Create PDS database for target
+    target_pds_path = f"{temp_dir}/{Path(target_path).stem}.pds"
+    command = [
+        f"{software_path}/master-v1.6/bin/createPDS",
+        "--type", "target",
+        "--pdb", target_path,
+        "--pds", target_pds_path
+    ]
+    subprocess.run(command, check=True)
+
+    # Run motif master search
+    match_out = f"{temp_dir}/match_out_{unique_id}.txt"
+    command = [
+        f"{software_path}/master-v1.6/bin/master",
+        "--query", query_pds_path,
+        "--target", target_pds_path,
+        "--rmsdCut", "1",
+        "--topN", "5",
+        "--minN", "1",
+        "--outType", "match",
+        "--matchOut", match_out,
+    ]
+    subprocess.run(command, check=True)
+
+    # Parse hits
+    df = pd.read_csv(match_out,
+                     sep=r"\s+",        # regex: one or more whitespace
+                     header=None,
+                     names=["rmsd", "pds_path", "indices"],
+                     engine="python")
+    df["indices"] = df["indices"].apply(ast.literal_eval)
+
+    # Clean up temp files
+    Path(query_path).unlink(missing_ok=True)
+    Path(target_path).unlink(missing_ok=True)
+    Path(query_pds_path).unlink(missing_ok=True)
+    Path(target_pds_path).unlink(missing_ok=True)
+    Path(match_out).unlink(missing_ok=True)
+
+    return df
