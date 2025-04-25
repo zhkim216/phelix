@@ -3,6 +3,9 @@ import math
 import os
 import pickle
 import re
+import socket
+import subprocess
+import time
 from pathlib import Path
 
 import numpy as np
@@ -115,8 +118,10 @@ def get_pdb_files(pdb_dir: str,
 
 def process_pdb_files(pdb_files: list[str],
                       processed_pdb_dir: str,
+                      software_path: str,
                       redis_host: str | None = None,
                       redis_port: int | None = None,
+                      ccd_rdb_path: str | None = None,
                       ccd_pkl_path: str | None = None) -> list[str]:
     """
     Process PDB files.
@@ -139,6 +144,7 @@ def process_pdb_files(pdb_files: list[str],
 
     # Load or seed CCD resource in Redis
     if redis_host is not None:
+        start_redis(redis_host, redis_port, software_path, ccd_rdb_path)
         resource = Resource(host=redis_host, port=redis_port)
     else:
         resource = pickle.load(open(ccd_pkl_path, "rb"))
@@ -154,6 +160,33 @@ def process_pdb_files(pdb_files: list[str],
 
     return processed_struct_files
 
+
+def start_redis(redis_host: str, redis_port: int, software_path: str, ccd_rdb_path: str):
+    command = [
+        f"{software_path}/redis/bin/redis-server",
+        "--daemonize", "yes",
+        "--dir", str(Path(ccd_rdb_path).parent),
+        "--dbfilename", str(Path(ccd_rdb_path).name),
+        "--port", str(redis_port),
+    ]
+    # Start Redis in daemon mode (forks immediately)
+    subprocess.run(command, check=True)
+
+    # Poll to see if Redis is accepting connections
+    start_time = time.time()
+    while True:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.connect((redis_host, redis_port))
+            sock.close()
+            break  # connected successfully
+        except ConnectionRefusedError:
+            if time.time() - start_time > 60:
+                raise TimeoutError("Redis did not start within 60 seconds.")
+            time.sleep(1)
+
+    # Now the server is guaranteed to be ready
+    print("Redis is up and running.")
 
 
 def load_pdb_files_from_manifest(pdb_dir: str, **manifest_kwargs) -> list[str]:
