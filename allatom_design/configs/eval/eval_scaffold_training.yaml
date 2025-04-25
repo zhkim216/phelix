@@ -5,6 +5,9 @@ wandb:
   wandb_id: "richardshuai"  # Wandb username
   group: "debug" # Wandb group name
 
+# Software path
+software_path: /media/scratch/software
+
 # Outputs
 exp_name: eval_scaffold_training  # experiment name; used for wandb and output directory
 base_out_dir: ${denoiser_train_dir}/eval_scaffold_training  # outputs will be saved to base_out_dir/exp_name
@@ -29,8 +32,13 @@ input_cfg:
 
 # PDB file processing
 pdb_processing_cfg:
-  redis_host: null
-  redis_port: null
+  # If using redis
+  software_path: ${software_path}
+  redis_host: null  # localhost
+  redis_port: 7777
+  ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
+
+  # If redis host is not null, use this path to load the chemical component dictionary
   ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
 
 # Scaffolding options
