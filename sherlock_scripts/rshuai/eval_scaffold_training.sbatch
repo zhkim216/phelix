@@ -1,6 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=s5_a2_noresidx_eval_scaffold
-#SBATCH -p possu,bioe
+#SBATCH --job-name=LP_s5_a1_mmdit_eval_scaffold
+#SBATCH -p possu
+#SBATCH --nodelist=sh03-18n05
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -35,7 +36,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Denoiser path
-MODEL_NAME=s5_a2_noresidx
+MODEL_NAME=s5_a1_mmdit
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Input config
@@ -44,7 +45,7 @@ PDB_DIR=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2_boltz/preprocess
 PDB_NAME_LIST=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2_boltz/${PHASE}_pdb_names.list
 PDB_NAME_EXT=.cif
 SUBSET_LENGTH_RANGE="[32,256]"
-N_SUBSAMPLE=128
+N_SUBSAMPLE=96
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
