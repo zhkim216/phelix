@@ -4,7 +4,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --nodelist=sh04-10n01
-#SBATCH --time=96:00:00
+#SBATCH --time=168:00:00
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%j.out
