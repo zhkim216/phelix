@@ -23,6 +23,8 @@ from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import \
     FAMPNNDenoiser
+from allatom_design.model.seq_denoiser.denoisers.atom_mpnn_denoiser import \
+    AtomMPNNDenoiser
 from chroma.layers import complexity
 
 
@@ -48,14 +50,11 @@ class SeqDenoiser(nn.Module):
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
         self.interpolant = get_interpolant(cfg.interpolant)
 
-        self.drop_residx_p = cfg.get("drop_residx_p", 0.0)
-
         # Backbone noise options
         denoiser_cfg = cfg.denoiser
-        fampnn_cfg = denoiser_cfg.get("fampnn", denoiser_cfg.get("minimpnn", None))  # default to FAMPNN / MiniMPNN settings for backwards compatibility
-        self.augment_eps = denoiser_cfg.get("augment_eps", fampnn_cfg.get("augment_eps", None))
-        self.per_residue_eps = denoiser_cfg.get("per_residue_eps", fampnn_cfg.get("per_residue_eps", False))
-        self.max_eps = denoiser_cfg.get("max_eps", fampnn_cfg.get("max_eps", None))
+        self.augment_eps = denoiser_cfg.augment_eps
+        self.per_residue_eps = denoiser_cfg.per_residue_eps
+        self.max_eps = denoiser_cfg.max_eps
 
 
     def setup(self):
@@ -63,93 +62,51 @@ class SeqDenoiser(nn.Module):
         self.denoiser.setup()
 
 
-    def forward(self,
-                batch: Dict[str, TensorType["b ..."]],
-                t: Optional[TensorType["b", float]] = None,
-                aux_inputs_override: Optional[Dict[str, TensorType["b ..."]]] = None,  # for providing overrides to aux_inputs
-                skip_interpolant: bool = False,  # for dpo-finetuning, interpolant is applied to the batch outside of the model
-                ) -> Dict[str, TensorType["b ..."]]:
-        """
-        batch should contain:
-        - x: TensorType["b n a 3", float]
-        - residue_index: TensorType["b n", int]
-        - seq_mask: TensorType["b n", float]
-        """
-        # Copy batch to avoid modifying the original
-        batch = copy.deepcopy(batch)
+    def forward(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
         outputs = {}
 
-        ## Apply interpolant to mask the inputs ##
-        if not skip_interpolant:
-            interpolant_out = self.interpolant(batch, t)
-            batch["x_noised"] = interpolant_out["x_noised"]
-            batch["aatype_noised"] = interpolant_out["aatype_noised"]
-            batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]  # 1 for unmasked aatype
-            batch["scn_mlm_mask"] = interpolant_out["scn_mlm_mask"]  # 1 for unmasked sidechains
+        # Copy batch to avoid modifying the original
+        batch = copy.deepcopy(batch)
 
-        ## Get random backbone noise ##
-        noise, noise_labels = self.get_random_noise(batch["seq_mask"])
+        # Denoise sequence
+        _, aux_preds = self.denoiser(batch)
 
-        ## Randomly drop out residue index ##
-        drop_residx = None
-        if self.training:
-            # at train time, randomly drop out all residue indices for each batch element
-            residue_index = batch["residue_index"]
-            drop_residx = torch.rand(residue_index.shape[0], device=residue_index.device) < self.drop_residx_p  # [B]
 
-        # During training, keep track of certain additional features
-        aux_inputs = {
-            "x": batch["x"],  # ground truth coordinates
-            "aatype": batch["aatype"],  # ground truth aatype
-            "atom_mask": batch["atom_mask"],  # ground truth atom mask; includes missing, ghost, and pad atoms
-            "t_scd": batch.get("t_scd", None),  # scalar; fix t_scd (sidechain diffusion time) if provided, usually for eval
-            "seq_mlm_mask": batch["seq_mlm_mask"],
-            "scn_mlm_mask": batch["scn_mlm_mask"],
-            "noise": noise,
-            "noise_labels": noise_labels,
-            "drop_residx": drop_residx,
-        }
-        aux_inputs.update(aux_inputs_override or {})  # override aux_inputs if provided
+        # ## Apply interpolant to mask the inputs ##
+        # if not skip_interpolant:
+        #     interpolant_out = self.interpolant(batch, t)
+        #     batch["x_noised"] = interpolant_out["x_noised"]
+        #     batch["aatype_noised"] = interpolant_out["aatype_noised"]
+        #     batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]  # 1 for unmasked aatype
+        #     batch["scn_mlm_mask"] = interpolant_out["scn_mlm_mask"]  # 1 for unmasked sidechains
 
-        # Denoise coords
-        _, _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"],
-                                        batch["residue_index"], batch['chain_index'],
-                                        batch["seq_mask"], batch["missing_atom_mask"],
-                                        batch["scn_mlm_mask"],
-                                        aux_inputs=aux_inputs)
+        # ## Get random backbone noise ##
+        # noise, noise_labels = self.get_random_noise(batch["seq_mask"])
+
+        # # During training, keep track of certain additional features
+        # aux_inputs = {
+        #     "x": batch["x"],  # ground truth coordinates
+        #     "aatype": batch["aatype"],  # ground truth aatype
+        #     "atom_mask": batch["atom_mask"],  # ground truth atom mask; includes missing, ghost, and pad atoms
+        #     "t_scd": batch.get("t_scd", None),  # scalar; fix t_scd (sidechain diffusion time) if provided, usually for eval
+        #     "seq_mlm_mask": batch["seq_mlm_mask"],
+        #     "scn_mlm_mask": batch["scn_mlm_mask"],
+        #     "noise": noise,
+        #     "noise_labels": noise_labels,
+        # }
+        # aux_inputs.update(aux_inputs_override or {})  # override aux_inputs if provided
+
+        # # Denoise coords
+        # _, _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"],
+        #                                 batch["residue_index"], batch['chain_index'],
+        #                                 batch["seq_mask"], batch["missing_atom_mask"],
+        #                                 batch["scn_mlm_mask"],
+        #                                 aux_inputs=aux_inputs)
 
         # Additional outputs for computing loss
         outputs.update(aux_preds)
 
         return outputs
-
-    def score(self,
-              x: TensorType["b n 37 3", float],
-              aatype: TensorType["b n", int],
-              seq_mask: TensorType["b n", float],
-              missing_atom_mask: TensorType["b n 37", float],  # 1 where atoms are missing
-              scn_mlm_mask: TensorType["b n", float],  # 0 for masked sidechains
-              residue_index: TensorType["b n", int],
-              chain_index: TensorType["b n", int],
-              return_embeddings: bool = False,
-        ) -> TensorType["b n"]:
-        atom_mask_noised = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype)  # 0 for ghost atoms; X only has backbone atoms
-        atom_mask_noised = atom_mask_noised * seq_mask.unsqueeze(-1)  # mask out padding
-        atom_mask_noised = atom_mask_noised * (1 - missing_atom_mask)  # mask out missing atoms
-        atom_mask_noised[..., rc.non_bb_idxs] = atom_mask_noised[..., rc.non_bb_idxs] * scn_mlm_mask.unsqueeze(-1)  # mask out masked sidechain atoms
-
-        # Run denoiser and get logits
-        seq_logits, mpnn_feature_dict = self.denoiser.seq_design_module(x,
-                                                                        aatype,
-                                                                        seq_mask,
-                                                                        atom_mask_noised,
-                                                                        residue_index,
-                                                                        chain_index,
-                                                                        return_encoder_embeds=return_embeddings)
-        log_probs = F.log_softmax(seq_logits, dim=-1)
-        if return_embeddings:
-            return log_probs, mpnn_feature_dict
-        return log_probs
 
 
     def set_scale_factors(self,
@@ -696,6 +653,8 @@ def get_denoiser(cfg: DictConfig,
     """
     if cfg.name == "fampnn" or cfg.name == "minimpnn":  # backwards compatibility
         return FAMPNNDenoiser(cfg, sigma_data)
+    elif cfg.name == "atom_mpnn":
+        return AtomMPNNDenoiser(cfg, sigma_data)
     else:
         raise ValueError(f"Unknown denoiser: {cfg.name}")
 
