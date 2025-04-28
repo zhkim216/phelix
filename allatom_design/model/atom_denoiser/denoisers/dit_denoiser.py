@@ -88,8 +88,8 @@ class DiTDenoiser(nn.Module):
 
 
     def backbone_diffusion(self,
-                           diffusion_inputs: dict[str, TensorType["b ..."]],
                            motif_inputs: dict[str, TensorType["b ..."]],
+                           diffusion_inputs: dict[str, TensorType["b ..."]],
                            is_sampling: bool,
                            diffusion_params: dict[str, Any] | None,
                            ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone

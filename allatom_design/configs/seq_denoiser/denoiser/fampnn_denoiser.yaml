@@ -5,7 +5,6 @@ defaults:
   - interpolant: edm_interpolant
 
 task: ${model.task}
-drop_residx_p: 0.0
 
 # Backbone noise options
 augment_eps: 0.0

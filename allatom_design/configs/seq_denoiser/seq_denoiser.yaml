@@ -33,8 +33,6 @@ trainer:
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
   check_val_every_n_epoch: 50  # How often to run validation
-  reload_dataloaders_every_n_epochs: null  # updated based on data.cluster_sample
-
 
 # Resuming training options
 resume:
@@ -43,24 +41,24 @@ resume:
   # overrides: {}  # add any specific overrides to apply to the config
 
 # Data options
-data:
-    pdb_path: /media/scratch/datasets/ingraham_cath_dataset
-    cluster_sample: false
-    fixed_size: 128
-    overfit: ${overfit}
-    subset_length_range: null
-    max_scrmsd: null
-    max_rel_rog: null
-    se3_augment: true  # randomly rotate and translate data
-    translation_scale: 1.0  # scale of the translation augmentation
-    n_train_cluster_resample: 1
+# data:
+#     pdb_path: /media/scratch/datasets/ingraham_cath_dataset
+#     cluster_sample: false
+#     fixed_size: 128
+#     overfit: ${overfit}
+#     subset_length_range: null
+#     max_scrmsd: null
+#     max_rel_rog: null
+#     se3_augment: true  # randomly rotate and translate data
+#     translation_scale: 1.0  # scale of the translation augmentation
+#     n_train_cluster_resample: 1
 
-boltz_data:
-  pdb_path: ${data.pdb_path}
+data:
+  pdb_path: /media/scratch/datasets/boltz
   tokenizer:
     _target_: boltz.data.tokenize.boltz.BoltzTokenizer
   featurizer:
-    _target_: allatom_design.data.featurizer.SimpleBoltzFeaturizer
+    _target_: allatom_design.data.feature.featurizer.SimpleBoltzFeaturizer
 
   filters:
     - _target_: boltz.data.filter.dynamic.size.SizeFilter
@@ -94,7 +92,7 @@ boltz_data:
 # Model options
 defaults:
   - _self_
-  - denoiser: fampnn_denoiser
+  - denoiser: atom_mpnn_denoiser
   - interpolant: mar_interpolant
 
 model:
@@ -109,7 +107,6 @@ model:
   ema:
     use_phema: false  # use post-hoc EMA
     ema_decay: 0.99  # if not using phema, use this decay rate
-
 
 eval:
   eval_timesteps: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]  # Timesteps to evaluate at

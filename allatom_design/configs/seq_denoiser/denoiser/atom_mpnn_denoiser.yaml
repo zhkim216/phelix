@@ -1,0 +1,41 @@
+name: atom_mpnn
+
+defaults:
+  - _self_
+  - interpolant: edm_interpolant
+
+task: ${model.task}
+
+# Backbone noise options
+augment_eps: 0.0
+per_residue_eps: false
+max_eps: null  # for per_residue_eps, samples from half-normal truncated to this value
+
+mpnn:
+  atom_encoder:
+    atom_n_channel: 16
+    token_n_channel: ${denoiser.mpnn.n_channel}
+    atom_feature_dim: 386
+    k_atom_neighbors: 32
+
+    n_layers: 3
+    dropout_p: 0.1
+
+  n_aatype: ${model.n_aatype}
+  n_channel: 128
+  n_layers: 3
+  k_neighbors: 48
+  ablate_noise_labels: false
+  init_hV_with_hS: true
+
+  dropout_p: 0.1
+  return_embedding: "last"
+
+  token_edge_features:
+
+
+  potts:
+    use_potts: true
+    parameterization: "factor"
+    num_factors: null
+    symmetric_J: true

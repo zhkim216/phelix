@@ -43,18 +43,8 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
     # Set up LightningDataModule
-    if Path(cfg.data.pdb_path).stem == "boltz":
-        # Load in Boltz datamodule
-        boltz_data_cfg = hydra.utils.instantiate(cfg.boltz_data)
-        datamodule = BoltzSDDataModule(boltz_data_cfg)
-    else:
-        # Standard SD data
-        datamodule = LitSDDataModule(
-            data_cfg=cfg.data,
-            batch_size=cfg.train.batch_size,
-            num_workers=cfg.num_workers,
-            cuda=cfg.cuda,
-        )
+    data_cfg = hydra.utils.instantiate(cfg.data)
+    datamodule = BoltzSDDataModule(data_cfg)
 
     # Init wandb only on node rank 0
     local_rank = os.environ.get("LOCAL_RANK", None)
@@ -196,13 +186,6 @@ def update_config(cfg: DictConfig) -> None:
     if getattr(cfg.denoiser, "confidence_module", None) and cfg.denoiser.confidence_module.enabled:
         # Confidence module parameters are not always used
         cfg.trainer.strategy = "ddp_find_unused_parameters_true"
-
-    if cfg.data.cluster_sample:
-        # if we're using cluster sampling, we want to reload the dataloader every epoch
-        cfg.trainer.reload_dataloaders_every_n_epochs = 1
-    else:
-        # don't reload dataloaders every epoch
-        cfg.trainer.reload_dataloaders_every_n_epochs = 0
 
 
 if __name__ == "__main__":
