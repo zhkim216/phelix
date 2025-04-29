@@ -8,20 +8,12 @@ from typing import List, Union
 import lightning as L
 import numpy as np
 import torch
-import torch.nn.functional as F
-from einops import rearrange
 from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from allatom_design.data import const, conversion
-from allatom_design.data import residue_constants as rc
 from allatom_design.data.crop.cropper import Cropper
-from allatom_design.data.data import (FEATURES_LONG, atom14_aatype_to_atom37,
-                                      atom37_to_atom14,
-                                      get_interface_residue_mask,
-                                      pad_atom_feats_to_tokenwise)
 from allatom_design.data.feature.featurizer import SimpleBoltzFeaturizer
 from allatom_design.data.feature.pad import pad_to_max
 from allatom_design.data.sample.sampler import Sample, Sampler
@@ -362,41 +354,3 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     return collated
 
 
-def process_single_pdb(data):
-    """
-    Given output of Boltz featurization and conversion to OpenFold features, process into a single example.
-    """
-    example = {}
-
-    # Use raw coordinates
-    x = data["all_atom_positions"]  # [n, a, 3]
-    atom_mask = data["all_atom_mask"]  # [n, a]
-    seq_mask = data["seq_mask"]  # [n]
-    x = x * atom_mask[..., None]  # we first ensure missing & ghost atoms are zeroed out
-
-    # per-channel mask for x, used for loss.
-    # We only mask out missing atoms from PDB files, not ghost atoms.
-    x_mask = rearrange(1 - data["missing_atom_mask"], "n a -> n a 1").expand_as(x)
-
-    # Construct example
-    example["x"] = x * atom_mask[..., None]
-    example["seq_mask"] = seq_mask
-    example["x_mask"] = x_mask
-    example["residue_index"] = data["residue_index"]
-    example["chain_index"] = data["chain_index"]
-    example["aatype"] = data["aatype"]  # not one-hot encoded
-    example["ghost_atom_mask"] = data["ghost_atom_mask"]
-    example["missing_atom_mask"] = data["missing_atom_mask"]
-    example["atom_mask"] = atom_mask
-    example["seq_unk_mask"] = (data["aatype"] == rc.restype_order_with_x["X"])
-    example["interface_residue_mask"] = data["interface_residue_mask"]
-
-    # Convert data types
-    example_out = {}
-    for k, v in example.items():
-        if k in FEATURES_LONG:
-            example_out[k] = v.long()
-        else:
-            example_out[k] = v.float()
-
-    return example_out

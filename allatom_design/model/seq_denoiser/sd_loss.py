@@ -18,8 +18,7 @@ class SDLoss(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.task = cfg.task
-        self.use_scn_diffusion_loss = self.task in ["scn_pack", "allatom_seq_des"]
-        self.use_seq_pred = self.task in ["seq_des", "allatom_seq_des"]
+        self.use_seq_pred = self.task in ["seq_des"]
 
         # Parse loss_weights
         self.loss_weights = {}
@@ -34,34 +33,22 @@ class SDLoss(nn.Module):
         # Define losses based on task
         if self.task == "seq_des":
             self.loss_keys = {"seq_loss", "potts_composite_loss"}
-        elif self.task == "scn_pack":
-            self.loss_keys = {"scn/mse_loss"}
-        elif self.task == "allatom_seq_des":
-            self.loss_keys = {"seq_loss", "scn/mse_loss", "psce_loss", "potts_composite_loss"}
         else:
             raise ValueError(f"Unrecognized task: {self.task}")
 
 
-    def forward(self, outputs, batch, eval_pack = True, eval_seq = True, eval_total = True, return_aux: bool = False):
+    def forward(self, outputs, batch, eval_seq = True, eval_total = True, return_aux: bool = False):
         """
-        Compute losses for the atom denoiser.
-        If computing seq_loss, expects outputs to contain:
-        - seq_logits: (b, n, k) sequence logits
-
-        If computing scn/mse_loss, expects outputs to contain a "scn_diffusion_aux" key with the following structure:
-        - x1_pred: (m*b, n, 33, 3) x1 prediction
-        - x_target: (m*b, n, 33, 3) target
-
-        m denotes batch size multiplier, b denotes batch size.
+        Compute losses for the sequence denoiser
         """
         aux = {}  # losses
         aux_monitor = {}  # monitor other metrics that do not contribute to the loss
         if self.use_seq_pred and eval_seq:
             # compute sequence loss from sequence design module
-            seq_loss_mask = batch['seq_mask'] * (1 - outputs["seq_mlm_mask"])
+            seq_loss_mask = batch["seq_mask"] * (1 - outputs["seq_mlm_mask"])
 
             #mask unk tokens from loss calculation
-            seq_loss_mask = seq_loss_mask * (1 - batch['seq_unk_mask'])
+            seq_loss_mask = seq_loss_mask * (1 - batch["seq_unk_mask"])
 
             aux["seq_loss"] = masked_cross_entropy(outputs["seq_logits"], batch["aatype"], seq_loss_mask,
                                                    seq_loss_cfg=self.cfg.seq_loss)
@@ -72,66 +59,6 @@ class SDLoss(nn.Module):
                 aux["potts_composite_loss"] = potts_composite_loss(batch["aatype"], potts_decoder_aux,
                                                                    self.cfg.potts.label_smoothing,
                                                                    self.cfg.potts.per_token_avg)
-
-        if self.use_scn_diffusion_loss and eval_pack:
-            # We use sidechain diffusion auxiliary outputs to compute loss
-            scn_diff_outputs = outputs["scn_diffusion_aux"]
-
-            ## handle batch multiplier dimension
-            scn_pred = scn_diff_outputs["scn_pred"]
-            scn_target = scn_diff_outputs["scn_target"]
-            M = scn_pred.shape[0] // batch["x_mask"].shape[0]  # diffusion batch multiplier
-            mask = repeat(batch["x_mask"][..., rc.non_bb_idxs, :], "b n a x -> (m b) n a x", m=M)
-
-            ## mask out loss wherever the backbone frame doesn't exist
-            mask = mask * scn_diff_outputs["bb_frames_exists"][..., None, None]
-
-            ## loss weight based on EDM loss
-            loss_weight_scn = scn_diff_outputs["loss_weight_t"]
-
-            # Compute sidechain MSE loss
-            aux["scn/mse_loss"] = masked_mse(scn_pred,
-                                             scn_target,
-                                             mask=mask,
-                                             per_token_avg=self.cfg.mse_loss.per_token_avg,)
-            aux_monitor["scn/unweighted_mse_loss"] = aux["scn/mse_loss"].mean().detach().clone()
-            aux["scn/mse_loss"] = aux["scn/mse_loss"] * loss_weight_scn  # apply time step loss weight
-
-            # Compute loss for confidence model
-            if scn_diff_outputs.get("confidence_aux") is not None:
-                confidence_outputs = scn_diff_outputs["confidence_aux"]
-
-                psce_logits = confidence_outputs["psce_logits"]
-                scn_pred_rollout = confidence_outputs["scn_pred_rollout"]
-                scn_target = confidence_outputs["scn_target"]
-                scn_atom_mask = batch["atom_mask"][..., rc.non_bb_idxs]
-
-                # Construct residue-level mask
-                new_scn_mask = (1 - outputs["scn_mlm_mask"])  # only compute confidence loss over masked sidechains
-                new_scn_mask = new_scn_mask * (1 - batch["seq_unk_mask"])  # mask out true unk tokens
-                new_scn_mask = new_scn_mask * batch["seq_mask"]  # mask out padding
-                new_scn_mask = new_scn_mask * confidence_outputs["bb_frames_exists"]  # mask out residues with missing backbone frames
-
-                # Compute PSCE confidence loss
-                psce_mask = rearrange(new_scn_mask, "b n -> b n 1") * scn_atom_mask  # mask out ghost and missing sidechain atoms
-                aux["psce_loss"] = psce_loss(psce_logits, scn_pred_rollout, scn_target, psce_mask,
-                                             self.cfg.inf,
-                                             **confidence_outputs["sce_bins_cfg"])
-
-                # monitor rollout sidechain RMSD (averaged across residues with masked sidechains)
-                msd_per_res = (psce_mask[..., None] * (scn_target - scn_pred_rollout)).pow(2).sum(dim=(-1, -2)) / psce_mask.sum(dim=-1).clamp(min=1)
-                rmsd_per_res = msd_per_res.sqrt()
-                rmsd = (rmsd_per_res * new_scn_mask).sum(dim=-1) / new_scn_mask.sum(dim=-1).clamp(min=1)
-                aux_monitor["rollout/scn_rmsd"] = rmsd.mean().detach().clone()
-
-                # monitor per-atom sce vs psce correlation
-                psce = confidence_outputs["psce"]
-                sce = torch.norm(scn_pred_rollout - scn_target, dim=-1)
-                rho = spearmanr(psce[psce_mask.bool()].detach().cpu(), sce[psce_mask.bool()].detach().cpu())[0]
-                pearson_r = pearsonr(psce[psce_mask.bool()].detach().cpu(), sce[psce_mask.bool()].detach().cpu())[0]
-                aux_monitor["rollout/sce_vs_psce_rho"] = rho
-                aux_monitor["rollout/sce_vs_psce_pearson_r"] = pearson_r
-
 
         # Aggregate losses
         total_loss = 0
@@ -160,24 +87,6 @@ class SDLoss(nn.Module):
             return total_loss, aux
 
         return total_loss
-
-def masked_mse(x: TensorType["b ...", float],
-               y: TensorType["b ...", float],
-               mask: TensorType["b ...", float],
-               per_token_avg: bool = True,
-               ) -> TensorType["b", float]:
-
-    data_dims = tuple(range(1, len(x.shape)))
-    mse = (x - y).pow(2) * mask
-    if per_token_avg:
-        # average loss per token
-        loss = mse.sum(data_dims) / mask.sum(data_dims).clamp(min=1e-6)
-    else:
-        # divide by constant N to get loss on roughly the same scale as per_token_avg
-        N = math.prod(mse.shape[1:])
-        loss = mse.sum(data_dims) / N
-
-    return loss
 
 
 def masked_cross_entropy(logits: TensorType["b n k", float],
@@ -229,32 +138,6 @@ def masked_seq_accuracy(logits: TensorType["b n k", float],
     pred = logits.argmax(dim=-1)
     correct = (pred == target).float()
     return (correct * mask).sum(dim=-1) / mask.sum(dim=-1).clamp(min=1e-8)
-
-
-def psce_loss(psce_logits: TensorType["b n 33 n_bins", float],
-              scn_pred_rollout: TensorType["b n 33", float],
-              scn_target: TensorType["b n 33", float],
-              mask: TensorType["b n 33", float],
-              inf: float,
-              min_bin: float,
-              max_bin: float,
-              n_bins: int) -> TensorType["b", float]:
-    """
-    Compute confidence loss -- cross-entropy loss on binned Predicted Sidechain Error (PSCE)
-    """
-    # Bin sidechain errors
-    lower = torch.linspace(min_bin, max_bin, n_bins, device=psce_logits.device)
-    upper = torch.cat([lower[1:], lower.new_tensor([inf])], dim=-1)
-
-    sce = torch.norm(scn_pred_rollout - scn_target, dim=-1, keepdim=True)
-    sce_binned = ((sce >= lower) * (sce < upper)).type(sce.dtype)  # [b n 33 n_bins]
-
-    # Compute cross entropy loss
-    logprobs = F.log_softmax(psce_logits, dim=-1)
-    cel = -(logprobs * sce_binned).sum(dim=-1)
-    loss = (cel * mask).sum(dim=[1, 2]) / mask.sum(dim=[1, 2]).clamp(min=1e-8)
-
-    return loss
 
 
 def potts_composite_loss(S: TensorType["b n", int],

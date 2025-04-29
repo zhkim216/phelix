@@ -35,40 +35,9 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                            TensorType["b n", int],  # aatype pred
                            dict[str, TensorType["b ..."]]  # aux_preds
                            ]:
-        mpnn_features = self.atom_mpnn(batch)
+        logits, mpnn_feats = self.atom_mpnn(batch)
 
-
-
-        # # Construct atom_mask_noised: 0 for missing / ghost / masked / pad atoms, 1 otherwise
-        # atom_mask_noised = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_noised)  # 0 for ghost atoms; X only has backbone atoms
-        # atom_mask_noised = atom_mask_noised * seq_mask.unsqueeze(-1)  # mask out padding
-        # atom_mask_noised = atom_mask_noised * (1 - missing_atom_mask)  # mask out missing atoms
-        # atom_mask_noised[..., rc.non_bb_idxs] = atom_mask_noised[..., rc.non_bb_idxs] * scn_mlm_mask.unsqueeze(-1)  # mask out masked sidechain atoms
-
-        # # Sequence design
-        # seq_logits, mpnn_feature_dict = self.seq_design_module(
-        #     x_noised,
-        #     aatype_noised,
-        #     seq_mask,
-        #     atom_mask_noised,
-        #     residue_index,
-        #     chain_encoding,
-        #     noise=aux_inputs.get("noise", None),
-        #     noise_labels=aux_inputs.get("noise_labels", None),
-        #     h_S_init=esmc_embed)
-
-        # aatype_pred, scaled_seq_probs = self.sample_aatype(seq_logits, aux_inputs, is_sampling)
-
-        # # Outputs
-        # aux_preds = {
-        #     "seq_logits": seq_logits,
-        #     "seq_probs": F.softmax(seq_logits, dim=-1),
-        #     "scaled_seq_probs": scaled_seq_probs,
-        #     "potts_decoder_aux": mpnn_feature_dict.get("potts_decoder_aux", None),
-        # }
-
-
-        return x1_pred, aatype_pred, aux_preds
+        return logits, mpnn_feats
 
 
     def sample_aatype(self,
