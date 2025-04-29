@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=s5_a2_noresidx_lw1.0
+#SBATCH --job-name=s5_a2_noresidx_a5.0
 #SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -30,7 +30,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
 WANDB_ID=richardshuai
-EXP_NAME=s5_a2_noresidx_lw1.0
+EXP_NAME=s5_a2_noresidx_a5.0
 GROUP=backbone
 
 # Dataset paths
@@ -56,7 +56,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser.dit.use_mmdit=false \
     train.batch_size=16 \
     denoiser.training_batch_size_mult=8 \
-    loss.loss_weights.motif.mse_loss=1.0 \
+    loss.loss_weights.bb.mse_loss=0.0 \
+    loss.loss_weights.motif_weighted_bb.mse_loss=1.0 \
+    loss.motif_weighted_bb.alpha_motif=5.0 \
     data.samples_per_epoch=16000 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}
