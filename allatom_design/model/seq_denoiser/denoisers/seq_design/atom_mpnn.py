@@ -138,7 +138,7 @@ class TokenFeatures(nn.Module):
 
         # Layers
         self.embeddings = PositionalEncodings(self.num_positional_embeddings)
-        edge_in = self.num_positional_embeddings + self.num_rbf
+        edge_in = self.num_positional_embeddings + self.num_rbf + 1
         self.edge_embedding = nn.Linear(edge_in, self.edge_n_channel, bias=False)
         self.norm_edges = nn.LayerNorm(self.edge_n_channel)
 
@@ -150,6 +150,7 @@ class TokenFeatures(nn.Module):
         X = self._get_token_coords(batch)
         D_neighbors, E_idx = self._dist(X, batch["token_mask"].float())
 
+        # Get RBF features
         RBF_all = self._rbf(D_neighbors)
 
         # Positional encodings
@@ -160,7 +161,13 @@ class TokenFeatures(nn.Module):
         d_chains = ((chain_labels[:, :, None] - chain_labels[:,None,:])==0).long()  # find self vs non-self interaction
         E_chains = gather_edges(d_chains[:,:,:,None], E_idx)[:,:,:,0]
         E_positional = self.embeddings(offset.long(), E_chains)
-        E = torch.cat((E_positional, RBF_all), -1)
+
+        # AF3 token_bond feature
+        token_bonds = batch["token_bonds"]
+        token_bonds = gather_edges(token_bonds, E_idx)
+
+        # Concatenate edge features and embed
+        E = torch.cat((E_positional, RBF_all, token_bonds), -1)
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
         return E, E_idx
