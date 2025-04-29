@@ -431,7 +431,7 @@ def process_atom_features(
 
     # Handle unresolved atoms for atom_to_token
     resolved_atom_to_token = atom_to_token * resolved_mask.unsqueeze(-1)  # unresolved atoms are all 0s
-    token_mask = resolved_atom_to_token.sum(dim=1) > 0  # a token is valid if any atom is resolved in the token
+    token_mask = resolved_atom_to_token.sum(dim=0) > 0  # a token is valid if any atom is resolved in the token
 
     # Compute padding and apply
     if max_atoms is not None:
@@ -454,8 +454,8 @@ def process_atom_features(
         atom_to_token = pad_dim(atom_to_token, 0, pad_len)
         token_to_rep_atom = pad_dim(token_to_rep_atom, 1, pad_len)
         r_set_to_rep_atom = pad_dim(r_set_to_rep_atom, 1, pad_len)
+
         resolved_atom_to_token = pad_dim(resolved_atom_to_token, 0, pad_len)
-        token_mask = pad_dim(token_mask, 0, pad_len)
 
     if max_tokens is not None:
         pad_len = max_tokens - token_to_rep_atom.shape[0]
@@ -466,7 +466,8 @@ def process_atom_features(
             disto_target = pad_dim(pad_dim(disto_target, 0, pad_len), 1, pad_len)
             frames = pad_dim(frames, 0, pad_len)
             frame_resolved_mask = pad_dim(frame_resolved_mask, 0, pad_len)
-            resolved_atom_to_token = pad_dim(resolved_atom_to_token, 0, pad_len)
+
+            resolved_atom_to_token = pad_dim(resolved_atom_to_token, 1, pad_len)
             token_mask = pad_dim(token_mask, 0, pad_len)
 
     return {
@@ -485,7 +486,7 @@ def process_atom_features(
         "frames_idx": frames,
         "frame_resolved_mask": frame_resolved_mask,
         "resolved_atom_to_token": resolved_atom_to_token,
-        "token_mask": token_mask,
+        "token_mask": token_mask,  # unlike token_resolved_mask, a token is valid if *any* atom is resolved in the token
     }
 
 

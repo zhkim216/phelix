@@ -86,10 +86,11 @@ class AtomMPNN(nn.Module):
         h_V = torch.cat([h_V, batch["res_type"]], dim=-1)
 
         # Build graph and get edge features
-        h_E, E_idx, token_mask = self.token_features(batch)
+        h_E, E_idx = self.token_features(batch)
 
         # Pass through encoder layers
         h_V, h_E = self.W_s(h_V), self.W_e(h_E)
+        token_mask = batch["token_mask"]
         token_mask_2d = gather_nodes(token_mask.unsqueeze(-1), E_idx).squeeze(-1)
         token_mask_2d = token_mask.unsqueeze(-1) * token_mask_2d
         for layer in self.encoder_layers:
@@ -146,8 +147,8 @@ class TokenFeatures(nn.Module):
         """
         Extract token-level edge features and build KNN graph.
         """
-        X, token_mask = self._get_token_coords(batch)
-        D_neighbors, E_idx = self._dist(X, token_mask)
+        X = self._get_token_coords(batch)
+        D_neighbors, E_idx = self._dist(X, batch["token_mask"].float())
 
         RBF_all = self._rbf(D_neighbors)
 
@@ -162,7 +163,7 @@ class TokenFeatures(nn.Module):
         E = torch.cat((E_positional, RBF_all), -1)
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
-        return E, E_idx, token_mask
+        return E, E_idx
 
 
     def _get_token_coords(self, batch: dict[str, TensorType["b ..."]]) -> tuple[TensorType["b n 3", float],
@@ -171,7 +172,7 @@ class TokenFeatures(nn.Module):
         Get token-level coordinates as an average over all known, resolved atoms in the token.
         """
         # mask out padding and unresolved atoms just in case
-        atom_mask = batch["atom_pad_mask"] * batch["atom_resolved_mask"]
+        atom_mask = batch["atom_resolved_mask"].float()
         X = batch["coords"] * atom_mask.unsqueeze(-1)
 
         # normalize by the number of resolved atoms in the token
@@ -413,7 +414,7 @@ class AtomGraphEncoder(nn.Module):
         K = self.k_atom_neighbors
 
         # Embed 1D features
-        atom_mask = batch["atom_pad_mask"] * batch["atom_resolved_mask"]
+        atom_mask = batch["atom_resolved_mask"].float()
         atom_ref_pos = batch["ref_pos"]
         ref_space_uid = batch["ref_space_uid"]
         atom_feats = torch.cat(

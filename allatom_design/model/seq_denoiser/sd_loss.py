@@ -45,7 +45,8 @@ class SDLoss(nn.Module):
         aux_monitor = {}  # monitor other metrics that do not contribute to the loss
         if self.use_seq_pred and eval_seq:
             # compute sequence loss from sequence design module
-            seq_loss_mask = batch["seq_mask"] * (1 - outputs["seq_mlm_mask"])
+            # seq_loss_mask = batch["seq_mask"] * (1 - outputs["seq_mlm_mask"])
+            seq_loss_mask = batch["token_mask"]
 
             #mask unk tokens from loss calculation
             seq_loss_mask = seq_loss_mask * (1 - batch["seq_unk_mask"])
