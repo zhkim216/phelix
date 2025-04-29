@@ -81,7 +81,7 @@ class LitSeqDenoiser(L.LightningModule):
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
 
         # eval seq design over discrete sequence noise
-        if self.model.task in ['seq_des', 'allatom_seq_des']:
+        if self.model.task in ["seq_des"]:
             aux_t = defaultdict(list)
             for eval_t in self.cfg.eval.eval_timesteps:
                 B = batch["seq_mask"].shape[0]
@@ -99,19 +99,19 @@ class LitSeqDenoiser(L.LightningModule):
             aux_t = {k: torch.stack(v).mean().item() for k, v in aux_t.items()}
             self._log(batch, None, aux_t, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix="_avg_t")
 
-        # eval sidechain packing over edm sidechain noise, fully unmasked sequence
-        if self.model.task in ["allatom_seq_des", "scn_pack"]:
-            B = batch["seq_mask"].shape[0]
-            t_seq = torch.full((B, ), fill_value=0).to(self.device)
+        # # eval sidechain packing over edm sidechain noise, fully unmasked sequence
+        # if self.model.task in ["allatom_seq_des", "scn_pack"]:
+        #     B = batch["seq_mask"].shape[0]
+        #     t_seq = torch.full((B, ), fill_value=0).to(self.device)
 
-            for t_scd in self.cfg.eval.eval_timesteps:
-                batch["t_scd"] = t_scd
-                outputs = self(batch, t=t_seq)
-                _, aux = self.loss(outputs, batch, eval_seq = False, eval_total = False, return_aux=True)
-                aux = {k: v for k, v in aux.items() if "scn/" in k}  # trim aux to sidechain diffusion metrics
-                aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
-                self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix="/scn_diff",
-                            key_suffix=f"_t_scd{t_scd}")
+        #     for t_scd in self.cfg.eval.eval_timesteps:
+        #         batch["t_scd"] = t_scd
+        #         outputs = self(batch, t=t_seq)
+        #         _, aux = self.loss(outputs, batch, eval_seq = False, eval_total = False, return_aux=True)
+        #         aux = {k: v for k, v in aux.items() if "scn/" in k}  # trim aux to sidechain diffusion metrics
+        #         aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
+        #         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix="/scn_diff",
+        #                     key_suffix=f"_t_scd{t_scd}")
 
     def _log(self,
              batch: Dict[str, TensorType["b ..."]],

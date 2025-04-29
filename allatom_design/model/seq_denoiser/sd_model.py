@@ -71,38 +71,6 @@ class SeqDenoiser(nn.Module):
         # Denoise sequence
         _, aux_preds = self.denoiser(batch)
 
-
-        # ## Apply interpolant to mask the inputs ##
-        # if not skip_interpolant:
-        #     interpolant_out = self.interpolant(batch, t)
-        #     batch["x_noised"] = interpolant_out["x_noised"]
-        #     batch["aatype_noised"] = interpolant_out["aatype_noised"]
-        #     batch["seq_mlm_mask"] = interpolant_out["seq_mlm_mask"]  # 1 for unmasked aatype
-        #     batch["scn_mlm_mask"] = interpolant_out["scn_mlm_mask"]  # 1 for unmasked sidechains
-
-        # ## Get random backbone noise ##
-        # noise, noise_labels = self.get_random_noise(batch["seq_mask"])
-
-        # # During training, keep track of certain additional features
-        # aux_inputs = {
-        #     "x": batch["x"],  # ground truth coordinates
-        #     "aatype": batch["aatype"],  # ground truth aatype
-        #     "atom_mask": batch["atom_mask"],  # ground truth atom mask; includes missing, ghost, and pad atoms
-        #     "t_scd": batch.get("t_scd", None),  # scalar; fix t_scd (sidechain diffusion time) if provided, usually for eval
-        #     "seq_mlm_mask": batch["seq_mlm_mask"],
-        #     "scn_mlm_mask": batch["scn_mlm_mask"],
-        #     "noise": noise,
-        #     "noise_labels": noise_labels,
-        # }
-        # aux_inputs.update(aux_inputs_override or {})  # override aux_inputs if provided
-
-        # # Denoise coords
-        # _, _, aux_preds = self.denoiser(batch["x_noised"], batch["aatype_noised"],
-        #                                 batch["residue_index"], batch['chain_index'],
-        #                                 batch["seq_mask"], batch["missing_atom_mask"],
-        #                                 batch["scn_mlm_mask"],
-        #                                 aux_inputs=aux_inputs)
-
         # Additional outputs for computing loss
         outputs.update(aux_preds)
 

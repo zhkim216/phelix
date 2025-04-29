@@ -11,7 +11,7 @@ from torchtyping import TensorType
 
 import allatom_design.data.residue_constants as rc
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
-from allatom_design.data.data import atom37_to_atom14
+import allatom_design.data.const as const
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
 
@@ -24,23 +24,19 @@ class AtomMPNN(nn.Module):
     def __init__(self, cfg: DictConfig):
         super().__init__()
         self.cfg = cfg
-        self.n_aatype = cfg.n_aatype
-        self.seq_emb_dim = cfg.n_channel
         self.node_features = cfg.n_channel
         self.edge_features = cfg.n_channel
         self.hidden_dim = cfg.n_channel
         self.num_encoder_layers = cfg.n_layers
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
-        self.ablate_noise_labels = getattr(cfg, "ablate_noise_labels", False)
-        self.init_hV_with_hS = getattr(cfg, "init_hV_with_hS", False)
 
-        self.features = ProteinFeatures(self.node_features, self.edge_features, top_k=self.k_neighbors)
-        self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=True)
-        self.W_s = nn.Embedding(self.n_aatype, self.hidden_dim)
+        self.token_features = TokenFeatures(cfg.token_features)
+        self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=False)
+        self.W_s = nn.Linear(self.node_features + len(const.tokens), self.hidden_dim, bias=False)
+        self.decoder_in = self.hidden_dim * 2  # concat of h_V and h_E
+
         self.dropout = nn.Dropout(cfg.dropout_p)
-        self.decoder_in = self.hidden_dim * 3
-        self.return_embedding = cfg.return_embedding
 
         # Atom-level encoder
         self.atom_encoder = AtomGraphEncoder(cfg.atom_encoder)
@@ -64,8 +60,9 @@ class AtomMPNN(nn.Module):
             self.num_factors = cfg.potts.num_factors
             self.decoder_S_potts = potts.GraphPotts(
                 dim_nodes=self.node_features,
-                dim_edges=self.edge_features * 4,
-                num_states=self.n_aatype,
+                dim_edges=self.decoder_in,
+                # num_states=self.n_aatype,
+                num_states=len(const.tokens),
                 parameterization=self.parameterization,
                 num_factors=self.num_factors,
                 symmetric_J=cfg.potts.symmetric_J,
@@ -73,7 +70,7 @@ class AtomMPNN(nn.Module):
             )
 
         # Output layers
-        self.W_out = nn.Linear(self.hidden_dim, self.n_aatype, bias=True)
+        self.W_out = nn.Linear(self.hidden_dim, len(const.tokens), bias=True)
 
         # Initialize weights
         for p in self.parameters():
@@ -84,152 +81,47 @@ class AtomMPNN(nn.Module):
     def forward(self, batch: dict[str, TensorType["b ..."]]):
         # Get token-level features
         h_V = self.atom_encoder(batch)
+
+        # Concatenate residue-level features to h_V
         h_V = torch.cat([h_V, batch["res_type"]], dim=-1)
 
         # Build graph and get edge features
-        E, E_idx = self.token_features(batch)
-
-
-        # E, E_idx = self.edge_features(batch)
-
-        # Concatenate residue-level features to h_V
+        h_E, E_idx, token_mask = self.token_features(batch)
 
         # Pass through encoder layers
-
-
-
-
-
-        # B, N, _, _ = denoised_coords.shape
-        # S = aatype_noised
-
-        # #prepare inputs for protein mpnn
-        # X, atom14_mask = atom37_to_atom14(aatype_noised, denoised_coords, atom37_mask=atom_mask_noised)
-        # X = torch.where(atom14_mask[..., None].bool(), X, X[..., 1:2, :])  # replace missing/ghost/masked atoms with CA
-
-        # # Add noise to input coordinates
-        # if noise is not None:
-        #     X = X + noise
-        # if noise_labels is None:
-        #     # assume 0 noise if not provided
-        #     noise_labels = torch.zeros_like(seq_mask)
-        # elif isinstance(noise_labels, float):
-        #     # assume constant noise if provided as float
-        #     noise_labels = torch.ones_like(seq_mask) * noise_labels
-
-        # Prepare node and edge embeddings
-        E, E_idx, X = self.features(X, seq_mask, residue_index, chain_encoding)
-
-        h_S = self.W_s(aatype_noised)  # [B, N, H]
-        if h_S_init is not None:
-            # add h_S_init to h_S
-            h_S = h_S + h_S_init
-
-        if self.init_hV_with_hS:
-            # Initialize h_V with sequence embeddings
-            h_V = h_S
-        else:
-            h_V = torch.zeros((E.shape[0], E.shape[1], E.shape[-1]), device=E.device)
-
-        h_E = self.W_e(E)
-
-        if not self.ablate_noise_labels:
-            # add noise label to last dimension of h_V
-            h_V[..., -1] = h_V[..., -1] + noise_labels
-
-        # Encoder is unmasked self-attention
-        mask_attend = gather_nodes(seq_mask.unsqueeze(-1), E_idx).squeeze(-1)
-        mask_attend = seq_mask.unsqueeze(-1) * mask_attend
+        h_V, h_E = self.W_s(h_V), self.W_e(h_E)
+        token_mask_2d = gather_nodes(token_mask.unsqueeze(-1), E_idx).squeeze(-1)
+        token_mask_2d = token_mask.unsqueeze(-1) * token_mask_2d
         for layer in self.encoder_layers:
-            h_V, h_E = layer(h_V, h_E, E_idx, seq_mask, mask_attend)
+            h_V, h_E = layer(h_V, h_E, E_idx, token_mask, token_mask_2d)
 
-        #keep copy of node embeddings from encoder
-        h_V_enc = h_V.clone()
-
-        # mask is all 1s
-        mask_size = E_idx.shape[1]
-        order_mask_backward = torch.ones(S.shape[0], mask_size, mask_size, device=E_idx.device)
-
-        mask_attend = torch.gather(order_mask_backward, 2, E_idx).unsqueeze(-1)
-        mask_1D = seq_mask.view([seq_mask.size(0), seq_mask.size(1), 1, 1])
-        mask_bw = mask_1D * mask_attend
-        mask_fw = mask_1D * (1. - mask_attend)
-
-        # Concatenate sequence embeddings to edge embeddings
-        h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
-
-        # edge embedding of encoder gets zeros for sequence added -> hidden dim = [Enc Embedding + Seq 0s ][128*2]
-        h_EX_encoder = cat_neighbors_nodes(torch.zeros((B, N, self.hidden_dim), device = h_S.device), h_E, E_idx)
-
-        if self.model_type in ['sidechain']:
-
-            # Add empty hidden dim of 128 to end of h_EXV to later sum with added sidechain distance information
-            h_EX_encoder = cat_neighbors_nodes(torch.zeros((B, N, self.hidden_dim), device = h_S.device), h_EX_encoder, E_idx)
-
-            # Extract sidechain features and concatenate to edge embeddings
-            E2, _ = self.sidechain_features(X, residue_index, chain_encoding, E_idx, atom14_mask)
-
-            #128 -> 128
-            h_E2 = self.W_e2(E2)
-
-            #concatenate sidechain information to Edge and Seq embeddings, Hidden dim is [128 Enc Edge, 128 Seq, 128 SC] = [128 * 3]
-            h_ES = torch.cat([h_ES, h_E2], dim = -1)
-
-        #concat h_V to edge embedding
-        h_EXV_encoder = cat_neighbors_nodes(h_V, h_EX_encoder, E_idx)
-        h_EXV_encoder_fw = mask_fw * h_EXV_encoder
-
-        #concat h_V_j to h_E_ij
-        h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
-
+        # Pass through decoder layers
+        h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
         for layer in self.decoder_layers:
-            #encoder representation added to masked decoder representation
-            h_ESV = mask_bw * h_ESV + h_EXV_encoder_fw
-            h_V, h_ESV = layer(h_V, h_ESV, seq_mask, E_idx)
-
-        #keep copy of node embeddings from encoder
-        h_V_dec = h_V.clone()
-
-        if self.use_gvp:
-            padding_mask = (seq_mask != 1)
-            h_V_flattened = self.vector_encoder(X, aatype_noised, E_idx, h_V, h_ESV, padding_mask, atom14_mask)
-            h_V = h_V_flattened.reshape(B, N, -1)
+            h_V, h_EV = layer(h_V, h_EV, token_mask, E_idx)
 
         # Potts model
         if self.use_potts:
-            mask_ij = mask_bw.squeeze(-1)
-            h, J = self.decoder_S_potts(h_V, h_ESV, E_idx, seq_mask, mask_ij)
+            h, J = self.decoder_S_potts(h_V, h_EV, E_idx, token_mask, token_mask_2d)
             potts_decoder_aux = {
                 "h": h,
                 "J": J,
                 "edge_idx": E_idx,
-                "mask_i": seq_mask,
-                "mask_ij": mask_ij,
+                "mask_i": token_mask,
+                "mask_ij": token_mask_2d,
             }
 
         logits = self.W_out(h_V)
 
-        h_V_out = None
-        if self.return_embedding == 'encoder':
-            h_V_out = h_V_enc
-        elif self.return_embedding == 'decoder':
-            h_V_out = h_V_dec
-        elif self.return_embedding == 'last':
-            h_V_out = h_V
-        else:
-            raise ValueError(f'Incorrect return embedding type specified: {self.return_embedding}, must be one of: encoder, decoder, gnn, or last!')
-
-        mpnn_feature_dict = {"h_V": h_V_out, "h_ESV": h_ESV, "X": X, "atom14_mask": atom14_mask, "E_idx": E_idx, "S": S, "noise_labels": noise_labels}
-        if return_encoder_embeds:
-            mpnn_feature_dict["h_V_enc"] = h_V_enc
-
+        # Output features
+        mpnn_feature_dict = {"h_V": h_V, "h_EV": h_EV, "E_idx": E_idx}
         if self.use_potts:
             mpnn_feature_dict["potts_decoder_aux"] = potts_decoder_aux
 
         return logits, mpnn_feature_dict
 
 
-class TokenEdgeFeatures(nn.Module):
+class TokenFeatures(nn.Module):
     def __init__(self, cfg: DictConfig):
         """
         Extract token-level edge features and build KNN graph.
@@ -237,7 +129,88 @@ class TokenEdgeFeatures(nn.Module):
         super().__init__()
         self.cfg = cfg
 
+        # Parameters
+        self.k_neighbors = cfg.k_neighbors
+        self.num_rbf = cfg.num_rbf
+        self.num_positional_embeddings = cfg.num_positional_embeddings
+        self.edge_n_channel = cfg.edge_n_channel
 
+        # Layers
+        self.embeddings = PositionalEncodings(self.num_positional_embeddings)
+        edge_in = self.num_positional_embeddings + self.num_rbf
+        self.edge_embedding = nn.Linear(edge_in, self.edge_n_channel, bias=False)
+        self.norm_edges = nn.LayerNorm(self.edge_n_channel)
+
+
+    def forward(self, batch: dict[str, TensorType["b ..."]]):
+        """
+        Extract token-level edge features and build KNN graph.
+        """
+        X, token_mask = self._get_token_coords(batch)
+        D_neighbors, E_idx = self._dist(X, token_mask)
+
+        RBF_all = self._rbf(D_neighbors)
+
+        # Positional encodings
+        offset = batch["residue_index"][:,:,None] - batch["residue_index"][:,None,:]
+        offset = gather_edges(offset[:,:,:,None], E_idx)[:,:,:,0]  # [B, L, K]
+
+        chain_labels = batch["asym_id"]
+        d_chains = ((chain_labels[:, :, None] - chain_labels[:,None,:])==0).long()  # find self vs non-self interaction
+        E_chains = gather_edges(d_chains[:,:,:,None], E_idx)[:,:,:,0]
+        E_positional = self.embeddings(offset.long(), E_chains)
+        E = torch.cat((E_positional, RBF_all), -1)
+        E = self.edge_embedding(E)
+        E = self.norm_edges(E)
+        return E, E_idx, token_mask
+
+
+    def _get_token_coords(self, batch: dict[str, TensorType["b ..."]]) -> tuple[TensorType["b n 3", float],
+                                                                                TensorType["b n", float]]:
+        """
+        Get token-level coordinates as an average over all known, resolved atoms in the token.
+        """
+        # mask out padding and unresolved atoms just in case
+        atom_mask = batch["atom_pad_mask"] * batch["atom_resolved_mask"]
+        X = batch["coords"] * atom_mask.unsqueeze(-1)
+
+        # normalize by the number of resolved atoms in the token
+        resolved_atom_to_token = batch["resolved_atom_to_token"]
+        atom_to_token_mean = resolved_atom_to_token / (
+            resolved_atom_to_token.sum(dim=1, keepdim=True) + 1e-6
+        )
+
+        with torch.autocast(device_type="cuda", enabled=False):
+            # Average over all known, resolved atoms in the token
+            X = torch.bmm(atom_to_token_mean.transpose(1, 2), X)  # [B, N, 3]
+
+        return X
+
+
+    def _dist(self, X, mask, eps=1E-6):
+        mask_2D = torch.unsqueeze(mask,1) * torch.unsqueeze(mask,2)
+        dX = torch.unsqueeze(X,1) - torch.unsqueeze(X,2)
+        D = mask_2D * torch.sqrt(torch.sum(dX**2, 3) + eps)
+        D_max, _ = torch.max(D, -1, keepdim=True)
+        D_adjust = D + (1. - mask_2D) * D_max
+        D_neighbors, E_idx = torch.topk(D_adjust, np.minimum(self.k_neighbors, X.shape[1]), dim=-1, largest=False)
+        return D_neighbors, E_idx
+
+    def _rbf(self, D):
+        device = D.device
+        D_min, D_max, D_count = 2., 22., self.num_rbf
+        D_mu = torch.linspace(D_min, D_max, D_count, device=device)
+        D_mu = D_mu.view([1,1,1,-1])
+        D_sigma = (D_max - D_min) / D_count
+        D_expand = torch.unsqueeze(D, -1)
+        RBF = torch.exp(-((D_expand - D_mu) / D_sigma)**2)
+        return RBF
+
+    def _get_rbf(self, A, B, E_idx):
+        D_A_B = torch.sqrt(torch.sum((A[:,:,None,:] - B[:,None,:,:])**2,-1) + 1e-6) #[B, L, L]
+        D_A_B_neighbors = gather_edges(D_A_B[:,:,:,None], E_idx)[:,:,:,0] #[B,L,K]
+        RBF_A_B = self._rbf(D_A_B_neighbors)
+        return RBF_A_B
 
 
 class PositionWiseFeedForward(torch.nn.Module):
@@ -325,11 +298,13 @@ class DecLayer(nn.Module):
 
 
 class EncLayer(nn.Module):
-    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
+    def __init__(self, num_hidden, num_in, dropout=0.1, scale=30, is_last_layer=False):
         super(EncLayer, self).__init__()
         self.num_hidden = num_hidden
         self.num_in = num_in
         self.scale = scale
+        self.is_last_layer = is_last_layer
+
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
         self.dropout3 = nn.Dropout(dropout)
@@ -340,11 +315,14 @@ class EncLayer(nn.Module):
         self.W1 = nn.Linear(num_hidden + num_in, num_hidden, bias=True)
         self.W2 = nn.Linear(num_hidden, num_hidden, bias=True)
         self.W3 = nn.Linear(num_hidden, num_hidden, bias=True)
-        self.W11 = nn.Linear(num_hidden + num_in, num_hidden, bias=True)
-        self.W12 = nn.Linear(num_hidden, num_hidden, bias=True)
-        self.W13 = nn.Linear(num_hidden, num_hidden, bias=True)
         self.act = torch.nn.GELU()
         self.dense = PositionWiseFeedForward(num_hidden, num_hidden * 4)
+
+        if not is_last_layer:
+            # only initialize if not last layer to avoid unused parameters
+            self.W11 = nn.Linear(num_hidden + num_in, num_hidden, bias=True)
+            self.W12 = nn.Linear(num_hidden, num_hidden, bias=True)
+            self.W13 = nn.Linear(num_hidden, num_hidden, bias=True)
 
 
     def forward(self, h_V, h_E, E_idx, mask_V=None, mask_attend=None):
@@ -366,11 +344,13 @@ class EncLayer(nn.Module):
             mask_V = mask_V.unsqueeze(-1)
             h_V = mask_V * h_V
 
-        h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
-        h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
-        h_EV = torch.cat([h_V_expand, h_EV], -1)
-        h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
-        h_E = self.norm3(h_E + self.dropout3(h_message))
+        if not self.is_last_layer:
+            # Edge updates
+            h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
+            h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
+            h_EV = torch.cat([h_V_expand, h_EV], -1)
+            h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
+            h_E = self.norm3(h_E + self.dropout3(h_message))
 
         return h_V, h_E
 
@@ -417,8 +397,9 @@ class AtomGraphEncoder(nn.Module):
 
         # Graph encoding layers
         self.layers = nn.ModuleList([
-            EncLayer(self.atom_n_channel, self.atom_n_channel * 2, dropout=self.dropout_p)
-            for _ in range(self.n_layers)
+            EncLayer(self.atom_n_channel, self.atom_n_channel * 2, dropout=self.dropout_p,
+                     is_last_layer=(i == self.n_layers - 1))
+            for i in range(self.n_layers)
         ])
 
         # Aggregation to token-level features
@@ -432,13 +413,13 @@ class AtomGraphEncoder(nn.Module):
         K = self.k_atom_neighbors
 
         # Embed 1D features
-        atom_pad_mask = batch["atom_pad_mask"]
+        atom_mask = batch["atom_pad_mask"] * batch["atom_resolved_mask"]
         atom_ref_pos = batch["ref_pos"]
         ref_space_uid = batch["ref_space_uid"]
         atom_feats = torch.cat(
             [
                 # atom_ref_pos,  # not invariant
-                batch["atom_pad_mask"].unsqueeze(-1),  # not needed?
+                atom_mask.unsqueeze(-1),  # not needed?
                 batch["ref_charge"].unsqueeze(-1),
                 batch["ref_element"],
                 batch["ref_atom_name_chars"].reshape(B, N, 4 * 64),
@@ -448,9 +429,9 @@ class AtomGraphEncoder(nn.Module):
         c = self.embed_atom_features(atom_feats)
 
         # Build KNN graph
-        E_idx = knn_neighbors_batched(batch["coords"], atom_pad_mask, k=K)
-        mask_2d = gather_nodes(atom_pad_mask.unsqueeze(-1), E_idx).squeeze(-1)
-        mask_2d = mask_2d * atom_pad_mask.unsqueeze(-1)
+        E_idx = knn_neighbors_batched(batch["coords"], atom_mask, k=K)
+        mask_2d = gather_nodes(atom_mask.unsqueeze(-1), E_idx).squeeze(-1)
+        mask_2d = mask_2d * atom_mask.unsqueeze(-1)
 
         # Embed offsets between reference positions
         ## get valid mask (within-conformer edges)
@@ -463,7 +444,7 @@ class AtomGraphEncoder(nn.Module):
         d_ref = (atom_ref_pos.view(B, N, 1, 3) - ref_pos_neighbors).norm(dim=-1, keepdim=True)
         inv_d_ref = 1 / (1 + d_ref**2)
 
-        p = self.embed_ref_dist(d_ref) * v_mask
+        p = self.embed_ref_dist(d_ref) * v_mask  # [B, N, K, atom_n_channel]
         p = p + self.embed_inv_ref_dist(inv_d_ref) * v_mask
         p = p + self.embed_v_mask(v_mask) * v_mask
 
@@ -481,30 +462,31 @@ class AtomGraphEncoder(nn.Module):
         # Run graph encoding layers
         q = c
         for layer in self.layers:
-            q, p = layer(q, p, E_idx, mask_V=atom_pad_mask, mask_attend=mask_2d)
+            q, p = layer(q, p, E_idx, mask_V=atom_mask, mask_attend=mask_2d)
 
         # Aggregate to token-level features
-        q_to_a = self.atom_to_token_trans(q)
-        atom_to_token = batch["atom_to_token"].float()
-        atom_to_token_mean = atom_to_token / (
-            atom_to_token.sum(dim=1, keepdim=True) + 1e-6
+        q_to_a = self.atom_to_token_trans(q) * atom_mask.unsqueeze(-1)
+        resolved_atom_to_token = batch["resolved_atom_to_token"]  # resolved_atom_to_token ensures that we don't average over unresolved atoms
+        atom_to_token_mean = resolved_atom_to_token / (
+            resolved_atom_to_token.sum(dim=1, keepdim=True) + 1e-6
         )
-        a = torch.bmm(atom_to_token_mean.transpose(1, 2), q_to_a)
+        with torch.autocast(device_type="cuda", enabled=False):
+            a = torch.bmm(atom_to_token_mean.transpose(1, 2), q_to_a)
 
         return a
 
 
 def knn_neighbors_batched(
     coords: TensorType["b n 3"],
-    atom_pad_mask: TensorType["b n"],
+    atom_mask: TensorType["b n"],
     k: int
 ) -> TensorType["b n k"]:
     """
-    Returns a [B, N, k] tensor of neighbor indices per atom, ignoring padded atoms
+    Returns a [B, N, k] tensor of neighbor indices per atom, ignoring padded and non-existent atoms
     and cutting off ties so each atom has at most k neighbors.
     Neighbors are "arbitrary among ties" because knn_graph may return more than k
     if distances tie. We keep only the first k that appear in its output.
-    Positions for padded atoms (or if <k neighbors) are filled with 0.
+    Positions for padded or non-existent atoms (or if <k neighbors) are filled with 0.
     """
     device = coords.device
     B, N, _ = coords.shape
@@ -512,7 +494,7 @@ def knn_neighbors_batched(
     # Flatten batch dimension
     # shape = [B*N, 3], [B*N], etc.
     coords_flat = coords.view(B*N, 3)
-    mask_flat = atom_pad_mask.view(B*N)
+    mask_flat = atom_mask.view(B*N)
 
     # Identify which flattened indices are valid (unmasked)
     valid_idx = mask_flat.nonzero(as_tuple=True)[0]  # 1D indices into [B*N]
@@ -558,7 +540,7 @@ def knn_neighbors_batched(
     dst_atom_final = valid_atom_idx[dst_final]  # [E], represents the atom index of the destination node within the batch
     local_idx_final = local_idx[keep_edge_mask]  # [E], represents the index of this edge in the edge list for the source node capped at k
 
-    # Build up neighbors, with -1 for padded atoms
+    # Build up neighbors, with -1 for padded or non-existent atoms
     neighbors = torch.full((B, N, k), -1, device=device, dtype=torch.long)
 
     ## get the destination node indices within the batch for each edge
@@ -567,7 +549,7 @@ def knn_neighbors_batched(
     neighbors_flat.scatter_(0, scatter_index, dst_atom_final)  # scatter the destination node indices to the appropriate positions in neighbors_flat
 
     neighbors = neighbors_flat.view(B, N, k)
-    neighbors = neighbors.clamp(min=0)  # clamp padding to 0
+    neighbors = neighbors.clamp(min=0)  # clamp padding and non-existent atoms to 0
     return neighbors
 
 
@@ -607,13 +589,13 @@ def test_knn_neighbors_batched():
     # Suppose we have 6 "slots" but only 4 valid points
     coords_3 = torch.tensor([[
         [0.0, 0.0, 1.0],
-        [0.0, 2.0, 0.0],
+        [0.0, 2.0, 0.0],  # non-existent
         [2.0, 2.0, 2.0],
         [1.0, 1.0, 1.0],
         [9.9, 9.9, 9.9],  # padded
         [9.9, 9.9, 9.9],  # padded
     ]])
-    mask_3 = torch.tensor([[1, 1, 1, 1, 0, 0]], dtype=torch.bool)
+    mask_3 = torch.tensor([[1, 0, 1, 1, 0, 0]], dtype=torch.bool)
     k_3 = 4
     neighbors_3 = knn_neighbors_batched(coords_3, mask_3, k_3)
     print("Test 3 (single batch with padding):")
@@ -639,7 +621,7 @@ def test_knn_neighbors_batched():
         ]
     ])
     mask_4 = torch.tensor([
-        [1, 1, 1, 1, 0],
+        [1, 0, 1, 1, 0],
         [1, 1, 1, 1, 1]
     ], dtype=torch.bool)
     k_4 = 2
