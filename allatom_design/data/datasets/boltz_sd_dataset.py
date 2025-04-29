@@ -14,10 +14,10 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from allatom_design.data.crop.cropper import Cropper
-from allatom_design.data.feature.featurizer import SimpleBoltzFeaturizer
+from allatom_design.data.feature.seq_des_featurizer import SequenceDesignFeaturizer
 from allatom_design.data.feature.pad import pad_to_max
 from allatom_design.data.sample.sampler import Sample, Sampler
-from allatom_design.data.tokenize.tokenizer import Tokenizer
+from allatom_design.data.tokenize.tokenizer import Tokenized, Tokenizer
 from allatom_design.data.types import (Connection, Input, Manifest, Record,
                                        Structure)
 
@@ -31,7 +31,7 @@ class BoltzSDDataModule(L.LightningDataModule):
         # Load in manifest
         manifest = self._load_manifest_from_file()
 
-        # Load in validation split  # TODO: do we need to load in the test split too? boltz does not do this.
+        # Load in validation split
         with open(f"{self.pdb_path}/splits/validation_ids.txt", "r") as f:
             val_split = {x.lower() for x in f.read().splitlines()}
 
@@ -117,7 +117,11 @@ class BoltzSDDataModule(L.LightningDataModule):
                 data = json.load(f)
             # records = [Record.from_dict(r) for r in tqdm(data, desc="Loading records...")]
             # DEBUG
-            records = [Record.from_dict(r) for r in tqdm(data[:100], desc="Loading records...")]
+            with open(f"{self.pdb_path}/splits/validation_ids.txt", "r") as f:
+                val_split = {x.lower() for x in f.read().splitlines()}
+            val_data = [x for x in data if x["id"] in val_split]
+            records = [Record.from_dict(r) for r in tqdm(val_data, desc="Loading records...")]
+            records += [Record.from_dict(r) for r in tqdm(data[:100], desc="Loading records...")]
             manifest = Manifest(records=records)
         else:
             manifest_path = f"{self.pdb_path}/rcsb_processed_targets/manifest.json"
@@ -179,9 +183,26 @@ class SDDataset(data.Dataset):
             The sampled data features.
 
         """
-        # Load in Boltz features for this sample
-        input_data, boltz_feats = self._load_boltz_feats(idx)
+        # Load in data + tokenize (+ possible cropping)
+        record_id, tokenized = self._load_and_tokenize_input(idx)
 
+        # Compute features
+        try:
+            boltz_feats = self.dataset.featurizer.process(
+                tokenized,
+                atoms_per_window_queries=self.atoms_per_window_queries,
+                min_dist=self.min_dist,
+                max_dist=self.max_dist,
+                num_bins=self.num_bins,
+                max_tokens=self.max_tokens if self.pad_to_max_tokens else None,
+                max_atoms=self.max_atoms if self.pad_to_max_atoms else None,
+            )
+        except Exception as e:
+            print(f"Featurizer failed on {record_id} with error {e}. Skipping.")
+            return self.__getitem__(idx)
+
+        boltz_feats["pdb_key"] = record_id
+        boltz_feats["coords"] = boltz_feats["coords"].squeeze(0)  # squeeze out batch dimension
         example = boltz_feats
         return example
 
@@ -201,7 +222,7 @@ class SDDataset(data.Dataset):
         return len(self.dataset.manifest.records)
 
 
-    def _load_boltz_feats(self, idx: int) -> tuple[Input, dict[str, torch.Tensor]]:
+    def _load_and_tokenize_input(self, idx: int) -> tuple[str, Tokenized]:
         """Load Boltz features for a given index."""
         dataset = self.dataset
 
@@ -213,10 +234,8 @@ class SDDataset(data.Dataset):
             record = self.dataset.manifest.records[idx]
             sample = Sample(record=record, chain_id=None, interface_id=None)
 
-        # Get the structure
+        # Get the structure and tokenize
         input_data = load_input(sample.record, dataset.pdb_path)
-
-        # Tokenize structure
         try:
             tokenized = dataset.tokenizer.tokenize(input_data)
         except Exception as e:
@@ -243,24 +262,7 @@ class SDDataset(data.Dataset):
             msg = "No tokens in cropped structure."
             raise ValueError(msg)
 
-        # Compute features
-        try:
-            boltz_feats = dataset.featurizer.process(
-                tokenized,
-                atoms_per_window_queries=self.atoms_per_window_queries,
-                min_dist=self.min_dist,
-                max_dist=self.max_dist,
-                num_bins=self.num_bins,
-                max_tokens=self.max_tokens if self.pad_to_max_tokens else None,
-                max_atoms=self.max_atoms if self.pad_to_max_atoms else None,
-            )
-        except Exception as e:
-            print(f"Featurizer failed on {sample.record.id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
-
-        boltz_feats["pdb_key"] = sample.record.id
-        boltz_feats["coords"] = boltz_feats["coords"].squeeze(0)  # squeeze out batch dimension
-        return input_data, boltz_feats
+        return sample.record.id, tokenized
 
 
 def load_input(record: Record, pdb_path: str) -> Input:
@@ -303,7 +305,7 @@ class BoltzDataset:
     sampler: Sampler
     cropper: Cropper
     tokenizer: Tokenizer
-    featurizer: SimpleBoltzFeaturizer
+    featurizer: SequenceDesignFeaturizer
 
 
 def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:

@@ -74,12 +74,6 @@ class SequenceDesignFeaturizer:
 def process_token_features(
     data: Tokenized,
     max_tokens: Optional[int] = None,
-    binder_pocket_conditioned_prop: Optional[float] = 0.0,
-    binder_pocket_cutoff: Optional[float] = 6.0,
-    binder_pocket_sampling_geometric_p: Optional[float] = 0.0,
-    only_ligand_binder_pocket: Optional[bool] = False,
-    inference_binder: Optional[list[int]] = None,
-    inference_pocket: Optional[list[tuple[int, int]]] = None,
 ) -> dict[str, Tensor]:
     """Get the token features.
 
@@ -134,92 +128,6 @@ def process_token_features(
 
     bonds = bonds.unsqueeze(-1)
 
-    # Pocket conditioned feature
-    pocket_feature = (
-        np.zeros(len(token_data)) + const.pocket_contact_info["UNSPECIFIED"]
-    )
-    if inference_binder is not None:
-        assert inference_pocket is not None
-        pocket_residues = set(inference_pocket)
-        for idx, token in enumerate(token_data):
-            if token["asym_id"] in inference_binder:
-                pocket_feature[idx] = const.pocket_contact_info["BINDER"]
-            elif (token["asym_id"], token["res_idx"]) in pocket_residues:
-                pocket_feature[idx] = const.pocket_contact_info["POCKET"]
-            else:
-                pocket_feature[idx] = const.pocket_contact_info["UNSELECTED"]
-    elif (
-        binder_pocket_conditioned_prop > 0.0
-        and random.random() < binder_pocket_conditioned_prop
-    ):
-        # choose as binder a random ligand in the crop, if there are no ligands select a protein chain
-        binder_asym_ids = np.unique(
-            token_data["asym_id"][
-                token_data["mol_type"] == const.chain_type_ids["NONPOLYMER"]
-            ]
-        )
-
-        if len(binder_asym_ids) == 0:
-            if not only_ligand_binder_pocket:
-                binder_asym_ids = np.unique(token_data["asym_id"])
-
-        if len(binder_asym_ids) > 0:
-            pocket_asym_id = random.choice(binder_asym_ids)
-            binder_mask = token_data["asym_id"] == pocket_asym_id
-
-            binder_coords = []
-            for token in token_data:
-                if token["asym_id"] == pocket_asym_id:
-                    binder_coords.append(
-                        data.structure.atoms["coords"][
-                            token["atom_idx"] : token["atom_idx"] + token["atom_num"]
-                        ]
-                    )
-            binder_coords = np.concatenate(binder_coords, axis=0)
-
-            # find the tokens in the pocket
-            token_dist = np.zeros(len(token_data)) + 1000
-            for i, token in enumerate(token_data):
-                if (
-                    token["mol_type"] != const.chain_type_ids["NONPOLYMER"]
-                    and token["asym_id"] != pocket_asym_id
-                    and token["resolved_mask"] == 1
-                ):
-                    token_coords = data.structure.atoms["coords"][
-                        token["atom_idx"] : token["atom_idx"] + token["atom_num"]
-                    ]
-
-                    # find chain and apply chain transformation
-                    for chain in data.structure.chains:
-                        if chain["asym_id"] == token["asym_id"]:
-                            break
-
-                    token_dist[i] = np.min(
-                        np.linalg.norm(
-                            token_coords[:, None, :] - binder_coords[None, :, :],
-                            axis=-1,
-                        )
-                    )
-
-            pocket_mask = token_dist < binder_pocket_cutoff
-
-            if np.sum(pocket_mask) > 0:
-                pocket_feature = (
-                    np.zeros(len(token_data)) + const.pocket_contact_info["UNSELECTED"]
-                )
-                pocket_feature[binder_mask] = const.pocket_contact_info["BINDER"]
-
-                if binder_pocket_sampling_geometric_p > 0.0:
-                    # select a subset of the pocket, according
-                    # to a geometric distribution with one as minimum
-                    pocket_mask = select_subset_from_mask(
-                        pocket_mask, binder_pocket_sampling_geometric_p
-                    )
-
-                pocket_feature[pocket_mask] = const.pocket_contact_info["POCKET"]
-    pocket_feature = from_numpy(pocket_feature).long()
-    pocket_feature = one_hot(pocket_feature, num_classes=len(const.pocket_contact_info))
-
     # Pad to max tokens if given
     if max_tokens is not None:
         pad_len = max_tokens - len(token_data)
@@ -235,7 +143,6 @@ def process_token_features(
             pad_mask = pad_dim(pad_mask, 0, pad_len)
             resolved_mask = pad_dim(resolved_mask, 0, pad_len)
             disto_mask = pad_dim(disto_mask, 0, pad_len)
-            pocket_feature = pad_dim(pocket_feature, 0, pad_len)
             center_coords = pad_dim(center_coords, 0, pad_len)
 
 
@@ -252,7 +159,6 @@ def process_token_features(
         "token_pad_mask": pad_mask,
         "token_resolved_mask": resolved_mask,
         "token_disto_mask": disto_mask,
-        "pocket_feature": pocket_feature,
         "center_coords": center_coords,
     }
     return token_features
