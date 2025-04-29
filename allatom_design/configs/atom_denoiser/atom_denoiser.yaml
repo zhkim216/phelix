@@ -115,10 +115,19 @@ loss:
   task: ${model.task}
   loss_weights:
     bb:
+      # loss on all backbone tokens
       mse_loss: 1.0
     motif:
-      # if task is scaffolding, use a separate loss to reconstruct motif
+      # loss on motif tokens
       mse_loss: 0.0
+    motif_weighted_bb:
+      # loss on all backbone tokens, with motif tokens upweighted by alpha_motif
+      mse_loss: 0.0
+
+  # loss configs
+  motif_weighted_bb:
+    alpha_motif: 5.0
+
 
 optim:
   optimizer: "adam_inv_sqrt"
