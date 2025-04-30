@@ -10,9 +10,45 @@ from torch import Tensor, from_numpy
 from torch.nn.functional import one_hot
 
 from allatom_design.data import const
-from allatom_design.data.feature.pad import pad_dim
+from allatom_design.data.feature.pad import pad_dim, crop_dim
 from allatom_design.data.tokenize.boltz import Tokenized
-from allatom_design.data.mask_selector import MaskSelector
+from torchtyping import TensorType
+
+# Keep track of the dimensions of the features in the token and atom features for padding & cropping
+FEAT_TO_TOKEN_DIM = {
+    # token features
+    "token_index": [0],
+    "residue_index": [0],
+    "asym_id": [0],
+    "entity_id": [0],
+    "sym_id": [0],
+    "mol_type": [0],
+    "res_type": [0],
+    "disto_center": [0],
+    "token_pad_mask": [0],
+    "token_resolved_mask": [0],
+    "token_disto_mask": [0],
+    "center_coords": [0],
+    "token_bonds": [0, 1],
+
+    # atom features
+    "atom_to_token": [1]
+}
+
+FEAT_TO_ATOM_DIM = {
+    # atom features
+    "atom_pad_mask": [0],
+    "ref_pos": [0],
+    "atom_resolved_mask": [0],
+    "ref_element": [0],
+    "ref_charge": [0],
+    "ref_atom_name_chars": [0],
+    "ref_space_uid": [0],
+    "coords": [1],
+    "atom_to_token": [0],
+    "prot_bb_atom_mask": [0],
+    "prot_scn_atom_mask": [0],
+}
 
 
 class SequenceDesignFeaturizer:
@@ -22,8 +58,6 @@ class SequenceDesignFeaturizer:
         self,
         data: Tokenized,
         atoms_per_window_queries: int = 32,
-        min_dist: float = 2.0,
-        max_dist: float = 22.0,
         num_bins: int = 64,
         max_tokens: Optional[int] = None,
         max_atoms: Optional[int] = None,
@@ -52,29 +86,24 @@ class SequenceDesignFeaturizer:
         # Compute token features
         token_features = process_sd_token_features(
             data,
-            max_tokens,
         )
 
         # Compute atom features
         atom_features = process_sd_atom_features(
             data,
-            atoms_per_window_queries,
-            min_dist,
-            max_dist,
             num_bins,
-            max_atoms,
-            max_tokens,
         )
 
-        return {
-            **token_features,
-            **atom_features,
-        }
+        feats = {**token_features, **atom_features}
+
+        # Pad features
+        feats = pad_sd_feats(feats, max_tokens, max_atoms, atoms_per_window_queries)
+
+        return feats
 
 
 def process_sd_token_features(
     data: Tokenized,
-    max_tokens: Optional[int] = None,
 ) -> dict[str, Tensor]:
     """Get the token features.
 
@@ -113,12 +142,7 @@ def process_sd_token_features(
     disto_mask = from_numpy(token_data["disto_mask"]).float()
 
     # Token bond features
-    if max_tokens is not None:
-        pad_len = max_tokens - len(token_data)
-        num_tokens = max_tokens if pad_len > 0 else len(token_data)
-    else:
-        num_tokens = len(token_data)
-
+    num_tokens = len(token_data)
     tok_to_idx = {tok["token_idx"]: idx for idx, tok in enumerate(token_data)}
     bonds = torch.zeros(num_tokens, num_tokens, dtype=torch.float)
     for token_bond in token_bonds:
@@ -128,24 +152,6 @@ def process_sd_token_features(
         bonds[token_2, token_1] = 1
 
     bonds = bonds.unsqueeze(-1)
-
-    # Pad to max tokens if given
-    if max_tokens is not None:
-        pad_len = max_tokens - len(token_data)
-        if pad_len > 0:
-            token_index = pad_dim(token_index, 0, pad_len)
-            residue_index = pad_dim(residue_index, 0, pad_len)
-            asym_id = pad_dim(asym_id, 0, pad_len)
-            entity_id = pad_dim(entity_id, 0, pad_len)
-            sym_id = pad_dim(sym_id, 0, pad_len)
-            mol_type = pad_dim(mol_type, 0, pad_len)
-            res_type = pad_dim(res_type, 0, pad_len)
-            disto_center = pad_dim(disto_center, 0, pad_len)
-            pad_mask = pad_dim(pad_mask, 0, pad_len)
-            resolved_mask = pad_dim(resolved_mask, 0, pad_len)
-            disto_mask = pad_dim(disto_mask, 0, pad_len)
-            center_coords = pad_dim(center_coords, 0, pad_len)
-
 
     token_features = {
         "token_index": token_index,
@@ -167,12 +173,7 @@ def process_sd_token_features(
 
 def process_sd_atom_features(
     data: Tokenized,
-    atoms_per_window_queries: int = 32,
-    min_dist: float = 2.0,
-    max_dist: float = 22.0,
     num_bins: int = 64,
-    max_atoms: Optional[int] = None,
-    max_tokens: Optional[int] = None,
 ) -> dict[str, Tensor]:
     """Get the atom features.
 
@@ -271,34 +272,6 @@ def process_sd_atom_features(
         ref_pos[None], resolved_mask[None], centering=False
     )[0]
 
-    # Compute padding and apply
-    if max_atoms is not None:
-        assert max_atoms % atoms_per_window_queries == 0
-        pad_len = max_atoms - len(atom_data)
-    else:
-        pad_len = (
-            (len(atom_data) - 1) // atoms_per_window_queries + 1
-        ) * atoms_per_window_queries - len(atom_data)
-
-    if pad_len > 0:
-        pad_mask = pad_dim(pad_mask, 0, pad_len)
-        ref_pos = pad_dim(ref_pos, 0, pad_len)
-        resolved_mask = pad_dim(resolved_mask, 0, pad_len)
-        ref_element = pad_dim(ref_element, 0, pad_len)
-        ref_charge = pad_dim(ref_charge, 0, pad_len)
-        ref_atom_name_chars = pad_dim(ref_atom_name_chars, 0, pad_len)
-        ref_space_uid = pad_dim(ref_space_uid, 0, pad_len)
-        coords = pad_dim(coords, 1, pad_len)
-        atom_to_token = pad_dim(atom_to_token, 0, pad_len)
-
-        prot_bb_atom_mask = pad_dim(prot_bb_atom_mask, 0, pad_len)
-        prot_scn_atom_mask = pad_dim(prot_scn_atom_mask, 0, pad_len)
-
-    if max_tokens is not None:
-        pad_len = max_tokens - atom_to_token.shape[1]
-        if pad_len > 0:
-            atom_to_token = pad_dim(atom_to_token, 1, pad_len)
-
     return {
         "ref_pos": ref_pos,
         "atom_resolved_mask": resolved_mask,
@@ -328,3 +301,64 @@ def select_subset_from_mask(mask, p):
     new_mask[selected_indices] = 1
 
     return new_mask
+
+
+def pad_sd_feats(feats: dict[str, Tensor],
+                 max_tokens: int | None,
+                 max_atoms: int | None,
+                 atoms_per_window_queries: int) -> dict[str, Tensor]:
+    """Pad the token and atom features to the maximum number of tokens and atoms.
+    """
+    # Pad to max tokens if given
+    if max_tokens is not None:
+        token_pad_len = max_tokens - len(feats["token_index"])
+        if token_pad_len > 0:
+            for k, v in FEAT_TO_TOKEN_DIM.items():
+                for dim_to_pad in v:
+                    feats[k] = pad_dim(feats[k], dim_to_pad, token_pad_len)
+
+    # Pad to max atoms if given
+    if max_atoms is not None:
+        assert max_atoms % atoms_per_window_queries == 0
+        atom_pad_len = max_atoms - len(feats["atom_resolved_mask"])
+    else:
+        atom_pad_len = (
+            (len(feats["atom_resolved_mask"]) - 1) // atoms_per_window_queries + 1
+        ) * atoms_per_window_queries - len(feats["atom_resolved_mask"])
+
+    if atom_pad_len > 0:
+        for k, v in FEAT_TO_ATOM_DIM.items():
+            for dim_to_pad in v:
+                feats[k] = pad_dim(feats[k], dim_to_pad, atom_pad_len)
+
+    return feats
+
+
+def crop_feats(feats: dict[str, Tensor],
+               token_crop_mask: TensorType["n", bool],
+               max_tokens: int | None,
+               max_atoms: int | None,
+               atoms_per_window_queries: int) -> dict[str, Tensor]:
+    """
+    Crop features based on a crop mask specified at the token level.
+
+    Note: after cropping, ref_space_uid and token_index will refer to positions *before* cropping, so make sure to
+    account for this when using these features.
+    """
+    # First, get atoms to crop out as well
+    atom_crop_mask = (feats["atom_to_token"] @ token_crop_mask).bool()
+
+    # Subset each feature at the token level
+    for k, v in FEAT_TO_TOKEN_DIM.items():
+        for dim_to_crop in v:
+            feats[k] = crop_dim(feats[k], dim_to_crop, token_crop_mask)
+
+    # Subset each feature at the atom level
+    for k, v in FEAT_TO_ATOM_DIM.items():
+        for dim_to_crop in v:
+            feats[k] = crop_dim(feats[k], dim_to_crop, atom_crop_mask)
+
+    # Pad each feature back to max tokens and atoms, accounting for atoms_per_window_queries
+    feats = pad_sd_feats(feats, max_tokens, max_atoms, atoms_per_window_queries)
+
+    return feats

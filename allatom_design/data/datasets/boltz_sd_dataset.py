@@ -16,7 +16,7 @@ from tqdm import tqdm
 from allatom_design.data.crop.cropper import Cropper
 from allatom_design.data.feature.pad import pad_to_max
 from allatom_design.data.feature.seq_des_featurizer import \
-    SequenceDesignFeaturizer
+    SequenceDesignFeaturizer, crop_feats
 from allatom_design.data.sample.sampler import Sample, Sampler
 from allatom_design.data.tokenize.tokenizer import Tokenized, Tokenizer
 from allatom_design.data.types import (Connection, Input, Manifest, Record,
@@ -71,8 +71,6 @@ class BoltzSDDataModule(L.LightningDataModule):
                                      pad_to_max_atoms=cfg.pad_to_max_atoms,
                                      pad_to_max_tokens=cfg.pad_to_max_tokens,
                                      atoms_per_window_queries=cfg.atoms_per_window_queries,
-                                     min_dist=cfg.min_dist,
-                                     max_dist=cfg.max_dist,
                                      num_bins=cfg.num_bins,
                                      )
         self._train_set = dataset_wrapper_fn(dataset=train_dataset, phase="train")
@@ -118,6 +116,10 @@ class BoltzSDDataModule(L.LightningDataModule):
             with gzip.open(manifest_path, "rt") as f:
                 data = json.load(f)
             records = [Record.from_dict(r) for r in tqdm(data, desc="Loading records...")]
+            # # DEBUG
+            # import glob
+            # ids = [Path(x).stem for x in glob.glob(f"{self.pdb_path}/processed_targets/featurized/*.npz")]
+            # records = [Record.from_dict(r) for r in data if r["id"] in ids]
             manifest = Manifest(records=records)
         else:
             manifest_path = f"{self.pdb_path}/rcsb_processed_targets/manifest.json"
@@ -139,8 +141,6 @@ class SDDataset(data.Dataset):
         pad_to_max_atoms: bool = False,
         pad_to_max_tokens: bool = False,
         atoms_per_window_queries: int = 32,
-        min_dist: float = 2.0,
-        max_dist: float = 22.0,
         num_bins: int = 64,
         phase: str = "train",
     ) -> None:
@@ -154,8 +154,6 @@ class SDDataset(data.Dataset):
         self.pad_to_max_tokens = pad_to_max_tokens
         self.pad_to_max_atoms = pad_to_max_atoms
         self.atoms_per_window_queries = atoms_per_window_queries
-        self.min_dist = min_dist
-        self.max_dist = max_dist
         self.num_bins = num_bins
         self.phase = phase
 
@@ -180,23 +178,7 @@ class SDDataset(data.Dataset):
 
         """
         # Load in data + tokenize (+ possible cropping)
-        record_id, tokenized = self._load_and_tokenize_input(idx)
-
-        # Compute features
-        try:
-            feats = self.dataset.featurizer.process(
-                tokenized,
-                atoms_per_window_queries=self.atoms_per_window_queries,
-                min_dist=self.min_dist,
-                max_dist=self.max_dist,
-                num_bins=self.num_bins,
-                max_tokens=self.max_tokens if self.pad_to_max_tokens else None,
-                max_atoms=self.max_atoms if self.pad_to_max_atoms else None,
-            )
-        except Exception as e:
-            print(f"Featurizer failed on {record_id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
-        feats["coords"] = feats["coords"].squeeze(0)  # squeeze out batch dimension
+        record_id, feats = self._load_feats(idx)
 
         # SE3 augmentation for convenience / scaling
         feats["coords"] = atom_center_random_augmentation(feats["coords"], feats["atom_pad_mask"] * feats["atom_resolved_mask"],
@@ -224,7 +206,7 @@ class SDDataset(data.Dataset):
         return len(self.dataset.manifest.records)
 
 
-    def _load_and_tokenize_input(self, idx: int) -> tuple[str, Tokenized]:
+    def _load_feats(self, idx: int) -> tuple[str, dict[str, torch.Tensor]]:
         """Load Boltz features for a given index."""
         dataset = self.dataset
 
@@ -242,24 +224,30 @@ class SDDataset(data.Dataset):
         # Compute crop
         try:
             if self.max_tokens is not None:
-                tokenized = dataset.cropper.crop(
+                tokenized_cropped, token_crop_mask = dataset.cropper.crop(
                     tokenized,
                     max_atoms=self.max_atoms,
                     max_tokens=self.max_tokens,
                     random=np.random,
                     chain_id=sample.chain_id,
                     interface_id=sample.interface_id,
+                    return_crop_mask=True,
                 )
         except Exception as e:
             print(f"Cropper failed on {sample.record.id} with error: {e}. Skipping.")
-            return self._load_and_tokenize_input(idx)
+            return self._load_feats(idx)
 
         # Check if there are tokens
         if len(tokenized.tokens) == 0:
             print(f"No tokens in cropped structure for {sample.record.id}. Skipping.")
-            return self._load_and_tokenize_input(idx)
+            return self._load_feats(idx)
 
-        return sample.record.id, tokenized
+        # Load pre-featurized data and crop
+        feats = load_featurized(sample.record, self.dataset.pdb_path)
+        feats = crop_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.atoms_per_window_queries)
+        feats["coords"] = feats["coords"].squeeze(0)  # squeeze out batch dimension
+
+        return sample.record.id, feats
 
 
 def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
@@ -279,6 +267,17 @@ def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
         mask=structure["mask"],
     )
     return Tokenized(tokens=tokenized["tokens"], bonds=tokenized["bonds"], structure=structure, msa={})
+
+
+def load_featurized(record: Record, pdb_path: str) -> dict[str, torch.Tensor]:
+    """
+    Load featurized data for a given record.
+    """
+    featurized = np.load(f"{pdb_path}/processed_targets/featurized/{record.id}.npz", allow_pickle=True)
+    feats = {}
+    for k, v in featurized.items():
+        feats[k] = torch.from_numpy(v)
+    return feats
 
 
 @dataclass

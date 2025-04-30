@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from torch import Tensor
 from torch.nn.functional import pad
@@ -82,3 +83,14 @@ def pad_to_max(data: list[Tensor], value: float = 0) -> tuple[Tensor, Tensor]:
     data = torch.stack(data, dim=0)
 
     return data, padding
+
+
+def crop_dim(x: Tensor, dim: int, mask: Tensor) -> Tensor:
+    """
+    Keep only the entries of x along dimension `dim` where mask==True.
+    mask must be 1-D, len(mask) == x.shape[dim].
+    """
+    if isinstance(mask, np.ndarray):
+        mask = torch.from_numpy(mask)
+    idx = torch.nonzero(mask, as_tuple=True)[0]
+    return torch.index_select(x, dim, idx)
