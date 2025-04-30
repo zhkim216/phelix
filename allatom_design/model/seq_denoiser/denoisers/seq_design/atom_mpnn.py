@@ -63,7 +63,7 @@ class AtomMPNN(nn.Module):
                 dim_nodes=self.node_features,
                 dim_edges=self.decoder_in,
                 # num_states=self.n_aatype,
-                num_states=len(const.tokens),
+                num_states=len(const.prot_only_tokens),  # only predict protein tokens
                 parameterization=self.parameterization,
                 num_factors=self.num_factors,
                 symmetric_J=cfg.potts.symmetric_J,
@@ -71,7 +71,7 @@ class AtomMPNN(nn.Module):
             )
 
         # Output layers
-        self.W_out = nn.Linear(self.hidden_dim, len(const.tokens), bias=True)
+        self.W_out = nn.Linear(self.hidden_dim, len(const.prot_only_tokens), bias=True)  # only predict protein tokens
 
         # Initialize weights
         for p in self.parameters():

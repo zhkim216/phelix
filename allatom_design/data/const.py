@@ -392,3 +392,15 @@ rna_bb_atoms = ["P", "OP1", "OP2", "O5'", "C5'", "C4'", "O4'", "C3'", "O3'", "C2
 dna_bb_atoms = ["P", "OP1", "OP2", "O5'", "C5'", "C4'", "O4'", "C3'", "O3'", "C2'", "C1'"]
 
 bb_atoms = {"PROTEIN": prot_bb_atoms, "DNA": dna_bb_atoms, "RNA": rna_bb_atoms}
+
+
+####################################################################################################
+# Selecting protein tokens
+####################################################################################################
+
+prot_only_tokens = tokens[2:23]
+prot_only_tokens_to_all_tokens = torch.zeros(len(prot_only_tokens), len(tokens))
+for i, token in enumerate(prot_only_tokens):
+    prot_only_tokens_to_all_tokens[i, token_ids[token]] = 1
+
+prot_only_token_to_id = {token: i for i, token in enumerate(prot_only_tokens)}

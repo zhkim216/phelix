@@ -20,7 +20,6 @@ mpnn:
     token_n_channel: ${denoiser.mpnn.n_channel}
     atom_feature_dim: 386
     k_atom_neighbors: 32
-
     n_layers: 3
     dropout_p: 0.1
 
@@ -31,12 +30,8 @@ mpnn:
     edge_n_channel: ${denoiser.mpnn.n_channel}
 
   n_layers: 3
-  ablate_noise_labels: false
-  init_hV_with_hS: true
-
   dropout_p: 0.1
   return_embedding: "last"
-
 
   potts:
     use_potts: true
