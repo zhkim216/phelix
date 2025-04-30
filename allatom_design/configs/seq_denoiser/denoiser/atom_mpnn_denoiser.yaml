@@ -14,13 +14,15 @@ max_eps: null  # for per_residue_eps, samples from half-normal truncated to this
 mpnn:
   n_channel: 128
   k_neighbors: 48
+  n_layers: 3
+  dropout_p: 0.1
 
   atom_encoder:
-    atom_n_channel: 16
+    atom_n_channel: 32
     token_n_channel: ${denoiser.mpnn.n_channel}
     atom_feature_dim: 386
-    k_atom_neighbors: 32
-    n_layers: 3
+    k_atom_neighbors: 64
+    n_layers: 2
     dropout_p: 0.1
 
   token_features:
@@ -28,10 +30,6 @@ mpnn:
     num_rbf: 16
     num_positional_embeddings: 16
     edge_n_channel: ${denoiser.mpnn.n_channel}
-
-  n_layers: 3
-  dropout_p: 0.1
-  return_embedding: "last"
 
   potts:
     use_potts: true

@@ -24,11 +24,11 @@ WANDB_ID=richardshuai
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=aasd1_a2
+EXP_NAME=sd0_a0
 GROUP=seq_des
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/af3_pdb_monomer
+PDB_PATH=/scratch/hielab/rshuai/datasets/boltz
 
 # Run training script
 cd ${BASE_DIR}
@@ -38,22 +38,12 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     wandb.no_wandb=false \
     out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
-    data.fixed_size=256 \
     data.pdb_path=${PDB_PATH} \
-    data.cluster_sample=true \
-    data.subset_length_range=[32,512] \
-    train.batch_size=32 \
-    trainer.accumulate_grad_batches=2 \
+    train.batch_size=64 \
+    trainer.accumulate_grad_batches=1 \
     train.compile_model=true \
-    model.task=allatom_seq_des \
-    denoiser=fampnn_denoiser \
-    denoiser.interpolant.training_noise_schedule=constant_t \
     denoiser.per_residue_eps=false \
     denoiser.augment_eps=0.3 \
-    denoiser.fampnn.use_gvp=false \
-    denoiser.fampnn.n_layers=3 \
-    denoiser.fampnn.potts.use_potts=true \
-    denoiser.confidence_module.enabled=true \
-    checkpointing.save_latest_every_n_steps=10000 \
-    trainer.check_val_every_n_epoch=10 \
+    checkpointing.save_latest_every_n_steps=5000 \
+    trainer.check_val_every_n_epoch=5 \
     hydra.run.dir=${HYDRA_DIR}
