@@ -63,14 +63,17 @@ class SeqDenoiser(nn.Module):
         self.denoiser.setup()
 
 
-    def forward(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
+    def forward(self,
+                batch: dict[str, TensorType["b ..."]],
+                t: TensorType["b", float] | None = None
+                ) -> dict[str, TensorType["b ..."]]:
         outputs = {}
 
         # Copy batch to avoid modifying the original
         batch = copy.deepcopy(batch)
 
         # Sample sequence and atom conditioning masks
-        batch["seq_cond_mask"] = self.mask_selector.sample_seq_cond_mask(batch)  # 1 if we should condition on the restype, 0 otherwise
+        batch["seq_cond_mask"] = self.mask_selector.sample_seq_cond_mask(batch, t)  # 1 if we should condition on the restype, 0 otherwise
         batch["atom_cond_mask"] = self.mask_selector.sample_atom_cond_mask(batch)  # 1 if we should condition on the atom, 0 otherwise
 
         # Ensure the conditioning masks only contain non-pad, resolved entries

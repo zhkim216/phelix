@@ -113,6 +113,7 @@ loss:
   # loss configs
   seq_loss:
     label_smoothing: 0.1
+    smoothing_n_classes: 21  # to match ProteinMPNN, assumes protein-only
     per_token_avg: false
 
   potts:

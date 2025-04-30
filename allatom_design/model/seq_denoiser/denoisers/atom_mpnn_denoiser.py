@@ -38,9 +38,18 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         batch = self.build_masks(batch)
 
         # Run model
-        logits, mpnn_feats = self.atom_mpnn(batch)
+        seq_logits, mpnn_feats = self.atom_mpnn(batch)
 
-        return logits, mpnn_feats
+        # Outputs
+        aux_preds = {
+            "seq_logits": seq_logits,
+            "potts_decoder_aux": mpnn_feats.get("potts_decoder_aux", None),
+            "seq_cond_mask": batch["seq_cond_mask"],
+            "atom_cond_mask": batch["atom_cond_mask"],
+            "token_exists_mask": batch["token_exists_mask"],
+        }
+
+        return seq_logits, aux_preds
 
 
     def build_masks(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
@@ -53,7 +62,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         # Create token-level mask which is 1 if there exists any unmasked atom in the token, or 0 otherwise
         token_n_cond_atoms = torch.bmm(batch["atom_to_token"].float().transpose(1, 2), batch["atom_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_tokens]
-        batch["token_exists_mask"] = (token_n_cond_atoms > 0).float()  # [b, n_tokens]
+        batch["token_exists_mask"] = (token_n_cond_atoms > 0).float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
         return batch
 
 

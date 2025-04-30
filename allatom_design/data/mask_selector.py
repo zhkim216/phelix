@@ -23,7 +23,10 @@ class MaskSelector:
 
 
 
-    def sample_seq_cond_mask(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_tokens", float]:
+    def sample_seq_cond_mask(self,
+                             batch: dict[str, TensorType["b ..."]],
+                             t: TensorType["b", float] | None = None
+                             ) -> TensorType["b n_tokens", float]:
         """
         Create a mask denoting which restypes to mask out.
         0 if we should mask, 1 if we should keep. Non-protein restypes are always kept (1).
@@ -31,27 +34,9 @@ class MaskSelector:
         B, N = batch["token_pad_mask"].shape
         device = batch["token_pad_mask"].device
 
-        # Sample timestep
-        if self.restype_masking_schedule == "constant_t":
-            t = torch.ones(B, device=device) * self.restype_masking_cfg.t
-        elif self.restype_masking_schedule.startswith("uniform"):
-            # sample time from uniform distribution
-            t_min, t_max = self.restype_masking_cfg.t_min, self.restype_masking_cfg.t_max
-            t = torch.rand(B, device=device) * (t_max - t_min) + t_min
-
-            # apply transformation to t
-            if self.restype_masking_schedule == "uniform_t":
-                t = t
-            elif self.restype_masking_schedule == "uniform_squared_t":
-                t = t ** 2
-            elif self.restype_masking_schedule == "uniform_cubed_t":
-                t = t ** 3
-            elif self.restype_masking_schedule == "uniform_cosine_t":
-                t = 1 - torch.cos(t * np.pi / 2)
-            elif self.restype_masking_schedule == "uniform_sqrt_t":
-                t = t ** 0.5
-            elif self.restype_masking_schedule == "uniform_cbrt_t":
-                t = t ** (1/3)
+        if t is None:
+            # Sample timestep
+            t = self._sample_t(B, device)
 
         # Create mask based on timestep
         seq_cond_mask = torch.rand(B, N, device=device) < rearrange(t, "b -> b 1")
@@ -90,6 +75,35 @@ class MaskSelector:
                                      prot_bb_atom_mask)
 
         return atom_cond_mask
+
+
+    def _sample_t(self, B: int, device: torch.device) -> TensorType["b", float]:
+        """
+        Sample a timestep from the masking schedule.
+        t = probability of keeping the restype unmasked
+        """
+        if self.restype_masking_schedule == "constant_t":
+            t = torch.ones(B, device=device) * self.restype_masking_cfg.t
+        elif self.restype_masking_schedule.startswith("uniform"):
+            # sample time from uniform distribution
+            t_min, t_max = self.restype_masking_cfg.t_min, self.restype_masking_cfg.t_max
+            t = torch.rand(B, device=device) * (t_max - t_min) + t_min
+
+            # apply transformation to t
+            if self.restype_masking_schedule == "uniform_t":
+                t = t
+            elif self.restype_masking_schedule == "uniform_squared_t":
+                t = t ** 2
+            elif self.restype_masking_schedule == "uniform_cubed_t":
+                t = t ** 3
+            elif self.restype_masking_schedule == "uniform_cosine_t":
+                t = 1 - torch.cos(t * np.pi / 2)
+            elif self.restype_masking_schedule == "uniform_sqrt_t":
+                t = t ** 0.5
+            elif self.restype_masking_schedule == "uniform_cbrt_t":
+                t = t ** (1/3)
+
+        return t
 
 
 ##################### Atom-level motif selection #####################

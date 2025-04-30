@@ -84,7 +84,7 @@ class LitSeqDenoiser(L.LightningModule):
         if self.model.task in ["seq_des"]:
             aux_t = defaultdict(list)
             for eval_t in self.cfg.eval.eval_timesteps:
-                B = batch["seq_mask"].shape[0]
+                B = batch["token_pad_mask"].shape[0]
                 t_seq = torch.full((B, ), fill_value=eval_t).to(self.device)
                 outputs = self(batch, t=t_seq)
                 _, aux = self.loss(outputs, batch, eval_total = False, return_aux=True)
