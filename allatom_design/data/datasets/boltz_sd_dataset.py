@@ -9,19 +9,21 @@ import lightning as L
 import numpy as np
 import torch
 from omegaconf import DictConfig
+from torch.nn.functional import one_hot
 from torch.utils import data
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from allatom_design.data import const
 from allatom_design.data.crop.cropper import Cropper
+from allatom_design.data.data import atom_center_random_augmentation
 from allatom_design.data.feature.pad import pad_to_max
-from allatom_design.data.feature.seq_des_featurizer import \
-    SequenceDesignFeaturizer, crop_feats
+from allatom_design.data.feature.seq_des_featurizer import (
+    SequenceDesignFeaturizer, crop_feats)
 from allatom_design.data.sample.sampler import Sample, Sampler
 from allatom_design.data.tokenize.tokenizer import Tokenized, Tokenizer
 from allatom_design.data.types import (Connection, Input, Manifest, Record,
                                        Structure)
-from allatom_design.data.data import atom_center_random_augmentation
 
 
 class BoltzSDDataModule(L.LightningDataModule):
@@ -224,7 +226,7 @@ class SDDataset(data.Dataset):
         # Compute crop
         try:
             if self.max_tokens is not None:
-                tokenized_cropped, token_crop_mask = dataset.cropper.crop(
+                _, token_crop_mask = dataset.cropper.crop(
                     tokenized,
                     max_atoms=self.max_atoms,
                     max_tokens=self.max_tokens,
@@ -269,7 +271,9 @@ def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
     return Tokenized(tokens=tokenized["tokens"], bonds=tokenized["bonds"], structure=structure, msa={})
 
 
-def load_featurized(record: Record, pdb_path: str) -> dict[str, torch.Tensor]:
+def load_featurized(record: Record,
+                    pdb_path: str,
+                    ) -> dict[str, torch.Tensor]:
     """
     Load featurized data for a given record.
     """

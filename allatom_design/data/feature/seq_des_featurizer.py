@@ -260,12 +260,12 @@ def process_sd_atom_features(
     prot_bb_atom_mask = torch.tensor(prot_bb_atom_mask, dtype=torch.float)
     prot_scn_atom_mask = torch.tensor(prot_scn_atom_mask, dtype=torch.float)
 
-    # Convert to one-hot
+    # Convert to one-hot (convert to bool for I/O efficiency)
     ref_atom_name_chars = one_hot(
         ref_atom_name_chars % num_bins, num_classes=num_bins
-    )  # added for lower case letters
-    ref_element = one_hot(ref_element, num_classes=const.num_elements)
-    atom_to_token = one_hot(atom_to_token, num_classes=token_id + 1)
+    ).bool()  # added for lower case letters
+    ref_element = one_hot(ref_element, num_classes=const.num_elements).bool()
+    atom_to_token = one_hot(atom_to_token, num_classes=token_id + 1).bool()
 
     # Apply random roto-translation to the input atoms
     ref_pos = boltz_center_random_augmentation(
