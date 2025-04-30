@@ -80,6 +80,9 @@ class AtomMPNN(nn.Module):
 
 
     def forward(self, batch: dict[str, TensorType["b ..."]]):
+        # If provided, add noise to input coordinates
+        batch["coords"] = self._add_noise(batch)
+
         # Get token-level features
         h_V = self.atom_encoder(batch)
 
@@ -125,6 +128,22 @@ class AtomMPNN(nn.Module):
             mpnn_feature_dict["potts_decoder_aux"] = potts_decoder_aux
 
         return logits, mpnn_feature_dict
+
+
+    def _add_noise(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_atoms 3", float]:
+        """
+        If provided, add noise to input coordinates
+        """
+        if batch["noise"] is None:
+            return batch["coords"]
+
+        # TODO: implement support for noise labels / per-residue noise
+        if batch["noise_labels"] is not None:
+            raise NotImplementedError("Per-residue noise not yet implemented for AtomMPNN")
+
+        # Add noise to input coordinates
+        noised_coords = batch["coords"] + batch["noise"]
+        return noised_coords
 
 
 class TokenFeatures(nn.Module):

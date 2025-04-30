@@ -24,6 +24,11 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         self.bb_sigma_data, self.scn_sigma_data = sigma_data
         self.task = cfg.task
 
+        # Random Gaussian noise
+        self.augment_eps = cfg.augment_eps
+        self.per_residue_eps = cfg.per_residue_eps
+        self.max_eps = cfg.max_eps
+
         # Sequence design model: AtomMPNN
         self.atom_mpnn = AtomMPNN(cfg.mpnn)
 
@@ -36,6 +41,9 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                            ]:
         # Build some helpful masks based on conditioning sequence and atoms
         batch = self.build_masks(batch)
+
+        # During training, add random noise to input coordinates
+        batch = self.get_random_noise(batch)
 
         # Run model
         seq_logits, mpnn_feats = self.atom_mpnn(batch)
@@ -55,14 +63,55 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
     def build_masks(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
         """
         Build various masks for AtomMPNN.
+
+        Updates batch (in place) with:
+        - atomwise_seq_cond_mask: Tensor["b n_atoms", float]: 1 if the atom is part of an unmasked residue type, or 0 otherwise
+        - token_exists_mask: Tensor["b n_tokens", float]: 1 if there exists any unmasked atom in the token, or 0 otherwise
         """
         # Create atom-level mask which is 1 if the atom is part of an unmasked residue type, or 0 otherwise
         B, N_atoms, N_tokens = batch["atom_to_token"].shape
-        batch["atomwise_seq_cond_mask"] = torch.bmm(batch["atom_to_token"].float(), batch["seq_cond_mask"].view(B, N_tokens, 1)).squeeze(dim=-1)  # [b, n_atoms]
+        batch["atomwise_seq_cond_mask"] = torch.bmm(batch["atom_to_token"].float(), batch["seq_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_atoms]
 
         # Create token-level mask which is 1 if there exists any unmasked atom in the token, or 0 otherwise
         token_n_cond_atoms = torch.bmm(batch["atom_to_token"].float().transpose(1, 2), batch["atom_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_tokens]
         batch["token_exists_mask"] = (token_n_cond_atoms > 0).float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
+        return batch
+
+
+
+    def get_random_noise(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
+        """
+        During training, adds random noise and noise labels for input coordinates.
+
+        Updates batch (in place) with:
+        - noise: Tensor["b n_atoms 3", float]: random noise for each atom
+        - noise_labels: Tensor["b n_tokens", float]: noise label for each token
+        """
+        if not self.training or self.augment_eps <= 0:
+            # if not training or no noise, and not provided, then we assume no noise
+            batch["noise"] = batch.get("noise", None)
+            batch["noise_labels"] = batch.get("noise_labels", None)
+            return batch
+
+        ## Training: choose random backbone noise ##
+        B, N_atoms, N_tokens = batch["atom_to_token"].shape
+        device = batch["atom_to_token"].device
+
+        if self.per_residue_eps:
+            # per-residue noise. Unlike Cho et al., we sample noise stds from a uniform distribution and apply different noise to each atom in a residue
+            # randomly sample noise labels
+            noise_labels = torch.rand((B, N_tokens), device=device) * self.augment_eps  # sample std for each residue from uniform [0, augment_eps]
+            atomwise_noise_labels = torch.bmm(batch["atom_to_token"].float(), noise_labels.unsqueeze(-1)).squeeze(dim=-1)  # [b, n_atoms]
+            noise = torch.randn((B, N_atoms, 3), device=device) * atomwise_noise_labels.unsqueeze(-1)
+            noise = noise * batch["atom_cond_mask"].unsqueeze(-1)
+        else:
+            # global noise, similar to ProteinMPNN
+            # add randomly sampled noise to input
+            noise = self.augment_eps * torch.randn((B, N_atoms, 3), device=device)
+            noise_labels = None
+
+        batch["noise"] = noise
+        batch["noise_labels"] = noise_labels
         return batch
 
 
