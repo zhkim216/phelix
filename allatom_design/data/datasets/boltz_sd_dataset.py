@@ -251,13 +251,13 @@ class SDDataset(data.Dataset):
                     interface_id=sample.interface_id,
                 )
         except Exception as e:
-            print(f"Cropper failed on {sample.record.id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
+            print(f"Cropper failed on {sample.record.id} with error: {e}. Skipping.")
+            return self._load_and_tokenize_input(idx)
 
         # Check if there are tokens
         if len(tokenized.tokens) == 0:
-            msg = "No tokens in cropped structure."
-            raise ValueError(msg)
+            print(f"No tokens in cropped structure for {sample.record.id}. Skipping.")
+            return self._load_and_tokenize_input(idx)
 
         return sample.record.id, tokenized
 

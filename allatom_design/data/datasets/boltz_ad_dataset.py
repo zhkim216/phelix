@@ -192,7 +192,11 @@ class ADDataset(data.Dataset):
 
         # Featurize motif (length 0 if unconditional or empty motif)
         if self.requires_motif:
-            example["motif_inputs"] = self._featurize_motif_inputs(idx, record_id, tokenized)
+            try:
+                example["motif_inputs"] = self._featurize_motif_inputs(tokenized)
+            except Exception as e:
+                print(f"Featurizer failed to featurize motif tokens on {record_id} with error {e}. Skipping.")
+                return self.__getitem__(idx)
 
         # Apply random augmentation
         example = self._apply_se3_augmentation(example)
@@ -229,10 +233,7 @@ class ADDataset(data.Dataset):
         return example
 
 
-    def _featurize_motif_inputs(self,
-                         idx: int,
-                         record_id: str,
-                         tokenized: Tokenized) -> dict[str, torch.Tensor]:
+    def _featurize_motif_inputs(self, tokenized: Tokenized) -> dict[str, torch.Tensor]:
         """
         Featurize motif.
         """
@@ -242,12 +243,7 @@ class ADDataset(data.Dataset):
             "motif_atoms_per_window_queries": self.motif_atoms_per_window_queries,
             "motif_num_bins": self.motif_num_bins,
         }
-        try:
-            motif_feats = featurize_motif_inputs(tokenized, self.dataset.motif_selector, self.dataset.motif_cropper, self.dataset.motif_featurizer, motif_data_kwargs)
-        except Exception as e:
-            print(f"Featurizer failed to featurize motif tokens on {record_id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
-
+        motif_feats = featurize_motif_inputs(tokenized, self.dataset.motif_selector, self.dataset.motif_cropper, self.dataset.motif_featurizer, motif_data_kwargs)
 
         return motif_feats
 
