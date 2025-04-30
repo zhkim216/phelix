@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=pretokenize_inputs
+#SBATCH --job-name=prefeaturize_inputs
 #SBATCH -p cpu_batch
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=32
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -19,6 +19,6 @@ BASE_DIR=/home/talal/rshuai/allatom-design
 cd ${BASE_DIR}
 
 # Run script
-python3 allatom_design/data/preprocessing/boltz/pretokenize_inputs.py \
+python3 allatom_design/data/preprocessing/boltz/prefeaturize_inputs.py \
     pdb_path=/scratch/hielab/rshuai/datasets/boltz \
     num_workers=32
