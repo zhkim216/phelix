@@ -51,12 +51,6 @@ class SeqDenoiser(nn.Module):
         # Mask selector
         self.mask_selector = cfg.mask_selector
 
-        # Backbone noise options
-        denoiser_cfg = cfg.denoiser
-        self.augment_eps = denoiser_cfg.augment_eps
-        self.per_residue_eps = denoiser_cfg.per_residue_eps
-        self.max_eps = denoiser_cfg.max_eps
-
 
     def setup(self):
         # Initialize denoiser pre-trained weights if needed
@@ -100,34 +94,6 @@ class SeqDenoiser(nn.Module):
         self.scn_mean.data = torch.tensor(scn_mean)
         self.scn_std.data = torch.tensor(scn_std)
         print(f"Setting scn_mean: {scn_mean}, scn_std: {scn_std}")
-
-
-    def get_random_noise(self, seq_mask: TensorType["b n", float]) -> Tuple[TensorType["b n 14 3", float], TensorType["b n", float]]:
-        ## Choose random backbone noise ##
-        B, N = seq_mask.shape
-
-        if self.per_residue_eps:
-            # per-residue noise. Unlike Cho et al., we sample noise stds from a uniform distribution and apply different noise to each atom in a residue
-            if self.training and self.augment_eps > 0:
-                # training: randomly sample noise labels
-                noise_labels = torch.rand_like(seq_mask, device=seq_mask.device) * self.augment_eps  # sample std for each residue from uniform [0, augment_eps]
-                noise = torch.randn((B, N, 14, 3), device=seq_mask.device) * rearrange(noise_labels, "b n -> b n 1 1")  # random noise for each atom
-            else:
-                # eval: assume no noise
-                noise, noise_labels = None, None
-
-        else:
-            # global noise, similar to ProteinMPNN
-            noise_labels = None
-            if self.training and self.augment_eps > 0:
-                # training: add randomly sampled noise to input
-                noise = self.augment_eps * torch.randn((B, N, 14, 3), device=seq_mask.device)
-                noise_labels = None
-            else:
-                # eval: assume no noise
-                noise, noise_labels = None, None
-
-        return noise, noise_labels
 
 
     def sidechain_pack(self,
