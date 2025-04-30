@@ -117,13 +117,7 @@ class BoltzSDDataModule(L.LightningDataModule):
             print(f"Loading in manifest from {manifest_path}...")
             with gzip.open(manifest_path, "rt") as f:
                 data = json.load(f)
-            # records = [Record.from_dict(r) for r in tqdm(data, desc="Loading records...")]
-            # DEBUG
-            with open(f"{self.pdb_path}/splits/validation_ids.txt", "r") as f:
-                val_split = {x.lower() for x in f.read().splitlines()}
-            val_data = [x for x in data if x["id"] in val_split]
-            records = [Record.from_dict(r) for r in tqdm(val_data, desc="Loading records...")]
-            records += [Record.from_dict(r) for r in tqdm(data[:100], desc="Loading records...")]
+            records = [Record.from_dict(r) for r in tqdm(data, desc="Loading records...")]
             manifest = Manifest(records=records)
         else:
             manifest_path = f"{self.pdb_path}/rcsb_processed_targets/manifest.json"
@@ -242,13 +236,8 @@ class SDDataset(data.Dataset):
             record = self.dataset.manifest.records[idx]
             sample = Sample(record=record, chain_id=None, interface_id=None)
 
-        # Get the structure and tokenize
-        input_data = load_input(sample.record, dataset.pdb_path)
-        try:
-            tokenized = dataset.tokenizer.tokenize(input_data)
-        except Exception as e:
-            print(f"Tokenizer failed on {sample.record.id} with error {e}. Skipping.")
-            return self.__getitem__(idx)
+        # Load pre-tokenized data
+        tokenized = load_tokenized(sample.record, dataset.pdb_path)
 
         # Compute crop
         try:
@@ -273,24 +262,13 @@ class SDDataset(data.Dataset):
         return sample.record.id, tokenized
 
 
-def load_input(record: Record, pdb_path: str) -> Input:
-    """Load the given input data.
-
-    Parameters
-    ----------
-    record : Record
-        The record to load.
-    pdb_path : str
-        The path to the data directory.
-
-    Returns
-    -------
-    Input
-        The loaded input.
-
+def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
     """
-    # Load the structure
-    structure = np.load(f"{pdb_path}/rcsb_processed_targets/structures/{record.id}.npz")
+    Load tokenized data for a given record.
+    We pre-tokenize the input structure with tokenwise atom feats so we can speed up dataloading.
+    """
+    tokenized = np.load(f"{pdb_path}/processed_targets/tokenized/{record.id}.npz", allow_pickle=True)
+    structure = tokenized["structure"].item()
     structure = Structure(
         atoms=structure["atoms"],
         bonds=structure["bonds"],
@@ -300,8 +278,7 @@ def load_input(record: Record, pdb_path: str) -> Input:
         interfaces=structure["interfaces"],
         mask=structure["mask"],
     )
-
-    return Input(structure, msa={})  # we don't load in the MSAs
+    return Tokenized(tokens=tokenized["tokens"], bonds=tokenized["bonds"], structure=structure, msa={})
 
 
 @dataclass
