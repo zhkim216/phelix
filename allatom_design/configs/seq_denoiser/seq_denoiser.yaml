@@ -48,14 +48,19 @@ data:
     _target_: allatom_design.data.feature.seq_des_featurizer.SequenceDesignFeaturizer
 
   filters:
-    - _target_: boltz.data.filter.dynamic.size.SizeFilter
+    - _target_: allatom_design.data.filter.dynamic.size.SizeFilter
       min_chains: 1
-      max_chains: 300
-    - _target_: boltz.data.filter.dynamic.date.DateFilter
+      max_chains: 50
+    - _target_: allatom_design.data.filter.dynamic.date.DateFilter
       date: "2021-09-30"
       ref: released
-    - _target_: boltz.data.filter.dynamic.resolution.ResolutionFilter
+    - _target_: allatom_design.data.filter.dynamic.resolution.ResolutionFilter
       resolution: 9.0
+    - _target_: allatom_design.data.filter.dynamic.n_chain_types.NChainTypesFilter
+      n_protein_chain_range: [1, 1]
+      n_dna_chain_range: [0, 10]
+      n_rna_chain_range: [0, 10]
+      n_nonpolymer_chain_range: [0, 10]
 
   sampler:
     _target_: boltz.data.sample.cluster.ClusterSampler
