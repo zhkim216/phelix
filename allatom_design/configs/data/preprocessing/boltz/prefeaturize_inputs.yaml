@@ -10,5 +10,5 @@ featurizer:
   _target_: allatom_design.data.feature.seq_des_featurizer.SequenceDesignFeaturizer
 
 atoms_per_window_queries: 32
-num_bins: 64
+num_bins: 64  # make sure this matches the training featurizer
 max_tokens_to_process: 2048  # to avoid caching very large files

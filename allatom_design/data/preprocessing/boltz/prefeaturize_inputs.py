@@ -48,9 +48,9 @@ def main(cfg: DictConfig):
     if use_parallel:
         with Parallel(n_jobs=cfg.num_workers) as parallel_pool:
             jobs = [delayed(featurize_fn)(processed_structure_file) for processed_structure_file in processed_structure_files]
-            list(parallel_pool(tqdm(jobs, total=len(jobs), desc="Tokenizing structures")))
+            list(parallel_pool(tqdm(jobs, total=len(jobs), desc="Featurizing structures")))
     else:
-        for processed_structure_file in tqdm(processed_structure_files, desc="Tokenizing structures"):
+        for processed_structure_file in tqdm(processed_structure_files, desc="Featurizing structures"):
             featurize_fn(processed_structure_file)
 
 
@@ -93,7 +93,7 @@ def featurize_structure_to_disk(processed_structure_file: str,
         print(f"Skipping structure {processed_structure_file} because it has {len(tokenized.tokens)} tokens, which is greater than max_tokens_to_process={max_tokens_to_process}.")
         return
 
-    # Featurize structure
+    # Featurize structure (without padding to max_tokens or max_atoms)
     try:
         feats = featurizer.process(tokenized, atoms_per_window_queries=atoms_per_window_queries, num_bins=num_bins)
     except Exception as e:
