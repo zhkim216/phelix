@@ -14,12 +14,14 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from allatom_design.data.crop.cropper import Cropper
-from allatom_design.data.feature.seq_des_featurizer import SequenceDesignFeaturizer
 from allatom_design.data.feature.pad import pad_to_max
+from allatom_design.data.feature.seq_des_featurizer import \
+    SequenceDesignFeaturizer
 from allatom_design.data.sample.sampler import Sample, Sampler
 from allatom_design.data.tokenize.tokenizer import Tokenized, Tokenizer
 from allatom_design.data.types import (Connection, Input, Manifest, Record,
                                        Structure)
+from allatom_design.data.data import atom_center_random_augmentation
 
 
 class BoltzSDDataModule(L.LightningDataModule):
@@ -52,11 +54,11 @@ class BoltzSDDataModule(L.LightningDataModule):
 
         # Create train dataset
         train_manifest = Manifest(records=train_records)
-        train_dataset = BoltzDataset(self.pdb_path, train_manifest, 1.0, cfg.sampler, cfg.cropper, cfg.tokenizer, cfg.featurizer)
+        train_dataset = BoltzSDDataset(self.pdb_path, train_manifest, 1.0, cfg.sampler, cfg.cropper, cfg.tokenizer, cfg.featurizer)
 
         # Create validation dataset
         val_manifest = Manifest(records=val_records)
-        val_dataset = BoltzDataset(self.pdb_path, val_manifest, 1.0, cfg.sampler, cfg.cropper, cfg.tokenizer, cfg.featurizer)
+        val_dataset = BoltzSDDataset(self.pdb_path, val_manifest, 1.0, cfg.sampler, cfg.cropper, cfg.tokenizer, cfg.featurizer)
 
         # Print dataset sizes
         print(f"Training dataset size: {len(train_dataset.manifest.records)}")
@@ -136,7 +138,7 @@ class SDDataset(data.Dataset):
 
     def __init__(
         self,
-        dataset: "BoltzDataset",
+        dataset: "BoltzSDDataset",
         samples_per_epoch: int,
         max_atoms: int,
         max_tokens: int,
@@ -188,7 +190,7 @@ class SDDataset(data.Dataset):
 
         # Compute features
         try:
-            boltz_feats = self.dataset.featurizer.process(
+            feats = self.dataset.featurizer.process(
                 tokenized,
                 atoms_per_window_queries=self.atoms_per_window_queries,
                 min_dist=self.min_dist,
@@ -200,10 +202,20 @@ class SDDataset(data.Dataset):
         except Exception as e:
             print(f"Featurizer failed on {record_id} with error {e}. Skipping.")
             return self.__getitem__(idx)
+        feats["coords"] = feats["coords"].squeeze(0)  # squeeze out batch dimension
 
-        boltz_feats["pdb_key"] = record_id
-        boltz_feats["coords"] = boltz_feats["coords"].squeeze(0)  # squeeze out batch dimension
-        example = boltz_feats
+        # By default, we condition on all residue types and resolved atoms
+        feats["seq_cond_mask"] = feats["token_pad_mask"]
+        feats["atom_cond_mask"] = feats["atom_pad_mask"] * feats["atom_resolved_mask"]
+
+        # SE3 augmentation for convenience / scaling
+        feats["coords"] = atom_center_random_augmentation(feats["coords"], feats["atom_cond_mask"],
+                                                          apply_random_augmentation=True,
+                                                          translation_scale=1.0,
+                                                          return_transforms=False)
+
+        feats["pdb_key"] = record_id
+        example = feats
         return example
 
 
@@ -297,7 +309,7 @@ def load_input(record: Record, pdb_path: str) -> Input:
 
 
 @dataclass
-class BoltzDataset:
+class BoltzSDDataset:
     """Data holder."""
     pdb_path: str
     manifest: Manifest
@@ -354,5 +366,3 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
         collated[key] = values
 
     return collated
-
-

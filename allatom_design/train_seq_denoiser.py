@@ -15,7 +15,6 @@ from omegaconf import DictConfig, OmegaConf
 from allatom_design.data.datasets.boltz_sd_dataset import BoltzSDDataModule
 from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
                                              repair_state_dict)
-from allatom_design.data.datasets.sd_dataset import LitSDDataModule
 from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
@@ -42,9 +41,11 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.deterministic = True  # nonrandom CUDNN convolution algo, maybe slower
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
+    # Instantiate config
+    cfg = hydra.utils.instantiate(cfg)
+
     # Set up LightningDataModule
-    data_cfg = hydra.utils.instantiate(cfg.data)
-    datamodule = BoltzSDDataModule(data_cfg)
+    datamodule = BoltzSDDataModule(cfg.data)
 
     # Init wandb only on node rank 0
     local_rank = os.environ.get("LOCAL_RANK", None)
@@ -91,10 +92,6 @@ def main(cfg: DictConfig):
     # Preserve configs
     with open(Path(log_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
-
-    with open(Path(log_dir, "config_unresolved.yaml"), "w") as f:
-        # also preserve unresolved config
-        yaml.safe_dump(OmegaConf.to_container(cfg, resolve=False), f)
 
     # Set up model
     lit_model = LitSeqDenoiser(cfg)

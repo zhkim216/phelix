@@ -8,7 +8,6 @@ from omegaconf import DictConfig
 from torchtyping import TensorType
 
 import allatom_design.data.residue_constants as rc
-from allatom_design.data.data import cat_bb_scn, get_rc_tensor
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn import \
@@ -35,9 +34,27 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                            TensorType["b n", int],  # aatype pred
                            dict[str, TensorType["b ..."]]  # aux_preds
                            ]:
+        # Build some helpful masks based on conditioning sequence and atoms
+        batch = self.build_masks(batch)
+
+        # Run model
         logits, mpnn_feats = self.atom_mpnn(batch)
 
         return logits, mpnn_feats
+
+
+    def build_masks(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
+        """
+        Build various masks for AtomMPNN.
+        """
+        # Create atom-level mask which is 1 if the atom is part of an unmasked residue type, or 0 otherwise
+        B, N_atoms, N_tokens = batch["atom_to_token"].shape
+        batch["atomwise_seq_cond_mask"] = torch.bmm(batch["atom_to_token"].float(), batch["seq_cond_mask"].view(B, N_tokens, 1)).squeeze(dim=-1)  # [b, n_atoms]
+
+        # Create token-level mask which is 1 if there exists any unmasked atom in the token, or 0 otherwise
+        token_n_cond_atoms = torch.bmm(batch["atom_to_token"].float().transpose(1, 2), batch["atom_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_tokens]
+        batch["token_exists_mask"] = (token_n_cond_atoms > 0).float()  # [b, n_tokens]
+        return batch
 
 
     def sample_aatype(self,
