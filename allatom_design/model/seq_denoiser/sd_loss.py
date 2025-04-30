@@ -43,17 +43,28 @@ class SDLoss(nn.Module):
         """
         aux = {}  # losses
         aux_monitor = {}  # monitor other metrics that do not contribute to the loss
+
+        # First, convert batch res_type to protein token vocabulary
+        target_res_type = batch["res_type"].argmax(dim=-1)  # undo one-hot encoding
+        lookup = const.prot_only_tokens_to_all_tokens.T.to(target_res_type.device)  # [33, 21]
+        target_res_type = lookup[target_res_type].argmax(dim=-1)  # [b, n]
+
         if self.use_seq_pred and eval_seq:
             # compute sequence loss from sequence design module
             seq_loss_mask = outputs["token_exists_mask"] * (1 - outputs["seq_cond_mask"])
+            seq_loss_mask = seq_loss_mask * (target_res_type != const.prot_only_token_to_id["UNK"])  # mask out UNK tokens from loss
 
-            aux["seq_loss"] = masked_cross_entropy(outputs["seq_logits"], batch["res_type"], seq_loss_mask,
+            # DEBUG: ensure that we're only computing over protein tokens
+            if (batch["mol_type"][seq_loss_mask.bool()] != const.chain_type_ids["PROTEIN"]).any():
+                print("WARNING: seq_loss is being computed over non-protein tokens")
+
+            aux["seq_loss"] = masked_cross_entropy(outputs["seq_logits"], target_res_type, seq_loss_mask,
                                                    seq_loss_cfg=self.cfg.seq_loss)
-            aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], batch["res_type"].argmax(dim=-1), seq_loss_mask).mean().detach().clone()
+            aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], target_res_type, seq_loss_mask).mean().detach().clone()
 
             if outputs.get("potts_decoder_aux") is not None:
                 potts_decoder_aux = outputs["potts_decoder_aux"]
-                aux["potts_composite_loss"] = potts_composite_loss(batch["res_type"].argmax(dim=-1), potts_decoder_aux,
+                aux["potts_composite_loss"] = potts_composite_loss(target_res_type, potts_decoder_aux,
                                                                    self.cfg.potts.label_smoothing,
                                                                    self.cfg.potts.per_token_avg)
 
@@ -87,7 +98,7 @@ class SDLoss(nn.Module):
 
 
 def masked_cross_entropy(logits: TensorType["b n c", float],
-                         target_oh: TensorType["b n c", float],
+                         target: TensorType["b n", int],
                          mask: TensorType["b n", float],
                          seq_loss_cfg: DictConfig,
                          ) -> TensorType["b", float]:
@@ -96,16 +107,17 @@ def masked_cross_entropy(logits: TensorType["b n c", float],
 
     seq_loss_cfg has the following keys:
     - label_smoothing: float, label smoothing factor
-    - n_aatype: int, number of amino acid types
     - per_token_avg: bool, whether to average loss per token (false will divide by fixed_size)
     """
+    n_classes = len(const.prot_only_tokens)
+    target_oh = F.one_hot(target, num_classes=n_classes).float()
+
     # Unpack seq_loss_cfg
     label_smoothing = seq_loss_cfg.label_smoothing
-    smoothing_n_classes = seq_loss_cfg.smoothing_n_classes
     per_token_avg = seq_loss_cfg.per_token_avg
 
     # Label smoothing
-    target_oh = target_oh + label_smoothing / smoothing_n_classes
+    target_oh = target_oh + label_smoothing / n_classes
     target_oh = target_oh / target_oh.sum(dim=-1, keepdim=True)
 
     # Compute cross entropy loss

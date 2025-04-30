@@ -22,7 +22,6 @@ class MaskSelector:
         self.restype_masking_cfg = cfg.restype_masking_cfg[self.restype_masking_schedule]
 
 
-
     def sample_seq_cond_mask(self,
                              batch: dict[str, TensorType["b ..."]],
                              t: TensorType["b", float] | None = None
