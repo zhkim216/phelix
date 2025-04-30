@@ -13,18 +13,17 @@ from tqdm import tqdm
 
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import cat_bb_scn, get_rc_tensor, stack_aux_traj
+from allatom_design.data.data import (atom_center_random_augmentation,
+                                      cat_bb_scn, get_rc_tensor,
+                                      stack_aux_traj)
 from allatom_design.data.pdb_utils import *
 from allatom_design.eval.eval_utils import sampling_utils
-from allatom_design.interpolants.sd_interpolants.mar_interpolant import MAR
-from allatom_design.interpolants.sd_interpolants.sd_interpolant import \
-    SDInterpolant
+from allatom_design.model.seq_denoiser.denoisers.atom_mpnn_denoiser import \
+    AtomMPNNDenoiser
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import \
     FAMPNNDenoiser
-from allatom_design.model.seq_denoiser.denoisers.atom_mpnn_denoiser import \
-    AtomMPNNDenoiser
 from chroma.layers import complexity
 
 
@@ -48,7 +47,9 @@ class SeqDenoiser(nn.Module):
         self.sigma_data = (self.bb_std, self.scn_std)
 
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
-        self.interpolant = get_interpolant(cfg.interpolant)
+
+        # Mask selector
+        self.mask_selector = cfg.mask_selector
 
         # Backbone noise options
         denoiser_cfg = cfg.denoiser
@@ -67,6 +68,14 @@ class SeqDenoiser(nn.Module):
 
         # Copy batch to avoid modifying the original
         batch = copy.deepcopy(batch)
+
+        # Sample sequence and atom conditioning masks
+        batch["seq_cond_mask"] = self.mask_selector.sample_seq_cond_mask(batch)  # 1 if we should condition on the restype, 0 otherwise
+        batch["atom_cond_mask"] = self.mask_selector.sample_atom_cond_mask(batch)  # 1 if we should condition on the atom, 0 otherwise
+
+        # Ensure the conditioning masks only contain non-pad, resolved entries
+        batch["seq_cond_mask"] = batch["seq_cond_mask"] * batch["token_pad_mask"]
+        batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
 
         # Denoise sequence
         _, aux_preds = self.denoiser(batch)
@@ -625,16 +634,6 @@ def get_denoiser(cfg: DictConfig,
         return AtomMPNNDenoiser(cfg, sigma_data)
     else:
         raise ValueError(f"Unknown denoiser: {cfg.name}")
-
-
-def get_interpolant(cfg: DictConfig) -> SDInterpolant:
-    """
-    Get the interpolant specified in the config.
-    """
-    if cfg.name == "mar":
-        return MAR(cfg)
-    else:
-        raise ValueError(f"Unknown interpolant: {cfg.name}")
 
 
 def truncated_half_normal_like(x: TensorType["...", float],

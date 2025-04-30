@@ -58,7 +58,7 @@ class BoltzADDataModule(L.LightningDataModule):
         datasets = {}
         for phase in ["train", "eval", "eval2"]:
             manifest = Manifest(records=records[phase])
-            datasets[phase] = BoltzDataset(cfg.task, self.pdb_path, manifest, 1.0, cfg.sampler, cfg.cropper, cfg.tokenizer, cfg.featurizer,
+            datasets[phase] = BoltzADDataset(cfg.task, self.pdb_path, manifest, 1.0, cfg.sampler, cfg.cropper, cfg.tokenizer, cfg.featurizer,
                                            cfg.motif_cropper, cfg.motif_featurizer, cfg.motif_selector)
 
         # Print dataset sizes
@@ -133,7 +133,7 @@ class ADDataset(data.Dataset):
 
     def __init__(
         self,
-        dataset: "BoltzDataset",
+        dataset: "BoltzADDataset",
         samples_per_epoch: int,
         max_tokens: int,
         max_atoms: int,
@@ -398,7 +398,7 @@ def featurize_motif_inputs(tokenized: Tokenized,
 
 
 @dataclass
-class BoltzDataset:
+class BoltzADDataset:
     """Data holder."""
     task: str
     pdb_path: str

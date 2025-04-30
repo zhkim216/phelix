@@ -6,12 +6,13 @@ import torch
 import torch.nn as nn
 from boltz.model.modules.utils import LinearNoBias
 from omegaconf import DictConfig
+from torch.nn import functional as F
 from torch_cluster import knn_graph
 from torchtyping import TensorType
 
+import allatom_design.data.const as const
 import allatom_design.data.residue_constants as rc
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
-import allatom_design.data.const as const
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
 
@@ -83,14 +84,18 @@ class AtomMPNN(nn.Module):
         h_V = self.atom_encoder(batch)
 
         # Concatenate residue-level features to h_V
-        h_V = torch.cat([h_V, batch["res_type"]], dim=-1)
+        ## first, mask out residues using gap token
+        B, N, C = batch["res_type"].shape
+        masked = F.one_hot(torch.full((B, N), const.token_ids["-"], device=batch["res_type"].device), num_classes=C).float()
+        res_type = torch.where(batch["seq_cond_mask"].unsqueeze(-1).bool(), batch["res_type"], masked)
+        h_V = torch.cat([h_V, res_type], dim=-1)
 
         # Build graph and get edge features
         h_E, E_idx = self.token_features(batch)
 
         # Pass through encoder layers
         h_V, h_E = self.W_s(h_V), self.W_e(h_E)
-        token_mask = batch["token_mask"]
+        token_mask = batch["token_exists_mask"]
         token_mask_2d = gather_nodes(token_mask.unsqueeze(-1), E_idx).squeeze(-1)
         token_mask_2d = token_mask.unsqueeze(-1) * token_mask_2d
         for layer in self.encoder_layers:
@@ -148,13 +153,14 @@ class TokenFeatures(nn.Module):
         Extract token-level edge features and build KNN graph.
         """
         X = self._get_token_coords(batch)
-        D_neighbors, E_idx = self._dist(X, batch["token_mask"].float())
+        D_neighbors, E_idx = self._dist(X, batch["token_exists_mask"].float())
 
         # Get RBF features
         RBF_all = self._rbf(D_neighbors)
 
         # Positional encodings
-        offset = batch["residue_index"][:,:,None] - batch["residue_index"][:,None,:]
+        residue_index = batch["residue_index"]
+        offset = residue_index[:,:,None] - residue_index[:,None,:]
         offset = gather_edges(offset[:,:,:,None], E_idx)[:,:,:,0]  # [B, L, K]
 
         chain_labels = batch["asym_id"]
@@ -173,19 +179,18 @@ class TokenFeatures(nn.Module):
         return E, E_idx
 
 
-    def _get_token_coords(self, batch: dict[str, TensorType["b ..."]]) -> tuple[TensorType["b n 3", float],
-                                                                                TensorType["b n", float]]:
+    def _get_token_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n 3", float]:
         """
         Get token-level coordinates as an average over all known, resolved atoms in the token.
         """
         # mask out padding and unresolved atoms just in case
-        atom_mask = batch["atom_resolved_mask"].float()
-        X = batch["coords"] * atom_mask.unsqueeze(-1)
+        atom_cond_mask = batch["atom_cond_mask"].float()
+        X = batch["coords"] * atom_cond_mask.unsqueeze(-1)
 
         # normalize by the number of resolved atoms in the token
-        resolved_atom_to_token = batch["resolved_atom_to_token"]
-        atom_to_token_mean = resolved_atom_to_token / (
-            resolved_atom_to_token.sum(dim=1, keepdim=True) + 1e-6
+        cond_atom_to_token = batch["atom_to_token"] * atom_cond_mask.unsqueeze(-1)  # cond_atom_to_token ensures that we don't average over unresolved or masked atoms
+        atom_to_token_mean = cond_atom_to_token / (
+            cond_atom_to_token.sum(dim=1, keepdim=True) + 1e-6
         )
 
         with torch.autocast(device_type="cuda", enabled=False):
@@ -421,28 +426,34 @@ class AtomGraphEncoder(nn.Module):
         K = self.k_atom_neighbors
 
         # Embed 1D features
-        atom_mask = batch["atom_resolved_mask"].float()
-        atom_ref_pos = batch["ref_pos"]
-        ref_space_uid = batch["ref_space_uid"]
+        atom_cond_mask = batch["atom_cond_mask"].float()
+        ref_charge = batch["ref_charge"] * atom_cond_mask
+        ref_element = batch["ref_element"] * atom_cond_mask.unsqueeze(-1)
+        ref_atom_name_chars = batch["ref_atom_name_chars"].reshape(B, N, 4 * 64) * atom_cond_mask.unsqueeze(-1)
+
         atom_feats = torch.cat(
             [
                 # atom_ref_pos,  # not invariant
-                atom_mask.unsqueeze(-1),  # not needed?
-                batch["ref_charge"].unsqueeze(-1),
-                batch["ref_element"],
-                batch["ref_atom_name_chars"].reshape(B, N, 4 * 64),
+                atom_cond_mask.unsqueeze(-1),  # not needed?
+                ref_charge.unsqueeze(-1),
+                ref_element,
+                ref_atom_name_chars,
             ],
             dim=-1,
         ).to(batch["coords"].dtype)
         c = self.embed_atom_features(atom_feats)
 
-        # Build KNN graph
-        E_idx = knn_neighbors_batched(batch["coords"], atom_mask, k=K)
-        mask_2d = gather_nodes(atom_mask.unsqueeze(-1), E_idx).squeeze(-1)
-        mask_2d = mask_2d * atom_mask.unsqueeze(-1)
+        # Build KNN graph on atoms we're conditioning on
+        X = batch["coords"] * atom_cond_mask.unsqueeze(-1)
+        E_idx = knn_neighbors_batched(X, atom_cond_mask, k=K)
+        mask_2d = gather_nodes(atom_cond_mask.unsqueeze(-1), E_idx).squeeze(-1)
+        mask_2d = mask_2d * atom_cond_mask.unsqueeze(-1)
 
         # Embed offsets between reference positions
         ## get valid mask (within-conformer edges)
+        atom_ref_pos = batch["ref_pos"] * batch["atomwise_seq_cond_mask"].unsqueeze(-1)  # if residue type is masked, set the whole ref_pos to 0 to avoid leakage
+        ref_space_uid = batch["ref_space_uid"] * atom_cond_mask
+
         uid_neighbors = gather_nodes(ref_space_uid.unsqueeze(-1), E_idx).squeeze(-1)
         v_mask = (ref_space_uid.view(B, N, 1) == uid_neighbors) * mask_2d  # [B, N, K]
         v_mask = v_mask.unsqueeze(-1)  # [B, N, K, 1]
@@ -457,8 +468,8 @@ class AtomGraphEncoder(nn.Module):
         p = p + self.embed_v_mask(v_mask) * v_mask
 
         # Embed distances between real positions
-        coords_neighbors = gather_nodes(batch["coords"], E_idx)
-        d = (batch["coords"].view(B, N, 1, 3) - coords_neighbors).norm(dim=-1, keepdim=True)
+        coords_neighbors = gather_nodes(X, E_idx)
+        d = (X.view(B, N, 1, 3) - coords_neighbors).norm(dim=-1, keepdim=True)
         inv_d = 1 / (1 + d**2)
         edge_mask = mask_2d.unsqueeze(-1)
 
@@ -470,13 +481,13 @@ class AtomGraphEncoder(nn.Module):
         # Run graph encoding layers
         q = c
         for layer in self.layers:
-            q, p = layer(q, p, E_idx, mask_V=atom_mask, mask_attend=mask_2d)
+            q, p = layer(q, p, E_idx, mask_V=atom_cond_mask, mask_attend=mask_2d)
 
         # Aggregate to token-level features
-        q_to_a = self.atom_to_token_trans(q) * atom_mask.unsqueeze(-1)
-        resolved_atom_to_token = batch["resolved_atom_to_token"]  # resolved_atom_to_token ensures that we don't average over unresolved atoms
-        atom_to_token_mean = resolved_atom_to_token / (
-            resolved_atom_to_token.sum(dim=1, keepdim=True) + 1e-6
+        q_to_a = self.atom_to_token_trans(q) * atom_cond_mask.unsqueeze(-1)
+        cond_atom_to_token = batch["atom_to_token"] * atom_cond_mask.unsqueeze(-1)  # cond_atom_to_token ensures that we don't average over unresolved or masked atoms
+        atom_to_token_mean = cond_atom_to_token / (
+            cond_atom_to_token.sum(dim=1, keepdim=True) + 1e-6
         )
         with torch.autocast(device_type="cuda", enabled=False):
             a = torch.bmm(atom_to_token_mean.transpose(1, 2), q_to_a)

@@ -12,6 +12,7 @@ from torch.nn.functional import one_hot
 from allatom_design.data import const
 from allatom_design.data.feature.pad import pad_dim
 from allatom_design.data.tokenize.boltz import Tokenized
+from allatom_design.data.mask_selector import MaskSelector
 
 
 class SequenceDesignFeaturizer:
@@ -49,13 +50,13 @@ class SequenceDesignFeaturizer:
 
         """
         # Compute token features
-        token_features = process_token_features(
+        token_features = process_sd_token_features(
             data,
             max_tokens,
         )
 
         # Compute atom features
-        atom_features = process_atom_features(
+        atom_features = process_sd_atom_features(
             data,
             atoms_per_window_queries,
             min_dist,
@@ -71,7 +72,7 @@ class SequenceDesignFeaturizer:
         }
 
 
-def process_token_features(
+def process_sd_token_features(
     data: Tokenized,
     max_tokens: Optional[int] = None,
 ) -> dict[str, Tensor]:
@@ -164,7 +165,7 @@ def process_token_features(
     return token_features
 
 
-def process_atom_features(
+def process_sd_atom_features(
     data: Tokenized,
     atoms_per_window_queries: int = 32,
     min_dist: float = 2.0,
@@ -192,19 +193,15 @@ def process_atom_features(
     atom_data = []
     ref_space_uid = []
     coord_data = []
-    frame_data = []
-    resolved_frame_data = []
+    prot_bb_atom_mask = []  # 1 if atom is backbone atom of a known protein residue, 0 otherwise
+    prot_scn_atom_mask = []  # 1 if atom is sidechain atom of a known protein residue, 0 otherwise
     atom_to_token = []
-    token_to_rep_atom = []  # index on cropped atom table
-    r_set_to_rep_atom = []
-    disto_coords = []
     atom_idx = 0
 
     chain_res_ids = {}
     for token_id, token in enumerate(data.tokens):
         # Get the chain residue ids
         chain_idx, res_id = token["asym_id"], token["res_idx"]
-        chain = data.structure.chains[chain_idx]
 
         if (chain_idx, res_id) not in chain_res_ids:
             new_idx = len(chain_res_ids)
@@ -213,69 +210,28 @@ def process_atom_features(
             new_idx = chain_res_ids[(chain_idx, res_id)]
 
         # Map atoms to token indices
-        ref_space_uid.extend([new_idx] * token["atom_num"])
-        atom_to_token.extend([token_id] * token["atom_num"])
+        atom_num = token["atom_num"]
+        ref_space_uid.extend([new_idx] * atom_num)
+        atom_to_token.extend([token_id] * atom_num)
 
         # Add atom data
         start = token["atom_idx"]
         end = token["atom_idx"] + token["atom_num"]
         token_atoms = data.structure.atoms[start:end]
 
-        # Map token to representative atom
-        token_to_rep_atom.append(atom_idx + token["disto_idx"] - start)
-        if (chain["mol_type"] != const.chain_type_ids["NONPOLYMER"]) and token[
-            "resolved_mask"
-        ]:
-            r_set_to_rep_atom.append(atom_idx + token["center_idx"] - start)
-
         # Get token coordinates
         token_coords = np.array([token_atoms["coords"]])
         coord_data.append(token_coords)
 
-        # Get frame data
-        res_type = const.tokens[token["res_type"]]
-
-        if token["atom_num"] < 3 or res_type in ["PAD", "UNK", "-"]:
-            idx_frame_a, idx_frame_b, idx_frame_c = 0, 0, 0
-            mask_frame = False
-        elif (token["mol_type"] == const.chain_type_ids["PROTEIN"]) and (
-            res_type in const.ref_atoms
-        ):
-            idx_frame_a, idx_frame_b, idx_frame_c = (
-                const.ref_atoms[res_type].index("N"),
-                const.ref_atoms[res_type].index("CA"),
-                const.ref_atoms[res_type].index("C"),
-            )
-            mask_frame = (
-                token_atoms["is_present"][idx_frame_a]
-                and token_atoms["is_present"][idx_frame_b]
-                and token_atoms["is_present"][idx_frame_c]
-            )
-        elif (
-            token["mol_type"] == const.chain_type_ids["DNA"]
-            or token["mol_type"] == const.chain_type_ids["RNA"]
-        ) and (res_type in const.ref_atoms):
-            idx_frame_a, idx_frame_b, idx_frame_c = (
-                const.ref_atoms[res_type].index("C1'"),
-                const.ref_atoms[res_type].index("C3'"),
-                const.ref_atoms[res_type].index("C4'"),
-            )
-            mask_frame = (
-                token_atoms["is_present"][idx_frame_a]
-                and token_atoms["is_present"][idx_frame_b]
-                and token_atoms["is_present"][idx_frame_c]
-            )
+        # Fill in protein backbone and sidechain atom masks
+        chain_type = const.chain_types[token["mol_type"]]
+        if chain_type == "PROTEIN":
+            restype = const.token_ids[const.tokens[token["res_type"]]]
+            prot_bb_atom_mask.extend(const.restype_atom_bb[restype].tolist()[:atom_num])
+            prot_scn_atom_mask.extend(const.restype_atom_scn[restype].tolist()[:atom_num])
         else:
-            idx_frame_a, idx_frame_b, idx_frame_c = 0, 0, 0
-            mask_frame = False
-        frame_data.append(
-            [idx_frame_a + atom_idx, idx_frame_b + atom_idx, idx_frame_c + atom_idx]
-        )
-        resolved_frame_data.append(mask_frame)
-
-        # Get distogram coordinates
-        disto_coords_tok = data.structure.atoms[token["disto_idx"]]["coords"]
-        disto_coords.append(disto_coords_tok)
+            prot_bb_atom_mask.extend([0] * atom_num)
+            prot_scn_atom_mask.extend([0] * atom_num)
 
         # Update atom data. This is technically never used again (we rely on coord_data),
         # but we update for consistency and to make sure the Atom object has valid, transformed coordinates.
@@ -283,15 +239,6 @@ def process_atom_features(
         token_atoms["coords"] = token_coords[0]  # atom has a copy of first coords
         atom_data.append(token_atoms)
         atom_idx += len(token_atoms)
-
-    disto_coords = np.array(disto_coords)
-
-    # Compute distogram
-    t_center = torch.Tensor(disto_coords)
-    t_dists = torch.cdist(t_center, t_center)
-    boundaries = torch.linspace(min_dist, max_dist, num_bins - 1)
-    distogram = (t_dists.unsqueeze(-1) > boundaries).sum(dim=-1).long()
-    disto_target = one_hot(distogram, num_classes=num_bins)
 
     atom_data = np.concatenate(atom_data)
     coord_data = np.concatenate(coord_data, axis=1)
@@ -309,35 +256,20 @@ def process_atom_features(
     resolved_mask = from_numpy(atom_data["is_present"])
     pad_mask = torch.ones(len(atom_data), dtype=torch.float)
     atom_to_token = torch.tensor(atom_to_token, dtype=torch.long)
-    token_to_rep_atom = torch.tensor(token_to_rep_atom, dtype=torch.long)
-    r_set_to_rep_atom = torch.tensor(r_set_to_rep_atom, dtype=torch.long)
-    frame_data, resolved_frame_data = compute_frames_nonpolymer(
-        data,
-        coord_data,
-        atom_data["is_present"],
-        atom_to_token,
-        frame_data,
-        resolved_frame_data,
-    )  # Compute frames for NONPOLYMER tokens
-    frames = from_numpy(frame_data.copy())
-    frame_resolved_mask = from_numpy(resolved_frame_data.copy())
+    prot_bb_atom_mask = torch.tensor(prot_bb_atom_mask, dtype=torch.float)
+    prot_scn_atom_mask = torch.tensor(prot_scn_atom_mask, dtype=torch.float)
+
     # Convert to one-hot
     ref_atom_name_chars = one_hot(
         ref_atom_name_chars % num_bins, num_classes=num_bins
     )  # added for lower case letters
     ref_element = one_hot(ref_element, num_classes=const.num_elements)
     atom_to_token = one_hot(atom_to_token, num_classes=token_id + 1)
-    token_to_rep_atom = one_hot(token_to_rep_atom, num_classes=len(atom_data))
-    r_set_to_rep_atom = one_hot(r_set_to_rep_atom, num_classes=len(atom_data))
 
     # Apply random roto-translation to the input atoms
     ref_pos = boltz_center_random_augmentation(
         ref_pos[None], resolved_mask[None], centering=False
     )[0]
-
-    # Handle unresolved atoms for atom_to_token
-    resolved_atom_to_token = atom_to_token * resolved_mask.unsqueeze(-1)  # unresolved atoms are all 0s
-    token_mask = resolved_atom_to_token.sum(dim=0) > 0  # a token is valid if any atom is resolved in the token
 
     # Compute padding and apply
     if max_atoms is not None:
@@ -358,23 +290,14 @@ def process_atom_features(
         ref_space_uid = pad_dim(ref_space_uid, 0, pad_len)
         coords = pad_dim(coords, 1, pad_len)
         atom_to_token = pad_dim(atom_to_token, 0, pad_len)
-        token_to_rep_atom = pad_dim(token_to_rep_atom, 1, pad_len)
-        r_set_to_rep_atom = pad_dim(r_set_to_rep_atom, 1, pad_len)
 
-        resolved_atom_to_token = pad_dim(resolved_atom_to_token, 0, pad_len)
+        prot_bb_atom_mask = pad_dim(prot_bb_atom_mask, 0, pad_len)
+        prot_scn_atom_mask = pad_dim(prot_scn_atom_mask, 0, pad_len)
 
     if max_tokens is not None:
-        pad_len = max_tokens - token_to_rep_atom.shape[0]
+        pad_len = max_tokens - atom_to_token.shape[1]
         if pad_len > 0:
             atom_to_token = pad_dim(atom_to_token, 1, pad_len)
-            token_to_rep_atom = pad_dim(token_to_rep_atom, 0, pad_len)
-            r_set_to_rep_atom = pad_dim(r_set_to_rep_atom, 0, pad_len)
-            disto_target = pad_dim(pad_dim(disto_target, 0, pad_len), 1, pad_len)
-            frames = pad_dim(frames, 0, pad_len)
-            frame_resolved_mask = pad_dim(frame_resolved_mask, 0, pad_len)
-
-            resolved_atom_to_token = pad_dim(resolved_atom_to_token, 1, pad_len)
-            token_mask = pad_dim(token_mask, 0, pad_len)
 
     return {
         "ref_pos": ref_pos,
@@ -386,107 +309,9 @@ def process_atom_features(
         "coords": coords,
         "atom_pad_mask": pad_mask,
         "atom_to_token": atom_to_token,
-        "token_to_rep_atom": token_to_rep_atom,
-        "r_set_to_rep_atom": r_set_to_rep_atom,
-        "disto_target": disto_target,
-        "frames_idx": frames,
-        "frame_resolved_mask": frame_resolved_mask,
-        "resolved_atom_to_token": resolved_atom_to_token,
-        "token_mask": token_mask,  # unlike token_resolved_mask, a token is valid if *any* atom is resolved in the token
+        "prot_bb_atom_mask": prot_bb_atom_mask,
+        "prot_scn_atom_mask": prot_scn_atom_mask,
     }
-
-
-def compute_frames_nonpolymer(
-    data: Tokenized,
-    coords,
-    resolved_mask,
-    atom_to_token,
-    frame_data: list,
-    resolved_frame_data: list,
-) -> tuple[list, list]:
-    """Get the frames for non-polymer tokens.
-
-    Parameters
-    ----------
-    data : Tokenized
-        The tokenized data.
-    frame_data : list
-        The frame data.
-    resolved_frame_data : list
-        The resolved frame data.
-
-    Returns
-    -------
-    tuple[list, list]
-        The frame data and resolved frame data.
-
-    """
-    frame_data = np.array(frame_data)
-    resolved_frame_data = np.array(resolved_frame_data)
-    asym_id_token = data.tokens["asym_id"]
-    asym_id_atom = data.tokens["asym_id"][atom_to_token]
-    token_idx = 0
-    atom_idx = 0
-    for id in np.unique(data.tokens["asym_id"]):
-        mask_chain_token = asym_id_token == id
-        mask_chain_atom = asym_id_atom == id
-        num_tokens = mask_chain_token.sum()
-        num_atoms = mask_chain_atom.sum()
-        if (
-            data.tokens[token_idx]["mol_type"] != const.chain_type_ids["NONPOLYMER"]
-            or num_atoms < 3
-        ):
-            token_idx += num_tokens
-            atom_idx += num_atoms
-            continue
-        dist_mat = (
-            (
-                coords.reshape(-1, 3)[mask_chain_atom][:, None, :]
-                - coords.reshape(-1, 3)[mask_chain_atom][None, :, :]
-            )
-            ** 2
-        ).sum(-1) ** 0.5
-        resolved_pair = 1 - (
-            resolved_mask[mask_chain_atom][None, :]
-            * resolved_mask[mask_chain_atom][:, None]
-        ).astype(np.float32)
-        resolved_pair[resolved_pair == 1] = math.inf
-        indices = np.argsort(dist_mat + resolved_pair, axis=1)
-        frames = (
-            np.concatenate(
-                [
-                    indices[:, 1:2],
-                    indices[:, 0:1],
-                    indices[:, 2:3],
-                ],
-                axis=1,
-            )
-            + atom_idx
-        )
-        frame_data[token_idx : token_idx + num_atoms, :] = frames
-        resolved_frame_data[token_idx : token_idx + num_atoms] = resolved_mask[
-            frames
-        ].all(axis=1)
-        token_idx += num_tokens
-        atom_idx += num_atoms
-    frames_expanded = coords.reshape(-1, 3)[frame_data]
-
-    mask_collinear = compute_collinear_mask(
-        frames_expanded[:, 1] - frames_expanded[:, 0],
-        frames_expanded[:, 1] - frames_expanded[:, 2],
-    )
-    return frame_data, resolved_frame_data & mask_collinear
-
-
-def compute_collinear_mask(v1, v2):
-    norm1 = np.linalg.norm(v1, axis=1, keepdims=True)
-    norm2 = np.linalg.norm(v2, axis=1, keepdims=True)
-    v1 = v1 / (norm1 + 1e-6)
-    v2 = v2 / (norm2 + 1e-6)
-    mask_angle = np.abs(np.sum(v1 * v2, axis=1)) < 0.9063
-    mask_overlap1 = norm1.reshape(-1) > 1e-2
-    mask_overlap2 = norm2.reshape(-1) > 1e-2
-    return mask_angle & mask_overlap1 & mask_overlap2
 
 
 def select_subset_from_mask(mask, p):

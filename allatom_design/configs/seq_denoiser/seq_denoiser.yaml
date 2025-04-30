@@ -56,6 +56,7 @@ data:
       ref: released
     - _target_: boltz.data.filter.dynamic.resolution.ResolutionFilter
       resolution: 9.0
+
   sampler:
     _target_: boltz.data.sample.cluster.ClusterSampler
   cropper:
@@ -63,6 +64,7 @@ data:
     min_neighborhood: 0
     max_neighborhood: 40
 
+  # Dataset options
   max_tokens: 256
   max_atoms: 4608
   pad_to_max_tokens: true
@@ -80,7 +82,7 @@ data:
 defaults:
   - _self_
   - denoiser: atom_mpnn_denoiser
-  - interpolant: mar_interpolant
+  - mask_selector: mask_selector
 
 model:
   task: "seq_des"  # "seq_des"
@@ -88,7 +90,12 @@ model:
   eps: 1.0e-8
   inf: 1.0e9
   denoiser: ${denoiser}
-  interpolant: ${interpolant}
+
+  # Masking options
+  mask_selector:
+    _target_: allatom_design.data.mask_selector.MaskSelector
+    cfg: ${mask_selector}
+
   ema:
     use_phema: false  # use post-hoc EMA
     ema_decay: 0.99  # if not using phema, use this decay rate

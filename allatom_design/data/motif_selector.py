@@ -8,7 +8,7 @@ from allatom_design.data import const
 from torchtyping import TensorType
 
 
-class MotifSelector():
+class MotifSelector:
     def __init__(self, cfg: DictConfig):
         """
         Handles selecting motifs for the AtomDenoiser.
