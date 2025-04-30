@@ -323,7 +323,6 @@ class EncLayer(nn.Module):
         self.dropout3 = nn.Dropout(dropout)
         self.norm1 = nn.LayerNorm(num_hidden)
         self.norm2 = nn.LayerNorm(num_hidden)
-        self.norm3 = nn.LayerNorm(num_hidden)
 
         self.W1 = nn.Linear(num_hidden + num_in, num_hidden, bias=True)
         self.W2 = nn.Linear(num_hidden, num_hidden, bias=True)
@@ -336,6 +335,7 @@ class EncLayer(nn.Module):
             self.W11 = nn.Linear(num_hidden + num_in, num_hidden, bias=True)
             self.W12 = nn.Linear(num_hidden, num_hidden, bias=True)
             self.W13 = nn.Linear(num_hidden, num_hidden, bias=True)
+            self.norm3 = nn.LayerNorm(num_hidden)
 
 
     def forward(self, h_V, h_E, E_idx, mask_V=None, mask_attend=None):

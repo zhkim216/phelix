@@ -204,12 +204,8 @@ class SDDataset(data.Dataset):
             return self.__getitem__(idx)
         feats["coords"] = feats["coords"].squeeze(0)  # squeeze out batch dimension
 
-        # By default, we condition on all residue types and resolved atoms
-        feats["seq_cond_mask"] = feats["token_pad_mask"]
-        feats["atom_cond_mask"] = feats["atom_pad_mask"] * feats["atom_resolved_mask"]
-
         # SE3 augmentation for convenience / scaling
-        feats["coords"] = atom_center_random_augmentation(feats["coords"], feats["atom_cond_mask"],
+        feats["coords"] = atom_center_random_augmentation(feats["coords"], feats["atom_pad_mask"] * feats["atom_resolved_mask"],
                                                           apply_random_augmentation=True,
                                                           translation_scale=1.0,
                                                           return_transforms=False)
