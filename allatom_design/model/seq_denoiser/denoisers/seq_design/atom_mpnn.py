@@ -40,7 +40,10 @@ class AtomMPNN(nn.Module):
         self.dropout = nn.Dropout(cfg.dropout_p)
 
         # Atom-level encoder
-        self.atom_encoder = AtomGraphEncoder(cfg.atom_encoder)
+        if cfg.use_atom_encoder:
+            self.atom_encoder = AtomGraphEncoder(cfg.atom_encoder)
+        else:
+            self.atom_encoder = None
 
         # Encoder layers
         self.encoder_layers = nn.ModuleList([
@@ -84,7 +87,11 @@ class AtomMPNN(nn.Module):
         batch["coords"] = self._add_noise(batch)
 
         # Get token-level features
-        h_V = self.atom_encoder(batch)
+        if self.atom_encoder is not None:
+            h_V = self.atom_encoder(batch)
+        else:
+            B, N, C = batch["res_type"].shape
+            h_V = torch.zeros((B, N, self.node_features), device=batch["res_type"].device)
 
         # Concatenate residue-level features to h_V
         ## first, mask out residues using gap token
@@ -202,20 +209,21 @@ class TokenFeatures(nn.Module):
         """
         Get token-level coordinates as an average over all known, resolved atoms in the token.
         """
-        # mask out padding and unresolved atoms just in case
-        atom_cond_mask = batch["atom_cond_mask"].float()
-        X = batch["coords"] * atom_cond_mask.unsqueeze(-1)
+        # # mask out padding and unresolved atoms just in case
+        # atom_cond_mask = batch["atom_cond_mask"].float()
+        # X = batch["coords"] * atom_cond_mask.unsqueeze(-1)
 
-        # normalize by the number of resolved atoms in the token
-        cond_atom_to_token = batch["atom_to_token"] * atom_cond_mask.unsqueeze(-1)  # cond_atom_to_token ensures that we don't average over unresolved or masked atoms
-        atom_to_token_mean = cond_atom_to_token / (
-            cond_atom_to_token.sum(dim=1, keepdim=True) + 1e-6
-        )
+        # # normalize by the number of resolved atoms in the token
+        # cond_atom_to_token = batch["atom_to_token"] * atom_cond_mask.unsqueeze(-1)  # cond_atom_to_token ensures that we don't average over unresolved or masked atoms
+        # atom_to_token_mean = cond_atom_to_token / (
+        #     cond_atom_to_token.sum(dim=1, keepdim=True) + 1e-6
+        # )
 
-        with torch.autocast(device_type="cuda", enabled=False):
-            # Average over all known, resolved atoms in the token
-            X = torch.bmm(atom_to_token_mean.transpose(1, 2), X)  # [B, N, 3]
+        # with torch.autocast(device_type="cuda", enabled=False):
+        #     # Average over all known, resolved atoms in the token
+        #     X = torch.bmm(atom_to_token_mean.transpose(1, 2), X)  # [B, N, 3]
 
+        X = batch["center_coords"] * batch["token_exists_mask"].unsqueeze(-1)
         return X
 
 

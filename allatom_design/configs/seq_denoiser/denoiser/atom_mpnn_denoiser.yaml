@@ -16,6 +16,7 @@ mpnn:
   k_neighbors: 48
   n_layers: 3
   dropout_p: 0.1
+  use_atom_encoder: true
 
   atom_encoder:
     atom_n_channel: 32
