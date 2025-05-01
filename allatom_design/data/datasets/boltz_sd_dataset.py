@@ -9,7 +9,6 @@ import lightning as L
 import numpy as np
 import torch
 from omegaconf import DictConfig
-from torch.nn.functional import one_hot
 from torch.utils import data
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -80,9 +79,6 @@ class BoltzSDDataModule(L.LightningDataModule):
 
 
     def train_dataloader(self) -> DataLoader:
-        """
-        Called each epoch if reload_dataloaders_every_n_epochs > 0.
-        """
         train_loader = DataLoader(self._train_set,
                                   batch_size=self.cfg.batch_size,
                                   num_workers=self.cfg.num_workers,
@@ -94,9 +90,6 @@ class BoltzSDDataModule(L.LightningDataModule):
 
 
     def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
-        """
-        Called each epoch if reload_dataloaders_every_n_epochs > 0.
-        """
         val_loader = DataLoader(self._val_set,
                                 batch_size=self.cfg.batch_size,
                                 num_workers=self.cfg.num_workers,
@@ -237,15 +230,20 @@ class SDDataset(data.Dataset):
                 )
         except Exception as e:
             print(f"Cropper failed on {sample.record.id} with error: {e}. Skipping.")
-            return self._load_feats(idx)
+            return self._load_feats(idx + 1)
 
         # Check if there are tokens
         if len(tokenized.tokens) == 0:
             print(f"No tokens in cropped structure for {sample.record.id}. Skipping.")
-            return self._load_feats(idx)
+            return self._load_feats(idx + 1)
 
         # Load pre-featurized data and crop
-        feats = load_featurized(sample.record, self.dataset.pdb_path)
+        try:
+            feats = load_featurized(sample.record, self.dataset.pdb_path)
+        except Exception as e:
+            print(f"Failed to load featurized data for {sample.record.id} with error: {e}. Skipping.")
+            return self._load_feats(idx + 1)
+
         feats = crop_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.atoms_per_window_queries)
         feats["coords"] = feats["coords"].squeeze(0)  # squeeze out batch dimension
 
