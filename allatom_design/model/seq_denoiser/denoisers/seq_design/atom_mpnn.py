@@ -406,44 +406,46 @@ class AtomGraphEncoder(nn.Module):
 
         self.k_atom_neighbors = cfg.k_atom_neighbors
         self.atom_feature_dim = cfg.atom_feature_dim
-        self.atom_n_channel = cfg.atom_n_channel
         self.token_n_channel = cfg.token_n_channel
+        self.atom_s = cfg.atom_s
+        self.atom_z = cfg.atom_z
         self.dropout_p = cfg.dropout_p
         self.n_layers = cfg.n_layers
 
         # Embed 1D features
-        self.embed_atom_features = LinearNoBias(self.atom_feature_dim, self.atom_n_channel)
+        self.embed_atom_features = LinearNoBias(self.atom_feature_dim, self.atom_s)
 
         # Embed 2D features
         # Reference position embeddings
-        self.embed_ref_dist = LinearNoBias(1, self.atom_n_channel)  # unlike AF3, we embed the distance, not the direction offset. TODO: switch to RBF?
-        self.embed_inv_ref_dist = LinearNoBias(1, self.atom_n_channel)  # 1 / (1 + dist**2)
-        self.embed_v_mask = LinearNoBias(1, self.atom_n_channel)  # embed mask for within-conformer edges
+        self.embed_ref_dist = LinearNoBias(1, self.atom_z)  # unlike AF3, we embed the distance, not the direction offset. TODO: switch to RBF?
+        self.embed_inv_ref_dist = LinearNoBias(1, self.atom_z)  # 1 / (1 + dist**2)
+        self.embed_v_mask = LinearNoBias(1, self.atom_z)  # embed mask for within-conformer edges
 
         # Coordinate embeddings
-        self.embed_dist = LinearNoBias(1, self.atom_n_channel)  # TODO: embed RBF?
-        self.embed_inv_dist = LinearNoBias(1, self.atom_n_channel)  # 1 / (1 + dist**2)
-        self.embed_edge_mask = LinearNoBias(1, self.atom_n_channel)  # embed mask for edges
+        self.embed_dist = LinearNoBias(1, self.atom_z)  # TODO: embed RBF?
+        self.embed_inv_dist = LinearNoBias(1, self.atom_z)  # 1 / (1 + dist**2)
+        self.embed_edge_mask = LinearNoBias(1, self.atom_z)  # embed mask for edges
 
         # Edge embedding MLP
         self.p_mlp = nn.Sequential(
             nn.ReLU(),
-            LinearNoBias(self.atom_n_channel, self.atom_n_channel),
+            LinearNoBias(self.atom_z, self.atom_z),
             nn.ReLU(),
-            LinearNoBias(self.atom_n_channel, self.atom_n_channel),
+            LinearNoBias(self.atom_z, self.atom_z),
             nn.ReLU(),
-            LinearNoBias(self.atom_n_channel, self.atom_n_channel),
+            LinearNoBias(self.atom_z, self.atom_z),
         )
 
         # Graph encoding layers
         self.layers = nn.ModuleList([
-            EncLayer(self.atom_n_channel, self.atom_n_channel * 2, dropout=self.dropout_p,
-                     is_last_layer=(i == self.n_layers - 1))
+            AtomGraphEncoderLayer(self.atom_s, self.atom_z,
+                                  dropout=self.dropout_p,
+                                  is_last_layer=(i == self.n_layers - 1))
             for i in range(self.n_layers)
         ])
 
         # Aggregation to token-level features
-        self.atom_to_token_trans = nn.Sequential(LinearNoBias(self.atom_n_channel, self.token_n_channel),
+        self.atom_to_token_trans = nn.Sequential(LinearNoBias(self.atom_s, self.token_n_channel),
                                                  nn.ReLU())
 
 
@@ -520,6 +522,65 @@ class AtomGraphEncoder(nn.Module):
             a = torch.bmm(atom_to_token_mean.transpose(1, 2), q_to_a)
 
         return a
+
+
+class AtomGraphEncoderLayer(nn.Module):
+    def __init__(self, atom_s, atom_z, dropout=0.1, scale=30, is_last_layer=False):
+        super(AtomGraphEncoderLayer, self).__init__()
+        self.atom_s = atom_s
+        self.atom_z = atom_z
+        self.scale = scale
+        self.is_last_layer = is_last_layer
+
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
+        self.norm1 = nn.LayerNorm(atom_s)
+        self.norm2 = nn.LayerNorm(atom_s)
+
+        self.W1 = nn.Linear(2 * atom_s + atom_z, atom_s, bias=True)
+        self.W2 = nn.Linear(atom_s, atom_s, bias=True)
+        self.W3 = nn.Linear(atom_s, atom_s, bias=True)
+        self.act = torch.nn.GELU()
+        self.dense = PositionWiseFeedForward(atom_s, atom_s * 4)
+
+        if not is_last_layer:
+            # only initialize edge updates if not last layer to avoid unused parameters
+            self.W11 = nn.Linear(2 * atom_s + atom_z, atom_z, bias=True)
+            self.W12 = nn.Linear(atom_z, atom_z, bias=True)
+            self.W13 = nn.Linear(atom_z, atom_z, bias=True)
+            self.norm3 = nn.LayerNorm(atom_z)
+
+
+    def forward(self, h_V, h_E, E_idx, mask_V=None, mask_attend=None):
+        """ Parallel computation of full transformer layer """
+
+        h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
+        h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
+        h_EV = torch.cat([h_V_expand, h_EV], -1)
+        h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
+
+        if mask_attend is not None:
+            h_message = mask_attend.unsqueeze(-1) * h_message
+        dh = torch.sum(h_message, -2) / self.scale
+        h_V = self.norm1(h_V + self.dropout1(dh))
+
+        dh = self.dense(h_V)
+        h_V = self.norm2(h_V + self.dropout2(dh))
+        if mask_V is not None:
+            mask_V = mask_V.unsqueeze(-1)
+            h_V = mask_V * h_V
+
+        if not self.is_last_layer:
+            # Edge updates
+            h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
+            h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
+            h_EV = torch.cat([h_V_expand, h_EV], -1)
+            h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
+            h_E = self.norm3(h_E + self.dropout3(h_message))
+
+        return h_V, h_E
+
 
 
 def knn_neighbors_batched(

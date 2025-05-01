@@ -19,11 +19,12 @@ mpnn:
   use_atom_encoder: true
 
   atom_encoder:
-    atom_n_channel: 32
     token_n_channel: ${denoiser.mpnn.n_channel}
+    atom_s: 64
+    atom_z: 16
     atom_feature_dim: 386
-    k_atom_neighbors: 64
-    n_layers: 2
+    k_atom_neighbors: 32
+    n_layers: 1
     dropout_p: 0.1
 
   token_features:
