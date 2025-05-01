@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
 
 from allatom_design.data import const
@@ -19,7 +19,7 @@ class MaskSelector:
         self.cfg = cfg
 
         self.restype_masking_schedule = cfg.restype_masking_schedule
-        self.restype_masking_cfg = cfg.restype_masking_cfg[self.restype_masking_schedule]
+        self.restype_masking_cfg = OmegaConf.to_container(cfg.restype_masking_cfg[self.restype_masking_schedule], resolve=True)  # to dict to avoid dataloader issues
 
 
     def sample_seq_cond_mask(self,
@@ -82,10 +82,10 @@ class MaskSelector:
         t = probability of keeping the restype unmasked
         """
         if self.restype_masking_schedule == "constant_t":
-            t = torch.ones(B, device=device) * self.restype_masking_cfg.t
+            t = torch.ones(B, device=device) * self.restype_masking_cfg["t"]
         elif self.restype_masking_schedule.startswith("uniform"):
             # sample time from uniform distribution
-            t_min, t_max = self.restype_masking_cfg.t_min, self.restype_masking_cfg.t_max
+            t_min, t_max = self.restype_masking_cfg["t_min"], self.restype_masking_cfg["t_max"]
             t = torch.rand(B, device=device) * (t_max - t_min) + t_min
 
             # apply transformation to t
