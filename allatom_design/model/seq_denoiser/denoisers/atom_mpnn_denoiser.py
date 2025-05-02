@@ -7,11 +7,13 @@ from einops import rearrange
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
-import allatom_design.data.residue_constants as rc
+import allatom_design.data.const as const
+import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn import \
     AtomMPNN
+from chroma.layers import complexity
 
 
 class AtomMPNNDenoiser(BaseSeqDenoiser):
@@ -35,15 +37,16 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
     def forward(self,
                 batch: dict[str, TensorType["b ..."]],
-                ) -> Tuple[TensorType["b n a 3", float],  # x1 pred
-                           TensorType["b n", int],  # aatype pred
-                           dict[str, TensorType["b ..."]]  # aux_preds
-                           ]:
+                is_sampling: bool = False,
+                sampling_inputs: dict[str, Any] | None = None,
+                ) -> Tuple[TensorType["b n c", float],  # seq_logits
+                           dict[str, TensorType["b ..."]]]:
         # Build some helpful masks based on conditioning sequence and atoms
         batch = self.build_masks(batch)
 
         # During training, add random noise to input coordinates
-        batch = self.get_random_noise(batch)
+        if not is_sampling:
+            batch = self.get_training_random_noise(batch)
 
         # Run model
         seq_logits, mpnn_feats = self.atom_mpnn(batch)
@@ -58,6 +61,71 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         }
 
         return seq_logits, aux_preds
+
+
+    def potts_sample(self, batch: dict[str, TensorType["b ..."]], sampling_inputs: dict[str, Any]):
+        potts_sampling_cfg = sampling_inputs["potts_sampling_cfg"]
+        regularization = potts_sampling_cfg["regularization"]
+        potts_sweeps = potts_sampling_cfg["potts_sweeps"]
+        potts_proposal = potts_sampling_cfg["potts_proposal"]
+        potts_temperature = potts_sampling_cfg["potts_temperature"]
+
+        B, N, _ = batch["res_type"].shape
+        logits_init = torch.zeros((B, N, len(const.prot_only_tokens)), device=batch["res_type"].device).float()
+
+        # Handle banned amino acids
+        ban_S = {"X"}
+        omit_aas = sampling_inputs.get("omit_aas", None)
+        if omit_aas is not None:
+            ban_S = ban_S | set(omit_aas)
+        ban_S = [const.prot_only_token_to_id[const.prot_letter_to_token[aa]] for aa in ban_S]
+
+        # Initialize random sequence and sampling masks
+        # first, convert res_type to protein token vocabulary
+        target_res_type = batch["res_type"].argmax(dim=-1)  # undo one-hot encoding
+        lookup = const.prot_only_tokens_to_all_tokens.T.to(target_res_type.device)  # [33, 21]
+        target_res_type = lookup[target_res_type].argmax(dim=-1)  # [b, n]
+
+        mask_sample, _, S_init = potts.init_sampling_masks(
+            logits_init, mask_sample=(1 - batch["seq_cond_mask"]), S=target_res_type, ban_S=ban_S
+        )
+
+        # Complexity regularization
+        penalty_func = None
+        mask_ij_coloring = None
+        edge_idx_coloring = None
+        symmetry_order = None
+        if regularization == "LCP":
+            # C_complexity = (
+            #     C
+            #     if symmetry_order is None
+            #     else C[:, : C.shape[1] // symmetry_order]
+            # )
+            C_complexity = batch["token_pad_mask"].clone()  # TODO: is C for multi-chain?
+            penalty_func = lambda _S: complexity.complexity_lcp(_S, C_complexity)
+            # edge_idx_coloring, mask_ij_coloring = complexity.graph_lcp(C, edge_idx, mask_ij)
+
+        _, aux_preds = self(batch, is_sampling=True, sampling_inputs=sampling_inputs)
+        potts_decoder_aux = aux_preds["potts_decoder_aux"]
+        S_sample, _ = self.atom_mpnn.decoder_S_potts.sample(
+            potts_decoder_aux["h"],
+            potts_decoder_aux["J"],
+            potts_decoder_aux["edge_idx"],
+            potts_decoder_aux["mask_i"],
+            potts_decoder_aux["mask_ij"],
+            S=S_init,
+            mask_sample=mask_sample,
+            temperature=potts_temperature,
+            num_sweeps=potts_sweeps,
+            penalty_func=penalty_func,
+            proposal=potts_proposal,
+            rejection_step=(potts_proposal == "chromatic"),
+            verbose=False,
+            edge_idx_coloring=edge_idx_coloring,
+            mask_ij_coloring=mask_ij_coloring,
+        )
+        return S_sample
+
 
 
     def build_masks(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
@@ -79,8 +147,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         return batch
 
 
-
-    def get_random_noise(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
+    def get_training_random_noise(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
         """
         During training, adds random noise and noise labels for input coordinates.
 

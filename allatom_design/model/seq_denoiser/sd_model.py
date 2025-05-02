@@ -13,9 +13,7 @@ from tqdm import tqdm
 
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import (atom_center_random_augmentation,
-                                      cat_bb_scn, get_rc_tensor,
-                                      stack_aux_traj)
+from allatom_design.data.data import cat_bb_scn, get_rc_tensor, stack_aux_traj
 from allatom_design.data.pdb_utils import *
 from allatom_design.eval.eval_utils import sampling_utils
 from allatom_design.model.seq_denoiser.denoisers.atom_mpnn_denoiser import \
@@ -96,302 +94,237 @@ class SeqDenoiser(nn.Module):
         print(f"Setting scn_mean: {scn_mean}, scn_std: {scn_std}")
 
 
-    def sidechain_pack(self,
-                       x: TensorType["b n a 3", float],
-                       aatype: TensorType["b n", int],
-                       seq_mask: TensorType["b n", float],
-                       missing_atom_mask: TensorType["b n 37", float],  # 1 where atoms are missing
-                       residue_index: TensorType["b n", int],
-                       chain_index: TensorType["b n", int],
-                       scn_override_mask: Optional[TensorType["b n", int]] = None,
-                       aatype_override_mask: Optional[TensorType["b n", int]] = None,
-                       scd_inputs: Dict[str, Any] = {}):
-        """
-        Given backbone and sequence, denoise sidechain atoms (sidechain packing).
-
-        Also supports packing partial sequence with partial sidechains through aatype_override_mask and scn_override_mask.
-
-
-        scd_inputs should contain the following keys:
-        - num_steps: int
-        - timesteps: TensorType["b S_scd+1", float]
-        - churn_cfg: Dict[str, Any]
-        - noise_schedule: Dict[str, Any]
-        """
-        aux, aux_inputs = {}, {}
-        B, N, A, _ = x.shape
-
-        # Override aatype with the input aatype during sequence denoising
-        if aatype_override_mask is None:
-            # if not provided, assume full sequence
-            aatype_override_mask = seq_mask.clone()
-
-        # Set sidechain to fully masked
-        if scn_override_mask is None:
-            # if not provided, assume no sidechains
-            scn_override_mask = torch.zeros_like(seq_mask)
-
-        # Set up structure input dependent on structure mask
-        x0 = x.clone()
-        x0[:,:,rc.non_bb_idxs,:] =  x0[:,:,rc.non_bb_idxs,:] * scn_override_mask[:,:,None,None]
-
-        # Sample aatype prior dependency on aatype mask
-        aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()
-        aatype_noised = torch.where(aatype_override_mask == 1, aatype, aatype_noised)
-
-        # Override aatype in sidechain diffusion as well
-        scd_inputs["aatype_override"] = aatype_noised
-        scd_inputs["aatype_override_mask"] = aatype_override_mask
-
-        # Add sidechain diffusion inputs
-        aux_inputs["scd"] = scd_inputs
-
-        seq_mlm_mask = torch.zeros_like(seq_mask).float() + aatype_override_mask # start with all masked tokens, other than partial seq
-        scn_mlm_mask = torch.zeros_like(seq_mask).float() + scn_override_mask # start with all masked tokens, other than partial scn
-        assert torch.all((seq_mlm_mask - scn_mlm_mask) >= 0), "Unmasked sidechains should be a subset of unmasked sequence"
-
-        # Run denoising steps
-        denoiser_fn = partial(self.denoiser,
-                              residue_index=residue_index,
-                              seq_mask=seq_mask,
-                              missing_atom_mask=missing_atom_mask,
-                              chain_encoding=chain_index,
-                              aux_inputs=aux_inputs,
-                              is_sampling=True)
-
-        xt = x0
-        aatype_t = aatype_noised
-        psce_t = torch.zeros((B, N, len(rc.non_bb_idxs)), device=x.device)
-
-        # Run sequence denoiser to get packed sidechains
-        x1_pred, _, aux_preds = denoiser_fn(xt, aatype_t, scn_mlm_mask=scn_mlm_mask)
-
-        # Unmask sidechains and sidechain confidence to match seq_mlm_mask
-        xt = sampling_utils.unmask(xt, x1_pred, scn_mlm_mask, seq_mlm_mask)
-        psce_t = sampling_utils.unmask(psce_t, aux_preds["scn_diffusion_aux"]["psce"], scn_mlm_mask, seq_mlm_mask)
-
-        aux["psce"] = psce_t
-        aux["seq_mask"] = seq_mask
-
-        return xt, aatype_t, aux
-
-
     def sample(self,
-               x: TensorType["b n a 3", float],
-               aatype: TensorType["b n", int],
-               seq_mask: TensorType["b n", float],
-               missing_atom_mask: TensorType["b n a 3", float],  # 1 where atoms are missing
-               residue_index: TensorType["b n", int],
-               chain_index:  TensorType["b n", int],
-               timesteps: TensorType["b s+1", float],  # timesteps for t_seq
-               temperature: float,  # 0.0 for argmax / greedy sampling
-               aatype_decoding_order_mode: str,
-               seq_only: bool = False,  # only sample sequence
-               repack_last: bool = False,  # repack last step after sampling the sequence
-               psce_threshold: Optional[float] = None,  # during design, only keep sidechains with psce below threshold; None to keep all
-               scn_override_mask: Optional[TensorType["b n", int]] = None,
-               aatype_override_mask: Optional[TensorType["b n", int]] = None,
-               pos_restrict_aatype: Optional[Tuple[TensorType["b n", float],
-                                                   TensorType["b n k", int]]] = None,  # restrict aatype sampling at certain positions
-               omit_aas: Optional[List[str]] = None,  # omit certain amino acids from sampling, e.g. ["C", "G"]
-               noise_labels: Optional[Union[float, TensorType["b n"]]] = None,  # per-residue noise label
-               add_noise: bool = False,
-               scd_inputs: Dict[str, Any] = {},  # sidechain diffusion inputs
-               use_potts_sampling: bool = False,
-               potts_sampling_cfg: Dict[str, Any] = {},
-               ):
-        """
-        scd_inputs should contain the following keys:
-        - num_steps: int
-        - timesteps: TensorType["b S_scd+1", float]
-        - churn_cfg: Dict[str, Any]
-        - noise_schedule: Dict[str, Any]
-        """
-        aux, aux_inputs = {}, {}
-        S = timesteps.shape[1] - 1
-        B, N, A, _ = x.shape
+               batch: dict[str, TensorType["b ..."]],
+               sampling_inputs: dict[str, Any]):
 
-        # Handle default overrides
-        if aatype_override_mask is None:
-            aatype_override_mask = torch.zeros((B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
+        # Handle inference noise labels
+        batch["noise_labels"] = sampling_inputs.get("noise", None)
+        if batch["noise_labels"] is not None:
+            raise NotImplementedError("Noise labels are not implemented yet")
 
-        if scn_override_mask is None:
-            scn_override_mask = torch.zeros((B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
+        if sampling_inputs["use_potts_sampling"]:
+            res_type_pred = self.denoiser.potts_sample(batch, sampling_inputs)
+        else:
+            raise NotImplementedError("Only Potts sampling is currently implemented")
+        return res_type_pred
 
-        # Handle aatype restrictions
-        aux_inputs["omit_aas"] = omit_aas
-        aux_inputs["pos_restrict_aatype"] = pos_restrict_aatype
 
-        # Add in noise label
-        aux_inputs["noise_labels"] = noise_labels
+    # def sample(self,
+    #            x: TensorType["b n a 3", float],
+    #            aatype: TensorType["b n", int],
+    #            seq_mask: TensorType["b n", float],
+    #            missing_atom_mask: TensorType["b n a 3", float],  # 1 where atoms are missing
+    #            residue_index: TensorType["b n", int],
+    #            chain_index:  TensorType["b n", int],
+    #            timesteps: TensorType["b s+1", float],  # timesteps for t_seq
+    #            temperature: float,  # 0.0 for argmax / greedy sampling
+    #            aatype_decoding_order_mode: str,
+    #            seq_only: bool = False,  # only sample sequence
+    #            repack_last: bool = False,  # repack last step after sampling the sequence
+    #            psce_threshold: Optional[float] = None,  # during design, only keep sidechains with psce below threshold; None to keep all
+    #            scn_override_mask: Optional[TensorType["b n", int]] = None,
+    #            aatype_override_mask: Optional[TensorType["b n", int]] = None,
+    #            pos_restrict_aatype: Optional[Tuple[TensorType["b n", float],
+    #                                                TensorType["b n k", int]]] = None,  # restrict aatype sampling at certain positions
+    #            omit_aas: Optional[List[str]] = None,  # omit certain amino acids from sampling, e.g. ["C", "G"]
+    #            noise_labels: Optional[Union[float, TensorType["b n"]]] = None,  # per-residue noise label
+    #            add_noise: bool = False,
+    #            use_potts_sampling: bool = False,
+    #            potts_sampling_cfg: Dict[str, Any] = {},
+    #            ):
+    #     """
+    #     scd_inputs should contain the following keys:
+    #     - num_steps: int
+    #     - timesteps: TensorType["b S_scd+1", float]
+    #     - churn_cfg: Dict[str, Any]
+    #     - noise_schedule: Dict[str, Any]
+    #     """
+    #     aux, aux_inputs = {}, {}
+    #     S = timesteps.shape[1] - 1
+    #     B, N, A, _ = x.shape
 
-        # Add in noise to the input if requested
-        if add_noise:
-            assert noise_labels is not None, "Need noise labels to know how much noise to add to backbone for add_noise option"
-            if type(noise_labels) is float:
-                noise_labels = torch.full((B, N), fill_value=noise_labels, device=seq_mask.device)  # assume constant noise label
-            noise = torch.randn((B, N, 14, 3), device=seq_mask.device) * rearrange(noise_labels, "b n -> b n 1 1")  # random noise for each atom
-            aux_inputs["noise"] = noise
+    #     # Handle default overrides
+    #     if aatype_override_mask is None:
+    #         aatype_override_mask = torch.zeros((B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
 
-        # Set up structure input dependent on structure mask
-        x0 = x.clone()
-        x0[:,:,rc.non_bb_idxs,:] =  x0[:,:,rc.non_bb_idxs,:] * scn_override_mask[:,:,None,None]
+    #     if scn_override_mask is None:
+    #         scn_override_mask = torch.zeros((B, N), device=residue_index.device, dtype=torch.long)  # don't override anything
 
-        # Sample aatype prior dependency on aatype mask
-        aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()
-        aatype_noised = torch.where(aatype_override_mask == 1, aatype, aatype_noised)
+    #     # Handle aatype restrictions
+    #     aux_inputs["omit_aas"] = omit_aas
+    #     aux_inputs["pos_restrict_aatype"] = pos_restrict_aatype
 
-        # Override aatype in sidechain diffusion as well
-        scd_inputs["aatype_override"] = aatype_noised
-        scd_inputs["aatype_override_mask"] = aatype_override_mask
+    #     # Add in noise label
+    #     aux_inputs["noise_labels"] = noise_labels
 
-        # Add sidechain diffusion inputs
-        aux_inputs["scd"] = scd_inputs
+    #     # Add in noise to the input if requested
+    #     if add_noise:
+    #         assert noise_labels is not None, "Need noise labels to know how much noise to add to backbone for add_noise option"
+    #         if type(noise_labels) is float:
+    #             noise_labels = torch.full((B, N), fill_value=noise_labels, device=seq_mask.device)  # assume constant noise label
+    #         noise = torch.randn((B, N, 14, 3), device=seq_mask.device) * rearrange(noise_labels, "b n -> b n 1 1")  # random noise for each atom
+    #         aux_inputs["noise"] = noise
 
-        # Get residue decoding order
-        seq_mlm_mask = torch.zeros_like(seq_mask).float() + aatype_override_mask # start with all masked tokens, other than partial seq
-        scn_mlm_mask = torch.zeros_like(seq_mask).float() + scn_override_mask # start with all masked tokens, other than partial scn
-        aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps, mlm_mask_prev=seq_mlm_mask)
-        aux_inputs["lengths"] = seq_mask.sum(dim=-1)
-        aux_inputs["temperature"] = temperature
+    #     # Set up structure input dependent on structure mask
+    #     x0 = x.clone()
+    #     x0[:,:,rc.non_bb_idxs,:] =  x0[:,:,rc.non_bb_idxs,:] * scn_override_mask[:,:,None,None]
 
-        # Initialize trajectories
-        xt_traj = []
-        aatype_t_traj, aatype_pred_traj = [], []
-        psce_t_traj = []
-        seq_logits_traj = []
-        scn_diffusion_aux_traj = []
+    #     # Sample aatype prior dependency on aatype mask
+    #     aatype_noised = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()
+    #     aatype_noised = torch.where(aatype_override_mask == 1, aatype, aatype_noised)
 
-        # Set up function for updating mlm mask
-        mask_update_fn = partial(sampling_utils.update_mlm_mask,
-                                 aatype_decoding_order=aatype_decoding_order,
-                                 aatype_decoding_order_mode=aatype_decoding_order_mode,
-                                 seq_mask=seq_mask)
+    #     # Override aatype in sidechain diffusion as well
+    #     scd_inputs["aatype_override"] = aatype_noised
+    #     scd_inputs["aatype_override_mask"] = aatype_override_mask
 
-        # Run denoising steps
-        denoiser_fn = partial(self.denoiser,
-                              residue_index=residue_index,
-                              seq_mask=seq_mask,
-                              missing_atom_mask=missing_atom_mask,
-                              chain_encoding=chain_index,
-                              aux_inputs=aux_inputs,
-                              is_sampling=True)
+    #     # Add sidechain diffusion inputs
+    #     aux_inputs["scd"] = scd_inputs
 
-        xt = x0
-        aatype_t = aatype_noised
-        seq_probs_t = torch.zeros((B, N, len(rc.restypes_with_x)), device=x.device)  # keep track of unscaled sequence probabilities as we decode
-        psce_t = torch.zeros((B, N, len(rc.non_bb_idxs)), device=x.device)  # keep track of sidechain confidence as we decode
+    #     # Get residue decoding order
+    #     seq_mlm_mask = torch.zeros_like(seq_mask).float() + aatype_override_mask # start with all masked tokens, other than partial seq
+    #     scn_mlm_mask = torch.zeros_like(seq_mask).float() + scn_override_mask # start with all masked tokens, other than partial scn
+    #     aatype_decoding_order = sampling_utils.get_decoding_order(mode=aatype_decoding_order_mode, seq_mask=seq_mask, timesteps=timesteps, mlm_mask_prev=seq_mlm_mask)
+    #     aux_inputs["lengths"] = seq_mask.sum(dim=-1)
+    #     aux_inputs["temperature"] = temperature
 
-        # Handle differences in provided sequence and sidechain masks
-        if torch.any((aatype_override_mask - scn_override_mask) < 0):
-            raise ValueError('Sidechain cannot be fixed at any positions where sequence is not fixed')
+    #     # Initialize trajectories
+    #     xt_traj = []
+    #     aatype_t_traj, aatype_pred_traj = [], []
+    #     psce_t_traj = []
+    #     seq_logits_traj = []
+    #     scn_diffusion_aux_traj = []
 
-        if torch.any((aatype_override_mask - scn_override_mask) > 0) and not seq_only:
-            # If we have more sequence than sidechains, pack all sidechains to catch up to aatype_override_mask
-            xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index, scn_override_mask, aatype_override_mask, scd_inputs)
-            psce_t = aux_preds_pack["psce"]  # reflect confidence in packed sidechains
-            scn_mlm_mask = seq_mlm_mask.clone()
+    #     # Set up function for updating mlm mask
+    #     mask_update_fn = partial(sampling_utils.update_mlm_mask,
+    #                              aatype_decoding_order=aatype_decoding_order,
+    #                              aatype_decoding_order_mode=aatype_decoding_order_mode,
+    #                              seq_mask=seq_mask)
 
-            if psce_threshold is not None:
-                # Re-mask sidechains with low confidence, but only if we are not at the last step
+    #     # Run denoising steps
+    #     denoiser_fn = partial(self.denoiser,
+    #                           residue_index=residue_index,
+    #                           seq_mask=seq_mask,
+    #                           missing_atom_mask=missing_atom_mask,
+    #                           chain_encoding=chain_index,
+    #                           aux_inputs=aux_inputs,
+    #                           is_sampling=True)
 
-                # get mask based on per-residue confidence
-                atom_mask_scn = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_t)[..., rc.non_bb_idxs]
-                psce_t_per_res = (psce_t * atom_mask_scn).sum(dim=-1) / atom_mask_scn.sum(dim=-1).clamp(min=1)  # average confidence per residue
-                print(f"Number before thresholding: {scn_mlm_mask.sum(dim=-1)[0]}")
-                scn_mlm_mask = scn_mlm_mask * (psce_t_per_res <= psce_threshold).float()
-                print(f"Number after thresholding: {scn_mlm_mask.sum(dim=-1)[0]}")
+    #     xt = x0
+    #     aatype_t = aatype_noised
+    #     seq_probs_t = torch.zeros((B, N, len(rc.restypes_with_x)), device=x.device)  # keep track of unscaled sequence probabilities as we decode
+    #     psce_t = torch.zeros((B, N, len(rc.non_bb_idxs)), device=x.device)  # keep track of sidechain confidence as we decode
 
-                # apply mask
-                xt[..., rc.non_bb_idxs, :] = xt[..., rc.non_bb_idxs, :] * rearrange(scn_mlm_mask, "b n -> b n 1 1").float()
-                psce_t = psce_t * rearrange(scn_mlm_mask, "b n -> b n 1")
+    #     # Handle differences in provided sequence and sidechain masks
+    #     if torch.any((aatype_override_mask - scn_override_mask) < 0):
+    #         raise ValueError('Sidechain cannot be fixed at any positions where sequence is not fixed')
 
-        # Get timesteps based on the number of unmasked residues
-        # assert (seq_mlm_mask == scn_mlm_mask).all(), "Expecting sequence and sidechain masks to be the same before sampling starts."
-        num_partial = seq_mlm_mask.sum(dim=-1).long()
-        timesteps_K = torch.ceil(timesteps * (aux_inputs["lengths"][:, None] - num_partial[:,None])).long()  # timestep schedule is defined relative to masked residues
-        timesteps_K += num_partial[:,None]
+    #     if torch.any((aatype_override_mask - scn_override_mask) > 0) and not seq_only:
+    #         # If we have more sequence than sidechains, pack all sidechains to catch up to aatype_override_mask
+    #         xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index, scn_override_mask, aatype_override_mask, scd_inputs)
+    #         psce_t = aux_preds_pack["psce"]  # reflect confidence in packed sidechains
+    #         scn_mlm_mask = seq_mlm_mask.clone()
 
-        if use_potts_sampling:
-            assert self.denoiser.seq_design_module.use_potts, "Denoiser must be trained with Potts decoder to use Potts sampling"
-            return self.potts_sample(
-                potts_sampling_cfg=potts_sampling_cfg,
-                denoiser_fn=denoiser_fn,
-                xt=xt,
-                aatype_t=aatype_t,
-                seq_mask=seq_mask,
-                seq_mlm_mask=seq_mlm_mask,
-                scn_mlm_mask=scn_mlm_mask,
-                omit_aas=omit_aas,
-            )
+    #         if psce_threshold is not None:
+    #             # Re-mask sidechains with low confidence, but only if we are not at the last step
 
-        for i in tqdm(range(S), leave=False, desc="Sampling..."):
-            # get next K residues to unmask
-            K_next = timesteps_K[:, i + 1]
+    #             # get mask based on per-residue confidence
+    #             atom_mask_scn = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_t)[..., rc.non_bb_idxs]
+    #             psce_t_per_res = (psce_t * atom_mask_scn).sum(dim=-1) / atom_mask_scn.sum(dim=-1).clamp(min=1)  # average confidence per residue
+    #             print(f"Number before thresholding: {scn_mlm_mask.sum(dim=-1)[0]}")
+    #             scn_mlm_mask = scn_mlm_mask * (psce_t_per_res <= psce_threshold).float()
+    #             print(f"Number after thresholding: {scn_mlm_mask.sum(dim=-1)[0]}")
 
-            # Run sequence denoiser
-            x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, scn_mlm_mask=scn_mlm_mask)
+    #             # apply mask
+    #             xt[..., rc.non_bb_idxs, :] = xt[..., rc.non_bb_idxs, :] * rearrange(scn_mlm_mask, "b n -> b n 1 1").float()
+    #             psce_t = psce_t * rearrange(scn_mlm_mask, "b n -> b n 1")
 
-            # Update mask
-            seq_mlm_mask_prev, scn_mlm_mask_prev = seq_mlm_mask.clone(), scn_mlm_mask.clone()
-            seq_mlm_mask = mask_update_fn(seq_mlm_mask,
-                                          K=K_next, aatype_pred=aatype_pred,
-                                          scaled_seq_probs=aux_preds["scaled_seq_probs"],
-                                          psce=aux_preds["scn_diffusion_aux"]["psce"])
-            scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else scn_override_mask  # default to user-provided sidechains if seq_only
+    #     # Get timesteps based on the number of unmasked residues
+    #     # assert (seq_mlm_mask == scn_mlm_mask).all(), "Expecting sequence and sidechain masks to be the same before sampling starts."
+    #     num_partial = seq_mlm_mask.sum(dim=-1).long()
+    #     timesteps_K = torch.ceil(timesteps * (aux_inputs["lengths"][:, None] - num_partial[:,None])).long()  # timestep schedule is defined relative to masked residues
+    #     timesteps_K += num_partial[:,None]
 
-            # Unmask sequence, sidechains, and sidechain confidence
-            aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
-            xt = sampling_utils.unmask(xt, x1_pred, scn_mlm_mask_prev, scn_mlm_mask)
-            seq_probs_t = sampling_utils.unmask(seq_probs_t, aux_preds["seq_probs"], seq_mlm_mask_prev, seq_mlm_mask)
-            psce_t = sampling_utils.unmask(psce_t, aux_preds["scn_diffusion_aux"]["psce"], scn_mlm_mask_prev, scn_mlm_mask)
+    #     if use_potts_sampling:
+    #         assert self.denoiser.seq_design_module.use_potts, "Denoiser must be trained with Potts decoder to use Potts sampling"
+    #         return self.potts_sample(
+    #             potts_sampling_cfg=potts_sampling_cfg,
+    #             denoiser_fn=denoiser_fn,
+    #             xt=xt,
+    #             aatype_t=aatype_t,
+    #             seq_mask=seq_mask,
+    #             seq_mlm_mask=seq_mlm_mask,
+    #             scn_mlm_mask=scn_mlm_mask,
+    #             omit_aas=omit_aas,
+    #         )
 
-            if (psce_threshold is not None) and (i != S - 1):
-                # Re-mask sidechains with low confidence, but only if we are not at the last step
+    #     for i in tqdm(range(S), leave=False, desc="Sampling..."):
+    #         # get next K residues to unmask
+    #         K_next = timesteps_K[:, i + 1]
 
-                # get mask based on per-residue confidence
-                atom_mask_scn = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_t)[..., rc.non_bb_idxs]
-                psce_t_per_res = (psce_t * atom_mask_scn).sum(dim=-1) / atom_mask_scn.sum(dim=-1).clamp(min=1)  # average confidence per residue
-                scn_mlm_mask = scn_mlm_mask * (psce_t_per_res <= psce_threshold).float()
+    #         # Run sequence denoiser
+    #         x1_pred, aatype_pred, aux_preds = denoiser_fn(xt, aatype_t, scn_mlm_mask=scn_mlm_mask)
 
-                # apply mask
-                xt[..., rc.non_bb_idxs, :] = xt[..., rc.non_bb_idxs, :] * rearrange(scn_mlm_mask, "b n -> b n 1 1").float()
-                psce_t = psce_t * rearrange(scn_mlm_mask, "b n -> b n 1")
+    #         # Update mask
+    #         seq_mlm_mask_prev, scn_mlm_mask_prev = seq_mlm_mask.clone(), scn_mlm_mask.clone()
+    #         seq_mlm_mask = mask_update_fn(seq_mlm_mask,
+    #                                       K=K_next, aatype_pred=aatype_pred,
+    #                                       scaled_seq_probs=aux_preds["scaled_seq_probs"],
+    #                                       psce=aux_preds["scn_diffusion_aux"]["psce"])
+    #         scn_mlm_mask = seq_mlm_mask.clone() if not seq_only else scn_override_mask  # default to user-provided sidechains if seq_only
 
-            # Save trajectory outputs
-            xt_traj.append(xt.cpu())
-            aatype_t_traj.append(aatype_t.cpu())
-            psce_t_traj.append(psce_t.cpu())
-            aatype_pred_traj.append(aatype_pred.cpu())
-            seq_logits_traj.append(aux_preds["seq_logits"].cpu())
+    #         # Unmask sequence, sidechains, and sidechain confidence
+    #         aatype_t = sampling_utils.unmask(aatype_t, aatype_pred, seq_mlm_mask_prev, seq_mlm_mask)
+    #         xt = sampling_utils.unmask(xt, x1_pred, scn_mlm_mask_prev, scn_mlm_mask)
+    #         seq_probs_t = sampling_utils.unmask(seq_probs_t, aux_preds["seq_probs"], seq_mlm_mask_prev, seq_mlm_mask)
+    #         psce_t = sampling_utils.unmask(psce_t, aux_preds["scn_diffusion_aux"]["psce"], scn_mlm_mask_prev, scn_mlm_mask)
 
-            if scd_inputs.get("return_scn_diffusion_aux", False):
-                scn_diffusion_aux_traj.append({k: aux_preds["scn_diffusion_aux"][k].cpu() for k in ["xt_scn_traj", "x1_scn_traj"]})
+    #         if (psce_threshold is not None) and (i != S - 1):
+    #             # Re-mask sidechains with low confidence, but only if we are not at the last step
 
-        if repack_last:
-            # Repack the structure after sampling the sequence (ignoring the provided sidechains)
-            xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index,
-                                                        scn_override_mask,  # start from the provided sidechains
-                                                        seq_mlm_mask,  # pack to the known sequence
-                                                        scd_inputs)
-            psce_t = aux_preds_pack["psce"]
-            scn_mlm_mask = seq_mlm_mask.clone()
+    #             # get mask based on per-residue confidence
+    #             atom_mask_scn = get_rc_tensor(rc.STANDARD_ATOM_MASK_WITH_X, aatype_t)[..., rc.non_bb_idxs]
+    #             psce_t_per_res = (psce_t * atom_mask_scn).sum(dim=-1) / atom_mask_scn.sum(dim=-1).clamp(min=1)  # average confidence per residue
+    #             scn_mlm_mask = scn_mlm_mask * (psce_t_per_res <= psce_threshold).float()
 
-        aux["xt_traj"] = torch.stack(xt_traj, dim=1)
-        aux["aatype_t_traj"] = torch.stack(aatype_t_traj, dim=1)
-        aux["aatype_pred_traj"] = torch.stack(aatype_pred_traj, dim=1)
-        aux["seq_probs"] = seq_probs_t
-        aux["psce"] = psce_t
-        aux["psce_t_traj"] = torch.stack(psce_t_traj, dim=1)
-        aux["seq_logits_traj"] = torch.stack(seq_logits_traj, dim=1)
-        aux["scn_diffusion_aux_traj"] = scn_diffusion_aux_traj
-        aux["seq_mask"] = seq_mask
+    #             # apply mask
+    #             xt[..., rc.non_bb_idxs, :] = xt[..., rc.non_bb_idxs, :] * rearrange(scn_mlm_mask, "b n -> b n 1 1").float()
+    #             psce_t = psce_t * rearrange(scn_mlm_mask, "b n -> b n 1")
 
-        # preprocess diffusion aux traj
-        if scd_inputs.get("return_scn_diffusion_aux", False):
-            aux["scn_diffusion_aux_traj"] = stack_aux_traj(scn_diffusion_aux_traj, dim=1)  # values are shape (B, S, S_scd, N, A, 3)
+    #         # Save trajectory outputs
+    #         xt_traj.append(xt.cpu())
+    #         aatype_t_traj.append(aatype_t.cpu())
+    #         psce_t_traj.append(psce_t.cpu())
+    #         aatype_pred_traj.append(aatype_pred.cpu())
+    #         seq_logits_traj.append(aux_preds["seq_logits"].cpu())
 
-        return xt, aatype_t, aux
+    #         if scd_inputs.get("return_scn_diffusion_aux", False):
+    #             scn_diffusion_aux_traj.append({k: aux_preds["scn_diffusion_aux"][k].cpu() for k in ["xt_scn_traj", "x1_scn_traj"]})
+
+    #     if repack_last:
+    #         # Repack the structure after sampling the sequence (ignoring the provided sidechains)
+    #         xt, _, aux_preds_pack = self.sidechain_pack(xt, aatype_t, seq_mask, missing_atom_mask, residue_index, chain_index,
+    #                                                     scn_override_mask,  # start from the provided sidechains
+    #                                                     seq_mlm_mask,  # pack to the known sequence
+    #                                                     scd_inputs)
+    #         psce_t = aux_preds_pack["psce"]
+    #         scn_mlm_mask = seq_mlm_mask.clone()
+
+    #     aux["xt_traj"] = torch.stack(xt_traj, dim=1)
+    #     aux["aatype_t_traj"] = torch.stack(aatype_t_traj, dim=1)
+    #     aux["aatype_pred_traj"] = torch.stack(aatype_pred_traj, dim=1)
+    #     aux["seq_probs"] = seq_probs_t
+    #     aux["psce"] = psce_t
+    #     aux["psce_t_traj"] = torch.stack(psce_t_traj, dim=1)
+    #     aux["seq_logits_traj"] = torch.stack(seq_logits_traj, dim=1)
+    #     aux["scn_diffusion_aux_traj"] = scn_diffusion_aux_traj
+    #     aux["seq_mask"] = seq_mask
+
+    #     # preprocess diffusion aux traj
+    #     if scd_inputs.get("return_scn_diffusion_aux", False):
+    #         aux["scn_diffusion_aux_traj"] = stack_aux_traj(scn_diffusion_aux_traj, dim=1)  # values are shape (B, S, S_scd, N, A, 3)
+
+    #     return xt, aatype_t, aux
 
 
     def potts_sample(self,

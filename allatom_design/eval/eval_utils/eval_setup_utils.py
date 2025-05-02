@@ -156,6 +156,7 @@ def process_pdb_files(pdb_files: list[str],
     data = fetch(mmcif_files, max_file_size=None)
 
     # Process each PDB file
+    # TODO: parallelize this
     processed_struct_files = []
     for pdb in tqdm(data, desc="Processing mmCIFs"):
         processed_struct_file = process_structure(pdb, resource=resource, outdir=Path(processed_pdb_dir), filters=[], clusters={}, return_struct_path=True)
