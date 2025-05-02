@@ -61,9 +61,9 @@ data:
       max_residues: 2048
     - _target_: allatom_design.data.filter.dynamic.n_chain_types.NChainTypesFilter
       n_protein_chain_range: [1, 1]
-      n_dna_chain_range: [0, 10]
-      n_rna_chain_range: [0, 10]
-      n_nonpolymer_chain_range: [0, 10]
+      n_dna_chain_range: [0, 0]
+      n_rna_chain_range: [0, 0]
+      n_nonpolymer_chain_range: [0, 0]
 
   sampler:
     _target_: allatom_design.data.sample.cluster.ClusterSampler

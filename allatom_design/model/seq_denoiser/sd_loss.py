@@ -44,14 +44,10 @@ class SDLoss(nn.Module):
         aux = {}  # losses
         aux_monitor = {}  # monitor other metrics that do not contribute to the loss
 
-        # First, convert batch res_type to protein token vocabulary
-        target_res_type = batch["res_type"].argmax(dim=-1)  # undo one-hot encoding
-        lookup = const.prot_only_tokens_to_all_tokens.T.to(target_res_type.device)  # [33, 21]
-        target_res_type = lookup[target_res_type].argmax(dim=-1)  # [b, n]
-
         if self.use_seq_pred and eval_seq:
             # compute sequence loss from sequence design module
-            seq_loss_mask = outputs["token_exists_mask"] * (1 - outputs["seq_cond_mask"])
+            target_res_type = batch["res_type"].argmax(dim=-1)
+            seq_loss_mask = outputs["token_exists_mask"] * (1 - outputs["seq_cond_mask"])  # compute loss only on masked tokens
             seq_loss_mask = seq_loss_mask * (target_res_type != const.prot_only_token_to_id["UNK"])  # mask out UNK tokens from loss
 
             # DEBUG: ensure that we're only computing over protein tokens
@@ -109,7 +105,7 @@ def masked_cross_entropy(logits: TensorType["b n c", float],
     - label_smoothing: float, label smoothing factor
     - per_token_avg: bool, whether to average loss per token (false will divide by fixed_size)
     """
-    n_classes = len(const.prot_only_tokens)
+    n_classes = len(const.tokens)
     target_oh = F.one_hot(target, num_classes=n_classes).float()
 
     # Unpack seq_loss_cfg
