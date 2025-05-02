@@ -29,7 +29,7 @@ class ADLoss(nn.Module):
 
         if self.task == "scaffold":
             self.loss_keys.add("motif/mse_loss")
-            self.loss_keys.add("motif_weighted_bb/mse_loss")
+            self.loss_keys.add("motif_proximity_bb/mse_loss")
 
         # Handle autoguidance loss and loss weights
         self.loss_keys = self.loss_keys.union({"autoguidance/bb/mse_loss"})
@@ -63,12 +63,14 @@ class ADLoss(nn.Module):
         aux_monitor["bb/unweighted_mse_loss"] = aux["bb/mse_loss"].mean().detach().clone()
         aux["bb/mse_loss"] = aux["bb/mse_loss"] * loss_weight_bb  # apply time step loss weight
 
-        # Compute motif loss
+        # Compute motif losses
         if self.task == "scaffold":
+            motif_inputs = bb_diff_outputs["motif_inputs_batched"]
+
             # Compute a loss only on motif tokens
-            # For now, assume diffusion token residue index is same as motif token residue index
-            motif_residx = torch.where(bb_diff_outputs["motif_inputs_batched"]["token_pad_mask"].bool(),   # set pad residx to -9999
-                                       bb_diff_outputs["motif_inputs_batched"]["residue_index"], -9999)
+            ## for now, assume diffusion token residue index is same as motif token residue index  # TODO: find a better way to track this that will generalize to multi-chain
+            motif_residx = torch.where(motif_inputs["token_pad_mask"].bool(),   # set pad residx to -9999
+                                       motif_inputs["residue_index"], -9999)
             diffusion_motif_mask = (bb_diff_outputs["diffusion_inputs_batched"]["residue_index"].unsqueeze(-1) == motif_residx.unsqueeze(1)).any(dim=-1)  # look for matching residx
 
             motif_bb_pred = bb_pred * diffusion_motif_mask[..., None, None]
@@ -82,16 +84,15 @@ class ADLoss(nn.Module):
             aux_monitor["motif/unweighted_mse_loss"] = aux["motif/mse_loss"].mean().detach().clone()
             aux["motif/mse_loss"] = aux["motif/mse_loss"] * loss_weight_bb  # apply time step loss weight
 
-            # Compute motif-weighted backbone MSE loss (motif tokens are upweighted by alpha_motif)
-            motif_weights = bb_mask.clone().float()
-            motif_weights[motif_bb_mask] = self.cfg.motif_weighted_bb.alpha_motif  # set weights on motif atoms to alpha_motif
-            aux["motif_weighted_bb/mse_loss"] = masked_mse(bb_pred,
-                                                           bb_target,
-                                                           weights=motif_weights)
-            # aux_monitor["motif_weighted_bb/unweighted_mse_loss"] = aux["motif_weighted_bb/mse_loss"].mean().detach().clone()  # no need to log unweighted loss
-            aux["motif_weighted_bb/mse_loss"] = aux["motif_weighted_bb/mse_loss"] * loss_weight_bb  # apply time step loss weight
-
-
+            # Compute a distance-weighted backbone MSE loss (tokens upweighted by alpha / (1 + d^2) where d is the distance to closest motif coordinate)
+            aux["motif_proximity_bb/mse_loss"] = motif_proximity_weighted_mse(bb_pred,
+                                                                              bb_target,
+                                                                              bb_mask,
+                                                                              motif_inputs["motif_coords"],
+                                                                              motif_inputs["motif_atom_mask"],
+                                                                              alpha=self.cfg.motif_proximity_bb.alpha)
+            # aux_monitor["motif_proximity_bb/unweighted_mse_loss"] = aux["motif_proximity_bb/mse_loss"].mean().detach().clone()  # no need to log unweighted loss
+            aux["motif_proximity_bb/mse_loss"] = aux["motif_proximity_bb/mse_loss"] * loss_weight_bb  # apply time step loss weight
 
         # Compute loss for autoguidance model
         if bb_diff_outputs.get("autoguidance_aux") is not None:
@@ -141,3 +142,30 @@ def masked_mse(x: TensorType["b ...", float],
     mse = (x - y).pow(2) * weights
     mse = mse.sum(data_dims) / weights.sum(data_dims).clamp(min=1e-6)
     return mse
+
+
+def motif_proximity_weighted_mse(bb_pred: TensorType["b n_tokens 4 3", float],
+                                 bb_target: TensorType["b n_tokens 4 3", float],
+                                 bb_mask: TensorType["b n_tokens 4 3", float],
+                                 motif_coords: TensorType["b n_atoms 3", float],
+                                 motif_atom_mask: TensorType["b n_atoms", bool],
+                                 alpha: float) -> TensorType["b", float]:
+    """
+    Compute a loss on backbone tokens with weights alpha / (1 + d^2) where d is the distance to closest motif coordinates.
+    """
+    # Compute distance of ground truth CA to motif coords
+    bb_target_ca = bb_target[..., const.prot_bb_atoms.index("CA"), :]
+    dists = torch.cdist(bb_target_ca, motif_coords)  # [b, n_tokens, n_atoms]
+
+    # Compute weights for each token
+    proximity_kernel = alpha / (1 + dists ** 2)
+    proximity_kernel = proximity_kernel * motif_atom_mask.unsqueeze(1)
+
+    # max over all atoms in the motif to get weight from closest atom
+    token_weights = proximity_kernel.max(dim=-1).values  # [b, n_tokens]
+
+    # handle token coordinate masking (both padding and missing atoms)
+    token_weights = token_weights[..., None, None] * bb_mask  # [b n_tokens 4 3]
+    return masked_mse(bb_pred,
+                      bb_target,
+                      weights=token_weights)
