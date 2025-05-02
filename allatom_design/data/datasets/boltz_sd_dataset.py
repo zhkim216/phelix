@@ -110,11 +110,11 @@ class BoltzSDDataModule(L.LightningDataModule):
             print(f"Loading in manifest from {manifest_path}...")
             with gzip.open(manifest_path, "rt") as f:
                 data = json.load(f)
-            records = [Record.from_dict(r) for r in tqdm(data, desc="Loading records...")]
-            # # DEBUG
-            # import glob
-            # ids = [Path(x).stem for x in glob.glob(f"{self.pdb_path}/processed_targets/featurized/*.npz")]
-            # records = [Record.from_dict(r) for r in data if r["id"] in ids]
+            # records = [Record.from_dict(r) for r in tqdm(data, desc="Loading records...")]
+            # DEBUG
+            import glob
+            ids = [Path(x).stem for x in glob.glob(f"{self.pdb_path}/processed_targets/featurized/*.npz")]
+            records = [Record.from_dict(r) for r in data if r["id"] in ids]
             manifest = Manifest(records=records)
         else:
             manifest_path = f"{self.pdb_path}/rcsb_processed_targets/manifest.json"

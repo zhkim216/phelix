@@ -1,5 +1,5 @@
 """
-Utils for sampling from FAMPNN.
+Utils for sampling from sequence design models.
 """
 import re
 from collections import defaultdict
@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import hydra
 import numpy as np
 import pandas as pd
 import torch
@@ -15,9 +16,15 @@ from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
 from tqdm import tqdm
 
+from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import load_feats_from_pdb, pad_to_max_len
+from allatom_design.data.data import (atom_center_random_augmentation,
+                                      pad_to_max_len, to)
+from allatom_design.data.datasets.boltz_sd_dataset import sd_collator
 from allatom_design.data.datasets.sd_dataset import process_single_pdb_sd
+import allatom_design.data.const as const
+from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
+    load_input
 from allatom_design.eval.eval_utils import sampling_utils
 from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
@@ -53,11 +60,14 @@ def get_seq_des_model(cfg: DictConfig, device: str) -> Dict[str, Any]:
     seq_des_model = {"model_name": model_name, "cfg": cfg, "device": device}
 
     if model_name == "atom_mpnn":
-        atom_mpnn_cfg = OmegaConf.load(cfg.atom_mpnn.atom_mpnn_cfg)
-        atom_mpnn_cfg = OmegaConf.merge(atom_mpnn_cfg, cfg.atom_mpnn.overrides)
-        lit_sd_model = LitSeqDenoiser.load_from_checkpoint(cfg.atom_mpnn.atom_mpnn_ckpt).eval()
-        seq_des_model["atom_mpnn_model"] = lit_sd_model.model
-        seq_des_model["atom_mpnn_cfg"] = atom_mpnn_cfg
+        lit_sd_model = LitSeqDenoiser.load_from_checkpoint(cfg.atom_mpnn.ckpt_path).eval()
+        model_cfg, _ = get_cfg_from_ckpt(cfg.atom_mpnn.ckpt_path)
+        data_cfg = hydra.utils.instantiate(model_cfg.data)
+        sampling_cfg = OmegaConf.load(cfg.atom_mpnn.sampling_cfg)
+        sampling_cfg = OmegaConf.merge(sampling_cfg, OmegaConf.to_container(cfg.atom_mpnn.overrides, resolve=True))
+        seq_des_model["model"] = lit_sd_model.model
+        seq_des_model["data_cfg"] = data_cfg
+        seq_des_model["sampling_cfg"] = sampling_cfg
 
     elif model_name == "proteinmpnn":
         mpnn_cfg = OmegaConf.load(cfg.proteinmpnn.mpnn_cfg)
@@ -69,16 +79,17 @@ def get_seq_des_model(cfg: DictConfig, device: str) -> Dict[str, Any]:
     return seq_des_model
 
 
-def run_fampnn(model: SeqDenoiser,
-               cfg: DictConfig,
-               pdb_paths: List[str],
-               device: str,
-               pos_constraint_df: Optional[pd.DataFrame] = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
-               out_dir: Optional[str] = None,
-               ) -> Tuple[Dict[str, Dict[str, torch.Tensor]],
+def run_seq_des(model: SeqDenoiser,
+                data_cfg: DictConfig,
+                cfg: DictConfig,  # sampling config
+                struct_file_paths: List[str],
+                device: str,
+                pos_constraint_df: Optional[pd.DataFrame] = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
+                out_dir: Optional[str] = None,
+                ) -> Tuple[Dict[str, Dict[str, torch.Tensor]],
                           Dict]:
     """
-    Given a list of PDB files, run FAMPNN on them.
+    Given a list of processed structure files, run sequence design on them.
 
     Returns a dictionary mapping from PDB paths to dictionaries containing samples for that PDB, including keys:
     - x_denoised: denoised coordinates
@@ -116,133 +127,45 @@ def run_fampnn(model: SeqDenoiser,
         # set empty string to NaN for easier parsing
         pos_constraint_df = pos_constraint_df.replace("", np.nan)
 
-    # Sequence design timestep schedule
-    t_seq = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)
-
-    # Set up sidechain diffusion inputs
-    t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)
-    noise_schedule = NoiseSchedule(cfg.scn_diffusion.noise_schedule)
-    churn_cfg = dict(cfg.scn_diffusion.churn_cfg)
-    scd_inputs_template = {
-        "num_steps": cfg.scn_diffusion.num_steps,
-        "timesteps": None,  # will be filled per batch
-        "noise_schedule": noise_schedule,
-        "churn_cfg": churn_cfg,
-        "return_scn_diffusion_aux": False
-    }
-
     # Print omitted amino acids
     if cfg.verbose and cfg.omit_aas is not None:
         print(f"Omitting aatype sampling for: {cfg.omit_aas}")
 
     # Process PDBs in batches of size B
-    pdb_paths_repeated = np.repeat(pdb_paths, cfg.num_seqs_per_pdb)
-    pbar = tqdm(total=len(pdb_paths_repeated), desc=f"FAMPNN: sampling S={cfg.num_steps} steps, {len(pdb_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
+    struct_file_paths_repeated = np.repeat(struct_file_paths, cfg.num_seqs_per_pdb)
+    pbar = tqdm(total=len(struct_file_paths_repeated), desc=f"Sampling {len(struct_file_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
 
     input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
-        for i in range(0, len(pdb_paths_repeated), cfg.batch_size):
-            pdb_batch_files = pdb_paths_repeated[i:i+cfg.batch_size]
-            B = len(pdb_batch_files)
-            batch, pdb_names, batch_chain_id_mapping = get_fampnn_batch(pdb_batch_files, device=device, parallel_pool=parallel_pool)
+        for i in range(0, len(struct_file_paths_repeated), cfg.batch_size):
+            struct_file_batch_files = struct_file_paths_repeated[i:i+cfg.batch_size]
+            B = len(struct_file_batch_files)
+            batch, input_structures = get_sd_batch(struct_file_batch_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
 
-            # Prepare scd_inputs for this batch
-            scd_inputs = dict(scd_inputs_template)
-            scd_inputs["timesteps"] = t_scd[None].expand(B, -1).to(device)
-
-            # Prepare sampling timesteps
-            timesteps = t_seq[None].expand(B, -1).to(device)
-
-            # Handle fixed positions and conditioning; update batch with override masks and overridden aatypes
-            batch = parse_fixed_pos_info(batch, pdb_names, batch_chain_id_mapping, pos_constraint_df, verbose=cfg.verbose)
-
-            # Restrict aatype sampling at certain positions
-            pos_restrict_aatype = parse_pos_restrict_aatype_info(batch, pdb_names, batch_chain_id_mapping, pos_constraint_df, verbose=cfg.verbose)
+            # TODO: Add fixed positions, etc. For now assume no fixed positions
+            batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
+            batch["seq_cond_mask"] = torch.where(batch["mol_type"] != const.chain_type_ids["PROTEIN"],
+                                                 batch["token_pad_mask"],
+                                                 torch.zeros_like(batch["seq_cond_mask"]))  # always condition on non-protein restypes
+            batch["atom_cond_mask"] = batch["prot_bb_atom_mask"]  # condition on backbone atoms
+            atomwise_prot_mask = torch.bmm(batch["atom_to_token"].float(), (batch["mol_type"] == const.chain_type_ids["PROTEIN"]).float().unsqueeze(-1)).squeeze(-1)
+            batch["atom_cond_mask"] = torch.where(atomwise_prot_mask.bool(), batch["atom_cond_mask"], torch.ones_like(batch["atom_cond_mask"]))  # always condition on non-protein atoms
 
             # Run sampling
-            x_denoised, aatype_denoised, aux = model.sample(
-                batch["x"],
-                aatype=batch["aatype"],
-                seq_mask=batch["seq_mask"],
-                missing_atom_mask=batch["missing_atom_mask"],
-                residue_index=batch["residue_index"],
-                chain_index=batch["chain_index"],
-                timesteps=timesteps,
-                temperature=cfg.temperature,
-                aatype_decoding_order_mode=cfg.aatype_decoding_order_mode,
-                seq_only=cfg.seq_only,
-                repack_last=cfg.repack_last,
-                psce_threshold=cfg.psce_threshold,
-                omit_aas=cfg.omit_aas,
-                noise_labels=cfg.noise_labels,
-                add_noise=cfg.add_noise,
-                aatype_override_mask=batch["aatype_override_mask"],
-                scn_override_mask=batch["scn_override_mask"],
-                pos_restrict_aatype=pos_restrict_aatype,
-                scd_inputs=scd_inputs,
-                use_potts_sampling=cfg.use_potts_sampling,
-                potts_sampling_cfg=cfg.potts_sampling_cfg,
-            )
-
-            batch_samples = {
-                "x_denoised": x_denoised,
-                "seq_mask": batch["seq_mask"],
-                "missing_atom_mask": batch["missing_atom_mask"],
-                "residue_index": batch["residue_index"],
-                "chain_index": batch["chain_index"],
-                "pred_aatype": aatype_denoised,
-                "psce": aux["psce"],
-                "seq_probs": aux["seq_probs"],
-                # save other useful info
-                "original_aatype": batch["aatype"],
-                "interface_residue_mask": batch["interface_residue_mask"],
-                "aatype_override_mask": batch["aatype_override_mask"],
-                "scn_override_mask": batch["scn_override_mask"],
-            }
-
-            batch_samples = {k: v.cpu() for k, v in batch_samples.items() if v is not None}
-
-            # Store samples and remove padding
-            for j in range(B):
-                length_j = batch["seq_mask"][j].sum().long().item()
-                sample_j = {k: v[j, :length_j].clone() for k, v in batch_samples.items()}
-                pdb_path = pdb_batch_files[j]
-                input_pdb_to_samples[pdb_path].append(sample_j)
-
-            # Save outputs to disk
-            if out_dir is not None:
-                # Save as PDB
-                sample_stems = [f"{Path(pdb_name).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(pdb_names)]
-                batch_out_pdbs = [f"{sample_out_dir}/{sample_stem}.pdb" for sample_stem in sample_stems]  # output PDBs
-                SeqDenoiser.save_samples_to_pdb(batch_samples, batch_out_pdbs)
-                run_aux["out_pdbs"].extend(batch_out_pdbs)
-                run_aux["input_pdb_names"].extend(pdb_names)
-
-                # Save samples as pt
-                for j in range(B):
-                    length_j = batch["seq_mask"][j].sum().long().item()
-                    sample_j = {k: v[j, :length_j].clone() for k, v in batch_samples.items()}
-                    pt_file = f"{sample_pt_out_dir}/{sample_stems[j]}.pt"
-                    with open(pt_file, "wb") as f:
-                        torch.save(sample_j, f)
-                    run_aux["out_pts"].append(pt_file)
-
-                    # Keep explicit track of pred seqs for convenience
-                    run_aux["pred_seqs"].append("".join([rc.restypes_with_x[aa] for aa in sample_j["pred_aatype"]]))
-
+            res_type_pred = model.sample(batch, sampling_inputs=cfg)
 
             pbar.update(B)
     pbar.close()
 
-    # For each input pdb, aggregate all FAMPNN samples
+    # For each input pdb, aggregate all sequence design samples
     preds = defaultdict(dict)
     for pdb, samples_list in input_pdb_to_samples.items():
         for k in samples_list[0].keys():
             preds[pdb][k] = torch.stack([s[k] for s in samples_list])
 
         # Get sampled sequences for this PDB as a list of strings
-        aatype_denoised = preds[pdb]["pred_aatype"]
+        aatype_denoised = preds[pdb]["res_type_pred"]
 
         pred_seqs = []
         for i in range(aatype_denoised.shape[0]):
@@ -253,217 +176,49 @@ def run_fampnn(model: SeqDenoiser,
     return preds, run_aux
 
 
-def run_fampnn_packing(model: SeqDenoiser,
-                       cfg: DictConfig,
-                       pdb_paths: list[str],
-                       device: str,
-                       pos_constraint_df: pd.DataFrame | None = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
-                       out_dir: str | None = None,
-                       ) -> Tuple[Dict[str, Dict[str, torch.Tensor]],
-                                  Dict]:
-    """
-    Given a list of PDB files, run FAMPNN sidechain packing on them.
-    """
-    if pos_constraint_df is not None:
-        raise NotImplementedError("Fixed positions are not yet supported for sidechain packing, but shouldn't be too hard to implement.")
-
-    # Set up output directory
-    run_aux = {}
-    run_aux["sample_info"] = []
-    if out_dir is not None:
-        sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
-        Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
-
-        run_aux["out_pdbs"] = []  # store paths to all output PDBs
-        run_aux["input_pdb_names"] = []  # store names of all input pdbs
-
-    # Set up sidechain diffusion inputs
-    t_scd = sampling_utils.get_timesteps_from_schedule(**cfg.scn_diffusion.timestep_schedule)
-    noise_schedule = NoiseSchedule(cfg.scn_diffusion.noise_schedule)
-    churn_cfg = dict(cfg.scn_diffusion.churn_cfg)
-    scd_inputs_template = {
-        "num_steps": cfg.scn_diffusion.num_steps,
-        "timesteps": None,  # will be filled per batch
-        "noise_schedule": noise_schedule,
-        "churn_cfg": churn_cfg,
-        "return_scn_diffusion_aux": False
-    }
-
-    # Process PDBs in batches of size B
-    pdb_paths_repeated = np.repeat(pdb_paths, cfg.num_seqs_per_pdb)
-    pbar = tqdm(total=len(pdb_paths_repeated), desc=f"FAMPNN: packing with S_scd={cfg.scn_diffusion.num_steps} steps, {len(pdb_paths)} PDBs, {cfg.num_seqs_per_pdb} samples per PDB...")
-
-    input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
-
-    parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
-    with parallel_context as parallel_pool:
-        for i in range(0, len(pdb_paths_repeated), cfg.batch_size):
-            pdb_batch_files = pdb_paths_repeated[i:i+cfg.batch_size]
-            B = len(pdb_batch_files)
-            batch, pdb_names, batch_chain_id_mapping = get_fampnn_batch(pdb_batch_files, device=device, parallel_pool=parallel_pool)
-
-            # Prepare scd_inputs for this batch
-            scd_inputs = dict(scd_inputs_template)
-            scd_inputs["timesteps"] = t_scd[None].expand(B, -1).to(device)
-
-            # Handle fixed positions and conditioning; update batch with override masks and overridden aatypes
-            batch = parse_fixed_pos_info(batch, pdb_names, batch_chain_id_mapping, pos_constraint_df, verbose=cfg.verbose)
-
-            # Run sidechain packing
-            x_denoised, _, aux = model.sidechain_pack(
-                x=batch["x"],
-                aatype=batch["aatype"],
-                seq_mask=batch["seq_mask"],
-                missing_atom_mask=batch["missing_atom_mask"],
-                residue_index=batch["residue_index"],
-                chain_index=batch["chain_index"],
-                scd_inputs=scd_inputs,
-            )
-            batch_samples = {"x_denoised": x_denoised,
-                            "seq_mask": batch["seq_mask"],
-                            "missing_atom_mask": batch["missing_atom_mask"],
-                            "pred_aatype": batch["aatype"],
-                            "psce": aux["psce"],
-                            "residue_index": batch["residue_index"],
-                            "chain_index": batch["chain_index"]}
-            batch_samples = {k: v.cpu() for k, v in batch_samples.items()}
-
-            # Store samples and remove padding
-            for j in range(B):
-                length_j = batch["seq_mask"][j].sum().long().item()
-                sample_j = {k: v[j, :length_j].clone() for k, v in batch_samples.items()}
-                pdb_path = pdb_batch_files[j]
-                input_pdb_to_samples[pdb_path].append(sample_j)
-
-            # Save outputs to disk
-            if out_dir is not None:
-                # Save as PDB
-                sample_stems = [f"{Path(pdb_name).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(pdb_names)]
-                batch_out_pdbs = [f"{sample_out_dir}/{sample_stem}.pdb" for sample_stem in sample_stems]  # output PDBs
-                SeqDenoiser.save_samples_to_pdb(batch_samples, batch_out_pdbs)
-
-                run_aux["out_pdbs"].extend(batch_out_pdbs)
-                run_aux["input_pdb_names"].extend(pdb_names)
-
-            # Also save useful sample info
-            aatype, seq_mask = batch["aatype"].cpu(), batch["seq_mask"].cpu()
-            atom_mask = torch.tensor(rc.STANDARD_ATOM_MASK)[aatype] * seq_mask[..., None]
-            atom_mask = atom_mask * (1 - batch["missing_atom_mask"].cpu())  # handle atoms missing from the ground truth PDB
-            batch_sample_info = {"x_denoised": x_denoised,
-                                "x_in": batch["x"],
-                                "seq_mask": seq_mask,
-                                "atom_mask": atom_mask,
-                                "aatype": aatype}
-            batch_sample_info = {k: v.cpu() for k, v in batch_sample_info.items()}
-            run_aux["sample_info"].append(batch_sample_info)
-
-            pbar.update(B)
-    pbar.close()
-
-    # For each input pdb, aggregate all packed samples
-    preds = defaultdict(dict)
-    for pdb, samples_list in input_pdb_to_samples.items():
-        for k in samples_list[0].keys():
-            preds[pdb][k] = torch.stack([s[k] for s in samples_list])
-
-    # Also return padded batch info of all samples
-    max_len = max([v["x_denoised"].shape[1] for v in preds.values()])
-    run_aux["sample_info"] = [pad_to_max_len(batch_i, max_len) for batch_i in run_aux["sample_info"]]
-    run_aux["sample_info"] = {k: torch.cat([v[k] for v in run_aux["sample_info"]], dim=0) for k in run_aux["sample_info"][0].keys()}
-
-    return preds, run_aux
-
-
-def get_fampnn_batch(pdb_batch_files: List[str], device: str,
-                     parallel_pool: Parallel | None
-                     ) -> Tuple[Dict[str, TensorType["b n ..."]],
-                                List[str],
-                                List[Dict[str, int]],  # maps chain letters to chain index
-                                ]:
+def get_sd_batch(struct_file_batch_paths: list[str], device: str,
+                 data_cfg: DictConfig,
+                 parallel_pool: Parallel | None) -> tuple[dict[str, TensorType["b n ..."]],
+                                                          list[str],
+                                                          list[Dict[str, int]]]:
     if parallel_pool is None:
         # Load PDBs sequentially
-        batch_data = [load_feats_from_pdb(pdb_file) for pdb_file in pdb_batch_files]
+        batch_examples, input_structures = zip(*[get_sd_example(struct_file_path, data_cfg) for struct_file_path in struct_file_batch_paths])
     else:
         # Load PDBs in parallel
-        batch_data = parallel_pool(delayed(load_feats_from_pdb)(pdb_file) for pdb_file in pdb_batch_files)
+        batch_examples, input_structures = zip(*parallel_pool(delayed(get_sd_example)(struct_file_path, data_cfg) for struct_file_path in struct_file_batch_paths))
 
-    # Load and process all PDBs in this batch
-    batch_list = []
-    batch_chain_id_mapping = []
-    for data in batch_data:
-        single = process_single_pdb_sd(data)
-        batch_list.append(single)
+    # Collate examples
+    batch = sd_collator(batch_examples)
+    batch = to(batch, device)  # move to device
 
-        # store chain ID mapping for parsing fixed positions
-        batch_chain_id_mapping.append(data["chain_id_mapping"])
-
-        # Ensure that input PDB does not have insertion codes
-        if (data["insertion_code_offsets"] > 0).any():
-            raise ValueError("Input PDB has insertion codes, which is not handled by fixed_pos specifications. Please renumber your input PDB before running sampling.")
-
-    pdb_names = [Path(pdb_file).name for pdb_file in pdb_batch_files]  # include extension
-
-    # Create a batch dictionary from batch_list by stacking
-    model_input_keys = ["x", "aatype", "seq_mask", "missing_atom_mask", "residue_index", "chain_index", "interface_residue_mask"]
-    max_len = max(b["x"].shape[0] for b in batch_list)  # determine the max_len (max number of residues across the batch)
-    batch_list = [pad_to_max_len({k: b[k].unsqueeze(0) for k in model_input_keys}, max_len)for b in batch_list]  # pad each batch to max length
-    batch = {k: torch.cat([b[k] for b in batch_list], dim=0) for k in model_input_keys}  # stack the padded batches
-
-    # Move to device
-    batch = {k: batch[k].to(device) for k in model_input_keys}
-
-    return batch, pdb_names, batch_chain_id_mapping
+    return batch, input_structures
 
 
-def create_fampnn_embeddings(model: FAMPNNDenoiser,
-                             pdb_paths: List[str],
-                             backbone_only: bool,
-                             batch_size: int,
-                             device: str,
-                             out_dir: str):
+def get_sd_example(struct_file_path: str, data_cfg: DictConfig) -> tuple[dict[str, TensorType["b n ..."]],
+                                                                         dict[str, Any]]:
     """
-    Create FAMPNN embeddings for a list of PDB files.
+    Given a structure file path, return a batch of features and the input structure.
     """
-    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    example = {}
 
-    pbar = tqdm(total=len(pdb_paths), desc="Creating FAMPNN embeddings")
-    for i in range(0, len(pdb_paths), batch_size):
-        pdb_batch_files = pdb_paths[i:i + batch_size]
-        B = len(pdb_batch_files)
+    input_data = load_input(struct_file_path)
 
-        batch, pdb_names, _ = get_fampnn_batch(pdb_batch_files, device)
-        with torch.no_grad():
-            x, aatype, seq_mask, missing_atom_mask, residue_index, chain_index = batch["x"], batch["aatype"], batch["seq_mask"], batch["missing_atom_mask"], batch["residue_index"], batch["chain_index"]
-            if backbone_only:
-                # Zero out aatype and sidechains
-                aatype = torch.full_like(residue_index, fill_value=rc.restype_order_with_x["X"]) * seq_mask.long()
-                seq_mlm_mask = torch.zeros_like(seq_mask)
-                scn_mlm_mask = torch.zeros_like(seq_mask)
-            else:
-                seq_mlm_mask = torch.ones_like(seq_mask)
-                scn_mlm_mask = torch.ones_like(seq_mask)
+    # Tokenize structure (no cropping applied)
+    tokenized = data_cfg["tokenizer"].tokenize(input_data)
+    feats = data_cfg["featurizer"].process(tokenized, data_cfg["atoms_per_window_queries"], data_cfg["num_bins"])
+    feats["coords"] = feats["coords"].squeeze(0)  # remove batch dimension
 
-            _, mpnn_feature_dict = model.score(x=x,
-                                               aatype=aatype,
-                                               seq_mask=seq_mask,
-                                               missing_atom_mask=missing_atom_mask,
-                                               scn_mlm_mask=scn_mlm_mask,
-                                               residue_index=residue_index,
-                                               chain_index=chain_index,
-                                               return_embeddings=True)
+    # SE3 augmentation for convenience / scaling
+    feats["coords"] = atom_center_random_augmentation(feats["coords"], feats["atom_pad_mask"] * feats["atom_resolved_mask"],
+                                                      apply_random_augmentation=True,
+                                                      translation_scale=1.0,
+                                                      return_transforms=False)
 
-        # Save FAMPNN feature dict to output directory
-        mpnn_feature_dict = {k: v.cpu() for k, v in mpnn_feature_dict.items() if k in ["h_V", "h_V_enc"]}  # prune to node embeddings only
-        lengths = seq_mask.sum(dim=-1).long()
-        for j in range(B):
-            name = Path(pdb_names[j]).stem  # strip off extension
-            out_file = Path(out_dir) / f"{name}.pt"
-            length_j = lengths[j].item()
-            mpnn_feature_dict_j = {k: v[j, :length_j].clone() for k, v in mpnn_feature_dict.items()}  # clone to avoid extra disk space usage from slice view
-            torch.save(mpnn_feature_dict_j, out_file)
+    example["pdb_key"] = Path(struct_file_path).stem
+    example.update(feats)
+    return example, input_data.structure
 
-        pbar.update(B)
-    pbar.close()
 
 
 def parse_fixed_pos_info(batch: Dict[str, TensorType["b ..."]],

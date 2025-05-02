@@ -45,7 +45,7 @@ def get_bb_gen_model(cfg: DictConfig, device: str) -> dict[str, Any]:
     model_cfg, _ = get_cfg_from_ckpt(cfg.ckpt_path)
     data_cfg = hydra.utils.instantiate(model_cfg.data)
     sampling_cfg = OmegaConf.load(cfg.sampling_cfg)
-    sampling_cfg = OmegaConf.merge(sampling_cfg, cfg.overrides)
+    sampling_cfg = OmegaConf.merge(sampling_cfg, OmegaConf.to_container(cfg.overrides, resolve=True))
     bb_gen_model = {"model": lit_ad_model.model,
                     "data_cfg": data_cfg,
                     "sampling_cfg": sampling_cfg,
@@ -421,7 +421,7 @@ def parse_contigs_str(contigs_str: str,
 def run_motif_cond_type_sampling(model: AtomDenoiser,
                                  data_cfg: DictConfig,
                                  motif_cond_type_cfg: DictConfig,
-                                 cfg: DictConfig,
+                                 cfg: DictConfig,  # sampling config
                                  device: str,
                                  struct_file_paths: list[str],
                                  software_path: str,
