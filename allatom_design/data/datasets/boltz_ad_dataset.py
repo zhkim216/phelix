@@ -190,7 +190,7 @@ class ADDataset(data.Dataset):
         # Featurize input tokens for diffusion (atom23 protein tokens)
         example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, self.max_tokens, is_sampling=False)
 
-        # Featurize motif (length 0 if unconditional or empty motif)
+        # Featurize motif (all 0s if unconditional or empty motif)
         if self.requires_motif:
             try:
                 example["motif_inputs"] = self._featurize_motif_inputs(tokenized)

@@ -71,7 +71,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         potts_temperature = potts_sampling_cfg["potts_temperature"]
 
         B, N, _ = batch["res_type"].shape
-        logits_init = torch.zeros((B, N, len(const.prot_only_tokens)), device=batch["res_type"].device).float()
+        logits_init = torch.zeros((B, N, len(const.tokens)), device=batch["res_type"].device).float()
 
         # Handle banned amino acids
         ban_S = {"X"}
