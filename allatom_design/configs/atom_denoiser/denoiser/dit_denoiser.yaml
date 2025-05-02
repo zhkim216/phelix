@@ -16,16 +16,11 @@ dit:
   task: ${model.task}
   num_atoms_in: 4
   use_self_conditioning: ${denoiser.use_self_conditioning}
-  n_aatype: 21
+  num_registers: 0
   inf: ${model.inf}
 
   # Positional encoding
   pos_encoding: rotary_residx    # one of ["absolute", "absolute_residx", "rotary", "rotary_residx"]
-  # Conditioning
-  cond_label_to_dropout_p:
-    # map from condition label to label dropout probability (required for unconditional generation / classifier-free guidance)
-    # null to disable conditioning, 0 to disable label dropout
-    crop_aug: 0.0
 
   # Multi-modal DiT
   use_mmdit: false

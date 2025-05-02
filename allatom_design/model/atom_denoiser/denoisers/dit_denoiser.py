@@ -263,13 +263,17 @@ class DiT(nn.Module):
         # Set up DiT model
         self.num_atoms_in = cfg.num_atoms_in
         self.use_self_conditioning = cfg.use_self_conditioning
+        self.hidden_size = cfg.hidden_size
 
         # Input and output channels
         self.c = self.num_atoms_in * 3  # 3 xyz coordinates per atom
         self.in_channels = self.c * 2 if self.use_self_conditioning else self.c  # 2x for self-conditioning
-
         self.out_channels = self.c
-        self.n_aatype = cfg.n_aatype
+
+        # Add registers
+        self.num_registers = cfg.get("num_registers", 0)
+        if self.num_registers > 0:
+            self.registers = torch.nn.Parameter(torch.randn(self.num_registers, self.hidden_size) / 20.0)  #  https://github.com/NVIDIA-Digital-Bio/proteina/blob/main/proteinfoundation/nn/protein_transformer.py#L488
 
         # Use motif conditioning
         self.use_motif_conditioning = cfg.get("task", "backbone") == "scaffold"
@@ -277,8 +281,7 @@ class DiT(nn.Module):
         # Model parameters
         self.num_heads = cfg.num_heads
         self.pos_encoding = cfg.pos_encoding
-
-        self.x_embedder = Linear(self.in_channels, cfg.hidden_size, bias=True, init="glorot")  # "glorot" should match DiT Patchify init
+        self.x_embedder = Linear(self.in_channels, self.hidden_size, bias=True, init="glorot")  # "glorot" should match DiT Patchify init
 
         # Positional encodings
         assert self.pos_encoding in ["absolute", "absolute_residx", "rotary", "rotary_residx", "af2"]
@@ -287,12 +290,12 @@ class DiT(nn.Module):
 
         self.rotary_emb = None
         if self.pos_encoding in ["rotary", "rotary_residx"]:
-            dim = cfg.hidden_size // cfg.num_heads
+            dim = self.hidden_size // cfg.num_heads
             use_residx = (self.pos_encoding == "rotary_residx")
             self.rotary_emb = rope.RotaryEmbedding(dim=dim, use_residx=use_residx, cache_if_possible=False)
 
         # Time embeddings
-        self.t_embedder = TimestepEmbedder(cfg.hidden_size)
+        self.t_embedder = TimestepEmbedder(self.hidden_size)
 
         # QK-normalization from SD3
         self.qk_normlayer = None
@@ -300,23 +303,21 @@ class DiT(nn.Module):
             self.qk_normlayer = partial(MultiHeadRMSNorm, heads=cfg.num_heads)
 
         # Blocks
-        # if self.use_motif_conditioning and cfg.get("use_mmdit", False):
-        # TODO: temporary backwards compatibility
-        if self.use_motif_conditioning and cfg.get("use_mmdit", self.use_motif_conditioning):
+        if self.use_motif_conditioning and cfg.use_mmdit:
             # Multi-modal DiT block for separate weights for backbone and motif
             block = MMDiTBlock
         else:
             block = DiTBlock
 
         self.blocks = nn.ModuleList([
-            block(cfg.hidden_size, cfg.num_heads,
+            block(self.hidden_size, cfg.num_heads,
                   mlp_dropout=cfg.mlp_dropout, mlp_ratio=cfg.mlp_ratio,
                   inf=cfg.inf,
                   rotary_emb=self.rotary_emb,
                   qk_norm=cfg.qk_rmsnorm, norm_layer=self.qk_normlayer) for _ in range(cfg.depth)
         ])
 
-        self.final_layer = FinalLayer(cfg.hidden_size, self.out_channels)
+        self.final_layer = FinalLayer(self.hidden_size, self.out_channels)
         self.initialize_weights()
 
 
@@ -376,19 +377,17 @@ class DiT(nn.Module):
         # Begin DiT forward pass
         x = self.x_embedder(x)
 
+        # Add registers to inputs
+        x, seq_mask, residue_index = self._add_registers(x, seq_mask, residue_index)
+
         # Motif conditioning
         residx_mask = None
         token_modality_idxs = None
         if self.use_motif_conditioning:
-            # For now, concatenate motif as extra tokens
-            N = x.shape[1]
-            token_modality_idxs = torch.tensor([0, seq_mask.shape[1]], device=x.device)  # starting index for backbone and motif tokens
+            # Concatenate motif inputs as extra tokens
+            M = motif_inputs["motif_embed_1d"].shape[1]  # keep track of number of motif tokens
 
-            x = torch.cat([x, motif_inputs["motif_embed_1d"]], dim=1)
-            seq_mask = torch.cat([seq_mask, motif_inputs["token_pad_mask"]], dim=1)
-            residx_mask = torch.cat([torch.ones_like(residue_index), motif_inputs["residx_mask"]], dim=1)  # for preventing RoPE from being applied to motif tokens
-            residue_index = torch.cat([residue_index, motif_inputs["residue_index"]], dim=1)
-            residue_index = residue_index * residx_mask  # mask out residx
+            x, seq_mask, residue_index, residx_mask, token_modality_idxs = self._add_motif_tokens(x, seq_mask, residue_index, motif_inputs)
 
         if self.pos_encoding == "absolute":
             x = x + self.pos_embed(x)
@@ -407,9 +406,10 @@ class DiT(nn.Module):
 
         # Remove motif conditioning tokens
         if self.use_motif_conditioning:
-            x = x[:, :N, :]
-            c = c[:, :N, :]
-            seq_mask = seq_mask[:, :N]
+            x, c, seq_mask = self._remove_motif_tokens(x, c, seq_mask, num_motif_tokens=M)
+
+        # Remove registers
+        x, seq_mask, c = self._remove_registers(x, seq_mask, c)
 
         # Final layer
         x = self.final_layer(x, c, per_token_conditioning=True)
@@ -420,6 +420,64 @@ class DiT(nn.Module):
         x = precondition_out(x)  # output preconditioning
 
         return x, aux_preds
+
+
+    def _add_motif_tokens(self,
+                          x: TensorType["b n h"],
+                          seq_mask: TensorType["b n"],
+                          residue_index: TensorType["b n"],
+                          motif_inputs: dict[str, TensorType["b ..."]]) -> Tuple[TensorType["b n+m h"], TensorType["b n+m h"], TensorType["b n+m"]]:
+        """
+        Append motif conditioning tokens to the input.
+        """
+        token_modality_idxs = torch.tensor([0, seq_mask.shape[1]], device=x.device)  # starting index for backbone and motif tokens, used only for mmdit
+
+        x = torch.cat([x, motif_inputs["motif_embed_1d"]], dim=1)
+        seq_mask = torch.cat([seq_mask, motif_inputs["token_pad_mask"]], dim=1)
+
+        # handle RoPE masking
+        residx_mask = torch.cat([torch.ones_like(residue_index), motif_inputs["residx_mask"]], dim=1)  # for preventing RoPE from being applied to motif tokens
+        residue_index = torch.cat([residue_index, motif_inputs["residue_index"]], dim=1)
+        residue_index = residue_index * residx_mask  # mask out residx
+
+        return x, seq_mask, residue_index, residx_mask, token_modality_idxs
+
+
+    def _remove_motif_tokens(self, x: TensorType["b n+m h"], c: TensorType["b n+m h"], seq_mask: TensorType["b n+m"],
+                             num_motif_tokens: int) -> Tuple[TensorType["b n h"], TensorType["b n h"], TensorType["b n"]]:
+        """
+        Remove motif conditioning tokens from the input, assuming the last num_motif_tokens are the motif tokens.
+        """
+        M = num_motif_tokens
+        x = x[:, :-M, :]
+        c = c[:, :-M, :]
+        seq_mask = seq_mask[:, :-M]
+        return x, c, seq_mask
+
+
+    def _add_registers(self, x: TensorType["b n h"], seq_mask: TensorType["b n"], residue_index: TensorType["b n"]):
+        """
+        Prepend registers to the input.
+        """
+        R = self.num_registers
+        if R == 0:
+            return x, seq_mask, residue_index
+        B, _, _ = x.shape
+        registers = self.registers.unsqueeze(0).expand(B, -1, -1)
+        x = torch.cat([registers, x], dim=1)  # [B, R+N, H]
+        seq_mask = torch.cat([seq_mask.new_ones(B, R), seq_mask], dim=1)  # [B, R+N]
+        residue_index = torch.cat([residue_index.new_zeros(B, R), residue_index], dim=1)  # [B, R+N]
+        return x, seq_mask, residue_index
+
+
+    def _remove_registers(self, x: TensorType["b n h"], seq_mask: TensorType["b n"], c: TensorType["b n h"]):
+        """
+        Remove registers from the input, assuming the first R tokens are registers.
+        """
+        R = self.num_registers
+        if R == 0:
+            return x, seq_mask, c
+        return x[:, R:, :], seq_mask[:, R:], c[:, R:]
 
 
 def get_interpolant(cfg: DictConfig,
