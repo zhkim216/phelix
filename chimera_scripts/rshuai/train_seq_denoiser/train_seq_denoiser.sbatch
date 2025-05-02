@@ -24,7 +24,7 @@ WANDB_ID=richardshuai
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=sd0_a1
+EXP_NAME=sd0_a2
 GROUP=seq_des
 
 # Dataset paths
@@ -44,7 +44,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     train.compile_model=true \
     denoiser.per_residue_eps=false \
     denoiser.augment_eps=0.3 \
-    denoiser.mpnn.use_atom_encoder=false \
+    denoiser.mpnn.use_atom_encoder=true \
     mask_selector.restype_masking_schedule=constant_t \
     checkpointing.save_latest_every_n_steps=5000 \
     trainer.check_val_every_n_epoch=2 \

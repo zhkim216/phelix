@@ -23,8 +23,8 @@ mpnn:
     atom_s: 64
     atom_z: 16
     atom_feature_dim: 386
-    k_atom_neighbors: 32
-    n_layers: 1
+    k_atom_neighbors: 16
+    n_layers: 2
     dropout_p: 0.1
 
   token_features:
