@@ -105,16 +105,8 @@ def run_seq_des(model: SeqDenoiser,
     """
     # Set up output directory
     run_aux = {}
-    if out_dir is not None:
-        sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
-        sample_pt_out_dir = f"{out_dir}/sample_pts"  # directory for pts containing various sample info
-        Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
-        Path(sample_pt_out_dir).mkdir(parents=True, exist_ok=True)  # create output directory for samples
 
-        run_aux["out_pdbs"] = []  # store paths to all output PDBs
-        run_aux["input_pdb_names"] = []  # store names of all input pdbs
-        run_aux["out_pts"] = []  # store paths to all output pts
-        run_aux["pred_seqs"] = []  # store predicted sequences as a string for each sample
+    run_aux["pred_seqs"] = []  # store predicted sequences as a string for each sample
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:

@@ -84,13 +84,12 @@ class ADLoss(nn.Module):
             aux_monitor["motif/unweighted_mse_loss"] = aux["motif/mse_loss"].mean().detach().clone()
             aux["motif/mse_loss"] = aux["motif/mse_loss"] * loss_weight_bb  # apply time step loss weight
 
-            # Compute a distance-weighted backbone MSE loss (tokens upweighted by alpha / (1 + d^2) where d is the distance to closest motif coordinate)
+            # Compute a distance-weighted backbone MSE loss (tokens upweighted by 1 / (1 + d^2) where d is the distance to closest motif coordinate)
             aux["motif_proximity_bb/mse_loss"] = motif_proximity_weighted_mse(bb_pred,
                                                                               bb_target,
                                                                               bb_mask,
                                                                               motif_inputs["motif_coords"],
-                                                                              motif_inputs["motif_atom_mask"],
-                                                                              alpha=self.cfg.motif_proximity_bb.alpha)
+                                                                              motif_inputs["motif_atom_mask"])
             # aux_monitor["motif_proximity_bb/unweighted_mse_loss"] = aux["motif_proximity_bb/mse_loss"].mean().detach().clone()  # no need to log unweighted loss
             aux["motif_proximity_bb/mse_loss"] = aux["motif_proximity_bb/mse_loss"] * loss_weight_bb  # apply time step loss weight
 
@@ -148,17 +147,16 @@ def motif_proximity_weighted_mse(bb_pred: TensorType["b n_tokens 4 3", float],
                                  bb_target: TensorType["b n_tokens 4 3", float],
                                  bb_mask: TensorType["b n_tokens 4 3", float],
                                  motif_coords: TensorType["b n_atoms 3", float],
-                                 motif_atom_mask: TensorType["b n_atoms", bool],
-                                 alpha: float) -> TensorType["b", float]:
+                                 motif_atom_mask: TensorType["b n_atoms", bool]) -> TensorType["b", float]:
     """
-    Compute a loss on backbone tokens with weights alpha / (1 + d^2) where d is the distance to closest motif coordinates.
+    Compute a loss on backbone tokens with weights 1 / (1 + d^2) where d is the distance to closest motif coordinates.
     """
     # Compute distance of ground truth CA to motif coords
     bb_target_ca = bb_target[..., const.prot_bb_atoms.index("CA"), :]
     dists = torch.cdist(bb_target_ca, motif_coords)  # [b, n_tokens, n_atoms]
 
     # Compute weights for each token
-    proximity_kernel = alpha / (1 + dists ** 2)
+    proximity_kernel = 1 / (1 + dists ** 2)
     proximity_kernel = proximity_kernel * motif_atom_mask.unsqueeze(1)
 
     # max over all atoms in the motif to get weight from closest atom
