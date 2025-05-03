@@ -48,7 +48,7 @@ class SDLoss(nn.Module):
             # compute sequence loss from sequence design module
             target_res_type = batch["res_type"].argmax(dim=-1)
             seq_loss_mask = outputs["token_exists_mask"] * (1 - outputs["seq_cond_mask"])  # compute loss only on masked tokens
-            seq_loss_mask = seq_loss_mask * (target_res_type != const.prot_only_token_to_id["UNK"])  # mask out UNK tokens from loss
+            seq_loss_mask = seq_loss_mask * (target_res_type != const.token_ids["UNK"])  # mask out UNK tokens from loss
 
             # DEBUG: ensure that we're only computing over protein tokens
             if (batch["mol_type"][seq_loss_mask.bool()] != const.chain_type_ids["PROTEIN"]).any():
