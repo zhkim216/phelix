@@ -132,7 +132,8 @@ def pick_interface_token(
 class BoltzCropper(Cropper):
     """Interpolate between contiguous and spatial crops."""
 
-    def __init__(self, min_neighborhood: int = 0, max_neighborhood: int = 40) -> None:
+    def __init__(self, min_neighborhood: int = 0, max_neighborhood: int = 40,
+                 subset_chain_types: list[str] | None = None) -> None:
         """Initialize the cropper.
 
         Modulates the type of cropping to be performed.
@@ -151,6 +152,7 @@ class BoltzCropper(Cropper):
         """
         sizes = list(range(min_neighborhood, max_neighborhood + 1, 2))
         self.neighborhood_sizes = sizes
+        self.subset_chain_types = subset_chain_types
 
     def crop(  # noqa: PLR0915
         self,
@@ -201,6 +203,11 @@ class BoltzCropper(Cropper):
         mask = data.structure.mask
         chains = data.structure.chains
         interfaces = data.structure.interfaces
+
+        # Filter to a subset of chain types
+        if self.subset_chain_types is not None:
+            subset_chain_type_ids = [const.chain_type_ids[chain_type] for chain_type in self.subset_chain_types]
+            mask = mask & np.isin(chains["mol_type"], subset_chain_type_ids)
 
         # Filter to valid chains
         valid_chains = chains[mask]
