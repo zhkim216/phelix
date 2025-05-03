@@ -63,6 +63,65 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         return seq_logits, aux_preds
 
 
+    def build_masks(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
+        """
+        Build various masks for AtomMPNN.
+
+        Updates batch (in place) with:
+        - atomwise_seq_cond_mask: Tensor["b n_atoms", float]: 1 if the atom is part of an unmasked residue type, or 0 otherwise
+        - token_exists_mask: Tensor["b n_tokens", float]: 1 if there exists any unmasked atom in the token, or 0 otherwise
+        """
+        # Create atom-level mask which is 1 if the atom is part of an unmasked residue type, or 0 otherwise
+        B, N_atoms, N_tokens = batch["atom_to_token"].shape
+        batch["atomwise_seq_cond_mask"] = torch.bmm(batch["atom_to_token"].float(), batch["seq_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_atoms]
+
+        # Create token-level mask which is 1 if there exists any unmasked atom in the token, or 0 otherwise
+
+        # if using average of all atoms in token for graph nodes
+        # token_n_cond_atoms = torch.bmm(batch["atom_to_token"].float().transpose(1, 2), batch["atom_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_tokens]
+        # batch["token_exists_mask"] = (token_n_cond_atoms > 0).float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
+
+        # if using center atom of token for graph nodes: ensure center atom is present
+        batch["token_exists_mask"] = batch["token_resolved_mask"].float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
+        return batch
+
+
+    def get_training_random_noise(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
+        """
+        During training, adds random noise and noise labels for input coordinates.
+
+        Updates batch (in place) with:
+        - noise: Tensor["b n_atoms 3", float]: random noise for each atom
+        - noise_labels: Tensor["b n_tokens", float]: noise label for each token
+        """
+        if not self.training or self.augment_eps <= 0:
+            # if not training or no noise, and not provided, then we assume no noise
+            batch["noise"] = batch.get("noise", None)
+            batch["noise_labels"] = batch.get("noise_labels", None)
+            return batch
+
+        ## Training: choose random backbone noise ##
+        B, N_atoms, N_tokens = batch["atom_to_token"].shape
+        device = batch["atom_to_token"].device
+
+        if self.per_residue_eps:
+            # per-residue noise. Unlike Cho et al., we sample noise stds from a uniform distribution and apply different noise to each atom in a residue
+            # randomly sample noise labels
+            noise_labels = torch.rand((B, N_tokens), device=device) * self.augment_eps  # sample std for each residue from uniform [0, augment_eps]
+            atomwise_noise_labels = torch.bmm(batch["atom_to_token"].float(), noise_labels.unsqueeze(-1)).squeeze(dim=-1)  # [b, n_atoms]
+            noise = torch.randn((B, N_atoms, 3), device=device) * atomwise_noise_labels.unsqueeze(-1)
+            noise = noise * batch["atom_cond_mask"].unsqueeze(-1)
+        else:
+            # global noise, similar to ProteinMPNN
+            # add randomly sampled noise to input
+            noise = self.augment_eps * torch.randn((B, N_atoms, 3), device=device)
+            noise_labels = None
+
+        batch["noise"] = noise
+        batch["noise_labels"] = noise_labels
+        return batch
+
+
     def potts_sample(self, batch: dict[str, TensorType["b ..."]], sampling_inputs: dict[str, Any]):
         potts_sampling_cfg = sampling_inputs["potts_sampling_cfg"]
         regularization = potts_sampling_cfg["regularization"]
@@ -122,65 +181,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             mask_ij_coloring=mask_ij_coloring,
         )
         return S_sample
-
-
-    def build_masks(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
-        """
-        Build various masks for AtomMPNN.
-
-        Updates batch (in place) with:
-        - atomwise_seq_cond_mask: Tensor["b n_atoms", float]: 1 if the atom is part of an unmasked residue type, or 0 otherwise
-        - token_exists_mask: Tensor["b n_tokens", float]: 1 if there exists any unmasked atom in the token, or 0 otherwise
-        """
-        # Create atom-level mask which is 1 if the atom is part of an unmasked residue type, or 0 otherwise
-        B, N_atoms, N_tokens = batch["atom_to_token"].shape
-        batch["atomwise_seq_cond_mask"] = torch.bmm(batch["atom_to_token"].float(), batch["seq_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_atoms]
-
-        # Create token-level mask which is 1 if there exists any unmasked atom in the token, or 0 otherwise
-
-        # if using average of all atoms in token for graph nodes
-        # token_n_cond_atoms = torch.bmm(batch["atom_to_token"].float().transpose(1, 2), batch["atom_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_tokens]
-        # batch["token_exists_mask"] = (token_n_cond_atoms > 0).float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
-
-        # if using center atom of token for graph nodes: ensure center atom is present
-        batch["token_exists_mask"] = batch["token_resolved_mask"].float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
-        return batch
-
-
-    def get_training_random_noise(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
-        """
-        During training, adds random noise and noise labels for input coordinates.
-
-        Updates batch (in place) with:
-        - noise: Tensor["b n_atoms 3", float]: random noise for each atom
-        - noise_labels: Tensor["b n_tokens", float]: noise label for each token
-        """
-        if not self.training or self.augment_eps <= 0:
-            # if not training or no noise, and not provided, then we assume no noise
-            batch["noise"] = batch.get("noise", None)
-            batch["noise_labels"] = batch.get("noise_labels", None)
-            return batch
-
-        ## Training: choose random backbone noise ##
-        B, N_atoms, N_tokens = batch["atom_to_token"].shape
-        device = batch["atom_to_token"].device
-
-        if self.per_residue_eps:
-            # per-residue noise. Unlike Cho et al., we sample noise stds from a uniform distribution and apply different noise to each atom in a residue
-            # randomly sample noise labels
-            noise_labels = torch.rand((B, N_tokens), device=device) * self.augment_eps  # sample std for each residue from uniform [0, augment_eps]
-            atomwise_noise_labels = torch.bmm(batch["atom_to_token"].float(), noise_labels.unsqueeze(-1)).squeeze(dim=-1)  # [b, n_atoms]
-            noise = torch.randn((B, N_atoms, 3), device=device) * atomwise_noise_labels.unsqueeze(-1)
-            noise = noise * batch["atom_cond_mask"].unsqueeze(-1)
-        else:
-            # global noise, similar to ProteinMPNN
-            # add randomly sampled noise to input
-            noise = self.augment_eps * torch.randn((B, N_atoms, 3), device=device)
-            noise_labels = None
-
-        batch["noise"] = noise
-        batch["noise_labels"] = noise_labels
-        return batch
 
 
     def sample_aatype(self,
