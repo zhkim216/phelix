@@ -27,7 +27,8 @@ train:
 # Some trainer options
 trainer:
   strategy: ddp  # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
-  max_epochs: 100000
+  max_epochs: -1
+  max_steps: 100000
   accumulate_grad_batches: 1
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
