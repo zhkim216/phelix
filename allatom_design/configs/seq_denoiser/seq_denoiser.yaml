@@ -59,11 +59,12 @@ data:
     - _target_: allatom_design.data.filter.dynamic.max_residues.MaxResiduesFilter
       min_residues: 16
       max_residues: 2048
-    - _target_: allatom_design.data.filter.dynamic.n_chain_types.NChainTypesFilter
-      n_protein_chain_range: [1, 1]
-      n_dna_chain_range: [0, 0]
-      n_rna_chain_range: [0, 0]
-      n_nonpolymer_chain_range: [0, 0]
+    - _target_: allatom_design.data.filter.dynamic.chain_type_size.ChainTypeSizeFilter
+      chain_type: "PROTEIN"
+      min_chains: 1
+      max_chains: 5
+      min_residues: 16
+      max_residues: 2048
 
   sampler:
     _target_: allatom_design.data.sample.cluster.ClusterSampler
@@ -71,6 +72,7 @@ data:
     _target_: allatom_design.data.crop.boltz.BoltzCropper
     min_neighborhood: 0
     max_neighborhood: 40
+    subset_chain_types: ["PROTEIN"]
 
   # Dataset options
   max_tokens: 256
