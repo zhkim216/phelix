@@ -262,22 +262,12 @@ def pdb_to_mmcif(pdb_path: str, mmcif_out: Path,
     mmcif_doc.write_file(str(mmcif_out))
 
 
-def mmcif_to_pdb(mmcif_path: str, pdb_out: Path, assign_label_seq_id: bool) -> None:
-    """
-    Convert a mmCIF file to a PDB file using gemmi.
-    """
-    if Path(pdb_out).exists():
-        return
-
-    structure = gemmi.read_structure(mmcif_path)
-    structure.setup_entities()
-
-
-def mmcif_to_pdb(mmcif_path: str, pdb_out: Path, assign_label_seq_id: bool) -> None:
+def mmcif_to_pdb(mmcif_path: str, pdb_out: Path, assign_label_seq_id: bool,
+                 overwrite: bool = False) -> None:
     """
     Convert a mmCIF file to PDB format using gemmi.
     """
-    if Path(pdb_out).exists():
+    if Path(pdb_out).exists() and not overwrite:
         return
 
     structure = gemmi.read_structure(mmcif_path)

@@ -78,16 +78,13 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         omit_aas = sampling_inputs.get("omit_aas", None)
         if omit_aas is not None:
             ban_S = ban_S | set(omit_aas)
-        ban_S = [const.prot_only_token_to_id[const.prot_letter_to_token[aa]] for aa in ban_S]
+        ban_S = [const.token_ids[const.prot_letter_to_token[aa]] for aa in ban_S]
+        ban_S.extend([const.token_ids[x] for x in const.tokens if x not in const.prot_only_tokens])  # ban all non-protein tokens
 
         # Initialize random sequence and sampling masks
         # first, convert res_type to protein token vocabulary
-        target_res_type = batch["res_type"].argmax(dim=-1)  # undo one-hot encoding
-        lookup = const.prot_only_tokens_to_all_tokens.T.to(target_res_type.device)  # [33, 21]
-        target_res_type = lookup[target_res_type].argmax(dim=-1)  # [b, n]
-
         mask_sample, _, S_init = potts.init_sampling_masks(
-            logits_init, mask_sample=(1 - batch["seq_cond_mask"]), S=target_res_type, ban_S=ban_S
+            logits_init, mask_sample=(1 - batch["seq_cond_mask"]), S=batch["res_type"].argmax(dim=-1), ban_S=ban_S
         )
 
         # Complexity regularization
@@ -125,7 +122,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             mask_ij_coloring=mask_ij_coloring,
         )
         return S_sample
-
 
 
     def build_masks(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:

@@ -210,8 +210,8 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
 
 
 def write_structure_to_mmcif(structure: Structure,
-                   filename: str,
-                   plddts: TensorType["n"] | None = None):
+                             filename: str,
+                             plddts: TensorType["n"] | None = None):
     """
     Small wrapper around to_mmcif that writes to a file.
     """
@@ -220,8 +220,8 @@ def write_structure_to_mmcif(structure: Structure,
 
 
 def write_batched_structures_to_mmcif(structures: list[Structure],
-                           filenames: list[str],
-                           plddts: TensorType["b n ..."] | None = None):
+                                      filenames: list[str],
+                                      plddts: TensorType["b n ..."] | None = None):
     """
     Write a list of structures to a list of files.
     """
@@ -246,7 +246,7 @@ def write_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
     # Unbatch feats into a list of dicts
     feats_list = []
     for i in range(feats["residue_index"].shape[0]):
-        feats_list.append({k: v[i] for k, v in to(feats, "cpu").items()})
+        feats_list.append({k: v[i] if isinstance(v, torch.Tensor) else v for k, v in to(feats, "cpu").items()})
 
     for i, feats_i in enumerate(feats_list):
         system = System()
@@ -332,8 +332,8 @@ def write_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                     label_seq_id_atomwise = (feats_i["atom_to_token"].float() @ label_seq_ids.float()).long().tolist()
 
                     # Convert from one-hot to index
-                    atom_names = feats_i["ref_atom_name_chars"].argmax(dim=-1)
-                    atom_elements = feats_i["ref_element"].argmax(dim=-1)
+                    atom_names = feats_i["ref_atom_name_chars"].long().argmax(dim=-1)
+                    atom_elements = feats_i["ref_element"].long().argmax(dim=-1)
 
                     for ai in range(feats_i["coords"].shape[0]):
                         if not feats_i["atom_pad_mask"][ai] or not feats_i["atom_resolved_mask"][ai]:

@@ -39,7 +39,7 @@ sampling_cfg_overrides:
   batch_size: 16
   num_seqs_per_pdb: 16  # number of sequences to sample per pdb
   num_steps: 50
-  noise_labels: 0.0
+  noise_labels: null
   num_workers: ${num_workers}
 
 # Sampling config
