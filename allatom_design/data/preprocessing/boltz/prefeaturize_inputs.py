@@ -42,7 +42,7 @@ def main(cfg: DictConfig):
                            featurizer=featurizer,
                            atoms_per_window_queries=cfg.atoms_per_window_queries,
                            num_bins=cfg.num_bins,
-                           max_tokens_to_process=cfg.max_tokens_to_process,
+                           max_residues_to_process=cfg.max_residues_to_process,
                            out_tokenized_dir=out_tokenized_dir,
                            out_featurized_dir=out_featurized_dir)
     if use_parallel:
@@ -59,14 +59,14 @@ def featurize_structure_to_disk(processed_structure_file: str,
                                 featurizer: SequenceDesignFeaturizer,
                                 atoms_per_window_queries: int,
                                 num_bins: int,
-                                max_tokens_to_process: int | None,
+                                max_residues_to_process: int | None,
                                 out_tokenized_dir: str,
                                 out_featurized_dir: str,
                                 ) -> None:
     """
     Load a processed structure and featurize it.
 
-    - If max_tokens_to_process is not None, we skip any structures that have more tokens than max_tokens_to_process.
+    - If max_residues_to_process is not None, we skip any structures that have more residues than max_residues_to_process.
     """
     out_tokenized_file = f"{out_tokenized_dir}/{Path(processed_structure_file).stem}.npz"
     out_featurized_file = f"{out_featurized_dir}/{Path(processed_structure_file).stem}.npz"
@@ -78,6 +78,10 @@ def featurize_structure_to_disk(processed_structure_file: str,
     # Get structure
     input_data = load_input(processed_structure_file)
 
+    if max_residues_to_process is not None and len(input_data.structure.residues) > max_residues_to_process:
+        print(f"Skipping structure {processed_structure_file} because it has {len(input_data.structure.residues)} residues, which is greater than max_residues_to_process={max_residues_to_process}.")
+        return
+
     # Tokenize structure
     try:
         tokenized = tokenizer.tokenize(input_data)
@@ -87,10 +91,6 @@ def featurize_structure_to_disk(processed_structure_file: str,
 
     if len(tokenized.tokens) == 0:
         print(f"Tokenized structure {processed_structure_file} has no tokens. Skipping.")
-        return
-
-    if max_tokens_to_process is not None and len(tokenized.tokens) > max_tokens_to_process:
-        print(f"Skipping structure {processed_structure_file} because it has {len(tokenized.tokens)} tokens, which is greater than max_tokens_to_process={max_tokens_to_process}.")
         return
 
     # Featurize structure (without padding to max_tokens or max_atoms)
