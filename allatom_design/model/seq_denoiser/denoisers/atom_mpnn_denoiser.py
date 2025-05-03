@@ -141,9 +141,13 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         batch["atomwise_seq_cond_mask"] = torch.bmm(batch["atom_to_token"].float(), batch["seq_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_atoms]
 
         # Create token-level mask which is 1 if there exists any unmasked atom in the token, or 0 otherwise
+
+        # if using average of all atoms in token for graph nodes
         # token_n_cond_atoms = torch.bmm(batch["atom_to_token"].float().transpose(1, 2), batch["atom_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_tokens]
         # batch["token_exists_mask"] = (token_n_cond_atoms > 0).float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
-        batch["token_exists_mask"] = batch["token_resolved_mask"].float()
+
+        # if using center atom of token for graph nodes: ensure center atom is present
+        batch["token_exists_mask"] = batch["token_resolved_mask"].float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
         return batch
 
 
