@@ -99,10 +99,16 @@ class SeqDenoiser(nn.Module):
                sampling_inputs: dict[str, Any]):
 
         # Handle inference noise labels
-        batch["noise_labels"] = sampling_inputs.get("noise", None)
+        batch["noise_labels"] = sampling_inputs.get("noise_labels", None)
+        batch["noise"] = None
+
         if batch["noise_labels"] is not None:
             raise NotImplementedError("Noise labels are not implemented yet")
 
+        if sampling_inputs["add_noise"]:
+            raise NotImplementedError("Adding noise is not implemented yet")
+
+        # Choose sampling method
         if sampling_inputs["use_potts_sampling"]:
             res_type_pred = self.denoiser.potts_sample(batch, sampling_inputs)
         else:

@@ -1,6 +1,7 @@
 """
 Utils for sampling from sequence design models.
 """
+import copy
 import re
 from collections import defaultdict
 from contextlib import nullcontext
@@ -11,20 +12,22 @@ import hydra
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from joblib import Parallel, delayed
 from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
 from tqdm import tqdm
 
+import allatom_design.data.const as const
 from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import (atom_center_random_augmentation,
                                       pad_to_max_len, to)
 from allatom_design.data.datasets.boltz_sd_dataset import sd_collator
 from allatom_design.data.datasets.sd_dataset import process_single_pdb_sd
-import allatom_design.data.const as const
-from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
-    load_input
+from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
+    load_input, mmcif_to_pdb)
+from allatom_design.data.write.mmcif import write_feats_to_mmcif
 from allatom_design.eval.eval_utils import sampling_utils
 from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
@@ -106,7 +109,13 @@ def run_seq_des(model: SeqDenoiser,
     # Set up output directory
     run_aux = {}
 
-    run_aux["pred_seqs"] = []  # store predicted sequences as a string for each sample
+    if out_dir is not None:
+        sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
+        Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
+
+        run_aux["out_pdbs"] = []  # store output PDB paths
+        run_aux["input_struct_files"] = []  # store input PDB names
+        run_aux["pred_seqs"] = []  # store predicted sequences as a string for each sample
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
@@ -131,9 +140,9 @@ def run_seq_des(model: SeqDenoiser,
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
         for i in range(0, len(struct_file_paths_repeated), cfg.batch_size):
-            struct_file_batch_files = struct_file_paths_repeated[i:i+cfg.batch_size]
-            B = len(struct_file_batch_files)
-            batch, input_structures = get_sd_batch(struct_file_batch_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+            batch_struct_files = struct_file_paths_repeated[i:i+cfg.batch_size]
+            B = len(batch_struct_files)
+            batch, input_structures = get_sd_batch(batch_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
 
             # TODO: Add fixed positions, etc. For now assume no fixed positions
             batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
@@ -146,6 +155,24 @@ def run_seq_des(model: SeqDenoiser,
 
             # Run sampling
             res_type_pred = model.sample(batch, sampling_inputs=cfg)
+
+            # Save PDB with predicted sequences
+            # TODO: handle cond masks
+            output_feats = copy.deepcopy(to(batch, device="cpu"))
+            output_feats["res_type"] = F.one_hot(res_type_pred, num_classes=len(const.tokens))
+            output_feats["coords"] = output_feats["coords"] * output_feats["atom_cond_mask"].unsqueeze(-1)
+
+            # Save outputs to disk
+            if out_dir is not None:
+                # Save as cif
+                sample_stems = [f"{Path(pdb_file).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_file in enumerate(batch_struct_files)]
+                batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
+                write_feats_to_mmcif(output_feats, filenames=batch_out_files)
+                # TODO: temporary fix for converting to PDB
+                batch_out_pdb_files = [out_file.replace(".cif", ".pdb") for out_file in batch_out_files]
+                [mmcif_to_pdb(cif_file, pdb_file, assign_label_seq_id=False, overwrite=True) for cif_file, pdb_file in zip(batch_out_files, batch_out_pdb_files)]
+                run_aux["out_pdbs"].extend(batch_out_pdb_files)
+                run_aux["input_struct_files"].extend(batch_struct_files)
 
             pbar.update(B)
     pbar.close()
@@ -168,17 +195,17 @@ def run_seq_des(model: SeqDenoiser,
     return preds, run_aux
 
 
-def get_sd_batch(struct_file_batch_paths: list[str], device: str,
+def get_sd_batch(struct_file_paths: list[str], device: str,
                  data_cfg: DictConfig,
                  parallel_pool: Parallel | None) -> tuple[dict[str, TensorType["b n ..."]],
                                                           list[str],
                                                           list[Dict[str, int]]]:
     if parallel_pool is None:
         # Load PDBs sequentially
-        batch_examples, input_structures = zip(*[get_sd_example(struct_file_path, data_cfg) for struct_file_path in struct_file_batch_paths])
+        batch_examples, input_structures = zip(*[get_sd_example(struct_file_path, data_cfg) for struct_file_path in struct_file_paths])
     else:
         # Load PDBs in parallel
-        batch_examples, input_structures = zip(*parallel_pool(delayed(get_sd_example)(struct_file_path, data_cfg) for struct_file_path in struct_file_batch_paths))
+        batch_examples, input_structures = zip(*parallel_pool(delayed(get_sd_example)(struct_file_path, data_cfg) for struct_file_path in struct_file_paths))
 
     # Collate examples
     batch = sd_collator(batch_examples)
