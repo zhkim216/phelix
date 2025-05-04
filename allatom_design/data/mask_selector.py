@@ -19,7 +19,7 @@ class MaskSelector:
         self.cfg = cfg
 
         self.restype_masking_schedule = cfg.restype_masking_schedule
-        self.restype_masking_cfg = OmegaConf.to_container(cfg.restype_masking_cfg[self.restype_masking_schedule], resolve=True)  # to dict to avoid dataloader issues
+        self.restype_masking_cfg = OmegaConf.to_container(cfg.restype_masking_cfg[self.restype_masking_schedule], resolve=True)  # to dict to avoid dataloader issues?
 
 
     def sample_seq_cond_mask(self,
