@@ -121,8 +121,11 @@ loss:
       # loss on motif tokens
       mse_loss: 0.0
     motif_proximity_bb:
-      # loss on backbone tokens with weights 1 / (1 + d^2) where d is the distance to closest motif coordinates
+      # loss on backbone tokens with weights 1 / (1 + d^p) where d is the distance to closest motif coordinates
       mse_loss: 0.0
+
+  motif_proximity_bb:
+    p: 2.0  # power of distance in proximity kernel
 
 
 optim:
