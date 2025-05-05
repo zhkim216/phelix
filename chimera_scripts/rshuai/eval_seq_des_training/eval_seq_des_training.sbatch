@@ -19,7 +19,8 @@ conda activate rshuai_allatom_design
 # Set base directories
 BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
-SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, redis
+SOFTWARE_PATH=/scratch/hielab/rshuai/software
+# SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, redis
 
 # Model params
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
