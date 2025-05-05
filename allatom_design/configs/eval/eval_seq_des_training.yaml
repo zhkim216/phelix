@@ -1,3 +1,6 @@
+# Software path
+software_path: /oak/stanford/groups/possu/rshuai/software  # includes redis, MASTER, etc.
+
 # Wandb configuration
 wandb:
   no_wandb: false  # Disable wandb logging
@@ -11,11 +14,12 @@ base_out_dir: ${denoiser_train_dir}/eval_seq_des_training  # outputs will be sav
 
 # Run settings
 seed: 0
+num_workers: 8  # for dataloading
 start_step: 0  # start evaluation after this step, 0 or null to start from the beginning
 end_step: null  # end evaluation after this step (inclusive), null to evaluate until the end
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 
-# Inputs
+# PDB file inputs
 input_cfg:
   pdb_dir: null
   pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
@@ -23,31 +27,40 @@ input_cfg:
   subset_length_range: null # only evaluate on sequences within this length range
   presort_by_length: false  # sort pdb keys by sequence length, potentially for efficiency
   n_subsample: null  # randomly sample this many pdb keys, null to use all
-  manifest_kwargs:
-    pdb_manifest_csv: null
-    phase: "eval"
-    subset_length_range: [32, 256]
-    scrmsd_range: [null, 2.0]
-    rel_rog_range: [null, 1.4]
-    cluster_sample_first: true
-    pdb_name_prefix: "esmfold_"  # prefix to add to manifest pdb_name to get the pdb files
+
+# PDB file processing
+pdb_processing_cfg:
+  # if we have to convert PDBs to mmCIFs
+  pdb_to_cif_conversion_cfg:
+    assign_label_seq_id: false  # if true, automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
+
+  # CCD
+  ccd_cfg:
+    software_path: ${software_path}
+    use_redis: true
+
+    # If using redis (fast)
+    ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
+
+    # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)
+    ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
+
 
 # Denoiser options
 denoiser_train_dir:
-
 sampling_cfg_overrides:
   batch_size: 64
   num_seqs_per_pdb: 1  # number of sequences to sample per pdb
   num_steps: 50
-  noise_labels: 0.0
-  add_noise: false
+  noise_labels: null
+  num_workers: ${num_workers}
 
 # Sampling config
 seq_des_cfg:
-  model_name: "fampnn"
-  fampnn:
-    fampnn_cfg: allatom_design/configs/seq_des/fampnn_inference.yaml
-    fampnn_ckpt: null  # overridden with training checkpoint paths
+  model_name: "atom_mpnn"
+  atom_mpnn:
+    ckpt_path: null  # overridden with training checkpoint paths
+    sampling_cfg: allatom_design/configs/seq_des/atom_mpnn_inference.yaml
     overrides: ${sampling_cfg_overrides}
 
 # Structure prediction model args

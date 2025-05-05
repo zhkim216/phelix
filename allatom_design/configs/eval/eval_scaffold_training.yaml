@@ -40,8 +40,9 @@ pdb_processing_cfg:
   ccd_cfg:
     # If using redis
     software_path: ${software_path}
-    redis_host: localhost  # null to disable
-    redis_port: 7777
+    use_redis: true
+
+    # If using redis (fast)
     ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
 
     # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)

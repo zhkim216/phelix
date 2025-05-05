@@ -35,6 +35,9 @@ def main(cfg: DictConfig):
     with open(Path(out_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
+    # Load in PDB file to eval on
+    processed_struct_file = process_pdb_files([cfg.pdb_path], processed_struct_dir=f"{out_dir}/processed_structures", **cfg.pdb_processing_cfg)
+
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -47,9 +50,6 @@ def main(cfg: DictConfig):
         pred_out_dir = f"{out_dir}/preds"  # directory for structure predictions
         Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
-
-    ### Load in PDB file to eval on ###
-    processed_struct_file = process_pdb_files([cfg.pdb_path], processed_pdb_dir=f"{out_dir}/processed_structures", **cfg.pdb_processing_cfg)
 
     # Create single sample fixed pos df
     pdb_name = Path(cfg.pdb_path).name

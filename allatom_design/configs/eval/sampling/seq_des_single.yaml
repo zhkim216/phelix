@@ -1,9 +1,9 @@
+# Software path
+software_path: /oak/stanford/groups/possu/rshuai/software  # includes redis, MASTER, etc.
+
 # Run settings
 seed: 0
 num_workers: 8  # for dataloading
-
-# Software path
-software_path: /oak/stanford/groups/possu/rshuai/software
 
 # Inputs
 ckpt_path: null
@@ -24,10 +24,8 @@ pdb_processing_cfg:
 
   # CCD
   ccd_cfg:
-    # If using redis
+    # If using redis (fast)
     software_path: ${software_path}
-    redis_host: localhost  # null to disable
-    redis_port: 7777
     ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
 
     # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)
