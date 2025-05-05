@@ -1,13 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=sd1_a1_cfg0_eval_seq_des
+#SBATCH --job-name=sd1_a0_eval_seq_des
 #SBATCH -p bioe
+#SBATCH --array=0-4
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%j.out
-#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%j.err
-
-# Write batch script to logs
+#
+#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%A_%a.out
+#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%A_%a.err
+## Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 # Load modules and set environment variables
@@ -33,7 +34,14 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to evaluate
-MODEL_NAME=sd1_a1_cfg0
+MODEL_NAMES=(
+    "sd1_a0_cfg0"
+    "sd1_a0_cfg1"
+    "sd1_a0_cfg2"
+    "sd1_a0_cfg3"
+    "sd1_a0_cfg4"
+)
+MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
