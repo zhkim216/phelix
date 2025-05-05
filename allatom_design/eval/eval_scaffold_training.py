@@ -51,7 +51,7 @@ def main(cfg: DictConfig):
     pdb_files = get_pdb_files(**cfg.input_cfg)
 
     # Process PDB files into .npz structure format
-    processed_struct_files = process_pdb_files(pdb_files, processed_pdb_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg)
+    processed_struct_files = process_pdb_files(pdb_files, processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg)
 
     # Get checkpoints from denoiser training run
     ad_ckpts, pattern = get_training_checkpoints(cfg.denoiser_train_dir, "atom_denoiser",

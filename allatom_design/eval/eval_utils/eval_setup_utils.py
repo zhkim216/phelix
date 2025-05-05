@@ -32,8 +32,6 @@ def get_pdb_files(pdb_dir: str,
                   array_id: int | None = None,
                   num_arrays: int | None = None,
                   skip_pdb_names: list[str] | None = None,
-                  # if providing a pdb manifest, set options here
-                  manifest_kwargs: dict = {},
                   ) -> list[str]:
     """
     Retrieve a list of PDB files from a directory, either by specifying a list of pdb_names or by getting all files.
@@ -57,11 +55,7 @@ def get_pdb_files(pdb_dir: str,
     Raises:
         ValueError: If no PDB files are found in the directory when pdb_name_list is None
     """
-    pdb_manifest_csv = manifest_kwargs.get("pdb_manifest_csv")
-    assert not (pdb_name_list is not None and pdb_manifest_csv is not None), "Cannot provide both pdb_name_list and pdb_manifest_csv"
-    if pdb_manifest_csv is not None:
-        pdb_files = load_pdb_files_from_manifest(pdb_dir, **manifest_kwargs)
-    elif pdb_name_list is not None:
+    if pdb_name_list is not None:
         # Get PDBs with keys in the list
         with open(pdb_name_list, "r") as f:
             pdb_names = f.read().splitlines()
@@ -93,7 +87,7 @@ def get_pdb_files(pdb_dir: str,
         pdb_files = pdb_files[start_idx:end_idx]
 
     # Handle length-dependent options
-    # TOOD: this needs to be rewritten to handle boltz feats
+    # TODO: this needs to be rewritten to handle boltz feats
     if (presort_by_length) or (subset_length_range is not None):
         results = Parallel(n_jobs=n_jobs)(
             delayed(get_length_from_pdb)(f) for f in tqdm(pdb_files, desc="Loading PDBs to determine lengths")
@@ -122,7 +116,7 @@ def get_pdb_files(pdb_dir: str,
 
 
 def process_pdb_files(pdb_files: list[str],
-                      processed_pdb_dir: str,
+                      processed_struct_dir: str,
                       pdb_to_cif_conversion_cfg: DictConfig,
                       ccd_cfg: DictConfig,
                       ) -> list[str]:
@@ -131,14 +125,14 @@ def process_pdb_files(pdb_files: list[str],
     Returns paths to processed structure files (.npz format).
     """
     # Make directories where we'll store preprocessed PDB files
-    mmcif_dir = f"{processed_pdb_dir}/converted_mmcifs"
+    mmcif_dir = f"{processed_struct_dir}/converted_mmcifs"
     Path(mmcif_dir).mkdir(parents=True, exist_ok=True)
 
     # Handle PDB -> mmCIF conversion if necessary
     mmcif_files = []
     for pdb_file in tqdm(pdb_files, desc="Processing PDB files"):
         if Path(pdb_file).suffix != ".cif":
-            # assume PDB file, convert to mmCIF and save to processed_pdb_dir/converted_mmcifs
+            # assume PDB file, convert to mmCIF and save to processed_struct_dir/converted_mmcifs
             mmcif_file = Path(mmcif_dir, Path(pdb_file).name.replace(".pdb", ".cif"))
             pdb_to_mmcif(pdb_file, mmcif_file, assign_label_seq_id=pdb_to_cif_conversion_cfg.assign_label_seq_id)
         else:
@@ -146,9 +140,10 @@ def process_pdb_files(pdb_files: list[str],
         mmcif_files.append(mmcif_file)
 
     # Load or seed CCD resource in Redis
-    if ccd_cfg.redis_host is not None:
-        start_redis(ccd_cfg.redis_host, ccd_cfg.redis_port, ccd_cfg.software_path, ccd_cfg.ccd_rdb_path)
-        resource = Resource(host=ccd_cfg.redis_host, port=ccd_cfg.redis_port)
+    if ccd_cfg.use_redis:
+        redis_host, redis_port = "localhost", 7777  # hardcoded but can be changed
+        start_redis(redis_host, redis_port, ccd_cfg.software_path, ccd_cfg.ccd_rdb_path)
+        resource = Resource(host=redis_host, port=redis_port)
     else:
         resource = pickle.load(open(ccd_cfg.ccd_pkl_path, "rb"))
 
@@ -159,7 +154,7 @@ def process_pdb_files(pdb_files: list[str],
     # TODO: parallelize this
     processed_struct_files = []
     for pdb in tqdm(data, desc="Processing mmCIFs"):
-        processed_struct_file = process_structure(pdb, resource=resource, outdir=Path(processed_pdb_dir), filters=[], clusters={}, return_struct_path=True)
+        processed_struct_file = process_structure(pdb, resource=resource, outdir=Path(processed_struct_dir), filters=[], clusters={}, return_struct_path=True)
         processed_struct_files.append(processed_struct_file)
 
     return processed_struct_files
