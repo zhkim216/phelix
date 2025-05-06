@@ -81,8 +81,8 @@ data:
     subset_chain_types: ["PROTEIN"]
 
   # Dataset options
-  max_tokens: 256
-  max_atoms: 4608
+  max_tokens: 512 # 256
+  max_atoms: 9216 # 4608
   pad_to_max_tokens: true
   pad_to_max_atoms: true
   samples_per_epoch: 50000

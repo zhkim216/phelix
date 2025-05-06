@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sd1_a1
+#SBATCH --job-name=sd1_a2
 #SBATCH -p bioe
 #SBATCH --array=0-5
 #SBATCH --gpus-per-node=2
@@ -28,7 +28,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME_BASE=sd1_a1
+EXP_NAME_BASE=sd1_a2
 GROUP=seq_des
 
 # Dataset paths
