@@ -64,13 +64,14 @@ class SeqDenoiser(nn.Module):
         # Copy batch to avoid modifying the original
         batch = copy.deepcopy(batch)
 
-        # Sample sequence and atom conditioning masks
-        batch["seq_cond_mask"] = self.mask_selector.sample_seq_cond_mask(batch, t)  # 1 if we should condition on the restype, 0 otherwise
-        batch["atom_cond_mask"] = self.mask_selector.sample_atom_cond_mask(batch)  # 1 if we should condition on the atom, 0 otherwise
+        with torch.no_grad():
+            # Sample sequence and atom conditioning masks
+            batch["seq_cond_mask"] = self.mask_selector.sample_seq_cond_mask(batch, t)  # 1 if we should condition on the restype, 0 otherwise
+            batch["atom_cond_mask"] = self.mask_selector.sample_atom_cond_mask(batch)  # 1 if we should condition on the atom, 0 otherwise
 
-        # Ensure the conditioning masks only contain non-pad, resolved entries
-        batch["seq_cond_mask"] = batch["seq_cond_mask"] * batch["token_pad_mask"]
-        batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
+            # Ensure the conditioning masks only contain non-pad, resolved entries
+            batch["seq_cond_mask"] = batch["seq_cond_mask"] * batch["token_pad_mask"]
+            batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
 
         # Denoise sequence
         _, aux_preds = self.denoiser(batch)
