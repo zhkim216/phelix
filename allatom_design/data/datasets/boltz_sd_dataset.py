@@ -7,6 +7,7 @@ from typing import List, Union
 
 import lightning as L
 import numpy as np
+import pandas as pd
 import torch
 from omegaconf import DictConfig
 from torch.utils import data
@@ -35,8 +36,12 @@ class BoltzSDDataModule(L.LightningDataModule):
         manifest = self._load_manifest_from_file()
 
         # Load in validation split
-        with open(f"{self.pdb_path}/splits/validation_ids.txt", "r") as f:
-            val_split = {x.lower() for x in f.read().splitlines()}
+        if Path(self.pdb_path).name in ["boltz"]:
+            with open(f"{self.pdb_path}/splits/validation_ids.txt", "r") as f:
+                val_split = {x.lower() for x in f.read().splitlines()}
+        else:
+            val_split = pd.read_csv(f"{self.pdb_path}/eval_pdb_names.list", header=None).iloc[:, 0].tolist()
+            val_split = {Path(x).stem.lower() for x in val_split}
 
         train_records = []
         val_records = []
@@ -107,7 +112,12 @@ class BoltzSDDataModule(L.LightningDataModule):
         Load manifest from file. Preferentially loads from a compressed file, but it if it is not found, will read in an uncompressed json and
         cache the result.
         """
-        manifest_path = f"{self.pdb_path}/rcsb_processed_targets/manifest.json.gz"
+        if Path(self.pdb_path).name in ["boltz"]:
+            processed_targets_dir = f"{self.pdb_path}/rcsb_processed_targets"
+        else:
+            processed_targets_dir = f"{self.pdb_path}/processed_targets"
+
+        manifest_path = f"{processed_targets_dir}/manifest.json.gz"
         if Path(manifest_path).exists():
             print(f"Loading in manifest from {manifest_path}...")
             with gzip.open(manifest_path, "rt") as f:
@@ -119,7 +129,7 @@ class BoltzSDDataModule(L.LightningDataModule):
             # records = [Record.from_dict(r) for r in data if r["id"] in ids]
             manifest = Manifest(records=records)
         else:
-            manifest_path = f"{self.pdb_path}/rcsb_processed_targets/manifest.json"
+            manifest_path = f"{processed_targets_dir}/manifest.json"
             print(f"Loading in manifest from {manifest_path}...")
             manifest = Manifest.load(Path(manifest_path))
         print(f"Loaded manifest with {len(manifest.records)} records.")
