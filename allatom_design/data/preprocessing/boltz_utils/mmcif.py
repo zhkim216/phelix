@@ -830,6 +830,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
     path: str,
     components: dict[str, Mol],
     use_assembly: bool = True,
+    use_auth_seq_id: bool = False
 ) -> ParsedStructure:
     """Parse a structure in MMCIF format.
 
@@ -1010,6 +1011,10 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
         res_num = len(chain.residues)
         atom_num = sum(len(res.atoms) for res in chain.residues)
 
+        if use_auth_seq_id and res_num > 0:
+            # use the first residue's auth_seq_id as the residx for the chain
+            res_idx = int(chain.residues[0].orig_idx)  # does not support insertion codes
+
         # Find all copies of this chain in the assembly
         entity_id = entity_ids[chain.name]
         sym_id = sym_count.get(entity_id, 0)
@@ -1037,7 +1042,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                 (
                     res.name,
                     res.type,
-                    res.idx,
+                    res.idx if not use_auth_seq_id else res.orig_idx,
                     atom_idx,
                     len(res.atoms),
                     atom_center,
@@ -1067,6 +1072,9 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                 )
                 atom_idx += 1
 
+            if use_auth_seq_id:
+                # update res_idx based on current residue's auth_seq_id
+                res_idx = int(res.orig_idx)
             res_idx += 1
 
     # Convert connections to tables
