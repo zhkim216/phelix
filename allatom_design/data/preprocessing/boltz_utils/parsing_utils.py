@@ -29,6 +29,7 @@ def process_structure(
     filters: list[StaticFilter],
     clusters: dict,
     return_struct_path: bool = False,
+    parse_mmcif_kwargs: dict = {},
 ) -> None | str:
     """Process a target.
 
@@ -58,7 +59,7 @@ def process_structure(
 
     try:
         # Parse the target
-        target: Target = parse(data, resource, clusters)
+        target: Target = parse(data, resource, clusters, **parse_mmcif_kwargs)
         structure = target.structure
 
         # Apply the filters
@@ -163,7 +164,7 @@ def fetch(mmcif_files: list[str | Path], max_file_size: Optional[int] = None) ->
 
 
 
-def parse(data: PDB, resource: dict, clusters: dict) -> Target:
+def parse(data: PDB, resource: dict, clusters: dict, **parse_mmcif_kwargs: dict) -> Target:
     """Process a structure.
 
     Parameters
@@ -183,7 +184,7 @@ def parse(data: PDB, resource: dict, clusters: dict) -> Target:
     pdb_id = data.id.lower()
 
     # Parse structure
-    parsed = parse_mmcif(data.path, resource)
+    parsed = parse_mmcif(data.path, resource, **parse_mmcif_kwargs)
     structure = parsed.data
     structure_info = parsed.info
 
