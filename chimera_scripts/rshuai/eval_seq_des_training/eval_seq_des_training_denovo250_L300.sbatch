@@ -19,6 +19,7 @@ conda activate rshuai_allatom_design
 # Set base directories
 BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
+SOFTWARE_PATH=/scratch/hielab/rshuai/software
 
 # Model params
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
@@ -31,13 +32,13 @@ export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Model to evaluate
-MODEL_NAME=aasd1_a1_v1
+MODEL_NAME=sd1_a5
 DENOISER_TRAIN_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/${MODEL_NAME}
-NOISE_LABELS=0.5
+NOISE_LABELS=0.0
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_seq_des_denovo250dev_L300_nl${NOISE_LABELS}_af2_AR
+EXP_NAME=${MODEL_NAME}_eval_seq_des_denovo250dev_L300
 GROUP=seq_des
 
 # Run training script
@@ -45,6 +46,7 @@ cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
+    software_path=${SOFTWARE_PATH} \
     exp_name=${EXP_NAME} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
@@ -54,6 +56,4 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
     start_step=0 \
     end_step=null \
     eval_every_n_ckpts=1 \
-    sampling_cfg_overrides.noise_labels=${NOISE_LABELS} \
-    +sampling_cfg_overrides.use_potts_sampling=false \
     hydra.run.dir=${HYDRA_DIR}
