@@ -55,7 +55,7 @@ class BoltzSDDataModule(L.LightningDataModule):
         print(f"Number of val records: {len(val_records)}")
 
         # Filter train records
-        train_records = [record for record in train_records if all(f.filter(record) for f in cfg.filters)]
+        train_records = [record for record in train_records if all(f.filter(record) for f in cfg.filters if f is not None)]
         print(f"Number of train records after applying filters: {len(train_records)}")
 
         # Create train dataset
