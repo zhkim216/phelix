@@ -132,6 +132,7 @@ class BoltzSDDataModule(L.LightningDataModule):
             manifest_path = f"{processed_targets_dir}/manifest.json"
             print(f"Loading in manifest from {manifest_path}...")
             manifest = Manifest.load(Path(manifest_path))
+
         print(f"Loaded manifest with {len(manifest.records)} records.")
         return manifest
 
@@ -231,7 +232,7 @@ class SDDataset(data.Dataset):
         # Compute crop
         try:
             if self.max_tokens is not None:
-                _, token_crop_mask = dataset.cropper.crop(
+                tokenized_cropped, token_crop_mask = dataset.cropper.crop(
                     tokenized,
                     max_atoms=self.max_atoms,
                     max_tokens=self.max_tokens,
@@ -244,12 +245,12 @@ class SDDataset(data.Dataset):
             print(f"Cropper failed on {sample.record.id} with error: {e}. Skipping.")
             return self._load_feats(idx + 1)
 
-        # Check if there are tokens
-        if len(tokenized.tokens) == 0:
+        # Check if there are tokens in the cropped structure
+        if len(tokenized_cropped.tokens) == 0:
             print(f"No tokens in cropped structure for {sample.record.id}. Skipping.")
             return self._load_feats(idx + 1)
 
-        # Load pre-featurized data and crop
+        # Load pre-featurized data and crop the features
         try:
             feats = load_featurized(sample.record, self.dataset.pdb_path)
         except Exception as e:
