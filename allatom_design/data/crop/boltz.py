@@ -1,5 +1,7 @@
 """
 Adapted from Boltz-1.
+
+Handles cases where residx is not contiguous (e.g. from using auth_seq_id).
 """
 
 from dataclasses import replace
@@ -204,6 +206,10 @@ class BoltzCropper(Cropper):
         chains = data.structure.chains
         interfaces = data.structure.interfaces
 
+        # Handle discontiguous residue indices by working with renumbered contiguous residx
+        token_data_renumbered = token_data.copy()  # copy to avoid modifying original tokens
+        _, token_data_renumbered["res_idx"] = np.unique(token_data_renumbered["res_idx"], return_inverse=True)
+
         # Filter to a subset of chain types
         if self.subset_chain_types is not None:
             subset_chain_type_ids = [const.chain_type_ids[chain_type] for chain_type in self.subset_chain_types]
@@ -218,7 +224,7 @@ class BoltzCropper(Cropper):
         valid_interfaces = valid_interfaces[mask[valid_interfaces["chain_2"]]]
 
         # Filter to resolved tokens
-        valid_tokens = token_data[token_data["resolved_mask"]]
+        valid_tokens = token_data_renumbered[token_data_renumbered["resolved_mask"]]
 
         # Check if we have any valid tokens
         if not valid_tokens.size:
@@ -247,12 +253,13 @@ class BoltzCropper(Cropper):
         # Select cropped indices
         cropped: set[int] = set()
         total_atoms = 0
+
         for idx in indices:
             # Get the token
             token = valid_tokens[idx]
 
             # Get all tokens from this chain
-            chain_tokens = token_data[token_data["asym_id"] == token["asym_id"]]
+            chain_tokens = token_data_renumbered[token_data_renumbered["asym_id"] == token["asym_id"]]
 
             # Pick the whole chain if possible, otherwise select
             # a contiguous subset centered at the query token
@@ -286,7 +293,7 @@ class BoltzCropper(Cropper):
 
             # Compute new tokens and new atoms
             new_indices = set(new_tokens["token_idx"]) - cropped
-            new_tokens = token_data[list(new_indices)]
+            new_tokens = token_data_renumbered[list(new_indices)]
             new_atoms = np.sum(new_tokens["atom_num"])
 
             # Stop if we exceed the max number of tokens or atoms
@@ -300,7 +307,7 @@ class BoltzCropper(Cropper):
             total_atoms += new_atoms
 
         # Get tokens to crop as a mask based on sorted indices
-        keep_mask = np.zeros(len(token_data), dtype=bool)
+        keep_mask = np.zeros(len(token_data_renumbered), dtype=bool)
         keep_mask[sorted(cropped)] = True
 
         # Return the cropped tokens

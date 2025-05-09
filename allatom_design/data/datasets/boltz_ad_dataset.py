@@ -124,6 +124,7 @@ class BoltzADDataModule(L.LightningDataModule):
             manifest_path = f"{self.pdb_path}/processed_targets/manifest.json"
             print(f"Loading in manifest from {manifest_path}...")
             manifest = Manifest.load(Path(manifest_path))
+
         print(f"Loaded manifest with {len(manifest.records)} records.")
         return manifest
 
