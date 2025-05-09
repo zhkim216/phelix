@@ -110,10 +110,11 @@ class BoltzADDataModule(L.LightningDataModule):
 
     def _load_manifest_from_file(self) -> Manifest:
         """
-        Load manifest from file. Preferentially loads from a compressed file, but it if it is not found, will read in an uncompressed json and
-        cache the result.
+        Load manifest from file. Loads from either a compressed file or uncompressed json.
         """
-        manifest_path = f"{self.pdb_path}/processed_targets/manifest.json.gz"
+        processed_targets_dir = f"{self.pdb_path}/processed_targets"
+        manifest_path = f"{processed_targets_dir}/manifest.json.gz"
+
         if Path(manifest_path).exists():
             print(f"Loading in manifest from {manifest_path}...")
             with gzip.open(manifest_path, "rt") as f:
@@ -121,7 +122,7 @@ class BoltzADDataModule(L.LightningDataModule):
             records = [Record.from_dict(r) for r in tqdm(data, desc="Loading records...")]
             manifest = Manifest(records=records)
         else:
-            manifest_path = f"{self.pdb_path}/processed_targets/manifest.json"
+            manifest_path = f"{processed_targets_dir}/manifest.json"
             print(f"Loading in manifest from {manifest_path}...")
             manifest = Manifest.load(Path(manifest_path))
 

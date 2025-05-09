@@ -109,15 +109,11 @@ class BoltzSDDataModule(L.LightningDataModule):
 
     def _load_manifest_from_file(self) -> Manifest:
         """
-        Load manifest from file. Preferentially loads from a compressed file, but it if it is not found, will read in an uncompressed json and
-        cache the result.
+        Load manifest from file. Loads from either a compressed file or uncompressed json.
         """
-        if Path(self.pdb_path).name in ["boltz"]:
-            processed_targets_dir = f"{self.pdb_path}/rcsb_processed_targets"
-        else:
-            processed_targets_dir = f"{self.pdb_path}/processed_targets"
-
+        processed_targets_dir = self._get_processed_targets_dir()
         manifest_path = f"{processed_targets_dir}/manifest.json.gz"
+
         if Path(manifest_path).exists():
             print(f"Loading in manifest from {manifest_path}...")
             with gzip.open(manifest_path, "rt") as f:
@@ -135,6 +131,14 @@ class BoltzSDDataModule(L.LightningDataModule):
 
         print(f"Loaded manifest with {len(manifest.records)} records.")
         return manifest
+
+
+    def _get_processed_targets_dir(self) -> str:
+        if Path(self.pdb_path).name in ["boltz"]:
+            processed_targets_dir = f"{self.pdb_path}/rcsb_processed_targets"
+        else:
+            processed_targets_dir = f"{self.pdb_path}/processed_targets"
+        return processed_targets_dir
 
 
 class SDDataset(data.Dataset):
