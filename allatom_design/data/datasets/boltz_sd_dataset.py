@@ -236,7 +236,7 @@ class SDDataset(data.Dataset):
         # Compute crop
         try:
             if self.max_tokens is not None:
-                tokenized_cropped, token_crop_mask = dataset.cropper.crop(
+                tokenized, token_crop_mask = dataset.cropper.crop(
                     tokenized,
                     max_atoms=self.max_atoms,
                     max_tokens=self.max_tokens,
@@ -250,7 +250,7 @@ class SDDataset(data.Dataset):
             return self._load_feats(idx + 1)
 
         # Check if there are tokens in the cropped structure
-        if len(tokenized_cropped.tokens) == 0:
+        if len(tokenized.tokens) == 0:
             print(f"No tokens in cropped structure for {sample.record.id}. Skipping.")
             return self._load_feats(idx + 1)
 
@@ -261,7 +261,9 @@ class SDDataset(data.Dataset):
             print(f"Failed to load featurized data for {sample.record.id} with error: {e}. Skipping.")
             return self._load_feats(idx + 1)
 
-        feats = crop_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.atoms_per_window_queries)
+        if self.max_tokens is not None:
+            feats = crop_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.atoms_per_window_queries)
+
         feats["coords"] = feats["coords"].squeeze(0)  # squeeze out batch dimension
 
         return sample.record.id, feats
