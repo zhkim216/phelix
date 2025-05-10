@@ -89,6 +89,7 @@ data:
   random_seed: ${train.seed}
   atoms_per_window_queries: 32
   num_bins: 64
+  n_random_subset: null  # number to subset after filtering
 
 # Model options
 defaults:

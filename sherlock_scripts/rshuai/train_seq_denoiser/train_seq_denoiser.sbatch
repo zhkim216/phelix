@@ -27,7 +27,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=sd1_a7
+EXP_NAME=sd1_a8
 GROUP=seq_des
 
 # Dataset paths
@@ -47,7 +47,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.filters.1=null \
     data.filters.4.max_residues=512 \
     data.filters.4.min_residues=32 \
-    train.batch_size=32 \
+    data.n_random_subset=50000 \
+    train.batch_size=16 \
     trainer.accumulate_grad_batches=2 \
     train.compile_model=false \
     denoiser.per_residue_eps=false \
