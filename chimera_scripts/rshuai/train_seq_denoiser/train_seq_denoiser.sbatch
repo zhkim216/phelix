@@ -56,6 +56,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.mpnn.atom_encoder.k_atom_neighbors=16 \
     denoiser.mpnn.atom_encoder.atom_s=64 \
     denoiser.mpnn.atom_encoder.atom_z=16 \
+    mask_selector.restype_masking_schedule=constant_t \
     loss.seq_loss.label_smoothing=0.157 \
     loss.potts.label_smoothing=0.157 \
     checkpointing.save_latest_every_n_steps=2500 \
