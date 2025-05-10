@@ -1,0 +1,5 @@
+sequences: /media/scratch/datasets/boltz_v2/pdb_seqres.txt
+ccd: /media/scratch/datasets/boltz/ccd.pkl
+outdir: /media/scratch/datasets/boltz_v2/clustering
+
+software_path: /media/scratch/software  # for redis

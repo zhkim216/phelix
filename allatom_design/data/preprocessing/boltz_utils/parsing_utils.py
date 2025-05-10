@@ -304,9 +304,9 @@ class Resource:
     def __init__(self, host: str, port: int) -> None:
         self._redis = Redis(host=host, port=port)
 
-    def get(self, key: str):
+    def get(self, key: str, default = None):
         value = self._redis.get(key)
-        return None if value is None else pickle.loads(value)  # noqa: S301
+        return default if value is None else pickle.loads(value)  # noqa: S301
 
     def __getitem__(self, key: str):
         out = self.get(key)
