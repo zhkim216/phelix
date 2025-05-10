@@ -24,6 +24,7 @@ from allatom_design.data.sample.sampler import Sample, Sampler
 from allatom_design.data.tokenize.tokenizer import Tokenized, Tokenizer
 from allatom_design.data.types import (Connection, Input, Manifest, Record,
                                        Structure)
+import random
 
 
 class BoltzSDDataModule(L.LightningDataModule):
@@ -57,6 +58,11 @@ class BoltzSDDataModule(L.LightningDataModule):
         # Filter train records
         train_records = [record for record in train_records if all(f.filter(record) for f in cfg.filters if f is not None)]
         print(f"Number of train records after applying filters: {len(train_records)}")
+
+        # Random subset
+        if cfg.n_random_subset is not None:
+            train_records = random.sample(train_records, min(cfg.n_random_subset, len(train_records)))
+            print(f"Randomly subsetting to {len(train_records)} records.")
 
         # Create train dataset
         train_manifest = Manifest(records=train_records)
