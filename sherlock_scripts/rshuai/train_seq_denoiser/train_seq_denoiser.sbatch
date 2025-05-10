@@ -27,11 +27,11 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=sd1_a8
+EXP_NAME=sd1_a5_v2
 GROUP=seq_des
 
 # Dataset paths
-PDB_PATH=/scratch/users/rshuai/datasets/boltz
+PDB_PATH=/scratch/users/subhang/datasets/af3_pdb_monomer_boltz
 
 # Run training script
 cd ${BASE_DIR}
@@ -47,7 +47,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.filters.1=null \
     data.filters.4.max_residues=512 \
     data.filters.4.min_residues=32 \
-    data.n_random_subset=50000 \
+    data.cropper._target_=allatom_design.data.crop.boltz.BoltzCropper \
     train.batch_size=16 \
     trainer.accumulate_grad_batches=2 \
     train.compile_model=false \
