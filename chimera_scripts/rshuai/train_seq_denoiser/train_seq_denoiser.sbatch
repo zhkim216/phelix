@@ -24,11 +24,11 @@ WANDB_ID=richardshuai
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=sd1_a7
+EXP_NAME=sd1_a9_res3.5
 GROUP=seq_des
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/boltz
+PDB_PATH=/scratch/hielab/rshuai/datasets/boltz_v2
 
 # Run training script
 cd ${BASE_DIR}
@@ -41,12 +41,13 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.pdb_path=${PDB_PATH} \
     data.max_tokens=256 \
     data.max_atoms=4608 \
+    data.filters.2.resolution=3.5 \
     data.filters.1=null \
     data.filters.4.max_residues=512 \
     data.filters.4.min_residues=32 \
     train.batch_size=32 \
     trainer.accumulate_grad_batches=2 \
-    train.compile_model=false \
+    train.compile_model=true \
     denoiser.per_residue_eps=false \
     denoiser.augment_eps=0.3 \
     denoiser.mpnn.k_neighbors=48 \

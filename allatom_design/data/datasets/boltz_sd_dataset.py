@@ -37,7 +37,7 @@ class BoltzSDDataModule(L.LightningDataModule):
         manifest = self._load_manifest_from_file()
 
         # Load in validation split
-        if Path(self.pdb_path).name in ["boltz"]:
+        if Path(self.pdb_path).name in ["boltz", "boltz_v2"]:
             with open(f"{self.pdb_path}/splits/validation_ids.txt", "r") as f:
                 val_split = {x.lower() for x in f.read().splitlines()}
         else:
