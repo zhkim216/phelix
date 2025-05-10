@@ -68,12 +68,17 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         Build various masks for AtomMPNN.
 
         Updates batch (in place) with:
+        - atomwise_token_idx: Tensor["b n_atoms", int]: index of the token that the atom belongs to, 0 for pad atoms
         - atomwise_seq_cond_mask: Tensor["b n_atoms", float]: 1 if the atom is part of an unmasked residue type, or 0 otherwise
         - token_exists_mask: Tensor["b n_tokens", float]: 1 if there exists any unmasked atom in the token, or 0 otherwise
         """
+        # Get the index of the token that each atom belongs to
+        _, batch["atomwise_token_idx"] = torch.max(batch["atom_to_token"], dim=-1)  # [b, n_atoms]
+
         # Create atom-level mask which is 1 if the atom is part of an unmasked residue type, or 0 otherwise
         B, N_atoms, N_tokens = batch["atom_to_token"].shape
-        batch["atomwise_seq_cond_mask"] = torch.bmm(batch["atom_to_token"].float(), batch["seq_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_atoms]
+        batch["atomwise_seq_cond_mask"] = batch["seq_cond_mask"].gather(dim=-1, index=batch["atomwise_token_idx"])  # [b, n_atoms]
+        batch["atomwise_seq_cond_mask"] = batch["atomwise_seq_cond_mask"] * batch["atom_pad_mask"]  # re-mask out pad atoms, since atomwise_token_idx is 0 for pad atoms
 
         # Create token-level mask which is 1 if there exists any unmasked atom in the token, or 0 otherwise
 
@@ -108,7 +113,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             # per-residue noise. Unlike Cho et al., we sample noise stds from a uniform distribution and apply different noise to each atom in a residue
             # randomly sample noise labels
             noise_labels = torch.rand((B, N_tokens), device=device) * self.augment_eps  # sample std for each residue from uniform [0, augment_eps]
-            atomwise_noise_labels = torch.bmm(batch["atom_to_token"].float(), noise_labels.unsqueeze(-1)).squeeze(dim=-1)  # [b, n_atoms]
+            atomwise_noise_labels = noise_labels.gather(dim=-1, index=batch["atomwise_token_idx"]) * batch["atom_pad_mask"] # [b, n_atoms]
             noise = torch.randn((B, N_atoms, 3), device=device) * atomwise_noise_labels.unsqueeze(-1)
             noise = noise * batch["atom_cond_mask"].unsqueeze(-1)
         else:

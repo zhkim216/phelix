@@ -67,7 +67,10 @@ class MaskSelector:
         tok_keep_scn_mask = torch.where(batch["mol_type"] != const.chain_type_ids["PROTEIN"],  # non-protein tokens should be kept
                                         torch.ones_like(tok_keep_scn_mask),
                                         tok_keep_scn_mask)
-        atomwise_tok_keep_scn_mask = torch.bmm(batch["atom_to_token"].float(), tok_keep_scn_mask.view(B, N_tokens, 1)).squeeze(dim=-1)  # [b, n_atoms]
+
+        ## convert to atomwise mask
+        _, atom_token_idx = torch.max(batch["atom_to_token"], dim=-1)  # [b, n_atoms]
+        atomwise_tok_keep_scn_mask = tok_keep_scn_mask.gather(dim=-1, index=atom_token_idx) * batch["atom_pad_mask"]  # [b, n_atoms]
 
         atom_cond_mask = torch.where(atomwise_tok_keep_scn_mask.bool(),
                                      atom_cond_mask,
