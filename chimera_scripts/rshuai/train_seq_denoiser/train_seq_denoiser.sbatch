@@ -24,11 +24,11 @@ WANDB_ID=richardshuai
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=sd1_a6
+EXP_NAME=sd1_a7
 GROUP=seq_des
 
 # Dataset paths
-PDB_PATH=/scratch/hielab/rshuai/datasets/af3_pdb_monomer_boltz
+PDB_PATH=/scratch/hielab/rshuai/datasets/boltz
 
 # Run training script
 cd ${BASE_DIR}

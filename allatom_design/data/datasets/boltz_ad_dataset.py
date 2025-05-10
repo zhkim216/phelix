@@ -86,6 +86,7 @@ class BoltzADDataModule(L.LightningDataModule):
                                   num_workers=self.cfg.num_workers,
                                   pin_memory=True,
                                   shuffle=False,  # sampler handles shuffling
+                                  drop_last=True,
                                   collate_fn=ad_collator)
 
         return train_loader
@@ -102,6 +103,7 @@ class BoltzADDataModule(L.LightningDataModule):
                                     num_workers=self.cfg.num_workers,
                                     pin_memory=True,
                                     shuffle=False,
+                                    drop_last=True,
                                     collate_fn=ad_collator)
             val_loaders.append(val_loader)
 

@@ -89,7 +89,7 @@ class BoltzSDDataModule(L.LightningDataModule):
                                   num_workers=self.cfg.num_workers,
                                   pin_memory=True,
                                   shuffle=False,  # sampler handles shuffling
-                                  persistent_workers=True,
+                                  drop_last=True,
                                   collate_fn=sd_collator)
 
         return train_loader
@@ -101,7 +101,7 @@ class BoltzSDDataModule(L.LightningDataModule):
                                 num_workers=self.cfg.num_workers,
                                 pin_memory=True,
                                 shuffle=False,
-                                persistent_workers=True,
+                                drop_last=True,
                                 collate_fn=sd_collator)
 
         return val_loader
