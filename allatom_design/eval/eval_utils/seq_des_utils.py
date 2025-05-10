@@ -150,7 +150,7 @@ def run_seq_des(model: SeqDenoiser,
                                                  batch["token_pad_mask"],
                                                  torch.zeros_like(batch["seq_cond_mask"]))  # always condition on non-protein restypes
             batch["atom_cond_mask"] = batch["prot_bb_atom_mask"]  # condition on backbone atoms
-            atomwise_prot_mask = torch.bmm(batch["atom_to_token"].float(), (batch["mol_type"] == const.chain_type_ids["PROTEIN"]).float().unsqueeze(-1)).squeeze(-1)
+            atomwise_prot_mask = torch.bmm(batch["atom_to_token"].float(), (batch["mol_type"] == const.chain_type_ids["PROTEIN"]).float().unsqueeze(-1)).squeeze(-1)  # TODO: make more efficient
             batch["atom_cond_mask"] = torch.where(atomwise_prot_mask.bool(), batch["atom_cond_mask"], torch.ones_like(batch["atom_cond_mask"]))  # always condition on non-protein atoms
 
             # Run sampling
