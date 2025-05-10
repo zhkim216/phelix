@@ -237,7 +237,11 @@ class SDDataset(data.Dataset):
             sample = Sample(record=record, chain_id=None, interface_id=None)
 
         # Load pre-tokenized data
-        tokenized = load_tokenized(sample.record, dataset.pdb_path)
+        try:
+            tokenized = load_tokenized(sample.record, dataset.pdb_path)
+        except Exception as e:
+            print(f"Failed to load tokenized data for {sample.record.id} with error: {e}. Skipping.")
+            return self._load_feats(idx + 1)
 
         # Compute crop
         try:
