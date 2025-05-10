@@ -27,7 +27,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=sd1_a0
+EXP_NAME=sd1_a7
 GROUP=seq_des
 
 # Dataset paths
@@ -42,13 +42,24 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
     data.pdb_path=${PDB_PATH} \
-    train.batch_size=16 \
+    data.max_tokens=256 \
+    data.max_atoms=4608 \
+    data.filters.1=null \
+    data.filters.4.max_residues=512 \
+    data.filters.4.min_residues=32 \
+    train.batch_size=32 \
     trainer.accumulate_grad_batches=2 \
-    train.compile_model=true \
+    train.compile_model=false \
     denoiser.per_residue_eps=false \
     denoiser.augment_eps=0.3 \
-    denoiser.mpnn.k_neighbors=32 \
+    denoiser.mpnn.k_neighbors=48 \
     denoiser.mpnn.use_atom_encoder=false \
+    denoiser.mpnn.atom_encoder.n_layers=1 \
+    denoiser.mpnn.atom_encoder.k_atom_neighbors=16 \
+    denoiser.mpnn.atom_encoder.atom_s=64 \
+    denoiser.mpnn.atom_encoder.atom_z=16 \
+    loss.seq_loss.label_smoothing=0.157 \
+    loss.potts.label_smoothing=0.157 \
     checkpointing.save_latest_every_n_steps=2500 \
     trainer.check_val_every_n_epoch=2 \
     hydra.run.dir=${HYDRA_DIR}
