@@ -31,4 +31,8 @@ class ResolutionFilter(DynamicFilter):
 
         """
         structure = record.structure
+        if structure.resolution == 0:
+            # resolution of 0 means no resolution found in the PDB file
+            return False
+
         return structure.resolution <= self.resolution
