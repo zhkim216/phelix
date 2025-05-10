@@ -14,8 +14,9 @@ from allatom_design.data.feature.pad import pad_dim, crop_dim
 from allatom_design.data.tokenize.boltz import Tokenized
 from torchtyping import TensorType
 
-# Keep track of the dimensions of the features in the token and atom features for padding & cropping
+# Keep track of the token/atom dimensions of the features for padding & cropping
 FEAT_TO_TOKEN_DIM = {
+    # Maps feature name to the token dimension
     # token features
     "token_index": [0],
     "residue_index": [0],
@@ -28,14 +29,15 @@ FEAT_TO_TOKEN_DIM = {
     "token_pad_mask": [0],
     "token_resolved_mask": [0],
     "token_disto_mask": [0],
-    "center_coords": [0],
     "token_bonds": [0, 1],
 
     # atom features
-    "atom_to_token": [1]
+    "atom_to_token": [1],
+    "token_to_center_atom": [0],
 }
 
 FEAT_TO_ATOM_DIM = {
+    # Maps feature name to the atom dimension
     # atom features
     "atom_pad_mask": [0],
     "ref_pos": [0],
@@ -46,6 +48,7 @@ FEAT_TO_ATOM_DIM = {
     "ref_space_uid": [0],
     "coords": [1],
     "atom_to_token": [0],
+    "token_to_center_atom": [1],
     "prot_bb_atom_mask": [0],
     "prot_scn_atom_mask": [0],
 }
@@ -134,7 +137,6 @@ def process_sd_token_features(
     res_type = from_numpy(token_data["res_type"]).long()
     res_type = one_hot(res_type, num_classes=const.num_tokens)
     disto_center = from_numpy(token_data["disto_coords"])
-    center_coords = from_numpy(token_data["center_coords"])
 
     # Token mask features
     pad_mask = torch.ones(len(token_data), dtype=torch.float)
@@ -166,7 +168,6 @@ def process_sd_token_features(
         "token_pad_mask": pad_mask,
         "token_resolved_mask": resolved_mask,
         "token_disto_mask": disto_mask,
-        "center_coords": center_coords,
     }
     return token_features
 
@@ -197,6 +198,7 @@ def process_sd_atom_features(
     prot_bb_atom_mask = []  # 1 if atom is backbone atom of a known protein residue, 0 otherwise
     prot_scn_atom_mask = []  # 1 if atom is sidechain atom of a known protein residue, 0 otherwise
     atom_to_token = []
+    token_to_center_atom = []  # map from token to center atom index
     atom_idx = 0
 
     chain_res_ids = {}
@@ -234,6 +236,9 @@ def process_sd_atom_features(
             prot_bb_atom_mask.extend([0] * atom_num)
             prot_scn_atom_mask.extend([0] * atom_num)
 
+        # Map from token to center atom index
+        token_to_center_atom.append(atom_idx + token["center_idx"] - start)
+
         # Update atom data. This is technically never used again (we rely on coord_data),
         # but we update for consistency and to make sure the Atom object has valid, transformed coordinates.
         token_atoms = token_atoms.copy()
@@ -257,6 +262,7 @@ def process_sd_atom_features(
     resolved_mask = from_numpy(atom_data["is_present"])
     pad_mask = torch.ones(len(atom_data), dtype=torch.float)
     atom_to_token = torch.tensor(atom_to_token, dtype=torch.long)
+    token_to_center_atom = torch.tensor(token_to_center_atom, dtype=torch.long)
     prot_bb_atom_mask = torch.tensor(prot_bb_atom_mask, dtype=torch.float)
     prot_scn_atom_mask = torch.tensor(prot_scn_atom_mask, dtype=torch.float)
 
@@ -266,6 +272,7 @@ def process_sd_atom_features(
     ).bool()  # added for lower case letters
     ref_element = one_hot(ref_element, num_classes=const.num_elements).bool()
     atom_to_token = one_hot(atom_to_token, num_classes=token_id + 1).bool()
+    token_to_center_atom = one_hot(token_to_center_atom, num_classes=len(atom_data)).bool()
 
     # Apply random roto-translation to the input atoms
     ref_pos = boltz_center_random_augmentation(
@@ -282,6 +289,7 @@ def process_sd_atom_features(
         "coords": coords,
         "atom_pad_mask": pad_mask,
         "atom_to_token": atom_to_token,
+        "token_to_center_atom": token_to_center_atom,
         "prot_bb_atom_mask": prot_bb_atom_mask,
         "prot_scn_atom_mask": prot_scn_atom_mask,
     }
