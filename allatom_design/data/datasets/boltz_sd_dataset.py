@@ -134,11 +134,11 @@ class BoltzSDDataModule(L.LightningDataModule):
             manifest_path = f"{processed_targets_dir}/manifest.json"
             print(f"Loading in manifest from {manifest_path}...")
             manifest = Manifest.load(Path(manifest_path))
-            # DEBUG
-            import glob
-            ids = [Path(x).stem for x in glob.glob(f"{self.pdb_path}/processed_targets/featurized/*.npz")]
-            records = [r for r in manifest.records if r.id in ids]
-            manifest = Manifest(records=records)
+            # # DEBUG
+            # import glob
+            # ids = [Path(x).stem for x in glob.glob(f"{self.pdb_path}/processed_targets/featurized/*.npz")]
+            # records = [r for r in manifest.records if r.id in ids]
+            # manifest = Manifest(records=records)
 
         print(f"Loaded manifest with {len(manifest.records)} records.")
         return manifest
