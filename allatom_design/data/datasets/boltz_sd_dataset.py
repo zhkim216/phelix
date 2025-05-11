@@ -59,6 +59,10 @@ class BoltzSDDataModule(L.LightningDataModule):
         train_records = [record for record in train_records if all(f.filter(record) for f in cfg.filters if f is not None)]
         print(f"Number of train records after applying filters: {len(train_records)}")
 
+        # Filter val records
+        val_records = [record for record in val_records if all(f.filter(record) for f in cfg.val_filters if f is not None)]
+        print(f"Number of val records after applying filters: {len(val_records)}")
+
         # Random subset
         if cfg.n_random_subset is not None:
             train_records = random.sample(train_records, min(cfg.n_random_subset, len(train_records)))

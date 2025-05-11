@@ -65,7 +65,8 @@ class AtomMPNN(nn.Module):
             self.decoder_S_potts = potts.GraphPotts(
                 dim_nodes=self.node_features,
                 dim_edges=self.decoder_in,
-                num_states=len(const.tokens),
+                # num_states=len(const.tokens),
+                num_states=21,  # DEBUG
                 parameterization=self.parameterization,
                 num_factors=self.num_factors,
                 symmetric_J=cfg.potts.symmetric_J,
@@ -73,7 +74,8 @@ class AtomMPNN(nn.Module):
             )
 
         # Output layers
-        self.W_out = nn.Linear(self.hidden_dim, len(const.tokens), bias=True)
+        # self.W_out = nn.Linear(self.hidden_dim, len(const.tokens), bias=True)
+        self.W_out = nn.Linear(self.hidden_dim, 21, bias=True)  # DEBUG
 
         # Initialize weights
         for p in self.parameters():

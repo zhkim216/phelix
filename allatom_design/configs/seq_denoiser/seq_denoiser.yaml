@@ -67,6 +67,11 @@ data:
       min_residues: 16
       max_residues: 1024
 
+  val_filters:
+    - ${data.filters.0}
+    - ${data.filters.3}
+    - ${data.filters.4}
+
   sampler:
     _target_: allatom_design.data.sample.cluster.ClusterSampler
     alpha_prot: 1.0
