@@ -34,8 +34,8 @@ class AtomMPNN(nn.Module):
 
         self.token_features = TokenFeatures(cfg.token_features)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=False)
-        self.W_s = nn.Linear(self.node_features + len(const.tokens), self.hidden_dim, bias=False)
-        self.decoder_in = self.hidden_dim * 2  # concat of h_V and h_E
+        self.W_s = nn.Linear(len(const.tokens), self.hidden_dim, bias=False)
+        self.decoder_in = self.hidden_dim * 3  # concat of h_E, h_S, h_V
 
         self.dropout = nn.Dropout(cfg.dropout_p)
 
@@ -97,13 +97,14 @@ class AtomMPNN(nn.Module):
         B, N, C = batch["res_type"].shape
         masked = F.one_hot(torch.full((B, N), const.token_ids["-"], device=batch["res_type"].device), num_classes=C).float()
         res_type = torch.where(batch["seq_cond_mask"].unsqueeze(-1).bool(), batch["res_type"], masked)
-        h_V = torch.cat([h_V, res_type], dim=-1)
+        h_S = self.W_s(res_type)
 
         # Build graph and get edge features
         h_E, E_idx = self.token_features(batch)
 
         # Pass through encoder layers
-        h_V, h_E = self.W_s(h_V), self.W_e(h_E)
+        h_V = h_V + h_S
+        h_E = self.W_e(h_E)
         token_mask = batch["token_exists_mask"]
         token_mask_2d = gather_nodes(token_mask.unsqueeze(-1), E_idx).squeeze(-1)
         token_mask_2d = token_mask.unsqueeze(-1) * token_mask_2d
@@ -111,13 +112,14 @@ class AtomMPNN(nn.Module):
             h_V, h_E = layer(h_V, h_E, E_idx, token_mask, token_mask_2d)
 
         # Pass through decoder layers
-        h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
+        h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
+        h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
         for layer in self.decoder_layers:
-            h_V, h_EV = layer(h_V, h_EV, token_mask, E_idx)
+            h_V, h_ESV = layer(h_V, h_ESV, token_mask, E_idx)
 
         # Potts model
         if self.use_potts:
-            h, J = self.decoder_S_potts(h_V, h_EV, E_idx, token_mask, token_mask_2d)
+            h, J = self.decoder_S_potts(h_V, h_ESV, E_idx, token_mask, token_mask_2d)
             potts_decoder_aux = {
                 "h": h,
                 "J": J,
@@ -129,7 +131,7 @@ class AtomMPNN(nn.Module):
         logits = self.W_out(h_V)
 
         # Output features
-        mpnn_feature_dict = {"h_V": h_V, "h_EV": h_EV, "E_idx": E_idx}
+        mpnn_feature_dict = {"h_V": h_V, "h_ESV": h_ESV, "E_idx": E_idx}
         if self.use_potts:
             mpnn_feature_dict["potts_decoder_aux"] = potts_decoder_aux
 

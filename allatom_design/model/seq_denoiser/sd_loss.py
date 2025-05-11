@@ -106,7 +106,6 @@ def masked_cross_entropy(logits: TensorType["b n c", float],
     - per_token_avg: bool, whether to average loss per token (false will divide by fixed_size)
     """
     n_classes = len(const.tokens)
-    logits = logits[..., 2:23]  # DEBUG
     target_oh = F.one_hot(target, num_classes=n_classes).float()
 
     # Unpack seq_loss_cfg
@@ -119,7 +118,7 @@ def masked_cross_entropy(logits: TensorType["b n c", float],
 
     # Compute cross entropy loss
     logprobs = F.log_softmax(logits, dim=-1)
-    cel = -(logprobs * target_oh[..., 2:23]).sum(dim=-1)  # DEBUG
+    cel = -(logprobs * target_oh).sum(dim=-1)  # DEBUG
 
     if per_token_avg:
         # average loss per token
