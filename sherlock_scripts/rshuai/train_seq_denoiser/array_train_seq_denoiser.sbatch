@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd1_a2
+#SBATCH --job-name=sd2_a0_res
 #SBATCH -p bioe
-#SBATCH --array=0-5
+#SBATCH --array=0-2
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
 #SBATCH --time=96:00:00
@@ -28,19 +28,16 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME_BASE=sd1_a2
+EXP_NAME_BASE=sd2_a0_cfg
 GROUP=seq_des
 
 # Dataset paths
-PDB_PATH=/scratch/users/rshuai/datasets/boltz
+PDB_PATH=/scratch/users/subhang/datasets/boltz_v2
 
 CONFIGS=(
-"denoiser.mpnn.k_neighbors=32 denoiser.mpnn.use_atom_encoder=false mask_selector.restype_masking_schedule=constant_t"
-"denoiser.mpnn.k_neighbors=32 denoiser.mpnn.use_atom_encoder=true mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.atom_encoder.n_layers=2  denoiser.mpnn.atom_encoder.k_atom_neighbors=16 denoiser.mpnn.atom_encoder.atom_s=64 denoiser.mpnn.atom_encoder.atom_z=16"
-"denoiser.mpnn.k_neighbors=32 denoiser.mpnn.use_atom_encoder=true denoiser.mpnn.atom_encoder.n_layers=3  denoiser.mpnn.atom_encoder.k_atom_neighbors=16 denoiser.mpnn.atom_encoder.atom_s=64 denoiser.mpnn.atom_encoder.atom_z=16"
-"denoiser.mpnn.k_neighbors=48 denoiser.mpnn.use_atom_encoder=true denoiser.mpnn.atom_encoder.n_layers=1  denoiser.mpnn.atom_encoder.k_atom_neighbors=16 denoiser.mpnn.atom_encoder.atom_s=64 denoiser.mpnn.atom_encoder.atom_z=16"
-"denoiser.mpnn.k_neighbors=48 denoiser.mpnn.use_atom_encoder=true denoiser.mpnn.atom_encoder.n_layers=2  denoiser.mpnn.atom_encoder.k_atom_neighbors=16 denoiser.mpnn.atom_encoder.atom_s=64 denoiser.mpnn.atom_encoder.atom_z=16"
-"denoiser.mpnn.k_neighbors=16 denoiser.mpnn.use_atom_encoder=true denoiser.mpnn.atom_encoder.n_layers=2  denoiser.mpnn.atom_encoder.k_atom_neighbors=16 denoiser.mpnn.atom_encoder.atom_s=64 denoiser.mpnn.atom_encoder.atom_z=16"
+"data.filters.2.resolution=2.0"
+"data.filters.2.resolution=3.5"
+"data.filters.2.resolution=5.0"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
@@ -54,12 +51,23 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
     data.pdb_path=${PDB_PATH} \
+    data.max_tokens=256 \
+    data.max_atoms=4608 \
+    data.filters.1=null \
+    data.filters.4.max_residues=512 \
+    data.filters.4.min_residues=32 \
     train.batch_size=16 \
     trainer.accumulate_grad_batches=2 \
     train.compile_model=false \
     denoiser.per_residue_eps=false \
     denoiser.augment_eps=0.3 \
-    ${OVERRIDES} \
+    denoiser.mpnn.k_neighbors=48 \
+    denoiser.mpnn.use_atom_encoder=false \
+    denoiser.mpnn.atom_encoder.n_layers=1 \
+    denoiser.mpnn.atom_encoder.k_atom_neighbors=16 \
+    denoiser.mpnn.atom_encoder.atom_s=64 \
+    denoiser.mpnn.atom_encoder.atom_z=16 \
     checkpointing.save_latest_every_n_steps=2500 \
     trainer.check_val_every_n_epoch=2 \
+    ${OVERRIDES} \
     hydra.run.dir=${HYDRA_DIR}
