@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sd2_a0_res
+#SBATCH --job-name=sd2_a4_res
 #SBATCH -p bioe
 #SBATCH --array=0-2
 #SBATCH --gpus-per-node=2
@@ -28,7 +28,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME_BASE=sd2_a0
+EXP_NAME_BASE=sd2_a4
 GROUP=seq_des
 
 # Dataset paths
@@ -61,12 +61,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     train.compile_model=false \
     denoiser.per_residue_eps=false \
     denoiser.augment_eps=0.3 \
-    denoiser.mpnn.k_neighbors=48 \
     denoiser.mpnn.use_atom_encoder=false \
-    denoiser.mpnn.atom_encoder.n_layers=1 \
-    denoiser.mpnn.atom_encoder.k_atom_neighbors=16 \
-    denoiser.mpnn.atom_encoder.atom_s=64 \
-    denoiser.mpnn.atom_encoder.atom_z=16 \
+    mask_selector.restype_masking_schedule=constant_t \
     checkpointing.save_latest_every_n_steps=2500 \
     trainer.check_val_every_n_epoch=2 \
     ${OVERRIDES} \
