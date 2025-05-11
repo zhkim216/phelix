@@ -24,7 +24,7 @@ WANDB_ID=richardshuai
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=sd2_a2_debug0_fix_decoder
+EXP_NAME=sd2_a3
 GROUP=seq_des
 
 # Dataset paths
@@ -53,8 +53,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.mpnn.use_atom_encoder=false \
     denoiser.mpnn.atom_encoder.n_layers=1 \
     mask_selector.restype_masking_schedule=constant_t \
-    loss.seq_loss.label_smoothing=0.157 \
-    loss.potts.label_smoothing=0.157 \
+    loss.seq_loss.label_smoothing=0.1 \
+    loss.potts.label_smoothing=0.1 \
     checkpointing.save_latest_every_n_steps=2500 \
     trainer.check_val_every_n_epoch=2 \
     hydra.run.dir=${HYDRA_DIR}
