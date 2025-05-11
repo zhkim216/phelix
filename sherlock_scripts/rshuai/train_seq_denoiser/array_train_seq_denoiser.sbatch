@@ -28,7 +28,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME_BASE=sd2_a0_cfg
+EXP_NAME_BASE=sd2_a0
 GROUP=seq_des
 
 # Dataset paths
