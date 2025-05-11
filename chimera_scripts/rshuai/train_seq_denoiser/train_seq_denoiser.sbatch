@@ -24,7 +24,7 @@ WANDB_ID=richardshuai
 export HF_HOME=/scratch/hielab/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=sd2_a2_debug0
+EXP_NAME=sd2_a2_debug0_fix_decoder
 GROUP=seq_des
 
 # Dataset paths
