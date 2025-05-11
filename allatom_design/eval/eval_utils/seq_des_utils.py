@@ -36,7 +36,7 @@ from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import \
     FAMPNNDenoiser
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
-
+from allatom_design.data.tokenize.boltz import BoltzTokenizer
 
 def get_seq_des_model(cfg: DictConfig, device: str) -> Dict[str, Any]:
     """
@@ -225,7 +225,10 @@ def get_sd_example(struct_file_path: str, data_cfg: DictConfig) -> tuple[dict[st
 
     # Tokenize structure (no cropping applied)
     tokenized = data_cfg["tokenizer"].tokenize(input_data)
-    feats = data_cfg["featurizer"].process(tokenized, data_cfg["atoms_per_window_queries"], data_cfg["num_bins"])
+    feats = data_cfg["featurizer"].process(tokenized,
+                                           use_auth_seq_id=True,
+                                           atoms_per_window_queries=data_cfg["atoms_per_window_queries"],
+                                           num_bins=data_cfg["num_bins"])
     feats["coords"] = feats["coords"].squeeze(0)  # remove batch dimension
 
     # SE3 augmentation for convenience / scaling
