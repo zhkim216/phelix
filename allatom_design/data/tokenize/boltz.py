@@ -26,6 +26,7 @@ class TokenData:
     disto_coords: np.ndarray
     resolved_mask: bool
     disto_mask: bool
+    auth_seq_id: int
 
 
 class BoltzTokenizer(Tokenizer):
@@ -99,6 +100,7 @@ class BoltzTokenizer(Tokenizer):
                         disto_coords=d_coords,
                         resolved_mask=is_present,
                         disto_mask=is_disto_present,
+                        auth_seq_id=res["auth_seq_id"],
                     )
                     token_data.append(astuple(token))
 
@@ -141,6 +143,7 @@ class BoltzTokenizer(Tokenizer):
                             disto_coords=atom_coords[i],
                             resolved_mask=is_present,
                             disto_mask=is_present,
+                            auth_seq_id=res["auth_seq_id"],
                         )
                         token_data.append(astuple(token))
 

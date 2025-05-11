@@ -60,6 +60,7 @@ class SequenceDesignFeaturizer:
     def process(
         self,
         data: Tokenized,
+        use_auth_seq_id: bool,
         atoms_per_window_queries: int = 32,
         num_bins: int = 64,
         max_tokens: Optional[int] = None,
@@ -71,6 +72,8 @@ class SequenceDesignFeaturizer:
         ----------
         data : Tokenized
             The tokenized data.
+        use_auth_seq_id : bool
+            If true, features["residue_index"] will be set to auth_seq_id. If false, we use label_seq_id ("res_idx" in tokens)
         training : bool
             Whether the model is in training mode.
         max_tokens : int, optional
@@ -89,6 +92,7 @@ class SequenceDesignFeaturizer:
         # Compute token features
         token_features = process_sd_token_features(
             data,
+            use_auth_seq_id,
         )
 
         # Compute atom features
@@ -107,6 +111,7 @@ class SequenceDesignFeaturizer:
 
 def process_sd_token_features(
     data: Tokenized,
+    use_auth_seq_id: bool,
 ) -> dict[str, Tensor]:
     """Get the token features.
 
@@ -129,7 +134,7 @@ def process_sd_token_features(
 
     # Token core features
     token_index = torch.arange(len(token_data), dtype=torch.long)
-    residue_index = from_numpy(token_data["res_idx"]).long()
+    res_idx = from_numpy(token_data["res_idx"]).long()
     asym_id = from_numpy(token_data["asym_id"]).long()
     entity_id = from_numpy(token_data["entity_id"]).long()
     sym_id = from_numpy(token_data["sym_id"]).long()
@@ -137,6 +142,7 @@ def process_sd_token_features(
     res_type = from_numpy(token_data["res_type"]).long()
     res_type = one_hot(res_type, num_classes=const.num_tokens)
     disto_center = from_numpy(token_data["disto_coords"])
+    auth_seq_id = from_numpy(token_data["auth_seq_id"]).long()
 
     # Token mask features
     pad_mask = torch.ones(len(token_data), dtype=torch.float)
@@ -157,7 +163,7 @@ def process_sd_token_features(
 
     token_features = {
         "token_index": token_index,
-        "residue_index": residue_index,
+        "residue_index": auth_seq_id if use_auth_seq_id else res_idx,
         "asym_id": asym_id,
         "entity_id": entity_id,
         "sym_id": sym_id,
@@ -182,8 +188,6 @@ def process_sd_atom_features(
     ----------
     data : Tokenized
         The tokenized data.
-    max_atoms : int, optional
-        The maximum number of atoms.
 
     Returns
     -------

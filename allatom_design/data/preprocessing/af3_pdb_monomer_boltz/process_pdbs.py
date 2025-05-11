@@ -92,7 +92,6 @@ def main(cfg: DictConfig):
             outdir=Path(processed_targets_dir),
             filters=filters,
             clusters=clusters,
-            parse_mmcif_kwargs={"use_auth_seq_id": True},
         )
         p_umap(fn, data, num_cpus=cfg.num_workers, desc="Processing mmCIFs")
     else:
@@ -103,7 +102,6 @@ def main(cfg: DictConfig):
                 outdir=Path(processed_targets_dir),
                 filters=filters,
                 clusters=clusters,
-                parse_mmcif_kwargs={"use_auth_seq_id": True},
             )
 
     # Post‑processing to create manifest.json

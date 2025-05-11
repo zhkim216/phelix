@@ -830,7 +830,6 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
     path: str,
     components: dict[str, Mol],
     use_assembly: bool = True,
-    use_auth_seq_id: bool = False
 ) -> ParsedStructure:
     """Parse a structure in MMCIF format.
 
@@ -1011,9 +1010,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
         res_num = len(chain.residues)
         atom_num = sum(len(res.atoms) for res in chain.residues)
 
-        if use_auth_seq_id and res_num > 0:
-            # use the first residue's auth_seq_id as the residx for the chain
-            res_idx = int(chain.residues[0].orig_idx)  # does not support insertion codes
+        # Include auth_seq_id, using the first residue's auth_seq_id for the chain
 
         # Find all copies of this chain in the assembly
         entity_id = entity_ids[chain.name]
@@ -1029,6 +1026,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                 atom_num,
                 res_idx,
                 res_num,
+                int(chain.residues[0].orig_idx),  # does not support insertion codes
             )
         )
         chain_to_idx[chain.name] = asym_id
@@ -1042,13 +1040,14 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                 (
                     res.name,
                     res.type,
-                    res.idx if not use_auth_seq_id else res.orig_idx,
+                    res.idx,
                     atom_idx,
                     len(res.atoms),
                     atom_center,
                     atom_disto,
                     res.is_standard,
                     res.is_present,
+                    int(res.orig_idx),  # does not support insertion codes
                 )
             )
             res_to_idx[(chain.name, i)] = (res_idx, atom_idx)
@@ -1071,10 +1070,6 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                     )
                 )
                 atom_idx += 1
-
-            if use_auth_seq_id:
-                # update res_idx based on current residue's auth_seq_id
-                res_idx = int(res.orig_idx)
             res_idx += 1
 
     # Convert connections to tables
