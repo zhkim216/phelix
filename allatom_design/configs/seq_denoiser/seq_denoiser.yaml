@@ -44,7 +44,7 @@ resume:
 data:
   pdb_path: /media/scratch/datasets/boltz
   tokenizer:
-    _target_: boltz.data.tokenize.boltz.BoltzTokenizer
+    _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
   featurizer:
     _target_: allatom_design.data.feature.seq_des_featurizer.SequenceDesignFeaturizer
 
