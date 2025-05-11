@@ -88,7 +88,7 @@ class ContiguousCropper(Cropper):
 
         # Pick a random token: chain or interface
         if chain_id is not None:
-            query = pick_chain_token(valid_tokens, chain_id, random)
+            query = pick_start_token_contiguous(valid_tokens, chain_id, random, max_tokens)
         elif interface_id is not None:
             interface = interfaces[interface_id]
             query = pick_interface_token(valid_tokens, interface, random)
@@ -99,7 +99,7 @@ class ContiguousCropper(Cropper):
         else:
             idx = random.randint(len(valid_chains))
             chain_id = valid_chains[idx]["asym_id"]
-            query = pick_chain_token(valid_tokens, chain_id, random)
+            query = pick_start_token_contiguous(valid_tokens, chain_id, random, max_tokens)
 
         # Select a contiguous subset of tokens around the query token
         cropped: set[int] = set()
@@ -107,10 +107,10 @@ class ContiguousCropper(Cropper):
 
         chain_tokens = token_data[token_data["asym_id"] == query["asym_id"]]
 
-        # Expand by res_idx until we have enough tokens
+        # Expand to the right by res_idx until we have enough tokens
         for i in range(max_tokens):
-            left, right = query["res_idx"] - i, query["res_idx"] + i
-            new_tokens = chain_tokens[(chain_tokens["res_idx"] == left) | (chain_tokens["res_idx"] == right)]
+            end = query["res_idx"] + i
+            new_tokens = chain_tokens[chain_tokens["res_idx"] == end]  # potentially more than one token in case of non-standard residues / ligands
             new_atoms = np.sum(new_tokens["atom_num"])
 
             if len(cropped) + len(new_tokens) > max_tokens:
@@ -132,3 +132,42 @@ class ContiguousCropper(Cropper):
         if return_crop_mask:
             return data, keep_mask
         return data
+
+
+def pick_start_token_contiguous(
+    tokens: np.ndarray,
+    chain_id: int,
+    random: np.random.RandomState,
+    max_tokens: int,
+) -> np.ndarray:
+    """Pick a random token to start a contiguous crop from a chain.
+    Boltz-1 contiguous cropping does not uniformly sample crops since it picks a random token across the whole chain.
+
+    Parameters
+    ----------
+    tokens : np.ndarray
+        The token data.
+    chain_id : int
+        The chain ID.
+    random : np.ndarray
+        The random state for reproducibility.
+    Returns
+    -------
+    np.ndarray
+        The selected token.
+
+    """
+    # Filter to chain
+    chain_tokens = tokens[tokens["asym_id"] == chain_id]
+    if not chain_tokens.size:
+        raise ValueError(f"No chain tokens found for chain {chain_id}")
+
+    if len(chain_tokens) < max_tokens:
+        # Do not crop
+        query = chain_tokens[0]
+    else:
+        # Pick start token from [0, len(chain_tokens) - max_tokens]
+        start = random.randint(len(chain_tokens) - max_tokens + 1)
+        query = chain_tokens[start]
+
+    return query
