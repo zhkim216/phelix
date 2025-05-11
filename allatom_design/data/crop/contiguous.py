@@ -65,10 +65,6 @@ class ContiguousCropper(Cropper):
         chains = data.structure.chains
         interfaces = data.structure.interfaces
 
-        # Handle discontiguous residue indices by working with renumbered contiguous residx
-        token_data_renumbered = token_data.copy()  # copy to avoid modifying original tokens
-        _, token_data_renumbered["res_idx"] = np.unique(token_data_renumbered["res_idx"], return_inverse=True)
-
         # Filter to a subset of chain types
         if self.subset_chain_types is not None:
             subset_chain_type_ids = [const.chain_type_ids[chain_type] for chain_type in self.subset_chain_types]
@@ -83,7 +79,7 @@ class ContiguousCropper(Cropper):
         valid_interfaces = valid_interfaces[mask[valid_interfaces["chain_2"]]]
 
         # Filter to resolved tokens
-        valid_tokens = token_data_renumbered[token_data_renumbered["resolved_mask"]]
+        valid_tokens = token_data[token_data["resolved_mask"]]
 
         # Check if we have any valid tokens
         if not valid_tokens.size:
@@ -109,10 +105,10 @@ class ContiguousCropper(Cropper):
         cropped: set[int] = set()
         total_atoms = 0
 
-        chain_tokens = token_data_renumbered[token_data_renumbered["asym_id"] == query["asym_id"]]
+        chain_tokens = token_data[token_data["asym_id"] == query["asym_id"]]
 
         # Expand by res_idx until we have enough tokens
-        for i in range(max_tokens // 2 + 1):
+        for i in range(max_tokens):
             left, right = query["res_idx"] - i, query["res_idx"] + i
             new_tokens = chain_tokens[(chain_tokens["res_idx"] == left) | (chain_tokens["res_idx"] == right)]
             new_atoms = np.sum(new_tokens["atom_num"])
@@ -128,7 +124,7 @@ class ContiguousCropper(Cropper):
             total_atoms += new_atoms
 
         # Get tokens to crop as a mask based on sorted indices
-        keep_mask = np.zeros(len(token_data_renumbered), dtype=bool)
+        keep_mask = np.zeros(len(token_data), dtype=bool)
         keep_mask[sorted(cropped)] = True
 
         # Return the cropped tokens

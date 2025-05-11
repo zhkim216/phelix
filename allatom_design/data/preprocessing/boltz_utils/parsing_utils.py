@@ -164,7 +164,7 @@ def fetch(mmcif_files: list[str | Path], max_file_size: Optional[int] = None) ->
 
 
 
-def parse(data: PDB, resource: dict, clusters: dict, **parse_mmcif_kwargs: dict) -> Target:
+def parse(data: PDB, resource: dict, clusters: dict) -> Target:
     """Process a structure.
 
     Parameters
@@ -184,7 +184,7 @@ def parse(data: PDB, resource: dict, clusters: dict, **parse_mmcif_kwargs: dict)
     pdb_id = data.id.lower()
 
     # Parse structure
-    parsed = parse_mmcif(data.path, resource, **parse_mmcif_kwargs)
+    parsed = parse_mmcif(data.path, resource)
     structure = parsed.data
     structure_info = parsed.info
 
