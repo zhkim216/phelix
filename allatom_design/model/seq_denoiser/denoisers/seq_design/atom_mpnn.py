@@ -223,8 +223,8 @@ class TokenFeatures(nn.Module):
         #     X = torch.bmm(atom_to_token_mean.transpose(1, 2), X)  # [B, N, 3]
         B, N, _ = batch["coords"].shape
         _, center_idx = torch.max(batch["token_to_center_atom"], dim=-1)
-        X = batch["coords"][torch.arange(B).unsqueeze(-1), center_idx]
-        X = X * batch["token_exists_mask"].unsqueeze(-1)
+        X = batch["coords"][torch.arange(B).unsqueeze(-1), center_idx]  # get center atom for each token
+        X = X * batch["token_exists_mask"].unsqueeze(-1)  # mask out padding and unresolved atoms
         return X
 
 
