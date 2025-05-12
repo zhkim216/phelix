@@ -16,9 +16,10 @@ from natsort import natsorted
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from allatom_design.data.data import get_length_from_pdb
+from functools import partial
+from p_tqdm import p_umap
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
-    Resource, fetch, pdb_to_mmcif, process_structure)
+    Resource, fetch, pdb_to_mmcif, process_structure, PDB)
 
 
 def get_pdb_files(pdb_dir: str,
@@ -97,6 +98,7 @@ def get_pdb_files(pdb_dir: str,
 
 def process_pdb_files(pdb_files: list[str],
                       processed_struct_dir: str,
+                      num_workers: int,
                       pdb_to_cif_conversion_cfg: DictConfig,
                       ccd_cfg: DictConfig,
                       ) -> list[str]:
@@ -131,12 +133,7 @@ def process_pdb_files(pdb_files: list[str],
     data = fetch(mmcif_files, max_file_size=None)
 
     # Process each PDB file
-    # TODO: parallelize this
-    processed_struct_files = []
-    for pdb in tqdm(data, desc="Processing mmCIFs"):
-        processed_struct_file = process_structure(pdb, resource=resource, outdir=Path(processed_struct_dir), filters=[], clusters={}, return_struct_path=True)
-        processed_struct_files.append(processed_struct_file)
-
+    processed_struct_files = parallel_process_structures(data, resource=resource, outdir=Path(processed_struct_dir), filters=[], clusters={}, num_workers=num_workers)
     return processed_struct_files
 
 
@@ -166,6 +163,19 @@ def start_redis(redis_host: str, redis_port: int, software_path: str, ccd_rdb_pa
 
     # Now the server is guaranteed to be ready
     print("Redis is up and running.")
+
+
+def parallel_process_structures(pdbs: list[PDB], resource: Resource, outdir: Path, filters: list, clusters: dict, num_workers: int) -> list[str]:
+    """
+    Small wrapper around process_structure to parallelize over a list of PDBs. Returns a list of processed structure file paths.
+    """
+    use_parallel = num_workers > 1
+    fn = partial(process_structure, resource=resource, outdir=outdir, filters=filters, clusters=clusters, return_struct_path=True)
+    if use_parallel:
+        processed_struct_files = p_umap(fn, pdbs, num_cpus=num_workers, desc="Processing mmCIFs")
+    else:
+        processed_struct_files = [fn(pdb) for pdb in tqdm(pdbs, desc="Processing mmCIFs", total=len(pdbs))]
+    return processed_struct_files
 
 
 def load_pdb_files_from_manifest(pdb_dir: str, **manifest_kwargs) -> list[str]:

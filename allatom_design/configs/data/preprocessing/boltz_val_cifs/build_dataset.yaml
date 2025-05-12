@@ -1,5 +1,24 @@
 mmcif_dir: /media/scratch/datasets/boltz_test_cases/cifs
 val_ids_txt: /scratch/hielab/rshuai/datasets/boltz_v2/splits/validation_ids.txt
 out_dir: /media/scratch/datasets/boltz_val_cifs
-
+software_path: /media/scratch/software
 num_workers: 8
+
+# PDB file processing
+pdb_processing_cfg:
+  num_workers: ${num_workers}
+
+  # if we have to convert PDBs to mmCIFs
+  pdb_to_cif_conversion_cfg:
+    assign_label_seq_id: false  # if true, automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
+
+  # CCD
+  ccd_cfg:
+    software_path: ${software_path}
+    use_redis: true
+
+    # If using redis (fast)
+    ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
+
+    # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)
+    ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
