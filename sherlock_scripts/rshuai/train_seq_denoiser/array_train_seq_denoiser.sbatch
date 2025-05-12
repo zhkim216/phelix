@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sd2_a9
+#SBATCH --job-name=sd2_a10
 #SBATCH -p bioe
 #SBATCH --array=0-4
 #SBATCH --gpus-per-node=2
@@ -28,18 +28,18 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME_BASE=sd2_a9
+EXP_NAME_BASE=sd2_a10
 GROUP=seq_des
 
 # Dataset paths
 PDB_PATH=/scratch/users/subhang/datasets/test/af3_pdb_monomer_boltz
 
 CONFIGS=(
-"denoiser.mpnn.use_atom_encoder=false mask_selector.restype_masking_schedule=constant_t"
-"denoiser.mpnn.use_atom_encoder=true mask_selector.restype_masking_schedule=constant_t loss.potts.label_smoothing=0.0 loss.seq_loss.label_smoothing=0.0"
-"denoiser.mpnn.use_atom_encoder=false"
-"denoiser.mpnn.use_atom_encoder=true mask_selector.restype_masking_schedule=constant_t"
-"denoiser.mpnn.use_atom_encoder=true"
+"denoiser.mpnn.use_atom_encoder=true mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.atom_encoder.k_atom_neighbors=32"
+"denoiser.mpnn.use_atom_encoder=true mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.atom_encoder.k_atom_neighbors=64"
+"denoiser.mpnn.use_atom_encoder=true mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.atom_encoder.k_atom_neighbors=128"
+"denoiser.mpnn.use_atom_encoder=true mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.atom_encoder.k_atom_neighbors=128 denoiser.mpnn.atom_encoder.atom_z=8"
+"denoiser.mpnn.use_atom_encoder=true mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.atom_encoder.k_atom_neighbors=128 denoiser.mpnn.atom_encoder.atom_z=8 denoiser.mpnn.atom_encoder.atom_s=128"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
