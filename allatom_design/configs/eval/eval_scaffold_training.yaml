@@ -17,6 +17,7 @@ seed: 0
 start_step: 0  # start evaluation after this step, 0 or null to start from the beginning
 end_step: null  # end evaluation after this step (inclusive), null to evaluate until the end
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
+num_workers: 8
 
 # Denoiser
 denoiser_train_dir:
@@ -30,6 +31,8 @@ input_cfg:
 
 # PDB file processing
 pdb_processing_cfg:
+  num_workers: ${num_workers}
+
   # if we have to convert PDBs to mmCIFs
   pdb_to_cif_conversion_cfg:
     assign_label_seq_id: false  # if true, automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES

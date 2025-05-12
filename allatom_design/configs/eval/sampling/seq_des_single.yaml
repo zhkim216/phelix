@@ -18,6 +18,8 @@ pos_restrict_aatype:   # restricts allowed aatypes at certain positions. Comma-s
 
 # PDB file processing
 pdb_processing_cfg:
+  num_workers: ${num_workers}
+
   # if we have to convert PDBs to mmCIFs
   pdb_to_cif_conversion_cfg:
     assign_label_seq_id: false  # if true, automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
