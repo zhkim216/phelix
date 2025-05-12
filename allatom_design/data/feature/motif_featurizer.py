@@ -23,6 +23,7 @@ class MotifFeaturizer:
     def process(
         self,
         data: Tokenized,
+        use_auth_seq_id: bool,
         atoms_per_window_queries: int = 32,
         num_bins: int = 64,
         max_tokens: int | None = None,
@@ -35,6 +36,8 @@ class MotifFeaturizer:
         ----------
         data : Tokenized
             The tokenized data.
+        use_auth_seq_id : bool
+            If True, features["residue_index"] will be set to auth_seq_id. If false, we use label_seq_id ("res_idx" in tokens)
         training : bool
             Whether the model is in training mode.
         max_tokens : int, optional
@@ -62,6 +65,7 @@ class MotifFeaturizer:
         # Compute token features
         token_features = process_motif_token_features(
             data,
+            use_auth_seq_id,
             restype_mask,
             residx_mask,
             max_tokens,
@@ -95,6 +99,7 @@ class MotifFeaturizer:
 
 def process_motif_token_features(
     data: Tokenized,
+    use_auth_seq_id: bool,
     restype_mask: TensorType["n", float],
     residx_mask: TensorType["n", float],
     max_tokens: Optional[int] = None,
@@ -122,7 +127,8 @@ def process_motif_token_features(
 
     # Token core features
     token_index = torch.arange(len(token_data), dtype=torch.long)
-    residue_index = from_numpy(token_data["res_idx"]).long()
+    label_seq_id = from_numpy(token_data["res_idx"]).long()
+    auth_seq_id = from_numpy(token_data["auth_seq_id"]).long()
     asym_id = from_numpy(token_data["asym_id"]).long()
     entity_id = from_numpy(token_data["entity_id"]).long()
     sym_id = from_numpy(token_data["sym_id"]).long()
@@ -160,6 +166,11 @@ def process_motif_token_features(
     )
     pocket_feature = from_numpy(pocket_feature).long()
     pocket_feature = one_hot(pocket_feature, num_classes=len(const.pocket_contact_info))
+
+    # use auth_seq_id as the featurized residue index if specified
+    residue_index = label_seq_id
+    if use_auth_seq_id:
+        residue_index = auth_seq_id
 
     # Pad to max tokens if given
     if max_tokens is not None:

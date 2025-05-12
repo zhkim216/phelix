@@ -338,7 +338,7 @@ def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int, is_samplin
 
     # Construct diffusion features
     diffusion_feats = {}
-    diffusion_feats["residue_index"] = tokenized.tokens["res_idx"]
+    diffusion_feats["residue_index"] = tokenized.tokens["auth_seq_id"]  # we use auth_seq_id since predicted structures won't have SEQRES records
     diffusion_feats["seq_mask"] = np.ones_like(diffusion_feats["residue_index"])  # denotes padding
     if not is_sampling:
         # During training, featurize with ground truth coords and atom mask
@@ -385,6 +385,7 @@ def featurize_motif_inputs(tokenized: Tokenized,
 
     # Featurize (possibly dummy) motif
     motif_feats = motif_featurizer.process(tokenized_motif,
+                                           use_auth_seq_id=True,  # we use auth_seq_id since predicted structures won't have SEQRES records
                                            atoms_per_window_queries=motif_data_kwargs["motif_atoms_per_window_queries"],
                                            num_bins=motif_data_kwargs["motif_num_bins"],
                                            max_tokens=motif_data_kwargs["motif_max_tokens"],

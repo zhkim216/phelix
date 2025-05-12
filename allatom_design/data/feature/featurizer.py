@@ -15,11 +15,16 @@ from allatom_design.data.tokenize.boltz import Tokenized
 
 
 class SimpleBoltzFeaturizer:
-    """Boltz-based featurizer, simplfiied to remove MSA and symmetry features."""
+    """
+    Boltz-based featurizer, simplified to remove MSA and symmetry features.
 
+    Also includes:
+    - use_auth_seq_id: If True, features["residue_index"] will be set to auth_seq_id. If false, we use label_seq_id ("res_idx" in tokens)
+    """
     def process(
         self,
         data: Tokenized,
+        use_auth_seq_id: bool,
         atoms_per_window_queries: int = 32,
         min_dist: float = 2.0,
         max_dist: float = 22.0,
@@ -51,6 +56,7 @@ class SimpleBoltzFeaturizer:
         # Compute token features
         token_features = process_token_features(
             data,
+            use_auth_seq_id,
             max_tokens,
         )
 
@@ -73,6 +79,7 @@ class SimpleBoltzFeaturizer:
 
 def process_token_features(
     data: Tokenized,
+    use_auth_seq_id: bool = False,
     max_tokens: Optional[int] = None,
     binder_pocket_conditioned_prop: Optional[float] = 0.0,
     binder_pocket_cutoff: Optional[float] = 6.0,
@@ -87,6 +94,8 @@ def process_token_features(
     ----------
     data : Tokenized
         The tokenized data.
+    use_auth_seq_id : bool
+        If True, features["residue_index"] will be set to auth_seq_id. If false, we use label_seq_id ("res_idx" in tokens)
     max_tokens : int
         The maximum number of tokens.
 
@@ -102,7 +111,8 @@ def process_token_features(
 
     # Token core features
     token_index = torch.arange(len(token_data), dtype=torch.long)
-    residue_index = from_numpy(token_data["res_idx"]).long()
+    label_seq_id = from_numpy(token_data["res_idx"]).long()
+    auth_seq_id = from_numpy(token_data["auth_seq_id"]).long()
     asym_id = from_numpy(token_data["asym_id"]).long()
     entity_id = from_numpy(token_data["entity_id"]).long()
     sym_id = from_numpy(token_data["sym_id"]).long()
@@ -218,6 +228,11 @@ def process_token_features(
                 pocket_feature[pocket_mask] = const.pocket_contact_info["POCKET"]
     pocket_feature = from_numpy(pocket_feature).long()
     pocket_feature = one_hot(pocket_feature, num_classes=len(const.pocket_contact_info))
+
+    # use auth_seq_id as the featurized residue index if specified
+    residue_index = label_seq_id
+    if use_auth_seq_id:
+        residue_index = auth_seq_id
 
     # Pad to max tokens if given
     if max_tokens is not None:
