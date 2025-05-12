@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd2_a4_res
+#SBATCH --job-name=sd2_a9
 #SBATCH -p bioe
-#SBATCH --array=0-2
+#SBATCH --array=0-4
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
 #SBATCH --time=96:00:00
@@ -28,16 +28,18 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME_BASE=sd2_a4
+EXP_NAME_BASE=sd2_a9
 GROUP=seq_des
 
 # Dataset paths
-PDB_PATH=/scratch/users/subhang/datasets/boltz_v2
+PDB_PATH=/scratch/users/subhang/datasets/test/af3_pdb_monomer_boltz
 
 CONFIGS=(
-"data.filters.2.resolution=2.0"
-"data.filters.2.resolution=3.5"
-"data.filters.2.resolution=5.0"
+"denoiser.mpnn.use_atom_encoder=false mask_selector.restype_masking_schedule=constant_t"
+"denoiser.mpnn.use_atom_encoder=true mask_selector.restype_masking_schedule=constant_t loss.potts.label_smoothing=0.0 loss.seq_loss.label_smoothing=0.0"
+"denoiser.mpnn.use_atom_encoder=false"
+"denoiser.mpnn.use_atom_encoder=true mask_selector.restype_masking_schedule=constant_t"
+"denoiser.mpnn.use_atom_encoder=true"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
@@ -52,8 +54,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     exp_name=${EXP_NAME} \
     data.pdb_path=${PDB_PATH} \
     data.max_tokens=256 \
-    data.max_atoms=4608 \
+    data.max_atoms=3584 \
     data.filters.1=null \
+    data.filters.2=null \
     data.filters.4.max_residues=512 \
     data.filters.4.min_residues=32 \
     train.batch_size=16 \
@@ -61,9 +64,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     train.compile_model=false \
     denoiser.per_residue_eps=false \
     denoiser.augment_eps=0.3 \
-    denoiser.mpnn.use_atom_encoder=false \
-    mask_selector.restype_masking_schedule=constant_t \
+    ${OVERRIDES} \
     checkpointing.save_latest_every_n_steps=2500 \
     trainer.check_val_every_n_epoch=2 \
-    ${OVERRIDES} \
     hydra.run.dir=${HYDRA_DIR}

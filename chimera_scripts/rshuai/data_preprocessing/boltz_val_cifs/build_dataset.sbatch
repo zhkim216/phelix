@@ -21,7 +21,8 @@ cd ${BASE_DIR}
 
 # Run script
 python3 allatom_design/data/preprocessing/boltz_val_cifs/build_dataset.py \
+    software_path=${SOFTWARE_PATH} \
     mmcif_dir=/large_storage/hielab/rshuai/datasets/mmCIF \
     val_ids_txt=/scratch/hielab/rshuai/datasets/boltz_v2/splits/validation_ids.txt \
     out_dir=/scratch/hielab/rshuai/datasets/boltz_val_cifs \
-    software_path=${SOFTWARE_PATH}
+    num_workers=8
