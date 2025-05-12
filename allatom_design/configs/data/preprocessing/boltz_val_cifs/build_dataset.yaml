@@ -1,0 +1,5 @@
+mmcif_dir: /media/scratch/datasets/boltz_test_cases/cifs
+val_ids_txt: /scratch/hielab/rshuai/datasets/boltz_v2/splits/validation_ids.txt
+out_dir: /media/scratch/datasets/boltz_val_cifs
+
+num_workers: 8
