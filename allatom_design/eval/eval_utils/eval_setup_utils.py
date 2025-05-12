@@ -24,10 +24,7 @@ from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
 def get_pdb_files(pdb_dir: str,
                   pdb_name_list: str | None,
                   pdb_name_ext: str | None = None,
-                  subset_length_range: tuple[int, int] | None = None,
-                  presort_by_length: bool = False,
                   n_subsample: int | None = None,
-                  n_jobs: int = 8,
                   # slurm array parameters for parallelization
                   array_id: int | None = None,
                   num_arrays: int | None = None,
@@ -55,8 +52,9 @@ def get_pdb_files(pdb_dir: str,
     Raises:
         ValueError: If no PDB files are found in the directory when pdb_name_list is None
     """
+    # Read in PDB files from directory or list of PDB names
     if pdb_name_list is not None:
-        # Get PDBs with keys in the list
+        # get PDBs with keys in the list
         with open(pdb_name_list, "r") as f:
             pdb_names = f.read().splitlines()
         if pdb_name_ext:
@@ -65,7 +63,7 @@ def get_pdb_files(pdb_dir: str,
         pdb_files = [f"{pdb_dir}/{name}" for name in pdb_names]
         print(f"Found {len(pdb_files)} PDB files from key list")
     else:
-        # Get all PDBs with .pdb_name_ext extension in the directory
+        # get all PDBs with .pdb_name_ext extension in the directory
         pdb_files = natsorted(list(glob.glob(f"{pdb_dir}/*")))
         print(f"Found {len(pdb_files)} PDB files in {pdb_dir}")
         if len(pdb_files) == 0:
@@ -85,24 +83,6 @@ def get_pdb_files(pdb_dir: str,
         start_idx = array_id * chunk_size
         end_idx = min(start_idx + chunk_size, len(pdb_files))
         pdb_files = pdb_files[start_idx:end_idx]
-
-    # Handle length-dependent options
-    # TODO: this needs to be rewritten to handle boltz feats
-    if (presort_by_length) or (subset_length_range is not None):
-        results = Parallel(n_jobs=n_jobs)(
-            delayed(get_length_from_pdb)(f) for f in tqdm(pdb_files, desc="Loading PDBs to determine lengths")
-        )
-        pdb_to_length = dict(results)
-
-        if subset_length_range is not None:
-            # filter to length range (inclusive)
-            min_len, max_len = subset_length_range
-            pdb_files = [f for f in pdb_files if min_len <= pdb_to_length[f] <= max_len]
-            print(f"Subsetted to {len(pdb_files)} PDB files in length range [{min_len}, {max_len}]")
-
-        if presort_by_length:
-            # sort by length, longest first
-            pdb_files = sorted(pdb_files, key=lambda x: pdb_to_length[x], reverse=True)
 
     # Optionally take a random subset, preserving order
     if n_subsample is not None:

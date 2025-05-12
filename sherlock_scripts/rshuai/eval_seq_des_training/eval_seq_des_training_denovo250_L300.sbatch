@@ -27,6 +27,7 @@ AF2_DATA_DIR=/scratch/users/rshuai/model_params/af2
 
 # Inputs config
 PDB_DIR=/scratch/users/rshuai/datasets/denovo250dev/pdbs
+PDB_NAME_LIST=/scratch/users/rshuai/datasets/denovo250dev/pdb_name_lists/L300.txt
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
@@ -52,7 +53,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
     struct_pred_cfg.model_name=af2 \
     input_cfg.pdb_dir=${PDB_DIR} \
-    input_cfg.subset_length_range=[300,300] \
+    input_cfg.pdb_name_list=${PDB_NAME_LIST} \
     start_step=0 \
     end_step=null \
     eval_every_n_ckpts=1 \
