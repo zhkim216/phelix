@@ -84,7 +84,9 @@ def add_tokenwise_atom_feats(tokenized: Tokenized, featurizer: SimpleBoltzFeatur
     Add tokenwise atom features to the tokenized structure.
     """
     # Featurize input tokens as atom23 tokens
-    feats = featurizer.process(tokenized)
+    feats = featurizer.process(tokenized,
+                               use_auth_seq_id=True  # doesn't matter here, since we don't use residue indices from this featurizer
+                               )
     tokenwise_feats = pad_atom_feats_to_tokenwise(feats, max_atoms_per_token=const.max_num_atoms)  # max number of atoms across any token
 
     # Construct tokenwise atom feats
