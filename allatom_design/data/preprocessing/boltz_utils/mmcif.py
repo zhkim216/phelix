@@ -1011,6 +1011,11 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
         atom_num = sum(len(res.atoms) for res in chain.residues)
 
         # Include auth_seq_id, using the first residue's auth_seq_id for the chain
+        try:
+            auth_seq_id = int(chain.residues[0].orig_idx)  # does not support insertion codes
+        except:
+            # fall back to 0 if orig_idx is not an integer
+            auth_seq_id = 0
 
         # Find all copies of this chain in the assembly
         entity_id = entity_ids[chain.name]
@@ -1026,7 +1031,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                 atom_num,
                 res_idx,
                 res_num,
-                int(chain.residues[0].orig_idx),  # does not support insertion codes
+                auth_seq_id,
             )
         )
         chain_to_idx[chain.name] = asym_id
@@ -1036,6 +1041,12 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
         for i, res in enumerate(chain.residues):
             atom_center = atom_idx + res.atom_center
             atom_disto = atom_idx + res.atom_disto
+            try:
+                auth_seq_id = int(res.orig_idx)
+            except:
+                # fall back to 0 if orig_idx is not an integer
+                auth_seq_id = 0
+
             res_data.append(
                 (
                     res.name,
@@ -1047,7 +1058,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                     atom_disto,
                     res.is_standard,
                     res.is_present,
-                    int(res.orig_idx),  # does not support insertion codes
+                    auth_seq_id,
                 )
             )
             res_to_idx[(chain.name, i)] = (res_idx, atom_idx)
