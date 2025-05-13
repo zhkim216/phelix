@@ -28,6 +28,7 @@ mpnn:
     dropout_p: 0.1
 
   token_features:
+    ca_only: true
     k_neighbors: ${denoiser.mpnn.k_neighbors}
     num_rbf: 16
     num_positional_embeddings: 16
