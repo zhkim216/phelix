@@ -11,10 +11,10 @@ from torch_cluster import knn_graph
 from torchtyping import TensorType
 
 import allatom_design.data.const as const
-import allatom_design.data.residue_constants as rc
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
+from allatom_design.data.data import batched_gather
 
 # https://github.com/pyg-team/pytorch_geometric/issues/8747
 knn_graph = torch.compiler.disable(knn_graph)
@@ -163,6 +163,7 @@ class TokenFeatures(nn.Module):
         self.cfg = cfg
 
         # Parameters
+        self.ca_only = cfg.get("ca_only", True)  # backwards compatibility
         self.k_neighbors = cfg.k_neighbors
         self.num_rbf = cfg.num_rbf
         self.num_positional_embeddings = cfg.num_positional_embeddings
@@ -170,7 +171,8 @@ class TokenFeatures(nn.Module):
 
         # Layers
         self.embeddings = PositionalEncodings(self.num_positional_embeddings)
-        edge_in = self.num_positional_embeddings + self.num_rbf + 1
+        num_pairwise_dists = 1 if self.ca_only else const.max_num_atoms ** 2
+        edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists + 1
         self.edge_embedding = nn.Linear(edge_in, self.edge_n_channel, bias=False)
         self.norm_edges = nn.LayerNorm(self.edge_n_channel)
 
@@ -183,7 +185,16 @@ class TokenFeatures(nn.Module):
         D_neighbors, E_idx = self._dist(X, batch["token_exists_mask"].float())
 
         # Get RBF features
-        RBF_all = self._rbf(D_neighbors)
+        if self.ca_only:
+            RBF_all = self._rbf(D_neighbors)
+        else:
+            X_all = self._get_tokenwise_coords(batch)
+
+            RBF_all = []
+            for i in range(X_all.shape[-2]):
+                for j in range(X_all.shape[-2]):
+                    RBF_all.append(self._get_rbf(X_all[..., i, :], X_all[..., j, :], E_idx))
+            RBF_all = torch.cat(RBF_all, dim=-1)
 
         # Positional encodings
         residue_index = batch["residue_index"]
@@ -204,6 +215,39 @@ class TokenFeatures(nn.Module):
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
         return E, E_idx
+
+
+    # def _get_full_rbf(self, X_all: TensorType["b n_tokens 23 3", float], E_idx: TensorType["b n_tokens k", int]):
+    #     """
+    #     Get RBF features for all pairwise atom distances in the batch.
+    #     """
+    #     # D_all = (X_all[..., None, :] - X_all[..., None, :, :])
+    #     B, N, _ = X_all.shape
+    #     D_all = torch.sqrt(torch.sum((X_all[..., None, :] - X_all[..., None, :, :])**2, dim=-1) + 1e-6).view(B, N, -1)
+    #     D_all_neighbors = gather_edges(D_all[..., None], E_idx).squeeze(-1)
+
+
+    def _get_tokenwise_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_tokens 23 3", float]:
+        """
+        Get token-level coordinates (padded to max_num_atoms per token). Batched version of pad_atom_feats_to_tokenwise for just coords.
+        """
+        B = batch["coords"].shape[0]
+        device = batch["coords"].device
+
+        # Build padded atom idxs
+        n_atoms_per_token = batch["atom_to_token"].sum(dim=-2)
+        atom_idxs = torch.cat([torch.zeros((B, 1), device=device), n_atoms_per_token.cumsum(dim=-1)[:, :-1]], dim=-1).long()
+        padded_atom_idxs = atom_idxs[..., None] + torch.arange(const.max_num_atoms, device=device)[None, None]
+        pad_mask = torch.arange(const.max_num_atoms, device=device)[None, None, :] < n_atoms_per_token[..., None]
+        padded_atom_idxs = padded_atom_idxs * pad_mask  # mask out ghost atoms
+
+        # Gather coords  # TODO: check this carefully
+        B, N, _ = padded_atom_idxs.shape
+        X_all = batched_gather(batch["coords"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.max_num_atoms, 1)
+        tokenwise_atom_cond_mask = batched_gather(batch["atom_cond_mask"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.max_num_atoms)
+
+        X_all = X_all * tokenwise_atom_cond_mask.unsqueeze(-1)  # zero out masked atoms
+        return X_all
 
 
     def _get_token_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n 3", float]:

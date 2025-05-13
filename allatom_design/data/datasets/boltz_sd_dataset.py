@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from allatom_design.data import const
 from allatom_design.data.crop.cropper import Cropper
-from allatom_design.data.data import atom_center_random_augmentation
+from allatom_design.data.data import atom_center_random_augmentation, pad_atom_feats_to_tokenwise
 from allatom_design.data.feature.pad import pad_to_max
 from allatom_design.data.feature.seq_des_featurizer import (
     SequenceDesignFeaturizer, crop_feats)
@@ -283,8 +283,11 @@ class SDDataset(data.Dataset):
         if self.max_tokens is not None:
             feats = crop_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.atoms_per_window_queries)
 
-        feats["coords"] = feats["coords"].squeeze(0)  # squeeze out batch dimension
+        # # Create tokenwise feats  # DEBUG
+        # tokenwise_feats = pad_atom_feats_to_tokenwise(feats, max_atoms_per_token=const.max_num_atoms)
+        # feats["tokenwise_feats"] = tokenwise_feats
 
+        feats["coords"] = feats["coords"].squeeze(0)  # squeeze out batch dimension
         return sample.record.id, feats
 
 
