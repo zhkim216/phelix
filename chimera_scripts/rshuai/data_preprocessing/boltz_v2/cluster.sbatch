@@ -21,4 +21,5 @@ cd ${BASE_DIR}
 # Run script
 python3 allatom_design/data/preprocessing/boltz_v2/cluster.py \
     ccd=/scratch/hielab/rshuai/datasets/boltz/ccd.pkl \
-    processed_targets_dir=/scratch/hielab/rshuai/datasets/boltz_v2/processed_targets
+    processed_targets_dir=/scratch/hielab/rshuai/datasets/boltz_v2/processed_targets \
+    num_workers=64

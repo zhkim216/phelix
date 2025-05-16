@@ -1,2 +1,3 @@
 processed_targets_dir: /media/scratch/datasets/boltz_v2/processed_targets
 ccd: /media/scratch/datasets/boltz/ccd.pkl
+num_workers: 1
