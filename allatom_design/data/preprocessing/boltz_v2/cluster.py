@@ -122,28 +122,16 @@ def main(cfg: DictConfig) -> None:
 
     # Load in manifest_unclustered.json and add cluster IDs to the manifest
     manifest = Manifest.load(f"{cfg.processed_targets_dir}/manifest_unclustered.json")
-    new_records = []
-    for record in manifest.records:
-        struct = load_input(f"{cfg.processed_targets_dir}/structures/{record.id}.npz").structure
-        name_to_chain = {c['name']: c for c in struct.chains}
 
-        new_chain_infos = []
-        for chain_info in record.chains:
-            # Recompute the same key we used above
-            chain = name_to_chain[chain_info.chain_name]
-            key = f"{record.id.lower()}_{chain['name']}"
-
-            seq_hash = hash_sequence(key_to_seq[key])
-            if seq_hash in clustering:
-                cluster_id = clustering[seq_hash]
-            else:
-                print(f"WARNING: {key} not found in clustering")
-                cluster_id = -1
-
-            new_chain_infos.append(replace(chain_info, cluster_id=cluster_id))
-        new_records.append(replace(record, chains=new_chain_infos))
-
+    if use_parallel:
+        new_records = Parallel(n_jobs=cfg.num_workers)(
+            delayed(add_cluster_id_to_record)(record, clustering, key_to_seq, cfg.processed_targets_dir)
+            for record in tqdm(manifest.records, desc="Adding cluster IDs to manifest")
+        )
+    else:
+        new_records = [add_cluster_id_to_record(record, clustering, key_to_seq, cfg.processed_targets_dir) for record in tqdm(manifest.records, desc="Adding cluster IDs to manifest")]
     new_records = [asdict(r) for r in new_records]
+
     with open(f"{cfg.processed_targets_dir}/manifest.json", "w") as f:
         json.dump(new_records, f)
 
@@ -198,6 +186,27 @@ def process_structure_file(structure_file: str) -> tuple[set[str], set[str], set
         key_to_seq,
     )
 
+
+def add_cluster_id_to_record(record: Record, clustering: dict[str, int], key_to_seq: dict[str, str],
+                             processed_targets_dir: str) -> Record:
+    """Returns a new record with the cluster ID added."""
+    struct = load_input(f"{processed_targets_dir}/structures/{record.id}.npz").structure
+    name_to_chain = {c['name']: c for c in struct.chains}
+
+    new_chain_infos = []
+    for chain_info in record.chains:
+        chain = name_to_chain[chain_info.chain_name]
+        key = f"{record.id.lower()}_{chain['name']}"
+
+        seq_hash = hash_sequence(key_to_seq[key])
+        if seq_hash in clustering:
+            cluster_id = clustering[seq_hash]
+        else:
+            print(f"WARNING: {key} not found in clustering")
+            cluster_id = -1
+
+        new_chain_infos.append(replace(chain_info, cluster_id=cluster_id))
+    return replace(record, chains=new_chain_infos)
 
 
 if __name__ == "__main__":
