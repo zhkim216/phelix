@@ -136,19 +136,24 @@ def save_interface_as_mmcif(record: Record,
     """
     Given a record, load in the processed structure. For each interface, filter for the interface and save it as a mmCIF file.
     """
-    processed_structure_file = f"{processed_structure_dir}/{record.id}.npz"
-    structure = load_input(processed_structure_file).structure
+    try:
+        processed_structure_file = f"{processed_structure_dir}/{record.id}.npz"
+        structure = load_input(processed_structure_file).structure
 
-    for interface in record.interfaces:
-        chain_record_1, chain_record_2 = record.chains[interface.chain_1], record.chains[interface.chain_2]
-        chain_name_1, chain_name_2 = chain_record_1.chain_name, chain_record_2.chain_name
-        chain_1, chain_2 = structure.chains[interface.chain_1], structure.chains[interface.chain_2]
-        interface_structure = replace(structure, chains=[chain_1, chain_2])
+        for interface in record.interfaces:
+            chain_record_1, chain_record_2 = record.chains[interface.chain_1], record.chains[interface.chain_2]
+            chain_name_1, chain_name_2 = chain_record_1.chain_name, chain_record_2.chain_name
+            chain_1, chain_2 = structure.chains[interface.chain_1], structure.chains[interface.chain_2]
+            interface_structure = replace(structure, chains=[chain_1, chain_2])
 
-        out_file = f"{interface_out_dir}/{Path(processed_structure_file).stem}_{chain_name_1}_{chain_name_2}.cif"
-        mmcif_str = to_mmcif(interface_structure)
-        with open(out_file, "w") as f:
-            f.write(mmcif_str)
+            out_file = f"{interface_out_dir}/{Path(processed_structure_file).stem}_{chain_name_1}_{chain_name_2}.cif"
+            mmcif_str = to_mmcif(interface_structure)
+            with open(out_file, "w") as f:
+                f.write(mmcif_str)
+    except Exception as e:
+        print(f"WARNING: Error in {record.id}, skipping...")
+        print(e)
+        return
 
 
 if __name__ == "__main__":
