@@ -301,12 +301,15 @@ def mmcif_to_pdb(mmcif_path: str, pdb_out: Path, assign_label_seq_id: bool,
 class Resource:
     """Lightweight handle to CCD data stored once in Redis."""
 
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(self, host: str, port: int, use_pickle: bool = True) -> None:
         self._redis = Redis(host=host, port=port)
+        self.use_pickle = use_pickle
 
     def get(self, key: str, default = None):
         value = self._redis.get(key)
-        return default if value is None else pickle.loads(value)  # noqa: S301
+        if self.use_pickle:
+            return default if value is None else pickle.loads(value)  # noqa: S301
+        return default if value is None else value.decode("utf-8")
 
     def __getitem__(self, key: str):
         out = self.get(key)
