@@ -23,5 +23,4 @@ python3 allatom_design/data/preprocessing/boltz_v2/process_pdbs.py \
     mmcif_dir=/large_storage/hielab/rshuai/datasets/mmCIF \
     out_dir=/scratch/hielab/rshuai/datasets/boltz_v2 \
     software_path=/scratch/hielab/rshuai/software \
-    cluster_rdb_path=/scratch/hielab/rshuai/datasets/boltz_v2/preprocessing/clustering/clustering.rdb \
     num_workers=32

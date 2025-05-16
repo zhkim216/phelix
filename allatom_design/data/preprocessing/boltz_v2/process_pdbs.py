@@ -21,7 +21,7 @@ from allatom_design.data.filter.static.polymer import (ClashingChainsFilter,
                                                        MinimumLengthFilter,
                                                        UnknownFilter)
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
-    Resource, fetch, finalize, pdb_to_mmcif, process_structure)
+    Resource, fetch, finalize, process_structure)
 from allatom_design.eval.eval_utils.eval_setup_utils import start_redis
 
 
@@ -51,11 +51,6 @@ def main(cfg: DictConfig):
     start_redis(redis_host, redis_port, cfg.software_path, cfg.ccd_rdb_path)
     resource = Resource(host=redis_host, port=redis_port)
 
-    # Set up cluster resource in Redis
-    redis_host, redis_port = "localhost", 7778
-    start_redis(redis_host, redis_port, cfg.software_path, cfg.cluster_rdb_path)
-    clusters_resource = Resource(host=redis_host, port=redis_port)
-
     # Fetch data
     mmcif_files = Path(cfg.mmcif_dir).rglob("*.cif")
     data = fetch(mmcif_files, max_file_size=cfg.max_file_size)
@@ -71,7 +66,7 @@ def main(cfg: DictConfig):
             resource=resource,
             outdir=Path(processed_targets_dir),
             filters=filters,
-            clusters=clusters_resource,
+            clusters={},  # we cluster after processing
         )
         p_umap(fn, data, num_cpus=cfg.num_workers, desc="Processing mmCIFs")
     else:
@@ -81,7 +76,7 @@ def main(cfg: DictConfig):
                 resource=resource,
                 outdir=Path(processed_targets_dir),
                 filters=filters,
-                clusters=clusters_resource,
+                clusters={},
             )
 
     # Post‑processing to create manifest.json

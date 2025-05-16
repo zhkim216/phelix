@@ -128,7 +128,7 @@ def finalize(outdir: Path) -> None:
         print("All entries parsed successfully.")
 
     # Save manifest
-    outpath = outdir / "manifest.json"
+    outpath = outdir / "manifest_unclustered.json"
     with outpath.open("w") as f:
         json.dump(records, f)
 
