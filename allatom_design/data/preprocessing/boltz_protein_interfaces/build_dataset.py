@@ -46,24 +46,29 @@ def main(cfg: DictConfig):
     id_to_record = {r.id: r for r in original_boltz_manifest.records}
     fixed_records = []
     for record in tqdm(manifest.records, desc="Fixing cluster ids"):
-        if record.id not in id_to_record:
-            print(f"WARNING: {record.id} not found in original boltz manifest, skipping...")
+        try:
+            if record.id not in id_to_record:
+                print(f"WARNING: {record.id} not found in original boltz manifest, skipping...")
+                continue
+            original_chain_name_to_chain = {c.chain_name: c for c in id_to_record[record.id].chains}
+
+            fixed_chains = []
+            for chain in record.chains:
+                if chain.num_residues != original_chain_name_to_chain[chain.chain_name].num_residues:
+                    # sanity check
+                    print(f"WARNING: In {record.id}, chain {chain.chain_name} has {chain.num_residues} residues in the new manifest, but {original_chain_name_to_chain[chain.chain_name].num_residues} residues in the original manifest, setting to -1...")
+                    chain = replace(chain, cluster_id=-1)
+
+                else:
+                    # fix cluster ids
+                    chain = replace(chain, cluster_id=original_chain_name_to_chain[chain.chain_name].cluster_id)
+                fixed_chains.append(chain)
+            record = replace(record, chains=fixed_chains)
+            fixed_records.append(record)
+        except Exception as e:
+            print(f"WARNING: Error in {record.id}, skipping...")
+            print(e)
             continue
-        original_chain_name_to_chain = {c.chain_name: c for c in id_to_record[record.id].chains}
-
-        fixed_chains = []
-        for chain in record.chains:
-            if chain.num_residues != original_chain_name_to_chain[chain.chain_name].num_residues:
-                # sanity check
-                print(f"WARNING: In {record.id}, chain {chain.chain_name} has {chain.num_residues} residues in the new manifest, but {original_chain_name_to_chain[chain.chain_name].num_residues} residues in the original manifest, setting to -1...")
-                chain = replace(chain, cluster_id=-1)
-
-            else:
-                # fix cluster ids
-                chain = replace(chain, cluster_id=original_chain_name_to_chain[chain.chain_name].cluster_id)
-            fixed_chains.append(chain)
-        record = replace(record, chains=fixed_chains)
-        fixed_records.append(record)
 
     manifest = replace(manifest, records=fixed_records)
 
