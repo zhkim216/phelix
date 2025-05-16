@@ -20,7 +20,5 @@ cd ${BASE_DIR}
 
 # Run script
 python3 allatom_design/data/preprocessing/boltz_v2/cluster.py \
-    sequences=/scratch/hielab/rshuai/datasets/boltz_v2/pdb_seqres.txt \
     ccd=/scratch/hielab/rshuai/datasets/boltz/ccd.pkl \
-    outdir=/scratch/hielab/rshuai/datasets/boltz_v2/preprocessing/clustering \
-    software_path=/scratch/hielab/rshuai/software
+    processed_targets_dir=/scratch/hielab/rshuai/datasets/boltz_v2/processed_targets
