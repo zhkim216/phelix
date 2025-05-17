@@ -1,6 +1,5 @@
 # processed_targets_dir: /scratch/hielab/rshuai/datasets/boltz_v2/processed_targets  # pre-processed structures
 processed_targets_dir: /media/scratch/datasets/boltz_v2/processed_targets  # pre-processed structures
-original_boltz_manifest: /media/scratch/datasets/boltz/rcsb_processed_targets/manifest.json  # original boltz manifest for obtaining clusters
 pdb_path: /media/scratch/datasets/boltz_interfaces  # output dataset path
 
 num_workers: 8
