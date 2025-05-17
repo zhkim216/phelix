@@ -22,6 +22,5 @@ cd ${BASE_DIR}
 # Run script
 python3 allatom_design/data/preprocessing/boltz_protein_interfaces/build_dataset.py \
     processed_targets_dir=/scratch/hielab/rshuai/datasets/boltz_v2/processed_targets \
-    original_boltz_manifest=/scratch/hielab/rshuai/datasets/boltz/rcsb_processed_targets/manifest.json \
     pdb_path=/scratch/hielab/rshuai/datasets/boltz_interfaces \
     num_workers=64
