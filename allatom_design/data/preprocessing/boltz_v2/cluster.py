@@ -15,19 +15,15 @@ from pathlib import Path
 import gemmi
 import hydra
 import pandas as pd
-import rdkit
 import redis
-from Bio import SeqIO
 from joblib import Parallel, delayed
 from omegaconf import DictConfig
-from p_tqdm import p_umap
 from tqdm import tqdm
 
 from allatom_design.data import const
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     Resource, load_input)
 from allatom_design.data.types import Manifest, Record
-from allatom_design.eval.eval_utils.eval_setup_utils import start_redis
 
 
 @hydra.main(config_path="../../../configs/data/preprocessing/boltz_v2", config_name="cluster", version_base="1.3.2",)
@@ -123,34 +119,11 @@ def main(cfg: DictConfig) -> None:
     with (outdir / "clustering.json").open("w") as handle:
         json.dump(clustering, handle)
 
-    # Create a redis database for clustering
-    redis_host, redis_port = "localhost", 7778
-    start_redis(redis_host, redis_port, cfg.software_path, f"{outdir}/clustering.rdb")
-    r = redis.Redis(host=redis_host, port=redis_port)
-    r.flushall()
-    for k, v in tqdm(clustering.items(), desc="Saving clustering to redis"):
-        r.set(k, v)
-    r.save()
-    clustering_resource = Resource(host=redis_host, port=redis_port, use_pickle=False)
-
-    # Create a redis database for key_to_seq
-    redis_host, redis_port = "localhost", 7779
-    start_redis(redis_host, redis_port, cfg.software_path, f"{outdir}/key_to_seq.rdb")
-    r2 = redis.Redis(host=redis_host, port=redis_port)
-    r2.flushall()
-    for k, v in tqdm(key_to_seq.items(), desc="Saving key_to_seq to redis"):
-        r2.set(k, v)
-    r2.save()
-    key_to_seq_resource = Resource(host=redis_host, port=redis_port, use_pickle=False)
-
     # Load in manifest_unclustered.json and add cluster IDs to the manifest
     manifest = Manifest.load(f"{cfg.processed_targets_dir}/manifest_unclustered.json")
 
-    fn = partial(add_cluster_id_to_record, clustering=clustering_resource, key_to_seq=key_to_seq_resource, processed_targets_dir=cfg.processed_targets_dir)
-    if use_parallel:
-        p_umap(fn, manifest.records, num_cpus=cfg.num_workers, desc="Adding cluster IDs to manifest")
-    else:
-        new_records = [fn(record) for record in tqdm(manifest.records, desc="Adding cluster IDs to manifest")]
+    fn = partial(add_cluster_id_to_record, clustering=clustering, key_to_seq=key_to_seq, processed_targets_dir=cfg.processed_targets_dir)
+    new_records = [fn(record) for record in tqdm(manifest.records, desc="Adding cluster IDs to manifest")]
     new_records = [asdict(r) for r in new_records]
 
     with open(f"{cfg.processed_targets_dir}/manifest.json", "w") as f:
@@ -211,14 +184,9 @@ def process_structure_file(structure_file: str) -> tuple[set[str], set[str], set
 def add_cluster_id_to_record(record: Record, clustering: dict[str, int], key_to_seq: dict[str, str],
                              processed_targets_dir: str) -> Record:
     """Returns a new record with the cluster ID added."""
-    struct = load_input(f"{processed_targets_dir}/structures/{record.id}.npz").structure
-    name_to_chain = {c['name']: c for c in struct.chains}
-
     new_chain_infos = []
     for chain_info in record.chains:
-        chain = name_to_chain[chain_info.chain_name]
-        key = f"{record.id.lower()}_{chain['name']}"
-
+        key = f"{record.id.lower()}_{chain_info.chain_name}"
         seq_hash = hash_sequence(key_to_seq[key])
         cluster_id = clustering.get(seq_hash, -1)
         if cluster_id == -1:
