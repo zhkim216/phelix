@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import glob
+from collections import defaultdict
 from dataclasses import asdict, replace
 from functools import partial
 from pathlib import Path
@@ -12,15 +13,10 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 
 from allatom_design.data import const
-from allatom_design.data.feature.seq_des_featurizer import \
-    SequenceDesignFeaturizer
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     load_input
-from allatom_design.data.tokenize.tokenizer import Tokenizer
-from allatom_design.data.types import (Connection, Input, InterfaceInfo,
-                                       Manifest, Record, Structure)
+from allatom_design.data.types import Manifest, Record
 from allatom_design.data.write.mmcif import to_mmcif
-from collections import defaultdict
 
 
 @hydra.main(config_path="../../../configs/data/preprocessing/boltz_protein_interfaces", config_name="build_dataset", version_base="1.3.2")
@@ -36,41 +32,6 @@ def main(cfg: DictConfig):
     manifest_path = f"{cfg.processed_targets_dir}/manifest.json"
     print(f"Loading in manifest from {manifest_path}...")
     manifest = Manifest.load(Path(manifest_path))
-
-    # Load in original boltz manifest
-    original_boltz_manifest_path = cfg.original_boltz_manifest
-    print(f"Loading in original boltz manifest from {original_boltz_manifest_path}...")
-    original_boltz_manifest = Manifest.load(Path(original_boltz_manifest_path))
-
-    # TEMP: fix for cluster ids
-    id_to_record = {r.id: r for r in original_boltz_manifest.records}
-    fixed_records = []
-    for record in tqdm(manifest.records, desc="Fixing cluster ids"):
-        try:
-            if record.id not in id_to_record:
-                print(f"WARNING: {record.id} not found in original boltz manifest, skipping...")
-                continue
-            original_chain_name_to_chain = {c.chain_name: c for c in id_to_record[record.id].chains}
-
-            fixed_chains = []
-            for chain in record.chains:
-                if chain.num_residues != original_chain_name_to_chain[chain.chain_name].num_residues:
-                    # sanity check
-                    print(f"WARNING: In {record.id}, chain {chain.chain_name} has {chain.num_residues} residues in the new manifest, but {original_chain_name_to_chain[chain.chain_name].num_residues} residues in the original manifest, setting to -1...")
-                    chain = replace(chain, cluster_id=-1)
-
-                else:
-                    # fix cluster ids
-                    chain = replace(chain, cluster_id=original_chain_name_to_chain[chain.chain_name].cluster_id)
-                fixed_chains.append(chain)
-            record = replace(record, chains=fixed_chains)
-            fixed_records.append(record)
-        except Exception as e:
-            print(f"WARNING: Error in {record.id}, skipping...")
-            print(e)
-            continue
-
-    manifest = replace(manifest, records=fixed_records)
 
     # Filter for chain pairs
     chain_type_filter = lambda c1, c2: c1.mol_type == const.chain_type_ids[cfg.interface_chain_type] and c2.mol_type == const.chain_type_ids[cfg.interface_chain_type]

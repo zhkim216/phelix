@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
-import glob
-import json
-import pickle
-import shutil
-from dataclasses import asdict, replace
 from functools import partial
 from pathlib import Path
 
 import hydra
-import pandas as pd
 import rdkit
-from joblib import Parallel, delayed
 from omegaconf import DictConfig
 from p_tqdm import p_umap
 from tqdm import tqdm
@@ -38,7 +31,6 @@ def main(cfg: DictConfig):
         ExcludedLigands(),
         MinimumLengthFilter(min_len=4, max_len=5000),
         UnknownFilter(),
-        ConsecutiveCA(max_dist=10.0),
         ClashingChainsFilter(freq=0.3, dist=1.7),
     ]
 

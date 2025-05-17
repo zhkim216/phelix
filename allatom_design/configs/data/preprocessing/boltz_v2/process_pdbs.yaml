@@ -3,6 +3,6 @@ out_dir: /media/scratch/datasets/boltz_v2
 software_path: /media/scratch/software
 
 num_workers: 8
-max_file_size: 7000000
+max_file_size: 2000000
 
 ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
