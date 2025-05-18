@@ -226,7 +226,7 @@ def get_sd_example(struct_file_path: str, data_cfg: DictConfig) -> tuple[dict[st
     # Tokenize structure (no cropping applied)
     tokenized = data_cfg["tokenizer"].tokenize(input_data)
     feats = data_cfg["featurizer"].process(tokenized,
-                                           use_auth_seq_id=True,
+                                           use_auth_as_residx=False,
                                            atoms_per_window_queries=data_cfg["atoms_per_window_queries"],
                                            num_bins=data_cfg["num_bins"])
     feats["coords"] = feats["coords"].squeeze(0)  # remove batch dimension

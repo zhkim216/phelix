@@ -426,7 +426,6 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                 chain_i = input_struct_i.chains[chain_id]
                 res_start = chain_i["res_idx"]
                 res_end = chain_i["res_idx"] + chain_i["res_num"]
-                # sequence = [res["name"] for res in input_structure_i.residues[res_start:res_end]]
                 sequence = input_struct_i.residues[res_start:res_end]["name"].tolist()
                 sequences[entity_id] = sequence
 
@@ -472,6 +471,7 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
         # into the asymmetric unit, and produce just a single assembly
         asym_unit_map = {}
         for chain_id in feats_i["asym_id"].unique().tolist():
+            # Crop feats to this chain
             chain_mask = feats_i["asym_id"] == chain_id
             chain_feats_i = crop_feats(copy.deepcopy(feats_i), chain_mask, max_tokens=None, max_atoms=None)
 

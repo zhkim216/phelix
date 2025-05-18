@@ -95,7 +95,7 @@ def featurize_structure_to_disk(processed_structure_file: str,
 
     # Featurize structure (without padding to max_tokens or max_atoms)
     try:
-        feats = featurizer.process(tokenized, atoms_per_window_queries=atoms_per_window_queries, num_bins=num_bins)
+        feats = featurizer.process(tokenized, use_auth_as_residx=False, atoms_per_window_queries=atoms_per_window_queries, num_bins=num_bins)
     except Exception as e:
         print(f"Error featurizing structure {processed_structure_file}: {e}. Skipping.")
         return
