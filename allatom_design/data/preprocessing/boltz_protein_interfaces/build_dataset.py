@@ -61,6 +61,7 @@ def main(cfg: DictConfig):
     interface_info = defaultdict(list)
     for record in filtered_records:
         for interface in record.interfaces:
+            interface_info["pdb_name"].append(f"{record.id}_{interface.chain_1}_{interface.chain_2}.cif")
             interface_info["record_id"].append(record.id)
             interface_info["resolution"].append(record.structure.resolution)
 

@@ -27,7 +27,7 @@ from allatom_design.data.datasets.boltz_sd_dataset import sd_collator
 from allatom_design.data.datasets.sd_dataset import process_single_pdb_sd
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     load_input, mmcif_to_pdb)
-from allatom_design.data.write.mmcif import write_feats_to_mmcif
+from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
 from allatom_design.eval.eval_utils import sampling_utils
 from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
@@ -167,7 +167,7 @@ def run_seq_des(model: SeqDenoiser,
                 # Save as cif
                 sample_stems = [f"{Path(pdb_file).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_file in enumerate(batch_struct_files)]
                 batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
-                write_feats_to_mmcif(output_feats, filenames=batch_out_files)
+                write_sd_feats_to_mmcif(output_feats, input_structs=input_structures, filenames=batch_out_files)
                 # TODO: temporary fix for converting to PDB
                 batch_out_pdb_files = [out_file.replace(".cif", ".pdb") for out_file in batch_out_files]
                 [mmcif_to_pdb(cif_file, pdb_file, assign_label_seq_id=False, overwrite=True) for cif_file, pdb_file in zip(batch_out_files, batch_out_pdb_files)]

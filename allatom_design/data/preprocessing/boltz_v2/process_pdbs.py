@@ -10,7 +10,6 @@ from tqdm import tqdm
 
 from allatom_design.data.filter.static.ligand import ExcludedLigands
 from allatom_design.data.filter.static.polymer import (ClashingChainsFilter,
-                                                       ConsecutiveCA,
                                                        MinimumLengthFilter,
                                                        UnknownFilter)
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
@@ -22,6 +21,7 @@ from allatom_design.eval.eval_utils.eval_setup_utils import start_redis
 def main(cfg: DictConfig):
     """
     Re-process the Boltz-1 RCSB dataset to get resolution info.
+    Also, unlike AF3, we do not apply ConsecutiveCAFilter, which filters out a huge number of chains.
     """
     # Create dataset directory
     Path(cfg.out_dir).mkdir(parents=True, exist_ok=True)

@@ -108,6 +108,7 @@ Residue = [
     ("is_standard", np.dtype("?")),
     ("is_present", np.dtype("?")),
     ("auth_seq_id", np.dtype("i4")),
+    ("pdb_icode", np.dtype("<U1")),
 ]
 
 Chain = [
@@ -121,6 +122,7 @@ Chain = [
     ("res_idx", np.dtype("i4")),
     ("res_num", np.dtype("i4")),
     ("auth_seq_id", np.dtype("i4")),
+    ("pdb_icode", np.dtype("<U1")),
 ]
 
 Connection = [
@@ -491,6 +493,7 @@ Token = [
     ("resolved_mask", np.dtype("?")),
     ("disto_mask", np.dtype("?")),
     ("auth_seq_id", np.dtype("i4")),
+    ("pdb_icode", np.dtype("i4")),
 ]
 
 TokenBond = [

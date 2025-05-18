@@ -29,7 +29,7 @@ from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     load_input
 from allatom_design.data.types import Structure, Tokenized
 from allatom_design.data.write.mmcif import (write_batched_structures_to_mmcif,
-                                             write_feats_to_mmcif)
+                                             write_ad_feats_to_mmcif)
 from allatom_design.eval.eval_utils import eval_metrics, sampling_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
@@ -459,7 +459,7 @@ def run_motif_cond_type_sampling(model: AtomDenoiser,
             motif_feats_out = batch["motif_inputs"]
             motif_feats_out["coords"] = batch["motif_inputs"]["motif_coords"]
             batch_motif_paths = [f"{motif_out_dir}/motif_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]
-            write_feats_to_mmcif(motif_feats_out, filenames=batch_motif_paths)
+            write_ad_feats_to_mmcif(motif_feats_out, filenames=batch_motif_paths)
 
             # Save centered examples from which motifs were drawn
             batch_centered_paths = [f"{centered_gt_out_dir}/centered_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]

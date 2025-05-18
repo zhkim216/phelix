@@ -30,6 +30,9 @@ FEAT_TO_TOKEN_DIM = {
     "token_resolved_mask": [0],
     "token_disto_mask": [0],
     "token_bonds": [0, 1],
+    "label_seq_id": [0],
+    "auth_seq_id": [0],
+    "pdb_icode": [0],
 
     # atom features
     "atom_to_token": [1],
@@ -46,7 +49,7 @@ FEAT_TO_ATOM_DIM = {
     "ref_charge": [0],
     "ref_atom_name_chars": [0],
     "ref_space_uid": [0],
-    "coords": [1],
+    "coords": [0],
     "atom_to_token": [0],
     "token_to_center_atom": [1],
     "prot_bb_atom_mask": [0],
@@ -134,7 +137,7 @@ def process_sd_token_features(
 
     # Token core features
     token_index = torch.arange(len(token_data), dtype=torch.long)
-    res_idx = from_numpy(token_data["res_idx"]).long()
+    label_seq_id = from_numpy(token_data["res_idx"]).long()
     asym_id = from_numpy(token_data["asym_id"]).long()
     entity_id = from_numpy(token_data["entity_id"]).long()
     sym_id = from_numpy(token_data["sym_id"]).long()
@@ -143,6 +146,7 @@ def process_sd_token_features(
     res_type = one_hot(res_type, num_classes=const.num_tokens)
     disto_center = from_numpy(token_data["disto_coords"])
     auth_seq_id = from_numpy(token_data["auth_seq_id"]).long()
+    pdb_icode = from_numpy(token_data["pdb_icode"]).long()
 
     # Token mask features
     pad_mask = torch.ones(len(token_data), dtype=torch.float)
@@ -163,7 +167,7 @@ def process_sd_token_features(
 
     token_features = {
         "token_index": token_index,
-        "residue_index": auth_seq_id if use_auth_seq_id else res_idx,
+        "residue_index": auth_seq_id if use_auth_seq_id else label_seq_id,
         "asym_id": asym_id,
         "entity_id": entity_id,
         "sym_id": sym_id,
@@ -174,6 +178,9 @@ def process_sd_token_features(
         "token_pad_mask": pad_mask,
         "token_resolved_mask": resolved_mask,
         "token_disto_mask": disto_mask,
+        "label_seq_id": label_seq_id,
+        "auth_seq_id": auth_seq_id,
+        "pdb_icode": pdb_icode,
     }
     return token_features
 
@@ -290,7 +297,7 @@ def process_sd_atom_features(
         "ref_charge": ref_charge,
         "ref_atom_name_chars": ref_atom_name_chars,
         "ref_space_uid": ref_space_uid,
-        "coords": coords,
+        "coords": coords.squeeze(0),
         "atom_pad_mask": pad_mask,
         "atom_to_token": atom_to_token,
         "token_to_center_atom": token_to_center_atom,
@@ -326,6 +333,8 @@ def pad_sd_feats(feats: dict[str, Tensor],
         token_pad_len = max_tokens - len(feats["token_index"])
         if token_pad_len > 0:
             for k, v in FEAT_TO_TOKEN_DIM.items():
+                if k not in feats:
+                    continue
                 for dim_to_pad in v:
                     feats[k] = pad_dim(feats[k], dim_to_pad, token_pad_len)
 
@@ -340,6 +349,8 @@ def pad_sd_feats(feats: dict[str, Tensor],
 
     if atom_pad_len > 0:
         for k, v in FEAT_TO_ATOM_DIM.items():
+            if k not in feats:
+                continue
             for dim_to_pad in v:
                 feats[k] = pad_dim(feats[k], dim_to_pad, atom_pad_len)
 
@@ -347,26 +358,34 @@ def pad_sd_feats(feats: dict[str, Tensor],
 
 
 def crop_feats(feats: dict[str, Tensor],
-               token_crop_mask: TensorType["n", bool],
+               token_crop_mask: np.ndarray,
                max_tokens: int | None,
                max_atoms: int | None,
-               atoms_per_window_queries: int) -> dict[str, Tensor]:
+               atoms_per_window_queries: int = 32) -> dict[str, Tensor]:
     """
-    Crop features based on a crop mask specified at the token level.
+    In-place crop features based on a crop mask specified at the token level.
 
     Note: after cropping, ref_space_uid and token_index will refer to positions *before* cropping, so make sure to
     account for this when using these features.
     """
+    # Handle some additional cases
+    if isinstance(token_crop_mask, Tensor):
+        token_crop_mask = token_crop_mask.cpu().numpy()
+
     # First, get atoms to crop out as well
     atom_crop_mask = (feats["atom_to_token"] @ token_crop_mask).bool()
 
     # Subset each feature at the token level
     for k, v in FEAT_TO_TOKEN_DIM.items():
+        if k not in feats:
+            continue
         for dim_to_crop in v:
             feats[k] = crop_dim(feats[k], dim_to_crop, token_crop_mask)
 
     # Subset each feature at the atom level
     for k, v in FEAT_TO_ATOM_DIM.items():
+        if k not in feats:
+            continue
         for dim_to_crop in v:
             feats[k] = crop_dim(feats[k], dim_to_crop, atom_crop_mask)
 
