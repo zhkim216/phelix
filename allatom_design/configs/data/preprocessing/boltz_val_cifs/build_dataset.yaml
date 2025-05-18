@@ -23,8 +23,9 @@ pdb_processing_cfg:
     # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)
     ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
 
+save_cifs: false  # if true, save selected cifs to new directory for convenience in visualization
 
-# Tokenizer and featurizer configs
+# Tokenizer and featurizer configs, needed if save_cifs is true
 data_cfg:
   atoms_per_window_queries: 32
   num_bins: 64

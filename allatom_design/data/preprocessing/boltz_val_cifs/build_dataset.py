@@ -10,8 +10,6 @@ from tqdm import tqdm
 from allatom_design.data.filter.dynamic.chain_type_size import \
     ChainTypeSizeFilter
 from allatom_design.data.filter.dynamic.max_residues import MaxResiduesFilter
-from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
-    load_input
 from allatom_design.data.types import Record
 from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
@@ -64,30 +62,39 @@ def main(cfg: DictConfig):
         with open(f"{record_dir}/{Path(processed_struct_file).stem}.json", "r") as f:
             records.append(Record.from_dict(json.load(f)))
 
-    # Filter for single protein chain, total residues between [32, 512]
-    filters = [
-        ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
-        MaxResiduesFilter(min_residues=32, max_residues=512),
-    ]
-    filtered_records = [r for r in records if all(f.filter(r) for f in filters)]
+    val_subset_filters = {
+        "protein_monomer_32_512": [
+            ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
+            MaxResiduesFilter(min_residues=32, max_residues=512),
+        ],
+        "protein_monomer_32_256": [
+            ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
+            MaxResiduesFilter(min_residues=32, max_residues=256),
+        ],
+    }
 
-    # Save PDB names to txt
-    lists_dir = f"{cfg.out_dir}/pdb_name_lists"
-    Path(lists_dir).mkdir(parents=True, exist_ok=True)
-    with open(f"{lists_dir}/protein_monomer_32_512.txt", "w") as f:
-        for record in filtered_records:
-            f.write(f"{record.id}.cif\n")
+    for val_subset_name, filters in val_subset_filters.items():
+        filtered_records = [r for r in records if all(f.filter(r) for f in filters)]
 
-    # TEMP: save cifs to new directory for convenience
-    # Initialize tokenizer and featurizer
-    data_cfg = hydra.utils.instantiate(cfg.data_cfg)
+        # Save PDB names to txt
+        lists_dir = f"{cfg.out_dir}/pdb_name_lists"
+        Path(lists_dir).mkdir(parents=True, exist_ok=True)
+        with open(f"{lists_dir}/{val_subset_name}.txt", "w") as f:
+            for record in filtered_records:
+                f.write(f"{record.id}.cif\n")
 
-    protein_monomer_32_512_dir = f"{cfg.out_dir}/protein_monomer_32_512"
-    Path(protein_monomer_32_512_dir).mkdir(parents=True, exist_ok=True)
-    for record in filtered_records:
-        processed_struct_file = f"{processed_struct_dir}/structures/{record.id}.npz"
-        example, input_structure = get_sd_batch([processed_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
-        write_sd_feats_to_mmcif(example, input_structure, [f"{protein_monomer_32_512_dir}/{record.id}.cif"])
+        if cfg.save_cifs:
+            # Initialize tokenizer and featurizer
+            data_cfg = hydra.utils.instantiate(cfg.data_cfg)
+
+            subset_cif_dir = f"{cfg.out_dir}/subset_cifs/{val_subset_name}"
+            Path(subset_cif_dir).mkdir(parents=True, exist_ok=True)
+
+            # TODO: this can be easily parallelized
+            for record in tqdm(filtered_records, desc=f"Saving {val_subset_name} cifs"):
+                processed_struct_file = f"{processed_struct_dir}/structures/{record.id}.npz"
+                example, input_structure = get_sd_batch([processed_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
+                write_sd_feats_to_mmcif(example, input_structure, [f"{subset_cif_dir}/{record.id}.cif"])
 
 
 if __name__ == "__main__":
