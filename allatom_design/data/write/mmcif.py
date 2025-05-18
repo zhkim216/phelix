@@ -1,3 +1,4 @@
+import copy
 import io
 import warnings
 from collections.abc import Iterator
@@ -14,6 +15,7 @@ from torchtyping import TensorType
 
 from allatom_design.data import const
 from allatom_design.data.data import to
+from allatom_design.data.feature.seq_des_featurizer import crop_feats
 from allatom_design.data.types import Structure
 
 # Ignore warnings about empty entities in mmCIF files
@@ -233,10 +235,11 @@ def write_batched_structures_to_mmcif(structures: list[Structure],
         write_structure_to_mmcif(structure_i, filename_i, plddts_i)
 
 
-def write_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
+def write_ad_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                          filenames: list[str]) -> None:
     """
     Convert a batched dictionary of features to a list of files.
+    TODO: support multiple chains properly
 
     By default, we use the sequence in the features to determine label_seq_id.
     Since features may be cropped (e.g. for a motif), we also save the original residue indices in the auth_seq_id field.
@@ -346,6 +349,176 @@ def write_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                         element = element.upper()
 
                         pos = feats_i["coords"][ai].tolist()
+                        biso = 100.00
+
+                        yield Atom(
+                            asym_unit=asym_unit_map[chain_id],
+                            type_symbol=element,
+                            seq_id=label_seq_id_atomwise[ai],
+                            atom_id=name,
+                            x=f"{pos[0]:.5f}",
+                            y=f"{pos[1]:.5f}",
+                            z=f"{pos[2]:.5f}",
+                            het=het,
+                            biso=biso,
+                            occupancy=1)
+
+        # Add the model and modeling protocol to the file and write them out:
+        model = _MyModel(assembly=modeled_assembly, name="Model")
+        model_group = ModelGroup([model], name="All models")
+        system.model_groups.append(model_group)
+
+        fh = io.StringIO()
+        dumper.write(fh, [system])
+        mmcif_str = fh.getvalue()
+        with open(filenames[i], "w") as f:
+            f.write(mmcif_str)
+
+
+def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
+                            input_structs: list[Structure],  # needed for ligand sequence info
+                            filenames: list[str]) -> None:
+    """
+    Convert a batched dictionary of sequence design features to a list of files.
+
+    By default, we use the sequence in the features to determine label_seq_id.
+    Since features may be cropped (e.g. for a motif), we also save the original residue indices in the auth_seq_id field.
+    """
+    periodic_table = Chem.GetPeriodicTable()  # for element mapping
+
+    # Unbatch feats into a list of dicts
+    feats_list = []
+    for i in range(feats["label_seq_id"].shape[0]):
+        feats_list.append({k: v[i] if isinstance(v, torch.Tensor) else v for k, v in to(feats, "cpu").items()})
+
+    for i, (feats_i, input_struct_i) in enumerate(zip(feats_list, input_structs)):
+        system = System()
+
+        # Map entities to chain_ids
+        entity_to_chains = {}
+        entity_to_moltype = {}
+
+        for chain_id in feats_i["asym_id"].unique().tolist():
+            chain_mask = feats_i["asym_id"] == chain_id
+            entity_id = feats_i["entity_id"][chain_mask].unique().tolist()
+            assert len(entity_id) == 1, f"Expected exactly one unique entity_id for chain {chain_id}, got {len(entity_id)}"
+
+            entity_id = entity_id[0]
+            entity_to_chains.setdefault(entity_id, []).append(chain_id)
+            entity_to_moltype[entity_id] = feats_i["mol_type"][chain_mask].unique().tolist()[0]
+
+        # Map entities to sequences
+        sequences = {}
+        for entity_id in entity_to_chains:
+            # Get the first chain
+            chain_id = entity_to_chains[entity_id][0]
+            chain_mask = feats_i["asym_id"] == chain_id
+            mol_type = feats_i["mol_type"][chain_mask].unique().tolist()[0]
+            if mol_type != const.chain_type_ids["NONPOLYMER"]:
+                # Extract sequence from the features, since we may have redesigned these
+                # Get the unpadded sequence for this chain
+                res_type = feats_i["res_type"][chain_mask].argmax(dim=-1)
+                res_type = res_type[feats_i["token_pad_mask"][chain_mask].bool()].tolist()
+                sequence = [const.tokens[res_type[ri]] for ri in range(len(res_type))]
+                sequences[entity_id] = sequence
+            elif mol_type == const.chain_type_ids["NONPOLYMER"]:
+                # Extract sequence from the input structure, since these chains are never redesigned
+                chain_i = input_struct_i.chains[chain_id]
+                res_start = chain_i["res_idx"]
+                res_end = chain_i["res_idx"] + chain_i["res_num"]
+                # sequence = [res["name"] for res in input_structure_i.residues[res_start:res_end]]
+                sequence = input_struct_i.residues[res_start:res_end]["name"].tolist()
+                sequences[entity_id] = sequence
+
+        # Create entity objects
+        lig_entity = None
+        entities_map = {}
+        for entity_id, sequence in sequences.items():
+            mol_type = entity_to_moltype[entity_id]
+
+            if mol_type == const.chain_type_ids["PROTEIN"]:
+                alphabet = ihm.LPeptideAlphabet()
+                chem_comp = lambda x: ihm.LPeptideChemComp(id=x, code=x, code_canonical="X")  # noqa: E731
+            elif mol_type == const.chain_type_ids["DNA"]:
+                alphabet = ihm.DNAAlphabet()
+                chem_comp = lambda x: ihm.DNAChemComp(id=x, code=x, code_canonical="N")  # noqa: E731
+            elif mol_type == const.chain_type_ids["RNA"]:
+                alphabet = ihm.RNAAlphabet()
+                chem_comp = lambda x: ihm.RNAChemComp(id=x, code=x, code_canonical="N")  # noqa: E731
+            elif len(sequence) > 1:
+                alphabet = {}
+                chem_comp = lambda x: ihm.SaccharideChemComp(id=x)  # noqa: E731
+            else:
+                alphabet = {}
+                chem_comp = lambda x: ihm.NonPolymerChemComp(id=x)  # noqa: E731
+
+            # Handle smiles
+            if len(sequence) == 1 and (sequence[0] == "LIG"):
+                if lig_entity is None:
+                    seq = [chem_comp(sequence[0])]
+                    lig_entity = Entity(seq)
+                model_e = lig_entity
+            else:
+                seq = [
+                    alphabet[item] if item in alphabet else chem_comp(item)
+                    for item in sequence
+                ]
+                model_e = Entity(seq)
+
+            for chain_id in entity_to_chains[entity_id]:
+                entities_map[chain_id] = model_e
+
+        # We don't assume that symmetry is perfect, so we dump everything
+        # into the asymmetric unit, and produce just a single assembly
+        asym_unit_map = {}
+        for chain_id in feats_i["asym_id"].unique().tolist():
+            chain_mask = feats_i["asym_id"] == chain_id
+            chain_feats_i = crop_feats(copy.deepcopy(feats_i), chain_mask, max_tokens=None, max_atoms=None)
+
+            # Map from label_seq_id to auth_seq_id
+            auth_seq_ids = chain_feats_i["auth_seq_id"][chain_feats_i["token_pad_mask"].bool()].tolist()
+            pdb_icodes = chain_feats_i["pdb_icode"][chain_feats_i["token_pad_mask"].bool()].tolist()
+            paired = [(seq_id, chr(icode + 32).strip()) for seq_id, icode in zip(auth_seq_ids, pdb_icodes)]  # pair up auth_seq_id and pdb_icode
+            label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()].tolist()
+            auth_seq_id_map = {label_seq_id + 1: pair for label_seq_id, pair in zip(label_seq_ids, paired)}  # renumber label seq id to 1-indexed
+
+            # Set chain_tag to A,B,C, etc., 0 indexed
+            chain_tag = chr(chain_id + 65)
+            asym = AsymUnit(entities_map[chain_id], auth_seq_id_map=auth_seq_id_map, id=chain_tag)
+            asym_unit_map[chain_id] = asym
+
+        modeled_assembly = Assembly(asym_unit_map.values(), name="Modeled assembly")
+
+        class _MyModel(AbInitioModel):
+            def get_atoms(self) -> Iterator[Atom]:
+                # Add all atom sites.
+                for chain_id in feats_i["asym_id"].unique().tolist():
+                    # First, subset relevant feats to this chain
+                    chain_mask = feats_i["asym_id"] == chain_id
+                    chain_feats_i = crop_feats(copy.deepcopy(feats_i), chain_mask, max_tokens=None, max_atoms=None)
+
+                    # Get het flag
+                    het = chain_feats_i["mol_type"].unique().tolist()[0] == const.chain_type_ids["NONPOLYMER"]
+
+                    # Get label_seq_id for each atom
+                    label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()] + 1  # renumber label seq id to 1-indexed
+                    label_seq_id_atomwise = (chain_feats_i["atom_to_token"].float() @ label_seq_ids.float()).long().tolist()
+
+                    # Convert from one-hot to index
+                    atom_names = chain_feats_i["ref_atom_name_chars"].long().argmax(dim=-1)
+                    atom_elements = chain_feats_i["ref_element"].long().argmax(dim=-1)
+
+                    for ai in range(chain_feats_i["coords"].shape[0]):
+                        if not chain_feats_i["atom_pad_mask"][ai] or not chain_feats_i["atom_resolved_mask"][ai]:
+                            continue
+                        name = atom_names[ai]
+                        name = [chr(c + 32) for c in name if c != 0]
+                        name = "".join(name)
+
+                        element = periodic_table.GetElementSymbol(atom_elements[ai].item())
+                        element = element.upper()
+
+                        pos = chain_feats_i["coords"][ai].tolist()
                         biso = 100.00
 
                         yield Atom(

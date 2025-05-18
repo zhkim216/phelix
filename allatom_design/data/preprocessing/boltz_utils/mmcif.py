@@ -1,4 +1,5 @@
 import contextlib
+import re
 from dataclasses import dataclass, replace
 from typing import Optional
 
@@ -10,16 +11,9 @@ from rdkit.Chem.rdchem import Conformer, Mol
 from sklearn.neighbors import KDTree
 
 from allatom_design.data import const
-from allatom_design.data.types import (
-    Atom,
-    Bond,
-    Chain,
-    Connection,
-    Interface,
-    Residue,
-    Structure,
-    StructureInfo,
-)
+from allatom_design.data.types import (Atom, Bond, Chain, Connection,
+                                       Interface, Residue, Structure,
+                                       StructureInfo)
 
 ####################################################################################################
 # DATACLASSES
@@ -1011,11 +1005,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
         atom_num = sum(len(res.atoms) for res in chain.residues)
 
         # Include auth_seq_id, using the first residue's auth_seq_id for the chain
-        try:
-            auth_seq_id = int(chain.residues[0].orig_idx)  # does not support insertion codes
-        except:
-            # fall back to 0 if orig_idx is not an integer
-            auth_seq_id = 0
+        auth_seq_id, icode = parse_auth_seq_id(chain.residues[0].orig_idx)
 
         # Find all copies of this chain in the assembly
         entity_id = entity_ids[chain.name]
@@ -1032,6 +1022,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                 res_idx,
                 res_num,
                 auth_seq_id,
+                icode,
             )
         )
         chain_to_idx[chain.name] = asym_id
@@ -1041,11 +1032,9 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
         for i, res in enumerate(chain.residues):
             atom_center = atom_idx + res.atom_center
             atom_disto = atom_idx + res.atom_disto
-            try:
-                auth_seq_id = int(res.orig_idx)
-            except:
-                # fall back to 0 if orig_idx is not an integer
-                auth_seq_id = 0
+
+            # Parse auth_seq_id
+            auth_seq_id, icode = parse_auth_seq_id(res.orig_idx)
 
             res_data.append(
                 (
@@ -1059,6 +1048,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                     res.is_standard,
                     res.is_present,
                     auth_seq_id,
+                    icode,
                 )
             )
             res_to_idx[(chain.name, i)] = (res_idx, atom_idx)
@@ -1135,3 +1125,19 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
     )
 
     return ParsedStructure(data=data, info=info, covalents=[])
+
+
+def parse_auth_seq_id(orig_idx: str | None) -> tuple[int, str]:
+    """
+    Parse auth_seq_id and icode from res.orig_idx.
+
+    If orig_idx is None, return (0, ' ').
+
+    """
+    if orig_idx is None:
+        return 0, ' '
+    m = re.match(r'^(-?\d+)([A-Za-z]?)$', orig_idx)
+    if m:
+        return int(m.group(1)), m.group(2)
+    print(f"Warning: could not parse auth_seq_id for residue index {orig_idx}, defaulting to 0")
+    return 0, ' '
