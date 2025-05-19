@@ -1,26 +1,15 @@
-import os
 from collections import defaultdict
-from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Tuple
 
-import jax.numpy as jnp
+import numpy as np
 import torch
-from colabdesign import clear_mem
-from colabdesign.af import mk_af_model
 from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
 from tqdm import tqdm
 from transformers import AutoTokenizer, EsmForProteinFolding, EsmTokenizer
 
-import omegafold
 from allatom_design.data import data
 from allatom_design.data.residue_constants import STANDARD_ATOM_MASK
-from omegafold import pipeline as of_pipeline
-from omegafold.utils.torch_utils import recursive_to
-import argparse
-from allatom_design.data import residue_constants as rc
-import numpy as np
-from colabdesign.af.alphafold.common import protein
 
 
 def run_esmfold(sequence_list: List[str],
@@ -235,214 +224,6 @@ def create_batched_seq_dataset(all_sequences: List[str],
 
     yield collate_fn(batch_examples)
 
-def save_best_model(af_model, filename):
-    aux = af_model._tmp["best"]["aux"]["all"]
-    plddt = np.mean(aux["plddt"], axis=-1)
-    best_model_idx = np.argmax(plddt)
-    p = {k:aux[k][best_model_idx] for k in ["aatype","residue_index","atom_positions","atom_mask"]}
-    p["b_factors"] = 100 * p["atom_mask"] * aux["plddt"][best_model_idx][...,None]
-
-    def to_pdb_str(x, n=None):
-      p_str = protein.to_pdb(protein.Protein(**x))
-      p_str = "\n".join(p_str.splitlines()[1:-2])
-      return p_str
-
-    p_str = to_pdb_str(p) + "\nEND\n"
-    with open(filename, 'w') as f:
-        f.write(p_str)
-
-
-def run_af2(sequences_list: List[str],
-            residue_index_list: List[TensorType["n_s", int]],
-            chain_index_list: List[TensorType["n_s", int]],
-            pdbs: List[str],  # used for extracting residue index. TODO remove dependence on pdb file
-            af_model: mk_af_model,
-            out_dir: str,
-            num_models: int,
-            sample_models: bool,
-            num_recycles: int,
-            save_best: bool = True,
-            rm_template_interchain: bool = False,
-            chains: Optional[str] = None,
-            **kwargs) -> Tuple[Dict[str, torch.Tensor],
-                               List[str]]:
-    """
-    Predict sequences with AlphaFold2.
-
-    Return a tuple (dictionary of outputs, output filenames).
-    """
-    Path(out_dir).mkdir(exist_ok=True, parents=True)
-    output_files = []
-
-    # Predict structures
-    for _, (seq, pdb, residue_index, chain_index) in enumerate(zip(sequences_list, pdbs, residue_index_list, chain_index_list)):
-        output_pdb = f"{out_dir}/af2_{Path(pdb).stem}.pdb"
-        assert len(chain_index_list[0].unique()) == 1, "Multi-chain prediction not supported yet"
-        # af_model.prep_inputs(pdb, chains, ignore_missing=False)
-        _prep_struct_pred(af_model, residue_index)
-
-        af_model.restart()
-        af_model.set_opt("template", rm_ic=rm_template_interchain)
-        af_model.predict(seq=seq,
-                         num_models=num_models,
-                         sample_models=sample_models,
-                         num_recycles=num_recycles,
-                         verbose=False)
-
-        af_model._save_results(save_best=save_best, best_metric="plddt", verbose=False)
-
-        if save_best:
-            save_best_model(af_model, output_pdb)
-        else:
-            af_model.save_current_pdb(output_pdb)
-
-        output_files.append(output_pdb)
-
-    preds = [data.load_feats_from_pdb(pdb) for pdb in output_files]
-
-    # Preprocess plddt-CA
-    plddt = [pred["b_factors"] for pred in preds]
-    ca_plddt = [pred["b_factors"][:, 1] for pred in preds]
-    avg_ca_plddt = [torch.mean(ca_plddt, dim=0, keepdim=True) for ca_plddt in ca_plddt]  # keep sequence dim for consistency
-
-    # Prepare AF2 outputs
-    af2_outputs = {
-        "pred_coords": [pred["all_atom_positions"] for pred in preds],
-        "plddt": plddt,
-        "ca_plddt": ca_plddt,
-        "seq_mask": [pred["seq_mask"] for pred in preds],
-        "aatype": [pred["aatype"] for pred in preds],
-        "residue_index": [pred["residue_index"].long() for pred in preds],
-        "avg_ca_plddt": avg_ca_plddt,
-        "atom_mask": [pred["all_atom_mask"] for pred in preds],
-    }
-
-    return af2_outputs, output_files
-
-
-def _prep_struct_pred(model: mk_af_model,
-                      residue_index: TensorType["n_s", int]):
-    '''
-    Prep inputs for structure prediction without requiring an input PDB.
-    Adapted from ColabDesign's _prep_fixbb function.
-    ---------------------------------------------------
-    if copies > 1:
-      -homooligomer=True - input pdb chains are parsed as homo-oligomeric units
-      -repeat=True       - tie the repeating sequence within single chain
-    -rm_template_seq     - if template is defined, remove information about template sequence
-    -fix_pos="1,2-10"    - specify which positions to keep fixed in the sequence
-                           note: supervised loss is applied to all positions, use "partial"
-                           protocol to apply supervised loss to only subset of positions
-    -ignore_missing=True - skip positions that have missing density (no CA coordinate)
-    ---------------------------------------------------
-    '''
-    # prep features
-    residue_index = np.array(residue_index)
-    model._len = residue_index.shape[0]
-    model._lengths = [model._len]
-
-    # feat dims
-    num_seq = 1
-    res_idx = residue_index
-
-    # configure input features
-    model._inputs = model._prep_features(num_res=sum(model._lengths), num_seq=num_seq)
-    model._inputs["residue_index"] = res_idx
-    model._wt_aatype = np.full(model._len, fill_value=-1, dtype=np.int64)
-
-    model._prep_model()
-
-
-def run_omegafold(sequences_list: List[str],
-                  residue_index_list: List[TensorType["n_s", int]],
-                  omegafold_model: omegafold.OmegaFold,
-                  out_dir: str,
-                  device: str,
-                  num_pseudo_msa: int = 15,
-                  mask_rate: float = 0.12,
-                  num_recycle: int = 10,
-                  deterministic: bool = True,
-                  subbatch_size: Optional[int] = None,
-                  **kwargs):
-    raise NotImplementedError("OmegaFold not supported anymore; code needs to be updated")
-    forward_config = argparse.Namespace(
-        subbatch_size=subbatch_size,
-        num_recycle=num_recycle,
-    )
-    of_inputs = omegafold_inputs(sequences_list, num_pseudo_msa, mask_rate, num_recycle, deterministic, device)
-    of_outputs = defaultdict(list)
-
-    for (of_input, of_aux), residue_index in tqdm(zip(of_inputs, residue_index_list), total=len(residue_index_list),
-                                                  desc="Running OmegaFold", leave=False):
-        # TODO: like ESMFold, omegafold seems to ignore discontiguous residues
-        output = omegafold_model(of_input, predict_with_confidence=True, fwd_cfg=forward_config)
-
-        # Save outputs
-        aatype, seq_mask = of_aux["aatype"], of_aux["seq_mask"]
-        atom37_coords = data.atom14_aatype_to_atom37(output["final_atom_positions"].detach().cpu(), aatype.detach().cpu())
-        atom37_mask = torch.tensor(STANDARD_ATOM_MASK[aatype]) * seq_mask[..., None]
-
-        of_outputs["pred_coords"].append(atom37_coords)
-        of_outputs["plddt"].append(output["confidence"].detach().cpu())
-        of_outputs["seq_mask"].append(seq_mask)
-        of_outputs["aatype"].append(aatype)
-        of_outputs["residue_index"].append(residue_index.detach().cpu())
-        of_outputs["avg_ca_plddt"].append(output["confidence"].mean(dim=0, keepdim=True).detach().cpu())
-        of_outputs["atom_mask"].append(atom37_mask)
-
-
-    return of_outputs
-
-
-
-def omegafold_inputs(sequences_list: List[str],
-                     num_pseudo_msa: int,
-                     mask_rate: float,
-                     num_cycle: int,
-                     deterministic: bool,
-                     device: str):
-    """
-    Adapted from omegafold.pipeline.fasta2inputs
-    """
-    aux = {}
-
-    for seq in sequences_list:
-        seq = seq.replace("Z", "E").replace("B", "D").replace("U", "C")
-        aatype = torch.LongTensor(
-            [rc.restypes_with_x.index(aa) if aa != '-' else 21 for aa in seq]
-        )
-        mask = torch.ones_like(aatype).float()
-
-        num_res = len(aatype)
-        data = list()
-        g = None
-        if deterministic:
-            g = torch.Generator()
-            g.manual_seed(num_res)
-        for _ in range(num_cycle):
-            p_msa = aatype[None, :].repeat(num_pseudo_msa, 1)
-            p_msa_mask = torch.rand([num_pseudo_msa, num_res], generator=g).gt(mask_rate)
-            p_msa_mask = torch.cat((mask[None, :], p_msa_mask), dim=0)
-            p_msa = torch.cat((aatype[None, :], p_msa), dim=0)
-            p_msa[~p_msa_mask.bool()] = 21
-            data.append({"p_msa": p_msa, "p_msa_mask": p_msa_mask})
-
-        aux["aatype"] = aatype
-        aux["seq_mask"] = mask
-        yield recursive_to(data, device=device), aux
-
-
-def get_omegafold_model(cache_file: str, device: str):
-    Path(cache_file).parent.mkdir(exist_ok=True, parents=True)
-    model = omegafold.OmegaFold(omegafold.make_config(1))
-    state_dict = of_pipeline._load_weights("https://helixon.s3.amazonaws.com/release1.pt", cache_file)
-    if "model" in state_dict:
-        state_dict = state_dict.pop("model")
-    model.load_state_dict(state_dict)
-    model.eval()
-    model.to(device)
-    return model
-
 
 def get_esmfold_model(device: str):
     # Set up ESMFold
@@ -460,36 +241,19 @@ def get_struct_pred_model(cfg: DictConfig,
 
     Example config:
     struct_pred_cfg:
-        model_name: "esmfold"  # ["esmfold", "af2", "omegafold"]
-        af2:
-            data_dir: # directory containing "params/" with af2 model params
-            num_models: 1  # only 1 model is currently supported
-            sample_models: true  # randomly sample models from the ensemble
-            num_recycles: 3
-            use_multimer: false
-        omegafold:
-            cache_dir: # directory to cache omegafold model
+        model_name: "esmfold"  # ["esmfold", "boltz-1"]
+        esmfold:
+            max_tokens_per_batch: 1024
     """
     model_name = cfg.model_name
     base_cfg = OmegaConf.load(cfg.base_cfg)
     cfg = OmegaConf.merge(base_cfg, cfg)
 
     struct_pred_model = {"model_name": model_name, "cfg": cfg, "device": device}
-    if model_name == "af2":
-        clear_mem()
-        af_model = mk_af_model(data_dir=cfg.af2.data_dir,
-                               use_multimer=cfg.af2.use_multimer)
-        struct_pred_model["af_model"] = af_model
-        af_model._get_loss = af_model._loss_unsupervised
-
-    elif model_name == "esmfold":
+    if model_name == "esmfold":
         esmfold, tokenizer = get_esmfold_model(device=device)
         struct_pred_model["esmfold"] = esmfold
         struct_pred_model["tokenizer"] = tokenizer
-
-    elif model_name == "omegafold":
-        omegafold = get_omegafold_model(cache_file=cfg.omegafold.cache_file, device=device)
-        struct_pred_model["omegafold"] = omegafold
     else:
         raise ValueError(f"Invalid model name: {model_name}")
 

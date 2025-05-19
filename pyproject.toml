@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "allatom_design"
+version = "0.1"
+requires-python = ">=3.9"
+
+[tool.setuptools.packages.find]
+exclude = ["tests", "scripts"]
