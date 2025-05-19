@@ -26,8 +26,10 @@ pdb_processing_cfg:
 
   # CCD
   ccd_cfg:
-    # If using redis (fast)
     software_path: ${software_path}
+    use_redis: true
+
+    # If using redis (fast)
     ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
 
     # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)

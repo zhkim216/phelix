@@ -26,10 +26,7 @@ from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     mmcif_to_pdb
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
-from allatom_design.eval.eval_utils.fampnn_utils import run_fampnn
-from allatom_design.eval.eval_utils.folding_utils import (run_af2,
-                                                          run_esmfold_batched,
-                                                          run_omegafold)
+from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched
 from allatom_design.eval.eval_utils.proteinmpnn_utils import run_mpnn
 
 
@@ -196,7 +193,7 @@ def run_self_consistency_eval(pdbs: List[str],
     Returns:
     --------
     Dictionary mapping from PDB paths to results containing keys:
-    - mpnn_preds or fampnn_preds: Sequence design predictions (if seq_des_model provided)
+    - mpnn_preds: Sequence design predictions (if seq_des_model provided)
     - struct_preds: Structure prediction outputs with coordinates and confidence metrics
     - sc_metrics: Calculated evaluation metrics
 
@@ -229,10 +226,7 @@ def run_self_consistency_eval(pdbs: List[str],
             for pdb, mpnn_preds in mpnn_preds_dict.items():
                 sc_info[pdb]["seq_des_preds"] = mpnn_preds
         elif seq_des_model_name == "fampnn":
-            fampnn_model, fampnn_cfg = seq_des_model["fampnn_model"], seq_des_model["fampnn_cfg"]
-            fampnn_preds_dict, _ = run_fampnn(fampnn_model, cfg=fampnn_cfg, pdb_paths=pdbs, device=device)
-            for pdb, fampnn_preds in fampnn_preds_dict.items():
-                sc_info[pdb]["seq_des_preds"] = fampnn_preds
+            raise NotImplementedError("FAMPNN is no longer supported")
 
     # === Run structure prediction === #
     if run_seq_des:
@@ -243,22 +237,9 @@ def run_self_consistency_eval(pdbs: List[str],
             if seq_des_model_name == "proteinmpnn":
                 sequences_list, residue_index_list, chain_index_list = seq_des_preds["mpnn_seqs"], seq_des_preds["residue_index"], seq_des_preds["chain_index"]
             elif seq_des_model_name == "fampnn":
-                sequences_list, residue_index_list, chain_index_list = seq_des_preds["pred_seqs"], seq_des_preds["residue_index"], seq_des_preds["chain_index"]
+                raise NotImplementedError("FAMPNN is no longer supported")
 
-            if struct_model_name == "af2":
-                # === Run AlphaFold2 === #
-                af2_preds, filenames = run_af2(sequences_list=sequences_list,
-                                               residue_index_list=residue_index_list,
-                                               chain_index_list=chain_index_list,
-                                               pdbs=[pdb] * len(sequences_list),
-                                               af_model=struct_pred_model["af_model"],
-                                               out_dir=preds_dir, **struct_pred_cfg.af2)
-
-                # stack all outputs since they are the same length for a given PDB
-                af2_preds = {k: torch.stack(v, dim=0) for k, v in af2_preds.items()}
-                sc_info[pdb]["struct_preds"] = af2_preds
-
-            elif struct_model_name == "esmfold":
+            if struct_model_name == "esmfold":
                 # === Run ESMFold === #
                 esm_preds = run_esmfold_batched(sequences_list=sequences_list,
                                                 residue_index_list=residue_index_list,
@@ -285,49 +266,12 @@ def run_self_consistency_eval(pdbs: List[str],
                 filenames = [f"{preds_dir}/esmfold_{Path(pdb).stem}_{i}.pdb" for i in range(B)]
                 write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
 
-            elif struct_model_name == "omegafold":
-                # === Run OmegaFold === #
-                of_preds = run_omegafold(sequences_list=sequences_list,
-                                         residue_index_list=residue_index_list,
-                                         omegafold_model=struct_pred_model["omegafold"],
-                                         out_dir=preds_dir, device=struct_pred_model["device"], **struct_pred_cfg.omegafold)
-
-                # stack all outputs since they are the same length for a given PDB
-                of_preds = {k: torch.stack(v, dim=0) for k, v in of_preds.items()}
-                sc_info[pdb]["struct_preds"] = of_preds
-
-                # Write to pdb file
-                feats = {
-                    "aatype": of_preds["aatype"],
-                    "atom_positions": of_preds["pred_coords"],
-                    "atom_mask": of_preds["atom_mask"],
-                    "residue_index": of_preds["residue_index"],
-                    "chain_index": torch.zeros_like(of_preds["residue_index"]),
-                    "b_factors": None,
-                }
-
-                B, _, _, _ = of_preds["pred_coords"].shape
-                filenames = [f"{preds_dir}/omegafold_{Path(pdb).stem}_{i}.pdb" for i in range(B)]
-                write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
-
+            else:
+                raise ValueError(f"Unknown structure prediction model: {struct_model_name}")
     else:
         # Run structure prediction on sequences directly from PDBs
         sequences_list, residue_index_list, chain_index_list = load_sequence_and_residx_from_pdbs(pdbs)
-        if struct_model_name == "af2":
-            # === Run AlphaFold2 === #
-            af2_preds, filenames = run_af2(sequences_list=sequences_list,
-                                           residue_index_list=residue_index_list,
-                                           chain_index_list=chain_index_list,
-                                           pdbs=pdbs,
-                                           af_model=struct_pred_model["af_model"],
-                                           out_dir=preds_dir, **struct_pred_cfg.af2)
-
-            # Add to sc_info
-            for i, pdb in enumerate(pdbs):
-                sc_info[pdb]["sample_seq"] = sequences_list[i]
-                sc_info[pdb]["struct_preds"] = {k: v[i][None] for k, v in af2_preds.items()}  # unpack preds and add batch dim
-
-        elif struct_model_name == "esmfold":
+        if struct_model_name == "esmfold":
             # === Run ESMFold === #
             esm_preds = run_esmfold_batched(sequences_list=sequences_list,
                                             residue_index_list=residue_index_list,
@@ -351,29 +295,8 @@ def run_self_consistency_eval(pdbs: List[str],
 
                 filename = f"{preds_dir}/esmfold_{Path(pdb).stem}.pdb"
                 write_to_pdb(**feats, filename=filename, mode="aa")
-
-        elif struct_model_name == "omegafold":
-            # === Run OmegaFold === #
-            of_preds = run_omegafold(sequences_list=sequences_list,
-                                     residue_index_list=residue_index_list,
-                                     omegafold_model=struct_pred_model["omegafold"],
-                                     out_dir=preds_dir, device=struct_pred_model["device"], **struct_pred_cfg.omegafold)
-
-            # Write to pdb file
-            for i, pdb in enumerate(pdbs):
-                sc_info[pdb]["sample_seq"] = sequences_list[i]
-                sc_info[pdb]["struct_preds"] = {k: v[i][None] for k, v in of_preds.items()}  # unpack preds and add batch dim
-
-                feats = {
-                    "aatype": of_preds["aatype"][i],
-                    "atom_positions": of_preds["pred_coords"][i],
-                    "atom_mask": of_preds["atom_mask"][i],
-                    "residue_index": of_preds["residue_index"][i],
-                    "chain_index": torch.zeros_like(of_preds["residue_index"][i]),
-                    "b_factors": None,
-                }
-                filename = f"{preds_dir}/omegafold_{Path(pdb).stem}.pdb"
-                write_to_pdb(**feats, filename=filename, mode="aa")
+        else:
+            raise ValueError(f"Unknown structure prediction model: {struct_model_name}")
 
     # === Compute eval metrics === #
     Path(ca_aligned_preds_dir).mkdir(parents=True, exist_ok=True)
@@ -413,8 +336,8 @@ def run_self_consistency_eval(pdbs: List[str],
                 assert B == 1, "We should only have one prediction per PDB if we're using the original sequence in the PDB"
                 filenames = [f"{ca_aligned_preds_dir}/{struct_model_name}_{Path(pdb).stem}.pdb"]
             write_batched_to_pdb(**feats, filenames=filenames, mode="aa")
-        except:
-            print(f"Error processing {pdb}: there was an issue processing {pdb}, skipping...")
+        except Exception as e:
+            print(f"Error processing {pdb}: {e}, skipping...")
 
     # Save results to pt file
     sc_info_path = Path(out_dir, "sc_info")
@@ -949,94 +872,6 @@ def get_core_surface_mask(coords: TensorType["b n 37 3", float],
     return core, surface
 
 
-def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
-    """Numpy implementation of the Frechet Distance.
-    The Frechet distance between two multivariate Gaussians X_1 ~ N(mu_1, C_1)
-    and X_2 ~ N(mu_2, C_2) is
-            d^2 = ||mu_1 - mu_2||^2 + Tr(C_1 + C_2 - 2*sqrt(C_1*C_2)).
-
-    Stable version by Dougal J. Sutherland.
-
-    Params:
-    -- mu1   : Numpy array containing the activations of a layer of the
-               inception net (like returned by the function 'get_predictions')
-               for generated samples.
-    -- mu2   : The sample mean over activations, precalculated on an
-               representative data set.
-    -- sigma1: The covariance matrix over activations for generated samples.
-    -- sigma2: The covariance matrix over activations, precalculated on an
-               representative data set.
-
-    Returns:
-    --   : The Frechet Distance.
-    """
-
-    mu1 = np.atleast_1d(mu1)
-    mu2 = np.atleast_1d(mu2)
-
-    sigma1 = np.atleast_2d(sigma1)
-    sigma2 = np.atleast_2d(sigma2)
-
-    assert (
-        mu1.shape == mu2.shape
-    ), "Training and test mean vectors have different lengths"
-    assert (
-        sigma1.shape == sigma2.shape
-    ), "Training and test covariances have different dimensions"
-
-    diff = mu1 - mu2
-
-    # Product might be almost singular
-    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
-    if not np.isfinite(covmean).all():
-        msg = (
-            "fid calculation produces singular product; "
-            "adding %s to diagonal of cov estimates"
-        ) % eps
-        print(msg)
-        offset = np.eye(sigma1.shape[0]) * eps
-        covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
-
-    # Numerical error might give slight imaginary component
-    if np.iscomplexobj(covmean):
-        if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
-            m = np.max(np.abs(covmean.imag))
-            raise ValueError("Imaginary component {}".format(m))
-        covmean = covmean.real
-
-    tr_covmean = np.trace(covmean)
-
-    return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean
-
-
-def fpd(
-    samp_embeds: np.ndarray,
-    gt_embeds: np.ndarray = None,
-    gt_mu: np.ndarray = None,
-    gt_sigma: np.ndarray = None,
-):
-    """Entrypoint for computing FPD
-
-    Parameters
-    ----------
-    samp_embeds
-        Array of embeddings of sampled structures, shape (N, D) for N samples with D dimensions each
-        If using per-residue embeddings, can be mean-pooled along the sequence dimension to achieve (N, D)
-            or treat each residue as a separate embedding, merged into axis=0
-    gt_embeds
-        Array of embeddings of reference structures
-    """
-    samp_mu = np.mean(samp_embeds, axis=0)
-    samp_sigma = np.cov(samp_embeds, rowvar=False)
-
-    if gt_embeds is not None:
-        gt_mu = np.mean(gt_embeds, axis=0)
-        gt_sigma = np.cov(gt_embeds, rowvar=False)
-
-    return calculate_frechet_distance(samp_mu, samp_sigma, gt_mu, gt_sigma)
-
-
-
 def compute_motif_bb_rmsd(pdb_path: str,
                           motif_coords: TensorType["n a 3", float],
                           motif_mask: TensorType["n a", float]) -> float:
@@ -1064,7 +899,6 @@ def compute_motif_bb_rmsd(pdb_path: str,
                                        weights=rearrange(bb_motif_atom_mask, "n a -> 1 (n a)")).squeeze(0)
 
     return bb_rmsd.item()
-
 
 
 def motif_master_search(motif_pdb_path: str,

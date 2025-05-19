@@ -71,7 +71,7 @@ def main(cfg: DictConfig):
         # We set the seed each checkpoint
         L.seed_everything(cfg.seed)
 
-        # Run FAMPNN
+        # Run sequence design model
         _, aux = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
                              struct_file_paths=processed_struct_files, device=device, out_dir=log_dir_i)
         sampled_pdbs = aux["out_pdbs"]
