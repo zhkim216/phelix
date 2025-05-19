@@ -22,7 +22,7 @@ def main(cfg: DictConfig):
     """
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
-    # Set seeds
+# Set seeds
     L.seed_everything(cfg.seed)
     torch.backends.cudnn.deterministic = True  # nonrandom CUDNN convolution algo, maybe slower
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
@@ -35,6 +35,9 @@ def main(cfg: DictConfig):
     with open(Path(out_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
+    # Initialize tokenizer and featurizer
+    data_cfg = hydra.utils.instantiate(cfg.data_cfg)
+
     # Load in PDB file to eval on
     processed_struct_file = process_pdb_files([cfg.pdb_path], processed_struct_dir=f"{out_dir}/processed_structures", **cfg.pdb_processing_cfg)
 
@@ -45,7 +48,7 @@ def main(cfg: DictConfig):
     # Load in sequence design model
     seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
 
-    # Load structure prediction model for self-consistency evaluation
+    # # Load structure prediction model for self-consistency evaluation
     if cfg.run_self_consistency_eval:
         pred_out_dir = f"{out_dir}/preds"  # directory for structure predictions
         Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
@@ -67,14 +70,12 @@ def main(cfg: DictConfig):
                          out_dir=out_dir)
 
     if cfg.run_self_consistency_eval:
-        codes_sc_info = eval_metrics.run_self_consistency_eval(
+        codes_sc_info = eval_metrics.run_self_consistency_eval_boltz(
             aux["out_pdbs"],
-            None,  # no MPNN model to use sequence directly from PDB
             struct_pred_model,
-            device,
-            out_dir=pred_out_dir,
-            temp_dir=f"{pred_out_dir}/tmp"
-        )
+            cfg.pdb_processing_cfg,
+            data_cfg,
+            out_dir=pred_out_dir)
 
         # Aggregate results
         codes_metrics = defaultdict(list)

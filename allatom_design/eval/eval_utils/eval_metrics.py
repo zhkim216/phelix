@@ -1,5 +1,6 @@
 import ast
 import math
+import pickle
 import shutil
 import subprocess
 import uuid
@@ -8,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import gemmi
 import numpy as np
 import pandas as pd
 import torch
@@ -18,16 +20,20 @@ from scipy import linalg
 from torchtyping import TensorType
 from tqdm import tqdm
 
+import allatom_design.data.const as const
 import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
-from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
-    mmcif_to_pdb
+from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
+    PDB, Resource, fetch, mmcif_to_pdb, pdb_to_mmcif, process_structure, finalize)
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
+from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
 from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched
 from allatom_design.eval.eval_utils.proteinmpnn_utils import run_mpnn
+from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
+
 
 
 def compute_per_pdb_info(pdbs: list[str],
@@ -162,6 +168,37 @@ def compute_secondary_structure_content(pdbs: List[str]) -> Dict[str, Dict[str, 
             dssp_metrics[pdb]["pct_beta"] = np.nan
             dssp_metrics[pdb]["pct_loop"] = np.nan
     return dssp_metrics
+
+
+def run_self_consistency_eval_boltz(pdbs: list[str],
+                                    struct_pred_model: dict[str, Any],
+                                    pdb_processing_cfg: DictConfig,
+                                    data_cfg: DictConfig,
+                                    out_dir: str) -> dict[str, dict[str, TensorType]]:
+    """
+    Run self-consistency evaluation on a list of PDBs with designed sequences.
+    """
+    unique_id = uuid.uuid4().hex  # unique ID for temp processing dir
+    processed_dir = Path(f"{out_dir}/processed/{unique_id}")  # directory for processed structures
+    preds_dir = Path(f"{out_dir}/struct_preds")  # directory for predicted structures
+
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    preds_dir.mkdir(parents=True, exist_ok=True)
+
+    # === Process PDBs === #
+    processed_struct_files = process_pdb_files(pdbs, processed_dir, **pdb_processing_cfg)
+    manifest_path = finalize(processed_dir)
+
+    # === Run structure prediction === #
+    trainer, data_module = struct_pred_model["trainer_fn"](processed_data_dir=processed_dir, out_dir=preds_dir)
+    preds = trainer.predict(struct_pred_model["boltz1"],
+                            datamodule=data_module,
+                            return_predictions=True)
+
+    # === Compute metrics === #
+
+
+
 
 
 def run_self_consistency_eval(pdbs: List[str],

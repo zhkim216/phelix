@@ -1,9 +1,16 @@
 from collections import defaultdict
+from dataclasses import asdict, dataclass
+from functools import partial
+from pathlib import Path
 from typing import Any, Dict, Generator, List, Tuple
 
-import numpy as np
 import torch
+from boltz.data.module.inference import BoltzInferenceDataModule
+from boltz.data.types import Manifest
+from allatom_design.data.write.writer import BoltzWriter
+from boltz.model.model import Boltz1
 from omegaconf import DictConfig, OmegaConf
+from pytorch_lightning import Trainer
 from torchtyping import TensorType
 from tqdm import tqdm
 from transformers import AutoTokenizer, EsmForProteinFolding, EsmTokenizer
@@ -225,6 +232,85 @@ def create_batched_seq_dataset(all_sequences: List[str],
     yield collate_fn(batch_examples)
 
 
+@dataclass
+class BoltzProcessedInput:
+    """Processed input data."""
+
+    manifest: Manifest
+    targets_dir: Path
+    msa_dir: Path
+
+
+@dataclass
+class BoltzDiffusionParams:
+    """Diffusion process parameters."""
+
+    gamma_0: float = 0.605
+    gamma_min: float = 1.107
+    noise_scale: float = 0.901
+    rho: float = 8
+    step_scale: float = 1.638
+    sigma_min: float = 0.0004
+    sigma_max: float = 160.0
+    sigma_data: float = 16.0
+    P_mean: float = -1.2
+    P_std: float = 1.5
+    coordinate_augmentation: bool = True
+    alignment_reverse_diff: bool = True
+    synchronize_sigmas: bool = True
+    use_inference_model_cache: bool = True
+
+
+
+def make_boltz_trainer(processed_data_dir: str,
+                       out_dir: str,
+                       num_workers: int):
+    processed_data_dir = Path(processed_data_dir)
+    processed = BoltzProcessedInput(
+        manifest=Manifest.load(processed_data_dir / "manifest_unclustered.json"),
+        targets_dir=processed_data_dir / "structures",
+        msa_dir=processed_data_dir / "msa",
+    )
+
+    # Create data module
+    data_module = BoltzInferenceDataModule(
+        manifest=processed.manifest,
+        target_dir=processed.targets_dir,
+        msa_dir=processed.msa_dir,
+        num_workers=num_workers,
+    )
+
+    # Create prediction writer
+    pred_writer = BoltzWriter(
+        data_dir=processed.targets_dir,
+        output_dir=out_dir / "predictions",
+        output_format="mmcif",
+    )
+
+    trainer = Trainer(
+        default_root_dir=out_dir,
+        strategy="auto",
+        callbacks=[pred_writer],
+        accelerator="gpu",
+        devices=1,
+        precision=32,
+    )
+
+    return trainer, data_module
+
+
+def get_boltz_model(boltz_cfg: DictConfig, device: str) -> Boltz1:
+    diffusion_params = BoltzDiffusionParams()
+    model_module: Boltz1 = Boltz1.load_from_checkpoint(boltz_cfg["checkpoint"],
+                                                       strict=True,
+                                                       predict_args=boltz_cfg["predict_args"],
+                                                       map_location="cpu",
+                                                       diffusion_process_args=asdict(diffusion_params),
+                                                       ema=False)
+    model_module = model_module.eval()
+    return model_module
+
+
 def get_esmfold_model(device: str):
     # Set up ESMFold
     esmfold = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
@@ -241,7 +327,10 @@ def get_struct_pred_model(cfg: DictConfig,
 
     Example config:
     struct_pred_cfg:
-        model_name: "esmfold"  # ["esmfold", "boltz-1"]
+        model_name: "esmfold"  # ["esmfold", "boltz1"]
+        boltz1:
+
+
         esmfold:
             max_tokens_per_batch: 1024
     """
@@ -250,7 +339,12 @@ def get_struct_pred_model(cfg: DictConfig,
     cfg = OmegaConf.merge(base_cfg, cfg)
 
     struct_pred_model = {"model_name": model_name, "cfg": cfg, "device": device}
-    if model_name == "esmfold":
+    if model_name == "boltz1":
+        struct_pred_model["boltz1"] = get_boltz_model(cfg.boltz1, device=device)
+        struct_pred_model["trainer_fn"] = partial(make_boltz_trainer,
+                                                  num_workers=cfg.boltz1.num_workers)
+
+    elif model_name == "esmfold":
         esmfold, tokenizer = get_esmfold_model(device=device)
         struct_pred_model["esmfold"] = esmfold
         struct_pred_model["tokenizer"] = tokenizer

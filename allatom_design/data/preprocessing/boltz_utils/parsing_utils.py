@@ -13,6 +13,7 @@ from typing import Optional
 
 import gemmi
 import numpy as np
+from natsort import natsorted
 from redis import Redis
 
 from allatom_design.data.filter.static.filter import StaticFilter
@@ -100,7 +101,7 @@ def process_structure(
         return str(struct_path)
 
 
-def finalize(outdir: Path) -> None:
+def finalize(outdir: Path) -> str:
     """Run post-processing in main thread.
 
     Parameters
@@ -114,7 +115,7 @@ def finalize(outdir: Path) -> None:
 
     failed_count = 0
     records = []
-    for record in records_dir.iterdir():
+    for record in natsorted(records_dir.iterdir()):
         path = record
         try:
             with path.open("r") as f:
@@ -131,6 +132,7 @@ def finalize(outdir: Path) -> None:
     outpath = outdir / "manifest_unclustered.json"
     with outpath.open("w") as f:
         json.dump(records, f)
+    return str(outpath)
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,7 +198,7 @@ def parse(data: PDB, resource: dict, clusters: dict) -> Target:
             ChainInfo(
                 chain_id=i,
                 chain_name=chain["name"],
-                msa_id="",  # FIX
+                msa_id=-1,  # FIX
                 mol_type=int(chain["mol_type"]),
                 cluster_id=clusters.get(key, -1),
                 num_residues=int(chain["res_num"]),
