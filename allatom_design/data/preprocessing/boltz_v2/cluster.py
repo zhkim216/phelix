@@ -6,6 +6,7 @@ Cluster the sequences of the processed targets and update the manifest with the 
 import glob
 import hashlib
 import json
+import os
 import pickle
 import subprocess
 from dataclasses import asdict, replace
@@ -75,7 +76,7 @@ def main(cfg: DictConfig) -> None:
         f.write("\n".join(proteins))
 
     subprocess.run(
-        f"mmseqs/bin/mmseqs easy-cluster {outdir / 'proteins.fasta'} {outdir / 'clust_prot'} {outdir / 'tmp'} --min-seq-id 0.4",  # noqa: E501
+        f"{os.environ['SOFTWARE_PATH']}/mmseqs/bin/mmseqs easy-cluster {outdir / 'proteins.fasta'} {outdir / 'clust_prot'} {outdir / 'tmp'} --min-seq-id 0.4",  # noqa: E501
         shell=True,  # noqa: S602
         check=True,
     )

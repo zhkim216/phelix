@@ -1,5 +1,6 @@
 import ast
 import math
+import os
 import pickle
 import shutil
 import subprocess
@@ -25,7 +26,8 @@ import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
-from allatom_design.data.preprocessing.boltz_utils.parsing_utils import finalize, mmcif_to_pdb
+from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
+    finalize, mmcif_to_pdb)
 from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
@@ -769,7 +771,7 @@ def run_nntm_eval(pdbs: List[str],
 
     try:
         command = [
-            "foldseek", "easy-search",
+            f"{os.environ['SOFTWARE_PATH']}/foldseek/bin/foldseek", "easy-search",
             *pdbs, dataset, str(foldseek_tsv), str(temp_dir),
             "--alignment-type", "1",
             "--format-output", "query,target,alntmscore,qtmscore,ttmscore"
@@ -921,7 +923,7 @@ def foldseek_cluster(pdbs: List[str],
         shutil.copy(pdb, pdb_dir)
 
     # Run Foldseek clustering
-    command = ["foldseek", "easy-cluster",
+    command = [f"{os.environ['SOFTWARE_PATH']}/foldseek/bin/foldseek", "easy-cluster",
                "--alignment-type", str(alignment_type),
                *pdbs, f"{out_dir}/foldseek", temp_dir,
                "-c", str(c),
@@ -1039,7 +1041,7 @@ def motif_master_search(motif_pdb_path: str,
     # Create PDS databases for query
     query_pds_path = f"{temp_dir}/{Path(query_path).stem}.pds"
     command = [
-        f"master-v1.6/bin/createPDS",
+        f"{os.environ['SOFTWARE_PATH']}/master-v1.6/bin/createPDS",
         "--type", "query",
         "--pdb", query_path,
         "--pds", query_pds_path
@@ -1049,7 +1051,7 @@ def motif_master_search(motif_pdb_path: str,
     # Create PDS database for target
     target_pds_path = f"{temp_dir}/{Path(target_path).stem}.pds"
     command = [
-        f"master-v1.6/bin/createPDS",
+        f"{os.environ['SOFTWARE_PATH']}/master-v1.6/bin/createPDS",
         "--type", "target",
         "--pdb", target_path,
         "--pds", target_pds_path
@@ -1059,7 +1061,7 @@ def motif_master_search(motif_pdb_path: str,
     # Run motif master search
     match_out = f"{temp_dir}/match_out_{unique_id}.txt"
     command = [
-        f"master-v1.6/bin/master",
+        f"{os.environ['SOFTWARE_PATH']}/master-v1.6/bin/master",
         "--query", query_pds_path,
         "--target", target_pds_path,
         "--rmsdCut", "1",

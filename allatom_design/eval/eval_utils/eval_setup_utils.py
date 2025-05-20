@@ -139,7 +139,7 @@ def process_pdb_files(pdb_files: list[str],
 
 def start_redis(redis_host: str, redis_port: int, ccd_rdb_path: str):
     command = [
-        f"redis/bin/redis-server",
+        f"{os.environ['SOFTWARE_PATH']}/redis/bin/redis-server",
         "--daemonize", "yes",
         "--dir", str(Path(ccd_rdb_path).parent),
         "--dbfilename", str(Path(ccd_rdb_path).name),
