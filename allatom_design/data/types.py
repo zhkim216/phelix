@@ -476,7 +476,8 @@ class Input:
 # TOKENS
 ####################################################################################################
 
-Token = [
+Token = np.dtype(
+[
     ("token_idx", np.dtype("i4")),
     ("atom_idx", np.dtype("i4")),
     ("atom_num", np.dtype("i4")),
@@ -494,7 +495,9 @@ Token = [
     ("disto_mask", np.dtype("?")),
     ("auth_seq_id", np.dtype("i4")),
     ("pdb_icode", np.dtype("i4")),
-]
+    ("is_standard", np.dtype("?")),
+],
+align=True)
 
 TokenBond = [
     ("token_1", np.dtype("i4")),

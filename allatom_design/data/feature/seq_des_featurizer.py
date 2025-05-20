@@ -32,6 +32,8 @@ FEAT_TO_TOKEN_DIM = {
     "label_seq_id": [0],
     "auth_seq_id": [0],
     "pdb_icode": [0],
+    "seq_cond_mask": [0],
+    "is_standard": [0],
 
     # atom features
     "atom_to_token": [1],
@@ -53,6 +55,7 @@ FEAT_TO_ATOM_DIM = {
     "token_to_center_atom": [1],
     "prot_bb_atom_mask": [0],
     "prot_scn_atom_mask": [0],
+    "atom_cond_mask": [0],
 }
 
 
@@ -147,6 +150,7 @@ def process_sd_token_features(
     label_seq_id = from_numpy(token_data["res_idx"]).long()
     auth_seq_id = from_numpy(token_data["auth_seq_id"]).long()
     pdb_icode = from_numpy(token_data["pdb_icode"]).long()
+    is_standard = from_numpy(token_data["is_standard"]).bool()
 
     # Token mask features
     pad_mask = torch.ones(len(token_data), dtype=torch.float)
@@ -181,6 +185,7 @@ def process_sd_token_features(
         "label_seq_id": label_seq_id,
         "auth_seq_id": auth_seq_id,
         "pdb_icode": pdb_icode,
+        "is_standard": is_standard,
     }
     return token_features
 

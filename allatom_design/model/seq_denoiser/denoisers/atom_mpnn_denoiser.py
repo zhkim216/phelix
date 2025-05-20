@@ -80,14 +80,14 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         batch["atomwise_seq_cond_mask"] = batch["seq_cond_mask"].gather(dim=-1, index=batch["atomwise_token_idx"])  # [b, n_atoms]
         batch["atomwise_seq_cond_mask"] = batch["atomwise_seq_cond_mask"] * batch["atom_pad_mask"]  # re-mask out pad atoms, since atomwise_token_idx is 0 for pad atoms
 
-        # Create token-level mask which is 1 if there exists any unmasked atom in the token, or 0 otherwise
-
-        # if using average of all atoms in token for graph nodes
-        # token_n_cond_atoms = torch.bmm(batch["atom_to_token"].float().transpose(1, 2), batch["atom_cond_mask"].unsqueeze(-1)).squeeze(dim=-1)  # [b, n_tokens]
-        # batch["token_exists_mask"] = (token_n_cond_atoms > 0).float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
-
-        # if using center atom of token for graph nodes: ensure center atom is present
+        # Build mask for which tokens to include in the token-level grpah
+        ## ensure center atom is present, since graph nodes are the center atom
         batch["token_exists_mask"] = batch["token_resolved_mask"].float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
+
+        ## sometimes, it's helpful to mask out certain tokens from the graph (e.g. for protein-only design)
+        token_exists_override = batch.get("token_exists_override", torch.ones_like(batch["token_exists_mask"]))
+        batch["token_exists_mask"] = batch["token_exists_mask"] * token_exists_override
+
         return batch
 
 

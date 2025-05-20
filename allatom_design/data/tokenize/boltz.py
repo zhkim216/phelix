@@ -28,6 +28,7 @@ class TokenData:
     disto_mask: bool
     auth_seq_id: int
     pdb_icode: int
+    is_standard: bool
 
 
 class BoltzTokenizer(Tokenizer):
@@ -103,6 +104,7 @@ class BoltzTokenizer(Tokenizer):
                         disto_mask=is_disto_present,
                         auth_seq_id=res["auth_seq_id"],
                         pdb_icode=convert_icode_to_token(res["pdb_icode"]),
+                        is_standard=res["is_standard"],
                     )
                     token_data.append(astuple(token))
 
@@ -147,6 +149,7 @@ class BoltzTokenizer(Tokenizer):
                             disto_mask=is_present,
                             auth_seq_id=res["auth_seq_id"],
                             pdb_icode=convert_icode_to_token(res["pdb_icode"]),
+                            is_standard=res["is_standard"],
                         )
                         token_data.append(astuple(token))
 
