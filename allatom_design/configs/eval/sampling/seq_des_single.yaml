@@ -31,18 +31,6 @@ pdb_processing_cfg:
     # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)
     ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
 
-# Tokenizer and featurizer configs
-data_cfg:
-  atoms_per_window_queries: 32
-  num_bins: 64
-
-  tokenizer:
-    _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
-
-  # Featurizer for prefeaturizing inputs
-  featurizer:
-    _target_: allatom_design.data.feature.seq_des_featurizer.SequenceDesignFeaturizer
-
 
 # Sampling config
 run_self_consistency_eval: false

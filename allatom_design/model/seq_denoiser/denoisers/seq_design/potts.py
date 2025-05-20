@@ -916,12 +916,14 @@ def init_sampling_masks(
         mask_S = ((mask_zero * O_init + mask_sample) > 0).float()
     else:
         raise NotImplementedError
+
     if ban_S is not None:
         mask_S[:, :, ban_S] = 0.0
     mask_S_1D = (mask_S.sum(-1) > 1).float()
 
     logits_init_masked = 1000 * mask_S + logits_init
-    S = torch.distributions.categorical.Categorical(logits=logits_init_masked).sample()
+    S_init = torch.distributions.categorical.Categorical(logits=logits_init_masked).sample()
+    S = torch.where(mask_S_1D.bool(), S_init, S)  # set S to S_init where we can sample
     return mask_S, mask_S_1D, S
 
 

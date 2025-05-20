@@ -410,7 +410,16 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
     # Unbatch feats into a list of dicts
     feats_list = []
     for i in range(feats["label_seq_id"].shape[0]):
-        feats_list.append({k: v[i] if isinstance(v, torch.Tensor) else v for k, v in to(feats, "cpu").items()})
+        feats_i = {}
+        for k, v in to(feats, "cpu").items():
+            if isinstance(v, torch.Tensor):
+                feats_i[k] = v[i]
+            elif isinstance(v, list):
+                feats_i[k] = v[i]
+            else:
+                feats_i[k] = v
+        feats_i = crop_feats(feats_i, feats_i["token_pad_mask"].bool(), max_tokens=None, max_atoms=None)
+        feats_list.append(feats_i)
 
     for i, (feats_i, input_struct_i) in enumerate(zip(feats_list, input_structs)):
         system = System()
