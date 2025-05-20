@@ -35,9 +35,6 @@ def main(cfg: DictConfig):
     with open(Path(out_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
-    # Initialize tokenizer and featurizer
-    data_cfg = hydra.utils.instantiate(cfg.data_cfg)
-
     # Load in PDB file to eval on
     processed_struct_file = process_pdb_files([cfg.pdb_path], processed_struct_dir=f"{out_dir}/processed_structures", **cfg.pdb_processing_cfg)
 
@@ -74,18 +71,17 @@ def main(cfg: DictConfig):
             aux["out_pdbs"],
             struct_pred_model,
             cfg.pdb_processing_cfg,
-            data_cfg,
+            seq_des_model["data_cfg"],
             out_dir=pred_out_dir)
 
         # Aggregate results
         sc_metrics = defaultdict(list)
         for record_id, metrics in id_to_metrics.items():
-            sc_metrics["record_id"].append(record_id)
             for k, v in metrics.items():
                 sc_metrics[f"{k}"].append(v)
 
         out_df = pd.DataFrame(sc_metrics)
-        out_df.to_csv(f"{out_dir}/self_consistency_metrics.csv", index=False)
+        out_df.to_csv(f"{out_dir}/self_consistency_metrics.csv", index=True)
 
 
 if __name__ == "__main__":

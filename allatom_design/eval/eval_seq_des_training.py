@@ -79,27 +79,22 @@ def main(cfg: DictConfig):
         # Run self-consistency evaluation
         out_metrics = defaultdict(list)
 
-        sc_info = eval_metrics.run_self_consistency_eval(
-            sampled_pdbs,
-            None,
+        id_to_metrics = eval_metrics.run_self_consistency_eval_boltz(
+            aux["out_pdbs"],
             struct_pred_model,
-            device,
-            out_dir=log_dir_i,
-            temp_dir=f"{log_dir_i}/tmp"
-        )
+            cfg.pdb_processing_cfg,
+            seq_des_model["data_cfg"],
+            out_dir=log_dir_i)
 
         # Aggregate results
         sc_metrics = defaultdict(list)
-        for pdb in sampled_pdbs:
-            if "sc_metrics" in sc_info[pdb]:
-                for k, v in sc_info[pdb]["sc_metrics"].items():
-                    sc_metrics[f"{k}"].append(v.item())
-            else:
-                print(f"No self-consistency metrics for {pdb}, skipping...")
+        for record_id, metrics in id_to_metrics.items():
+            for k, v in metrics.items():
+                sc_metrics[f"{k}"].append(v)
 
         # Update metrics
-        out_metrics = {f"seq_des/mean/{k}": np.mean(v) for k, v in sc_metrics.items()}
-        out_metrics.update({f"seq_des/median/{k}": np.median(v) for k, v in sc_metrics.items()})
+        out_metrics = {f"seq_des/mean/{k}": np.nanmean(v) for k, v in sc_metrics.items() if k != "record_id"}
+        out_metrics.update({f"seq_des/median/{k}": np.nanmedian(v) for k, v in sc_metrics.items() if k != "record_id"})
 
         # Log metrics to wandb
         if not cfg.wandb.no_wandb:

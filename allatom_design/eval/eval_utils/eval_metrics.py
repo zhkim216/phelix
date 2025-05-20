@@ -195,7 +195,7 @@ def run_self_consistency_eval_boltz(pdbs: list[str],
     id_to_preds = {record.id: pred for record, pred in zip(data_module.manifest.records, preds)}
 
     # === Compute metrics === #
-    record_ids = [Path(struct_file).stem for struct_file in design_struct_files]
+    record_ids = [Path(struct_file).stem for struct_file in design_struct_files if struct_file is not None]
     pred_struct_files = [f"{out_dir}/predictions/{record_id}/{record_id}_model_0.npz" for record_id in record_ids]
     id_to_metrics = {}
     for record_id, pred_struct_file, design_struct_file in tqdm(zip(record_ids, pred_struct_files, design_struct_files), desc="Computing self-consistency metrics", total=len(design_struct_files)):
@@ -248,7 +248,8 @@ def compute_self_consistency_metrics(pred_struct_file: str,
     write_sd_feats_to_mmcif(pred_example, pred_structure, [f"{out_dir}/boltz_{Path(pred_struct_file).stem}.cif"])
 
     # Compute metrics
-    for metric in ["sc_ca_rmsd", "sc_center_rmsd", "avg_plddt", "avg_ca_plddt"]:
+    for metric in ["sc_ca_rmsd", "sc_center_rmsd", "sc_nonpolymer_rmsd",
+                   "avg_plddt", "avg_ca_plddt", "avg_nonpolymer_plddt"]:
         if metric == "sc_ca_rmsd":
             # Align on CA atoms, compute CA RMSD
             metrics[metric] = ca_rmsd.item()
@@ -261,6 +262,27 @@ def compute_self_consistency_metrics(pred_struct_file: str,
             center_rmsd = data.torch_rmsd_weighted(pred_coords, design_coords, center_atom_mask)
             metrics[metric] = center_rmsd.item()
 
+        elif metric == "sc_nonpolymer_rmsd":
+            # Align on center atoms, compute non-polymer RMSD
+            center_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
+            center_token_mask = design_example["token_resolved_mask"]
+            center_atom_mask[batch_idx, center_idx] = center_token_mask
+            center_rmsd, (aligned_pred_coords, _) = data.torch_rmsd_weighted(pred_coords, design_coords, center_atom_mask, return_aligned=True)
+
+            nonpolymer_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
+            nonpolymer_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["NONPOLYMER"])
+            nonpolymer_atom_mask[batch_idx, center_idx] = nonpolymer_token_mask
+            if nonpolymer_atom_mask.sum() == 0:
+                # nan if no non-polymer atoms
+                metrics[metric] = np.nan
+                continue
+
+            nonpolymer_msd = ((
+                (aligned_pred_coords - design_coords) ** 2 * nonpolymer_atom_mask[..., None]
+            ).sum(dim=(-1, -2)) / nonpolymer_atom_mask.sum(dim=-1, keepdim=True).clamp(min=1e-6))
+            nonpolymer_rmsd = torch.sqrt(nonpolymer_msd + 1e-8)
+            metrics[metric] = nonpolymer_rmsd.item()
+
         elif metric == "avg_plddt":
             # Compute average pLDDT across all resolved tokens
             center_token_mask = design_example["token_resolved_mask"]
@@ -272,6 +294,17 @@ def compute_self_consistency_metrics(pred_struct_file: str,
             ca_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["PROTEIN"])  # only protein tokens where center exists
             ca_plddt = (struct_pred_out["plddt"] * ca_token_mask).sum(dim=-1) / ca_token_mask.sum(dim=-1).clamp(min=1e-6)
             metrics[metric] = ca_plddt.item()
+
+        elif metric == "avg_nonpolymer_plddt":
+            # Compute average pLDDT across all non-polymer atoms
+            nonpolymer_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["NONPOLYMER"])
+            if nonpolymer_token_mask.sum() == 0:
+                # nan if no non-polymer tokens
+                metrics[metric] = np.nan
+                continue
+
+            nonpolymer_plddt = (struct_pred_out["plddt"] * nonpolymer_token_mask).sum(dim=-1) / nonpolymer_token_mask.sum(dim=-1).clamp(min=1e-6)
+            metrics[metric] = nonpolymer_plddt.item()
 
     return metrics
 

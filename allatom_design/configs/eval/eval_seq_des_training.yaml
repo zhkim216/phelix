@@ -61,11 +61,11 @@ seq_des_cfg:
 
 # Structure prediction model args
 struct_pred_cfg:
-  model_name: "esmfold"
+  model_name: "boltz1"
   base_cfg: allatom_design/configs/struct_pred/struct_pred_base.yaml
   # overrides to base config
-  af2:
-    data_dir: /media/scratch/huang_lab/af2
+  boltz1:
+    checkpoint: /media/scratch/huang_lab/model_params/boltz1/boltz1_conf.ckpt
   esmfold:
     max_tokens_per_batch: 1024
 

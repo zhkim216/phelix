@@ -146,9 +146,9 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         ban_S.extend([const.token_ids[x] for x in const.tokens if x not in const.prot_only_tokens])  # ban all non-protein tokens
 
         # Initialize random sequence and sampling masks
-        # first, convert res_type to protein token vocabulary
+        mask_sample = (1 - batch["seq_cond_mask"]) * batch["token_pad_mask"]  # 1 where we can sample, 0 where we can't
         mask_sample, _, S_init = potts.init_sampling_masks(
-            logits_init, mask_sample=(1 - batch["seq_cond_mask"]), S=batch["res_type"].argmax(dim=-1), ban_S=ban_S
+            logits_init, mask_sample=mask_sample, S=batch["res_type"].argmax(dim=-1), ban_S=ban_S
         )
 
         # Complexity regularization
