@@ -221,10 +221,10 @@ def get_sd_example(struct_file_path: str, data_cfg: DictConfig) -> tuple[dict[st
                                            num_bins=data_cfg["num_bins"])
     feats["coords"] = feats["coords"].squeeze(0)  # remove batch dimension
 
-    # SE3 augmentation for convenience / scaling
+    # Centers coordinates at origin
     feats["coords"] = atom_center_random_augmentation(feats["coords"], feats["atom_pad_mask"] * feats["atom_resolved_mask"],
-                                                      apply_random_augmentation=True,
-                                                      translation_scale=1.0,
+                                                      apply_random_augmentation=False,
+                                                      translation_scale=0.0,
                                                       return_transforms=False)
 
     example["pdb_key"] = Path(struct_file_path).stem

@@ -112,8 +112,7 @@ class SeqDenoiser(nn.Module):
         # Choose sampling method
         if sampling_inputs["use_potts_sampling"]:
             res_type_pred = self.denoiser.potts_sample(batch, sampling_inputs)
-        else:
-            raise NotImplementedError("Only Potts sampling is currently implemented")
+
         return res_type_pred
 
 

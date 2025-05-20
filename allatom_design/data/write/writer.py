@@ -149,9 +149,10 @@ class BoltzWriter(BasePredictionWriter):
                     path = struct_dir / f"{outname}.cif"
                     with path.open("w") as f:
                         f.write(to_mmcif(new_structure, plddts=plddts))
-                else:
-                    path = struct_dir / f"{outname}.npz"
-                    np.savez_compressed(path, **asdict(new_structure))
+
+                # Save processed structure as well
+                path = struct_dir / f"{outname}.npz"
+                np.savez_compressed(path, **asdict(new_structure))
 
                 # Save confidence summary
                 if "plddt" in prediction:

@@ -25,15 +25,14 @@ import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
-from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
-    PDB, Resource, fetch, mmcif_to_pdb, pdb_to_mmcif, process_structure, finalize)
+from allatom_design.data.preprocessing.boltz_utils.parsing_utils import finalize, mmcif_to_pdb
+from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
 from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched
 from allatom_design.eval.eval_utils.proteinmpnn_utils import run_mpnn
 from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
-
 
 
 def compute_per_pdb_info(pdbs: list[str],
@@ -180,25 +179,99 @@ def run_self_consistency_eval_boltz(pdbs: list[str],
     """
     unique_id = uuid.uuid4().hex  # unique ID for temp processing dir
     processed_dir = Path(f"{out_dir}/processed/{unique_id}")  # directory for processed structures
-    preds_dir = Path(f"{out_dir}/struct_preds")  # directory for predicted structures
-
     processed_dir.mkdir(parents=True, exist_ok=True)
-    preds_dir.mkdir(parents=True, exist_ok=True)
 
     # === Process PDBs === #
-    processed_struct_files = process_pdb_files(pdbs, processed_dir, **pdb_processing_cfg)
+    design_struct_files = process_pdb_files(pdbs, processed_dir, **pdb_processing_cfg)
     manifest_path = finalize(processed_dir)
 
     # === Run structure prediction === #
-    trainer, data_module = struct_pred_model["trainer_fn"](processed_data_dir=processed_dir, out_dir=preds_dir)
+    trainer, data_module = struct_pred_model["trainer_fn"](processed_data_dir=processed_dir, out_dir=Path(out_dir))
     preds = trainer.predict(struct_pred_model["boltz1"],
                             datamodule=data_module,
                             return_predictions=True)
+    id_to_preds = {record.id: pred for record, pred in zip(data_module.manifest.records, preds)}
 
     # === Compute metrics === #
+    record_ids = [Path(struct_file).stem for struct_file in design_struct_files]
+    pred_struct_files = [f"{out_dir}/predictions/{record_id}/{record_id}_model_0.npz" for record_id in record_ids]
+    id_to_metrics = {}
+    for record_id, pred_struct_file, design_struct_file in tqdm(zip(record_ids, pred_struct_files, design_struct_files), desc="Computing self-consistency metrics", total=len(design_struct_files)):
+        # TODO: can be parallelized if too slow
+        struct_pred_out = id_to_preds[record_id]
+        id_to_metrics[record_id] = compute_self_consistency_metrics(pred_struct_file, design_struct_file,
+                                                                    struct_pred_out,
+                                                                    data_cfg, f"{out_dir}/ca_aligned_struct_preds")
+
+    # === Clean up temp dir === #
+    shutil.rmtree(processed_dir)
+
+    return id_to_metrics
 
 
+def compute_self_consistency_metrics(pred_struct_file: str,
+                                     design_struct_file: str,
+                                     struct_pred_out: dict[str, Any],  # output from boltz prediction, needed for pLDDT
+                                     data_cfg: DictConfig,  # holds tokenizer and featurizer
+                                     out_dir: str,
+                                     ):
+    """
+    Compute self-consistency metrics between a designed structure and its predicted structure.
+    """
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    metrics = {}
 
+    # First, featurize each structure
+    design_example, design_structure = get_sd_batch([design_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
+    pred_example, pred_structure = get_sd_batch([pred_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
+
+    # Align on CA atoms
+    pred_coords, design_coords = pred_example["coords"], design_example["coords"]  # [1, N, 3]
+
+    ## First, extract CA-only mask (protein-only center atoms)
+    ca_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
+
+    B = design_coords.shape[0]
+    batch_idx = torch.arange(B).unsqueeze(-1)
+    _, center_idx = torch.max(design_example["token_to_center_atom"], dim=-1)
+    ca_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["PROTEIN"])  # only protein tokens where center exists
+    ca_atom_mask[batch_idx, center_idx] = ca_token_mask
+
+    # Compute RMSD
+    ca_rmsd, (ca_aligned_pred_coords, _) = data.torch_rmsd_weighted(pred_coords, design_coords, ca_atom_mask,
+                                                                    return_aligned=True)
+
+    # Write aligned coords to mmcif
+    pred_example["coords"] = ca_aligned_pred_coords
+    write_sd_feats_to_mmcif(pred_example, pred_structure, [f"{out_dir}/boltz_{Path(pred_struct_file).stem}.cif"])
+
+    # Compute metrics
+    for metric in ["sc_ca_rmsd", "sc_center_rmsd", "avg_plddt", "avg_ca_plddt"]:
+        if metric == "sc_ca_rmsd":
+            # Align on CA atoms, compute CA RMSD
+            metrics[metric] = ca_rmsd.item()
+
+        elif metric == "sc_center_rmsd":
+            # Align on center atoms, compute center RMSD
+            center_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
+            center_token_mask = design_example["token_resolved_mask"]
+            center_atom_mask[batch_idx, center_idx] = center_token_mask
+            center_rmsd = data.torch_rmsd_weighted(pred_coords, design_coords, center_atom_mask)
+            metrics[metric] = center_rmsd.item()
+
+        elif metric == "avg_plddt":
+            # Compute average pLDDT across all resolved tokens
+            center_token_mask = design_example["token_resolved_mask"]
+            plddt = (struct_pred_out["plddt"] * center_token_mask).sum(dim=-1) / center_token_mask.sum(dim=-1).clamp(min=1e-6)
+            metrics[metric] = plddt.item()
+
+        elif metric == "avg_ca_plddt":
+            # Compute average pLDDT across all CA atoms
+            ca_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["PROTEIN"])  # only protein tokens where center exists
+            ca_plddt = (struct_pred_out["plddt"] * ca_token_mask).sum(dim=-1) / ca_token_mask.sum(dim=-1).clamp(min=1e-6)
+            metrics[metric] = ca_plddt.item()
+
+    return metrics
 
 
 def run_self_consistency_eval(pdbs: List[str],

@@ -22,7 +22,7 @@ def main(cfg: DictConfig):
     """
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
-# Set seeds
+    # Set seeds
     L.seed_everything(cfg.seed)
     torch.backends.cudnn.deterministic = True  # nonrandom CUDNN convolution algo, maybe slower
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
@@ -70,7 +70,7 @@ def main(cfg: DictConfig):
                          out_dir=out_dir)
 
     if cfg.run_self_consistency_eval:
-        codes_sc_info = eval_metrics.run_self_consistency_eval_boltz(
+        id_to_metrics = eval_metrics.run_self_consistency_eval_boltz(
             aux["out_pdbs"],
             struct_pred_model,
             cfg.pdb_processing_cfg,
@@ -78,12 +78,13 @@ def main(cfg: DictConfig):
             out_dir=pred_out_dir)
 
         # Aggregate results
-        codes_metrics = defaultdict(list)
-        for pdb in aux["out_pdbs"]:
-            for k, v in codes_sc_info[pdb]["sc_metrics"].items():
-                codes_metrics[f"codes_{k}"].append(v.item())
+        sc_metrics = defaultdict(list)
+        for record_id, metrics in id_to_metrics.items():
+            sc_metrics["record_id"].append(record_id)
+            for k, v in metrics.items():
+                sc_metrics[f"{k}"].append(v)
 
-        out_df = pd.DataFrame(codes_metrics)
+        out_df = pd.DataFrame(sc_metrics)
         out_df.to_csv(f"{out_dir}/self_consistency_metrics.csv", index=False)
 
 
