@@ -22,7 +22,7 @@ conda activate allatom_design
 BASE_DIR=/home/users/rshuai/code/allatom-design
 HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, redis
-export PATH=${SOFTWARE_PATH}:$PATH  # add software path to PATH
+export SOFTWARE_PATH=${SOFTWARE_PATH}  # required for mmseqs, foldseek, redis, etc.
 # Sequence design model params
 MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
 FAMPNN_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt

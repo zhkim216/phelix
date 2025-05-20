@@ -20,7 +20,7 @@ conda activate rshuai_allatom_design
 BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
 SOFTWARE_PATH=/scratch/hielab/rshuai/software
-export PATH=${SOFTWARE_PATH}:$PATH  # add software path to PATH
+export SOFTWARE_PATH=${SOFTWARE_PATH}  # required for mmseqs, foldseek, redis, etc.
 
 # Model params
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
