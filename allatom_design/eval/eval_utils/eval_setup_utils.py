@@ -124,7 +124,7 @@ def process_pdb_files(pdb_files: list[str],
     # Load or seed CCD resource in Redis
     if ccd_cfg.use_redis:
         redis_host, redis_port = "localhost", 7777  # hardcoded but can be changed
-        start_redis(redis_host, redis_port, ccd_cfg.software_path, ccd_cfg.ccd_rdb_path)
+        start_redis(redis_host, redis_port, ccd_cfg.ccd_rdb_path)
         resource = Resource(host=redis_host, port=redis_port)
     else:
         resource = pickle.load(open(ccd_cfg.ccd_pkl_path, "rb"))
@@ -137,9 +137,9 @@ def process_pdb_files(pdb_files: list[str],
     return processed_struct_files
 
 
-def start_redis(redis_host: str, redis_port: int, software_path: str, ccd_rdb_path: str):
+def start_redis(redis_host: str, redis_port: int, ccd_rdb_path: str):
     command = [
-        f"{software_path}/redis/bin/redis-server",
+        f"redis/bin/redis-server",
         "--daemonize", "yes",
         "--dir", str(Path(ccd_rdb_path).parent),
         "--dbfilename", str(Path(ccd_rdb_path).name),

@@ -20,6 +20,7 @@ conda activate rshuai_allatom_design
 BASE_DIR=/home/talal/rshuai/allatom-design
 HYDRA_DIR=/scratch/hielab/rshuai/hydra_outputs
 SOFTWARE_PATH=/scratch/hielab/rshuai/software
+export PATH=${SOFTWARE_PATH}:$PATH  # add software path to PATH
 
 # Model params
 AF2_DATA_DIR=/scratch/hielab/rshuai/model_params/af2
@@ -46,7 +47,6 @@ cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
-    software_path=${SOFTWARE_PATH} \
     exp_name=${EXP_NAME} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \

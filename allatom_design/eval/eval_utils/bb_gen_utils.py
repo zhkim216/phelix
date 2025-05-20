@@ -424,7 +424,6 @@ def run_motif_cond_type_sampling(model: AtomDenoiser,
                                  cfg: DictConfig,  # sampling config
                                  device: str,
                                  struct_file_paths: list[str],
-                                 software_path: str,
                                  out_dir: str) -> tuple[list[str], dict[str, Any]]:
     """
     Run motif-conditioned sampling from a backbone generation model based on the motif conditioning type config.
@@ -495,7 +494,7 @@ def run_motif_cond_type_sampling(model: AtomDenoiser,
                 # Get motif indices within sampled structures
                 master_dfs = []
                 for j, pdb_path in enumerate(batch_sampled_paths):
-                    master_df = eval_metrics.motif_master_search(batch_motif_paths[j], batch_sampled_paths[j], f"{master_search_dir}/temp", software_path=software_path)
+                    master_df = eval_metrics.motif_master_search(batch_motif_paths[j], batch_sampled_paths[j], f"{master_search_dir}/temp")
                     master_df.to_csv(f"{master_search_dir}/master_hits_{batch['pdb_key'][j]}_{i + j}.tsv", sep="\t", index=False)
                     master_dfs.append(master_df)
             else:

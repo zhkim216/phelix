@@ -22,7 +22,7 @@ conda activate allatom_design
 BASE_DIR=/home/users/rshuai/code/allatom-design
 HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, redis
-
+export PATH=${SOFTWARE_PATH}:$PATH  # add software path to PATH
 # Sequence design model params
 MPNN_PARAMS_DIR=/scratch/users/rshuai/model_params/mpnn
 FAMPNN_CKPT=/scratch/users/rshuai/allatom_design/allatom_design/c6_aasd1/checkpoints/ema/sd-step120000-epoch344-ema0.99.ckpt
@@ -54,7 +54,6 @@ cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_scaffold_training.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
-    software_path=${SOFTWARE_PATH} \
     exp_name=${EXP_NAME} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     seq_des_cfg.proteinmpnn.mpnn_params_dir=${MPNN_PARAMS_DIR} \

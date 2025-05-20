@@ -5,9 +5,6 @@ wandb:
   wandb_id: "richardshuai"  # Wandb username
   group: "debug" # Wandb group name
 
-# Software path
-software_path: /oak/stanford/groups/possu/rshuai/software
-
 # Outputs
 exp_name: eval_scaffold_training  # experiment name; used for wandb and output directory
 base_out_dir: ${denoiser_train_dir}/eval_scaffold_training  # outputs will be saved to base_out_dir/exp_name
@@ -40,7 +37,6 @@ pdb_processing_cfg:
   # CCD
   ccd_cfg:
     # If using redis
-    software_path: ${software_path}
     use_redis: true
 
     # If using redis (fast)

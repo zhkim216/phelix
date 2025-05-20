@@ -1,7 +1,6 @@
 mmcif_dir: /media/scratch/datasets/boltz_val_cifs/mmCIF
 val_ids_txt: /media/scratch/datasets/boltz_v2/splits/validation_ids.txt
 out_dir: /media/scratch/datasets/boltz_val_cifs
-software_path: /media/scratch/software
 num_workers: 8
 
 # PDB file processing
@@ -14,7 +13,6 @@ pdb_processing_cfg:
 
   # CCD
   ccd_cfg:
-    software_path: ${software_path}
     use_redis: true
 
     # If using redis (fast)

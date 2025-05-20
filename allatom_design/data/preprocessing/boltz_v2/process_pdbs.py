@@ -40,7 +40,7 @@ def main(cfg: DictConfig):
     rdkit.Chem.SetDefaultPickleProperties(pickle_option)
 
     redis_host, redis_port = "localhost", 7777
-    start_redis(redis_host, redis_port, cfg.software_path, cfg.ccd_rdb_path)
+    start_redis(redis_host, redis_port, cfg.ccd_rdb_path)
     resource = Resource(host=redis_host, port=redis_port)
 
     # Fetch data

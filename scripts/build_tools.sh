@@ -2,9 +2,23 @@
 module load gcc/12.4.0
 
 # Define installation path
-SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software
+# SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software
+SOFTWARE_PATH=/media/scratch/software
 mkdir -p "${SOFTWARE_PATH}"
 cd "${SOFTWARE_PATH}"
+
+# Install foldseek
+if [ ! -d "${SOFTWARE_PATH}/foldseek" ]; then
+    wget https://mmseqs.com/foldseek/foldseek-linux-avx2.tar.gz
+    tar -xzvf foldseek-linux-avx2.tar.gz
+fi
+
+
+# Install mmseqs2
+if [ ! -d "${SOFTWARE_PATH}/mmseqs" ]; then
+    wget https://mmseqs.com/latest/mmseqs-linux-avx2.tar.gz
+    tar -xzvf mmseqs-linux-avx2.tar.gz
+fi
 
 # Build Redis
 # check if Redis is already installed
