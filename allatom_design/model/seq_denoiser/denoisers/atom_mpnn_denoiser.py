@@ -185,6 +185,13 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             edge_idx_coloring=edge_idx_coloring,
             mask_ij_coloring=mask_ij_coloring,
         )
+
+        # Set all tokens that don't exist in the graph to unknown
+        for chain_type, unk_token_id in const.unk_token_ids.items():
+            chain_type_id = const.chain_type_ids[chain_type]
+            unk_mask = (~batch["token_exists_mask"].bool()) & (batch["mol_type"] == chain_type_id)
+            S_sample[unk_mask] = unk_token_id
+
         return S_sample
 
 

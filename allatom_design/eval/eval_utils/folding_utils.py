@@ -261,6 +261,45 @@ class BoltzDiffusionParams:
     use_inference_model_cache: bool = True
 
 
+@dataclass
+class BoltzSteeringParams:
+    """Steering parameters."""
+
+    fk_steering: bool = True
+    num_particles: int = 3
+    fk_lambda: float = 4.0
+    fk_resampling_interval: int = 3
+    guidance_update: bool = True
+    num_gd_steps: int = 16
+
+
+@dataclass
+class PairformerArgs:
+    """Pairformer arguments."""
+
+    num_blocks: int = 48
+    num_heads: int = 16
+    dropout: float = 0.0
+    activation_checkpointing: bool = False
+    offload_to_cpu: bool = False
+    use_trifast: bool = True
+
+
+@dataclass
+class MSAModuleArgs:
+    """MSA module arguments."""
+
+    msa_s: int = 64
+    msa_blocks: int = 4
+    msa_dropout: float = 0.0
+    z_dropout: float = 0.0
+    pairwise_head_width: int = 32
+    pairwise_num_heads: int = 4
+    activation_checkpointing: bool = False
+    offload_to_cpu: bool = False
+    use_trifast: bool = True
+
+
 
 def make_boltz_trainer(processed_data_dir: str,
                        out_dir: str,
@@ -301,12 +340,19 @@ def make_boltz_trainer(processed_data_dir: str,
 
 def get_boltz_model(boltz_cfg: DictConfig, device: str) -> Boltz1:
     diffusion_params = BoltzDiffusionParams()
+    steering_args = BoltzSteeringParams()
+    pairformer_args = PairformerArgs(use_trifast=True)
+    msa_module_args = MSAModuleArgs(use_trifast=True)
+
     model_module: Boltz1 = Boltz1.load_from_checkpoint(boltz_cfg["checkpoint"],
                                                        strict=True,
                                                        predict_args=boltz_cfg["predict_args"],
                                                        map_location="cpu",
                                                        diffusion_process_args=asdict(diffusion_params),
-                                                       ema=False)
+                                                       ema=False,
+                                                       pairformer_args=asdict(pairformer_args),
+                                                       msa_module_args=asdict(msa_module_args),
+                                                       steering_args=asdict(steering_args))
     model_module = model_module.eval()
     return model_module
 

@@ -27,13 +27,17 @@ warnings.filterwarnings(
 )
 
 
-def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # noqa: C901, PLR0915, PLR0912
+def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None,
+             keep_auth: bool = False
+             ) -> str:  # noqa: C901, PLR0915, PLR0912
     """Write a structure into an MMCIF file.
 
     Parameters
     ----------
     structure : Structure
         The input structure
+    keep_auth : bool
+        If True, save auth_seq_id by mapping label_seq_id to auth_seq_id
 
     Returns
     -------
@@ -114,11 +118,27 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None) -> str:  # n
     for chain in structure.chains:
         # Define the model assembly
         chain_idx = chain["asym_id"]
-        label_asym_id = chr(chain_idx + 65)  # rename to A,B,C, etc.
+
+        if keep_auth:
+            # Map from label_seq_id to auth_seq_id
+            res_start = chain["res_idx"]
+            res_end = chain["res_idx"] + chain["res_num"]
+            residues = structure.residues[res_start:res_end]
+            auth_seq_ids = residues["auth_seq_id"].tolist()
+            pdb_icodes = [icode.strip() for icode in residues["pdb_icode"]]
+            paired = list(zip(auth_seq_ids, pdb_icodes))
+            label_seq_ids = residues["res_idx"].tolist()
+            auth_seq_id_map = {label_seq_id + 1: pair for label_seq_id, pair in zip(label_seq_ids, paired)}
+        else:
+            auth_seq_id_map = 0
+
+        # Set label_asym_id to A,B,C, etc. 0 indexed
+        label_asym_id = chr(chain_idx + 65)
         asym = AsymUnit(
             entities_map[chain_idx],
             details="Model subunit %s" % label_asym_id,
             id=label_asym_id,
+            auth_seq_id_map=auth_seq_id_map,
         )
         asym_unit_map[chain_idx] = asym
     modeled_assembly = Assembly(asym_unit_map.values(), name="Modeled assembly")
@@ -377,12 +397,13 @@ def write_ad_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
 
 def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                             input_structs: list[Structure],  # needed for ligand sequence info
-                            filenames: list[str]) -> None:
+                            filenames: list[str],
+                            keep_auth: bool = False,
+                            ) -> None:
     """
     Convert a batched dictionary of sequence design features to a list of files.
 
-    By default, we use the sequence in the features to determine label_seq_id.
-    Since features may be cropped (e.g. for a motif), we also save the original residue indices in the auth_seq_id field.
+    If keep_auth is True, we save the auth_seq_id by mapping label_seq_id to auth_seq_id.
     """
     periodic_table = Chem.GetPeriodicTable()  # for element mapping
 
@@ -475,12 +496,15 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
             chain_mask = feats_i["asym_id"] == chain_id
             chain_feats_i = crop_feats(copy.deepcopy(feats_i), chain_mask, max_tokens=None, max_atoms=None)
 
-            # Map from label_seq_id to auth_seq_id
-            auth_seq_ids = chain_feats_i["auth_seq_id"][chain_feats_i["token_pad_mask"].bool()].tolist()
-            pdb_icodes = chain_feats_i["pdb_icode"][chain_feats_i["token_pad_mask"].bool()].tolist()
-            paired = [(seq_id, chr(icode + 32).strip()) for seq_id, icode in zip(auth_seq_ids, pdb_icodes)]  # pair up auth_seq_id and pdb_icode
-            label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()].tolist()
-            auth_seq_id_map = {label_seq_id + 1: pair for label_seq_id, pair in zip(label_seq_ids, paired)}  # renumber label seq id to 1-indexed
+            if keep_auth:
+                # Map from label_seq_id to auth_seq_id
+                auth_seq_ids = chain_feats_i["auth_seq_id"][chain_feats_i["token_pad_mask"].bool()].tolist()
+                pdb_icodes = chain_feats_i["pdb_icode"][chain_feats_i["token_pad_mask"].bool()].tolist()
+                paired = [(seq_id, chr(icode + 32).strip()) for seq_id, icode in zip(auth_seq_ids, pdb_icodes)]  # pair up auth_seq_id and pdb_icode
+                label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()].tolist()
+                auth_seq_id_map = {label_seq_id + 1: pair for label_seq_id, pair in zip(label_seq_ids, paired)}  # renumber label seq id to 1-indexed
+            else:
+                auth_seq_id_map = 0
 
             # Set chain_tag to A,B,C, etc., 0 indexed
             chain_tag = chr(chain_id + 65)

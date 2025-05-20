@@ -1131,13 +1131,13 @@ def parse_auth_seq_id(orig_idx: str | None) -> tuple[int, str]:
     """
     Parse auth_seq_id and icode from res.orig_idx.
 
-    If orig_idx is None, return (0, ' ').
+    If orig_idx is None, return (0, '').
 
     """
     if orig_idx is None:
-        return 0, ' '
+        return 0, ''
     m = re.match(r'^(-?\d+)([A-Za-z]?)$', orig_idx)
     if m:
         return int(m.group(1)), m.group(2)
     print(f"Warning: could not parse auth_seq_id for residue index {orig_idx}, defaulting to 0")
-    return 0, ' '
+    return 0, ''
