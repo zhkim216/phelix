@@ -6,12 +6,16 @@ num_seqs_per_pdb: 1
 verbose: true
 num_workers: 8  # number of workers for data loading
 
-# Inverse folding options
+# Sequence design options
 use_potts_sampling: true
 
 omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
 noise_labels: null  # per-residue noise labels, float for same noise for each residue  # TODO: implement user-provided per-residue noise labels
 add_noise: false  # add noise equal to noise_labels to the input backbone
+
+# Ablation options
+use_protein_only: false  # only condition on protein for sequence design
+save_protein_only: false  # save CIFs with only protein sequence
 
 potts_sampling_cfg:
   regularization: "LCP"

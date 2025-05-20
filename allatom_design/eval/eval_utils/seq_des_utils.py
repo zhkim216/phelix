@@ -23,6 +23,7 @@ from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import atom_center_random_augmentation, to
 from allatom_design.data.datasets.boltz_sd_dataset import sd_collator
+from allatom_design.data.feature.seq_des_featurizer import crop_feats
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     load_input, mmcif_to_pdb)
 from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
@@ -139,13 +140,16 @@ def run_seq_des(model: SeqDenoiser,
 
             # TODO: Add fixed positions, etc. For now assume no fixed positions
             batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
-            batch["seq_cond_mask"] = torch.where(batch["mol_type"] != const.chain_type_ids["PROTEIN"],
-                                                 batch["token_pad_mask"],
-                                                 torch.zeros_like(batch["seq_cond_mask"]))  # always condition on non-protein restypes
+            batch["seq_cond_mask"] = torch.where((batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"],
+                                                 torch.zeros_like(batch["seq_cond_mask"]),
+                                                 batch["token_pad_mask"])  # always condition on non-protein or non-standard residues
             batch["atom_cond_mask"] = batch["prot_bb_atom_mask"]  # condition on backbone atoms
             atomwise_prot_mask = torch.bmm(batch["atom_to_token"].float(), (batch["mol_type"] == const.chain_type_ids["PROTEIN"]).float().unsqueeze(-1)).squeeze(-1)  # TODO: make more efficient
             batch["atom_cond_mask"] = torch.where(atomwise_prot_mask.bool(), batch["atom_cond_mask"], torch.ones_like(batch["atom_cond_mask"]))  # always condition on non-protein atoms
 
+            if cfg["use_protein_only"]:
+                # subset to protein-only features; useful for ablations to only condition on protein
+                batch["token_exists_override"] = batch["mol_type"] == const.chain_type_ids["PROTEIN"]
             # Run sampling
             res_type_pred = model.sample(batch, sampling_inputs=cfg)
 
@@ -155,9 +159,14 @@ def run_seq_des(model: SeqDenoiser,
             output_feats["res_type"] = F.one_hot(res_type_pred, num_classes=len(const.tokens))
             output_feats["coords"] = output_feats["coords"] * output_feats["atom_cond_mask"].unsqueeze(-1)
 
+
             # Save outputs to disk
             if out_dir is not None:
                 # Save as cif
+                if cfg["save_protein_only"]:
+                    # crop to protein-only features; useful for ablations to only fold with protein sequence
+                    output_feats = crop_feats_to_protein_only(output_feats)
+
                 sample_stems = [f"{Path(pdb_file).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_file in enumerate(batch_struct_files)]
                 batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
                 write_sd_feats_to_mmcif(output_feats, input_structs=input_structures, filenames=batch_out_files)
@@ -183,6 +192,25 @@ def run_seq_des(model: SeqDenoiser,
         preds[pdb]["pred_seqs"] = pred_seqs
 
     return preds, run_aux
+
+
+def crop_feats_to_protein_only(batch: dict[str, TensorType["b n ..."]]) -> dict[str, TensorType["b n ..."]]:
+    """
+    Crop a batch of features to protein-only features.
+    """
+    device = batch["coords"].device
+
+    protein_token_mask = batch["mol_type"] == const.chain_type_ids["PROTEIN"]
+    batch = to(batch, device="cpu")
+    cropped_batch = []
+    for i in range(batch["mol_type"].shape[0]):
+        example = {k: v[i] for k, v in batch.items() if v is not None}
+        cropped_example = crop_feats(example, protein_token_mask[i], max_tokens=None, max_atoms=None)
+        cropped_batch.append(cropped_example)
+    cropped_batch = sd_collator(cropped_batch)
+    cropped_batch = to(cropped_batch, device)
+
+    return cropped_batch
 
 
 def get_sd_batch(struct_file_paths: list[str], device: str,

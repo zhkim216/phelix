@@ -254,19 +254,6 @@ class TokenFeatures(nn.Module):
         """
         Get token-level coordinates as an average over all known, resolved atoms in the token.
         """
-        # # mask out padding and unresolved atoms just in case
-        # atom_cond_mask = batch["atom_cond_mask"].float()
-        # X = batch["coords"] * atom_cond_mask.unsqueeze(-1)
-
-        # # normalize by the number of resolved atoms in the token
-        # cond_atom_to_token = batch["atom_to_token"] * atom_cond_mask.unsqueeze(-1)  # cond_atom_to_token ensures that we don't average over unresolved or masked atoms
-        # atom_to_token_mean = cond_atom_to_token / (
-        #     cond_atom_to_token.sum(dim=1, keepdim=True) + 1e-6
-        # )
-
-        # with torch.autocast(device_type="cuda", enabled=False):
-        #     # Average over all known, resolved atoms in the token
-        #     X = torch.bmm(atom_to_token_mean.transpose(1, 2), X)  # [B, N, 3]
         B, N, _ = batch["coords"].shape
         _, center_idx = torch.max(batch["token_to_center_atom"], dim=-1)
         X = batch["coords"][torch.arange(B).unsqueeze(-1), center_idx]  # get center atom for each token
