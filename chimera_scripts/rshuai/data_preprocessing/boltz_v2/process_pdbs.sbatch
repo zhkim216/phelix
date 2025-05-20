@@ -13,7 +13,7 @@ scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files
 
 ## Load modules and set environment variables:
 source ~/.rshuai_bash_profile
-ENV_DIR=/scratch/hielab/rshuai/envs/allatom_design
+ENV_DIR=/scratch/hielab/rshuai/envs
 source ${ENV_DIR}/allatom_design/bin/activate
 
 BASE_DIR=/home/talal/rshuai/allatom-design

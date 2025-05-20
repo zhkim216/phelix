@@ -161,7 +161,7 @@ cython_debug/
 wandb/
 
 #text files
-*.txt
+# *.txt
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
