@@ -1,6 +1,5 @@
 mmcif_dir: /media/scratch/datasets/boltz_test_cases/cifs
 out_dir: /media/scratch/datasets/boltz_v2
-software_path: /media/scratch/software
 
 num_workers: 8
 max_file_size: 2000000

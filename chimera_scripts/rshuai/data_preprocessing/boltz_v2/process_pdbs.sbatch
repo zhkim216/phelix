@@ -15,6 +15,8 @@ scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files
 source ~/.rshuai_bash_profile
 conda activate rshuai_allatom_design
 BASE_DIR=/home/talal/rshuai/allatom-design
+SOFTWARE_PATH=/scratch/hielab/rshuai/software
+export PATH=${SOFTWARE_PATH}:$PATH  # add software path to PATH
 
 cd ${BASE_DIR}
 
@@ -22,5 +24,4 @@ cd ${BASE_DIR}
 python3 allatom_design/data/preprocessing/boltz_v2/process_pdbs.py \
     mmcif_dir=/large_storage/hielab/rshuai/datasets/mmCIF \
     out_dir=/scratch/hielab/rshuai/datasets/boltz_v2 \
-    software_path=/scratch/hielab/rshuai/software \
     num_workers=32

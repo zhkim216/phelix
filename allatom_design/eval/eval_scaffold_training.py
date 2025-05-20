@@ -86,7 +86,6 @@ def main(cfg: DictConfig):
                                                                     motif_cond_type_cfg=motif_cond_type_cfg,
                                                                     device=device,
                                                                     struct_file_paths=processed_struct_files,
-                                                                    software_path=cfg.software_path,
                                                                     out_dir=log_dir_i)
 
             # === CALCULATE STRUCTURE METRICS ===

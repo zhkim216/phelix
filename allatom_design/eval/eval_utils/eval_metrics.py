@@ -1013,8 +1013,7 @@ def compute_motif_bb_rmsd(pdb_path: str,
 
 def motif_master_search(motif_pdb_path: str,
                         target_pdb_path: str,
-                        temp_dir: str,
-                        software_path: str) -> pd.DataFrame:
+                        temp_dir: str) -> pd.DataFrame:
     """
     Run motif master search querying a motif PDB against a target PDB.
 
@@ -1040,7 +1039,7 @@ def motif_master_search(motif_pdb_path: str,
     # Create PDS databases for query
     query_pds_path = f"{temp_dir}/{Path(query_path).stem}.pds"
     command = [
-        f"{software_path}/master-v1.6/bin/createPDS",
+        f"master-v1.6/bin/createPDS",
         "--type", "query",
         "--pdb", query_path,
         "--pds", query_pds_path
@@ -1050,7 +1049,7 @@ def motif_master_search(motif_pdb_path: str,
     # Create PDS database for target
     target_pds_path = f"{temp_dir}/{Path(target_path).stem}.pds"
     command = [
-        f"{software_path}/master-v1.6/bin/createPDS",
+        f"master-v1.6/bin/createPDS",
         "--type", "target",
         "--pdb", target_path,
         "--pds", target_pds_path
@@ -1060,7 +1059,7 @@ def motif_master_search(motif_pdb_path: str,
     # Run motif master search
     match_out = f"{temp_dir}/match_out_{unique_id}.txt"
     command = [
-        f"{software_path}/master-v1.6/bin/master",
+        f"master-v1.6/bin/master",
         "--query", query_pds_path,
         "--target", target_pds_path,
         "--rmsdCut", "1",

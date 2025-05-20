@@ -1,6 +1,3 @@
-# Software path
-software_path: /oak/stanford/groups/possu/rshuai/software  # includes redis, MASTER, etc.
-
 # Run settings
 seed: 0
 num_workers: 8  # for dataloading
@@ -26,7 +23,6 @@ pdb_processing_cfg:
 
   # CCD
   ccd_cfg:
-    software_path: ${software_path}
     use_redis: true
 
     # If using redis (fast)

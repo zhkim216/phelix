@@ -15,6 +15,8 @@ scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files
 source ~/.rshuai_bash_profile
 conda activate rshuai_allatom_design
 BASE_DIR=/home/talal/rshuai/allatom-design
+SOFTWARE_PATH=/scratch/hielab/rshuai/software
+export PATH=${SOFTWARE_PATH}:$PATH  # add software path to PATH
 
 cd ${BASE_DIR}
 
