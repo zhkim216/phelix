@@ -24,7 +24,7 @@ SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, red
 export SOFTWARE_PATH=${SOFTWARE_PATH}  # required for mmseqs, foldseek, redis, etc.
 
 # Model params
-AF2_DATA_DIR=/scratch/users/rshuai/model_params/af2
+BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
 PDB_DIR=/scratch/users/rshuai/datasets/denovo250dev/pdbs
@@ -35,12 +35,12 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to evaluate
-MODEL_NAME=sd1_a1_cfg0
+MODEL_NAME=sd3_a0_cfg0
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_seq_des_denovo250dev_L300
+EXP_NAME=${MODEL_NAME}_eval_seq_des_denovo250dev_L300_boltz
 GROUP=seq_des
 
 # Run training script
@@ -50,8 +50,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
     wandb.group=${GROUP} \
     exp_name=${EXP_NAME} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
-    struct_pred_cfg.af2.data_dir=${AF2_DATA_DIR} \
-    struct_pred_cfg.model_name=af2 \
+    struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
+    struct_pred_cfg.model_name=boltz1 \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
     start_step=0 \
