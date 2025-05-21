@@ -17,8 +17,8 @@ source ~/.subhang_bash_profile
 ml python
 module load gcc/12.4.0
 module load cuda/12.1
-source /home/groups/possu/miniconda/etc/profile.d/conda.sh
-conda activate allatom_design
+ENV_DIR=/oak/stanford/groups/possu/rshuai/envs
+source ${ENV_DIR}/allatom_design/bin/activate
 
 # Define directories
 BASE_DIR=/home/users/rshuai/code/allatom-design

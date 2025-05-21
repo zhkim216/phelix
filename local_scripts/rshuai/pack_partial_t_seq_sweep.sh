@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-conda activate allatom_design
+ENV_DIR=/media/scratch/envs
+source ${ENV_DIR}/allatom_design/bin/activate
+
 cd /home/rshuai/research/huang_lab/allatom-design
 export HF_HOME=/media/scratch/huang_lab/allatom_design/cache/huggingface
 

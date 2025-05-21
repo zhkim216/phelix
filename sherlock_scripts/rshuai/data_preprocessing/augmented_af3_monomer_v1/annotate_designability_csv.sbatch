@@ -15,9 +15,8 @@ scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/
 ml python
 module load gcc/12.4.0
 module load cuda/12.1
-source /home/groups/possu/miniconda/etc/profile.d/conda.sh
-
-conda activate allatom_design
+ENV_DIR=/oak/stanford/groups/possu/rshuai/envs
+source ${ENV_DIR}/allatom_design/bin/activate
 
 BASE_DIR=/home/users/rshuai/code/allatom-design
 cd ${BASE_DIR}

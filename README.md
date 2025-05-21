@@ -4,8 +4,8 @@ Repository for backbone generation + FAMPNN sequence design. For specific exampl
 # Installation
 This environment requires python 3.10 to run. On sherlock, you can simply activate the environment with:
 ```bash
-conda activate allatom_design
-```
+ENV_DIR=/oak/stanford/groups/possu/rshuai/envs
+source ${ENV_DIR}/allatom_design/bin/activate```
 Contact Richard Shuai for detailed instructions on reproducing this environment.
 
 # Datasets
