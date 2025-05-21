@@ -100,14 +100,15 @@ def main(cfg: DictConfig):
         cfg.pdb_processing_cfg,
         out_dir=log_dir)
 
+    # Save metrics as CSV
+    metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
+    metrics_df.to_csv(f"{log_dir}/sc_metrics.csv", index=False)
+
     # Aggregate results
     sc_metrics = defaultdict(list)
     for record_id, metrics in id_to_metrics.items():
         for k, v in metrics.items():
             sc_metrics[f"{k}"].append(v)
-
-    # Save metrics
-    torch.save(sc_metrics, f"{log_dir}/sc_metrics.pt")
 
     # Update metrics
     out_metrics = {f"seq_des/mean/{k}": np.nanmean(v) for k, v in sc_metrics.items() if k != "record_id"}

@@ -73,14 +73,9 @@ def main(cfg: DictConfig):
             cfg.pdb_processing_cfg,
             out_dir=pred_out_dir)
 
-        # Aggregate results
-        sc_metrics = defaultdict(list)
-        for record_id, metrics in id_to_metrics.items():
-            for k, v in metrics.items():
-                sc_metrics[f"{k}"].append(v)
-
-        out_df = pd.DataFrame(sc_metrics)
-        out_df.to_csv(f"{out_dir}/self_consistency_metrics.csv", index=True)
+        # Save metrics as CSV
+        metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
+        metrics_df.to_csv(f"{out_dir}/self_consistency_metrics.csv", index=False)
 
 
 if __name__ == "__main__":
