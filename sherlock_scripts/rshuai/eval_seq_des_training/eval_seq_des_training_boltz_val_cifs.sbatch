@@ -1,15 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a0_eval_seq_des
-#SBATCH -p possu
-#SBATCH --nodelist=sh03-18n05
-#SBATCH --array=0-3
+#SBATCH --job-name=sd1_a1_cfg0_eval_seq_des
+#SBATCH -p bioe
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
-#
-#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%A_%a.out
-#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%A_%a.err
-## Write batch script to logs
+#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%j.out
+#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%j.err
+
+# Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 # Load modules and set environment variables
@@ -24,30 +22,25 @@ BASE_DIR=/home/users/rshuai/code/allatom-design
 HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, redis
 export SOFTWARE_PATH=${SOFTWARE_PATH}  # required for mmseqs, foldseek, redis, etc.
+
 # Model params
 BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
-PDB_DIR=/scratch/users/rshuai/datasets/denovo250dev/pdbs
-PDB_NAME_LIST=/scratch/users/rshuai/datasets/denovo250dev/pdb_name_lists/L300.txt
+PDB_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/pdbs
+PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/protein_monomer_32_256.txt
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to evaluate
-MODEL_NAMES=(
-    "sd3_a0_cfg0"
-    "sd3_a0_cfg1"
-    "sd3_a0_cfg2"
-    "sd3_a0_cfg3"
-)
-MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
+MODEL_NAME=sd3_a0_cfg0
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_seq_des_denovo250dev_L300
+EXP_NAME=${MODEL_NAME}_eval_seq_des_denovo250dev_L300_boltz
 GROUP=seq_des
 
 # Run training script
