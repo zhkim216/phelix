@@ -71,7 +71,6 @@ def main(cfg: DictConfig):
             aux["out_pdbs"],
             struct_pred_model,
             cfg.pdb_processing_cfg,
-            seq_des_model["data_cfg"],
             out_dir=pred_out_dir)
 
         # Aggregate results

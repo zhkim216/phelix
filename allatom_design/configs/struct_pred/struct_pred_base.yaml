@@ -8,5 +8,17 @@ boltz1:
     write_confidence_summary: true
     write_full_pae: false
     write_full_pde: false
+  data_cfg:
+    # Tokenizer and featurizer for pretokenizing inputs
+    tokenizer:
+      _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
+
+    # Featurizer for prefeaturizing inputs
+    featurizer:
+      _target_: allatom_design.data.feature.seq_des_featurizer.SequenceDesignFeaturizer
+
+    atoms_per_window_queries: 32
+    num_bins: 64
+
 esmfold:
   max_tokens_per_batch: 1024

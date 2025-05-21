@@ -174,7 +174,6 @@ def compute_secondary_structure_content(pdbs: List[str]) -> Dict[str, Dict[str, 
 def run_self_consistency_eval_boltz(pdbs: list[str],
                                     struct_pred_model: dict[str, Any],
                                     pdb_processing_cfg: DictConfig,
-                                    data_cfg: DictConfig,
                                     out_dir: str) -> dict[str, dict[str, TensorType]]:
     """
     Run self-consistency evaluation on a list of PDBs with designed sequences.
@@ -203,7 +202,7 @@ def run_self_consistency_eval_boltz(pdbs: list[str],
         struct_pred_out = id_to_preds[record_id]
         id_to_metrics[record_id] = compute_self_consistency_metrics(pred_struct_file, design_struct_file,
                                                                     struct_pred_out,
-                                                                    data_cfg, f"{out_dir}/ca_aligned_struct_preds")
+                                                                    struct_pred_model["data_cfg"], f"{out_dir}/ca_aligned_struct_preds")
 
     # === Clean up temp dir === #
     shutil.rmtree(processed_dir)
