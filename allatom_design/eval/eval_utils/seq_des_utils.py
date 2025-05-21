@@ -148,8 +148,8 @@ def run_seq_des(model: SeqDenoiser,
             batch["atom_cond_mask"] = torch.where(atomwise_prot_mask.bool(), batch["atom_cond_mask"], torch.ones_like(batch["atom_cond_mask"]))  # always condition on non-protein atoms
 
             if cfg["use_protein_only"]:
-                # subset to protein-only features; useful for ablations to only condition on protein
-                batch["token_exists_override"] = batch["mol_type"] == const.chain_type_ids["PROTEIN"]
+                # subset to standard protein-only features; useful for ablations to only condition on protein
+                batch["token_exists_override"] = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
             # Run sampling
             res_type_pred = model.sample(batch, sampling_inputs=cfg)
 
@@ -164,7 +164,7 @@ def run_seq_des(model: SeqDenoiser,
                 # Save as cif
                 if cfg["save_protein_only"]:
                     # crop to protein-only features; useful for ablations to only fold with protein sequence
-                    output_feats = crop_feats_to_protein_only(output_feats)
+                    output_feats = crop_batch_to_protein_only(output_feats)
 
                 sample_stems = [f"{Path(pdb_file).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_file in enumerate(batch_struct_files)]
                 batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
@@ -193,13 +193,13 @@ def run_seq_des(model: SeqDenoiser,
     return preds, run_aux
 
 
-def crop_feats_to_protein_only(batch: dict[str, TensorType["b n ..."]]) -> dict[str, TensorType["b n ..."]]:
+def crop_batch_to_protein_only(batch: dict[str, TensorType["b n ..."]]) -> dict[str, TensorType["b n ..."]]:
     """
-    Crop a batch of features to protein-only features.
+    Crop a batch of features to standard protein-only features.
     """
     device = batch["coords"].device
 
-    protein_token_mask = batch["mol_type"] == const.chain_type_ids["PROTEIN"]
+    protein_token_mask = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
     batch = to(batch, device="cpu")
     cropped_batch = []
     for i in range(batch["mol_type"].shape[0]):

@@ -396,7 +396,10 @@ def get_struct_pred_model(cfg: DictConfig,
         esmfold, tokenizer = get_esmfold_model(device=device)
         struct_pred_model["esmfold"] = esmfold
         struct_pred_model["tokenizer"] = tokenizer
+        struct_pred_model["data_cfg"] = hydra.utils.instantiate(cfg.boltz1.data_cfg)  # useful to have boltz tokenizer/featurizer
     else:
         raise ValueError(f"Invalid model name: {model_name}")
 
     return struct_pred_model
+
+

@@ -32,9 +32,10 @@ from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
-from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched
+from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched, run_esmfold
 from allatom_design.eval.eval_utils.proteinmpnn_utils import run_mpnn
-from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
+from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch, get_sd_example
+from allatom_design.data.feature.seq_des_featurizer import crop_feats
 
 
 def compute_per_pdb_info(pdbs: list[str],
@@ -187,11 +188,16 @@ def run_self_consistency_eval_boltz(pdbs: list[str],
     manifest_path = finalize(processed_dir)
 
     # === Run structure prediction === #
-    trainer, data_module = struct_pred_model["trainer_fn"](processed_data_dir=processed_dir, out_dir=Path(out_dir))
-    preds = trainer.predict(struct_pred_model["boltz1"],
-                            datamodule=data_module,
-                            return_predictions=True)
-    id_to_preds = {record.id: pred for record, pred in zip(data_module.manifest.records, preds)}
+    if struct_pred_model["model_name"] == "boltz1":
+        trainer, data_module = struct_pred_model["trainer_fn"](processed_data_dir=processed_dir, out_dir=Path(out_dir))
+        preds = trainer.predict(struct_pred_model["boltz1"],
+                                datamodule=data_module,
+                                return_predictions=True)
+        id_to_preds = {record.id: pred for record, pred in zip(data_module.manifest.records, preds)}
+    elif struct_pred_model["model_name"] == "esmfold":
+        id_to_preds = run_esmfold_from_boltz_feats(design_struct_files, struct_pred_model, out_dir)
+    else:
+        raise ValueError(f"Unknown structure prediction model: {struct_pred_model['model_name']}")
 
     # === Compute metrics === #
     record_ids = [Path(struct_file).stem for struct_file in design_struct_files if struct_file is not None]
@@ -200,7 +206,7 @@ def run_self_consistency_eval_boltz(pdbs: list[str],
     for record_id, pred_struct_file, design_struct_file in tqdm(zip(record_ids, pred_struct_files, design_struct_files), desc="Computing self-consistency metrics", total=len(design_struct_files)):
         # TODO: can be parallelized if too slow
         struct_pred_out = id_to_preds[record_id]
-        id_to_metrics[record_id] = compute_self_consistency_metrics(pred_struct_file, design_struct_file,
+        id_to_metrics[record_id] = compute_self_consistency_metrics_boltz(pred_struct_file, design_struct_file,
                                                                     struct_pred_out,
                                                                     struct_pred_model["data_cfg"], f"{out_dir}/ca_aligned_struct_preds")
 
@@ -210,12 +216,11 @@ def run_self_consistency_eval_boltz(pdbs: list[str],
     return id_to_metrics
 
 
-def compute_self_consistency_metrics(pred_struct_file: str,
-                                     design_struct_file: str,
-                                     struct_pred_out: dict[str, Any],  # output from boltz prediction, needed for pLDDT
-                                     data_cfg: DictConfig,  # holds tokenizer and featurizer
-                                     out_dir: str,
-                                     ):
+def compute_self_consistency_metrics_boltz(pred_struct_file: str,
+                                           design_struct_file: str,
+                                           struct_pred_out: dict[str, Any],  # output from boltz prediction, needed for pLDDT
+                                           data_cfg: DictConfig,  # holds tokenizer and featurizer
+                                           out_dir: str):
     """
     Compute self-consistency metrics between a designed structure and its predicted structure.
     """
@@ -306,6 +311,65 @@ def compute_self_consistency_metrics(pred_struct_file: str,
             metrics[metric] = nonpolymer_plddt.item()
 
     return metrics
+
+
+def run_esmfold_from_boltz_feats(design_struct_files: str,
+                                 struct_pred_model: dict[str, Any],  # contains struct pred model components
+                                 out_dir: str,) -> dict[str, dict[str, TensorType]]:
+    # === Load in design structures === #
+    data_cfg = struct_pred_model["data_cfg"]  # holds boltz tokenizer/featurizer
+
+    for design_struct_file in design_struct_files:
+        # Load in designed structure and extract standard protein-only features
+        design_example, design_structure = get_sd_example(design_struct_file, data_cfg=data_cfg)
+        protein_only_mask = (design_example["mol_type"] == const.chain_type_ids["PROTEIN"]) & design_example["is_standard"]
+        design_example = crop_feats(design_example, protein_only_mask, max_tokens=None, max_atoms=None)
+
+        # Extract sequence and residue indices
+        sequence = "".join([const.token_ids[const.prot_letter_to_token[aa]] for aa in design_example["res_idx"].argmax(dim=-1)])
+        residue_index = design_example["label_seq_id"]
+        chain_index = design_example["asym_id"]
+
+        esm_pred = run_esmfold([sequence], [residue_index], [chain_index], model=struct_pred_model["esmfold"], tokenizer=struct_pred_model["tokenizer"])
+        print("TEST")
+
+
+
+    design_examples, design_structures = get_sd_batch(design_struct_files, device=device, data_cfg=data_cfg, parallel_pool=None)
+    sequences_list, residue_index_list, chain_index_list = [], [], []
+
+
+    pass
+    # # === Run structure prediction === #
+    # sequences_list, residue_index_list, chain_index_list = load_sequence_and_residx_from_pdbs(pdbs)
+    #     if struct_model_name == "esmfold":
+    #         # === Run ESMFold === #
+    #         esm_preds = run_esmfold_batched(sequences_list=sequences_list,
+    #                                         residue_index_list=residue_index_list,
+    #                                         chain_index_list=chain_index_list,
+    #                                         model=struct_pred_model["esmfold"],
+    #                                         tokenizer=struct_pred_model["tokenizer"],
+    #                                         max_tokens_per_batch=struct_pred_cfg.esmfold.max_tokens_per_batch)
+    #         # Write to pdb file
+    #         for i, pdb in enumerate(pdbs):
+    #             sc_info[pdb]["sample_seq"] = sequences_list[i]
+    #             sc_info[pdb]["struct_preds"] = {k: v[i][None] for k, v in esm_preds.items()}  # unpack preds and add batch dim
+
+    #             feats = {
+    #                 "aatype": esm_preds["aatype"][i],
+    #                 "atom_positions": esm_preds["pred_coords"][i],
+    #                 "atom_mask": esm_preds["atom_mask"][i],
+    #                 "residue_index": esm_preds["residue_index"][i],
+    #                 "chain_index": esm_preds["chain_index"][i],
+    #                 "b_factors": esm_preds["plddt"][i],
+    #             }
+
+    #             filename = f"{preds_dir}/esmfold_{Path(pdb).stem}.pdb"
+    #             write_to_pdb(**feats, filename=filename, mode="aa")
+    #     else:
+    #         raise ValueError(f"Unknown structure prediction model: {struct_model_name}")
+
+    # return sc_info
 
 
 def run_self_consistency_eval(pdbs: List[str],
