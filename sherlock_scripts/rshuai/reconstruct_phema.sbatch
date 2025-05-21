@@ -16,7 +16,7 @@ scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/
 ml python
 module load gcc/12.4.0
 module load cuda/12.1
-ENV_DIR=/oak/stanford/groups/possu/rshuai/envs
+ENV_DIR=/home/groups/possu/rshuai/envs
 source ${ENV_DIR}/allatom_design/bin/activate
 
 # Define directories
