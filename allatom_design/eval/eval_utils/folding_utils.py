@@ -4,10 +4,10 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Tuple
 
+import hydra
 import torch
 from boltz.data.module.inference import BoltzInferenceDataModule
 from boltz.data.types import Manifest
-from allatom_design.data.write.writer import BoltzWriter
 from boltz.model.model import Boltz1
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
@@ -17,6 +17,7 @@ from transformers import AutoTokenizer, EsmForProteinFolding, EsmTokenizer
 
 from allatom_design.data import data
 from allatom_design.data.residue_constants import STANDARD_ATOM_MASK
+from allatom_design.data.write.writer import BoltzWriter
 
 
 def run_esmfold(sequence_list: List[str],
@@ -389,6 +390,7 @@ def get_struct_pred_model(cfg: DictConfig,
         struct_pred_model["boltz1"] = get_boltz_model(cfg.boltz1, device=device)
         struct_pred_model["trainer_fn"] = partial(make_boltz_trainer,
                                                   num_workers=cfg.boltz1.num_workers)
+        struct_pred_model["data_cfg"] = hydra.utils.instantiate(cfg.boltz1.data_cfg)
 
     elif model_name == "esmfold":
         esmfold, tokenizer = get_esmfold_model(device=device)
