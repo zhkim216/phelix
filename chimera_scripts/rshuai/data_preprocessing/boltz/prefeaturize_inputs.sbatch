@@ -13,7 +13,6 @@ scontrol write batch_script $SLURM_JOB_ID /scratch/hielab/rshuai/slurm_log_files
 
 ## Load modules and set environment variables:
 source ~/.rshuai_bash_profile
-conda activate rshuai_allatom_design
 BASE_DIR=/home/talal/rshuai/allatom-design
 
 cd ${BASE_DIR}
