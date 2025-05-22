@@ -35,7 +35,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=proteinmpnn_boltz_val_protein_monomer_32_512_no_ligand
+EXP_NAME=proteinmpnn_bvc_protein_monomer_32_512_no_ligand_boltz1
 GROUP=seq_des
 BASE_OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/boltz_val_cifs_evals/protein_monomer_32_512_no_ligand/proteinmpnn
 
