@@ -14,7 +14,7 @@ scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/
 ## Load modules and conda environment
 ml python
 module load gcc/12.4.0
-module load cuda/12.1
+module load cuda/12.4
 ENV_DIR=/home/groups/possu/rshuai/envs
 source ${ENV_DIR}/allatom_design/bin/activate
 
@@ -28,17 +28,17 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME_BASE=sd3_a0
+EXP_NAME_BASE=sd3_a1
 GROUP=seq_des
 
 # Dataset paths
-PDB_PATH=/scratch/users/subhang/datasets/test/af3_pdb_monomer_boltz
+PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 CONFIGS=(
 "denoiser.mpnn.use_atom_encoder=false mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.token_features.ca_only=false"
-"denoiser.mpnn.use_atom_encoder=true mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.token_features.ca_only=false"
-"denoiser.mpnn.use_atom_encoder=false denoiser.mpnn.token_features.ca_only=false"
-"denoiser.mpnn.use_atom_encoder=true denoiser.mpnn.token_features.ca_only=false"
+"denoiser.mpnn.use_atom_encoder=false mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.token_features.ca_only=false data.filters.4.max_residues=2048"
+"denoiser.mpnn.use_atom_encoder=false mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.token_features.ca_only=false data.filters.4.max_residues=2048 data.filters.2.resolution=4.0"
+"denoiser.mpnn.use_atom_encoder=false mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.token_features.ca_only=false data.filters.4.max_residues=2048 data.filters.2.resolution=2.0"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
@@ -54,10 +54,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.pdb_path=${PDB_PATH} \
     data.max_tokens=256 \
     data.max_atoms=3584 \
-    data.filters.1=null \
-    data.filters.2=null \
-    data.filters.4.max_residues=512 \
-    data.filters.4.min_residues=32 \
     train.batch_size=16 \
     trainer.accumulate_grad_batches=2 \
     train.compile_model=false \

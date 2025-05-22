@@ -374,7 +374,7 @@ def run_esmfold_from_boltz_feats(design_struct_files: str,
         protein_mask = (design_example["mol_type"] == const.chain_type_ids["PROTEIN"]) & design_example["is_standard"]
         plddt = torch.zeros_like(protein_mask, dtype=torch.float32)
         plddt[protein_mask] = esm_pred["ca_plddt"]
-        preds["plddt"] = plddt
+        preds["plddt"] = plddt / 100.0
         id_to_preds[Path(design_struct_file).stem] = preds
 
     # Re-process to get processed struct files
