@@ -8,7 +8,7 @@ p:
   protein_discontiguous: 0.9
 
 restype_mask_p:
-  # Probability of masking out non-polymer residue types (along with the sidechain atoms)
+  # Probability of masking out polymer residue types (along with the sidechain atoms)
   all: 1.0  # mask out all restypes
   uniform: 0.0  # mask out with probability from U[0, 1]
 

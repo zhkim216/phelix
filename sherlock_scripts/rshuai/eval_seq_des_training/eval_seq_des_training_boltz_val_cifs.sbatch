@@ -24,11 +24,13 @@ SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, red
 export SOFTWARE_PATH=${SOFTWARE_PATH}  # required for mmseqs, foldseek, redis, etc.
 
 # Model params
+STRUCT_PRED_MODEL=boltz1
 BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
 PDB_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/pdbs
-PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/protein_monomer_32_256.txt
+LIST_NAME=protein_monomer_32_256_no_ligand.txt
+PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/${LIST_NAME}
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
@@ -40,7 +42,7 @@ DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_N
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_seq_des_denovo250dev_L300_boltz
+EXP_NAME=${MODEL_NAME}_eval_seq_des_bvc_${LIST_NAME}_${STRUCT_PRED_MODEL}
 GROUP=seq_des
 
 # Run training script
@@ -51,7 +53,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
     exp_name=${EXP_NAME} \
     denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
-    struct_pred_cfg.model_name=boltz1 \
+    struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
     start_step=0 \
