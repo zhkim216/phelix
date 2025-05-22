@@ -59,7 +59,7 @@ data:
       resolution: 9.0
     - _target_: allatom_design.data.filter.dynamic.max_residues.MaxResiduesFilter
       min_residues: 16
-      max_residues: 1024
+      max_residues: 4096
     - _target_: allatom_design.data.filter.dynamic.chain_type_size.ChainTypeSizeFilter
       chain_type: "PROTEIN"
       min_chains: 1
