@@ -276,16 +276,24 @@ class SDDataset(data.Dataset):
         # Load pre-featurized data and crop the features
         try:
             feats = load_featurized(sample.record, self.dataset.pdb_path)
+            # DEBUG
+            if feats["coords"].ndim == 3:
+                # backwards compatibility: remove batch dimension
+                feats["coords"] = feats["coords"].squeeze(0)
+
+            if self.max_tokens is not None:
+                feats = crop_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.atoms_per_window_queries)
+
         except Exception as e:
             print(f"Failed to load featurized data for {sample.record.id} with error: {e}. Skipping.")
             return self._load_feats(idx + 1)
 
-        if feats["coords"].ndim == 3:
-            # backwards compatibility: remove batch dimension
-            feats["coords"] = feats["coords"].squeeze(0)
+        # if feats["coords"].ndim == 3:
+        #     # backwards compatibility: remove batch dimension
+        #     feats["coords"] = feats["coords"].squeeze(0)
 
-        if self.max_tokens is not None:
-            feats = crop_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.atoms_per_window_queries)
+        # if self.max_tokens is not None:
+        #     feats = crop_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.atoms_per_window_queries)
 
         # # Create tokenwise feats  # DEBUG
         # tokenwise_feats = pad_atom_feats_to_tokenwise(feats, max_atoms_per_token=const.max_num_atoms)
