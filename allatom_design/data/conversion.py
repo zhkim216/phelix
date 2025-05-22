@@ -4,11 +4,6 @@ Convert between OpenFold and Boltz representations.
 from allatom_design.data import residue_constants as rc
 from allatom_design.data import const
 
-
-
-rc.restype_name_to_atom14_names
-const.ref_atoms
-
 for resname, atom14_names in rc.restype_name_to_atom14_names.items():
     if resname == "UNK":
         continue

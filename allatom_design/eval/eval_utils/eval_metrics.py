@@ -32,10 +32,9 @@ from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
-from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched, run_esmfold
+from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched
 from allatom_design.eval.eval_utils.proteinmpnn_utils import run_mpnn
-from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch, get_sd_example
-from allatom_design.data.feature.seq_des_featurizer import crop_feats
+from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch, crop_batch_to_protein_only
 
 
 def compute_per_pdb_info(pdbs: list[str],
@@ -188,27 +187,27 @@ def run_self_consistency_eval_boltz(pdbs: list[str],
     manifest_path = finalize(processed_dir)
 
     # === Run structure prediction === #
+    record_ids = [Path(struct_file).stem for struct_file in design_struct_files if struct_file is not None]
     if struct_pred_model["model_name"] == "boltz1":
         trainer, data_module = struct_pred_model["trainer_fn"](processed_data_dir=processed_dir, out_dir=Path(out_dir))
         preds = trainer.predict(struct_pred_model["boltz1"],
                                 datamodule=data_module,
                                 return_predictions=True)
         id_to_preds = {record.id: pred for record, pred in zip(data_module.manifest.records, preds)}
+        pred_struct_files = [f"{out_dir}/predictions/{record_id}/{record_id}_model_0.npz" for record_id in record_ids]
     elif struct_pred_model["model_name"] == "esmfold":
-        id_to_preds = run_esmfold_from_boltz_feats(design_struct_files, struct_pred_model, out_dir)
+        id_to_preds, pred_struct_files = run_esmfold_from_boltz_feats(design_struct_files, struct_pred_model, pdb_processing_cfg, processed_dir, out_dir)
     else:
         raise ValueError(f"Unknown structure prediction model: {struct_pred_model['model_name']}")
 
     # === Compute metrics === #
-    record_ids = [Path(struct_file).stem for struct_file in design_struct_files if struct_file is not None]
-    pred_struct_files = [f"{out_dir}/predictions/{record_id}/{record_id}_model_0.npz" for record_id in record_ids]
     id_to_metrics = {}
     for record_id, pred_struct_file, design_struct_file in tqdm(zip(record_ids, pred_struct_files, design_struct_files), desc="Computing self-consistency metrics", total=len(design_struct_files)):
         # TODO: can be parallelized if too slow
         struct_pred_out = id_to_preds[record_id]
         id_to_metrics[record_id] = compute_self_consistency_metrics_boltz(pred_struct_file, design_struct_file,
-                                                                    struct_pred_out,
-                                                                    struct_pred_model["data_cfg"], f"{out_dir}/ca_aligned_struct_preds")
+                                                                          struct_pred_out,
+                                                                          struct_pred_model["data_cfg"], f"{out_dir}/ca_aligned_struct_preds")
 
     # === Clean up temp dir === #
     shutil.rmtree(processed_dir)
@@ -220,7 +219,8 @@ def compute_self_consistency_metrics_boltz(pred_struct_file: str,
                                            design_struct_file: str,
                                            struct_pred_out: dict[str, Any],  # output from boltz prediction, needed for pLDDT
                                            data_cfg: DictConfig,  # holds tokenizer and featurizer
-                                           out_dir: str):
+                                           out_dir: str,
+                                           ):
     """
     Compute self-consistency metrics between a designed structure and its predicted structure.
     """
@@ -249,7 +249,7 @@ def compute_self_consistency_metrics_boltz(pred_struct_file: str,
 
     # Write aligned coords to mmcif
     pred_example["coords"] = ca_aligned_pred_coords
-    write_sd_feats_to_mmcif(pred_example, pred_structure, [f"{out_dir}/boltz_{Path(pred_struct_file).stem}.cif"])
+    write_sd_feats_to_mmcif(pred_example, pred_structure, [f"{out_dir}/{Path(pred_struct_file).stem}.cif"])
 
     # Compute metrics
     for metric in ["sc_ca_rmsd", "sc_center_rmsd", "sc_nonpolymer_rmsd",
@@ -315,61 +315,75 @@ def compute_self_consistency_metrics_boltz(pred_struct_file: str,
 
 def run_esmfold_from_boltz_feats(design_struct_files: str,
                                  struct_pred_model: dict[str, Any],  # contains struct pred model components
-                                 out_dir: str,) -> dict[str, dict[str, TensorType]]:
+                                 pdb_processing_cfg: DictConfig,
+                                 processed_dir: str,
+                                 out_dir: str) -> tuple[dict[str, dict[str, TensorType]], list[str]]:
+    id_to_preds = {}
+
     # === Load in design structures === #
     data_cfg = struct_pred_model["data_cfg"]  # holds boltz tokenizer/featurizer
+    pred_dir = f"{processed_dir}/esmfold_preds"
+    Path(pred_dir).mkdir(parents=True, exist_ok=True)
 
-    for design_struct_file in design_struct_files:
+    out_pdbs = []
+    for design_struct_file in tqdm(design_struct_files, desc="Running ESMFold"):
+        preds = {}  # for now, this just holds plddt
+
         # Load in designed structure and extract standard protein-only features
-        design_example, design_structure = get_sd_example(design_struct_file, data_cfg=data_cfg)
-        protein_only_mask = (design_example["mol_type"] == const.chain_type_ids["PROTEIN"]) & design_example["is_standard"]
-        design_example = crop_feats(design_example, protein_only_mask, max_tokens=None, max_atoms=None)
+        design_example, design_structure = get_sd_batch([design_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
+        prot_example = crop_batch_to_protein_only(design_example)
 
         # Extract sequence and residue indices
-        sequence = "".join([const.token_ids[const.prot_letter_to_token[aa]] for aa in design_example["res_idx"].argmax(dim=-1)])
-        residue_index = design_example["label_seq_id"]
-        chain_index = design_example["asym_id"]
+        sequence = "".join([const.prot_token_to_letter[const.tokens[aa.item()]] for aa in prot_example["res_type"].argmax(dim=-1).squeeze(0)])
+        residue_index = prot_example["label_seq_id"].squeeze(0)
+        chain_index = prot_example["asym_id"].squeeze(0)
 
-        esm_pred = run_esmfold([sequence], [residue_index], [chain_index], model=struct_pred_model["esmfold"], tokenizer=struct_pred_model["tokenizer"])
-        print("TEST")
+        # Run ESMFold prediction on this sequence
+        esm_pred = run_esmfold_batched([sequence], [residue_index], [chain_index], model=struct_pred_model["esmfold"], tokenizer=struct_pred_model["tokenizer"])
+        esm_pred = {k: v[0] for k, v in esm_pred.items()}
 
+        # Format output coordinates to match boltz coordinates. This works since atom14 representations match
+        n_atoms_per_token = prot_example["atom_to_token"].squeeze(0).sum(dim=-0)
 
+        # pack atom14 coords into atom-level representation
+        pred_atom14 = esm_pred["pred_coords_atom14"]  # shape [n_token, 14, 3]
+        mask = torch.arange(14, device=pred_atom14.device).unsqueeze(0) < n_atoms_per_token.unsqueeze(-1)
+        mask = mask.unsqueeze(-1).expand(-1, -1, 3)  # shape [n_token, 14, 3]
+        esm_coords = pred_atom14[mask].view(-1, 3).unsqueeze(0)  # shape [1, n_atoms, 3]
 
-    design_examples, design_structures = get_sd_batch(design_struct_files, device=device, data_cfg=data_cfg, parallel_pool=None)
-    sequences_list, residue_index_list, chain_index_list = [], [], []
+        if esm_coords.shape[1] != prot_example["atom_pad_mask"].sum().item():
+            print(f"Something went wrong with converting ESMFold coords to boltz coords for {design_struct_file}, defaulting boltz coords to 0")
+            esm_coords = torch.zeros_like(prot_example["coords"])
 
+        atom_pad_mask = prot_example["atom_pad_mask"].bool()  # accounting for that atoms are padded to nearest multiple of 32
+        prot_example["coords"][atom_pad_mask] = esm_coords
 
-    pass
-    # # === Run structure prediction === #
-    # sequences_list, residue_index_list, chain_index_list = load_sequence_and_residx_from_pdbs(pdbs)
-    #     if struct_model_name == "esmfold":
-    #         # === Run ESMFold === #
-    #         esm_preds = run_esmfold_batched(sequences_list=sequences_list,
-    #                                         residue_index_list=residue_index_list,
-    #                                         chain_index_list=chain_index_list,
-    #                                         model=struct_pred_model["esmfold"],
-    #                                         tokenizer=struct_pred_model["tokenizer"],
-    #                                         max_tokens_per_batch=struct_pred_cfg.esmfold.max_tokens_per_batch)
-    #         # Write to pdb file
-    #         for i, pdb in enumerate(pdbs):
-    #             sc_info[pdb]["sample_seq"] = sequences_list[i]
-    #             sc_info[pdb]["struct_preds"] = {k: v[i][None] for k, v in esm_preds.items()}  # unpack preds and add batch dim
+        # Put protein-only coordinates back into design example
+        _, atomwise_token_idx = torch.max(design_example["atom_to_token"], dim=-1)  # [b, n_atoms]
+        atomwise_moltype = design_example["mol_type"].gather(dim=-1, index=atomwise_token_idx)  # [b, n_atoms]
+        atomwise_is_standard = design_example["is_standard"].gather(dim=-1, index=atomwise_token_idx)  # [b, n_atoms]
+        atomwise_protein_mask = (atomwise_moltype == const.chain_type_ids["PROTEIN"]) & atomwise_is_standard
+        design_example["coords"][atomwise_protein_mask] = prot_example["coords"]
 
-    #             feats = {
-    #                 "aatype": esm_preds["aatype"][i],
-    #                 "atom_positions": esm_preds["pred_coords"][i],
-    #                 "atom_mask": esm_preds["atom_mask"][i],
-    #                 "residue_index": esm_preds["residue_index"][i],
-    #                 "chain_index": esm_preds["chain_index"][i],
-    #                 "b_factors": esm_preds["plddt"][i],
-    #             }
+        # Write to mmcif
+        out_pdb = f"{pred_dir}/esmfold_{Path(design_struct_file).stem}.cif"
+        write_sd_feats_to_mmcif(design_example, design_structure, [out_pdb])
+        out_pdbs.append(out_pdb)
 
-    #             filename = f"{preds_dir}/esmfold_{Path(pdb).stem}.pdb"
-    #             write_to_pdb(**feats, filename=filename, mode="aa")
-    #     else:
-    #         raise ValueError(f"Unknown structure prediction model: {struct_model_name}")
+        # Format plddt to match boltz format
+        protein_mask = (design_example["mol_type"] == const.chain_type_ids["PROTEIN"]) & design_example["is_standard"]
+        plddt = torch.zeros_like(protein_mask, dtype=torch.float32)
+        plddt[protein_mask] = esm_pred["ca_plddt"]
+        preds["plddt"] = plddt
+        id_to_preds[Path(design_struct_file).stem] = preds
 
-    # return sc_info
+    # Re-process to get processed struct files
+    esmfold_processed_dir = Path(f"{processed_dir}/esmfold")
+    esmfold_processed_dir.mkdir(parents=True, exist_ok=True)
+    processed_struct_files = process_pdb_files(out_pdbs, esmfold_processed_dir, **pdb_processing_cfg)
+
+    return id_to_preds, processed_struct_files
+
 
 
 def run_self_consistency_eval(pdbs: List[str],

@@ -68,6 +68,7 @@ def run_esmfold(sequence_list: List[str],
     avg_ca_plddt = (ca_plddt * seq_mask).sum(dim=-1) / seq_mask.sum(dim=-1).clamp(min=1e-3)
 
     esm_outputs = {
+        "pred_coords_atom14": pred_coords_atom14,
         "pred_coords": pred_coords_atom37,
         "plddt": plddt,
         "ca_plddt": ca_plddt,
@@ -143,6 +144,7 @@ def run_esmfold_batched(sequences_list: List[str],
 
         # Create batch outputs
         esm_outputs_batch = {
+            "pred_coords_atom14": pred_coords_atom14,
             "pred_coords": pred_coords_atom37,
             "plddt": plddt,
             "ca_plddt": ca_plddt,

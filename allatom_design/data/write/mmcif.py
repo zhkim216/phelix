@@ -407,19 +407,23 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
     """
     periodic_table = Chem.GetPeriodicTable()  # for element mapping
 
-    # Unbatch feats into a list of dicts
     feats_list = []
-    for i in range(feats["label_seq_id"].shape[0]):
-        feats_i = {}
-        for k, v in to(feats, "cpu").items():
-            if isinstance(v, torch.Tensor):
-                feats_i[k] = v[i]
-            elif isinstance(v, list):
-                feats_i[k] = v[i]
-            else:
-                feats_i[k] = v
-        feats_i = crop_feats(feats_i, feats_i["token_pad_mask"].bool(), max_tokens=None, max_atoms=None)
-        feats_list.append(feats_i)
+    if feats["label_seq_id"].ndim == 2:
+        # Unbatch feats into a list of dicts
+        for i in range(feats["label_seq_id"].shape[0]):
+            feats_i = {}
+            for k, v in to(feats, "cpu").items():
+                if isinstance(v, torch.Tensor):
+                    feats_i[k] = v[i]
+                elif isinstance(v, list):
+                    feats_i[k] = v[i]
+                else:
+                    feats_i[k] = v
+            feats_i = crop_feats(feats_i, feats_i["token_pad_mask"].bool(), max_tokens=None, max_atoms=None)
+            feats_list.append(feats_i)
+    else:
+        # Already unbatched
+        feats_list.append(feats)
 
     for i, (feats_i, input_struct_i) in enumerate(zip(feats_list, input_structs)):
         system = System()
