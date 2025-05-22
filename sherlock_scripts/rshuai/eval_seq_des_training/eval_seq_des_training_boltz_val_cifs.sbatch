@@ -29,8 +29,8 @@ BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
 PDB_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/pdbs
-LIST_NAME=protein_monomer_32_256_no_ligand.txt
-PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/${LIST_NAME}
+LIST_STEM=protein_monomer_32_256_no_ligand
+PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/${LIST_STEM}.txt
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
@@ -42,7 +42,7 @@ DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_N
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_seq_des_bvc_${LIST_NAME}_${STRUCT_PRED_MODEL}
+EXP_NAME=${MODEL_NAME}_eval_seq_des_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
 GROUP=seq_des
 
 # Run training script
