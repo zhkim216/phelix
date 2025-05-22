@@ -1,8 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=sd3_a0_eval_seq_des
-#SBATCH -p possu
-#SBATCH --nodelist=sh03-18n05
-#SBATCH --array=0-3
+#SBATCH -p bioe
+#SBATCH --array=0-2
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -37,10 +36,9 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to evaluate
 MODEL_NAMES=(
-    "sd3_a0_cfg0"
-    "sd3_a0_cfg1"
-    "sd3_a0_cfg2"
-    "sd3_a0_cfg3"
+    "sd3_a1_cfg0"
+    "sd3_a1_cfg1"
+    "sd3_a1_cfg3"
 )
 MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}

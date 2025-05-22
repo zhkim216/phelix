@@ -29,7 +29,7 @@ BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
 PDB_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/pdbs
-LIST_STEM=protein_monomer_32_256_no_ligand
+LIST_STEM=protein_monomer_32_512_no_ligand
 PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/${LIST_STEM}.txt
 
 # Set cache directories
