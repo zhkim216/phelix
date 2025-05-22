@@ -16,7 +16,7 @@ scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/subhang/slurm_lo
 source ~/.subhang_bash_profile
 ml python
 module load gcc/12.4.0
-module load cuda/12.1
+module load cuda/12.4
 ENV_DIR=/home/groups/possu/rshuai/envs
 source ${ENV_DIR}/allatom_design/bin/activate
 

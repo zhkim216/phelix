@@ -63,9 +63,9 @@ data:
     - _target_: allatom_design.data.filter.dynamic.chain_type_size.ChainTypeSizeFilter
       chain_type: "PROTEIN"
       min_chains: 1
-      max_chains: 5
-      min_residues: 16
-      max_residues: 1024
+      max_chains: null
+      min_residues: 32
+      max_residues: 512
 
   val_filters:
     - ${data.filters.0}
