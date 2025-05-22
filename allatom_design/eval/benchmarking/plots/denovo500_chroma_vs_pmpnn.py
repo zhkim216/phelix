@@ -92,7 +92,7 @@ def main(cfg: DictConfig) -> None:
             sub_df = merged_df[merged_df["length"] == length].copy()
 
             # Prepare figure
-            plt.figure(figsize=(8, 8))
+            plt.figure(figsize=(6, 6))
             ax = plt.gca()
 
             # Scatter

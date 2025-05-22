@@ -5,6 +5,7 @@ from pathlib import Path
 import hydra
 import lightning as L
 import numpy as np
+import pandas as pd
 import torch
 import wandb
 import yaml
@@ -80,10 +81,14 @@ def main(cfg: DictConfig):
         out_metrics = defaultdict(list)
 
         id_to_metrics = eval_metrics.run_self_consistency_eval_boltz(
-            aux["out_pdbs"],
+            sampled_pdbs,
             struct_pred_model,
             cfg.pdb_processing_cfg,
             out_dir=log_dir_i)
+
+        # Save metrics as CSV
+        metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
+        metrics_df.to_csv(f"{log_dir_i}/sc_metrics.csv", index=False)
 
         # Aggregate results
         sc_metrics = defaultdict(list)
