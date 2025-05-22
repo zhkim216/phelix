@@ -322,7 +322,7 @@ def run_esmfold_from_boltz_feats(design_struct_files: str,
 
     # === Load in design structures === #
     data_cfg = struct_pred_model["data_cfg"]  # holds boltz tokenizer/featurizer
-    pred_dir = f"{processed_dir}/esmfold_preds"
+    pred_dir = f"{out_dir}/esmfold_preds"
     Path(pred_dir).mkdir(parents=True, exist_ok=True)
 
     out_pdbs = []
