@@ -380,7 +380,10 @@ def run_esmfold_from_boltz_feats(design_struct_files: str,
     # Re-process to get processed struct files
     esmfold_processed_dir = Path(f"{processed_dir}/esmfold")
     esmfold_processed_dir.mkdir(parents=True, exist_ok=True)
-    processed_struct_files = process_pdb_files(out_pdbs, esmfold_processed_dir, **pdb_processing_cfg)
+    _ = process_pdb_files(out_pdbs, esmfold_processed_dir, **pdb_processing_cfg)
+
+    # reorder processed struct files to match design_struct_files ordering
+    processed_struct_files = [f"{esmfold_processed_dir}/structures/esmfold_{Path(x).stem}.npz" for x in design_struct_files]
 
     return id_to_preds, processed_struct_files
 
