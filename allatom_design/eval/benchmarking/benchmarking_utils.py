@@ -18,7 +18,7 @@ def thread_sequence_onto_example(example: dict[str, TensorType["1 n ..."]],
     """
     example = copy.deepcopy(example)
 
-    # Handle mask so we only update where mask is True
+    # Subset inputs based on mask, so that we only update the sequence where mask is True
     if mask is None:
         mask = torch.ones_like(label_seq_id, dtype=torch.bool)
 
@@ -32,8 +32,8 @@ def thread_sequence_onto_example(example: dict[str, TensorType["1 n ..."]],
         raise ValueError(f"Found {n_prot_chains} protein chains in {example['record_id']}. For now, we only support threading sequences onto single-chain proteins.")
 
     # Set all missing protein residues to X and erase all sidechain coordinates
-    protein_res_type = torch.full_like(protein_mask, const.token_ids["UNK"], dtype=torch.long)
-    protein_res_type = F.one_hot(protein_res_type, num_classes=example["res_type"].shape[-1])  # [1, n_protein, 33]
+    protein_res_type = torch.full_like(example["mol_type"][protein_mask], const.token_ids["UNK"], dtype=torch.long)  # [1, n_prot_tokens]
+    protein_res_type = F.one_hot(protein_res_type, num_classes=example["res_type"].shape[-1])  # [1, n_prot_tokens, 33]
     protein_res_type = protein_res_type.squeeze(0)  # temporarily squeeze out batch dimension
     protein_res_type[label_seq_id - 1] = new_res_type  # label_seq_id is 1-indexed
 

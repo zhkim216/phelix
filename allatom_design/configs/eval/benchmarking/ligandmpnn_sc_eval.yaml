@@ -13,6 +13,7 @@ exp_name: null  # experiment name; used for wandb and output directory
 
 # Inputs
 ligandmpnn_outputs_dir: /media/scratch/huang_lab/allatom_design/allatom_design/boltz_val_cifs_evals/protein_monomer_32_512_no_ligand/proteinmpnn/designs
+max_samples_per_pdb: null  # if we don't want to run on all samples
 
 # PDB file inputs
 input_cfg:

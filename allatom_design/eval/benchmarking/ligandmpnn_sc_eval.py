@@ -73,12 +73,17 @@ def main(cfg: DictConfig):
         B = ligandmpnn_restype.shape[0]
 
         for bi in range(B):
+            if (cfg.max_samples_per_pdb is not None) and (bi == cfg.max_samples_per_pdb):
+                # in case we don't want to run on all samples
+                break
+
             example = thread_sequence_onto_example(example, ligandmpnn_restype[bi], label_seq_id[bi])
 
             # Save structure with ligandMPNN sequence threaded on
             threaded_pdb = f"{threaded_pdb_dir}/{record_id}_sample{bi}.cif"
             write_sd_feats_to_mmcif(example, input_structure, [threaded_pdb])
             threaded_pdbs.append(threaded_pdb)
+
 
     # Run self-consistency evaluation
     out_metrics = defaultdict(list)
