@@ -24,9 +24,10 @@ export SOFTWARE_PATH=/scratch/hielab/rshuai/software
 BOLTZ1_CHECKPOINT=/scratch/hielab/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
-LIGANDMPNN_OUTPUTS_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/boltz_val_cifs_evals/protein_monomer_32_512_no_ligand/proteinmpnn/designs
 PDB_DIR=/scratch/hielab/rshuai/datasets/boltz_val_cifs/pdbs
-PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/boltz_val_cifs/pdb_name_lists/protein_monomer_32_512_no_ligand.txt
+PDB_LIST_STEM=protein_monomer_32_256
+PDB_NAME_LIST=/scratch/hielab/rshuai/datasets/boltz_val_cifs/pdb_name_lists/${PDB_LIST_STEM}.txt
+LIGANDMPNN_OUTPUTS_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/boltz_val_cifs_evals/${PDB_LIST_STEM}/ligandmpnn/designs
 MODEL_NAME=boltz1
 
 # Set cache directories
@@ -35,9 +36,9 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=proteinmpnn_bvc_protein_monomer_32_512_no_ligand_${MODEL_NAME}
+EXP_NAME=ligandmpnn_bvc_${PDB_LIST_STEM}_${MODEL_NAME}_1sample
 GROUP=seq_des
-BASE_OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/boltz_val_cifs_evals/protein_monomer_32_512_no_ligand/proteinmpnn
+BASE_OUT_DIR=/scratch/hielab/rshuai/allatom_design/allatom_design/boltz_val_cifs_evals/${PDB_LIST_STEM}/ligandmpnn
 
 # Run script
 cd ${BASE_DIR}
@@ -51,4 +52,5 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/benchmarking/ligandmpnn_sc_e
     ligandmpnn_outputs_dir=${LIGANDMPNN_OUTPUTS_DIR} \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
+    max_samples_per_pdb=1 \
     hydra.run.dir=${HYDRA_DIR}

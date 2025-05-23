@@ -216,7 +216,7 @@ def run_self_consistency_eval_boltz(pdbs: list[str],
 
 
 def compute_self_consistency_metrics_boltz(pred_struct_file: str,
-                                           design_struct_file: str,
+                                           design_struct_file: str,  # we use the designed structure for computing atom masks e.g. for missing residues
                                            struct_pred_out: dict[str, Any],  # output from boltz prediction, needed for pLDDT
                                            data_cfg: DictConfig,  # holds tokenizer and featurizer
                                            out_dir: str,
@@ -345,7 +345,7 @@ def run_esmfold_from_boltz_feats(design_struct_files: str,
         # Format output coordinates to match boltz coordinates. This works since atom14 representations match
         n_atoms_per_token = prot_example["atom_to_token"].squeeze(0).sum(dim=-0)
 
-        # pack atom14 coords into atom-level representation
+        ## first, pack atom14 coords into atom-level representation
         pred_atom14 = esm_pred["pred_coords_atom14"]  # shape [n_token, 14, 3]
         mask = torch.arange(14, device=pred_atom14.device).unsqueeze(0) < n_atoms_per_token.unsqueeze(-1)
         mask = mask.unsqueeze(-1).expand(-1, -1, 3)  # shape [n_token, 14, 3]
@@ -353,17 +353,15 @@ def run_esmfold_from_boltz_feats(design_struct_files: str,
 
         if esm_coords.shape[1] != prot_example["atom_pad_mask"].sum().item():
             print(f"Something went wrong with converting ESMFold coords to boltz coords for {design_struct_file}, defaulting boltz coords to 0")
-            esm_coords = torch.zeros_like(prot_example["coords"])
+            esm_coords = torch.zeros_like(prot_example["coords"])[prot_example["atom_pad_mask"].bool()]
 
-        atom_pad_mask = prot_example["atom_pad_mask"].bool()  # accounting for that atoms are padded to nearest multiple of 32
-        prot_example["coords"][atom_pad_mask] = esm_coords
-
-        # Put protein-only coordinates back into design example
+        ## next, put protein-only coordinates back into design example to make our predicted example
+        ## note: we do not update non-protein atoms (but keep these in the cif for shape convenience)
         _, atomwise_token_idx = torch.max(design_example["atom_to_token"], dim=-1)  # [b, n_atoms]
         atomwise_moltype = design_example["mol_type"].gather(dim=-1, index=atomwise_token_idx)  # [b, n_atoms]
         atomwise_is_standard = design_example["is_standard"].gather(dim=-1, index=atomwise_token_idx)  # [b, n_atoms]
-        atomwise_protein_mask = (atomwise_moltype == const.chain_type_ids["PROTEIN"]) & atomwise_is_standard
-        design_example["coords"][atomwise_protein_mask] = prot_example["coords"]
+        atomwise_protein_mask = (atomwise_moltype == const.chain_type_ids["PROTEIN"]) & atomwise_is_standard & design_example["atom_pad_mask"].bool()
+        design_example["coords"][atomwise_protein_mask] = esm_coords
 
         # Write to mmcif
         out_pdb = f"{pred_dir}/esmfold_{Path(design_struct_file).stem}.cif"
