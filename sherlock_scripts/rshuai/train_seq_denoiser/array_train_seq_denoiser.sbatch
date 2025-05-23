@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a0
+#SBATCH --job-name=sd3_a2
 #SBATCH -p bioe
-#SBATCH --array=0-3
+#SBATCH --array=0-2
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
 #SBATCH --time=96:00:00
@@ -28,17 +28,17 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME_BASE=sd3_a1
+EXP_NAME_BASE=sd3_a2
 GROUP=seq_des
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 CONFIGS=(
-"denoiser.mpnn.use_atom_encoder=false mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.token_features.ca_only=false"
-"denoiser.mpnn.use_atom_encoder=false mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.token_features.ca_only=false data.filters.4.max_residues=2048"
-"denoiser.mpnn.use_atom_encoder=false mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.token_features.ca_only=false data.filters.4.max_residues=2048 data.filters.2.resolution=4.0"
-"denoiser.mpnn.use_atom_encoder=false mask_selector.restype_masking_schedule=constant_t denoiser.mpnn.token_features.ca_only=false data.filters.4.max_residues=2048 data.filters.2.resolution=2.0"
+"denoiser.mpnn.use_atom_encoder=false denoiser.mpnn.token_features.ca_only=false data.filters.4.max_residues=2048"
+"denoiser.mpnn.use_atom_encoder=false denoiser.mpnn.token_features.ca_only=false data.filters.4.max_residues=2048 data.max_tokens=512 data.max_atoms=4608 train.batch_size=8 trainer.accumulate_grad_batches=4"
+"denoiser.mpnn.use_atom_encoder=false denoiser.mpnn.token_features.ca_only=false data.filters.4.max_residues=2048 data.cropper._target_=allatom_design.data.crop.boltz.BoltzCropper"
+"denoiser.mpnn.use_atom_encoder=true denoiser.mpnn.token_features.ca_only=false data.filters.4.max_residues=2048 data.cropper._target_=allatom_design.data.crop.boltz.BoltzCropper"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
@@ -56,9 +56,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.max_atoms=3584 \
     train.batch_size=16 \
     trainer.accumulate_grad_batches=2 \
-    train.compile_model=false \
+    train.compile_model=true \
     denoiser.per_residue_eps=false \
     denoiser.augment_eps=0.3 \
+    mask_selector.restype_masking_schedule=constant_t \
     ${OVERRIDES} \
     checkpointing.save_latest_every_n_steps=2500 \
     trainer.check_val_every_n_epoch=2 \
