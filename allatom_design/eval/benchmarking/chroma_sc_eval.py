@@ -66,7 +66,12 @@ def main(cfg: DictConfig):
         example, input_structure = get_sd_batch([processed_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
 
         # Load in Chroma outputs
-        chroma_features = np.load(f"{cfg.chroma_outputs_dir}/features/{record_id}.npz")
+        try:
+            chroma_features = np.load(f"{cfg.chroma_outputs_dir}/features/{record_id}.npz")
+        except FileNotFoundError:
+            print(f"Chroma outputs not found for {record_id}, skipping...")
+            continue
+
         chain_labels = torch.from_numpy(chroma_features["C"])  # [b, n]
         B, N = chain_labels.shape
         label_seq_id = torch.arange(N).unsqueeze(0).expand(B, N) + 1  # chroma denotes missing residues with negative values
@@ -74,6 +79,10 @@ def main(cfg: DictConfig):
         chroma_restype = F.one_hot(seq_token_ids, num_classes=example["res_type"].shape[-1])
 
         for bi in range(B):
+            if (cfg.max_samples_per_pdb is not None) and (bi == cfg.max_samples_per_pdb):
+                # in case we don't want to run on all samples
+                break
+
             example = thread_sequence_onto_example(example, chroma_restype[bi], label_seq_id[bi],
                                                    mask=chain_labels[bi] > 0)  # set missing residues to X; chroma does not update seq for missing residues but also does not use them for sampling
 
