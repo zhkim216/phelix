@@ -57,6 +57,7 @@ class AtomMPNN(nn.Module):
                 dim_embedding=self.node_features,
                 noise_schedule=self.noise_perturb.noise_schedule,
             )
+            self.t_max = cfg.polymer_diffusion.get("t_max", 1.0)
 
         # Atom-level encoder
         if cfg.use_atom_encoder:
@@ -189,6 +190,7 @@ class AtomMPNN(nn.Module):
         # Sample timestep
         if not is_sampling and self.training:
             t = self.noise_perturb.sample_t(batch["token_pad_mask"])
+            t = t * self.t_max
 
             # Get protein coordinates and apply noise to the backbone atoms
             protein_batch, protein_token_mask = crop_batch_to_protein_only(batch, return_crop_mask=True)
