@@ -27,6 +27,7 @@ mpnn:
     noise_covariance_model: globular
     noise_complex_scaling: true
     t_max: 1.0
+    canonicalize: false
 
   atom_encoder:
     token_n_channel: ${denoiser.mpnn.n_channel}
