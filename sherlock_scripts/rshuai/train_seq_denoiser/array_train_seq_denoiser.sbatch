@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a5
-#SBATCH -p possu
+#SBATCH --job-name=sd3_a6
+#SBATCH -p bioe
 #SBATCH --array=0-2
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --nodelist=sh04-04n01
+#SBATCH --nodelist=sh03-18n05
 #SBATCH --time=96:00:00
 #
 #SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%A_%a.out
@@ -29,16 +29,16 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME_BASE=sd3_a5
+EXP_NAME_BASE=sd3_a6
 GROUP=seq_des
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 CONFIGS=(
-"denoiser.mpnn.polymer_diffusion.t_max=0.75"
-"denoiser.mpnn.polymer_diffusion.t_max=0.75 denoiser.mpnn.n_layers=5"
-"denoiser.mpnn.polymer_diffusion.t_max=0.5"
+"denoiser.mpnn.polymer_diffusion.t_max=1.0 denoiser.mpnn.polymer_diffusion.canonicalize=true"
+"denoiser.mpnn.polymer_diffusion.t_max=0.75 denoiser.mpnn.polymer_diffusion.canonicalize=true"
+"denoiser.mpnn.polymer_diffusion.t_max=0.5 denoiser.mpnn.polymer_diffusion.canonicalize=true"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
