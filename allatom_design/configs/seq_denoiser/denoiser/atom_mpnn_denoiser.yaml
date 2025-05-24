@@ -18,6 +18,15 @@ mpnn:
   dropout_p: 0.1
   use_atom_encoder: true
 
+  # Polymer backbone diffusion options
+  polymer_diffusion:
+    enabled: false
+    noise_schedule: log_snr
+    noise_beta_range: [0.2, 70.0]
+    noise_log_snr_range: [-7.0, 13.5]
+    noise_covariance_model: globular
+    noise_complex_scaling: true
+
   atom_encoder:
     token_n_channel: ${denoiser.mpnn.n_channel}
     atom_s: 64

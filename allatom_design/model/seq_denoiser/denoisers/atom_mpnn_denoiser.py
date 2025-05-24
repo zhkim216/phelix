@@ -49,7 +49,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             batch = self.get_training_random_noise(batch)
 
         # Run model
-        seq_logits, mpnn_feats = self.atom_mpnn(batch)
+        seq_logits, mpnn_feats = self.atom_mpnn(batch, is_sampling)
 
         # Outputs
         aux_preds = {
@@ -124,6 +124,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         batch["noise"] = noise
         batch["noise_labels"] = noise_labels
+
         return batch
 
 

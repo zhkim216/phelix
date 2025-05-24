@@ -514,8 +514,9 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                 auth_seq_ids = chain_feats_i["auth_seq_id"][chain_feats_i["token_pad_mask"].bool()].tolist()
                 pdb_icodes = chain_feats_i["pdb_icode"][chain_feats_i["token_pad_mask"].bool()].tolist()
                 paired = [(seq_id, chr(icode + 32).strip()) for seq_id, icode in zip(auth_seq_ids, pdb_icodes)]  # pair up auth_seq_id and pdb_icode
-                label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()].tolist()
-                auth_seq_id_map = {label_seq_id + 1: pair for label_seq_id, pair in zip(label_seq_ids, paired)}  # renumber label seq id to 1-indexed
+                label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()]
+                label_seq_ids = (label_seq_ids - label_seq_ids.min() + 1).tolist()  # renumber label seq id to 1-indexed
+                auth_seq_id_map = {label_seq_id + 1: pair for label_seq_id, pair in zip(label_seq_ids, paired)}
             else:
                 auth_seq_id_map = 0
 
@@ -538,7 +539,8 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                     het = chain_feats_i["mol_type"].unique().tolist()[0] == const.chain_type_ids["NONPOLYMER"]
 
                     # Get label_seq_id for each atom
-                    label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()] + 1  # renumber label seq id to 1-indexed
+                    label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()]
+                    label_seq_ids = (label_seq_ids - label_seq_ids.min() + 1)  # renumber label seq id to 1-indexed
                     label_seq_id_atomwise = (chain_feats_i["atom_to_token"].float() @ label_seq_ids.float()).long().tolist()
 
                     # Convert from one-hot to index

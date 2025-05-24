@@ -343,7 +343,7 @@ def run_esmfold_from_boltz_feats(design_struct_files: str,
         esm_pred = {k: v[0] for k, v in esm_pred.items()}
 
         # Format output coordinates to match boltz coordinates. This works since atom14 representations match
-        n_atoms_per_token = prot_example["atom_to_token"].squeeze(0).sum(dim=-0)
+        n_atoms_per_token = prot_example["atom_to_token"].squeeze(0).sum(dim=0)
 
         ## first, pack atom14 coords into atom-level representation
         pred_atom14 = esm_pred["pred_coords_atom14"]  # shape [n_token, 14, 3]
