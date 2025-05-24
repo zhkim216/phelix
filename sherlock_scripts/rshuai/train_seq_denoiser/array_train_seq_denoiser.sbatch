@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a6
+#SBATCH --job-name=sd3_a7
 #SBATCH -p bioe
 #SBATCH --array=0-2
 #SBATCH --gpus-per-node=1
@@ -29,16 +29,16 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME_BASE=sd3_a6
+EXP_NAME_BASE=sd3_a7
 GROUP=seq_des
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 CONFIGS=(
-"denoiser.mpnn.polymer_diffusion.t_max=1.0 denoiser.mpnn.polymer_diffusion.canonicalize=true"
-"denoiser.mpnn.polymer_diffusion.t_max=0.75 denoiser.mpnn.polymer_diffusion.canonicalize=true"
-"denoiser.mpnn.polymer_diffusion.t_max=0.5 denoiser.mpnn.polymer_diffusion.canonicalize=true"
+"denoiser.mpnn.polymer_diffusion.enabled=true denoiser.mpnn.polymer_diffusion.t_max=0.75 denoiser.mpnn.polymer_diffusion.canonicalize=true denoiser.mpnn.n_layers=5"
+"denoiser.mpnn.polymer_diffusion.enabled=false denoiser.mpnn.polymer_diffusion.canonicalize=true"
+"denoiser.mpnn.polymer_diffusion.enabled=false denoiser.mpnn.polymer_diffusion.canonicalize=false"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
@@ -59,7 +59,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     train.compile_model=true \
     denoiser.per_residue_eps=false \
     denoiser.augment_eps=0.0 \
-    denoiser.mpnn.polymer_diffusion.enabled=true \
     mask_selector.restype_masking_schedule=constant_t \
     denoiser.mpnn.use_atom_encoder=false \
     denoiser.mpnn.token_features.ca_only=false \
