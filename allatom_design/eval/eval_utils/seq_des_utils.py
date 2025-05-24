@@ -22,8 +22,7 @@ import allatom_design.data.const as const
 from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import atom_center_random_augmentation, to
-from allatom_design.data.datasets.boltz_sd_dataset import sd_collator
-from allatom_design.data.feature.seq_des_featurizer import crop_feats
+from allatom_design.data.datasets.boltz_sd_dataset import sd_collator, crop_batch_to_protein_only
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     load_input, mmcif_to_pdb)
 from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
@@ -191,25 +190,6 @@ def run_seq_des(model: SeqDenoiser,
         preds[pdb]["pred_seqs"] = pred_seqs
 
     return preds, run_aux
-
-
-def crop_batch_to_protein_only(batch: dict[str, TensorType["b n ..."]]) -> dict[str, TensorType["b n ..."]]:
-    """
-    Crop a batch of features to standard protein-only features.
-    """
-    device = batch["coords"].device
-
-    protein_token_mask = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
-    batch = to(batch, device="cpu")
-    cropped_batch = []
-    for i in range(batch["mol_type"].shape[0]):
-        example = {k: v[i] for k, v in batch.items() if v is not None}
-        cropped_example = crop_feats(example, protein_token_mask[i], max_tokens=None, max_atoms=None)
-        cropped_batch.append(cropped_example)
-    cropped_batch = sd_collator(cropped_batch)
-    cropped_batch = to(cropped_batch, device)
-
-    return cropped_batch
 
 
 def get_sd_batch(struct_file_paths: list[str], device: str,

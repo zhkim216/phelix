@@ -12,9 +12,12 @@ from torchtyping import TensorType
 
 import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
+from allatom_design.data.data import batched_gather
+from allatom_design.data.datasets.boltz_sd_dataset import \
+    crop_batch_to_protein_only
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
-from allatom_design.data.data import batched_gather
+from chroma.layers.structure import diffusion
 
 # https://github.com/pyg-team/pytorch_geometric/issues/8747
 knn_graph = torch.compiler.disable(knn_graph)
@@ -38,6 +41,22 @@ class AtomMPNN(nn.Module):
         self.decoder_in = self.hidden_dim * 3  # concat of h_E, h_S, h_V
 
         self.dropout = nn.Dropout(cfg.dropout_p)
+
+        # Polymer backbone diffusion
+        self.use_polymer_diffusion = cfg.polymer_diffusion.enabled
+        if self.use_polymer_diffusion:
+            self.noise_perturb = diffusion.DiffusionChainCov(
+                noise_schedule=cfg.polymer_diffusion.noise_schedule,
+                beta_min=cfg.polymer_diffusion.noise_beta_range[0],
+                beta_max=cfg.polymer_diffusion.noise_beta_range[1],
+                log_snr_range=cfg.polymer_diffusion.noise_log_snr_range,
+                covariance_model=cfg.polymer_diffusion.noise_covariance_model,
+                complex_scaling=cfg.polymer_diffusion.noise_complex_scaling,
+            )
+            self.time_features = diffusion.NoiseTimeEmbedding(
+                dim_embedding=self.node_features,
+                noise_schedule=self.noise_perturb.noise_schedule,
+            )
 
         # Atom-level encoder
         if cfg.use_atom_encoder:
@@ -81,9 +100,13 @@ class AtomMPNN(nn.Module):
                 nn.init.xavier_uniform_(p)
 
 
-    def forward(self, batch: dict[str, TensorType["b ..."]]):
+    def forward(self, batch: dict[str, TensorType["b ..."]], is_sampling: bool):
         # If provided, add noise to input coordinates
         batch["coords"] = self._add_noise(batch)
+
+        # Apply polymer backbone diffusion
+        if self.use_polymer_diffusion:
+            batch = self.polymer_noise_perturb(batch, is_sampling)
 
         # Get token-level features
         if self.atom_encoder is not None:
@@ -91,6 +114,10 @@ class AtomMPNN(nn.Module):
         else:
             B, N, C = batch["res_type"].shape
             h_V = torch.zeros((B, N, self.node_features), device=batch["res_type"].device)
+
+        # Embed time step
+        if self.use_polymer_diffusion:
+            h_V = h_V + self.time_features(batch["t"])
 
         # Concatenate residue-level features to h_V
         ## first, mask out residues using gap token
@@ -154,6 +181,33 @@ class AtomMPNN(nn.Module):
         return noised_coords
 
 
+    @torch.compiler.disable
+    def polymer_noise_perturb(self, batch: dict[str, TensorType["b ..."]], is_sampling: bool) -> dict[str, TensorType["b ..."]]:
+        """
+        Apply polymer backbone diffusion noise to the input coordinates.
+        """
+        # Sample timestep
+        if not is_sampling and self.training:
+            t = self.noise_perturb.sample_t(batch["token_pad_mask"])
+
+            # Get protein coordinates and apply noise to the backbone atoms
+            protein_batch, protein_token_mask = crop_batch_to_protein_only(batch, return_crop_mask=True)
+            X_prot = get_tokenwise_coords(protein_batch)
+            X_prot_bb_noised = self.noise_perturb(X_prot[..., const.prot_bb_atom14_idxs, :], protein_batch["token_exists_mask"], t)
+            X_prot[..., const.prot_bb_atom14_idxs, :] = X_prot_bb_noised
+
+            # Scatter back to atom coordinates
+            X_all = get_tokenwise_coords(batch)
+            for i in range(X_all.shape[0]):
+                X_all[i, protein_token_mask[i]] = X_prot[i][protein_batch["token_pad_mask"][i].bool()]
+            batch["coords"] = get_atomwise_coords(batch, X_all)
+        else:
+            t = batch["token_pad_mask"].new_zeros(batch["token_pad_mask"].shape[0])
+
+        batch["t"] = t
+        return batch
+
+
 class TokenFeatures(nn.Module):
     def __init__(self, cfg: DictConfig):
         """
@@ -188,7 +242,7 @@ class TokenFeatures(nn.Module):
         if self.ca_only:
             RBF_all = self._rbf(D_neighbors)
         else:
-            X_all = self._get_tokenwise_coords(batch)
+            X_all = get_tokenwise_coords(batch)
 
             RBF_all = []
             for i in range(X_all.shape[-2]):
@@ -215,39 +269,6 @@ class TokenFeatures(nn.Module):
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
         return E, E_idx
-
-
-    # def _get_full_rbf(self, X_all: TensorType["b n_tokens 23 3", float], E_idx: TensorType["b n_tokens k", int]):
-    #     """
-    #     Get RBF features for all pairwise atom distances in the batch.
-    #     """
-    #     # D_all = (X_all[..., None, :] - X_all[..., None, :, :])
-    #     B, N, _ = X_all.shape
-    #     D_all = torch.sqrt(torch.sum((X_all[..., None, :] - X_all[..., None, :, :])**2, dim=-1) + 1e-6).view(B, N, -1)
-    #     D_all_neighbors = gather_edges(D_all[..., None], E_idx).squeeze(-1)
-
-
-    def _get_tokenwise_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_tokens 23 3", float]:
-        """
-        Get token-level coordinates (padded to max_num_atoms per token). Batched version of pad_atom_feats_to_tokenwise for just coords.
-        """
-        B = batch["coords"].shape[0]
-        device = batch["coords"].device
-
-        # Build padded atom idxs
-        n_atoms_per_token = batch["atom_to_token"].sum(dim=-2)
-        atom_idxs = torch.cat([torch.zeros((B, 1), device=device), n_atoms_per_token.cumsum(dim=-1)[:, :-1]], dim=-1).long()
-        padded_atom_idxs = atom_idxs[..., None] + torch.arange(const.max_num_atoms, device=device)[None, None]
-        pad_mask = torch.arange(const.max_num_atoms, device=device)[None, None, :] < n_atoms_per_token[..., None]
-        padded_atom_idxs = padded_atom_idxs * pad_mask  # mask out ghost atoms
-
-        # Gather coords  # TODO: check this carefully
-        B, N, _ = padded_atom_idxs.shape
-        X_all = batched_gather(batch["coords"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.max_num_atoms, 1)
-        tokenwise_atom_cond_mask = batched_gather(batch["atom_cond_mask"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.max_num_atoms)
-
-        X_all = X_all * tokenwise_atom_cond_mask.unsqueeze(-1)  # zero out masked atoms
-        return X_all
 
 
     def _get_token_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n 3", float]:
@@ -694,80 +715,49 @@ def knn_neighbors_batched(
     return neighbors
 
 
-def test_knn_neighbors_batched():
-    # 1) Single-batch, no padding, distinct points
-    coords_1 = torch.tensor([[
-        [0.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [2.0, 0.0, 0.0],
-        [5.0, 5.0, 5.0],
-    ]])  # shape = (1, 4, 3)
-    mask_1 = torch.ones((1, 4), dtype=torch.bool)  # all valid
-    k_1 = 2
-    neighbors_1 = knn_neighbors_batched(coords_1, mask_1, k_1)
-    print("Test 1 (distinct points, single batch):")
-    print("coords_1.shape =", coords_1.shape)
-    print("neighbors_1.shape =", neighbors_1.shape)
-    print("neighbors_1 =", neighbors_1, "\n")
+def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_tokens 23 3", float]:
+    """
+    Get token-level coordinates (padded to max_num_atoms per token). Batched version of pad_atom_feats_to_tokenwise for just coords.
+    """
+    B = batch["coords"].shape[0]
+    device = batch["coords"].device
 
-    # 2) Single-batch, repeated points to test ties
-    coords_2 = torch.tensor([[
-        [0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0],  # identical to first
-        [1.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0],  # identical to third
-        [1.0, 0.0, 0.0],  # identical to third
-    ]])
-    mask_2 = torch.ones((1, 5), dtype=torch.bool)
-    k_2 = 2
-    neighbors_2 = knn_neighbors_batched(coords_2, mask_2, k_2)
-    print("Test 2 (ties, single batch):")
-    print("coords_2.shape =", coords_2.shape)
-    print("neighbors_2.shape =", neighbors_2.shape)
-    print("neighbors_2 =", neighbors_2, "\n")
+    # Build padded atom idxs
+    n_atoms_per_token = batch["atom_to_token"].sum(dim=-2)
+    atom_idxs = torch.cat([torch.zeros((B, 1), device=device), n_atoms_per_token.cumsum(dim=-1)[:, :-1]], dim=-1).long()
+    padded_atom_idxs = atom_idxs[..., None] + torch.arange(const.max_num_atoms, device=device)[None, None]
+    pad_mask = torch.arange(const.max_num_atoms, device=device)[None, None, :] < n_atoms_per_token[..., None]
+    padded_atom_idxs = padded_atom_idxs * pad_mask  # mask out ghost atoms
 
-    # 3) Single-batch with padding
-    # Suppose we have 6 "slots" but only 4 valid points
-    coords_3 = torch.tensor([[
-        [0.0, 0.0, 1.0],
-        [0.0, 2.0, 0.0],  # non-existent
-        [2.0, 2.0, 2.0],
-        [1.0, 1.0, 1.0],
-        [9.9, 9.9, 9.9],  # padded
-        [9.9, 9.9, 9.9],  # padded
-    ]])
-    mask_3 = torch.tensor([[1, 0, 1, 1, 0, 0]], dtype=torch.bool)
-    k_3 = 4
-    neighbors_3 = knn_neighbors_batched(coords_3, mask_3, k_3)
-    print("Test 3 (single batch with padding):")
-    print("coords_3.shape =", coords_3.shape)
-    print("neighbors_3.shape =", neighbors_3.shape)
-    print("neighbors_3 =", neighbors_3, "\n")
+    # Gather coords  # TODO: check this carefully
+    B, N, _ = padded_atom_idxs.shape
+    X_all = batched_gather(batch["coords"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.max_num_atoms, 1)
+    tokenwise_atom_cond_mask = batched_gather(batch["atom_cond_mask"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.max_num_atoms)
 
-    # 4) Multi-batch with some padding in each
-    coords_4 = torch.tensor([
-        [
-            [0.0, 0.0, 1.0],
-            [0.0, 2.0, 0.0],
-            [2.0, 2.0, 2.0],
-            [1.0, 1.0, 1.0],
-            [9.9, 9.9, 9.9], # padded
-        ],
-        [
-            [10.0, 10.0, 10.0],
-            [11.0, 10.0, 10.0],
-            [12.0, 12.0, 12.0],
-            [13.0, 13.0, 13.0],
-            [13.0, 13.0, 13.0],  # repeated
-        ]
-    ])
-    mask_4 = torch.tensor([
-        [1, 0, 1, 1, 0],
-        [1, 1, 1, 1, 1]
-    ], dtype=torch.bool)
-    k_4 = 2
-    neighbors_4 = knn_neighbors_batched(coords_4, mask_4, k_4)
-    print("Test 4 (multi-batch, partial padding):")
-    print("coords_4.shape =", coords_4.shape)
-    print("neighbors_4.shape =", neighbors_4.shape)
-    print("neighbors_4 =", neighbors_4, "\n")
+    X_all = X_all * tokenwise_atom_cond_mask.unsqueeze(-1)  # zero out masked atoms
+    return X_all
+
+
+def get_atomwise_coords(
+    batch: dict[str, TensorType["b ..."]],
+    tokenwise_coords: TensorType["b n_tokens 23 3", float],
+) -> TensorType["b n_atoms 3", float]:
+    """
+    Inverse of get_tokenwise_coords. Given tokenwise coords [B, n_tokens, max_num_atoms, 3],
+    reconstruct atomwise coords [B, n_atoms, 3].
+    """
+    B = batch["coords"].shape[0]
+    device = batch["coords"].device
+
+    x = batch["atomwise_token_idx"] * tokenwise_coords.shape[-2]  # flattened atomwise token indices
+    is_start = torch.ones_like(x, dtype=torch.bool)
+    is_start[:, 1:] = x[:, 1:] != x[:, :-1]
+    pos = torch.arange(x.shape[-1], device=x.device).unsqueeze(0).expand(B, x.shape[-1])
+    start_pos = torch.where(is_start, pos, torch.full_like(pos, -1))
+    first_pos = torch.cummax(start_pos, dim=1).values
+    local_idx = pos - first_pos
+    gather_idx = x + local_idx
+    gather_idx = gather_idx
+
+    new_coords = batched_gather(tokenwise_coords.view(B, -1, 3), gather_idx, dim=1, no_batch_dims=1)
+    return new_coords

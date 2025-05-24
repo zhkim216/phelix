@@ -32,12 +32,15 @@ FEAT_TO_TOKEN_DIM = {
     "label_seq_id": [0],
     "auth_seq_id": [0],
     "pdb_icode": [0],
-    "seq_cond_mask": [0],
     "is_standard": [0],
 
     # atom features
     "atom_to_token": [1],
     "token_to_center_atom": [0],
+
+    # optional features that might not be present
+    "seq_cond_mask": [0],
+    "token_exists_mask": [0],
 }
 
 FEAT_TO_ATOM_DIM = {
@@ -55,6 +58,8 @@ FEAT_TO_ATOM_DIM = {
     "token_to_center_atom": [1],
     "prot_bb_atom_mask": [0],
     "prot_scn_atom_mask": [0],
+
+    # optional features that might not be present
     "atom_cond_mask": [0],
 }
 
@@ -245,6 +250,7 @@ def process_sd_atom_features(
         # Fill in protein backbone and sidechain atom masks
         chain_type = const.chain_types[token["mol_type"]]
         if chain_type == "PROTEIN":
+            # TODO: make this use is_standard, and allow backbone atoms to be included for UNK tokens
             restype = const.token_ids[const.tokens[token["res_type"]]]
             prot_bb_atom_mask.extend(const.restype_atom_bb[restype].tolist()[:atom_num])
             prot_scn_atom_mask.extend(const.restype_atom_scn[restype].tolist()[:atom_num])

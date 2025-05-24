@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sd1_a0
+#SBATCH --job-name=sd3_a4
 #SBATCH -p bioe
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
@@ -27,11 +27,11 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=sd1_a5_v2
+EXP_NAME=sd3_a4
 GROUP=seq_des
 
 # Dataset paths
-PDB_PATH=/scratch/users/subhang/datasets/af3_pdb_monomer_boltz
+PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 # Run training script
 cd ${BASE_DIR}
@@ -42,25 +42,18 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
     data.pdb_path=${PDB_PATH} \
-    data.max_tokens=256 \
+    data.max_tokens=512 \
     data.max_atoms=4608 \
-    data.filters.1=null \
-    data.filters.4.max_residues=512 \
-    data.filters.4.min_residues=32 \
-    data.cropper._target_=allatom_design.data.crop.boltz.BoltzCropper \
-    train.batch_size=16 \
-    trainer.accumulate_grad_batches=2 \
-    train.compile_model=false \
+    train.batch_size=8 \
+    trainer.accumulate_grad_batches=4 \
+    train.compile_model=true \
     denoiser.per_residue_eps=false \
-    denoiser.augment_eps=0.3 \
-    denoiser.mpnn.k_neighbors=48 \
+    denoiser.augment_eps=0.0 \
+    denoiser.mpnn.polymer_diffusion.enabled=true \
+    mask_selector.restype_masking_schedule=constant_t \
     denoiser.mpnn.use_atom_encoder=false \
-    denoiser.mpnn.atom_encoder.n_layers=1 \
-    denoiser.mpnn.atom_encoder.k_atom_neighbors=16 \
-    denoiser.mpnn.atom_encoder.atom_s=64 \
-    denoiser.mpnn.atom_encoder.atom_z=16 \
-    loss.seq_loss.label_smoothing=0.157 \
-    loss.potts.label_smoothing=0.157 \
+    denoiser.mpnn.token_features.ca_only=false \
+    data.filters.4.max_residues=2048 \
     checkpointing.save_latest_every_n_steps=2500 \
     trainer.check_val_every_n_epoch=2 \
     hydra.run.dir=${HYDRA_DIR}

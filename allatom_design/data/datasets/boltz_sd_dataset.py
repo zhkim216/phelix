@@ -1,5 +1,6 @@
 import gzip
 import json
+import random
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -12,11 +13,13 @@ import torch
 from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader
+from torchtyping import TensorType
 from tqdm import tqdm
 
 from allatom_design.data import const
 from allatom_design.data.crop.cropper import Cropper
-from allatom_design.data.data import atom_center_random_augmentation, pad_atom_feats_to_tokenwise
+from allatom_design.data.data import (atom_center_random_augmentation,
+                                      batched_gather, to)
 from allatom_design.data.feature.pad import pad_to_max
 from allatom_design.data.feature.seq_des_featurizer import (
     SequenceDesignFeaturizer, crop_feats)
@@ -24,7 +27,6 @@ from allatom_design.data.sample.sampler import Sample, Sampler
 from allatom_design.data.tokenize.tokenizer import Tokenized, Tokenizer
 from allatom_design.data.types import (Connection, Input, Manifest, Record,
                                        Structure)
-import random
 
 
 class BoltzSDDataModule(L.LightningDataModule):
@@ -138,11 +140,11 @@ class BoltzSDDataModule(L.LightningDataModule):
             manifest_path = f"{processed_targets_dir}/manifest.json"
             print(f"Loading in manifest from {manifest_path}...")
             manifest = Manifest.load(Path(manifest_path))
-            # # DEBUG
-            # import glob
-            # ids = [Path(x).stem for x in glob.glob(f"{self.pdb_path}/processed_targets/featurized/*.npz")]
-            # records = [r for r in manifest.records if r.id in ids]
-            # manifest = Manifest(records=records)
+            # DEBUG
+            import glob
+            ids = [Path(x).stem for x in glob.glob(f"{self.pdb_path}/processed_targets/featurized/*.npz")]
+            records = [r for r in manifest.records if r.id in ids]
+            manifest = Manifest(records=records)
 
         print(f"Loaded manifest with {len(manifest.records)} records.")
         return manifest
@@ -298,6 +300,7 @@ class SDDataset(data.Dataset):
         # # Create tokenwise feats  # DEBUG
         # tokenwise_feats = pad_atom_feats_to_tokenwise(feats, max_atoms_per_token=const.max_num_atoms)
         # feats["tokenwise_feats"] = tokenwise_feats
+
         return sample.record.id, feats
 
 
@@ -391,3 +394,24 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
         collated[key] = values
 
     return collated
+
+
+def crop_batch_to_protein_only(batch: dict[str, TensorType["b n ..."]], return_crop_mask: bool = False) -> dict[str, TensorType["b n ..."]]:
+    """
+    Crop a batch of features to standard protein-only features.
+    """
+    device = batch["coords"].device
+
+    protein_token_mask = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
+    batch = to(batch, device="cpu")
+    cropped_batch = []
+    for i in range(batch["mol_type"].shape[0]):
+        example = {k: v[i] for k, v in batch.items() if v is not None}
+        cropped_example = crop_feats(example, protein_token_mask[i], max_tokens=None, max_atoms=None)
+        cropped_batch.append(cropped_example)
+    cropped_batch = sd_collator(cropped_batch)
+    cropped_batch = to(cropped_batch, device)
+
+    if return_crop_mask:
+        return cropped_batch, protein_token_mask
+    return cropped_batch
