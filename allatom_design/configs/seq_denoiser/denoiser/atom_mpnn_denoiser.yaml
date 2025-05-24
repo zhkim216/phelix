@@ -26,6 +26,7 @@ mpnn:
     noise_log_snr_range: [-7.0, 13.5]
     noise_covariance_model: globular
     noise_complex_scaling: true
+    t_max: 1.0
 
   atom_encoder:
     token_n_channel: ${denoiser.mpnn.n_channel}
