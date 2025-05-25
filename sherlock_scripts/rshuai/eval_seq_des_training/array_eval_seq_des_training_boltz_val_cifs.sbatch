@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=bvc_eval_seq_des
-#SBATCH -p possu
-#SBATCH --array=0-5%1
+#SBATCH -p bioe
+#SBATCH --array=0-3%1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -39,12 +39,10 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to evaluate
 MODEL_NAMES=(
-    "sd3_a4"
-    "sd3_a5_cfg0"
-    "sd3_a5_cfg1"
-    "sd3_a5_cfg2"
-    "sd3_a7_cfg2"
-    "sd3_a7_cfg3"
+    "sd3_a6_cfg0"
+    "sd3_a6_cfg1"
+    "sd3_a7_cfg0"
+    "sd3_a7_cfg1"
 )
 MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
