@@ -189,12 +189,13 @@ class AtomMPNN(nn.Module):
         """
         Apply polymer backbone diffusion noise to the input coordinates.
         """
-        # Sample timestep
         if not is_sampling and self.training:
+            # Sample timestep
             t = self.noise_perturb.sample_t(batch["token_pad_mask"])
             t = t * self.t_max
         else:
-            t = batch["token_pad_mask"].new_zeros(batch["token_pad_mask"].shape[0])
+            # Use provided timestep or zero if not provided
+            t = batch.get("t", batch["token_pad_mask"].new_zeros(batch["token_pad_mask"].shape[0]))
 
         # Get protein coordinates and apply noise to the backbone atoms
         protein_batch, protein_token_mask = crop_batch_to_protein_only(batch, return_crop_mask=True)
@@ -215,8 +216,11 @@ class AtomMPNN(nn.Module):
             X = torch.cat(Xs, dim=0)
             X_prot_bb = X
 
-        X_prot_bb_noised = self.noise_perturb(X_prot_bb, protein_batch["token_exists_mask"], t)
-        X_prot[..., const.prot_bb_atom14_idxs, :] = X_prot_bb_noised
+        if not is_sampling and self.training:
+            # Only apply noise if not sampling and training
+            X_prot_bb = self.noise_perturb(X_prot_bb, protein_batch["token_exists_mask"], t)
+
+        X_prot[..., const.prot_bb_atom14_idxs, :] = X_prot_bb  # update protein coordinates with possibly canonicalized and noised backbone atoms
 
         # Scatter back to atom coordinates
         X_all = get_tokenwise_coords(batch)

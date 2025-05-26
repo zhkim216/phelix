@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=bvc_eval_seq_des
-#SBATCH -p bioe
-#SBATCH --array=0-3%1
+#SBATCH --job-name=t0.5_bvc_eval_seq_des
+#SBATCH -p bioe,possu
+#SBATCH --array=0-7
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -39,17 +39,21 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to evaluate
 MODEL_NAMES=(
+    "sd3_a4"
+    "sd3_a5_cfg0"
+    "sd3_a5_cfg1"
     "sd3_a6_cfg0"
     "sd3_a6_cfg1"
     "sd3_a7_cfg0"
     "sd3_a7_cfg1"
+    "sd3_a7_cfg2"
 )
 MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_seq_des_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
+EXP_NAME=${MODEL_NAME}_t0.5_eval_seq_des_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
 GROUP=seq_des
 
 # Run training script
@@ -64,6 +68,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
     start_step=0 \
-    end_step=null \
+    end_step=40000 \
     eval_every_n_ckpts=1 \
+    +sampling_cfg_overrides.t=0.5 \
     hydra.run.dir=${HYDRA_DIR}
