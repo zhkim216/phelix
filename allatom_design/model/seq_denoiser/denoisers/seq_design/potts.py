@@ -875,6 +875,7 @@ def init_sampling_masks(
     mask_sample: Optional[torch.Tensor] = None,
     S: Optional[torch.LongTensor] = None,
     ban_S: Optional[List[int]] = None,
+    pos_restrict_aatype: tuple[torch.Tensor, torch.Tensor] | None = None,
 ):
     """Parse sampling masks and an initial sequence.
 
@@ -891,6 +892,10 @@ def init_sampling_masks(
             `(num_batch, num_nodes)`.
         ban_S (list of int, optional): Optional list of alphabet indices to ban from
             all positions during sampling.
+        pos_restrict_aatype (tuple of torch.Tensor, optional): Tuple of two tensors with shape
+            `(num_batch, num_nodes)` and `(num_batch, num_nodes, alphabet)`, respectively,
+            indicating which positions are restricted to certain aatypes and which aatypes
+            are allowed at each position.
 
     Returns:
         mask_sample (torch.Tensor): Finalized position specific mask with shape
@@ -917,13 +922,22 @@ def init_sampling_masks(
     else:
         raise NotImplementedError
 
+    # Handle aatype restrictions
     if ban_S is not None:
+        # ban certain aatypes
         mask_S[:, :, ban_S] = 0.0
-    mask_S_1D = (mask_S.sum(-1) > 1).float()
+
+    if pos_restrict_aatype is not None:
+        # restrict to certain aatypes at certain positions
+        restrict_pos_mask, allowed_aatype_mask = pos_restrict_aatype  # (B, N), (B, N, K)
+        mask_S[restrict_pos_mask.bool()] = allowed_aatype_mask[restrict_pos_mask.bool()]
+
+    mask_S_1D = (mask_S.sum(-1) > 1).float()  # check where we can sample
 
     logits_init_masked = 1000 * mask_S + logits_init
     S_init = torch.distributions.categorical.Categorical(logits=logits_init_masked).sample()
-    S = torch.where(mask_S_1D.bool(), S_init, S)  # set S to S_init where we can sample
+    S = torch.where(mask_S_1D.bool(), S_init, S)  # where we can sample, set S to S_init
+    S = torch.where(mask_S.sum(-1) == 1, mask_S.argmax(-1), S)  # where there is only one possible aatype, set S to the aatype
     return mask_S, mask_S_1D, S
 
 

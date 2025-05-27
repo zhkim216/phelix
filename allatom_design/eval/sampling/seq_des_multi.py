@@ -9,16 +9,17 @@ import yaml
 from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.eval.eval_utils import eval_metrics
+from allatom_design.eval.eval_utils.eval_setup_utils import (
+    get_pdb_files, process_pdb_files)
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import (get_seq_des_model,
                                                           run_seq_des)
-from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
 
 
-@hydra.main(config_path="../../configs/eval/sampling", config_name="seq_des_single", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/sampling", config_name="seq_des_multi", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
-    Script for designing sequences for a single PDB.
+    Script for designing sequences for multiple PDBs.
     """
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
@@ -36,7 +37,8 @@ def main(cfg: DictConfig):
         yaml.safe_dump(cfg_dict, f)
 
     # Load in PDB file to eval on
-    processed_struct_file = process_pdb_files([cfg.pdb_path], processed_struct_dir=f"{out_dir}/processed_structures", **cfg.pdb_processing_cfg)
+    pdb_files = get_pdb_files(**cfg.input_cfg)
+    processed_struct_files = process_pdb_files(pdb_files, processed_struct_dir=f"{out_dir}/processed_structures", **cfg.pdb_processing_cfg)
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
@@ -51,19 +53,15 @@ def main(cfg: DictConfig):
         Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
-    # Create single sample fixed pos df
-    pdb_key = Path(cfg.pdb_path).stem
-    pos_constraint_df = pd.DataFrame({
-        "pdb_key": [pdb_key],
-        "fixed_pos_seq": [cfg.fixed_pos_seq],
-        "fixed_pos_scn": [cfg.fixed_pos_scn],
-        "fixed_pos_override_seq": [cfg.fixed_pos_override_seq],
-        "pos_restrict_aatype": [cfg.pos_restrict_aatype]
-    })
+    # Read in fixed positions
+    if cfg.pos_constraint_csv is not None:
+        pos_constraint_df = pd.read_csv(cfg.pos_constraint_csv)
+    else:
+        pos_constraint_df = pd.DataFrame(columns=["pdb_name"])
 
     # Run sequence design model
     _, aux = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                         struct_file_paths=processed_struct_file, device=device, pos_constraint_df=pos_constraint_df,
+                         struct_file_paths=processed_struct_files, device=device, pos_constraint_df=pos_constraint_df,
                          out_dir=out_dir)
 
     if cfg.run_self_consistency_eval:

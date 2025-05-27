@@ -44,7 +44,7 @@ class AtomMPNN(nn.Module):
         self.dropout = nn.Dropout(cfg.dropout_p)
 
         # Polymer backbone diffusion
-        self.use_polymer_diffusion = cfg.polymer_diffusion.enabled
+        self.use_polymer_diffusion = cfg.get("use_polymer_diffusion", False)
         if self.use_polymer_diffusion:
             self.noise_perturb = diffusion.DiffusionChainCov(
                 noise_schedule=cfg.polymer_diffusion.noise_schedule,

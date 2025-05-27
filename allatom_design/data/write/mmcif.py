@@ -441,6 +441,9 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
             entity_to_chains.setdefault(entity_id, []).append(chain_id)
             entity_to_moltype[entity_id] = feats_i["mol_type"][chain_mask].unique().tolist()[0]
 
+        # Construct chain map (map asym_id to index of chain in the input structure)
+        chain_map = {c["asym_id"]: i for i, c in enumerate(input_struct_i.chains)}
+
         # Map entities to sequences
         sequences = {}
         for entity_id in entity_to_chains:
@@ -457,7 +460,7 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                 sequences[entity_id] = sequence
             elif mol_type == const.chain_type_ids["NONPOLYMER"]:
                 # Extract sequence from the input structure, since these chains are never redesigned
-                chain_i = input_struct_i.chains[chain_id]
+                chain_i = input_struct_i.chains[chain_map[chain_id]]
                 res_start = chain_i["res_idx"]
                 res_end = chain_i["res_idx"] + chain_i["res_num"]
                 sequence = input_struct_i.residues[res_start:res_end]["name"].tolist()

@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import gemmi
 import hydra
 import numpy as np
 import pandas as pd
@@ -22,13 +23,16 @@ import allatom_design.data.const as const
 from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import atom_center_random_augmentation, to
-from allatom_design.data.datasets.boltz_sd_dataset import sd_collator, crop_batch_to_protein_only
+from allatom_design.data.datasets.boltz_sd_dataset import (
+    crop_batch_to_protein_only, sd_collator)
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     load_input, mmcif_to_pdb)
 from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
 from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
+from allatom_design.data.types import Structure
+
 
 
 def get_seq_des_model(cfg: DictConfig, device: str) -> Dict[str, Any]:
@@ -112,11 +116,11 @@ def run_seq_des(model: SeqDenoiser,
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
-        valid_columns = ["pdb_name", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype"]
+        valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype"]
         if not set(pos_constraint_df.columns).issubset(valid_columns):
             # columns in input df must be a subset of valid columns
             raise ValueError(f"Invalid columns in pos_constraint_df. Expected subset of {valid_columns}. Found: {pos_constraint_df.columns}")
-        pos_constraint_df = pos_constraint_df.set_index("pdb_name")  # set index to pdb name
+        pos_constraint_df = pos_constraint_df.set_index("pdb_key")  # set index to pdb name
 
         # set empty string to NaN for easier parsing
         pos_constraint_df = pos_constraint_df.replace("", np.nan)
@@ -135,27 +139,30 @@ def run_seq_des(model: SeqDenoiser,
         for i in range(0, len(struct_file_paths_repeated), cfg.batch_size):
             batch_struct_files = struct_file_paths_repeated[i:i+cfg.batch_size]
             B = len(batch_struct_files)
-            batch, input_structures = get_sd_batch(batch_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+            batch, input_structs = get_sd_batch(batch_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
 
-            # TODO: Add fixed positions, etc. For now assume no fixed positions
-            batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
-            batch["seq_cond_mask"] = torch.where((batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"],
-                                                 torch.zeros_like(batch["seq_cond_mask"]),
-                                                 batch["token_pad_mask"])  # always condition on non-protein or non-standard residues
-            batch["atom_cond_mask"] = batch["prot_bb_atom_mask"]  # condition on backbone atoms
-            atomwise_prot_mask = torch.bmm(batch["atom_to_token"].float(), (batch["mol_type"] == const.chain_type_ids["PROTEIN"]).float().unsqueeze(-1)).squeeze(-1)  # TODO: make more efficient
-            batch["atom_cond_mask"] = torch.where(atomwise_prot_mask.bool(), batch["atom_cond_mask"], torch.ones_like(batch["atom_cond_mask"]))  # always condition on non-protein atoms
+            # Initialize seq_cond and atom_cond masks
+            batch = initialize_sampling_masks(batch)
+
+            # Parse fixed positions
+            batch = parse_fixed_pos_info(batch, input_structs, pos_constraint_df, verbose=cfg.verbose)
+
+            # Restrict aatype sampling at certain positions
+            sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
+            sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(batch, input_structs, pos_constraint_df, verbose=cfg.verbose)
 
             if cfg["use_protein_only"]:
                 # subset to standard protein-only features; useful for ablations to only condition on protein
                 batch["token_exists_override"] = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
+
             # Run sampling
-            res_type_pred = model.sample(batch, sampling_inputs=cfg)
+            res_type_pred = model.sample(batch, sampling_inputs=sampling_inputs)
 
             # Save PDB with predicted sequences
-            # TODO: handle cond masks
             output_feats = copy.deepcopy(to(batch, device="cpu"))
-            output_feats["res_type"] = F.one_hot(res_type_pred, num_classes=len(const.tokens))
+            output_feats["res_type"] = torch.where(batch["seq_cond_mask"][..., None].bool().cpu(),
+                                                   output_feats["res_type"],
+                                                   F.one_hot(res_type_pred, num_classes=len(const.tokens)).cpu())
             output_feats["coords"] = output_feats["coords"] * output_feats["atom_cond_mask"].unsqueeze(-1)
 
             # Save outputs to disk
@@ -167,7 +174,7 @@ def run_seq_des(model: SeqDenoiser,
 
                 sample_stems = [f"{Path(pdb_file).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_file in enumerate(batch_struct_files)]
                 batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
-                write_sd_feats_to_mmcif(output_feats, input_structs=input_structures, filenames=batch_out_files)
+                write_sd_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
                 run_aux["out_pdbs"].extend(batch_out_files)
                 run_aux["input_struct_files"].extend(batch_struct_files)
 
@@ -240,11 +247,30 @@ def get_sd_example(struct_file_path: str, data_cfg: DictConfig) -> tuple[dict[st
 
 
 
-def parse_fixed_pos_info(batch: Dict[str, TensorType["b ..."]],
-                         pdb_names: List[str],
-                         batch_chain_id_mapping: List[Dict[str, int]],  # maps chain letter to chain index
-                         pos_constraint_df: Optional[pd.DataFrame],
-                         verbose: bool = False) -> Dict[str, torch.Tensor]:
+def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str, torch.Tensor]:
+    """
+    Initialize the sampling masks for the batch. Modifies batch in place and returns it.
+    """
+    # Initialize sequence mask: always condition on non-protein or non-standard residues
+    standard_prot_mask = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
+    batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
+    batch["seq_cond_mask"] = torch.where(standard_prot_mask, torch.zeros_like(batch["seq_cond_mask"]), batch["token_pad_mask"])
+
+    # Initialize atom mask: condition on backbone atoms, non-protein atoms, and non-standard residues
+    batch["atom_cond_mask"] = batch["prot_bb_atom_mask"]  # condition on backbone atoms
+
+    ## condition on non-protein atoms and non-standard residues
+    _, batch["atomwise_token_idx"] = torch.max(batch["atom_to_token"], dim=-1)  # [b, n_atoms]
+    atomwise_standard_prot_mask = torch.gather(standard_prot_mask, dim=-1, index=batch["atomwise_token_idx"]) * batch["atom_pad_mask"]
+    batch["atom_cond_mask"] = torch.where(atomwise_standard_prot_mask.bool(), batch["atom_cond_mask"], batch["atom_resolved_mask"])
+
+    return batch
+
+
+def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
+                         input_structs: list[Structure],
+                         pos_constraint_df: pd.DataFrame | None,
+                         verbose: bool = False) -> dict[str, torch.Tensor]:
 
     """
     Given a pos_constraint_df containing fixed positions for each PDB, return a batch updated with:
@@ -258,40 +284,42 @@ def parse_fixed_pos_info(batch: Dict[str, TensorType["b ..."]],
     where each entry is a comma-separated string of positions in the format "A1-100,B1-100", "A1-10,A15-20", or np.nan.
     """
 
-    aatype_override_mask, scn_override_mask = torch.zeros_like(batch["residue_index"]), torch.zeros_like(batch["residue_index"])
+    seq_cond_mask, atom_cond_mask = batch["seq_cond_mask"].clone(), batch["atom_cond_mask"].clone()
 
     if pos_constraint_df is None:
         if verbose:
             print("No fixed positions specified, redesigning all positions.")
-        batch["aatype_override_mask"] = aatype_override_mask
-        batch["scn_override_mask"] = scn_override_mask
         return batch
 
-    for i, pdb_name in enumerate(pdb_names):
+    for i, pdb_key in enumerate(batch["pdb_key"]):
         if verbose:
-            print(f"\n======================== {pdb_name} ========================")
+            print(f"\n======================== {pdb_key} ========================")
 
-        if pdb_name not in pos_constraint_df.index:
+        if pdb_key not in pos_constraint_df.index:
             if verbose:
-                print(f"No fixed positions found for {pdb_name}")
+                print(f"No fixed positions found for {pdb_key}")
             continue
 
         ### Get fixed positions from df ###
-        row = pos_constraint_df.loc[pdb_name]
+        row = pos_constraint_df.loc[pdb_key]
         fixed_pos_seq, fixed_pos_scn = row.get("fixed_pos_seq", np.nan), row.get("fixed_pos_scn", np.nan)  # get fixed positions for this PDB
+
+        # Set up example
         example = {k: v[i] for k, v in batch.items()}
-        chain_id_mapping = batch_chain_id_mapping[i]
+        input_struct = input_structs[i]
+        chain_to_asym_id = {c["name"]: c["asym_id"] for c in input_struct.chains}
+        asym_id_to_chain = {c["asym_id"]: c["name"] for c in input_struct.chains}
 
         ### Override sequence at specified positions and condition on them ###
         fixed_pos_override_seq = row.get("fixed_pos_override_seq", np.nan)
         if not pd.isna(fixed_pos_override_seq):
             if verbose:
-                print(f"{pdb_name}: Overriding sequence at positions {fixed_pos_override_seq}")
+                print(f"{pdb_key}: Overriding sequence at positions {fixed_pos_override_seq}")
 
             # parse the override string into a list of positions and aatypes
-            pdb_pos, abs_pos, override_aatypes = parse_fixed_pos_override_seq_str(fixed_pos_override_seq, chain_id_mapping, example["residue_index"], example["chain_index"])
-            for abs_pos_i, aa in zip(abs_pos, override_aatypes):
-                batch["aatype"][i, abs_pos_i] = rc.restype_order_with_x[aa]  # override the aatype at the specified position
+            pdb_pos, override_abs_pos, override_aatypes = parse_fixed_pos_override_seq_str(fixed_pos_override_seq, chain_to_asym_id, example["auth_seq_id"], example["asym_id"])
+            for abs_pos_i, aa in zip(override_abs_pos, override_aatypes):
+                batch["res_type"][i, abs_pos_i] = F.one_hot(torch.tensor(const.token_ids[const.prot_letter_to_token[aa]], device=batch["res_type"].device), num_classes=len(const.tokens))
 
             # add to fixed_pos_seq
             fixed_pos_seq = f"{fixed_pos_seq}," if not pd.isna(fixed_pos_seq) else ""
@@ -301,49 +329,49 @@ def parse_fixed_pos_info(batch: Dict[str, TensorType["b ..."]],
         if not pd.isna(fixed_pos_seq):
             # sequence override
             if verbose:
-                print(f"{pdb_name}: Fixing sequence at positions {fixed_pos_seq}")
-            abs_fixed_pos_seq = parse_fixed_pos_str(fixed_pos_seq, chain_id_mapping, example["residue_index"], example["chain_index"])
-            aatype_override_mask[i, abs_fixed_pos_seq] = 1
+                print(f"{pdb_key}: Fixing sequence at positions {fixed_pos_seq}")
+            abs_fixed_pos_seq = parse_fixed_pos_str(fixed_pos_seq, chain_to_asym_id, example["auth_seq_id"], example["asym_id"])
+            seq_cond_mask[i, abs_fixed_pos_seq] = 1
 
             # print fixed sequence
             if verbose:
-                fixed_seq_viz = "".join([rc.restypes_with_x[example["aatype"][j]] if aatype_override_mask[i, j] else "-" for j in range(aatype_override_mask.shape[1])])
-                print(f"Fixed sequence: {fixed_seq_viz}")
+                print("Fixed sequence:")
+                visualize_sequences(example, seq_cond_mask[i], input_struct, asym_id_to_chain)
         else:
             if verbose:
-                print(f"{pdb_name}: No fixed sequence positions specified.")
+                print(f"{pdb_key}: No fixed sequence positions specified.")
 
         if not pd.isna(fixed_pos_scn):
             # sidechain override
             if verbose:
-                print(f"{pdb_name}: Fixing sidechains at positions {fixed_pos_scn}")
-            abs_fixed_pos_scn = parse_fixed_pos_str(fixed_pos_scn, chain_id_mapping, example["residue_index"], example["chain_index"])
-            scn_override_mask[i, abs_fixed_pos_scn] = 1
+                print(f"{pdb_key}: Fixing sidechains at positions {fixed_pos_scn}")
+            abs_fixed_pos_scn = parse_fixed_pos_str(fixed_pos_scn, chain_to_asym_id, example["auth_seq_id"], example["asym_id"])
+            scn_atom_mask = torch.isin(example["atomwise_token_idx"], torch.tensor(abs_fixed_pos_scn, device=example["atomwise_token_idx"].device))
+            atom_cond_mask[i] = torch.where(scn_atom_mask, example["atom_resolved_mask"], atom_cond_mask[i])
 
+            # ensure that we're not fixing sidechains when we override the PDB sequence
+            scn_cond_num_atoms = scn_atom_mask.float() @ example["atom_to_token"].float()  # number of atoms we're conditioning on at fixed_pos_scn
             if not pd.isna(fixed_pos_override_seq):
-                # ensure that we're not fixing sidechains when we override the PDB sequence
-                assert scn_override_mask[i, abs_fixed_pos_seq].sum() == 0, "Cannot fix sidechains at positions where the sequence from the PDB is overridden."
+                assert (scn_cond_num_atoms[override_abs_pos] == 0).all(), "Cannot fix sidechains at positions where the sequence from the PDB is overridden."
 
             # print fixed sidechains
             if verbose:
-                fixed_scn_viz = "".join([rc.restypes_with_x[example["aatype"][j]] if scn_override_mask[i, j] else "-" for j in range(scn_override_mask.shape[1])])
-                print(f"Fixed sidechains: {fixed_scn_viz}")
+                print("Fixed sidechains:")
+                visualize_sequences(example, scn_cond_num_atoms > 0, input_struct, asym_id_to_chain)
         else:
             if verbose:
-                print(f"{pdb_name}: No fixed sidechain positions specified.")
+                print(f"{pdb_key}: No fixed sidechain positions specified.")
 
     # Update batch
-    batch["aatype_override_mask"] = aatype_override_mask
-    batch["scn_override_mask"] = scn_override_mask
-
+    batch["seq_cond_mask"] = seq_cond_mask
+    batch["atom_cond_mask"] = atom_cond_mask
     return batch
 
 
 def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
-                                  pdb_names: List[str],
-                                  batch_chain_id_mapping: List[Dict[str, int]],  # maps chain letter to chain index
-                                  pos_constraint_df: Optional[pd.DataFrame],
-                                  verbose: bool = False) -> Tuple[torch.Tensor, torch.Tensor] | None:
+                                   input_structs: list[Structure],
+                                   pos_constraint_df: Optional[pd.DataFrame],
+                                   verbose: bool = False) -> Tuple[torch.Tensor, torch.Tensor] | None:
     """
     Given a pos_constraint_df containing position restrictions for each PDB, return:
     - a mask indicating which positions have restricted amino acid sampling
@@ -354,8 +382,8 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
     columns: ["pos_restrict_aatype"]
     where each entry is a comma-separated string of positions in the format "A1:AVG,B10:ILMV", or None.
     """
-    B, N = batch["seq_mask"].shape
-    K = len(rc.restype_order_with_x)
+    B, N = batch["token_pad_mask"].shape
+    K = len(const.tokens)
 
     if pos_constraint_df is None:
         if verbose:
@@ -363,39 +391,42 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
         return None
 
     # Initialize masks for the entire batch
-    restrict_pos_mask = torch.zeros((B, N), dtype=torch.float32, device=batch["seq_mask"].device)
-    allowed_aatype_mask = torch.ones((B, N, K), dtype=torch.float32, device=batch["seq_mask"].device)
+    restrict_pos_mask = torch.zeros((B, N), dtype=torch.float32, device=batch["token_pad_mask"].device)
+    allowed_aatype_mask = torch.ones((B, N, K), dtype=torch.float32, device=batch["token_pad_mask"].device)
 
     if verbose:
         print("\n======================== Position-wise amino acid restrictions ========================")
 
-    for i, pdb_name in enumerate(pdb_names):
-        if pdb_name not in pos_constraint_df.index:
+    for i, pdb_key in enumerate(batch["pdb_key"]):
+        if pdb_key not in pos_constraint_df.index:
             if verbose:
-                print(f"{pdb_name}: No amino acid restrictions specified.")
+                print(f"{pdb_key}: No amino acid restrictions specified.")
             continue
 
         # Get position restrictions from df
-        row = pos_constraint_df.loc[pdb_name]
+        row = pos_constraint_df.loc[pdb_key]
         pos_restrict_aatype = row.get("pos_restrict_aatype", np.nan)
 
         if pd.isna(pos_restrict_aatype):
             if verbose:
-                print(f"{pdb_name}: No amino acid restrictions specified.")
+                print(f"{pdb_key}: No amino acid restrictions specified.")
             continue
 
+        # Set up example
         example = {k: v[i] for k, v in batch.items()}
-        chain_id_mapping = batch_chain_id_mapping[i]
+        input_struct = input_structs[i]
+        chain_to_asym_id = {c["name"]: c["asym_id"] for c in input_struct.chains}
+        asym_id_to_chain = {c["asym_id"]: c["name"] for c in input_struct.chains}
 
         if verbose:
-            print(f"{pdb_name}: Restricting amino acid sampling at positions {pos_restrict_aatype}")
+            print(f"{pdb_key}: Restricting amino acid sampling at positions {pos_restrict_aatype}")
 
         # Parse the restriction string into lists of positions and allowed amino acids
         pdb_pos, abs_pos, allowed_aatypes = parse_pos_restrict_aatype_str(
             pos_restrict_aatype,
-            chain_id_mapping,
-            example["residue_index"],
-            example["chain_index"]
+            chain_to_asym_id,
+            example["auth_seq_id"],
+            example["asym_id"]
         )
 
         # Mark positions with restrictions
@@ -408,10 +439,10 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
 
             # Then allow only the specified amino acids
             for aa in allowed_aa:
-                if aa in rc.restype_order_with_x:
-                    allowed_aatype_mask[i, pos_idx, rc.restype_order_with_x[aa]] = 1.0
+                if aa in const.prot_letter_to_token:
+                    allowed_aatype_mask[i, pos_idx, const.token_ids[const.prot_letter_to_token[aa]]] = 1.0
                 else:
-                    print(f"Warning: Unknown amino acid '{aa}' in restriction for {pdb_name} at position {pdb_pos[abs_pos.index(pos_idx)]}")
+                    print(f"Warning: Unknown amino acid '{aa}' in restriction for {pdb_key} at position {pdb_pos[abs_pos.index(pos_idx)]}")
 
         if verbose:
             # Print a summary of the restrictions
@@ -569,3 +600,40 @@ def parse_pos_restrict_aatype_str(pos_restrict_str: str,
     abs_pos = parse_fixed_pos_str(",".join(pdb_pos), chain_id_mapping, residue_index, chain_index)
 
     return pdb_pos, abs_pos, allowed_aatypes
+
+
+def visualize_sequences(example: dict[str, torch.Tensor],
+                        cond_mask: TensorType["n", int],
+                        input_struct: Structure,
+                        asym_id_to_chain: Dict[str, str],
+                        ) -> str:
+    """
+    Visualize the conditioning sequence for a given batch of residues.
+    """
+    # Construct chain map (map chain_id to index of chain in the input structure)
+    chain_map = {c["asym_id"]: i for i, c in enumerate(input_struct.chains)}
+
+    # first, get full sequence for each chain
+    sequences = {}
+    for chain_id in example["asym_id"].unique().tolist():
+        chain_mask = example["asym_id"] == chain_id
+        mol_type = example["mol_type"][chain_mask].unique().tolist()[0]
+        if mol_type != const.chain_type_ids["NONPOLYMER"]:
+            # Extract sequence from the features
+            # Get the unpadded sequence for this chain
+            res_type = example["res_type"][chain_mask].argmax(dim=-1)
+            res_type = res_type[example["token_pad_mask"][chain_mask].bool()].tolist()
+            sequence = [const.tokens[res_type[ri]] for ri in range(len(res_type))]
+            sequences[chain_id] = "".join([x if cond_mask[j] else "-" for j, x in enumerate(gemmi.one_letter_code(sequence))])
+        else:
+            # Extract sequence from the input structure, since non-polymer chains are never redesigned
+            chain_i = input_struct.chains[chain_map[chain_id]]
+            res_start = chain_i["res_idx"]
+            res_end = chain_i["res_idx"] + chain_i["res_num"]
+            sequence = input_struct.residues[res_start:res_end]["name"].tolist()
+            sequence = "".join([f"<{x}>" for x in sequence])  # <> to denote CCD code, not 1-letter
+            sequences[chain_id] = sequence
+
+    # print sequences for each chain
+    for chain_id, seq in sequences.items():
+        print(f"Chain {asym_id_to_chain[chain_id]}: {seq}")

@@ -138,7 +138,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         B, N, _ = batch["res_type"].shape
         logits_init = torch.zeros((B, N, len(const.tokens)), device=batch["res_type"].device).float()
 
-        # Handle banned amino acids
+        # Handle banned amino acids and aatype restrictions
         ban_S = {"X"}
         omit_aas = sampling_inputs.get("omit_aas", None)
         if omit_aas is not None:
@@ -149,7 +149,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         # Initialize random sequence and sampling masks
         mask_sample = (1 - batch["seq_cond_mask"]) * batch["token_pad_mask"]  # 1 where we can sample, 0 where we can't
         mask_sample, _, S_init = potts.init_sampling_masks(
-            logits_init, mask_sample=mask_sample, S=batch["res_type"].argmax(dim=-1), ban_S=ban_S
+            logits_init, mask_sample=mask_sample, S=batch["res_type"].argmax(dim=-1), ban_S=ban_S, pos_restrict_aatype=sampling_inputs.get("pos_restrict_aatype", None)
         )
 
         # Complexity regularization
