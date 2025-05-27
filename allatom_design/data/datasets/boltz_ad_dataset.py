@@ -27,7 +27,8 @@ from allatom_design.data.motif_selector import MotifSelector
 from allatom_design.data.sample.sampler import Sample, Sampler
 from allatom_design.data.tokenize.tokenizer import Tokenizer
 from allatom_design.data.types import (Connection, Manifest, Record, Structure,
-                                       Tokenized)
+                                       Tokenized, TokenwiseAtomFeats)
+from allatom_design.data.data import pad_atom_feats_to_tokenwise
 
 
 class BoltzADDataModule(L.LightningDataModule):
@@ -192,7 +193,7 @@ class ADDataset(data.Dataset):
         record_id, tokenized = self._load_and_tokenize_input(idx)
 
         # Featurize input tokens for diffusion (atom23 protein tokens)
-        example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, self.max_tokens, is_sampling=False)
+        example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, self.max_tokens)
 
         # Featurize motif (all 0s if unconditional or empty motif)
         if self.requires_motif:
@@ -324,7 +325,27 @@ def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
     return Tokenized(tokens=tokenized["tokens"], bonds=tokenized["bonds"], structure=structure, msa={}, tokenwise_atom_feats=tokenized["tokenwise_atom_feats"])
 
 
-def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int, is_sampling: bool) -> dict[str, torch.Tensor]:
+def add_tokenwise_atom_feats(tokenized: Tokenized, featurizer: SimpleBoltzFeaturizer) -> Tokenized:
+    """
+    Add tokenwise atom features to the tokenized structure.
+    """
+    # Featurize input tokens as atom23 tokens
+    feats = featurizer.process(tokenized,
+                               use_auth_seq_id=True  # doesn't matter here, since we don't use residue indices from this featurizer
+                               )
+    tokenwise_feats = pad_atom_feats_to_tokenwise(feats, max_atoms_per_token=const.max_num_atoms)  # max number of atoms across any token
+
+    # Construct tokenwise atom feats
+    tokenwise_atom_feats = np.empty((tokenwise_feats["coords"].shape[:2]), dtype=TokenwiseAtomFeats)
+    tokenwise_atom_feats["coords"] = tokenwise_feats["coords"]
+    tokenwise_atom_feats["atom_resolved_mask"] = tokenwise_feats["atom_resolved_mask"]
+
+    # Add tokenwise atom feats to tokenized
+    tokenized = replace(tokenized, tokenwise_atom_feats=tokenwise_atom_feats)
+    return tokenized
+
+
+def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int) -> dict[str, torch.Tensor]:
     """
     Featurize protein tokens into diffusion inputs.
     """
@@ -333,6 +354,9 @@ def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int, is_samplin
     known_residue_mask = tokenized.tokens["res_type"] != const.token_ids[const.unk_token["PROTEIN"]]
     protein_token_mask = protein_token_mask * known_residue_mask
 
+    # Also only include resolved tokens  # TODO: is this the right place to put this?
+    protein_token_mask = protein_token_mask * tokenized.tokens["resolved_mask"]
+
     # Subset tokenized data to only include protein tokens
     tokenized = subset_tokenized(tokenized, protein_token_mask)
 
@@ -340,10 +364,10 @@ def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int, is_samplin
     diffusion_feats = {}
     diffusion_feats["residue_index"] = tokenized.tokens["auth_seq_id"]  # we use auth_seq_id since predicted structures won't have SEQRES records
     diffusion_feats["seq_mask"] = np.ones_like(diffusion_feats["residue_index"])  # denotes padding
-    if not is_sampling:
-        # During training, featurize with ground truth coords and atom mask
-        diffusion_feats["x"] = tokenized.tokenwise_atom_feats["coords"]
-        diffusion_feats["atom_mask"] = tokenized.tokenwise_atom_feats["atom_resolved_mask"]
+
+    # Featurize with ground truth coords and atom mask (for training or partial diffusion)
+    diffusion_feats["x"] = tokenized.tokenwise_atom_feats["coords"]
+    diffusion_feats["atom_mask"] = tokenized.tokenwise_atom_feats["atom_resolved_mask"]
 
     # Convert to torch
     diffusion_feats = {k: torch.from_numpy(v.copy()) for k, v in diffusion_feats.items()}

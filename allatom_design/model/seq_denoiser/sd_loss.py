@@ -4,13 +4,11 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange, repeat
 from omegaconf import DictConfig
-from scipy.stats import pearsonr, spearmanr
 from torchtyping import TensorType
-from allatom_design.data import const
 
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
+from allatom_design.data import const
 
 
 class SDLoss(nn.Module):
