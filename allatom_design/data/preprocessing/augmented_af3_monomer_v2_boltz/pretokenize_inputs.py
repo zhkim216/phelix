@@ -10,7 +10,7 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 
 from allatom_design.data import const
-from allatom_design.data.data import pad_atom_feats_to_tokenwise
+from allatom_design.data.datasets.boltz_ad_dataset import add_tokenwise_atom_feats
 from allatom_design.data.feature.featurizer import SimpleBoltzFeaturizer
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     load_input
@@ -77,26 +77,6 @@ def tokenize_structure_to_disk(processed_structure_file: str, out_dir: str, toke
 
     # Save tokenized
     np.savez_compressed(out_file, **asdict(tokenized))
-
-
-def add_tokenwise_atom_feats(tokenized: Tokenized, featurizer: SimpleBoltzFeaturizer) -> Tokenized:
-    """
-    Add tokenwise atom features to the tokenized structure.
-    """
-    # Featurize input tokens as atom23 tokens
-    feats = featurizer.process(tokenized,
-                               use_auth_seq_id=True  # doesn't matter here, since we don't use residue indices from this featurizer
-                               )
-    tokenwise_feats = pad_atom_feats_to_tokenwise(feats, max_atoms_per_token=const.max_num_atoms)  # max number of atoms across any token
-
-    # Construct tokenwise atom feats
-    tokenwise_atom_feats = np.empty((tokenwise_feats["coords"].shape[:2]), dtype=TokenwiseAtomFeats)
-    tokenwise_atom_feats["coords"] = tokenwise_feats["coords"]
-    tokenwise_atom_feats["atom_resolved_mask"] = tokenwise_feats["atom_resolved_mask"]
-
-    # Add tokenwise atom feats to tokenized
-    tokenized = replace(tokenized, tokenwise_atom_feats=tokenwise_atom_feats)
-    return tokenized
 
 
 

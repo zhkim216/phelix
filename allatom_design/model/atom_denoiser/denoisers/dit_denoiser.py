@@ -182,13 +182,15 @@ class DiTDenoiser(nn.Module):
 
         else:
             ### SAMPLING ###
-
-            # Sample backbone from prior
-            A = len(const.prot_bb_atoms)
-            x0_bb = self.interpolant.sample_prior((B, N, A, 3), diffusion_inputs["seq_mask"].device)
-
-            # Store trajectory
-            xt_bb_traj, x1_bb_traj = [], []
+            if diffusion_params.get("use_partial_diffusion", False):
+                # Noise input backbone
+                x_bb = diffusion_inputs["x"][..., const.prot_bb_atom14_idxs, :]
+                xt_bb = self.interpolant.noise_x(x_bb, t=diffusion_params["timesteps"][:, 0])
+            else:
+                # Sample backbone from prior
+                A = len(const.prot_bb_atoms)
+                x0_bb = self.interpolant.sample_prior((B, N, A, 3), diffusion_inputs["seq_mask"].device)
+                xt_bb = x0_bb
 
             # Extract sampling parameters
             S = diffusion_params["num_steps"]
@@ -205,14 +207,14 @@ class DiTDenoiser(nn.Module):
                                                               residue_index=diffusion_inputs["residue_index"],
                                                               seq_mask=diffusion_inputs["seq_mask"],
                                                               motif_inputs=motif_inputs)
-
-            # Run integration steps
+            # Set up denoiser function
             denoiser_fn = partial(self.dit,
                                   residue_index=diffusion_inputs["residue_index"],
                                   seq_mask=diffusion_inputs["seq_mask"],
                                   motif_inputs=motif_inputs)
 
-            xt_bb = x0_bb
+            # Run integration steps
+            xt_bb_traj, x1_bb_traj = [], []  # store trajectory
             for i in tqdm(range(S), leave=False, desc="Sampling..."):
                 t = timesteps[:, i]
                 t_next = timesteps[:, i + 1]

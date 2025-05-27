@@ -23,7 +23,7 @@ from allatom_design.data.data import (atom_apply_random_augmentation,
                                       atom_center_random_augmentation,
                                       center_random_augmentation, to)
 from allatom_design.data.datasets.boltz_ad_dataset import (
-    ad_collator, featurize_diffusion_inputs, featurize_motif_inputs)
+    ad_collator, featurize_diffusion_inputs, featurize_motif_inputs, add_tokenwise_atom_feats)
 from allatom_design.data.pdb_utils import write_batched_to_pdb
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     load_input
@@ -90,13 +90,22 @@ def run_bb_uncond_sampling(model: AtomDenoiser,
         diffusion_params["churn_cfg"] = dict(cfg.churn_cfg)  # churn config for stochastic sampling
         diffusion_params["autoguidance_cfg"] = dict(cfg.autoguidance_cfg)  # autoguidance config
 
+        # Create seq mask from lengths
+        seq_mask = (residue_index < lengths_batch[:, None]).float()
+
+        # Construct diffusion inputs
+        diffusion_inputs = {
+            "seq_mask": seq_mask,
+            "residue_index": residue_index,
+        }
+
         # Sample backbones
-        x_bb_denoised, aux = model.sample(lengths=lengths_batch,
-                                          residue_index=residue_index,
+        x_bb_denoised, aux = model.sample(diffusion_inputs=diffusion_inputs,
                                           diffusion_params=diffusion_params,
                                           motif_inputs=None)
+
         samples = {"x_bb": x_bb_denoised,
-                   "seq_mask": aux["seq_mask"],
+                   "seq_mask": seq_mask,
                    "residue_index": residue_index}
         samples = {k: v.cpu() if v is not None else v for k, v in samples.items()}
 
@@ -118,29 +127,60 @@ def run_bb_uncond_sampling(model: AtomDenoiser,
     return sampled_pdb_paths
 
 
-# def get_bb_batch(pdb_batch_files: list[str],
-#                  sm: ScaffoldManager | None,
-#                  device: str,
-#                  parallel_pool: Parallel | None) -> tuple[dict[str, TensorType["b n ..."]],
-#                                                           list[str]]:
-#     """
-#     Get a batch of backbone generation model inputs from a list of PDB files.
-#     """
-#     if parallel_pool is None:
-#         # Load PDBs sequentially
-#         batch_examples, pdb_names, chain_id_mapping = zip(*[get_bb_example(pdb_path, sm) for pdb_path in pdb_batch_files])
-#     else:
-#         # Load PDBs in parallel
-#         batch_examples, pdb_names, chain_id_mapping = zip(*parallel_pool(delayed(get_bb_example)(pdb_path, sm) for pdb_path in pdb_batch_files))
+def run_bb_partial_diffusion(model: AtomDenoiser,
+                             data_cfg: DictConfig,
+                             cfg: DictConfig,  # sampling config
+                             device: str,
+                             struct_file_paths: list[str],
+                             out_dir: str) -> list[str]:
+    """
+    Run partial diffusion on a set of structures.
+    """
+    # Set up output directories
+    sample_out_dir = Path(out_dir, "samples")
+    Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
 
-#     # Pad all examples to the max length and stack
-#     model_input_keys = list(batch_examples[0].keys())
-#     max_len = max(b["x"].shape[0] for b in batch_examples)
-#     batch_examples = [pad_to_max_len({k: b[k].unsqueeze(0) for k in model_input_keys}, max_len) for b in batch_examples]
-#     batch = {k: torch.cat([b[k] for b in batch_examples], dim=0) for k in model_input_keys}
-#     batch = {k: batch[k].to(device) for k in model_input_keys}
+    # Load in input PDB
+    sampled_pdb_paths = []
+    parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
+    with parallel_context as parallel_pool:
+        pbar = tqdm(total=len(struct_file_paths), desc="Running partial diffusion")
+        for i in range(0, len(struct_file_paths), cfg.batch_size):
+            struct_file_batch_paths = struct_file_paths[i:i + cfg.batch_size]
+            B = len(struct_file_batch_paths)
 
-#     return batch, pdb_names, chain_id_mapping
+            # Get batch of inputs
+            unconditional_motif_cfg = {"name": "unconditional", "motif_type": "unconditional"}  # TODO: find a better way to handle unconditional sampling from scaffolding models / creation of empty motifs
+            batch, input_structures = get_bb_batch(struct_file_batch_paths, data_cfg, unconditional_motif_cfg, device, parallel_pool)
+
+            # Set up backbone diffusion inputs
+            diffusion_params = {}
+            diffusion_params["use_partial_diffusion"] = True
+            diffusion_params["num_steps"] = cfg.num_steps
+            t_bb = sampling_utils.get_timesteps_from_schedule(**cfg.timestep_schedule)  # timesteps for backbone diffusion
+            diffusion_params["timesteps"] = t_bb[None].expand(B, -1).to(device)
+            diffusion_params["noise_schedule"] = NoiseSchedule(cfg.noise_schedule)  # noise schedule, used for step_scale
+            diffusion_params["churn_cfg"] = dict(cfg.churn_cfg)  # churn config for stochastic sampling
+            diffusion_params["autoguidance_cfg"] = dict(cfg.autoguidance_cfg)  # autoguidance config
+
+            # Sample backbones
+            x_bb_denoised, _ = model.sample(diffusion_inputs=batch["diffusion_inputs"],  # uses true auth seq ID from PDBs
+                                            diffusion_params=diffusion_params,
+                                            motif_inputs=batch["motif_inputs"])
+            samples = {"x_bb": x_bb_denoised,
+                       "seq_mask": batch["diffusion_inputs"]["seq_mask"],
+                       "residue_index": batch["diffusion_inputs"]["residue_index"]}
+            samples = {k: v.cpu() if v is not None else v for k, v in samples.items()}
+
+            # Save samples
+            filenames = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{i + j}.pdb" for j in range(B)]
+            AtomDenoiser.save_samples_to_pdb(samples, filenames)
+            sampled_pdb_paths.extend(filenames)
+
+            pbar.update(B)
+        pbar.close()
+
+    return sampled_pdb_paths
 
 
 def get_bb_batch(struct_file_batch_paths: list[str],
@@ -179,9 +219,10 @@ def get_bb_example(struct_file_path: str,
 
     # Tokenize structure (no cropping applied)
     tokenized = data_cfg["tokenizer"].tokenize(input_data)
+    tokenized = add_tokenwise_atom_feats(tokenized, data_cfg["featurizer"])
 
     # Featurize diffusion inputs
-    example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, data_cfg["max_tokens"], is_sampling=True)
+    example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, data_cfg["max_tokens"])
 
     # Featurize motif
     example["motif_inputs"] = featurize_motif_inputs(tokenized, data_cfg["motif_selector"], data_cfg["motif_cropper"], data_cfg["motif_featurizer"],
@@ -224,6 +265,7 @@ def run_backbone_scaffolding(model: AtomDenoiser,
             where the length of the contig is specified by the single numeric value, and the motif contig is specified by the chain letter and residue indices
         - N: number of samples to generate
     """
+    raise NotImplementedError("This function needs to be updated")
     # Set up output directories
     sample_out_dir = Path(out_dir, "samples")  # stores generated samples
     Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
@@ -475,8 +517,7 @@ def run_motif_cond_type_sampling(model: AtomDenoiser,
             diffusion_params["autoguidance_cfg"] = dict(cfg.autoguidance_cfg)  # autoguidance config
 
             # Sample backbones
-            x_bb_denoised, _ = model.sample(lengths=batch["diffusion_inputs"]["seq_mask"].sum(dim=-1),
-                                            residue_index=batch["diffusion_inputs"]["residue_index"],  # this uses the true residue index from PDBs
+            x_bb_denoised, _ = model.sample(diffusion_inputs=batch["diffusion_inputs"],  # uses true auth seq ID from PDBs
                                             diffusion_params=diffusion_params,
                                             motif_inputs=batch["motif_inputs"])
             samples = {

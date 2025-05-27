@@ -64,8 +64,7 @@ class AtomDenoiser(nn.Module):
 
 
     def sample(self,
-               lengths: TensorType["b", int],
-               residue_index: TensorType["b n", int],
+               diffusion_inputs: Dict[str, Any],
                diffusion_params: Dict[str, Any],
                motif_inputs: dict[str, TensorType["b n ..."]] | None = None,
                ) -> Tuple[TensorType["b n 4 3", float], Dict[str, torch.Tensor]]:
@@ -74,20 +73,7 @@ class AtomDenoiser(nn.Module):
 
         Returns the final denoised coords and auxiliary outputs.
         """
-        B, N = residue_index.shape
-
         aux = {}  # keep track of auxiliary outputs
-
-        # Create seq mask
-        ranges = torch.arange(N, device=residue_index.device).expand(B, N)
-        seq_mask = (ranges < lengths[:, None]).float()
-        aux["seq_mask"] = seq_mask.cpu()
-
-        # Construct diffusion inputs
-        diffusion_inputs = {
-            "seq_mask": seq_mask,
-            "residue_index": residue_index,
-        }
 
         # Initialize motif inputs
         x1_bb, aux_preds = self.denoiser(motif_inputs=motif_inputs,
