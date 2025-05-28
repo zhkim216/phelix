@@ -890,6 +890,7 @@ def sample_potts(
             U_sums = U.new_zeros(unique_ids.size(0)).scatter_add_(0, inverse, U)
             U_means = U_sums / counts.to(U_sums.dtype)
             U = U_means[inverse]
+        # print(f"Iteration {i}: {U[tied_sampling_inputs['rep_idx'].unique()]}")  # DEBUG
 
     # Use first sequence of each tied group as the representative sequence
     if tied_sampling_inputs is not None:

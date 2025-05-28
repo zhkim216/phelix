@@ -1,10 +1,18 @@
+# Wandb configuration
+wandb:
+  no_wandb: true  # Disable wandb logging
+  project: "allatom_design"  # Wandb project name
+  wandb_id: "richardshuai"  # Wandb username
+  group: "debug" # Wandb group name
+
 # Run settings
 seed: 0
 num_workers: 8  # for dataloading
 
 # Inputs
 ckpt_path: null
-out_dir: null
+base_out_dir: null
+exp_name: null  # experiment name; used for wandb and output directory
 
 # PDB file inputs
 input_cfg:
