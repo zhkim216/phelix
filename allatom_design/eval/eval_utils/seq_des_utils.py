@@ -199,6 +199,126 @@ def run_seq_des(model: SeqDenoiser,
     return preds, run_aux
 
 
+def run_seq_des_multistate(model: SeqDenoiser,
+                           data_cfg: DictConfig,
+                           cfg: DictConfig,  # sampling config
+                           struct_file_paths: list[str],
+                           device: str,
+                           pos_constraint_df: Optional[pd.DataFrame] = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
+                           out_dir: Optional[str] = None,
+                           ) -> Tuple[Dict[str, Dict[str, torch.Tensor]], Dict]:
+    """
+    Given a list of processed structure files, run sequence design on them.
+
+    Returns a dictionary mapping from PDB paths to dictionaries containing samples for that PDB, including keys:
+    - x_denoised: denoised coordinates
+    - seq_mask: sequence mask
+    - missing_atom_mask: missing atom mask
+    - residue_index: residue index
+    - chain_index: chain index
+    - pred_aatype: predicted amino acid types
+    - pred_seq: predicted sequences
+
+    Also returns a run_aux:
+    - If out_dir is specified, save the samples to the given directory and return the paths to the samples in aux.
+    """
+    # Set up output directory
+    run_aux = {}
+
+    if out_dir is not None:
+        sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
+        Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
+
+        run_aux["out_pdbs"] = []  # store output PDB paths
+        run_aux["input_struct_files"] = []  # store input PDB names
+        run_aux["pred_seqs"] = []  # store predicted sequences as a string for each sample
+
+    # Validate pos_constraint_df
+    if pos_constraint_df is not None:
+        valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype"]
+        if not set(pos_constraint_df.columns).issubset(valid_columns):
+            # columns in input df must be a subset of valid columns
+            raise ValueError(f"Invalid columns in pos_constraint_df. Expected subset of {valid_columns}. Found: {pos_constraint_df.columns}")
+        pos_constraint_df = pos_constraint_df.set_index("pdb_key")  # set index to pdb name
+
+        # set empty string to NaN for easier parsing
+        pos_constraint_df = pos_constraint_df.replace("", np.nan)
+
+    # Print omitted amino acids
+    if cfg.verbose and cfg.omit_aas is not None:
+        print(f"Omitting aatype sampling for: {cfg.omit_aas}")
+
+    # Process PDBs in batches of size B
+    struct_file_paths_repeated = np.repeat(struct_file_paths, cfg.num_seqs_per_pdb)
+    pbar = tqdm(total=len(struct_file_paths_repeated), desc=f"Sampling {len(struct_file_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
+
+    input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
+    parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
+    with parallel_context as parallel_pool:
+        for i in range(0, len(struct_file_paths_repeated), cfg.batch_size):
+            batch_struct_files = struct_file_paths_repeated[i:i+cfg.batch_size]
+            B = len(batch_struct_files)
+            batch, input_structs = get_sd_batch(batch_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+
+            # Initialize seq_cond and atom_cond masks
+            batch = initialize_sampling_masks(batch)
+
+            # Parse fixed positions
+            batch = parse_fixed_pos_info(batch, input_structs, pos_constraint_df, verbose=cfg.verbose)
+
+            # Restrict aatype sampling at certain positions
+            sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
+            sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(batch, input_structs, pos_constraint_df, verbose=cfg.verbose)
+
+            if cfg["use_protein_only"]:
+                # subset to standard protein-only features; useful for ablations to only condition on protein
+                batch["token_exists_override"] = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
+
+            # Run sampling
+            res_type_pred = model.sample(batch, sampling_inputs=sampling_inputs)
+
+            # Save PDB with predicted sequences
+            output_feats = copy.deepcopy(to(batch, device="cpu"))
+            output_feats["res_type"] = torch.where(batch["seq_cond_mask"][..., None].bool().cpu(),
+                                                   output_feats["res_type"],
+                                                   F.one_hot(res_type_pred, num_classes=len(const.tokens)).cpu())
+            output_feats["coords"] = output_feats["coords"] * output_feats["atom_cond_mask"].unsqueeze(-1)
+
+            # Save outputs to disk
+            if out_dir is not None:
+                # Save as cif
+                if cfg["save_protein_only"]:
+                    # crop to protein-only features; useful for ablations to only fold with protein sequence
+                    output_feats = crop_batch_to_protein_only(output_feats)
+
+                sample_stems = [f"{Path(pdb_file).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_file in enumerate(batch_struct_files)]
+                batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
+                write_sd_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
+                run_aux["out_pdbs"].extend(batch_out_files)
+                run_aux["input_struct_files"].extend(batch_struct_files)
+
+            pbar.update(B)
+    pbar.close()
+
+    # For each input pdb, aggregate all sequence design samples
+    preds = defaultdict(dict)
+    for pdb, samples_list in input_pdb_to_samples.items():
+        for k in samples_list[0].keys():
+            preds[pdb][k] = torch.stack([s[k] for s in samples_list])
+
+        # Get sampled sequences for this PDB as a list of strings
+        aatype_denoised = preds[pdb]["res_type_pred"]
+
+        pred_seqs = []
+        for i in range(aatype_denoised.shape[0]):
+            pred_seq = "".join([rc.restypes_with_x[aatype_denoised[i, j]] for j in range(aatype_denoised.shape[1])])
+            pred_seqs.append(pred_seq)
+        preds[pdb]["pred_seqs"] = pred_seqs
+
+    return preds, run_aux
+
+
+
 def get_sd_batch(struct_file_paths: list[str], device: str,
                  data_cfg: DictConfig,
                  parallel_pool: Parallel | None) -> tuple[dict[str, TensorType["b n ..."]],
