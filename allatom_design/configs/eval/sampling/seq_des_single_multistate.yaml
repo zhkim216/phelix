@@ -8,6 +8,8 @@ out_dir: null
 
 # PDB file inputs
 pdb_dir: null
+
+# Positional contraints
 fixed_pos_seq: # comma-separated, chain + residue index specification, e.g. "A1-100,B1-100"
 fixed_pos_scn: # null for no provided sidechains, otherwise should be subset of fixed_pos_seq, e.g. "A1-100"
 fixed_pos_override_seq:  # overrides sequence in input pdb at certain positions and conditions on it. Comma-separated, "<chain + residue index>:<desired aatype in 1-letter code format>", e.g. "A26:A,A27:L"
@@ -40,7 +42,7 @@ sampling_cfg_overrides:
   num_steps: 50
   noise_labels: null
   num_workers: ${num_workers}
-  tied_across_batch: false
+  tied_across_batch: true
 
 # Sampling config
 seq_des_cfg:

@@ -32,6 +32,7 @@ from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 from allatom_design.data.types import Structure
+import itertools
 
 
 
@@ -90,18 +91,6 @@ def run_seq_des(model: SeqDenoiser,
                           Dict]:
     """
     Given a list of processed structure files, run sequence design on them.
-
-    Returns a dictionary mapping from PDB paths to dictionaries containing samples for that PDB, including keys:
-    - x_denoised: denoised coordinates
-    - seq_mask: sequence mask
-    - missing_atom_mask: missing atom mask
-    - residue_index: residue index
-    - chain_index: chain index
-    - pred_aatype: predicted amino acid types
-    - pred_seq: predicted sequences
-
-    Also returns a run_aux:
-    - If out_dir is specified, save the samples to the given directory and return the paths to the samples in aux.
     """
     # Set up output directory
     run_aux = {}
@@ -156,7 +145,7 @@ def run_seq_des(model: SeqDenoiser,
                 batch["token_exists_override"] = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
 
             # Run sampling
-            res_type_pred = model.sample(batch, sampling_inputs=sampling_inputs)
+            res_type_pred, _ = model.sample(batch, sampling_inputs=sampling_inputs)
 
             # Save PDB with predicted sequences
             output_feats = copy.deepcopy(to(batch, device="cpu"))
@@ -202,25 +191,13 @@ def run_seq_des(model: SeqDenoiser,
 def run_seq_des_multistate(model: SeqDenoiser,
                            data_cfg: DictConfig,
                            cfg: DictConfig,  # sampling config
-                           struct_file_paths: list[str],
+                           conformer_struct_files: list[tuple[str, list[str]]],  # maps from a given pdb name to its conformer structure files
                            device: str,
                            pos_constraint_df: Optional[pd.DataFrame] = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
                            out_dir: Optional[str] = None,
                            ) -> Tuple[Dict[str, Dict[str, torch.Tensor]], Dict]:
     """
     Given a list of processed structure files, run sequence design on them.
-
-    Returns a dictionary mapping from PDB paths to dictionaries containing samples for that PDB, including keys:
-    - x_denoised: denoised coordinates
-    - seq_mask: sequence mask
-    - missing_atom_mask: missing atom mask
-    - residue_index: residue index
-    - chain_index: chain index
-    - pred_aatype: predicted amino acid types
-    - pred_seq: predicted sequences
-
-    Also returns a run_aux:
-    - If out_dir is specified, save the samples to the given directory and return the paths to the samples in aux.
     """
     # Set up output directory
     run_aux = {}
@@ -249,16 +226,24 @@ def run_seq_des_multistate(model: SeqDenoiser,
         print(f"Omitting aatype sampling for: {cfg.omit_aas}")
 
     # Process PDBs in batches of size B
-    struct_file_paths_repeated = np.repeat(struct_file_paths, cfg.num_seqs_per_pdb)
-    pbar = tqdm(total=len(struct_file_paths_repeated), desc=f"Sampling {len(struct_file_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
+    conformer_struct_files_repeated = list(itertools.chain(*itertools.repeat(conformer_struct_files, cfg.num_seqs_per_pdb)))
+    pbar = tqdm(total=len(conformer_struct_files), desc=f"Sampling {len(conformer_struct_files)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
 
     input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
-        for i in range(0, len(struct_file_paths_repeated), cfg.batch_size):
-            batch_struct_files = struct_file_paths_repeated[i:i+cfg.batch_size]
-            B = len(batch_struct_files)
+        for i in range(0, len(conformer_struct_files_repeated), cfg.batch_size):
+            # Extract batch of conformer struct files
+            batch_conformer_struct_files = conformer_struct_files_repeated[i:i+cfg.batch_size]
+            batch_pdb_names, batch_struct_files = zip(*batch_conformer_struct_files)
+            B_conformers = len(batch_conformer_struct_files)
+
+            # Flatten struct_files and create tied_sampling_ids
+            n_conformers = [len(struct_files) for struct_files in batch_struct_files]
+            batch_pdb_names = list(itertools.chain(*[[pdb_name] * n_conformers[i] for i, pdb_name in enumerate(batch_pdb_names)]))
+            batch_struct_files = list(itertools.chain(*batch_struct_files))
             batch, input_structs = get_sd_batch(batch_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+            batch["tied_sampling_ids"] = torch.tensor([[i] * n_conformers[i] for i in range(B_conformers)], device=device, dtype=torch.long).flatten()
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
@@ -275,11 +260,14 @@ def run_seq_des_multistate(model: SeqDenoiser,
                 batch["token_exists_override"] = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
 
             # Run sampling
-            res_type_pred = model.sample(batch, sampling_inputs=sampling_inputs)
+            res_type_pred, aux = model.sample(batch, sampling_inputs=sampling_inputs)
+            unique_rep_idx = aux["tied_sampling_inputs"]["rep_idx"].unique()  # indices of representative sequences, [B_conformers]
+            res_type_pred = res_type_pred[unique_rep_idx]
 
             # Save PDB with predicted sequences
             output_feats = copy.deepcopy(to(batch, device="cpu"))
-            output_feats["res_type"] = torch.where(batch["seq_cond_mask"][..., None].bool().cpu(),
+            output_feats = {k: v[unique_rep_idx.cpu()] for k, v in output_feats.items() if isinstance(v, torch.Tensor)}
+            output_feats["res_type"] = torch.where(output_feats["seq_cond_mask"][..., None].bool().cpu(),
                                                    output_feats["res_type"],
                                                    F.one_hot(res_type_pred, num_classes=len(const.tokens)).cpu())
             output_feats["coords"] = output_feats["coords"] * output_feats["atom_cond_mask"].unsqueeze(-1)
@@ -291,13 +279,15 @@ def run_seq_des_multistate(model: SeqDenoiser,
                     # crop to protein-only features; useful for ablations to only fold with protein sequence
                     output_feats = crop_batch_to_protein_only(output_feats)
 
-                sample_stems = [f"{Path(pdb_file).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_file in enumerate(batch_struct_files)]
+                rep_batch_struct_files = [batch_struct_files[i] for i in unique_rep_idx]
+                rep_batch_pdb_names = [batch_pdb_names[i] for i in unique_rep_idx]
+                sample_stems = [f"{pdb_name}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(rep_batch_pdb_names)]
                 batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
                 write_sd_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
                 run_aux["out_pdbs"].extend(batch_out_files)
                 run_aux["input_struct_files"].extend(batch_struct_files)
 
-            pbar.update(B)
+            pbar.update(B_conformers)
     pbar.close()
 
     # For each input pdb, aggregate all sequence design samples

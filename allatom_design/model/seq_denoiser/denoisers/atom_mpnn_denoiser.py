@@ -129,6 +129,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
 
     def potts_sample(self, batch: dict[str, TensorType["b ..."]], sampling_inputs: dict[str, Any]):
+        aux = {}
+
         potts_sampling_cfg = sampling_inputs["potts_sampling_cfg"]
         regularization = potts_sampling_cfg["regularization"]
         potts_sweeps = potts_sampling_cfg["potts_sweeps"]
@@ -168,6 +170,23 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             # edge_idx_coloring, mask_ij_coloring = complexity.graph_lcp(C, edge_idx, mask_ij)
 
         _, aux_preds = self(batch, is_sampling=True, sampling_inputs=sampling_inputs)
+
+        # If provided, handle tied sampling across different inputs in the batch
+        if "tied_sampling_ids" in batch:
+            tied_sampling_inputs = {"tied_sampling_ids": batch["tied_sampling_ids"]}
+            device = batch["tied_sampling_ids"].device
+            tied_sampling_inputs["unique_ids"], tied_sampling_inputs["inverse"] = tied_sampling_inputs["tied_sampling_ids"].unique(return_inverse=True)
+
+            # use first sequence of each tied group as the representative sequence
+            batch_idx = torch.arange(B, device=device)
+            n_unique_ids = tied_sampling_inputs["unique_ids"].shape[0]
+            first_idxs = torch.full((n_unique_ids, ), B, device=device)
+            first_idxs.scatter_reduce_(0, tied_sampling_inputs["inverse"], batch_idx, reduce="amin", include_self=True)
+            tied_sampling_inputs["rep_idx"] = first_idxs[tied_sampling_inputs["inverse"]]
+            aux["tied_sampling_inputs"] = tied_sampling_inputs
+        else:
+            tied_sampling_inputs = None
+
         potts_decoder_aux = aux_preds["potts_decoder_aux"]
         S_sample, _ = self.atom_mpnn.decoder_S_potts.sample(
             potts_decoder_aux["h"],
@@ -185,7 +204,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             verbose=False,
             edge_idx_coloring=edge_idx_coloring,
             mask_ij_coloring=mask_ij_coloring,
-            tied_across_batch=sampling_inputs.get("tied_across_batch", False),
+            tied_sampling_inputs=tied_sampling_inputs,
         )
 
         # Set all tokens that don't exist in the graph to unknown
@@ -194,7 +213,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             unk_mask = (~batch["token_exists_mask"].bool()) & (batch["mol_type"] == chain_type_id)
             S_sample[unk_mask] = unk_token_id
 
-        return S_sample
+        return S_sample, aux
 
 
     def sample_aatype(self,

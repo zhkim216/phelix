@@ -20,12 +20,13 @@ graph embeddings.
 Adapted from Chroma by Richard Shuai.
 """
 
-from typing import Callable, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchtyping import TensorType
 from tqdm.auto import tqdm
 
 from chroma.layers import graph
@@ -423,7 +424,7 @@ class GraphPotts(nn.Module):
         edge_idx_coloring: Optional[torch.LongTensor] = None,
         mask_ij_coloring: Optional[torch.Tensor] = None,
         symmetry_order: Optional[int] = None,
-        tied_across_batch: bool = False,
+        tied_sampling_inputs: Optional[dict[str, Any]] = None,
     ) -> Tuple[torch.LongTensor, torch.Tensor]:
         """Sample from Potts model with Chromatic Gibbs sampling.
 
@@ -511,7 +512,7 @@ class GraphPotts(nn.Module):
             verbose=verbose,
             edge_idx_coloring=edge_idx_coloring,
             mask_ij_coloring=mask_ij_coloring,
-            tied_across_batch=tied_across_batch,
+            tied_sampling_inputs=tied_sampling_inputs,
         )
 
         if symmetry_order is not None:
@@ -701,7 +702,7 @@ def sample_potts(
     thin_sweeps: int = 3,
     edge_idx_coloring: Optional[torch.LongTensor] = None,
     mask_ij_coloring: Optional[torch.Tensor] = None,
-    tied_across_batch: bool = False,
+    tied_sampling_inputs: Optional[dict[str, Any]] = None,
 ) -> Union[
     Tuple[torch.LongTensor, torch.Tensor],
     Tuple[torch.LongTensor, torch.Tensor, List[torch.LongTensor], List[torch.Tensor]],
@@ -827,19 +828,29 @@ def sample_potts(
 
         # Compute current energy and local conditionals
         U, logp = _energy_proposal(S, T_i)
-        if tied_across_batch:
+        if tied_sampling_inputs is not None:
             B = S.shape[0]
-            # replace U and logp with the mean across batch
-            U = U.mean(0, keepdim=True).expand(B)
-            logp = logp.mean(0, keepdim=True).expand(B, -1, -1)
+            # replace U and logp with the mean across tied sampling ids
+            unique_ids, inverse = tied_sampling_inputs["unique_ids"], tied_sampling_inputs["inverse"]
+            counts = torch.bincount(inverse)
+
+            U_sums = U.new_zeros(unique_ids.size(0)).scatter_add_(0, inverse, U)
+            U_means = U_sums / counts.to(U_sums.dtype)
+            U = U_means[inverse]
+
+            B, N, K = logp.shape
+            logp_sums = logp.new_zeros(unique_ids.size(0), N, K)
+            logp_sums = logp_sums.index_add(0, inverse, logp)
+            logp_means = logp_sums / counts.view(-1, 1, 1).to(logp_sums.dtype)
+            logp = logp_means[inverse]
 
         # Propose
         S_new = torch.distributions.categorical.Categorical(logits=logp).sample()
         S_new = torch.where(mask_update, S_new, S)
 
-        if tied_across_batch:
-            # hack: use first sequence as the representative sequence
-            S_new = S_new[0:1].expand(B, -1)
+        if tied_sampling_inputs is not None:
+            # use first sequence of each tied group as the representative sequence
+            S_new = S_new[tied_sampling_inputs["rep_idx"]]
 
         # Metropolis-Hastings adjusment
         if rejection_step:
@@ -874,9 +885,16 @@ def sample_potts(
 
         U, _ = compute_potts_energy(S, h, J, edge_idx)
 
-        if tied_across_batch:
-            # replace U with the mean across batch
-            U = U.mean(0, keepdim=True).expand(B)
+        if tied_sampling_inputs is not None:
+            # replace U with the mean across tied sampling ids
+            U_sums = U.new_zeros(unique_ids.size(0)).scatter_add_(0, inverse, U)
+            U_means = U_sums / counts.to(U_sums.dtype)
+            U = U_means[inverse]
+
+    # Use first sequence of each tied group as the representative sequence
+    if tied_sampling_inputs is not None:
+        S = S[tied_sampling_inputs["rep_idx"]]
+        U = U[tied_sampling_inputs["rep_idx"]]
 
     if verbose:
         print(f"Effective number of sweeps: {cumulative_sweeps}")
