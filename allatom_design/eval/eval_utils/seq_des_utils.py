@@ -212,6 +212,7 @@ def run_seq_des_multistate(model: SeqDenoiser,
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
+        raise NotImplementedError("Pos constraint df not implemented for multi-state sequence design")
         valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype"]
         if not set(pos_constraint_df.columns).issubset(valid_columns):
             # columns in input df must be a subset of valid columns
@@ -227,7 +228,7 @@ def run_seq_des_multistate(model: SeqDenoiser,
 
     # Process PDBs in batches of size B
     conformer_struct_files_repeated = list(itertools.chain(*itertools.repeat(conformer_struct_files, cfg.num_seqs_per_pdb)))
-    pbar = tqdm(total=len(conformer_struct_files), desc=f"Sampling {len(conformer_struct_files)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
+    pbar = tqdm(total=len(conformer_struct_files_repeated), desc=f"Sampling {len(conformer_struct_files)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
 
     input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel

@@ -17,7 +17,7 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 
 from functools import partial
-from p_tqdm import p_umap
+from p_tqdm import p_umap, p_map
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     Resource, fetch, pdb_to_mmcif, process_structure, PDB)
 
@@ -101,10 +101,13 @@ def process_pdb_files(pdb_files: list[str],
                       num_workers: int,
                       pdb_to_cif_conversion_cfg: DictConfig,
                       ccd_cfg: DictConfig,
+                      keep_order: bool = False,
                       ) -> list[str]:
     """
     Process PDB files.
     Returns paths to processed structure files (.npz format).
+
+    If keep_order is True, the order of the processed structure files will be the same as the order of the input PDB files.
     """
     # Make directories where we'll store preprocessed PDB files
     mmcif_dir = f"{processed_struct_dir}/converted_mmcifs"
@@ -133,7 +136,7 @@ def process_pdb_files(pdb_files: list[str],
     data = fetch(mmcif_files, max_file_size=None)
 
     # Process each PDB file
-    processed_struct_files = parallel_process_structures(data, resource=resource, outdir=Path(processed_struct_dir), filters=[], clusters={}, num_workers=num_workers)
+    processed_struct_files = parallel_process_structures(data, resource=resource, outdir=Path(processed_struct_dir), filters=[], clusters={}, num_workers=num_workers, keep_order=keep_order)
     return processed_struct_files
 
 
@@ -165,14 +168,18 @@ def start_redis(redis_host: str, redis_port: int, ccd_rdb_path: str):
     print("Redis is up and running.")
 
 
-def parallel_process_structures(pdbs: list[PDB], resource: Resource, outdir: Path, filters: list, clusters: dict, num_workers: int) -> list[str]:
+def parallel_process_structures(pdbs: list[PDB], resource: Resource, outdir: Path, filters: list, clusters: dict, num_workers: int, keep_order: bool = False) -> list[str]:
     """
     Small wrapper around process_structure to parallelize over a list of PDBs. Returns a list of processed structure file paths.
+    If keep_order is True, the order of the processed structure files will be the same as the order of the input PDBs.
     """
     use_parallel = num_workers > 1
     fn = partial(process_structure, resource=resource, outdir=outdir, filters=filters, clusters=clusters, return_struct_path=True)
     if use_parallel:
-        processed_struct_files = p_umap(fn, pdbs, num_cpus=num_workers, desc="Processing mmCIFs")
+        if keep_order:
+            processed_struct_files = p_map(fn, pdbs, num_cpus=num_workers, desc="Processing mmCIFs in order")
+        else:
+            processed_struct_files = p_umap(fn, pdbs, num_cpus=num_workers, desc="Processing mmCIFs")
     else:
         processed_struct_files = [fn(pdb) for pdb in tqdm(pdbs, desc="Processing mmCIFs", total=len(pdbs))]
     return processed_struct_files
