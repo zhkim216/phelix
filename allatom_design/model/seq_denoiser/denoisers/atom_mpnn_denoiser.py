@@ -185,6 +185,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             verbose=False,
             edge_idx_coloring=edge_idx_coloring,
             mask_ij_coloring=mask_ij_coloring,
+            tied_across_batch=sampling_inputs.get("tied_across_batch", False),
         )
 
         # Set all tokens that don't exist in the graph to unknown

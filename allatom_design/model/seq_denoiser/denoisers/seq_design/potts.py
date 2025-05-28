@@ -423,6 +423,7 @@ class GraphPotts(nn.Module):
         edge_idx_coloring: Optional[torch.LongTensor] = None,
         mask_ij_coloring: Optional[torch.Tensor] = None,
         symmetry_order: Optional[int] = None,
+        tied_across_batch: bool = False,
     ) -> Tuple[torch.LongTensor, torch.Tensor]:
         """Sample from Potts model with Chromatic Gibbs sampling.
 
@@ -510,6 +511,7 @@ class GraphPotts(nn.Module):
             verbose=verbose,
             edge_idx_coloring=edge_idx_coloring,
             mask_ij_coloring=mask_ij_coloring,
+            tied_across_batch=tied_across_batch,
         )
 
         if symmetry_order is not None:
@@ -699,6 +701,7 @@ def sample_potts(
     thin_sweeps: int = 3,
     edge_idx_coloring: Optional[torch.LongTensor] = None,
     mask_ij_coloring: Optional[torch.Tensor] = None,
+    tied_across_batch: bool = False,
 ) -> Union[
     Tuple[torch.LongTensor, torch.Tensor],
     Tuple[torch.LongTensor, torch.Tensor, List[torch.LongTensor], List[torch.Tensor]],
@@ -824,10 +827,19 @@ def sample_potts(
 
         # Compute current energy and local conditionals
         U, logp = _energy_proposal(S, T_i)
+        if tied_across_batch:
+            B = S.shape[0]
+            # replace U and logp with the mean across batch
+            U = U.mean(0, keepdim=True).expand(B)
+            logp = logp.mean(0, keepdim=True).expand(B, -1, -1)
 
         # Propose
         S_new = torch.distributions.categorical.Categorical(logits=logp).sample()
         S_new = torch.where(mask_update, S_new, S)
+
+        if tied_across_batch:
+            # hack: use first sequence as the representative sequence
+            S_new = S_new[0:1].expand(B, -1)
 
         # Metropolis-Hastings adjusment
         if rejection_step:
@@ -861,6 +873,10 @@ def sample_potts(
             U_trajectory.append(U)
 
         U, _ = compute_potts_energy(S, h, J, edge_idx)
+
+        if tied_across_batch:
+            # replace U with the mean across batch
+            U = U.mean(0, keepdim=True).expand(B)
 
     if verbose:
         print(f"Effective number of sweeps: {cumulative_sweeps}")
