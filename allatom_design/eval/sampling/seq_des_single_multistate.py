@@ -37,8 +37,9 @@ def main(cfg: DictConfig):
         yaml.safe_dump(cfg_dict, f)
 
     # Load in PDB file to eval on
-    pdb_paths = glob.glob(f"{cfg.pdb_dir}/*.pdb")
+    pdb_paths = glob.glob(f"{cfg.pdb_dir}/*")
     processed_struct_files = process_pdb_files(pdb_paths, processed_struct_dir=f"{out_dir}/processed_structures", **cfg.pdb_processing_cfg)
+    conformer_struct_files = [(Path(cfg.pdb_dir).name, processed_struct_files)]
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
@@ -55,7 +56,7 @@ def main(cfg: DictConfig):
 
     # Run sequence design model
     _, aux = run_seq_des_multistate(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                                    struct_file_paths=processed_struct_files, device=device, pos_constraint_df=None,
+                                    conformer_struct_files=conformer_struct_files, device=device, pos_constraint_df=None,
                                     out_dir=out_dir)
 
     if cfg.run_self_consistency_eval:
