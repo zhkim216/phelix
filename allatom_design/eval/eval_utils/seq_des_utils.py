@@ -209,6 +209,7 @@ def run_seq_des_multistate(model: SeqDenoiser,
         run_aux["out_pdbs"] = []  # store output PDB paths
         run_aux["input_struct_files"] = []  # store input PDB names
         run_aux["pred_seqs"] = []  # store predicted sequences as a string for each sample
+        run_aux["n_conformers"] = []
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
@@ -287,6 +288,7 @@ def run_seq_des_multistate(model: SeqDenoiser,
                 write_sd_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
                 run_aux["out_pdbs"].extend(batch_out_files)
                 run_aux["input_struct_files"].extend(batch_struct_files)
+                run_aux["n_conformers"].extend(n_conformers)
 
             pbar.update(B_conformers)
     pbar.close()
