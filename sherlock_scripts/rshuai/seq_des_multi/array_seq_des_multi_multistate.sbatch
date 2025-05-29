@@ -30,15 +30,16 @@ BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
 EPS_VALUES=(0.1 0.3 0.5 1.0)
-MAX_NUM_CONFORMERS_VALUES=(2 8 32)
-BATCH_SIZE_VALUES=(16 4 1)  # 16, 4, 1 for 2, 8, 32 conformers to keep batch size constant at 32
+MAX_NUM_CONFORMERS_VALUES=(2 8 16)
+BATCH_SIZE_VALUES=(8 2 1)  # 8, 2, 1 for 2, 8, 16 conformers to keep batch size constant at 16
 TASK_ID=${SLURM_ARRAY_TASK_ID}
 EPS_IDX=$(( TASK_ID % ${#EPS_VALUES[@]} ))
 CONF_IDX=$(( TASK_ID / ${#EPS_VALUES[@]} ))
 EPS=${EPS_VALUES[$EPS_IDX]}
 MAX_NUM_CONFORMERS=${MAX_NUM_CONFORMERS_VALUES[$CONF_IDX]}
 BATCH_SIZE=${BATCH_SIZE_VALUES[$CONF_IDX]}
-CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/protein_monomer_32_512_no_ligand/gaussian_conformers/eps${EPS}
+LIST_STEM=protein_monomer_32_512_no_ligand
+CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/gaussian_conformers/eps${EPS}
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
