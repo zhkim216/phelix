@@ -245,7 +245,7 @@ def run_seq_des_multistate(model: SeqDenoiser,
             batch_pdb_names = list(itertools.chain(*[[pdb_name] * n_conformers[i] for i, pdb_name in enumerate(batch_pdb_names)]))
             batch_struct_files = list(itertools.chain(*batch_struct_files))
             batch, input_structs = get_sd_batch(batch_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
-            batch["tied_sampling_ids"] = torch.tensor([[i] * n_conformers[i] for i in range(B_conformers)], device=device, dtype=torch.long).flatten()
+            batch["tied_sampling_ids"] = torch.tensor(list(itertools.chain(*[[i] * n_conformers[i] for i in range(B_conformers)])), device=device, dtype=torch.long)
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
