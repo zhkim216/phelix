@@ -64,6 +64,9 @@ def main(cfg: DictConfig):
         conformer_struct_files.append((pdb_name, processed_flat[offset:offset + n]))
         offset += n
 
+    # filter out conformers that failed to process
+    conformer_struct_files = [(pdb_name, [x for x in struct_files if x is not None]) for pdb_name, struct_files in conformer_struct_files]
+
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -91,6 +94,12 @@ def main(cfg: DictConfig):
 
         # Save metrics as CSV
         metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
+
+        # Add n_conformers to metrics, since sometimes we are missing some conformers due to processing errors
+        record_ids = [Path(x).stem for x in aux["out_pdbs"]]
+        n_conformers_df = pd.DataFrame({"record_id": record_ids, "n_conformers": aux["n_conformers"]})
+        metrics_df = pd.merge(metrics_df, n_conformers_df, on="record_id", how="left")
+
         metrics_df.to_csv(f"{log_dir}/self_consistency_metrics.csv", index=False)
 
         if not cfg.wandb.no_wandb:
@@ -101,8 +110,8 @@ def main(cfg: DictConfig):
                     sc_metrics[f"{k}"].append(v)
 
             # Update metrics
-            out_metrics = {f"seq_des/mean/{k}": np.nanmean(v) for k, v in sc_metrics.items() if k != "record_id"}
-            out_metrics.update({f"seq_des/median/{k}": np.nanmedian(v) for k, v in sc_metrics.items() if k != "record_id"})
+            out_metrics = {f"seq_des/mean/{k}": np.nanmean(v) for k, v in sc_metrics.items() if k not in ["record_id", "n_conformers"]}
+            out_metrics.update({f"seq_des/median/{k}": np.nanmedian(v) for k, v in sc_metrics.items() if k not in ["record_id", "n_conformers"]})
 
             # Log metrics to wandb
             wandb.log(out_metrics, step=0)
