@@ -16,6 +16,7 @@ from allatom_design.eval.eval_utils.bb_gen_utils import get_bb_gen_model, run_bb
 from allatom_design.eval.eval_utils.eval_setup_utils import (get_pdb_files,
                                                              process_pdb_files,
                                                              wandb_setup)
+import shutil
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="bb_partial_diffusion", version_base="1.3.2")
@@ -37,9 +38,11 @@ def main(cfg: DictConfig):
     with open(Path(log_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
+    ### Load in PDB files to eval on ###
+    pdb_files = get_pdb_files(**cfg.input_cfg)
+
     # Process PDB files into .npz structure format
-    processed_struct_files = process_pdb_files([cfg.pdb_path], processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg)
-    processed_struct_files = np.repeat(processed_struct_files, cfg.n_samples_per_pdb).tolist()
+    processed_struct_files = process_pdb_files(pdb_files, processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg, keep_order=True)
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
@@ -47,8 +50,24 @@ def main(cfg: DictConfig):
 
     # Load in atom denoiser
     bb_gen_model = get_bb_gen_model(cfg.bb_gen_cfg, device=device)
+    sampled_pdb_paths = run_bb_partial_diffusion(bb_gen_model["model"], bb_gen_model["data_cfg"], bb_gen_model["sampling_cfg"], device, processed_struct_files, n_samples_per_pdb=cfg.n_samples_per_pdb, out_dir=log_dir)
 
-    sampled_pdb_paths = run_bb_partial_diffusion(bb_gen_model["model"], bb_gen_model["data_cfg"], bb_gen_model["sampling_cfg"], device, processed_struct_files, log_dir)
+    # Rename files to expected format for multistate seq des
+    for pdb_file in pdb_files:
+        record_id = Path(pdb_file).stem
+        pdb_out_dir = f"{cfg.base_out_dir}/{record_id}"
+        Path(pdb_out_dir).mkdir(parents=True, exist_ok=True)
+
+        # Copy over original pdb file
+        shutil.copy(pdb_file, f"{pdb_out_dir}/{record_id}.cif")
+
+        # Copy over sampled pdb files
+        for sampled_pdb_path in sampled_pdb_paths:
+            if record_id in sampled_pdb_path:
+                shutil.copy(sampled_pdb_path, f"{pdb_out_dir}/{Path(sampled_pdb_path).stem}.pdb")
+
+    # Delete log dir
+    shutil.rmtree(log_dir)
 
     if not cfg.wandb.no_wandb:
         wandb.finish()

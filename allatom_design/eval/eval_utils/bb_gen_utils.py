@@ -132,6 +132,7 @@ def run_bb_partial_diffusion(model: AtomDenoiser,
                              cfg: DictConfig,  # sampling config
                              device: str,
                              struct_file_paths: list[str],
+                             n_samples_per_pdb: int,
                              out_dir: str) -> list[str]:
     """
     Run partial diffusion on a set of structures.
@@ -143,6 +144,7 @@ def run_bb_partial_diffusion(model: AtomDenoiser,
     # Load in input PDB
     sampled_pdb_paths = []
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
+    struct_file_paths = np.repeat(struct_file_paths, n_samples_per_pdb).tolist()
     with parallel_context as parallel_pool:
         pbar = tqdm(total=len(struct_file_paths), desc="Running partial diffusion")
         for i in range(0, len(struct_file_paths), cfg.batch_size):
@@ -173,7 +175,7 @@ def run_bb_partial_diffusion(model: AtomDenoiser,
             samples = {k: v.cpu() if v is not None else v for k, v in samples.items()}
 
             # Save samples
-            filenames = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{i + j}.pdb" for j in range(B)]
+            filenames = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{(i+j) % n_samples_per_pdb}.pdb" for j in range(B)]
             AtomDenoiser.save_samples_to_pdb(samples, filenames)
             sampled_pdb_paths.extend(filenames)
 
@@ -222,7 +224,7 @@ def get_bb_example(struct_file_path: str,
     tokenized = add_tokenwise_atom_feats(tokenized, data_cfg["featurizer"])
 
     # Featurize diffusion inputs
-    example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, data_cfg["max_tokens"])
+    example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, max_tokens=None)
 
     # Featurize motif
     example["motif_inputs"] = featurize_motif_inputs(tokenized, data_cfg["motif_selector"], data_cfg["motif_cropper"], data_cfg["motif_featurizer"],
@@ -497,10 +499,12 @@ def run_motif_cond_type_sampling(model: AtomDenoiser,
 
             ### Save motifs as PDBs ###
             # Save motifs
-            motif_feats_out = batch["motif_inputs"]
-            motif_feats_out["coords"] = batch["motif_inputs"]["motif_coords"]
-            batch_motif_paths = [f"{motif_out_dir}/motif_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]
-            write_ad_feats_to_mmcif(motif_feats_out, filenames=batch_motif_paths)
+            if motif_cond_type_cfg["motif_type"] != "unconditional":
+                # TODO: make sure write_ad_feats_to_mmcif can support empty motifs
+                motif_feats_out = batch["motif_inputs"]
+                motif_feats_out["coords"] = batch["motif_inputs"]["motif_coords"]
+                batch_motif_paths = [f"{motif_out_dir}/motif_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]
+                write_ad_feats_to_mmcif(motif_feats_out, filenames=batch_motif_paths)
 
             # Save centered examples from which motifs were drawn
             batch_centered_paths = [f"{centered_gt_out_dir}/centered_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]

@@ -345,7 +345,7 @@ def add_tokenwise_atom_feats(tokenized: Tokenized, featurizer: SimpleBoltzFeatur
     return tokenized
 
 
-def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int) -> dict[str, torch.Tensor]:
+def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int | None) -> dict[str, torch.Tensor]:
     """
     Featurize protein tokens into diffusion inputs.
     """
@@ -373,9 +373,10 @@ def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int) -> dict[st
     diffusion_feats = {k: torch.from_numpy(v.copy()) for k, v in diffusion_feats.items()}
 
     # Pad to max tokens
-    pad_len = max_tokens - len(diffusion_feats["seq_mask"])
-    for k, v in diffusion_feats.items():
-        diffusion_feats[k] = pad_dim(v, 0, pad_len)
+    if max_tokens is not None:
+        pad_len = max_tokens - len(diffusion_feats["seq_mask"])
+        for k, v in diffusion_feats.items():
+            diffusion_feats[k] = pad_dim(v, 0, pad_len)
 
     return diffusion_feats
 

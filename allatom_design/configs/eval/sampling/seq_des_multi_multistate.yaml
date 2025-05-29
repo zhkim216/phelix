@@ -31,6 +31,7 @@ pdb_processing_cfg:
   # if we have to convert PDBs to mmCIFs
   pdb_to_cif_conversion_cfg:
     assign_label_seq_id: false  # if true, automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
+    set_seqid_gaps_to_X: true  # if true, set seqid gaps to X
 
   # CCD
   ccd_cfg:

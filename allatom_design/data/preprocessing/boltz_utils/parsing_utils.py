@@ -229,7 +229,9 @@ def parse(data: PDB, resource: dict, clusters: dict) -> Target:
 
 
 def pdb_to_mmcif(pdb_path: str, mmcif_out: Path,
-                 assign_label_seq_id: bool) -> None:
+                 assign_label_seq_id: bool,
+                 set_seqid_gaps_to_X: bool = False,
+                 ) -> None:
     """
     Convert a PDB file to mmCIF format using gemmi.
     """
@@ -240,6 +242,8 @@ def pdb_to_mmcif(pdb_path: str, mmcif_out: Path,
     structure.setup_entities()
 
     if assign_label_seq_id:
+        assert not set_seqid_gaps_to_X, "set_gaps_to_X is not supported when assign_label_seq_id is True"
+
         # automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
         structure.assign_label_seq_id()
     else:
@@ -258,7 +262,34 @@ def pdb_to_mmcif(pdb_path: str, mmcif_out: Path,
         for raw_chain in structure[0].subchains():
             model_sequence = raw_chain.extract_sequence()
             subchain_id = raw_chain.subchain_id()
+            if set_seqid_gaps_to_X:
+                # assume seqid should be 1-indexed, and where there are gaps, we should set SEQRES to X
+                # note that we won't be able to know how long the missing residues at the end are
+                new_sequence = []
+                residx = 1
+                residues = list(raw_chain)
+
+                for idx, residue in enumerate(residues):
+                    curr_num = residue.seqid.num
+                    # fill in “X” for every missing seqid up to the next real residue
+                    if curr_num > residx:
+                        for missing in range(residx, curr_num):
+                            new_sequence.append("UNK")
+                        residx = curr_num
+
+                    # append this residue’s 3-letter code (in the same order as model_sequence)
+                    new_sequence.append(model_sequence[idx])
+
+                    # if this is the last residue at this seqid (i.e. no more insertions here), bump residx
+                    is_last_of_num = (idx + 1 == len(residues)) or (residues[idx+1].seqid.num != curr_num)
+                    if is_last_of_num:
+                        residx += 1
+                model_sequence = new_sequence
+
             entities[subchain_id].full_sequence = model_sequence
+
+            if set_seqid_gaps_to_X:
+                structure.assign_label_seq_id()
 
     # Write mmCIF file
     mmcif_doc = structure.make_mmcif_document()

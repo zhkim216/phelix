@@ -119,7 +119,9 @@ def process_pdb_files(pdb_files: list[str],
         if Path(pdb_file).suffix != ".cif":
             # assume PDB file, convert to mmCIF and save to processed_struct_dir/converted_mmcifs
             mmcif_file = Path(mmcif_dir, Path(pdb_file).name.replace(".pdb", ".cif"))
-            pdb_to_mmcif(pdb_file, mmcif_file, assign_label_seq_id=pdb_to_cif_conversion_cfg.assign_label_seq_id)
+            pdb_to_mmcif(pdb_file, mmcif_file,
+                         assign_label_seq_id=pdb_to_cif_conversion_cfg.assign_label_seq_id,
+                         set_seqid_gaps_to_X=pdb_to_cif_conversion_cfg.get("set_seqid_gaps_to_X", False))
         else:
             mmcif_file = pdb_file
         mmcif_files.append(mmcif_file)
