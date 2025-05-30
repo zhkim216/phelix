@@ -28,14 +28,18 @@ def main(cfg: DictConfig) -> None:
     model2_boltz_df["avg_ca_plddt"] = model2_boltz_df["avg_ca_plddt"] * 100
 
     # Load subset pdb names
-    with open(cfg.subset_pdb_names, "r") as f:
-        subset_pdb_names = [line.strip() for line in f.readlines()]
+    if cfg.subset_pdb_names is not None:
+        with open(cfg.subset_pdb_names, "r") as f:
+            subset_pdb_names = [line.strip() for line in f.readlines()]
+    else:
+        subset_pdb_names = None
 
     # extract pdb_name from record id
     model1_boltz_df["pdb_name"] = model1_boltz_df["record_id"].apply(lambda x: f'{x.split("_sample")[0]}.cif')
     model2_boltz_df["pdb_name"] = model2_boltz_df["record_id"].apply(lambda x: f'{x.split("_sample")[0]}.cif')
-    model1_boltz_df = model1_boltz_df[model1_boltz_df["pdb_name"].isin(subset_pdb_names)]
-    model2_boltz_df = model2_boltz_df[model2_boltz_df["pdb_name"].isin(subset_pdb_names)]
+    if subset_pdb_names is not None:
+        model1_boltz_df = model1_boltz_df[model1_boltz_df["pdb_name"].isin(subset_pdb_names)]
+        model2_boltz_df = model2_boltz_df[model2_boltz_df["pdb_name"].isin(subset_pdb_names)]
 
     # Create a function to generate and save scatter plots
     create_scatter_plots(
