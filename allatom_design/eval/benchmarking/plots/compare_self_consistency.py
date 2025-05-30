@@ -4,7 +4,8 @@ import hydra
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from omegaconf import DictConfig
+import yaml
+from omegaconf import DictConfig, OmegaConf
 
 
 @hydra.main(version_base=None, config_path="../../../configs/eval/benchmarking/plots", config_name="compare_self_consistency")
@@ -13,6 +14,11 @@ def main(cfg: DictConfig) -> None:
     """
     Path(cfg.out_dir).mkdir(parents=True, exist_ok=True)
 
+    # Dump config to out_dir
+    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+    with open(Path(cfg.out_dir, "config.yaml"), "w") as f:
+        yaml.safe_dump(cfg_dict, f)
+
     # Load CSVs
     model1_boltz_df = pd.read_csv(cfg.model1_boltz_csv)
     model2_boltz_df = pd.read_csv(cfg.model2_boltz_csv)
@@ -20,6 +26,16 @@ def main(cfg: DictConfig) -> None:
     # Handle plddt scaling
     model1_boltz_df["avg_ca_plddt"] = model1_boltz_df["avg_ca_plddt"] * 100
     model2_boltz_df["avg_ca_plddt"] = model2_boltz_df["avg_ca_plddt"] * 100
+
+    # Load subset pdb names
+    with open(cfg.subset_pdb_names, "r") as f:
+        subset_pdb_names = [line.strip() for line in f.readlines()]
+
+    # extract pdb_name from record id
+    model1_boltz_df["pdb_name"] = model1_boltz_df["record_id"].apply(lambda x: f'{x.split("_sample")[0]}.cif')
+    model2_boltz_df["pdb_name"] = model2_boltz_df["record_id"].apply(lambda x: f'{x.split("_sample")[0]}.cif')
+    model1_boltz_df = model1_boltz_df[model1_boltz_df["pdb_name"].isin(subset_pdb_names)]
+    model2_boltz_df = model2_boltz_df[model2_boltz_df["pdb_name"].isin(subset_pdb_names)]
 
     # Create a function to generate and save scatter plots
     create_scatter_plots(
