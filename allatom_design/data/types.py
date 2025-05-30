@@ -109,6 +109,7 @@ Residue = [
     ("is_present", np.dtype("?")),
     ("auth_seq_id", np.dtype("i4")),
     ("pdb_icode", np.dtype("<U1")),
+    ("auth_asym_name", np.dtype("<U5")),
 ]
 
 Chain = [
@@ -123,6 +124,7 @@ Chain = [
     ("res_num", np.dtype("i4")),
     ("auth_seq_id", np.dtype("i4")),
     ("pdb_icode", np.dtype("<U1")),
+    ("auth_asym_name", np.dtype("<U5")),
 ]
 
 Connection = [

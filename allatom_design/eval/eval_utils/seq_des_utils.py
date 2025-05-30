@@ -307,8 +307,8 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
         # Set up example
         example = {k: v[i] for k, v in batch.items()}
         input_struct = input_structs[i]
-        chain_to_asym_id = {c["name"]: c["asym_id"] for c in input_struct.chains}
-        asym_id_to_chain = {c["asym_id"]: c["name"] for c in input_struct.chains}
+        chain_to_asym_id = {c["auth_asym_name"]: c["asym_id"] for c in input_struct.chains}  # we use auth_asym_name as the chain name for fixing positions, not the label_asym_name
+        asym_id_to_chain = {c["asym_id"]: c["auth_asym_name"] for c in input_struct.chains}
 
         ### Override sequence at specified positions and condition on them ###
         fixed_pos_override_seq = row.get("fixed_pos_override_seq", np.nan)
@@ -415,8 +415,8 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
         # Set up example
         example = {k: v[i] for k, v in batch.items()}
         input_struct = input_structs[i]
-        chain_to_asym_id = {c["name"]: c["asym_id"] for c in input_struct.chains}
-        asym_id_to_chain = {c["asym_id"]: c["name"] for c in input_struct.chains}
+        chain_to_asym_id = {c["auth_asym_name"]: c["asym_id"] for c in input_struct.chains}  # we use auth_asym_name as the chain name for fixing positions, not the label_asym_name
+        asym_id_to_chain = {c["asym_id"]: c["auth_asym_name"] for c in input_struct.chains}
 
         if verbose:
             print(f"{pdb_key}: Restricting amino acid sampling at positions {pos_restrict_aatype}")
