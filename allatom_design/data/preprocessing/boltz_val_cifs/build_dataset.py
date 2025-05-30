@@ -77,6 +77,11 @@ def main(cfg: DictConfig):
             MaxResiduesFilter(min_residues=32, max_residues=512),
             SizeFilter(max_chains=1),
         ],
+        "protein_monomer_32_256_no_ligand": [
+            ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
+            MaxResiduesFilter(min_residues=32, max_residues=256),
+            SizeFilter(max_chains=1),
+        ],
     }
 
     for val_subset_name, filters in val_subset_filters.items():
