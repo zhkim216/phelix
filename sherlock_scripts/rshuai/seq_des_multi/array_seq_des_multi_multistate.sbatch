@@ -41,7 +41,7 @@ PD=${PD_VALUES[$PD_IDX]}
 MAX_NUM_CONFORMERS=16
 BATCH_SIZE=1
 LIST_STEM=protein_monomer_32_512_no_ligand
-CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers/richards-structures-${PD}
+CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-no-recurrence/no-recurrence-richards-structures-${PD}
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
