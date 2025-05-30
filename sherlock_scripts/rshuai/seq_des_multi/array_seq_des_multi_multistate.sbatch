@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=seq_des_multi_multistate
 #SBATCH -p bioe
-#SBATCH --array=0-8
+#SBATCH --array=0-9
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -29,17 +29,19 @@ STRUCT_PRED_MODEL=boltz1
 BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
-T_VALUES=(0.6 0.65 0.7)
-MAX_NUM_CONFORMERS_VALUES=(2 8 16)
-BATCH_SIZE_VALUES=(8 2 1)  # 8, 2, 1 for 2, 8, 16 conformers to keep batch size constant at 16
+PD_VALUES=(80 90 100 110 120 130 140 150 160 170)
+# MAX_NUM_CONFORMERS_VALUES=(2 8 16)
+# BATCH_SIZE_VALUES=(8 2 1)  # 8, 2, 1 for 2, 8, 16 conformers to keep batch size constant at 16
 TASK_ID=${SLURM_ARRAY_TASK_ID}
-T_IDX=$(( TASK_ID % ${#T_VALUES[@]} ))
-CONF_IDX=$(( TASK_ID / ${#T_VALUES[@]} ))
-T=${T_VALUES[$T_IDX]}
-MAX_NUM_CONFORMERS=${MAX_NUM_CONFORMERS_VALUES[$CONF_IDX]}
-BATCH_SIZE=${BATCH_SIZE_VALUES[$CONF_IDX]}
+PD_IDX=$(( TASK_ID % ${#PD_VALUES[@]} ))
+# CONF_IDX=$(( TASK_ID / ${#PD_VALUES[@]} ))
+PD=${PD_VALUES[$PD_IDX]}
+# MAX_NUM_CONFORMERS=${MAX_NUM_CONFORMERS_VALUES[$CONF_IDX]}
+# BATCH_SIZE=${BATCH_SIZE_VALUES[$CONF_IDX]}
+MAX_NUM_CONFORMERS=16
+BATCH_SIZE=1
 LIST_STEM=protein_monomer_32_512_no_ligand
-CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/s6_a0_conformers/t${T}
+CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers/richards-structures-${PD}
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
@@ -52,7 +54,7 @@ BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a2_cfg1/mul
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 GROUP=seq_des
-EXP_NAME=sd3_a2_cfg1_ms_sweep2_t${T}_nc${MAX_NUM_CONFORMERS}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
+EXP_NAME=sd3_a2_cfg1_ms_sweep3_pd${PD}_nc${MAX_NUM_CONFORMERS}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
 
 # Run training script
 cd ${BASE_DIR}
