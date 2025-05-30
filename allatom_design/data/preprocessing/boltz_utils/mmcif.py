@@ -1023,6 +1023,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                 res_num,
                 auth_seq_id,
                 icode,
+                entities[chain.name].name  # auth_asym_name
             )
         )
         chain_to_idx[chain.name] = asym_id
@@ -1049,6 +1050,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                     res.is_present,
                     auth_seq_id,
                     icode,
+                    entities[chain.name].name,  # auth_asym_name
                 )
             )
             res_to_idx[(chain.name, i)] = (res_idx, atom_idx)
