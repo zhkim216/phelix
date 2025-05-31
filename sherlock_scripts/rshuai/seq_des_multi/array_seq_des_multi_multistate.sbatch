@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sde-aicath-multistate
+#SBATCH --job-name=ode-aicath-multistate
 #SBATCH -p bioe
 #SBATCH --array=0-7%3
 #SBATCH --gpus-per-node=1
@@ -41,7 +41,7 @@ PD=${PD_VALUES[$PD_IDX]}
 MAX_NUM_CONFORMERS=16
 BATCH_SIZE=1
 LIST_STEM=protein_monomer_32_512_no_ligand
-CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-${PD}
+CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-ode-aicath-no-recurrence/ode-aicath-no-recurrence-richards-structures-${PD}
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
@@ -54,7 +54,7 @@ BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a2_cfg1/mul
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 GROUP=seq_des
-EXP_NAME=sd3_a2_cfg1_ms_sweep6_pd${PD}_nc${MAX_NUM_CONFORMERS}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
+EXP_NAME=sd3_a2_cfg1_ms_sweep7_pd${PD}_nc${MAX_NUM_CONFORMERS}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
 
 # Run training script
 cd ${BASE_DIR}
