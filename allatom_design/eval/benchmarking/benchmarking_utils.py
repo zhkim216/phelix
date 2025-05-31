@@ -39,5 +39,6 @@ def thread_sequence_onto_example(example: dict[str, TensorType["1 n ..."]],
 
     example["res_type"][protein_mask] = protein_res_type.unsqueeze(0)
     example["coords"][example["prot_scn_atom_mask"].bool()] = 0.0
+    example["atom_resolved_mask"][example["prot_scn_atom_mask"].bool()] = False
 
     return example
