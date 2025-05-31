@@ -164,6 +164,7 @@ def run_seq_des(model: SeqDenoiser,
                                                    output_feats["res_type"],
                                                    F.one_hot(res_type_pred, num_classes=len(const.tokens)).cpu())
             output_feats["coords"] = output_feats["coords"] * output_feats["atom_cond_mask"].unsqueeze(-1)
+            output_feats["atom_resolved_mask"] = output_feats["atom_resolved_mask"] * output_feats["atom_cond_mask"]
 
             # Save outputs to disk
             if out_dir is not None:
