@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=ode-aicath-multistate
 #SBATCH -p bioe
-#SBATCH --array=0-7%3
+#SBATCH --array=0-3
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -29,19 +29,12 @@ STRUCT_PRED_MODEL=boltz1
 BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
-PD_VALUES=(50 60 70 80 90 100 110 120)
-# MAX_NUM_CONFORMERS_VALUES=(2 8 16)
-# BATCH_SIZE_VALUES=(8 2 1)  # 8, 2, 1 for 2, 8, 16 conformers to keep batch size constant at 16
-TASK_ID=${SLURM_ARRAY_TASK_ID}
-PD_IDX=$(( TASK_ID % ${#PD_VALUES[@]} ))
-# CONF_IDX=$(( TASK_ID / ${#PD_VALUES[@]} ))
-PD=${PD_VALUES[$PD_IDX]}
-# MAX_NUM_CONFORMERS=${MAX_NUM_CONFORMERS_VALUES[$CONF_IDX]}
-# BATCH_SIZE=${BATCH_SIZE_VALUES[$CONF_IDX]}
+EPS_VALUES=(0.1 0.3 0.5 1.0)
+EPS=${EPS_VALUES[$SLURM_ARRAY_TASK_ID]}
 MAX_NUM_CONFORMERS=16
 BATCH_SIZE=1
 LIST_STEM=protein_monomer_32_512_no_ligand
-CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-ode-aicath-no-recurrence/ode-aicath-no-recurrence-richards-structures-${PD}
+CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/gaussian_conformers/eps${EPS}
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
@@ -54,7 +47,7 @@ BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a2_cfg1/mul
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 GROUP=seq_des
-EXP_NAME=sd3_a2_cfg1_ms_sweep7_pd${PD}_nc${MAX_NUM_CONFORMERS}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
+EXP_NAME=sd3_a2_cfg1_ms_sweep8_eps${EPS}_nc${MAX_NUM_CONFORMERS}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
 
 # Run training script
 cd ${BASE_DIR}
