@@ -1,33 +1,58 @@
-# out_dir: out_dir/compare_self_consistency/bvc_chroma_vs_atommpnn
-# out_dir: out_dir/compare_self_consistency/bvc_chroma_vs_ms_sweep2_t0.7
-# out_dir: out_dir/compare_self_consistency/bvc_baseline_vs_ms_sweep2_t0.7
-# out_dir: out_dir/compare_self_consistency/bvc_noreg_baseline_vs_ms_sweep2_t0.7
-# out_dir: out_dir/compare_self_consistency/bvc_pd90_vs_t0.7
-# out_dir: out_dir/compare_self_consistency/bvc_chroma_vs_pd90
-out_dir: out_dir/compare_self_consistency/bvc_pd90_vs_pd90norecurrence
+base_out_dir: out_dir/compare_self_consistency/bvc/
 
+comparisons:
+  # y-axis, x-axis
+  - ["chroma", "baseline"]
+  - ["baseline", "baseline_noreg"]
+  - ["chroma", "s6_a0_t0.7"]
+  - ["chroma", "aicath_pd90"]
+  - ["baseline", "s6_a0_t0.7"]
+  - ["s6_a0_t0.7", "md_cath_pd90"]
+  # - ["md_cath_pd90", "md_cath_pd110_ode"]
+  - ["md_cath_pd90", "aicath_pd90"]
+  - ["aicath_pd90", "aicath_pd110_ode"]
 
-# model1_boltz_csv: /media/scratch/huang_lab/allatom_design/allatom_design/boltz_val_cifs_evals/protein_monomer_32_512_no_ligand/chroma/chroma_bvc_protein_monomer_32_512_no_ligand_boltz1/sc_metrics.csv
-# model1_boltz_csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_baseline_ps500_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
-# model1_boltz_csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_baseline_ps5000_noreg_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
-model1_boltz_csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_ms_sweep3_pd90_nc16_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+model_csvs:
+  - model_name: "chroma"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/boltz_val_cifs_evals/protein_monomer_32_512_no_ligand/chroma/chroma_bvc_protein_monomer_32_512_no_ligand_boltz1/sc_metrics.csv
+    plot_name: "Chroma"
 
-# model2_boltz_csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_ms_sweep2_t0.7_nc16_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
-# model2_boltz_csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_baseline_ps500_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
-# model2_boltz_csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_ms_sweep3_pd90_nc16_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
-model2_boltz_csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_ms_sweep4_pd90_nc16_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+  - model_name: "baseline"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_baseline_ps500_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "Baseline"
 
+  - model_name: "baseline_noreg"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_baseline_ps5000_noreg_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "Baseline, no reg"
 
-# model1_name: "Chroma"
-# model1_name: "(500 sweeps, LCP regularization)"
-model1_name: "(5000 sweeps, no reg, pd90, nc16)"
+  # s6_a0 models
+  - model_name: "s6_a0_t0.7"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_ms_sweep2_t0.7_nc16_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "s6_a0, t=0.7"
 
-# model2_name: "(5000 sweeps, no reg, t=0.7, nc16)"
-# model2_name: "(5000 sweeps, no reg, pd90, nc16)"
-model2_name: "(5000 sweeps, no reg, pd90, norecurrence, nc16)"
+  # MD-CATH models
+  - model_name: "md_cath_pd90"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_ms_sweep4_pd90_nc16_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "MD-CATH, pd90"
 
-# subset_pdb_names: /media/scratch/datasets/boltz_val_cifs/pdb_name_lists/protein_monomer_32_256_no_ligand.txt
-subset_pdb_names: null
+  - model_name: "md_cath_pd110_ode"
+    csv: null
+    plot_name: "MD-CATH, pd110, ODE"
+
+  # AI-CATH models
+  - model_name: "aicath_pd90"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_ms_sweep6_pd90_nc16_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "AI-CATH, pd90"
+
+  - model_name: "aicath_pd110_ode"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_ms_sweep7_pd110_nc16_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "AI-CATH, pd110, ODE"
+
+# Which models that need to use subset_pdb_names
+subset_pdb_names: /media/scratch/datasets/boltz_val_cifs/pdb_name_lists/protein_monomer_32_256_no_ligand.txt
+
+use_subset_models:
+  - s6_a0_t0.7
 
 hydra:
   run:
