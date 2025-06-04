@@ -94,6 +94,14 @@ def main(cfg: DictConfig):
         with open(f"{lists_dir}/{val_subset_name}.txt", "w") as f:
             for record in filtered_records:
                 f.write(f"{record.id}.cif\n")
+                
+        # Also save csv of PDB names with their lengths
+        length_list_dir = f"{cfg.out_dir}/length_lists"
+        Path(length_list_dir).mkdir(parents=True, exist_ok=True)
+        with open(f"{length_list_dir}/{val_subset_name}.csv", "w") as f:
+            for record in filtered_records:
+                num_residues = sum(chain.num_residues for chain in record.chains)
+                f.write(f"{record.id},{num_residues}\n")
 
         if cfg.copy_subset_cifs:
             subset_cif_dir = f"{cfg.out_dir}/subset_cifs/{val_subset_name}"
