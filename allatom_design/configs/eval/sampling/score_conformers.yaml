@@ -33,9 +33,6 @@ pdb_processing_cfg:
 # Sampling config
 sampling_cfg_overrides:
   batch_size: 16
-  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
-  num_steps: 50
-  noise_labels: null
   num_workers: ${num_workers}
 
 seq_des_cfg:
@@ -44,8 +41,6 @@ seq_des_cfg:
     ckpt_path: ${ckpt_path}
     sampling_cfg: allatom_design/configs/seq_des/atom_mpnn_inference.yaml
     overrides: ${sampling_cfg_overrides}
-
-
 
 hydra:
   run:

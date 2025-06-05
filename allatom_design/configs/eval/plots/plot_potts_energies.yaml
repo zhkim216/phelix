@@ -1,6 +1,7 @@
-base_out_dir: out_dir/plot_potts_energies/bvc/
+base_out_dir: out_dir/plot_potts_energies/bvc/s6_a0/s6_a0_t0.7/
 
-score_csv: /home/rshuai/research/huang_lab/allatom-design/out_dir/sd3_a2_cfg1/score/s6_a0_test/score_outputs.csv
+score_csv: /home/rshuai/research/huang_lab/allatom-design/out_dir/sd3_a2_cfg1/score/s6_a0/s6_a0_t0.7/score_outputs.csv
+
 
 comparisons:
   # y-axis, x-axis

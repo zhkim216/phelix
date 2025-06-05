@@ -25,6 +25,13 @@ def main(cfg: DictConfig) -> None:
     # Load in score csv
     score_df = pd.read_csv(cfg.score_csv)
     
+    # Subset to subset_pdb_names
+    if cfg.subset_pdb_names is not None:
+        with open(cfg.subset_pdb_names, "r") as f:
+            subset_pdbs = [line.strip() for line in f.readlines()]
+        subset_pdbs = [Path(pdb_name).stem for pdb_name in subset_pdbs]
+        score_df = score_df[score_df["pdb_name"].isin(subset_pdbs)]
+    
     # load in s6_a0 sc csv
     s6_a0_model_csv_data = [x for x in cfg.model_csvs if x["model_name"] == "s6_a0_t0.7"]
     s6_a0_sc_df = pd.read_csv(s6_a0_model_csv_data[0]["csv"])

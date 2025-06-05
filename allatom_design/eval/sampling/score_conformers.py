@@ -89,6 +89,9 @@ def main(cfg: DictConfig):
     for pdb_name, input_backbone_files in conformer_struct_files:
         sample_files = sample_struct_files[pdb_name]
         for input_backbone_file in input_backbone_files:
+            if len(sample_files) == 0:
+                print(f"No samples found for {input_backbone_file}")
+                continue
             bb_to_sample_files[input_backbone_file] = sample_files
 
     # Set up models (in eval mode)
@@ -107,6 +110,9 @@ def main(cfg: DictConfig):
     df = defaultdict(list)
     for pdb_name, input_backbone_files in conformer_struct_files:
         for input_backbone_file in input_backbone_files:
+            if input_backbone_file not in score_outputs:
+                print(f"No score outputs found for {input_backbone_file}")
+                continue
             score_outputs_i = score_outputs[input_backbone_file]
             df["pdb_name"].extend([pdb_name] * len(score_outputs_i["bb_pdb_key"]))
             df["bb_pdb_key"].extend(score_outputs_i["bb_pdb_key"])
