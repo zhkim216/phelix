@@ -17,6 +17,7 @@ exp_name: null  # experiment name; used for wandb and output directory
 # PDB file inputs
 conformer_dir: null
 max_num_conformers: 4
+include_primary_conformer: true
 
 # Positional contraints
 fixed_pos_seq: # comma-separated, chain + residue index specification, e.g. "A1-100,B1-100"

@@ -24,10 +24,6 @@ HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, redis
 export SOFTWARE_PATH=${SOFTWARE_PATH}  # required for mmseqs, foldseek, redis, etc.
 
-# Model params (if running self-consistency eval)
-STRUCT_PRED_MODEL=boltz1
-BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
-
 # Backbones we want to score on
 CONFORMER_BASE_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/protein_monomer_32_512_no_ligand
 CONFORMER_NAMES=(
