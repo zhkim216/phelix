@@ -33,6 +33,7 @@ from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 from allatom_design.data.types import Structure
 import itertools
+from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import compute_potts_energy
 
 
 
@@ -91,17 +92,18 @@ def run_seq_des(model: SeqDenoiser,
                           Dict]:
     """
     Given a list of processed structure files, run sequence design on them.
+    
+    If out_dir is not None, PDBs with sampled sequences will be saved to the provided directory. In this case, run_aux will be a dictionary with the following keys:
+        - "out_pdbs": list of output PDB paths
+        - "input_struct_files": list of input PDB names
+        - "pred_seqs": list of predicted sequences as a string for each sample
     """
     # Set up output directory
-    run_aux = {}
+    run_aux = defaultdict(list)
 
     if out_dir is not None:
         sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
         Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
-
-        run_aux["out_pdbs"] = []  # store output PDB paths
-        run_aux["input_struct_files"] = []  # store input PDB names
-        run_aux["pred_seqs"] = []  # store predicted sequences as a string for each sample
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
@@ -129,6 +131,7 @@ def run_seq_des(model: SeqDenoiser,
             batch_struct_files = struct_file_paths_repeated[i:i+cfg.batch_size]
             B = len(batch_struct_files)
             batch, input_structs = get_sd_batch(batch_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+            run_aux["pdb_keys"].extend(batch["pdb_key"])
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
@@ -167,7 +170,7 @@ def run_seq_des(model: SeqDenoiser,
                 write_sd_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
                 run_aux["out_pdbs"].extend(batch_out_files)
                 run_aux["input_struct_files"].extend(batch_struct_files)
-
+                
             pbar.update(B)
     pbar.close()
 
@@ -187,6 +190,75 @@ def run_seq_des(model: SeqDenoiser,
         preds[pdb]["pred_seqs"] = pred_seqs
 
     return preds, run_aux
+
+
+def score_samples(model: SeqDenoiser,
+                  data_cfg: DictConfig,
+                  cfg: DictConfig,  # sampling config
+                  bb_to_sample_files: dict[str, list[str]],  # maps from input backbone path to list of sample paths, all preprocessed
+                  device: str):
+    """
+    Score samples using Potts parameters computed from input backbones. 
+    """
+    score_outputs = {}  # store results for each input backbone
+
+    # Process PDBs in batches of size B
+    pbar = tqdm(total=len(bb_to_sample_files), desc=f"Scoring {len(bb_to_sample_files)} with input backbones...")
+
+    parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
+    bb_struct_files = list(bb_to_sample_files.keys())
+    with parallel_context as parallel_pool:
+        for i in range(0, len(bb_struct_files), cfg.batch_size):
+            batch_bb_struct_files = bb_struct_files[i:i+cfg.batch_size]
+            B = len(batch_bb_struct_files)
+            bb_batch, _ = get_sd_batch(batch_bb_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+
+            # Initialize seq_cond and atom_cond masks
+            bb_batch = initialize_sampling_masks(bb_batch)
+
+            sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
+            sampling_inputs["skip_sampling"] = True  # do not sample new sequences, just get potts parameters
+
+            if cfg["use_protein_only"]:
+                # subset to standard protein-only features; useful for ablations to only condition on protein
+                bb_batch["token_exists_override"] = (bb_batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & bb_batch["is_standard"]
+
+            # Get potts parameters for each input backbone
+            _, aux = model.sample(bb_batch, sampling_inputs=sampling_inputs)
+            
+            # Load in samples to score for each input backbone
+            for i in tqdm(range(B), desc=f"Scoring samples with Potts parameters...", leave=False):
+                potts_decoder_aux_i = {k: v[i] for k, v in aux["potts_decoder_aux"].items()}
+                
+                # Load in samples to score for each input backbone
+                sample_struct_files = bb_to_sample_files[batch_bb_struct_files[i]]
+                sample_batch, _ = get_sd_batch(sample_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+                B_sample = len(sample_struct_files)
+                
+                # Score
+                S_sample = sample_batch["res_type"].argmax(dim=-1).to(device)
+                
+                # temporary hack: handle the case where we didn't add enough UNK tokens in the conformers
+                if S_sample.shape[1] > bb_batch["res_type"].shape[1]:
+                    length_diff = S_sample.shape[1] - bb_batch["res_type"].shape[1]
+                    assert (sample_batch["token_resolved_mask"][..., -length_diff:] == 0).all(), "Expected all UNK tokens to be unresolved in the samples"
+                    S_sample = S_sample[..., :bb_batch["res_type"].shape[1]]
+                
+                potts_decoder_aux_i = to(potts_decoder_aux_i, device=device)
+                potts_decoder_aux_i = {k: v[None].expand(B_sample, *(v.ndim * (-1, ))) for k, v in potts_decoder_aux_i.items()}  # expand to match B_sample
+                U, U_i = compute_potts_energy(S_sample, potts_decoder_aux_i["h"], potts_decoder_aux_i["J"], potts_decoder_aux_i["edge_idx"])
+                
+                # Store results
+                outputs = {"bb_pdb_key": [bb_batch["pdb_key"][i]] * B_sample, 
+                           "sample_pdb_key": sample_batch["pdb_key"], 
+                           "U": U, 
+                           "U_i": U_i}
+                score_outputs[batch_bb_struct_files[i]] = to(outputs, "cpu")
+
+            pbar.update(B)
+    pbar.close()
+
+    return score_outputs
 
 
 def run_seq_des_multistate(model: SeqDenoiser,
@@ -210,7 +282,7 @@ def run_seq_des_multistate(model: SeqDenoiser,
         run_aux["out_pdbs"] = []  # store output PDB paths
         run_aux["input_struct_files"] = []  # store input PDB names
         run_aux["pred_seqs"] = []  # store predicted sequences as a string for each sample
-        run_aux["n_conformers"] = []
+        run_aux["n_conformers"] = []  # store number of conformers for each PDB (some may have been skipped due to parsing issues)
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
