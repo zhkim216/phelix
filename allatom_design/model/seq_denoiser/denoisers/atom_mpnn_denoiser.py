@@ -9,6 +9,7 @@ from torchtyping import TensorType
 
 import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
+from allatom_design.data.data import to
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn import \
@@ -165,7 +166,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             #     if symmetry_order is None
             #     else C[:, : C.shape[1] // symmetry_order]
             # )
-            C_complexity = batch["token_pad_mask"].clone()  # TODO: is C for multi-chain?
+            C_complexity = batch["token_pad_mask"].clone()
             penalty_func = lambda _S: complexity.complexity_lcp(_S, C_complexity)
             # edge_idx_coloring, mask_ij_coloring = complexity.graph_lcp(C, edge_idx, mask_ij)
 
@@ -188,24 +189,32 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             tied_sampling_inputs = None
 
         potts_decoder_aux = aux_preds["potts_decoder_aux"]
-        S_sample, _ = self.atom_mpnn.decoder_S_potts.sample(
-            potts_decoder_aux["h"],
-            potts_decoder_aux["J"],
-            potts_decoder_aux["edge_idx"],
-            potts_decoder_aux["mask_i"],
-            potts_decoder_aux["mask_ij"],
-            S=S_init,
-            mask_sample=mask_sample,
-            temperature=potts_temperature,
-            num_sweeps=potts_sweeps,
-            penalty_func=penalty_func,
-            proposal=potts_proposal,
-            rejection_step=(potts_proposal == "chromatic"),
-            verbose=False,
-            edge_idx_coloring=edge_idx_coloring,
-            mask_ij_coloring=mask_ij_coloring,
-            tied_sampling_inputs=tied_sampling_inputs,
-        )
+        aux["potts_decoder_aux"] = to(potts_decoder_aux, "cpu")
+        
+        if sampling_inputs.get("skip_sampling", False):
+            # Skip sampling, just return potts_decoder_aux and initial sequence
+            S_sample = S_init
+        else:
+            # Sample sequence
+            S_sample, _ = self.atom_mpnn.decoder_S_potts.sample(
+                potts_decoder_aux["h"],
+                potts_decoder_aux["J"],
+                potts_decoder_aux["edge_idx"],
+                potts_decoder_aux["mask_i"],
+                potts_decoder_aux["mask_ij"],
+                S=S_init,
+                mask_sample=mask_sample,
+                temperature=potts_temperature,
+                num_sweeps=potts_sweeps,
+                penalty_func=penalty_func,
+                proposal=potts_proposal,
+                rejection_step=(potts_proposal == "chromatic"),
+                verbose=False,
+                edge_idx_coloring=edge_idx_coloring,
+                mask_ij_coloring=mask_ij_coloring,
+                tied_sampling_inputs=tied_sampling_inputs,
+            )
+            
 
         # Set all tokens that don't exist in the graph to unknown
         for chain_type, unk_token_id in const.unk_token_ids.items():
