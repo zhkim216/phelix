@@ -31,7 +31,7 @@ mlm_sampling_cfg:
   aatype_decoding_order_mode: "random"
 
   timestep_schedule:
-    num_steps: ${num_steps}
+    num_steps: ${mlm_sampling_cfg.num_steps}
     mode: "linear"
     t_start: 0.0
     t_end: 1.0

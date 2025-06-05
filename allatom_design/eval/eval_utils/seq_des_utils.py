@@ -203,7 +203,7 @@ def score_samples(model: SeqDenoiser,
     score_outputs = {}  # store results for each input backbone
 
     # Process PDBs in batches of size B
-    pbar = tqdm(total=len(bb_to_sample_files), desc=f"Scoring {len(bb_to_sample_files)} with input backbones...")
+    pbar = tqdm(total=len(bb_to_sample_files), desc=f"Scoring samples with {len(bb_to_sample_files)} input backbones...")
 
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     bb_struct_files = list(bb_to_sample_files.keys())
