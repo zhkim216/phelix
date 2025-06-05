@@ -49,7 +49,10 @@ def main(cfg: DictConfig):
         all_conformers = natsorted(glob.glob(f"{cfg.conformer_dir}/{pdb_name}/*"))
         primary_conformer = f"{cfg.conformer_dir}/{pdb_name}/{pdb_name}.cif"
         all_conformers.remove(primary_conformer)
-        conformers = [primary_conformer] + all_conformers[:cfg.max_num_conformers - 1]
+        if cfg.include_primary_conformer:
+            conformers = [primary_conformer] + all_conformers[:cfg.max_num_conformers - 1]
+        else:
+            conformers = all_conformers[:cfg.max_num_conformers]
         conformer_groups.append((pdb_name, conformers))
 
     # flatten and process everything in one go
