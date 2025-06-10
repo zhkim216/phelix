@@ -64,7 +64,7 @@ class DiTDenoiser(nn.Module):
 
 
     def forward(self,
-                motif_inputs: dict[str, TensorType["b n ..."]],
+                motif_inputs: dict[str, TensorType["b n ..."]] | None,
                 diffusion_inputs: dict[str, TensorType["b ..."]],
                 is_sampling: bool = False,
                 diffusion_params: dict[str, Any] | None = None,  # required only for sampling
@@ -88,7 +88,7 @@ class DiTDenoiser(nn.Module):
 
 
     def backbone_diffusion(self,
-                           motif_inputs: dict[str, TensorType["b ..."]],
+                           motif_inputs: dict[str, TensorType["b ..."]] | None,
                            diffusion_inputs: dict[str, TensorType["b ..."]],
                            is_sampling: bool,
                            diffusion_params: dict[str, Any] | None,
@@ -108,8 +108,11 @@ class DiTDenoiser(nn.Module):
             diffusion_inputs_batched = {k: v.reshape(M * B, *v.shape[2:]) if v is not None else None for k, v in diffusion_inputs_batched.items()}
 
             # repeat conditioning inputs
-            motif_inputs_batched = {k: v[None].expand(M, *v.shape) if v is not None else None for k, v in motif_inputs.items()}
-            motif_inputs_batched = {k: v.reshape(M * B, *v.shape[2:]) if v is not None else None for k, v in motif_inputs_batched.items()}
+            if motif_inputs is not None:
+                motif_inputs_batched = {k: v[None].expand(M, *v.shape) if v is not None else None for k, v in motif_inputs.items()}
+                motif_inputs_batched = {k: v.reshape(M * B, *v.shape[2:]) if v is not None else None for k, v in motif_inputs_batched.items()}
+            else:
+                motif_inputs_batched = None
 
             # Noise the ground truth backbone
             interpolant_out = self.interpolant({"x": diffusion_inputs_batched["x_bb"], "aatype": None}, t=diffusion_inputs_batched["t_bb"])
