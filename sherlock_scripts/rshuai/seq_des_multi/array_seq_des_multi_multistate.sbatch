@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=ms-sweep9
-#SBATCH -p bioe
-#SBATCH --array=0-13%7
+#SBATCH --job-name=ms-sweep10
+#SBATCH -p possu,bioe
+#SBATCH --array=0-3
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -29,22 +29,16 @@ STRUCT_PRED_MODEL=boltz1
 BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
-NUM_CONFORMERS_VALUES=(1 16)
 LIST_STEM=protein_monomer_32_512_no_ligand
-CONFORMER_DIRS=(
-    /scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/gaussian_conformers/eps0.1
-    /scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/gaussian_conformers/eps0.3
-    /scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/gaussian_conformers/eps0.5
-    /scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-80
-    /scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-90
-    /scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-100
-    /scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/s6_a0_conformers/t0.7
+CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-90
+
+CONFIGS=(
+"+sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=500 +sampling_cfg_overrides.potts_sampling_cfg.regularization=null"
+"+sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.regularization=null"
+"+sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=500 +sampling_cfg_overrides.potts_sampling_cfg.regularization=LCP"
+"+sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.regularization=LCP"
 )
-NUM_DIRS=${#CONFORMER_DIRS[@]}
-SIZE_IDX=$(( SLURM_ARRAY_TASK_ID / NUM_DIRS ))
-DIR_IDX=$(( SLURM_ARRAY_TASK_ID % NUM_DIRS ))
-MAX_NUM_CONFORMERS=${NUM_CONFORMERS_VALUES[$SIZE_IDX]}
-CONFORMER_DIR=${CONFORMER_DIRS[$DIR_IDX]}
+OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
@@ -57,7 +51,7 @@ BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a2_cfg1/mul
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 GROUP=seq_des
-EXP_NAME=sd3_a2_cfg1_ms_sweep9_idx${SLURM_ARRAY_TASK_ID}_nc${MAX_NUM_CONFORMERS}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
+EXP_NAME=sd3_a2_cfg1_ms_sweep10_idx${SLURM_ARRAY_TASK_ID}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
 
 # Run training script
 cd ${BASE_DIR}
@@ -69,13 +63,11 @@ python3 allatom_design/eval/sampling/seq_des_multi_multistate.py \
     ckpt_path=${CKPT_PATH} \
     base_out_dir=${BASE_OUT_DIR} \
     conformer_dir=${CONFORMER_DIR} \
-    max_num_conformers=${MAX_NUM_CONFORMERS} \
+    max_num_conformers=16 \
     struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
     struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
     run_self_consistency_eval=true \
     sampling_cfg_overrides.batch_size=1 \
     sampling_cfg_overrides.num_seqs_per_pdb=8 \
-    include_primary_conformer=false \
-    +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 \
-    +sampling_cfg_overrides.potts_sampling_cfg.regularization=null \
+    ${OVERRIDES} \
     hydra.run.dir=${HYDRA_DIR}
