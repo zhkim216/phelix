@@ -20,7 +20,7 @@ dit:
   inf: ${model.inf}
 
   # Positional encoding
-  pos_encoding: rotary_residx    # one of ["absolute", "absolute_residx", "rotary", "rotary_residx"]
+  pos_encoding: rotary_residx    # one of ["absolute", "absolute_residx", "rotary", "rotary_residx", "af3"]
 
   # Multi-modal DiT
   use_mmdit: false

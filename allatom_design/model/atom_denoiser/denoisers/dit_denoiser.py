@@ -1,3 +1,4 @@
+import copy
 from collections import defaultdict
 from functools import partial
 from typing import Any, Dict, Optional, Tuple
@@ -5,7 +6,6 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from einops import rearrange, repeat
 from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
@@ -19,14 +19,14 @@ from allatom_design.interpolants.ad_interpolants.edm_interpolant import EDM
 from allatom_design.interpolants.ad_interpolants.sd3_rf_interpolant import \
     SD3_RF
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.dit_utils import (
-    DiTBlock, FinalLayer, MultiHeadRMSNorm, MMDiTBlock)
+    DiTBlock, FinalLayer, MMDiTBlock, MultiHeadRMSNorm)
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.motif_embedders import \
     MotifEmbedder
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.timestep_embedders import \
     TimestepEmbedder
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
-from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import FAMPNN
+from allatom_design.model.atom_denoiser.denoisers.pos_embed.af3_relpos import RelativePositionEncoder
 from openfold.model.primitives import Linear
 
 
@@ -94,6 +94,15 @@ class DiTDenoiser(nn.Module):
                            diffusion_params: dict[str, Any] | None,
                            ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
                                       Dict[str, TensorType["b ..."]]]:
+        """
+        diffusion_inputs:
+            - "x" (training only): TensorType["b n 4 3", float], ground truth backbone coordinates
+            - "t_bb" (training only): TensorType["b", float], backbone noise timestep
+            - "seq_mask": TensorType["b n", float], 1 for valid residues, 0 for padding
+            - "residue_index": TensorType["b n", int], residue index
+            - "chain_index": TensorType["b n", int], chain index
+            - "bb_atom_mask": TensorType["b n 4", float], 1 for valid backbone atoms, 0 for padding / missing atoms
+        """
         B, N = diffusion_inputs["seq_mask"].shape
         diffusion_aux = defaultdict(lambda: None)
 
@@ -122,45 +131,32 @@ class DiTDenoiser(nn.Module):
             loss_weight_t_batched = interpolant_out["loss_weight_t"]
 
             # Run denoising DiT
-            denoiser_fn = self.dit
+            denoiser_fn = partial(self.dit, x_noised=xt_bb_batched, t=t_batched,
+                                  diffusion_inputs=diffusion_inputs_batched,
+                                  motif_inputs=motif_inputs_batched)
             if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                 # Apply self-conditioning
                 with torch.no_grad():
-                    denoiser_pred_batched, aux_preds = denoiser_fn(xt_bb_batched,
-                                                                   t_batched,
-                                                                   seq_mask=diffusion_inputs_batched["seq_mask"],
-                                                                   residue_index=diffusion_inputs_batched["residue_index"],
-                                                                   motif_inputs=motif_inputs_batched)
+                    denoiser_pred_batched, aux_preds = denoiser_fn()
                 torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
                 denoiser_fn = partial(denoiser_fn, x_self_cond=self.interpolant.get_x1_pred(denoiser_pred_batched, xt_bb_batched, t_batched))
-
-            denoiser_pred_batched, aux_preds = denoiser_fn(xt_bb_batched,
-                                                           t_batched,
-                                                           seq_mask=diffusion_inputs_batched["seq_mask"],
-                                                           residue_index=diffusion_inputs_batched["residue_index"],
-                                                           motif_inputs=motif_inputs_batched)
+            denoiser_pred_batched, aux_preds = denoiser_fn()
 
             # Train autoguidance model
             diffusion_aux["autoguidance_aux"] = None
             if self.use_autoguidance and (np.random.uniform() < self.autoguidance_train_p):
                 ### If memory spikes due to running the autoguidance model,
                 ### consider activation checkpointing, separate optimization steps, alternating head predictions, or just training the models separately.
-                denoiser_fn = self.guiding_model
+                guide_denoiser_fn = partial(self.guiding_model, x_noised=xt_bb_batched, t=t_batched,
+                                      diffusion_inputs=diffusion_inputs_batched,
+                                      motif_inputs=motif_inputs_batched)
                 if self.use_self_conditioning and (np.random.uniform() < self.cfg.self_cond_p):
                     with torch.no_grad():
-                        denoiser_pred_batched_guide, _ = denoiser_fn(xt_bb_batched,
-                                                                     t_batched,
-                                                                     seq_mask=diffusion_inputs_batched["seq_mask"],
-                                                                     residue_index=diffusion_inputs_batched["residue_index"],
-                                                                     motif_inputs=motif_inputs_batched)
+                        denoiser_pred_batched_guide, _ = guide_denoiser_fn()
                     torch.clear_autocast_cache()  # Sidestep AMP bug (PyTorch issue #65766)
-                    denoiser_fn = partial(denoiser_fn, x_self_cond=self.interpolant.get_x1_pred(denoiser_pred_batched_guide, xt_bb_batched, t_batched))
+                    guide_denoiser_fn = partial(guide_denoiser_fn, x_self_cond=self.interpolant.get_x1_pred(denoiser_pred_batched_guide, xt_bb_batched, t_batched))
 
-                denoiser_pred_batched_guide, _ = denoiser_fn(xt_bb_batched,
-                                                             t_batched,
-                                                             seq_mask=diffusion_inputs_batched["seq_mask"],
-                                                             residue_index=diffusion_inputs_batched["residue_index"],
-                                                             motif_inputs=motif_inputs_batched)
+                denoiser_pred_batched_guide, _ = guide_denoiser_fn()
 
                 # add to autoguidance outputs
                 diffusion_aux["autoguidance_aux"] = {
@@ -207,13 +203,11 @@ class DiTDenoiser(nn.Module):
             if use_autoguidance:
                 assert self.use_autoguidance, "Model must be trained with autoguidance to use it."
                 autoguidance_cfg["autoguidance_fn"] = partial(self.guiding_model,
-                                                              residue_index=diffusion_inputs["residue_index"],
-                                                              seq_mask=diffusion_inputs["seq_mask"],
+                                                              diffusion_inputs=diffusion_inputs,
                                                               motif_inputs=motif_inputs)
             # Set up denoiser function
             denoiser_fn = partial(self.dit,
-                                  residue_index=diffusion_inputs["residue_index"],
-                                  seq_mask=diffusion_inputs["seq_mask"],
+                                  diffusion_inputs=diffusion_inputs,
                                   motif_inputs=motif_inputs)
 
             # Run integration steps
@@ -289,9 +283,11 @@ class DiT(nn.Module):
         self.x_embedder = Linear(self.in_channels, self.hidden_size, bias=True, init="glorot")  # "glorot" should match DiT Patchify init
 
         # Positional encodings
-        assert self.pos_encoding in ["absolute", "absolute_residx", "rotary", "rotary_residx", "af2"]
+        assert self.pos_encoding in ["absolute", "absolute_residx", "rotary", "rotary_residx", "af3"]
         if self.pos_encoding in ["absolute", "absolute_residx"]:
             self.pos_embed = posemb_sincos_1d
+        elif self.pos_encoding == "af3":
+            self.rel_pos = RelativePositionEncoder(cfg.num_heads)
 
         self.rotary_emb = None
         if self.pos_encoding in ["rotary", "rotary_residx"]:
@@ -359,13 +355,27 @@ class DiT(nn.Module):
     def forward(self,
                 x_noised: TensorType["b n 4 3", float],
                 t: TensorType["b", float],
-                residue_index: TensorType["b n", int],
-                seq_mask: TensorType["b n", float],
+                diffusion_inputs: dict[str, TensorType["b ..."]],
                 motif_inputs: dict[str, TensorType["b ..."]],
                 x_self_cond: Optional[TensorType["b n 4 3", float]] = None,
                 ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
                            Dict[str, TensorType["b ..."]]]:
+        """
+        diffusion_inputs:
+            - "seq_mask": TensorType["b n", float]
+            - "residue_index": TensorType["b n", int]
+            - "chain_index": TensorType["b n", int]
+            - "bb_atom_mask": TensorType["b n 4", float]
+            - "token_index": TensorType["b n", int]
+            - "sym_id": TensorType["b n", int]
+            - "entity_id": TensorType["b n", int]
+        """
+        diffusion_inputs = copy.deepcopy(diffusion_inputs)  # make a copy to avoid modifying the original dict when e.g. adding registers
+
         aux_preds = {}
+
+        # Zero out missing atoms
+        x_noised = x_noised * diffusion_inputs["bb_atom_mask"][..., None]
 
         # Preconditioning
         precondition_in, precondition_out = self.interpolant.setup_preconditioning(x_noised, x_self_cond, t)
@@ -383,7 +393,7 @@ class DiT(nn.Module):
         x = self.x_embedder(x)
 
         # Add registers to inputs
-        x, seq_mask, residue_index = self._add_registers(x, seq_mask, residue_index)
+        x, diffusion_inputs = self._add_registers(x, diffusion_inputs)
 
         # Motif conditioning
         residx_mask = None
@@ -392,33 +402,40 @@ class DiT(nn.Module):
             # Concatenate motif inputs as extra tokens
             M = motif_inputs["motif_embed_1d"].shape[1]  # keep track of number of motif tokens
 
-            x, seq_mask, residue_index, residx_mask, token_modality_idxs = self._add_motif_tokens(x, seq_mask, residue_index, motif_inputs)
+            x, diffusion_inputs, token_modality_idxs = self._add_motif_tokens(x, diffusion_inputs, motif_inputs)
 
+        # Handle non-RoPE positional encodings
+        attn_bias = None
         if self.pos_encoding == "absolute":
             x = x + self.pos_embed(x)
         elif self.pos_encoding == "absolute_residx":
-            x = x + self.pos_embed(x, residue_index=residue_index.float())
+            x = x + self.pos_embed(x, residue_index=diffusion_inputs["residue_index"].float())
+        elif self.pos_encoding == "af3":
+            # TODO: this can technically be moved out of the diffusion steps for computational efficiency
+            attn_bias = self.rel_pos(diffusion_inputs).permute(0, 3, 1, 2)  # [B, H, N, N]
 
         # Conditioning
         c = self.t_embedder(t)
         c = c.unsqueeze(1).expand((-1, x.shape[1], -1))  # expand to sequence length
 
         # Blocks
-        attn_mask = repeat(seq_mask[:, :, None] * seq_mask[:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
+        attn_mask = repeat(diffusion_inputs["seq_mask"][:, :, None] * diffusion_inputs["seq_mask"][:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
         for block in self.blocks:
-            x = block(x, c, residx=residue_index.float(), attn_mask=attn_mask, attn_bias=None, per_token_conditioning=True,
+            x = block(x, c, residx=diffusion_inputs["residue_index"].float(),
+                      attn_mask=attn_mask, attn_bias=attn_bias,
+                      per_token_conditioning=True,
                       rope_mask=residx_mask, token_modality_idxs=token_modality_idxs)
 
         # Remove motif conditioning tokens
         if self.use_motif_conditioning:
-            x, c, seq_mask = self._remove_motif_tokens(x, c, seq_mask, num_motif_tokens=M)
+            x, c, diffusion_inputs = self._remove_motif_tokens(x, c, diffusion_inputs, num_motif_tokens=M)
 
         # Remove registers
-        x, seq_mask, c = self._remove_registers(x, seq_mask, c)
+        x, c, diffusion_inputs = self._remove_registers(x, c, diffusion_inputs)
 
         # Final layer
         x = self.final_layer(x, c, per_token_conditioning=True)
-        x = x * seq_mask[..., None]  # zero out padding positions
+        x = x * diffusion_inputs["seq_mask"][..., None]  # zero out padding positions
 
         # Reshape back to coordinates
         x = rearrange(x, "b n (a x) -> b n a x", x=3).float()  # ensure we're not in bf16
@@ -429,60 +446,81 @@ class DiT(nn.Module):
 
     def _add_motif_tokens(self,
                           x: TensorType["b n h"],
-                          seq_mask: TensorType["b n"],
-                          residue_index: TensorType["b n"],
-                          motif_inputs: dict[str, TensorType["b ..."]]) -> Tuple[TensorType["b n+m h"], TensorType["b n+m h"], TensorType["b n+m"]]:
+                          diffusion_inputs: dict[str, TensorType["b ..."]],
+                          motif_inputs: dict[str, TensorType["b ..."]]) -> Tuple[TensorType["b n+m h"], dict[str, TensorType["b ..."]], TensorType["b n+m"]]:
         """
         Append motif conditioning tokens to the input.
         """
-        token_modality_idxs = torch.tensor([0, seq_mask.shape[1]], device=x.device)  # starting index for backbone and motif tokens, used only for mmdit
+        token_modality_idxs = torch.tensor([0, diffusion_inputs["seq_mask"].shape[1]], device=x.device)  # starting index for backbone and motif tokens, used only for mmdit
 
+        # Concatenate embedded motif tokens to input
         x = torch.cat([x, motif_inputs["motif_embed_1d"]], dim=1)
-        seq_mask = torch.cat([seq_mask, motif_inputs["token_pad_mask"]], dim=1)
+
+        # Update diffusion_inputs
+        diffusion_inputs["seq_mask"] = torch.cat([diffusion_inputs["seq_mask"], motif_inputs["token_pad_mask"]], dim=1)
 
         # handle RoPE masking
-        residx_mask = torch.cat([torch.ones_like(residue_index), motif_inputs["residx_mask"]], dim=1)  # for preventing RoPE from being applied to motif tokens
-        residue_index = torch.cat([residue_index, motif_inputs["residue_index"]], dim=1)
-        residue_index = residue_index * residx_mask  # mask out residx
+        diffusion_inputs["residx_mask"] = torch.cat([torch.ones_like(diffusion_inputs["residue_index"]), motif_inputs["residx_mask"]], dim=1)  # when hiding motif residxs, we prevent RoPE from being applied to motif tokens
+        diffusion_inputs["residue_index"] = torch.cat([diffusion_inputs["residue_index"], motif_inputs["residue_index"]], dim=1)
+        diffusion_inputs["residue_index"] = (diffusion_inputs["residue_index"] * diffusion_inputs["residx_mask"]).long()  # mask out residx
 
-        return x, seq_mask, residue_index, residx_mask, token_modality_idxs
+        # concatenate motif chain index (we always provide the chain index of motif tokens)
+        diffusion_inputs["chain_index"] = torch.cat([diffusion_inputs["chain_index"], motif_inputs["asym_id"]], dim=1)
+
+        # concatenate other indices
+        diffusion_inputs["token_index"] = torch.cat([diffusion_inputs["token_index"], motif_inputs["token_index"]], dim=1)
+        diffusion_inputs["sym_id"] = torch.cat([diffusion_inputs["sym_id"], motif_inputs["sym_id"]], dim=1)
+        diffusion_inputs["entity_id"] = torch.cat([diffusion_inputs["entity_id"], motif_inputs["entity_id"]], dim=1)
+
+        return x, diffusion_inputs, token_modality_idxs
 
 
-    def _remove_motif_tokens(self, x: TensorType["b n+m h"], c: TensorType["b n+m h"], seq_mask: TensorType["b n+m"],
-                             num_motif_tokens: int) -> Tuple[TensorType["b n h"], TensorType["b n h"], TensorType["b n"]]:
+    def _remove_motif_tokens(self, x: TensorType["b n+m h"], c: TensorType["b n+m h"],
+                             diffusion_inputs: dict[str, TensorType["b ..."]],
+                             num_motif_tokens: int) -> Tuple[TensorType["b n h"], TensorType["b n h"], dict[str, TensorType["b ..."]]]:
         """
         Remove motif conditioning tokens from the input, assuming the last num_motif_tokens are the motif tokens.
         """
         M = num_motif_tokens
         x = x[:, :-M, :]
         c = c[:, :-M, :]
-        seq_mask = seq_mask[:, :-M]
-        return x, c, seq_mask
+        diffusion_inputs["seq_mask"] = diffusion_inputs["seq_mask"][:, :-M]
+        return x, c, diffusion_inputs
 
 
-    def _add_registers(self, x: TensorType["b n h"], seq_mask: TensorType["b n"], residue_index: TensorType["b n"]):
+    def _add_registers(self, x: TensorType["b n h"], diffusion_inputs: dict[str, TensorType["b ..."]]):
         """
         Prepend registers to the input.
         """
         R = self.num_registers
         if R == 0:
-            return x, seq_mask, residue_index
+            return x, diffusion_inputs
+
+        # Add learned registers to the input
         B, _, _ = x.shape
         registers = self.registers.unsqueeze(0).expand(B, -1, -1)
         x = torch.cat([registers, x], dim=1)  # [B, R+N, H]
-        seq_mask = torch.cat([seq_mask.new_ones(B, R), seq_mask], dim=1)  # [B, R+N]
-        residue_index = torch.cat([residue_index.new_zeros(B, R), residue_index], dim=1)  # [B, R+N]
-        return x, seq_mask, residue_index
+
+        # Update diffusion inputs where needed
+        diffusion_inputs["seq_mask"] = torch.cat([diffusion_inputs["seq_mask"].new_ones(B, R), diffusion_inputs["seq_mask"]], dim=1)  # [B, R+N], seq_mask of registers is 1
+        diffusion_inputs["residue_index"] = torch.cat([diffusion_inputs["residue_index"].new_full((B, R), -1), diffusion_inputs["residue_index"]], dim=1)  # [B, R+N], residue index of registers is -1
+        diffusion_inputs["chain_index"] = torch.cat([diffusion_inputs["chain_index"].new_full((B, R), -1), diffusion_inputs["chain_index"]], dim=1)  # [B, R+N], chain index of registers is -1
+        diffusion_inputs["token_index"] = torch.cat([diffusion_inputs["token_index"].new_full((B, R), -1), diffusion_inputs["token_index"]], dim=1)  # [B, R+N], token index of registers is -1
+        diffusion_inputs["sym_id"] = torch.cat([diffusion_inputs["sym_id"].new_full((B, R), -1), diffusion_inputs["sym_id"]], dim=1)  # [B, R+N], sym id of registers is -1
+        diffusion_inputs["entity_id"] = torch.cat([diffusion_inputs["entity_id"].new_full((B, R), -1), diffusion_inputs["entity_id"]], dim=1)  # [B, R+N], entity id of registers is -1
+
+        return x, diffusion_inputs
 
 
-    def _remove_registers(self, x: TensorType["b n h"], seq_mask: TensorType["b n"], c: TensorType["b n h"]):
+    def _remove_registers(self, x: TensorType["b n h"], c: TensorType["b n h"], diffusion_inputs: dict[str, TensorType["b ..."]]):
         """
         Remove registers from the input, assuming the first R tokens are registers.
         """
         R = self.num_registers
         if R == 0:
-            return x, seq_mask, c
-        return x[:, R:, :], seq_mask[:, R:], c[:, R:]
+            return x, c, diffusion_inputs
+        diffusion_inputs["seq_mask"] = diffusion_inputs["seq_mask"][:, R:]
+        return x[:, R:, :], c[:, R:], diffusion_inputs
 
 
 def get_interpolant(cfg: DictConfig,

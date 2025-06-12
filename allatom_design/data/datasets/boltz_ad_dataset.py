@@ -374,11 +374,16 @@ def featurize_diffusion_inputs(tokenized: Tokenized, use_auth_as_residx: bool, m
     # Construct diffusion features
     diffusion_feats = {}
     diffusion_feats["residue_index"] = tokenized.tokens["auth_seq_id"] if use_auth_as_residx else tokenized.tokens["res_idx"]
+    diffusion_feats["chain_index"] = tokenized.tokens["asym_id"]
     diffusion_feats["seq_mask"] = np.ones_like(diffusion_feats["residue_index"])  # denotes padding
+    diffusion_feats["token_index"] = tokenized.tokens["token_idx"]
+    diffusion_feats["sym_id"] = tokenized.tokens["sym_id"]
+    diffusion_feats["entity_id"] = tokenized.tokens["entity_id"]
 
     # Featurize with ground truth coords and atom mask (for training or partial diffusion)
     diffusion_feats["x"] = tokenized.tokenwise_atom_feats["coords"]
     diffusion_feats["atom_mask"] = tokenized.tokenwise_atom_feats["atom_resolved_mask"]
+    diffusion_feats["bb_atom_mask"] = diffusion_feats["atom_mask"][..., const.prot_bb_atom14_idxs]
 
     # Convert to torch
     diffusion_feats = {k: torch.from_numpy(v.copy()) for k, v in diffusion_feats.items()}
