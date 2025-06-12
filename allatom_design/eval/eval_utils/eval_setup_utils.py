@@ -64,7 +64,7 @@ def get_pdb_files(pdb_dir: str,
         pdb_files = [f"{pdb_dir}/{name}" for name in pdb_names]
         print(f"Found {len(pdb_files)} PDB files from key list")
     else:
-        # get all PDBs with .pdb_name_ext extension in the directory
+        # get all PDBs in the directory
         pdb_files = natsorted(list(glob.glob(f"{pdb_dir}/*")))
         print(f"Found {len(pdb_files)} PDB files in {pdb_dir}")
         if len(pdb_files) == 0:

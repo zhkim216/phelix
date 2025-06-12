@@ -286,7 +286,6 @@ def run_seq_des_multistate(model: SeqDenoiser,
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
-        raise NotImplementedError("Pos constraint df not implemented for multi-state sequence design")
         valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype"]
         if not set(pos_constraint_df.columns).issubset(valid_columns):
             # columns in input df must be a subset of valid columns
