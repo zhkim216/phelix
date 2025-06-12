@@ -57,6 +57,7 @@ def main(cfg: DictConfig):
     threaded_pdb_dir = f"{log_dir}/threaded_pdbs"
     Path(threaded_pdb_dir).mkdir(parents=True, exist_ok=True)
     threaded_pdbs = []
+    U = []  # energies
 
     for processed_struct_file in tqdm(processed_struct_files, desc="Threading Chroma outputs onto PDB files"):
         record_id = Path(processed_struct_file).stem
@@ -90,6 +91,12 @@ def main(cfg: DictConfig):
             threaded_pdb = f"{threaded_pdb_dir}/{record_id}_sample{bi}.cif"
             write_sd_feats_to_mmcif(example, input_structure, [threaded_pdb])
             threaded_pdbs.append(threaded_pdb)
+            
+            # Get energies
+            if "U" in chroma_features:
+                U.append(chroma_features["U"][bi])
+            else:
+                U.append(np.nan)
 
     # Run self-consistency evaluation
     out_metrics = defaultdict(list)
@@ -100,8 +107,13 @@ def main(cfg: DictConfig):
         cfg.pdb_processing_cfg,
         out_dir=log_dir)
 
-    # Save metrics as CSV
     metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
+    
+    # add energies
+    energies_df = pd.DataFrame({"record_id": [Path(pdb).stem for pdb in threaded_pdbs], "U": U})
+    metrics_df = pd.merge(metrics_df, energies_df, on="record_id", how="left")
+    
+    # Save metrics as CSV
     metrics_df.to_csv(f"{log_dir}/sc_metrics.csv", index=False)
 
     # Aggregate results
