@@ -224,10 +224,10 @@ def get_bb_example(struct_file_path: str,
     tokenized = add_tokenwise_atom_feats(tokenized, data_cfg["featurizer"])
 
     # Featurize diffusion inputs
-    example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, max_tokens=None)
+    example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, use_auth_as_residx=data_cfg["use_auth_as_residx"], max_tokens=None)
 
     # Featurize motif
-    example["motif_inputs"] = featurize_motif_inputs(tokenized, data_cfg["motif_selector"], data_cfg["motif_cropper"], data_cfg["motif_featurizer"],
+    example["motif_inputs"] = featurize_motif_inputs(tokenized, data_cfg["use_auth_as_residx"], data_cfg["motif_selector"], data_cfg["motif_cropper"], data_cfg["motif_featurizer"],
                                                      motif_data_kwargs=data_cfg["motif_feats"],
                                                      motif_cond_type_cfg=motif_cond_type_cfg)
 

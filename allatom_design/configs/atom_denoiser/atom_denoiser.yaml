@@ -40,7 +40,7 @@ data:
   tokenizer:
     _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
   featurizer:
-    _target_: allatom_design.data.feature.featurizer.SimpleBoltzFeaturizer
+    _target_: allatom_design.data.feature.ad_featurizer.ADFeaturizer
 
   filters:
     - _target_: allatom_design.data.filter.dynamic.size.SizeFilter
@@ -72,6 +72,9 @@ data:
   # Backbone diffusion featurization options
   max_tokens: 256
   max_atoms: null  # currently unused
+
+  # Whether to use auth_seq_id as the residue_index during featurization. Should be true for augmented dataset (backwards compatibility since we didn't keep SEQRES records), but false for boltz_v2. TODO: remove this option after we have a new augmented dataset
+  use_auth_as_residx: false
 
   # Motif featurization options
   motif_feats:

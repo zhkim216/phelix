@@ -15,7 +15,7 @@ from torchtyping import TensorType
 
 from allatom_design.data import const
 from allatom_design.data.data import to
-from allatom_design.data.feature.seq_des_featurizer import crop_feats
+from allatom_design.data.feature.seq_des_featurizer import crop_sd_feats
 from allatom_design.data.types import Structure
 
 # Ignore warnings about empty entities in mmCIF files
@@ -419,7 +419,7 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                     feats_i[k] = v[i]
                 else:
                     feats_i[k] = v
-            feats_i = crop_feats(feats_i, feats_i["token_pad_mask"].bool(), max_tokens=None, max_atoms=None)
+            feats_i = crop_sd_feats(feats_i, feats_i["token_pad_mask"].bool(), max_tokens=None, max_atoms=None)
             feats_list.append(feats_i)
     else:
         # Already unbatched
@@ -510,7 +510,7 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
         for chain_id in feats_i["asym_id"].unique().tolist():
             # Crop feats to this chain
             chain_mask = feats_i["asym_id"] == chain_id
-            chain_feats_i = crop_feats(copy.deepcopy(feats_i), chain_mask, max_tokens=None, max_atoms=None)
+            chain_feats_i = crop_sd_feats(copy.deepcopy(feats_i), chain_mask, max_tokens=None, max_atoms=None)
 
             if keep_auth:
                 # Map from label_seq_id to auth_seq_id
@@ -536,7 +536,7 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                 for chain_id in feats_i["asym_id"].unique().tolist():
                     # First, subset relevant feats to this chain
                     chain_mask = feats_i["asym_id"] == chain_id
-                    chain_feats_i = crop_feats(copy.deepcopy(feats_i), chain_mask, max_tokens=None, max_atoms=None)
+                    chain_feats_i = crop_sd_feats(copy.deepcopy(feats_i), chain_mask, max_tokens=None, max_atoms=None)
 
                     # Get het flag
                     het = chain_feats_i["mol_type"].unique().tolist()[0] == const.chain_type_ids["NONPOLYMER"]

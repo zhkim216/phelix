@@ -22,7 +22,7 @@ from allatom_design.data.data import (atom_center_random_augmentation,
                                       batched_gather, to)
 from allatom_design.data.feature.pad import pad_to_max
 from allatom_design.data.feature.seq_des_featurizer import (
-    SequenceDesignFeaturizer, crop_feats)
+    SequenceDesignFeaturizer, crop_sd_feats)
 from allatom_design.data.sample.sampler import Sample, Sampler
 from allatom_design.data.tokenize.tokenizer import Tokenized, Tokenizer
 from allatom_design.data.types import (Connection, Input, Manifest, Record,
@@ -284,7 +284,7 @@ class SDDataset(data.Dataset):
                 feats["coords"] = feats["coords"].squeeze(0)
 
             if self.max_tokens is not None:
-                feats = crop_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.atoms_per_window_queries)
+                feats = crop_sd_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.atoms_per_window_queries)
 
         except Exception as e:
             print(f"Failed to load featurized data for {sample.record.id} with error: {e}. Skipping.")
@@ -407,7 +407,7 @@ def crop_batch_to_protein_only(batch: dict[str, TensorType["b n ..."]], return_c
     cropped_batch = []
     for i in range(batch["mol_type"].shape[0]):
         example = {k: v[i] for k, v in batch.items() if v is not None}
-        cropped_example = crop_feats(example, protein_token_mask[i], max_tokens=None, max_atoms=None)
+        cropped_example = crop_sd_feats(example, protein_token_mask[i], max_tokens=None, max_atoms=None)
         cropped_batch.append(cropped_example)
     cropped_batch = sd_collator(cropped_batch)
     cropped_batch = to(cropped_batch, device)
