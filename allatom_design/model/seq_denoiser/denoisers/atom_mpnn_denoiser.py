@@ -190,13 +190,13 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         potts_decoder_aux = aux_preds["potts_decoder_aux"]
         aux["potts_decoder_aux"] = to(potts_decoder_aux, "cpu")
-        
+
         if sampling_inputs.get("skip_sampling", False):
             # Skip sampling, just return potts_decoder_aux and initial sequence
             S_sample = S_init
         else:
             # Sample sequence
-            S_sample, _ = self.atom_mpnn.decoder_S_potts.sample(
+            S_sample, U_sample = self.atom_mpnn.decoder_S_potts.sample(
                 potts_decoder_aux["h"],
                 potts_decoder_aux["J"],
                 potts_decoder_aux["edge_idx"],
@@ -214,7 +214,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 mask_ij_coloring=mask_ij_coloring,
                 tied_sampling_inputs=tied_sampling_inputs,
             )
-            
+            aux["U"] = U_sample
 
         # Set all tokens that don't exist in the graph to unknown
         for chain_type, unk_token_id in const.unk_token_ids.items():

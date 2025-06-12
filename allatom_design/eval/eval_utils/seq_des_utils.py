@@ -92,7 +92,7 @@ def run_seq_des(model: SeqDenoiser,
                           Dict]:
     """
     Given a list of processed structure files, run sequence design on them.
-    
+
     If out_dir is not None, PDBs with sampled sequences will be saved to the provided directory. In this case, run_aux will be a dictionary with the following keys:
         - "out_pdbs": list of output PDB paths
         - "input_struct_files": list of input PDB names
@@ -170,7 +170,7 @@ def run_seq_des(model: SeqDenoiser,
                 write_sd_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
                 run_aux["out_pdbs"].extend(batch_out_files)
                 run_aux["input_struct_files"].extend(batch_struct_files)
-                
+
             pbar.update(B)
     pbar.close()
 
@@ -198,7 +198,7 @@ def score_samples(model: SeqDenoiser,
                   bb_to_sample_files: dict[str, list[str]],  # maps from input backbone path to list of sample paths, all preprocessed
                   device: str):
     """
-    Score samples using Potts parameters computed from input backbones. 
+    Score samples using Potts parameters computed from input backbones.
     """
     score_outputs = {}  # store results for each input backbone
 
@@ -225,33 +225,33 @@ def score_samples(model: SeqDenoiser,
 
             # Get potts parameters for each input backbone
             _, aux = model.sample(bb_batch, sampling_inputs=sampling_inputs)
-            
+
             # Load in samples to score for each input backbone
             for i in tqdm(range(B), desc=f"Scoring samples with Potts parameters...", leave=False):
                 potts_decoder_aux_i = {k: v[i] for k, v in aux["potts_decoder_aux"].items()}
-                
+
                 # Load in samples to score for each input backbone
                 sample_struct_files = bb_to_sample_files[batch_bb_struct_files[i]]
                 sample_batch, _ = get_sd_batch(sample_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
                 B_sample = len(sample_struct_files)
-                
+
                 # Score
                 S_sample = sample_batch["res_type"].argmax(dim=-1).to(device)
-                
+
                 # temporary hack: handle the case where we didn't add enough UNK tokens in the conformers
                 if S_sample.shape[1] > bb_batch["res_type"].shape[1]:
                     length_diff = S_sample.shape[1] - bb_batch["res_type"].shape[1]
                     assert (sample_batch["token_resolved_mask"][..., -length_diff:] == 0).all(), "Expected all UNK tokens to be unresolved in the samples"
                     S_sample = S_sample[..., :bb_batch["res_type"].shape[1]]
-                
+
                 potts_decoder_aux_i = to(potts_decoder_aux_i, device=device)
                 potts_decoder_aux_i = {k: v[None].expand(B_sample, *(v.ndim * (-1, ))) for k, v in potts_decoder_aux_i.items()}  # expand to match B_sample
                 U, U_i = compute_potts_energy(S_sample, potts_decoder_aux_i["h"], potts_decoder_aux_i["J"], potts_decoder_aux_i["edge_idx"])
-                
+
                 # Store results
-                outputs = {"bb_pdb_key": [bb_batch["pdb_key"][i]] * B_sample, 
-                           "sample_pdb_key": sample_batch["pdb_key"], 
-                           "U": U, 
+                outputs = {"bb_pdb_key": [bb_batch["pdb_key"][i]] * B_sample,
+                           "sample_pdb_key": sample_batch["pdb_key"],
+                           "U": U,
                            "U_i": U_i}
                 score_outputs[batch_bb_struct_files[i]] = to(outputs, "cpu")
 
@@ -283,6 +283,7 @@ def run_seq_des_multistate(model: SeqDenoiser,
         run_aux["input_struct_files"] = []  # store input PDB names
         run_aux["pred_seqs"] = []  # store predicted sequences as a string for each sample
         run_aux["n_conformers"] = []  # store number of conformers for each PDB (some may have been skipped due to parsing issues)
+        run_aux["U"] = []  # store energies for each sample
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
@@ -358,9 +359,15 @@ def run_seq_des_multistate(model: SeqDenoiser,
                 sample_stems = [f"{pdb_name}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(rep_batch_pdb_names)]
                 batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
                 write_sd_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
+
+                # Get energies for each sample
+                rep_U = [aux["U"][i].item() for i in unique_rep_idx]
+
                 run_aux["out_pdbs"].extend(batch_out_files)
                 run_aux["input_struct_files"].extend(batch_struct_files)
                 run_aux["n_conformers"].extend(n_conformers)
+                run_aux["U"].extend(rep_U)
+
 
             pbar.update(B_conformers)
     pbar.close()
