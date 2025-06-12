@@ -25,7 +25,7 @@ def main(cfg: DictConfig):
     Given processed structures, tokenize them and save to disk for faster loading.
     """
     # Create output directory
-    out_dir = f"{cfg.pdb_path}/processed_targets/tokenized"
+    out_dir = f"{cfg.pdb_path}/processed_targets/ad_tokenized"
     Path(out_dir).mkdir(parents=True, exist_ok=True)
 
     # Initialize tokenizer and featurizer
@@ -77,7 +77,6 @@ def tokenize_structure_to_disk(processed_structure_file: str, out_dir: str, toke
 
     # Save tokenized
     np.savez_compressed(out_file, **asdict(tokenized))
-
 
 
 if __name__ == "__main__":

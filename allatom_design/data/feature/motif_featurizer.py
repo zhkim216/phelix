@@ -17,13 +17,57 @@ from allatom_design.data.motif_selector import MotifSelector
 from allatom_design.data.tokenize.boltz import Tokenized
 
 
+# Keep track of the token/atom dimensions of the features for padding & cropping
+FEAT_TO_TOKEN_DIM = {
+    # Maps feature name to the token dimension
+    # token features
+    "token_index": [0],
+    "residue_index": [0],
+    "asym_id": [0],
+    "entity_id": [0],
+    "sym_id": [0],
+    "mol_type": [0],
+    "res_type": [0],
+    "disto_center": [0],
+    "token_pad_mask": [0],
+    "token_resolved_mask": [0],
+    "token_disto_mask": [0],
+    "token_bonds": [0, 1],
+    "label_seq_id": [0],
+    "auth_seq_id": [0],
+    "pdb_icode": [0],
+    "is_standard": [0],
+    "restype_mask": [0],
+    "residx_mask": [0],
+
+    # atom features
+    "atom_to_token": [1],
+}
+
+FEAT_TO_ATOM_DIM = {
+    # Maps feature name to the atom dimension
+    # atom features
+    "atom_pad_mask": [0],
+    "ref_pos": [0],
+    "atom_resolved_mask": [0],
+    "ref_element": [0],
+    "ref_charge": [0],
+    "ref_atom_name_chars": [0],
+    "ref_space_uid": [0],
+    "coords": [0],
+    "atom_to_token": [0],
+    "prot_bb_atom_mask": [0],
+    "prot_scn_atom_mask": [0],
+}
+
+
 class MotifFeaturizer:
     """Boltz-based featurizer modified for motif featurization."""
 
     def process(
         self,
         data: Tokenized,
-        use_auth_seq_id: bool,
+        use_auth_as_residx: bool,
         atoms_per_window_queries: int = 32,
         num_bins: int = 64,
         max_tokens: int | None = None,
@@ -36,7 +80,7 @@ class MotifFeaturizer:
         ----------
         data : Tokenized
             The tokenized data.
-        use_auth_seq_id : bool
+        use_auth_as_residx : bool
             If True, features["residue_index"] will be set to auth_seq_id. If false, we use label_seq_id ("res_idx" in tokens)
         training : bool
             Whether the model is in training mode.
@@ -65,7 +109,7 @@ class MotifFeaturizer:
         # Compute token features
         token_features = process_motif_token_features(
             data,
-            use_auth_seq_id,
+            use_auth_as_residx,
             restype_mask,
             residx_mask,
             max_tokens,
@@ -86,12 +130,15 @@ class MotifFeaturizer:
             **atom_features,
         }
 
+        # Pad features
+        feats = pad_motif_feats(feats, max_tokens, max_atoms, atoms_per_window_queries)
+
         # Create motif atom mask from atom features
         feats["motif_atom_mask"] = motif_selector.select_motif_atoms(feats)
 
         # Apply motif atom mask, making sure to zero out missing atoms
         feats["motif_atom_mask"] = feats["motif_atom_mask"] * feats["atom_resolved_mask"]
-        feats["motif_coords"] = feats.pop("coords").squeeze(0)  # coords has a batch dimension of 1 for some reason
+        feats["motif_coords"] = feats.pop("coords")
         feats["motif_coords"] = feats["motif_coords"] * feats["motif_atom_mask"].unsqueeze(-1)
 
         return feats
@@ -99,7 +146,7 @@ class MotifFeaturizer:
 
 def process_motif_token_features(
     data: Tokenized,
-    use_auth_seq_id: bool,
+    use_auth_as_residx: bool,
     restype_mask: TensorType["n", float],
     residx_mask: TensorType["n", float],
     max_tokens: Optional[int] = None,
@@ -127,16 +174,19 @@ def process_motif_token_features(
 
     # Token core features
     token_index = torch.arange(len(token_data), dtype=torch.long)
-    label_seq_id = from_numpy(token_data["res_idx"]).long()
-    auth_seq_id = from_numpy(token_data["auth_seq_id"]).long()
     asym_id = from_numpy(token_data["asym_id"]).long()
     entity_id = from_numpy(token_data["entity_id"]).long()
     sym_id = from_numpy(token_data["sym_id"]).long()
     mol_type = from_numpy(token_data["mol_type"]).long()
     res_type = from_numpy(token_data["res_type"]).long()
-    res_type = mask_restype(res_type, mol_type, restype_mask)
+    res_type = mask_restype(res_type, mol_type, restype_mask)  # mask out restypes in motifs
     res_type = one_hot(res_type, num_classes=const.num_tokens)
     disto_center = from_numpy(token_data["disto_coords"])
+
+    label_seq_id = from_numpy(token_data["res_idx"]).long()
+    auth_seq_id = from_numpy(token_data["auth_seq_id"]).long()
+    pdb_icode = from_numpy(token_data["pdb_icode"]).long()
+    is_standard = from_numpy(token_data["is_standard"]).bool()
 
     # Token mask features
     pad_mask = torch.ones(len(token_data), dtype=torch.float)
@@ -160,42 +210,14 @@ def process_motif_token_features(
 
     bonds = bonds.unsqueeze(-1)
 
-    # Pocket conditioned feature
-    pocket_feature = (
-        np.zeros(len(token_data)) + const.pocket_contact_info["UNSPECIFIED"]
-    )
-    pocket_feature = from_numpy(pocket_feature).long()
-    pocket_feature = one_hot(pocket_feature, num_classes=len(const.pocket_contact_info))
-
     # use auth_seq_id as the featurized residue index if specified
     residue_index = label_seq_id
-    if use_auth_seq_id:
+    if use_auth_as_residx:
         residue_index = auth_seq_id
-
-    # Pad to max tokens if given
-    if max_tokens is not None:
-        pad_len = max_tokens - len(token_data)
-        if pad_len > 0:
-            token_index = pad_dim(token_index, 0, pad_len)
-            residue_index = pad_dim(residue_index, 0, pad_len)
-            asym_id = pad_dim(asym_id, 0, pad_len)
-            entity_id = pad_dim(entity_id, 0, pad_len)
-            sym_id = pad_dim(sym_id, 0, pad_len)
-            mol_type = pad_dim(mol_type, 0, pad_len)
-            res_type = pad_dim(res_type, 0, pad_len)
-            disto_center = pad_dim(disto_center, 0, pad_len)
-            pad_mask = pad_dim(pad_mask, 0, pad_len)
-            resolved_mask = pad_dim(resolved_mask, 0, pad_len)
-            disto_mask = pad_dim(disto_mask, 0, pad_len)
-            pocket_feature = pad_dim(pocket_feature, 0, pad_len)
-
-            restype_mask = pad_dim(restype_mask, 0, pad_len)
-            residx_mask = pad_dim(residx_mask, 0, pad_len)
 
     token_features = {
         "token_index": token_index,
         "residue_index": residue_index,
-        "asym_id": asym_id,
         "entity_id": entity_id,
         "sym_id": sym_id,
         "mol_type": mol_type,
@@ -205,7 +227,10 @@ def process_motif_token_features(
         "token_pad_mask": pad_mask,
         "token_resolved_mask": resolved_mask,
         "token_disto_mask": disto_mask,
-        "pocket_feature": pocket_feature,
+        "label_seq_id": label_seq_id,
+        "auth_seq_id": auth_seq_id,
+        "pdb_icode": pdb_icode,
+        "is_standard": is_standard,
         "restype_mask": restype_mask,
         "residx_mask": residx_mask,
     }
@@ -355,35 +380,6 @@ def process_motif_atom_features(
         ref_pos[None], resolved_mask[None], centering=False
     )[0]
 
-    # Compute padding and apply
-    # Pad to max atoms
-    if max_atoms is not None:
-        assert max_atoms % atoms_per_window_queries == 0
-        pad_len = max_atoms - len(atom_data)
-    else:
-        pad_len = (
-            (len(atom_data) - 1) // atoms_per_window_queries + 1
-        ) * atoms_per_window_queries - len(atom_data)
-
-    if pad_len > 0:
-        pad_mask = pad_dim(pad_mask, 0, pad_len)
-        ref_pos = pad_dim(ref_pos, 0, pad_len)
-        resolved_mask = pad_dim(resolved_mask, 0, pad_len)
-        ref_element = pad_dim(ref_element, 0, pad_len)
-        ref_charge = pad_dim(ref_charge, 0, pad_len)
-        ref_atom_name_chars = pad_dim(ref_atom_name_chars, 0, pad_len)
-        ref_space_uid = pad_dim(ref_space_uid, 0, pad_len)
-        coords = pad_dim(coords, 1, pad_len)
-        atom_to_token = pad_dim(atom_to_token, 0, pad_len)
-
-        prot_bb_atom_mask = pad_dim(prot_bb_atom_mask, 0, pad_len)
-        prot_scn_atom_mask = pad_dim(prot_scn_atom_mask, 0, pad_len)
-
-    # Pad to max tokens
-    if max_tokens is not None:
-        pad_len = max_tokens - atom_to_token.shape[1]
-        if pad_len > 0:
-            atom_to_token = pad_dim(atom_to_token, 1, pad_len)
 
     return {
         "ref_pos": ref_pos,
@@ -392,7 +388,7 @@ def process_motif_atom_features(
         "ref_charge": ref_charge,
         "ref_atom_name_chars": ref_atom_name_chars,
         "ref_space_uid": ref_space_uid,
-        "coords": coords,
+        "coords": coords.squeeze(0),
         "atom_pad_mask": pad_mask,
         "atom_to_token": atom_to_token,
         "prot_bb_atom_mask": prot_bb_atom_mask,
@@ -400,17 +396,74 @@ def process_motif_atom_features(
     }
 
 
-def select_subset_from_mask(mask, p):
-    num_true = np.sum(mask)
-    v = np.random.geometric(p) + 1
-    k = min(v, num_true)
+def pad_motif_feats(feats: dict[str, Tensor],
+                    max_tokens: int | None,
+                    max_atoms: int | None,
+                    atoms_per_window_queries: int) -> dict[str, Tensor]:
+    """Pad the token and atom features to the maximum number of tokens and atoms.
+    """
+    # Pad to max tokens if given
+    if max_tokens is not None:
+        token_pad_len = max_tokens - len(feats["token_index"])
+        if token_pad_len > 0:
+            for k, v in FEAT_TO_TOKEN_DIM.items():
+                if k not in feats:
+                    continue
+                for dim_to_pad in v:
+                    feats[k] = pad_dim(feats[k], dim_to_pad, token_pad_len)
 
-    true_indices = np.where(mask)[0]
+    # Pad to max atoms if given
+    if max_atoms is not None:
+        assert max_atoms % atoms_per_window_queries == 0
+        atom_pad_len = max_atoms - len(feats["atom_resolved_mask"])
+    else:
+        atom_pad_len = (
+            (len(feats["atom_resolved_mask"]) - 1) // atoms_per_window_queries + 1
+        ) * atoms_per_window_queries - len(feats["atom_resolved_mask"])
 
-    # Randomly select k indices from the true_indices
-    selected_indices = np.random.choice(true_indices, size=k, replace=False)
+    if atom_pad_len > 0:
+        for k, v in FEAT_TO_ATOM_DIM.items():
+            if k not in feats:
+                continue
+            for dim_to_pad in v:
+                feats[k] = pad_dim(feats[k], dim_to_pad, atom_pad_len)
 
-    new_mask = np.zeros_like(mask)
-    new_mask[selected_indices] = 1
+    return feats
 
-    return new_mask
+
+def crop_motif_feats(feats: dict[str, Tensor],
+               token_crop_mask: np.ndarray,
+               max_tokens: int | None,
+               max_atoms: int | None,
+               atoms_per_window_queries: int = 32) -> dict[str, Tensor]:
+    """
+    In-place crop features based on a crop mask specified at the token level.
+
+    Note: after cropping, ref_space_uid and token_index will refer to positions *before* cropping, so make sure to
+    account for this when using these features.
+    """
+    # Handle some additional cases
+    if isinstance(token_crop_mask, Tensor):
+        token_crop_mask = token_crop_mask.cpu().numpy()
+
+    # First, get atoms to crop out as well
+    atom_crop_mask = (feats["atom_to_token"] @ token_crop_mask).bool()
+
+    # Subset each feature at the token level
+    for k, v in FEAT_TO_TOKEN_DIM.items():
+        if k not in feats:
+            continue
+        for dim_to_crop in v:
+            feats[k] = crop_dim(feats[k], dim_to_crop, token_crop_mask)
+
+    # Subset each feature at the atom level
+    for k, v in FEAT_TO_ATOM_DIM.items():
+        if k not in feats:
+            continue
+        for dim_to_crop in v:
+            feats[k] = crop_dim(feats[k], dim_to_crop, atom_crop_mask)
+
+    # Pad each feature back to max tokens and atoms, accounting for atoms_per_window_queries
+    feats = pad_sd_feats(feats, max_tokens, max_atoms, atoms_per_window_queries)
+
+    return feats

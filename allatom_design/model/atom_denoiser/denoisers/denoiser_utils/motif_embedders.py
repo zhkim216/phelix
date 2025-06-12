@@ -54,7 +54,7 @@ class MotifEmbedder(nn.Module):
         super().__init__()
         self.token_s = token_s
         self.no_atom_encoder = no_atom_encoder
-        self.to_motif_embed_1d = LinearNoBias(token_s + 33 + 4, token_s)  # token_s + 33 restypes + 4 pocket features
+        self.to_motif_embed_1d = LinearNoBias(token_s + 33, token_s)  # token_s + 33 restypes
 
         if not no_atom_encoder:
             self.atom_attention_encoder = AtomAttentionEncoder(
@@ -84,7 +84,6 @@ class MotifEmbedder(nn.Module):
         """
         # Load relevant features
         res_type = feats["res_type"]
-        pocket_feature = feats["pocket_feature"]
 
         # Compute input embedding
         if self.no_atom_encoder:
@@ -94,7 +93,7 @@ class MotifEmbedder(nn.Module):
             )
         else:
             a, _, _, _, _ = self.atom_attention_encoder(feats)
-        s = torch.cat([a, res_type, pocket_feature], dim=-1)
+        s = torch.cat([a, res_type], dim=-1)
         motif_embed_1d = self.to_motif_embed_1d(s)
         return motif_embed_1d
 

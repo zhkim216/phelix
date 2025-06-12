@@ -27,8 +27,9 @@ comparisons:
   # - ["eps0.5", "s6_a0_t0.7"]
   # - ["eps0.3", "s6_a0_t0.7"]
   # - ["aicath_pd90", "aicath_pd90_no_primary"]
-  - ["aicath_pd90_noreg_ps500", "aicath_pd90_LCP_ps500"]
-  - ["aicath_pd90_noreg_ps5000", "aicath_pd90_LCP_ps500"]
+  # - ["aicath_pd90_noreg_ps500", "aicath_pd90_LCP_ps500"]
+  # - ["aicath_pd90_noreg_ps5000", "aicath_pd90_LCP_ps500"]
+  - ["chroma", "aicath_pd90_LCP_ps500"]
 
 model_csvs:
   - model_name: "chroma"

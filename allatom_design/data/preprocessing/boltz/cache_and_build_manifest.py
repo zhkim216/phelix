@@ -9,7 +9,7 @@ import hydra
 import numpy as np
 import torch
 import torch.nn.functional as F
-from allatom_design.data.feature.featurizer import BoltzFeaturizer
+from allatom_design.data.feature.ad_featurizer import BoltzFeaturizer
 from allatom_design.data.tokenize.boltz import BoltzTokenizer
 from allatom_design.data.write.mmcif import to_mmcif
 from joblib import Parallel, delayed

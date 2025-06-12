@@ -368,7 +368,7 @@ def pad_sd_feats(feats: dict[str, Tensor],
     return feats
 
 
-def crop_feats(feats: dict[str, Tensor],
+def crop_sd_feats(feats: dict[str, Tensor],
                token_crop_mask: np.ndarray,
                max_tokens: int | None,
                max_atoms: int | None,

@@ -20,7 +20,7 @@ from allatom_design.data.crop.cropper import Cropper
 from allatom_design.data.data import (atom_apply_random_augmentation,
                                       atom_center_random_augmentation,
                                       subset_tokenized)
-from allatom_design.data.feature.featurizer import SimpleBoltzFeaturizer
+from allatom_design.data.feature.ad_featurizer import ADFeaturizer
 from allatom_design.data.feature.motif_featurizer import MotifFeaturizer
 from allatom_design.data.feature.pad import pad_dim, pad_to_max
 from allatom_design.data.motif_selector import MotifSelector
@@ -48,7 +48,7 @@ class BoltzADDataModule(L.LightningDataModule):
         # Filter records
         for phase in ["train", "eval", "eval2"]:
             print(f"Number of {phase} records: {len(records[phase])}")
-            records[phase] = [record for record in records[phase] if all(f.filter(record) for f in cfg.filters)]
+            records[phase] = [record for record in records[phase] if all(f.filter(record) for f in cfg.filters if f is not None)]
             print(f"Number of {phase} records after applying filters: {len(records[phase])}")
 
         # Overfit
@@ -66,10 +66,17 @@ class BoltzADDataModule(L.LightningDataModule):
         for phase in ["train", "eval", "eval2"]:
             print(f"{phase} dataset size: {len(datasets[phase].manifest.records)}")
 
+        # Validate use_auth_as_residx TODO: this should be removed when we make a new augmented dataset
+        if "boltz_v2" in self.pdb_path:
+            assert not cfg.use_auth_as_residx, "use_auth_as_residx should be false for boltz_v2"
+        elif "augmented_af3_monomer_v2_boltz" in self.pdb_path:
+            assert cfg.use_auth_as_residx, "use_auth_as_residx should be true for augmented_af3_monomer_v2_boltz"
+
         dataset_wrapper_fn = partial(ADDataset,
                                      samples_per_epoch=cfg.samples_per_epoch,
                                      max_tokens=cfg.max_tokens,
                                      max_atoms=cfg.max_atoms,
+                                     use_auth_as_residx=cfg.use_auth_as_residx,
                                      **cfg.motif_feats,
                                      se3_augment_cfg=cfg.se3_augment_cfg,
                                      )
@@ -142,6 +149,7 @@ class ADDataset(data.Dataset):
         samples_per_epoch: int,
         max_tokens: int,
         max_atoms: int,
+        use_auth_as_residx: bool,
         phase: str,
         motif_max_tokens: int | None,
         motif_max_atoms: int | None,
@@ -157,6 +165,7 @@ class ADDataset(data.Dataset):
 
         self.max_tokens = max_tokens
         self.max_atoms = max_atoms
+        self.use_auth_as_residx = use_auth_as_residx
         self.phase = phase
         self.se3_augment_cfg = se3_augment_cfg
 
@@ -193,7 +202,7 @@ class ADDataset(data.Dataset):
         record_id, tokenized = self._load_and_tokenize_input(idx)
 
         # Featurize input tokens for diffusion (atom23 protein tokens)
-        example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, self.max_tokens)
+        example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, self.use_auth_as_residx, self.max_tokens)
 
         # Featurize motif (all 0s if unconditional or empty motif)
         if self.requires_motif:
@@ -248,7 +257,7 @@ class ADDataset(data.Dataset):
             "motif_atoms_per_window_queries": self.motif_atoms_per_window_queries,
             "motif_num_bins": self.motif_num_bins,
         }
-        motif_feats = featurize_motif_inputs(tokenized, self.dataset.motif_selector, self.dataset.motif_cropper, self.dataset.motif_featurizer, motif_data_kwargs)
+        motif_feats = featurize_motif_inputs(tokenized, self.use_auth_as_residx, self.dataset.motif_selector, self.dataset.motif_cropper, self.dataset.motif_featurizer, motif_data_kwargs)
 
         return motif_feats
 
@@ -311,7 +320,10 @@ def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
     Load tokenized data for a given record.
     We pre-tokenize the input structure with tokenwise atom feats so we can speed up dataloading.
     """
-    tokenized = np.load(f"{pdb_path}/processed_targets/tokenized/{record.id}.npz", allow_pickle=True)
+    if "boltz_v2" in pdb_path:
+        tokenized = np.load(f"{pdb_path}/processed_targets/ad_tokenized/{record.id}.npz", allow_pickle=True)
+    else:
+        tokenized = np.load(f"{pdb_path}/processed_targets/tokenized/{record.id}.npz", allow_pickle=True)
     structure = tokenized["structure"].item()
     structure = Structure(
         atoms=structure["atoms"],
@@ -325,14 +337,15 @@ def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
     return Tokenized(tokens=tokenized["tokens"], bonds=tokenized["bonds"], structure=structure, msa={}, tokenwise_atom_feats=tokenized["tokenwise_atom_feats"])
 
 
-def add_tokenwise_atom_feats(tokenized: Tokenized, featurizer: SimpleBoltzFeaturizer) -> Tokenized:
+def add_tokenwise_atom_feats(tokenized: Tokenized, featurizer: ADFeaturizer) -> Tokenized:
     """
     Add tokenwise atom features to the tokenized structure.
+
+    This is done during pretokenization, allowing us to avoid featurizing the whole structure to obtain backbone coords during training.
     """
     # Featurize input tokens as atom23 tokens
     feats = featurizer.process(tokenized,
-                               use_auth_seq_id=True  # doesn't matter here, since we don't use residue indices from this featurizer
-                               )
+                               use_auth_as_residx=False)  # doesn't matter here, since we don't use residue indices from this featurizer
     tokenwise_feats = pad_atom_feats_to_tokenwise(feats, max_atoms_per_token=const.max_num_atoms)  # max number of atoms across any token
 
     # Construct tokenwise atom feats
@@ -345,14 +358,12 @@ def add_tokenwise_atom_feats(tokenized: Tokenized, featurizer: SimpleBoltzFeatur
     return tokenized
 
 
-def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int | None) -> dict[str, torch.Tensor]:
+def featurize_diffusion_inputs(tokenized: Tokenized, use_auth_as_residx: bool, max_tokens: int | None) -> dict[str, torch.Tensor]:
     """
-    Featurize protein tokens into diffusion inputs.
+    Featurize standard protein tokens into diffusion inputs.
     """
-    # Get mask for protein tokens
-    protein_token_mask = tokenized.tokens["mol_type"] == const.chain_type_ids["PROTEIN"]
-    known_residue_mask = tokenized.tokens["res_type"] != const.token_ids[const.unk_token["PROTEIN"]]
-    protein_token_mask = protein_token_mask * known_residue_mask
+    # Get mask for standard protein tokens
+    protein_token_mask = (tokenized.tokens["mol_type"] == const.chain_type_ids["PROTEIN"]) & (tokenized.tokens["is_standard"])
 
     # Also only include resolved tokens  # TODO: is this the right place to put this?
     protein_token_mask = protein_token_mask * tokenized.tokens["resolved_mask"]
@@ -362,7 +373,7 @@ def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int | None) -> 
 
     # Construct diffusion features
     diffusion_feats = {}
-    diffusion_feats["residue_index"] = tokenized.tokens["auth_seq_id"]  # we use auth_seq_id since predicted structures won't have SEQRES records
+    diffusion_feats["residue_index"] = tokenized.tokens["auth_seq_id"] if use_auth_as_residx else tokenized.tokens["res_idx"]
     diffusion_feats["seq_mask"] = np.ones_like(diffusion_feats["residue_index"])  # denotes padding
 
     # Featurize with ground truth coords and atom mask (for training or partial diffusion)
@@ -382,11 +393,12 @@ def featurize_diffusion_inputs(tokenized: Tokenized, max_tokens: int | None) -> 
 
 
 def featurize_motif_inputs(tokenized: Tokenized,
-                    motif_selector: MotifSelector,
-                    motif_cropper: Cropper,
-                    motif_featurizer: MotifFeaturizer,
-                    motif_data_kwargs: dict[str, Any],
-                    motif_cond_type_cfg: DictConfig | None = None):
+                           use_auth_as_residx: bool,
+                           motif_selector: MotifSelector,
+                           motif_cropper: Cropper,
+                           motif_featurizer: MotifFeaturizer,
+                           motif_data_kwargs: dict[str, Any],
+                           motif_cond_type_cfg: DictConfig | None = None):
     """
     Featurize a motif given a tokenized structure and motif selector, cropper, and featurizer.
     """
@@ -410,7 +422,7 @@ def featurize_motif_inputs(tokenized: Tokenized,
 
     # Featurize (possibly dummy) motif
     motif_feats = motif_featurizer.process(tokenized_motif,
-                                           use_auth_seq_id=True,  # we use auth_seq_id since predicted structures won't have SEQRES records
+                                           use_auth_as_residx=use_auth_as_residx,
                                            atoms_per_window_queries=motif_data_kwargs["motif_atoms_per_window_queries"],
                                            num_bins=motif_data_kwargs["motif_num_bins"],
                                            max_tokens=motif_data_kwargs["motif_max_tokens"],
@@ -433,7 +445,7 @@ class BoltzADDataset:
     sampler: Sampler
     cropper: Cropper
     tokenizer: Tokenizer
-    featurizer: SimpleBoltzFeaturizer
+    featurizer: ADFeaturizer
     motif_cropper: Cropper
     motif_featurizer: MotifFeaturizer
     motif_selector: MotifSelector
