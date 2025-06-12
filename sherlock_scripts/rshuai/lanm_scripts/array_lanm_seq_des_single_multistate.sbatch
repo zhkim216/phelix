@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=lanm_sweep0
+#SBATCH --job-name=lanm_sweep1
 #SBATCH -p bioe,possu
 #SBATCH --array=0-32%6
 #SBATCH --gpus-per-node=1
@@ -70,13 +70,13 @@ PDB_DIRS=(
 "/scratch/users/rshuai/datasets/lanm/lanm_pd/cc89-epoch206-sampling_partial_diffusion-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0-rewind90/8fnr_A_altloc"
 )
 PDB_DIR=${PDB_DIRS[$SLURM_ARRAY_TASK_ID]}
-FIXED_POS=null
 
-# if [ "$SLURM_ARRAY_TASK_ID" -le 16 ]; then
-#   FIXED_POS="A31-42,A56-67"
-# else
-#   FIXED_POS="A35-46,A60-71"
-# fi
+# FIXED_POS=null
+if [ "$SLURM_ARRAY_TASK_ID" -le 16 ]; then
+  FIXED_POS="A31-42\,A56-67"
+else
+  FIXED_POS="A35-46\,A60-71"
+fi
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
@@ -85,7 +85,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 # Model to use
 CKPT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt
 BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/lanm
-EXP_NAME=sd3_a8_S_lanm_sweep0_idx${SLURM_ARRAY_TASK_ID}
+EXP_NAME=sd3_a8_S_lanm_sweep1_idx${SLURM_ARRAY_TASK_ID}
 OUT_DIR=${BASE_OUT_DIR}/${EXP_NAME}
 
 # Run training script
