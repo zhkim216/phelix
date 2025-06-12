@@ -99,7 +99,7 @@ def main(cfg: DictConfig):
         metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
 
         # Add n_conformers to metrics, since sometimes we are missing some conformers due to processing errors
-        record_ids = [Path(x).stem for x in aux["out_pdbs"]]
+        record_ids = [Path(x).stem.lower() for x in aux["out_pdbs"]]
         n_conformers_df = pd.DataFrame({"record_id": record_ids, "n_conformers": aux["n_conformers"]})
         metrics_df = pd.merge(metrics_df, n_conformers_df, on="record_id", how="left")
 
