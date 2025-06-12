@@ -220,6 +220,7 @@ def process_motif_token_features(
         "residue_index": residue_index,
         "entity_id": entity_id,
         "sym_id": sym_id,
+        "asym_id": asym_id,
         "mol_type": mol_type,
         "res_type": res_type,
         "disto_center": disto_center,
