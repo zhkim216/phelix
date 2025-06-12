@@ -55,7 +55,7 @@ def main(cfg: DictConfig):
         pred_out_dir = f"{out_dir}/preds"  # directory for structure predictions
         Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
-    
+
     conformer_pdb_keys = [Path(struct_file).stem for struct_file in conformer_struct_files[0][1]]
     pos_constraint_df = pd.DataFrame({
         "pdb_key": conformer_pdb_keys,
@@ -80,10 +80,14 @@ def main(cfg: DictConfig):
         # Save metrics as CSV
         metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
 
-        # Add n_conformers to metrics, since sometimes we are missing some conformers due to processing errors
+        # Add additional metrics
         record_ids = [Path(x).stem.lower() for x in aux["out_pdbs"]]
-        n_conformers_df = pd.DataFrame({"record_id": record_ids, "n_conformers": aux["n_conformers"]})
-        metrics_df = pd.merge(metrics_df, n_conformers_df, on="record_id", how="left")
+        aux_df = pd.DataFrame({
+            "record_id": record_ids,
+            "n_conformers": aux["n_conformers"], # add n_conformers to metrics, since sometimes we are missing some conformers due to processing errors
+            "U": aux["U"] # add energies to metrics
+        })
+        metrics_df = pd.merge(metrics_df, aux_df, on="record_id", how="left")
 
         metrics_df.to_csv(f"{out_dir}/self_consistency_metrics.csv", index=False)
 

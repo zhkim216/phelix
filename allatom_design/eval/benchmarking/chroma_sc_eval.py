@@ -91,7 +91,7 @@ def main(cfg: DictConfig):
             threaded_pdb = f"{threaded_pdb_dir}/{record_id}_sample{bi}.cif"
             write_sd_feats_to_mmcif(example, input_structure, [threaded_pdb])
             threaded_pdbs.append(threaded_pdb)
-            
+
             # Get energies
             if "U" in chroma_features:
                 U.append(chroma_features["U"][bi])
@@ -108,11 +108,11 @@ def main(cfg: DictConfig):
         out_dir=log_dir)
 
     metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
-    
+
     # add energies
     energies_df = pd.DataFrame({"record_id": [Path(pdb).stem for pdb in threaded_pdbs], "U": U})
     metrics_df = pd.merge(metrics_df, energies_df, on="record_id", how="left")
-    
+
     # Save metrics as CSV
     metrics_df.to_csv(f"{log_dir}/sc_metrics.csv", index=False)
 
