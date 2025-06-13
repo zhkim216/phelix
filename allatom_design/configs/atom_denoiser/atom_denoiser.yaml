@@ -75,6 +75,12 @@ data:
       min_residues: 32
       max_residues: 2048
 
+  boltz_val_filters:
+    - ${data.boltz_filters.0}
+    - ${data.boltz_filters.3}
+    - ${data.boltz_filters.4}
+
+
   sampler:
     _target_: allatom_design.data.sample.cluster.ClusterSampler
   cropper:

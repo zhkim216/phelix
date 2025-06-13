@@ -45,13 +45,17 @@ class BoltzADDataModule(L.LightningDataModule):
         for record in manifest.records:
             records[record.phase].append(record)
 
-        # Choose filter set
-        filters = cfg.augmented_filters if "augmented" in self.pdb_path else cfg.boltz_filters
+        # Choose filter sets
+        filter_map = {
+            "train": cfg.augmented_filters if "augmented" in self.pdb_path else cfg.boltz_filters,
+            "eval": cfg.augmented_filters if "augmented" in self.pdb_path else cfg.boltz_val_filters,
+            "eval2": cfg.augmented_filters if "augmented" in self.pdb_path else cfg.boltz_val_filters,
+        }
 
         # Filter records
         for phase in ["train", "eval", "eval2"]:
             print(f"Number of {phase} records: {len(records[phase])}")
-            records[phase] = [record for record in records[phase] if all(f.filter(record) for f in filters if f is not None)]
+            records[phase] = [record for record in records[phase] if all(f.filter(record) for f in filter_map[phase] if f is not None)]
             print(f"Number of {phase} records after applying filters: {len(records[phase])}")
 
         # Overfit
