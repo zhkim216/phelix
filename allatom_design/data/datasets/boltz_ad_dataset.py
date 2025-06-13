@@ -45,10 +45,13 @@ class BoltzADDataModule(L.LightningDataModule):
         for record in manifest.records:
             records[record.phase].append(record)
 
+        # Choose filter set
+        filters = cfg.augmented_filters if "augmented" in self.pdb_path else cfg.boltz_filters
+
         # Filter records
         for phase in ["train", "eval", "eval2"]:
             print(f"Number of {phase} records: {len(records[phase])}")
-            records[phase] = [record for record in records[phase] if all(f.filter(record) for f in cfg.filters if f is not None)]
+            records[phase] = [record for record in records[phase] if all(f.filter(record) for f in filters if f is not None)]
             print(f"Number of {phase} records after applying filters: {len(records[phase])}")
 
         # Overfit
@@ -212,8 +215,11 @@ class ADDataset(data.Dataset):
                 print(f"Featurizer failed to featurize motif tokens on {record_id} with error {e}. Skipping.")
                 return self.__getitem__(idx)
 
+        # Apply random augmentation
+        example = self._apply_se3_augmentation(example)
+
         # # DEBUG: visualize motifs
-        # out_dir = f"out_dir/viz/motifs"
+        # out_dir = f"out_dir/viz_centered/motifs"
         # Path(out_dir).mkdir(parents=True, exist_ok=True)
         # out_file = f"{out_dir}/{record_id}_motif.cif"
         # if example["motif_inputs"]["motif_atom_mask"].sum() > 0:
@@ -223,7 +229,7 @@ class ADDataset(data.Dataset):
         #         print(f"Failed to write motif features to {out_file} with error {e}. Skipping.")
 
         # # DEBUG: visualize diffusion inputs
-        # out_dir = f"out_dir/viz/diffusion_inputs"
+        # out_dir = f"out_dir/viz_centered/diffusion_inputs"
         # Path(out_dir).mkdir(parents=True, exist_ok=True)
         # out_file = f"{out_dir}/{record_id}_diffusion_inputs.cif"
         # try:
@@ -231,8 +237,6 @@ class ADDataset(data.Dataset):
         # except Exception as e:
         #     print(f"Failed to write diffusion inputs to {out_file} with error {e}. Skipping.")
 
-        # Apply random augmentation
-        example = self._apply_se3_augmentation(example)
 
         example["pdb_key"] = record_id
         return example
