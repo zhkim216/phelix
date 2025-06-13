@@ -19,7 +19,7 @@ from allatom_design.data.types import (Connection, Input, Structure, Tokenized,
                                        TokenwiseAtomFeats)
 
 
-@hydra.main(config_path="../../../configs/data/preprocessing/augmented_af3_monomer_v2_boltz", config_name="pretokenize_inputs", version_base="1.3.2")
+@hydra.main(config_path="../../../configs/data/preprocessing/boltz_v2", config_name="ad_pretokenize_inputs", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Given processed structures, tokenize them and save to disk for faster loading.
@@ -39,14 +39,14 @@ def main(cfg: DictConfig):
     use_parallel = cfg.num_workers > 1
     if use_parallel:
         with Parallel(n_jobs=cfg.num_workers) as parallel_pool:
-            jobs = [delayed(tokenize_structure_to_disk)(processed_structure_file, out_dir, tokenizer, featurizer) for processed_structure_file in processed_structure_files]
+            jobs = [delayed(tokenize_structure_to_disk)(processed_structure_file, out_dir, tokenizer, featurizer, cfg.max_residues_to_process) for processed_structure_file in processed_structure_files]
             list(parallel_pool(tqdm(jobs, total=len(jobs), desc="Tokenizing structures")))
     else:
         for processed_structure_file in tqdm(processed_structure_files, desc="Tokenizing structures"):
             tokenize_structure_to_disk(processed_structure_file, out_dir, tokenizer, featurizer)
 
 
-def tokenize_structure_to_disk(processed_structure_file: str, out_dir: str, tokenizer: Tokenizer, featurizer: ADFeaturizer) -> None:
+def tokenize_structure_to_disk(processed_structure_file: str, out_dir: str, tokenizer: Tokenizer, featurizer: ADFeaturizer, max_residues_to_process: int | None) -> None:
     """
     Load a processed structure and tokenize it.
     """
@@ -57,6 +57,11 @@ def tokenize_structure_to_disk(processed_structure_file: str, out_dir: str, toke
 
     # Get structure
     input_data = load_input(processed_structure_file)
+
+    if max_residues_to_process is not None and len(input_data.structure.residues) > max_residues_to_process:
+        print(f"Skipping structure {processed_structure_file} because it has {len(input_data.structure.residues)} residues, which is greater than max_residues_to_process={max_residues_to_process}.")
+        return
+
 
     # Tokenize structure
     try:
