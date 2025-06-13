@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=spd0_a0
+#SBATCH --job-name=test
 #SBATCH -p gpu_batch
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
