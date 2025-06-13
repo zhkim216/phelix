@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange, repeat
 from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
@@ -24,9 +25,10 @@ from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.motif_embedders
     MotifEmbedder
 from allatom_design.model.atom_denoiser.denoisers.denoiser_utils.timestep_embedders import \
     TimestepEmbedder
+from allatom_design.model.atom_denoiser.denoisers.pos_embed.af3_relpos import \
+    RelativePositionEncoder
 from allatom_design.model.atom_denoiser.denoisers.pos_embed.sin_cos import \
     posemb_sincos_1d
-from allatom_design.model.atom_denoiser.denoisers.pos_embed.af3_relpos import RelativePositionEncoder
 from openfold.model.primitives import Linear
 
 
@@ -47,6 +49,11 @@ class DiTDenoiser(nn.Module):
         self.motif_embedder = None
         if self.task == "scaffold":
             self.motif_embedder = MotifEmbedder(**cfg.motif_embedder)
+
+        # Set up pairwise positional encodings
+        self.rel_pos = None
+        if cfg.dit.pos_encoding == "af3":
+            self.rel_pos = RelativePositionEncoder(cfg.dit.num_heads)
 
         # Set up DiT
         self.interpolant = get_interpolant(cfg.interpolant, sigma_data)
@@ -74,6 +81,9 @@ class DiTDenoiser(nn.Module):
 
         if self.motif_embedder is not None:
             motif_inputs["motif_embed_1d"] = self.motif_embedder(motif_inputs)
+
+        if self.rel_pos is not None:
+            diffusion_inputs["attn_bias"], diffusion_inputs["attn_mask"] = self.rel_pos_pair_bias(diffusion_inputs, motif_inputs)
 
         x1_pred, bb_diffusion_aux = self.backbone_diffusion(
             diffusion_inputs=diffusion_inputs,
@@ -249,6 +259,24 @@ class DiTDenoiser(nn.Module):
         return x1_bb, diffusion_aux
 
 
+    def rel_pos_pair_bias(self, diffusion_inputs: dict[str, TensorType["b ..."]], motif_inputs: dict[str, TensorType["b ..."]] | None) -> TensorType["b h n n"]:
+        """
+        Compute the pairwise relative position bias for the attention matrix.
+        """
+        diffusion_inputs = diffusion_inputs.copy()  # make a shallow copy to avoid modifying the original dict when adding motif tokens
+
+        # Handle motif indices
+        if self.dit.use_motif_conditioning:
+            _, diffusion_inputs, _ = self.dit._add_motif_tokens(None, diffusion_inputs, motif_inputs)
+
+        # Create pair bias outside of diffusion loop for computational efficiency
+        attn_bias = self.rel_pos(diffusion_inputs).permute(0, 3, 1, 2)  # [B, H, N, N]
+
+        # Create attention mask here so that it has the same history as pair bias for torch.compile
+        attn_mask = repeat(diffusion_inputs["seq_mask"][:, :, None] * diffusion_inputs["seq_mask"][:, None, :], "b i j -> b h i j", h=self.cfg.dit.num_heads)
+        return attn_bias, attn_mask
+
+
 class DiT(nn.Module):
     def __init__(self, cfg: DictConfig, interpolant: ADInterpolant):
         """
@@ -286,8 +314,6 @@ class DiT(nn.Module):
         assert self.pos_encoding in ["absolute", "absolute_residx", "rotary", "rotary_residx", "af3"]
         if self.pos_encoding in ["absolute", "absolute_residx"]:
             self.pos_embed = posemb_sincos_1d
-        elif self.pos_encoding == "af3":
-            self.rel_pos = RelativePositionEncoder(cfg.num_heads)
 
         self.rotary_emb = None
         if self.pos_encoding in ["rotary", "rotary_residx"]:
@@ -370,7 +396,7 @@ class DiT(nn.Module):
             - "sym_id": TensorType["b n", int]
             - "entity_id": TensorType["b n", int]
         """
-        diffusion_inputs = copy.deepcopy(diffusion_inputs)  # make a copy to avoid modifying the original dict when e.g. adding registers
+        diffusion_inputs = diffusion_inputs.copy()  # make a shallow copy to avoid modifying the original dict when e.g. adding registers
 
         aux_preds = {}
 
@@ -411,15 +437,14 @@ class DiT(nn.Module):
         elif self.pos_encoding == "absolute_residx":
             x = x + self.pos_embed(x, residue_index=diffusion_inputs["residue_index"].float())
         elif self.pos_encoding == "af3":
-            # TODO: this can technically be moved out of the diffusion steps for computational efficiency
-            attn_bias = self.rel_pos(diffusion_inputs).permute(0, 3, 1, 2)  # [B, H, N, N]
+            attn_bias = diffusion_inputs["attn_bias"]  # precomputed before DiT
 
         # Conditioning
         c = self.t_embedder(t)
         c = c.unsqueeze(1).expand((-1, x.shape[1], -1))  # expand to sequence length
 
         # Blocks
-        attn_mask = repeat(diffusion_inputs["seq_mask"][:, :, None] * diffusion_inputs["seq_mask"][:, None, :], "b i j -> b h i j", h=self.cfg.num_heads)
+        attn_mask = diffusion_inputs.get("attn_mask", repeat(diffusion_inputs["seq_mask"][:, :, None] * diffusion_inputs["seq_mask"][:, None, :], "b i j -> b h i j", h=self.cfg.num_heads))
         for block in self.blocks:
             x = block(x, c, residx=diffusion_inputs["residue_index"].float(),
                       attn_mask=attn_mask, attn_bias=attn_bias,
@@ -445,16 +470,18 @@ class DiT(nn.Module):
 
 
     def _add_motif_tokens(self,
-                          x: TensorType["b n h"],
+                          x: TensorType["b n h"] | None,
                           diffusion_inputs: dict[str, TensorType["b ..."]],
                           motif_inputs: dict[str, TensorType["b ..."]]) -> Tuple[TensorType["b n+m h"], dict[str, TensorType["b ..."]], TensorType["b n+m"]]:
         """
         Append motif conditioning tokens to the input.
         """
-        token_modality_idxs = torch.tensor([0, diffusion_inputs["seq_mask"].shape[1]], device=x.device)  # starting index for backbone and motif tokens, used only for mmdit
+        device = diffusion_inputs["seq_mask"].device
+        token_modality_idxs = torch.tensor([0, diffusion_inputs["seq_mask"].shape[1]], device=device)  # starting index for backbone and motif tokens, used only for mmdit
 
         # Concatenate embedded motif tokens to input
-        x = torch.cat([x, motif_inputs["motif_embed_1d"]], dim=1)
+        if x is not None:
+            x = torch.cat([x, motif_inputs["motif_embed_1d"]], dim=1)
 
         # Update diffusion_inputs
         diffusion_inputs["seq_mask"] = torch.cat([diffusion_inputs["seq_mask"], motif_inputs["token_pad_mask"]], dim=1)
@@ -508,6 +535,10 @@ class DiT(nn.Module):
         diffusion_inputs["token_index"] = torch.cat([diffusion_inputs["token_index"].new_full((B, R), -1), diffusion_inputs["token_index"]], dim=1)  # [B, R+N], token index of registers is -1
         diffusion_inputs["sym_id"] = torch.cat([diffusion_inputs["sym_id"].new_full((B, R), -1), diffusion_inputs["sym_id"]], dim=1)  # [B, R+N], sym id of registers is -1
         diffusion_inputs["entity_id"] = torch.cat([diffusion_inputs["entity_id"].new_full((B, R), -1), diffusion_inputs["entity_id"]], dim=1)  # [B, R+N], entity id of registers is -1
+
+        if "attn_bias" in diffusion_inputs:
+            diffusion_inputs["attn_bias"] = F.pad(diffusion_inputs["attn_bias"], (R, 0, R, 0), mode="constant", value=0)  # [B, H, R+N, R+N], pair bias of registers is 0
+            diffusion_inputs["attn_mask"] = F.pad(diffusion_inputs["attn_mask"], (R, 0, R, 0), mode="constant", value=1)  # [B, H, R+N, R+N], pair mask of registers is 1
 
         return x, diffusion_inputs
 

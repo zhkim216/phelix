@@ -621,7 +621,7 @@ def atom_center_random_augmentation(X: TensorType["b n_atoms 3", float],
         M = M.unsqueeze(0)
 
     # Center coords
-    X_mean = (X * M[..., None]).sum(dim=1, keepdim=True) / M.sum(dim=1, keepdim=True)  # [b 1 3]
+    X_mean = (X * M[..., None]).sum(dim=1, keepdim=True) / M.sum(dim=1, keepdim=True).clamp(min=1e-6)  # [b 1 3]
     X = X - X_mean
 
     if not apply_random_augmentation:
