@@ -31,7 +31,8 @@ BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # --- Dynamic Inputs Config from Manifest ---
 # Define the manifest file containing all job configurations
-MANIFEST_FILE="/scratch/users/rshuai/datasets/lanm/lanm_pd_scaffolded/lanm_scaffolded_fixed_pos_manifest.txt"
+DATASET_DIR="/scratch/users/rshuai/datasets/lanm/lanm_pd_scaffolded"
+MANIFEST_FILE="${DATASET_DIR}/lanm_scaffolded_fixed_pos_manifest.txt"
 
 # Read the line corresponding to the Slurm array task ID
 # Since the array is 0-indexed, we need to read the (ID + 1)-th line
@@ -39,7 +40,7 @@ JOB_CONFIG_LINE=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" ${MANIFEST_FILE})
 
 # Parse the line to get the PDB directory and the fixed positions
 PDB_DIR=$(echo "${JOB_CONFIG_LINE}" | cut -f1)
-PDB_DIR="/scratch/users/rshuai/datasets/lanm/lanm_pd_scaffolded/${PDB_DIR}"
+PDB_DIR="${DATASET_DIR}/${PDB_DIR}"
 FIXED_POS=$(echo "${JOB_CONFIG_LINE}" | cut -f2)
 # --- End Dynamic Inputs ---
 
