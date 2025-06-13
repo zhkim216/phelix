@@ -73,9 +73,9 @@ PDB_DIR=${PDB_DIRS[$SLURM_ARRAY_TASK_ID]}
 
 # FIXED_POS=null
 if [ "$SLURM_ARRAY_TASK_ID" -le 16 ]; then
-  FIXED_POS="A31-42\,A56-67"
+  FIXED_POS="A31-42,A56-67"
 else
-  FIXED_POS="A35-46\,A60-71"
+  FIXED_POS="A35-46,A60-71"
 fi
 
 # Set cache directories
@@ -93,7 +93,7 @@ cd ${BASE_DIR}
 python3 allatom_design/eval/sampling/seq_des_single_multistate.py \
     ckpt_path=${CKPT_PATH} \
     pdb_dir=${PDB_DIR} \
-    fixed_pos_seq=${FIXED_POS} \
+    fixed_pos_seq=\"${FIXED_POS}\" \
     out_dir=${OUT_DIR} \
     struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
     struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
