@@ -12,6 +12,8 @@ training_noise_cfg:
   lognormal:
     psigma_mean: -0.5
     psigma_std: 1.5
+    t_min: null
+    t_max: null
   uniform_sigma:
   uniform_t:
     t_min: 0.0

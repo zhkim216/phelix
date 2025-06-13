@@ -29,7 +29,7 @@ from allatom_design.data.tokenize.tokenizer import Tokenizer
 from allatom_design.data.types import (Connection, Manifest, Record, Structure,
                                        Tokenized, TokenwiseAtomFeats)
 from allatom_design.data.data import pad_atom_feats_to_tokenwise
-
+from allatom_design.data.write.mmcif import write_motif_feats_to_mmcif, write_ad_feats_to_mmcif
 
 class BoltzADDataModule(L.LightningDataModule):
     def __init__(self, cfg: DictConfig):
@@ -212,6 +212,25 @@ class ADDataset(data.Dataset):
                 print(f"Featurizer failed to featurize motif tokens on {record_id} with error {e}. Skipping.")
                 return self.__getitem__(idx)
 
+        # # DEBUG: visualize motifs
+        # out_dir = f"out_dir/viz/motifs"
+        # Path(out_dir).mkdir(parents=True, exist_ok=True)
+        # out_file = f"{out_dir}/{record_id}_motif.cif"
+        # if example["motif_inputs"]["motif_atom_mask"].sum() > 0:
+        #     try:
+        #         write_motif_feats_to_mmcif(example["motif_inputs"], [tokenized.structure], [out_file], keep_auth=True)
+        #     except Exception as e:
+        #         print(f"Failed to write motif features to {out_file} with error {e}. Skipping.")
+
+        # # DEBUG: visualize diffusion inputs
+        # out_dir = f"out_dir/viz/diffusion_inputs"
+        # Path(out_dir).mkdir(parents=True, exist_ok=True)
+        # out_file = f"{out_dir}/{record_id}_diffusion_inputs.cif"
+        # try:
+        #     write_ad_feats_to_mmcif(example["diffusion_inputs"], [out_file])
+        # except Exception as e:
+        #     print(f"Failed to write diffusion inputs to {out_file} with error {e}. Skipping.")
+
         # Apply random augmentation
         example = self._apply_se3_augmentation(example)
 
@@ -221,7 +240,7 @@ class ADDataset(data.Dataset):
 
     def _apply_se3_augmentation(self, example: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         N, A, _ = example["diffusion_inputs"]["x"].shape
-        if self.requires_motif and example["motif_inputs"]["token_pad_mask"].sum() > 0:
+        if self.requires_motif and example["motif_inputs"]["motif_atom_mask"].sum() > 0:
             # Conditional: center on motif atoms
             x_motif, transforms = atom_center_random_augmentation(example["motif_inputs"]["motif_coords"],
                                                                   example["motif_inputs"]["motif_atom_mask"],
@@ -379,6 +398,11 @@ def featurize_diffusion_inputs(tokenized: Tokenized, use_auth_as_residx: bool, m
     diffusion_feats["token_index"] = tokenized.tokens["token_idx"]
     diffusion_feats["sym_id"] = tokenized.tokens["sym_id"]
     diffusion_feats["entity_id"] = tokenized.tokens["entity_id"]
+
+    # optional features, for saving to mmcif
+    diffusion_feats["label_seq_id"] = tokenized.tokens["res_idx"]
+    diffusion_feats["auth_seq_id"] = tokenized.tokens["auth_seq_id"]
+    diffusion_feats["pdb_icode"] = tokenized.tokens["pdb_icode"]
 
     # Featurize with ground truth coords and atom mask (for training or partial diffusion)
     diffusion_feats["x"] = tokenized.tokenwise_atom_feats["coords"]

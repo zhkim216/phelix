@@ -43,7 +43,7 @@ def main(cfg: DictConfig):
             list(parallel_pool(tqdm(jobs, total=len(jobs), desc="Tokenizing structures")))
     else:
         for processed_structure_file in tqdm(processed_structure_files, desc="Tokenizing structures"):
-            tokenize_structure_to_disk(processed_structure_file, out_dir, tokenizer, featurizer)
+            tokenize_structure_to_disk(processed_structure_file, out_dir, tokenizer, featurizer, cfg.max_residues_to_process)
 
 
 def tokenize_structure_to_disk(processed_structure_file: str, out_dir: str, tokenizer: Tokenizer, featurizer: ADFeaturizer, max_residues_to_process: int | None) -> None:

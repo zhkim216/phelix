@@ -2,11 +2,13 @@ import copy
 import io
 import warnings
 from collections.abc import Iterator
+from functools import partial
 from typing import Optional
 
 import ihm
 import modelcif
 import torch
+import torch.nn.functional as F
 from modelcif import Assembly, AsymUnit, Entity, System, dumper
 from modelcif.model import AbInitioModel, Atom, ModelGroup
 from rdkit import Chem
@@ -230,7 +232,6 @@ def to_mmcif(structure: Structure, plddts: Optional[Tensor] = None,
     return fh.getvalue()
 
 
-
 def write_structure_to_mmcif(structure: Structure,
                              filename: str,
                              plddts: TensorType["n"] | None = None):
@@ -256,7 +257,7 @@ def write_batched_structures_to_mmcif(structures: list[Structure],
 
 
 def write_ad_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
-                         filenames: list[str]) -> None:
+                            filenames: list[str]) -> None:
     """
     Convert a batched dictionary of features to a list of files.
     TODO: support multiple chains properly
@@ -396,7 +397,7 @@ def write_ad_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
 
 
 def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
-                            input_structs: list[Structure],  # needed for ligand sequence info
+                            input_structs: list[Structure] | None,  # needed for ligand sequence info
                             filenames: list[str],
                             keep_auth: bool = False,
                             ) -> None:
@@ -404,6 +405,7 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
     Convert a batched dictionary of sequence design features to a list of files.
 
     If keep_auth is True, we save the auth_seq_id by mapping label_seq_id to auth_seq_id.
+    Otherwise, I think we expect label_seq_id to be contiguous, starting from 0.
     """
     periodic_table = Chem.GetPeriodicTable()  # for element mapping
 
@@ -423,7 +425,11 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
             feats_list.append(feats_i)
     else:
         # Already unbatched
+        feats = crop_sd_feats(feats, feats["token_pad_mask"].bool(), max_tokens=None, max_atoms=None)
         feats_list.append(feats)
+
+    if input_structs is None:
+        input_structs = [None] * len(feats_list)
 
     for i, (feats_i, input_struct_i) in enumerate(zip(feats_list, input_structs)):
         system = System()
@@ -441,9 +447,6 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
             entity_to_chains.setdefault(entity_id, []).append(chain_id)
             entity_to_moltype[entity_id] = feats_i["mol_type"][chain_mask].unique().tolist()[0]
 
-        # Construct chain map (map asym_id to index of chain in the input structure)
-        chain_map = {c["asym_id"]: i for i, c in enumerate(input_struct_i.chains)}
-
         # Map entities to sequences
         sequences = {}
         for entity_id in entity_to_chains:
@@ -459,7 +462,8 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                 sequence = [const.tokens[res_type[ri]] for ri in range(len(res_type))]
                 sequences[entity_id] = sequence
             elif mol_type == const.chain_type_ids["NONPOLYMER"]:
-                # Extract sequence from the input structure, since these chains are never redesigned
+                # construct chain map (map asym_id to index of chain in the input structure)
+                chain_map = {c["asym_id"]: i for i, c in enumerate(input_struct_i.chains)}
                 chain_i = input_struct_i.chains[chain_map[chain_id]]
                 res_start = chain_i["res_idx"]
                 res_end = chain_i["res_idx"] + chain_i["res_num"]
@@ -518,8 +522,9 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                 pdb_icodes = chain_feats_i["pdb_icode"][chain_feats_i["token_pad_mask"].bool()].tolist()
                 paired = [(seq_id, chr(icode + 32).strip()) for seq_id, icode in zip(auth_seq_ids, pdb_icodes)]  # pair up auth_seq_id and pdb_icode
                 label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()]
-                label_seq_ids = (label_seq_ids - label_seq_ids.min() + 1).tolist()  # renumber label seq id to 1-indexed
-                auth_seq_id_map = {label_seq_id + 1: pair for label_seq_id, pair in zip(label_seq_ids, paired)}
+                _, label_seq_ids = torch.unique(label_seq_ids, return_inverse=True)  # make label_seq_ids contiguous, starting from 0
+                label_seq_ids = (label_seq_ids + 1).tolist()  # renumber label seq id to 1-indexed
+                auth_seq_id_map = {label_seq_id: pair for label_seq_id, pair in zip(label_seq_ids, paired)}
             else:
                 auth_seq_id_map = 0
 
@@ -543,6 +548,8 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
 
                     # Get label_seq_id for each atom
                     label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()]
+                    if keep_auth:
+                        _, label_seq_ids = torch.unique(label_seq_ids, return_inverse=True)  # make label_seq_ids contiguous, starting from 0
                     label_seq_ids = (label_seq_ids - label_seq_ids.min() + 1)  # renumber label seq id to 1-indexed
                     label_seq_id_atomwise = (chain_feats_i["atom_to_token"].float() @ label_seq_ids.float()).long().tolist()
 
@@ -585,3 +592,46 @@ def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
         mmcif_str = fh.getvalue()
         with open(filenames[i], "w") as f:
             f.write(mmcif_str)
+
+
+def write_motif_feats_to_mmcif(feats: dict[str, TensorType["n ..."]], *args, **kwargs):
+    """
+    Write motif features to a mmCIF file.
+    Wrapper around write_sd_feats_to_mmcif that handles the renaming of motif-specific keys.
+    """
+    feats = copy.deepcopy(feats)
+    feats["coords"] = feats.pop("motif_coords")
+    feats["atom_resolved_mask"] = feats.pop("motif_atom_mask")
+    write_sd_feats_to_mmcif(feats, *args, **kwargs)
+
+
+def write_ad_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]], filenames: list[str]) -> None:
+    """
+    Write atom denoiser features to a list of files.
+    """
+    # First, create dummy features to resemble sd features
+    N_tokens = feats["seq_mask"].shape[0]
+    N_atoms = N_tokens * 4  # 4 backbone atoms
+    ad_feats = {}
+    ad_feats["res_type"] = F.one_hot(torch.full_like(feats["residue_index"], const.token_ids["GLY"], dtype=torch.long), num_classes=len(const.tokens))
+    ad_feats["coords"] = feats["x"][..., const.prot_bb_atom14_idxs, :].reshape(N_atoms, 3)  # N, 4, 3
+    ad_feats["atom_resolved_mask"] = feats["atom_mask"][..., const.prot_bb_atom14_idxs].reshape(N_atoms)
+    ad_feats["token_pad_mask"] = feats["seq_mask"]
+    ad_feats["atom_pad_mask"] = feats["seq_mask"].repeat_interleave(4)
+    ad_feats["label_seq_id"] = feats.get("label_seq_id", feats["residue_index"])
+    ad_feats["auth_seq_id"] = feats.get("auth_seq_id", feats["residue_index"])
+    ad_feats["pdb_icode"] = feats.get("pdb_icode", torch.zeros_like(feats["residue_index"]))
+    ad_feats["asym_id"] = feats["chain_index"]
+    ad_feats["entity_id"] = feats["entity_id"]
+    ad_feats["mol_type"] = torch.full_like(feats["residue_index"], const.chain_type_ids["PROTEIN"])
+    ad_feats["atom_to_token"] = F.one_hot(torch.arange(N_tokens).repeat_interleave(4), num_classes=N_tokens)
+
+    ref_element = torch.tensor([7, 6, 6, 8], device=feats["seq_mask"].device).repeat(N_tokens)  # N, Ca, C, O
+    ad_feats["ref_element"] = F.one_hot(ref_element, num_classes=ref_element.max() + 1)
+    ref_atom_name_chars = torch.tensor([[ord("N") - 32, 0, 0, 0],
+                                        [ord("C") - 32, ord("A") - 32, 0, 0],
+                                        [ord("C") - 32, 0, 0, 0],
+                                        [ord("O") - 32, 0, 0, 0]], device=feats["seq_mask"].device).repeat(N_tokens, 1)
+    ad_feats["ref_atom_name_chars"] = F.one_hot(ref_atom_name_chars, num_classes=ref_atom_name_chars.max() + 1)
+
+    write_sd_feats_to_mmcif(ad_feats, input_structs=None, filenames=filenames, keep_auth=True)

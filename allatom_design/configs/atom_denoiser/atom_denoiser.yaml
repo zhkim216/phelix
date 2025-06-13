@@ -53,6 +53,12 @@ data:
       max_rel_rog: 1.4
     - _target_: allatom_design.data.filter.dynamic.self_consistency.SelfConsistencyFilter
       max_scrmsd: 2.0
+    - _target_: allatom_design.data.filter.dynamic.chain_type_size.ChainTypeSizeFilter
+      chain_type: "PROTEIN"
+      min_chains: 1
+      max_chains: null
+      min_residues: null
+      max_residues: null
 
   sampler:
     _target_: allatom_design.data.sample.cluster.ClusterSampler

@@ -16,7 +16,7 @@ dit:
   task: ${model.task}
   num_atoms_in: 4
   use_self_conditioning: ${denoiser.use_self_conditioning}
-  num_registers: 0
+  num_registers: 10
   inf: ${model.inf}
 
   # Positional encoding

@@ -37,6 +37,10 @@ class EDM(ADInterpolant):
         # Get t_min and t_max from training_noise_cfg
         self.t_min = self.training_noise_cfg.get("t_min", None)
         self.t_max = self.training_noise_cfg.get("t_max", None)
+        if self.t_min is None:
+            self.t_min = 0.0
+        if self.t_max is None:
+            self.t_max = 1.0
 
 
     @torch.compiler.disable
