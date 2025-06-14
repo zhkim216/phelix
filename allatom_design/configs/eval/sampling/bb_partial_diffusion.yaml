@@ -14,6 +14,7 @@ ckpt_path: /media/scratch/huang_lab/allatom_design/allatom_design/u1_a7/checkpoi
 num_workers: 8
 seed: 0
 n_samples_per_pdb: 16
+save_as_ensemble: true
 
 # PDB file inputs
 input_cfg:

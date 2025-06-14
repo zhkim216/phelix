@@ -31,8 +31,9 @@ from allatom_design.data.pdb_utils import write_batched_to_pdb
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     load_input
 from allatom_design.data.types import Structure, Tokenized
-from allatom_design.data.write.mmcif import (write_ad_feats_to_mmcif,
-                                             write_batched_structures_to_mmcif)
+from allatom_design.data.write.mmcif import (write_diffusion_inputs_to_ensemble,
+                                             write_batched_structures_to_mmcif,
+                                             write_diffusion_inputs_to_mmcif)
 from allatom_design.eval.eval_utils import eval_metrics, sampling_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
@@ -136,6 +137,7 @@ def run_bb_partial_diffusion(model: AtomDenoiser,
                              device: str,
                              struct_file_paths: list[str],
                              n_samples_per_pdb: int,
+                             save_as_ensemble: bool,
                              out_dir: str) -> list[str]:
     """
     Run partial diffusion on a set of structures.
@@ -176,10 +178,14 @@ def run_bb_partial_diffusion(model: AtomDenoiser,
             # Save samples
             out_feats = copy.deepcopy(batch["diffusion_inputs"])
             out_feats["x"][..., const.prot_bb_atom14_idxs, :] = x_bb_denoised
-
-            filenames = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{(i+j) % n_samples_per_pdb}.cif" for j in range(B)]
-            write_ad_feats_to_mmcif(to(out_feats, "cpu"), filenames)
-            sampled_pdb_paths.extend(filenames)
+            if save_as_ensemble:
+                filename = f"{sample_out_dir}/sample_{batch['pdb_key'][0]}.cif"
+                write_diffusion_inputs_to_ensemble(to(out_feats, "cpu"), filename)
+                sampled_pdb_paths.append(filename)
+            else:
+                filenames = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{(i+j) % n_samples_per_pdb}.cif" for j in range(B)]
+                write_diffusion_inputs_to_mmcif(to(out_feats, "cpu"), filenames)
+                sampled_pdb_paths.extend(filenames)
 
             pbar.update(B)
         pbar.close()
@@ -506,7 +512,7 @@ def run_motif_cond_type_sampling(model: AtomDenoiser,
                 motif_feats_out = batch["motif_inputs"]
                 motif_feats_out["coords"] = batch["motif_inputs"]["motif_coords"]
                 batch_motif_paths = [f"{motif_out_dir}/motif_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]
-                write_ad_feats_to_mmcif(motif_feats_out, filenames=batch_motif_paths)
+                write_diffusion_inputs_to_mmcif(motif_feats_out, filenames=batch_motif_paths)
 
             # Save centered examples from which motifs were drawn
             batch_centered_paths = [f"{centered_gt_out_dir}/centered_{batch['pdb_key'][j]}_{i + j}.cif" for j in range(B)]
