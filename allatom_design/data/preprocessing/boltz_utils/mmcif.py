@@ -1006,6 +1006,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
 
         # Include auth_seq_id, using the first residue's auth_seq_id for the chain
         auth_seq_id, icode = parse_auth_seq_id(chain.residues[0].orig_idx)
+        auth_asym_name = parse_auth_asym_name(entities[chain.name].name)
 
         # Find all copies of this chain in the assembly
         entity_id = entity_ids[chain.name]
@@ -1023,7 +1024,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                 res_num,
                 auth_seq_id,
                 icode,
-                entities[chain.name].name  # auth_asym_name
+                auth_asym_name,
             )
         )
         chain_to_idx[chain.name] = asym_id
@@ -1050,7 +1051,7 @@ def parse_mmcif(  # noqa: C901, PLR0915, PLR0912
                     res.is_present,
                     auth_seq_id,
                     icode,
-                    entities[chain.name].name,  # auth_asym_name
+                    auth_asym_name,
                 )
             )
             res_to_idx[(chain.name, i)] = (res_idx, atom_idx)
@@ -1143,3 +1144,13 @@ def parse_auth_seq_id(orig_idx: str | None) -> tuple[int, str]:
         return int(m.group(1)), m.group(2)
     print(f"Warning: could not parse auth_seq_id for residue index {orig_idx}, defaulting to 0")
     return 0, ''
+
+
+def parse_auth_asym_name(entity_name: str) -> str:
+    """
+    Parse auth_asym_name from entity_name. Specifically, if entity_name is a number, return the corresponding letter (1 -> A, 2 -> B, etc.).
+    """
+    # if entity_name is a number, return the corresponding letter
+    if entity_name.isdigit():
+        return chr(int(entity_name) + 64)
+    return entity_name
