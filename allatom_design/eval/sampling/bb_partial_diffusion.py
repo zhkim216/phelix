@@ -33,6 +33,7 @@ def main(cfg: DictConfig):
 
     # Set up wandb logging / output directory
     log_dir = wandb_setup(base_out_dir=cfg.base_out_dir, exp_name=cfg.exp_name, cfg_dict=cfg_dict, **cfg.wandb)
+    partial_diffusion_dir = f"{log_dir}/partial_diffusion"  # temporary directory for partial diffusion outputs
 
     # Preserve config
     with open(Path(log_dir, "config.yaml"), "w") as f:
@@ -42,7 +43,7 @@ def main(cfg: DictConfig):
     pdb_files = get_pdb_files(**cfg.input_cfg)
 
     # Process PDB files into .npz structure format
-    processed_struct_files = process_pdb_files(pdb_files, processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg, keep_order=True)
+    processed_struct_files = process_pdb_files(pdb_files, processed_struct_dir=f"{partial_diffusion_dir}/processed_structures", **cfg.pdb_processing_cfg, keep_order=True)
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
@@ -50,24 +51,24 @@ def main(cfg: DictConfig):
 
     # Load in atom denoiser
     bb_gen_model = get_bb_gen_model(cfg.bb_gen_cfg, device=device)
-    sampled_pdb_paths = run_bb_partial_diffusion(bb_gen_model["model"], bb_gen_model["data_cfg"], bb_gen_model["sampling_cfg"], device, processed_struct_files, n_samples_per_pdb=cfg.n_samples_per_pdb, out_dir=log_dir)
+    sampled_pdb_paths = run_bb_partial_diffusion(bb_gen_model["model"], bb_gen_model["data_cfg"], bb_gen_model["sampling_cfg"], device, processed_struct_files, n_samples_per_pdb=cfg.n_samples_per_pdb, out_dir=partial_diffusion_dir)
 
     # Rename files to expected format for multistate seq des
     for pdb_file in pdb_files:
         record_id = Path(pdb_file).stem
-        pdb_out_dir = f"{cfg.base_out_dir}/{record_id}"
+        pdb_out_dir = f"{log_dir}/{record_id}"
         Path(pdb_out_dir).mkdir(parents=True, exist_ok=True)
 
         # Copy over original pdb file
-        shutil.copy(pdb_file, f"{pdb_out_dir}/{record_id}.cif")
+        shutil.copy(pdb_file, f"{pdb_out_dir}/{Path(pdb_file).name}")
 
         # Copy over sampled pdb files
         for sampled_pdb_path in sampled_pdb_paths:
             if record_id in sampled_pdb_path:
-                shutil.copy(sampled_pdb_path, f"{pdb_out_dir}/{Path(sampled_pdb_path).stem}.pdb")
+                shutil.copy(sampled_pdb_path, f"{pdb_out_dir}/{Path(sampled_pdb_path).stem}.cif")
 
-    # Delete log dir
-    shutil.rmtree(log_dir)
+    # Delete partial diffusion temp dir
+    shutil.rmtree(partial_diffusion_dir)
 
     if not cfg.wandb.no_wandb:
         wandb.finish()
