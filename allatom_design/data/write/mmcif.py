@@ -396,219 +396,233 @@ def write_ad_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
             f.write(mmcif_str)
 
 
-def write_sd_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
-                            input_structs: list[Structure] | None,  # needed for ligand sequence info
-                            filenames: list[str],
-                            keep_auth: bool = False,
-                            ) -> None:
+def write_feats_to_mmcif(feats: dict[str, TensorType["n ..."]],
+                         input_struct: Structure | None,
+                         filename: str,
+                         keep_auth: bool = False) -> None:
     """
-    Convert a batched dictionary of sequence design features to a list of files.
+    Write a dictionary of features to a mmCIF file.
 
     If keep_auth is True, we save the auth_seq_id by mapping label_seq_id to auth_seq_id.
     Otherwise, I think we expect label_seq_id to be contiguous, starting from 0.
     """
     periodic_table = Chem.GetPeriodicTable()  # for element mapping
 
-    feats_list = []
-    if feats["label_seq_id"].ndim == 2:
-        # Unbatch feats into a list of dicts
-        for i in range(feats["label_seq_id"].shape[0]):
-            feats_i = {}
-            for k, v in to(feats, "cpu").items():
-                if isinstance(v, torch.Tensor):
-                    feats_i[k] = v[i]
-                elif isinstance(v, list):
-                    feats_i[k] = v[i]
-                else:
-                    feats_i[k] = v
-            feats_i = crop_sd_feats(feats_i, feats_i["token_pad_mask"].bool(), max_tokens=None, max_atoms=None)
-            feats_list.append(feats_i)
-    else:
-        # Already unbatched
-        feats = crop_sd_feats(feats, feats["token_pad_mask"].bool(), max_tokens=None, max_atoms=None)
-        feats_list.append(feats)
+    feats = crop_sd_feats(feats, feats["token_pad_mask"].bool(), max_tokens=None, max_atoms=None)
 
+    system = System()
+
+    # Map entities to chain_ids
+    entity_to_chains = {}
+    entity_to_moltype = {}
+
+    for chain_id in feats["asym_id"].unique().tolist():
+        chain_mask = feats["asym_id"] == chain_id
+        entity_id = feats["entity_id"][chain_mask].unique().tolist()
+        assert len(entity_id) == 1, f"Expected exactly one unique entity_id for chain {chain_id}, got {len(entity_id)}"
+
+        entity_id = entity_id[0]
+        entity_to_chains.setdefault(entity_id, []).append(chain_id)
+        entity_to_moltype[entity_id] = feats["mol_type"][chain_mask].unique().tolist()[0]
+
+    # Map entities to sequences
+    sequences = {}
+    for entity_id in entity_to_chains:
+        # Get the first chain
+        chain_id = entity_to_chains[entity_id][0]
+        chain_mask = feats["asym_id"] == chain_id
+        mol_type = feats["mol_type"][chain_mask].unique().tolist()[0]
+        if mol_type != const.chain_type_ids["NONPOLYMER"]:
+            # Extract sequence from the features, since we may have redesigned these
+            # Get the unpadded sequence for this chain
+            res_type = feats["res_type"][chain_mask].argmax(dim=-1)
+            res_type = res_type[feats["token_pad_mask"][chain_mask].bool()].tolist()
+            sequence = [const.tokens[res_type[ri]] for ri in range(len(res_type))]
+            sequences[entity_id] = sequence
+        elif mol_type == const.chain_type_ids["NONPOLYMER"]:
+            if input_struct is None:
+                raise ValueError("input_struct is required for labeling non-polymer chains")
+
+            # construct chain map (map asym_id to index of chain in the input structure)
+            chain_map = {c["asym_id"]: i for i, c in enumerate(input_struct.chains)}
+            chain_i = input_struct.chains[chain_map[chain_id]]
+            res_start = chain_i["res_idx"]
+            res_end = chain_i["res_idx"] + chain_i["res_num"]
+            sequence = input_struct.residues[res_start:res_end]["name"].tolist()
+            sequences[entity_id] = sequence
+
+    # Create entity objects
+    lig_entity = None
+    entities_map = {}
+    for entity_id, sequence in sequences.items():
+        mol_type = entity_to_moltype[entity_id]
+
+        if mol_type == const.chain_type_ids["PROTEIN"]:
+            alphabet = ihm.LPeptideAlphabet()
+            chem_comp = lambda x: ihm.LPeptideChemComp(id=x, code=x, code_canonical="X")  # noqa: E731
+        elif mol_type == const.chain_type_ids["DNA"]:
+            alphabet = ihm.DNAAlphabet()
+            chem_comp = lambda x: ihm.DNAChemComp(id=x, code=x, code_canonical="N")  # noqa: E731
+        elif mol_type == const.chain_type_ids["RNA"]:
+            alphabet = ihm.RNAAlphabet()
+            chem_comp = lambda x: ihm.RNAChemComp(id=x, code=x, code_canonical="N")  # noqa: E731
+        elif len(sequence) > 1:
+            alphabet = {}
+            chem_comp = lambda x: ihm.SaccharideChemComp(id=x)  # noqa: E731
+        else:
+            alphabet = {}
+            chem_comp = lambda x: ihm.NonPolymerChemComp(id=x)  # noqa: E731
+
+        # Handle smiles
+        if len(sequence) == 1 and (sequence[0] == "LIG"):
+            if lig_entity is None:
+                seq = [chem_comp(sequence[0])]
+                lig_entity = Entity(seq)
+            model_e = lig_entity
+        else:
+            seq = [
+                alphabet[item] if item in alphabet else chem_comp(item)
+                for item in sequence
+            ]
+            model_e = Entity(seq)
+
+        for chain_id in entity_to_chains[entity_id]:
+            entities_map[chain_id] = model_e
+
+    # We don't assume that symmetry is perfect, so we dump everything
+    # into the asymmetric unit, and produce just a single assembly
+    asym_unit_map = {}
+    for chain_id in feats["asym_id"].unique().tolist():
+        # Crop feats to this chain
+        chain_mask = feats["asym_id"] == chain_id
+        chain_feats_i = crop_sd_feats(feats, chain_mask, max_tokens=None, max_atoms=None, in_place=False)
+
+        if keep_auth:
+            # Map from label_seq_id to auth_seq_id
+            auth_seq_ids = chain_feats_i["auth_seq_id"][chain_feats_i["token_pad_mask"].bool()].tolist()
+            pdb_icodes = chain_feats_i["pdb_icode"][chain_feats_i["token_pad_mask"].bool()].tolist()
+            paired = [(seq_id, chr(icode + 32).strip()) for seq_id, icode in zip(auth_seq_ids, pdb_icodes)]  # pair up auth_seq_id and pdb_icode
+            label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()]
+            _, label_seq_ids = torch.unique(label_seq_ids, return_inverse=True)  # make label_seq_ids contiguous, starting from 0
+            label_seq_ids = (label_seq_ids + 1).tolist()  # renumber label seq id to 1-indexed
+            auth_seq_id_map = {label_seq_id: pair for label_seq_id, pair in zip(label_seq_ids, paired)}
+        else:
+            auth_seq_id_map = 0
+
+        # Set chain_tag to A,B,C, etc., 0 indexed
+        chain_tag = chr(chain_id + 65)
+        asym = AsymUnit(entities_map[chain_id], auth_seq_id_map=auth_seq_id_map, id=chain_tag)
+        asym_unit_map[chain_id] = asym
+
+    modeled_assembly = Assembly(asym_unit_map.values(), name="Modeled assembly")
+
+    class _MyModel(AbInitioModel):
+        def get_atoms(self) -> Iterator[Atom]:
+            # Add all atom sites.
+            for chain_id in feats["asym_id"].unique().tolist():
+                # First, subset relevant feats to this chain
+                chain_mask = feats["asym_id"] == chain_id
+                chain_feats_i = crop_sd_feats(feats, chain_mask, max_tokens=None, max_atoms=None, in_place=False)
+
+                # Get het flag
+                het = chain_feats_i["mol_type"].unique().tolist()[0] == const.chain_type_ids["NONPOLYMER"]
+
+                # Get label_seq_id for each atom
+                label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()]
+                if keep_auth:
+                    _, label_seq_ids = torch.unique(label_seq_ids, return_inverse=True)  # make label_seq_ids contiguous, starting from 0
+                label_seq_ids = (label_seq_ids - label_seq_ids.min() + 1)  # renumber label seq id to 1-indexed
+                label_seq_id_atomwise = (chain_feats_i["atom_to_token"].float() @ label_seq_ids.float()).long().tolist()
+
+                # Convert from one-hot to index
+                atom_names = chain_feats_i["ref_atom_name_chars"].long().argmax(dim=-1)
+                atom_elements = chain_feats_i["ref_element"].long().argmax(dim=-1)
+
+                for ai in range(chain_feats_i["coords"].shape[0]):
+                    if not chain_feats_i["atom_pad_mask"][ai] or not chain_feats_i["atom_resolved_mask"][ai]:
+                        continue
+                    name = atom_names[ai]
+                    name = [chr(c + 32) for c in name if c != 0]
+                    name = "".join(name)
+
+                    element = periodic_table.GetElementSymbol(atom_elements[ai].item())
+                    element = element.upper()
+
+                    pos = chain_feats_i["coords"][ai].tolist()
+                    biso = 100.00
+
+                    yield Atom(
+                        asym_unit=asym_unit_map[chain_id],
+                        type_symbol=element,
+                        seq_id=label_seq_id_atomwise[ai],
+                        atom_id=name,
+                        x=f"{pos[0]:.5f}",
+                        y=f"{pos[1]:.5f}",
+                        z=f"{pos[2]:.5f}",
+                        het=het,
+                        biso=biso,
+                        occupancy=1)
+
+    # Add the model and modeling protocol to the file and write them out:
+    model = _MyModel(assembly=modeled_assembly, name="Model")
+    model_group = ModelGroup([model], name="All models")
+    system.model_groups.append(model_group)
+
+    fh = io.StringIO()
+    dumper.write(fh, [system])
+    mmcif_str = fh.getvalue()
+    with open(filename, "w") as f:
+        f.write(mmcif_str)
+
+
+
+def batch_write_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
+                               input_structs: list[Structure | None] | None,  # needed for ligand sequence info
+                               filenames: list[str],
+                               keep_auth: bool = False) -> None:
+    """
+    Convert a batched dictionary of sequence design features to a list of files.
+    """
+    feats = to(feats, "cpu")
+
+    # Unbatch feats into a list of dicts
+    feats_list = []
+    for bi in range(feats["label_seq_id"].shape[0]):
+        feats_i = {}
+        for k, v in feats.items():
+            if isinstance(v, torch.Tensor):
+                feats_i[k] = v[bi]
+            elif isinstance(v, list):
+                feats_i[k] = v[bi]
+            else:
+                feats_i[k] = v
+        feats_list.append(feats_i)
+
+    # Handle input_structs
     if input_structs is None:
         input_structs = [None] * len(feats_list)
 
-    for i, (feats_i, input_struct_i) in enumerate(zip(feats_list, input_structs)):
-        system = System()
-
-        # Map entities to chain_ids
-        entity_to_chains = {}
-        entity_to_moltype = {}
-
-        for chain_id in feats_i["asym_id"].unique().tolist():
-            chain_mask = feats_i["asym_id"] == chain_id
-            entity_id = feats_i["entity_id"][chain_mask].unique().tolist()
-            assert len(entity_id) == 1, f"Expected exactly one unique entity_id for chain {chain_id}, got {len(entity_id)}"
-
-            entity_id = entity_id[0]
-            entity_to_chains.setdefault(entity_id, []).append(chain_id)
-            entity_to_moltype[entity_id] = feats_i["mol_type"][chain_mask].unique().tolist()[0]
-
-        # Map entities to sequences
-        sequences = {}
-        for entity_id in entity_to_chains:
-            # Get the first chain
-            chain_id = entity_to_chains[entity_id][0]
-            chain_mask = feats_i["asym_id"] == chain_id
-            mol_type = feats_i["mol_type"][chain_mask].unique().tolist()[0]
-            if mol_type != const.chain_type_ids["NONPOLYMER"]:
-                # Extract sequence from the features, since we may have redesigned these
-                # Get the unpadded sequence for this chain
-                res_type = feats_i["res_type"][chain_mask].argmax(dim=-1)
-                res_type = res_type[feats_i["token_pad_mask"][chain_mask].bool()].tolist()
-                sequence = [const.tokens[res_type[ri]] for ri in range(len(res_type))]
-                sequences[entity_id] = sequence
-            elif mol_type == const.chain_type_ids["NONPOLYMER"]:
-                # construct chain map (map asym_id to index of chain in the input structure)
-                chain_map = {c["asym_id"]: i for i, c in enumerate(input_struct_i.chains)}
-                chain_i = input_struct_i.chains[chain_map[chain_id]]
-                res_start = chain_i["res_idx"]
-                res_end = chain_i["res_idx"] + chain_i["res_num"]
-                sequence = input_struct_i.residues[res_start:res_end]["name"].tolist()
-                sequences[entity_id] = sequence
-
-        # Create entity objects
-        lig_entity = None
-        entities_map = {}
-        for entity_id, sequence in sequences.items():
-            mol_type = entity_to_moltype[entity_id]
-
-            if mol_type == const.chain_type_ids["PROTEIN"]:
-                alphabet = ihm.LPeptideAlphabet()
-                chem_comp = lambda x: ihm.LPeptideChemComp(id=x, code=x, code_canonical="X")  # noqa: E731
-            elif mol_type == const.chain_type_ids["DNA"]:
-                alphabet = ihm.DNAAlphabet()
-                chem_comp = lambda x: ihm.DNAChemComp(id=x, code=x, code_canonical="N")  # noqa: E731
-            elif mol_type == const.chain_type_ids["RNA"]:
-                alphabet = ihm.RNAAlphabet()
-                chem_comp = lambda x: ihm.RNAChemComp(id=x, code=x, code_canonical="N")  # noqa: E731
-            elif len(sequence) > 1:
-                alphabet = {}
-                chem_comp = lambda x: ihm.SaccharideChemComp(id=x)  # noqa: E731
-            else:
-                alphabet = {}
-                chem_comp = lambda x: ihm.NonPolymerChemComp(id=x)  # noqa: E731
-
-            # Handle smiles
-            if len(sequence) == 1 and (sequence[0] == "LIG"):
-                if lig_entity is None:
-                    seq = [chem_comp(sequence[0])]
-                    lig_entity = Entity(seq)
-                model_e = lig_entity
-            else:
-                seq = [
-                    alphabet[item] if item in alphabet else chem_comp(item)
-                    for item in sequence
-                ]
-                model_e = Entity(seq)
-
-            for chain_id in entity_to_chains[entity_id]:
-                entities_map[chain_id] = model_e
-
-        # We don't assume that symmetry is perfect, so we dump everything
-        # into the asymmetric unit, and produce just a single assembly
-        asym_unit_map = {}
-        for chain_id in feats_i["asym_id"].unique().tolist():
-            # Crop feats to this chain
-            chain_mask = feats_i["asym_id"] == chain_id
-            chain_feats_i = crop_sd_feats(copy.deepcopy(feats_i), chain_mask, max_tokens=None, max_atoms=None)
-
-            if keep_auth:
-                # Map from label_seq_id to auth_seq_id
-                auth_seq_ids = chain_feats_i["auth_seq_id"][chain_feats_i["token_pad_mask"].bool()].tolist()
-                pdb_icodes = chain_feats_i["pdb_icode"][chain_feats_i["token_pad_mask"].bool()].tolist()
-                paired = [(seq_id, chr(icode + 32).strip()) for seq_id, icode in zip(auth_seq_ids, pdb_icodes)]  # pair up auth_seq_id and pdb_icode
-                label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()]
-                _, label_seq_ids = torch.unique(label_seq_ids, return_inverse=True)  # make label_seq_ids contiguous, starting from 0
-                label_seq_ids = (label_seq_ids + 1).tolist()  # renumber label seq id to 1-indexed
-                auth_seq_id_map = {label_seq_id: pair for label_seq_id, pair in zip(label_seq_ids, paired)}
-            else:
-                auth_seq_id_map = 0
-
-            # Set chain_tag to A,B,C, etc., 0 indexed
-            chain_tag = chr(chain_id + 65)
-            asym = AsymUnit(entities_map[chain_id], auth_seq_id_map=auth_seq_id_map, id=chain_tag)
-            asym_unit_map[chain_id] = asym
-
-        modeled_assembly = Assembly(asym_unit_map.values(), name="Modeled assembly")
-
-        class _MyModel(AbInitioModel):
-            def get_atoms(self) -> Iterator[Atom]:
-                # Add all atom sites.
-                for chain_id in feats_i["asym_id"].unique().tolist():
-                    # First, subset relevant feats to this chain
-                    chain_mask = feats_i["asym_id"] == chain_id
-                    chain_feats_i = crop_sd_feats(copy.deepcopy(feats_i), chain_mask, max_tokens=None, max_atoms=None)
-
-                    # Get het flag
-                    het = chain_feats_i["mol_type"].unique().tolist()[0] == const.chain_type_ids["NONPOLYMER"]
-
-                    # Get label_seq_id for each atom
-                    label_seq_ids = chain_feats_i["label_seq_id"][chain_feats_i["token_pad_mask"].bool()]
-                    if keep_auth:
-                        _, label_seq_ids = torch.unique(label_seq_ids, return_inverse=True)  # make label_seq_ids contiguous, starting from 0
-                    label_seq_ids = (label_seq_ids - label_seq_ids.min() + 1)  # renumber label seq id to 1-indexed
-                    label_seq_id_atomwise = (chain_feats_i["atom_to_token"].float() @ label_seq_ids.float()).long().tolist()
-
-                    # Convert from one-hot to index
-                    atom_names = chain_feats_i["ref_atom_name_chars"].long().argmax(dim=-1)
-                    atom_elements = chain_feats_i["ref_element"].long().argmax(dim=-1)
-
-                    for ai in range(chain_feats_i["coords"].shape[0]):
-                        if not chain_feats_i["atom_pad_mask"][ai] or not chain_feats_i["atom_resolved_mask"][ai]:
-                            continue
-                        name = atom_names[ai]
-                        name = [chr(c + 32) for c in name if c != 0]
-                        name = "".join(name)
-
-                        element = periodic_table.GetElementSymbol(atom_elements[ai].item())
-                        element = element.upper()
-
-                        pos = chain_feats_i["coords"][ai].tolist()
-                        biso = 100.00
-
-                        yield Atom(
-                            asym_unit=asym_unit_map[chain_id],
-                            type_symbol=element,
-                            seq_id=label_seq_id_atomwise[ai],
-                            atom_id=name,
-                            x=f"{pos[0]:.5f}",
-                            y=f"{pos[1]:.5f}",
-                            z=f"{pos[2]:.5f}",
-                            het=het,
-                            biso=biso,
-                            occupancy=1)
-
-        # Add the model and modeling protocol to the file and write them out:
-        model = _MyModel(assembly=modeled_assembly, name="Model")
-        model_group = ModelGroup([model], name="All models")
-        system.model_groups.append(model_group)
-
-        fh = io.StringIO()
-        dumper.write(fh, [system])
-        mmcif_str = fh.getvalue()
-        with open(filenames[i], "w") as f:
-            f.write(mmcif_str)
+    for feats_i, input_struct_i, filename_i in zip(feats_list, input_structs, filenames):
+        write_feats_to_mmcif(feats_i, input_struct_i, filename_i, keep_auth=keep_auth)
 
 
-def write_motif_feats_to_mmcif(feats: dict[str, TensorType["n ..."]], *args, **kwargs):
+def write_motif_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]], *args, **kwargs):
     """
     Write motif features to a mmCIF file.
-    Wrapper around write_sd_feats_to_mmcif that handles the renaming of motif-specific keys.
+    Wrapper around batch_write_feats_to_mmcif that handles the renaming of motif-specific keys.
     """
     feats = copy.deepcopy(feats)
     feats["coords"] = feats.pop("motif_coords")
     feats["atom_resolved_mask"] = feats.pop("motif_atom_mask")
-    write_sd_feats_to_mmcif(feats, *args, **kwargs)
+    batch_write_feats_to_mmcif(feats, *args, **kwargs)
 
 
 def write_ad_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]], filenames: list[str]) -> None:
     """
-    Write atom denoiser features to a list of files.
+    Write atom denoiser features to a list of files. Creates dummy features to resemble boltz features, then calls batch_write_feats_to_mmcif.
     """
+    feats = to(feats, "cpu")
+
     # First, create dummy features to resemble sd features
     is_unbatched = feats["seq_mask"].ndim == 1
     if is_unbatched:
@@ -634,7 +648,7 @@ def write_ad_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]], filenames: 
 
     ref_element_1d = torch.tensor([7, 6, 6, 8], device=feats["seq_mask"].device).repeat(N_tokens)  # N, Ca, C, O
     ad_feats["ref_element"] = F.one_hot(ref_element_1d.expand(B, -1), num_classes=ref_element_1d.max() + 1)
-    ref_atom_name_chars_1d = torch.tensor([[ord("N") - 32, 0, 0, 0],
+    ref_atom_name_chars_1d = torch.tensor([[ord("N") - 32, 0, 0, 0],  # N, CA, C, O
                                             [ord("C") - 32, ord("A") - 32, 0, 0],
                                             [ord("C") - 32, 0, 0, 0],
                                             [ord("O") - 32, 0, 0, 0]], device=feats["seq_mask"].device).repeat(N_tokens, 1)
@@ -644,4 +658,4 @@ def write_ad_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]], filenames: 
     if is_unbatched:
         ad_feats = {k: v.squeeze(0) if isinstance(v, torch.Tensor) else v for k, v in ad_feats.items()}
 
-    write_sd_feats_to_mmcif(ad_feats, input_structs=None, filenames=filenames, keep_auth=True)
+    batch_write_feats_to_mmcif(ad_feats, input_structs=None, filenames=filenames, keep_auth=True)

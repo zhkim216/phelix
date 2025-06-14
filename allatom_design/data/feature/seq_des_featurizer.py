@@ -1,3 +1,4 @@
+import copy
 import math
 import random
 from typing import Optional
@@ -10,8 +11,9 @@ from torch import Tensor, from_numpy
 from torch.nn.functional import one_hot
 
 from allatom_design.data import const
-from allatom_design.data.feature.pad import pad_dim, crop_dim
+from allatom_design.data.feature.pad import crop_dim, pad_dim
 from allatom_design.data.tokenize.boltz import Tokenized
+
 
 # Keep track of the token/atom dimensions of the features for padding & cropping
 FEAT_TO_TOKEN_DIM = {
@@ -369,16 +371,21 @@ def pad_sd_feats(feats: dict[str, Tensor],
 
 
 def crop_sd_feats(feats: dict[str, Tensor],
-               token_crop_mask: np.ndarray,
-               max_tokens: int | None,
-               max_atoms: int | None,
-               atoms_per_window_queries: int = 32) -> dict[str, Tensor]:
+                  token_crop_mask: np.ndarray,
+                  max_tokens: int | None,
+                  max_atoms: int | None,
+                  atoms_per_window_queries: int = 32,
+                  in_place: bool = True
+                  ) -> dict[str, Tensor]:
     """
-    In-place crop features based on a crop mask specified at the token level.
+    Crop features based on a crop mask specified at the token level. By default, this function crops in-place.
 
     Note: after cropping, ref_space_uid and token_index will refer to positions *before* cropping, so make sure to
     account for this when using these features.
     """
+    if not in_place:
+        feats = copy.deepcopy(feats)
+
     # Handle some additional cases
     if isinstance(token_crop_mask, Tensor):
         token_crop_mask = token_crop_mask.cpu().numpy()

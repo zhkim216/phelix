@@ -13,7 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
 import allatom_design.data.const as const
-from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
+from allatom_design.data.write.mmcif import write_feats_to_mmcif
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.eval_setup_utils import (get_pdb_files,
                                                              process_pdb_files,
@@ -89,7 +89,7 @@ def main(cfg: DictConfig):
 
             # Save structure with Chroma sequence threaded on
             threaded_pdb = f"{threaded_pdb_dir}/{record_id}_sample{bi}.cif"
-            write_sd_feats_to_mmcif(example, input_structure, [threaded_pdb])
+            write_feats_to_mmcif(example, input_structure, threaded_pdb)
             threaded_pdbs.append(threaded_pdb)
 
             # Get energies

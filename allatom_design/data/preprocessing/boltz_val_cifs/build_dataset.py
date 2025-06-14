@@ -12,7 +12,7 @@ from allatom_design.data.filter.dynamic.chain_type_size import \
 from allatom_design.data.filter.dynamic.max_residues import MaxResiduesFilter
 from allatom_design.data.filter.dynamic.size import SizeFilter
 from allatom_design.data.types import Record
-from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
+from allatom_design.data.write.mmcif import write_feats_to_mmcif
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
 from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
 
@@ -54,7 +54,7 @@ def main(cfg: DictConfig):
         record = Record.from_dict(json.load(open(f"{processed_struct_dir}/records/{Path(processed_struct_file).stem}.json")))
         processed_struct_file = f"{processed_struct_dir}/structures/{record.id}.npz"
         example, input_structure = get_sd_batch([processed_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
-        write_sd_feats_to_mmcif(example, input_structure, [f"{pdb_dir}/{record.id}.cif"])
+        write_feats_to_mmcif(example, input_structure, f"{pdb_dir}/{record.id}.cif")
 
     # Load in records and filter
     record_dir = f"{processed_struct_dir}/records"
@@ -94,7 +94,7 @@ def main(cfg: DictConfig):
         with open(f"{lists_dir}/{val_subset_name}.txt", "w") as f:
             for record in filtered_records:
                 f.write(f"{record.id}.cif\n")
-                
+
         # Also save csv of PDB names with their lengths
         length_list_dir = f"{cfg.out_dir}/length_lists"
         Path(length_list_dir).mkdir(parents=True, exist_ok=True)
