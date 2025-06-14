@@ -29,7 +29,7 @@ from allatom_design.data.tokenize.tokenizer import Tokenizer
 from allatom_design.data.types import (Connection, Manifest, Record, Structure,
                                        Tokenized, TokenwiseAtomFeats)
 from allatom_design.data.data import pad_atom_feats_to_tokenwise
-from allatom_design.data.write.mmcif import write_motif_feats_to_mmcif, write_ad_feats_to_mmcif
+from allatom_design.data.write.mmcif import write_motif_feats_to_mmcif, write_diffusion_inputs_to_mmcif
 
 class BoltzADDataModule(L.LightningDataModule):
     def __init__(self, cfg: DictConfig):
