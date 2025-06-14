@@ -1,5 +1,5 @@
 num_workers: 8
-batch_size: 64
+batch_size: 8
 
 # Diffusion inputs
 num_steps: 500

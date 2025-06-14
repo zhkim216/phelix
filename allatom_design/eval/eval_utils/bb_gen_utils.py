@@ -1,6 +1,7 @@
 """
 Utils for sampling from backbone generation models.
 """
+import copy
 import re
 from contextlib import nullcontext
 from functools import partial
@@ -17,19 +18,21 @@ from torchtyping import TensorType
 from tqdm import tqdm
 
 from allatom_design.checkpoint_utils import get_cfg_from_ckpt
+from allatom_design.data import const
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.conditioning_labels import create_cond_labels_input
 from allatom_design.data.data import (atom_apply_random_augmentation,
                                       atom_center_random_augmentation,
                                       center_random_augmentation, to)
 from allatom_design.data.datasets.boltz_ad_dataset import (
-    ad_collator, featurize_diffusion_inputs, featurize_motif_inputs, add_tokenwise_atom_feats)
+    ad_collator, add_tokenwise_atom_feats, featurize_diffusion_inputs,
+    featurize_motif_inputs)
 from allatom_design.data.pdb_utils import write_batched_to_pdb
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     load_input
 from allatom_design.data.types import Structure, Tokenized
-from allatom_design.data.write.mmcif import (write_batched_structures_to_mmcif,
-                                             write_ad_feats_to_mmcif)
+from allatom_design.data.write.mmcif import (write_ad_feats_to_mmcif,
+                                             write_batched_structures_to_mmcif)
 from allatom_design.eval.eval_utils import eval_metrics, sampling_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
@@ -169,14 +172,13 @@ def run_bb_partial_diffusion(model: AtomDenoiser,
             x_bb_denoised, _ = model.sample(diffusion_inputs=batch["diffusion_inputs"],  # uses true auth seq ID from PDBs
                                             diffusion_params=diffusion_params,
                                             motif_inputs=batch["motif_inputs"])
-            samples = {"x_bb": x_bb_denoised,
-                       "seq_mask": batch["diffusion_inputs"]["seq_mask"],
-                       "residue_index": batch["diffusion_inputs"]["residue_index"]}
-            samples = {k: v.cpu() if v is not None else v for k, v in samples.items()}
 
             # Save samples
-            filenames = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{(i+j) % n_samples_per_pdb}.pdb" for j in range(B)]
-            AtomDenoiser.save_samples_to_pdb(samples, filenames)
+            out_feats = copy.deepcopy(batch["diffusion_inputs"])
+            out_feats["x"][..., const.prot_bb_atom14_idxs, :] = x_bb_denoised
+
+            filenames = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{(i+j) % n_samples_per_pdb}.cif" for j in range(B)]
+            write_ad_feats_to_mmcif(to(out_feats, "cpu"), filenames)
             sampled_pdb_paths.extend(filenames)
 
             pbar.update(B)

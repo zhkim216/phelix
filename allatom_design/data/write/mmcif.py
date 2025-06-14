@@ -610,28 +610,38 @@ def write_ad_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]], filenames: 
     Write atom denoiser features to a list of files.
     """
     # First, create dummy features to resemble sd features
-    N_tokens = feats["seq_mask"].shape[0]
+    is_unbatched = feats["seq_mask"].ndim == 1
+    if is_unbatched:
+        feats = {k: v.unsqueeze(0) if isinstance(v, torch.Tensor) else v for k, v in feats.items()}
+
+    B, N_tokens = feats["seq_mask"].shape
     N_atoms = N_tokens * 4  # 4 backbone atoms
     ad_feats = {}
     ad_feats["res_type"] = F.one_hot(torch.full_like(feats["residue_index"], const.token_ids["GLY"], dtype=torch.long), num_classes=len(const.tokens))
-    ad_feats["coords"] = feats["x"][..., const.prot_bb_atom14_idxs, :].reshape(N_atoms, 3)  # N, 4, 3
-    ad_feats["atom_resolved_mask"] = feats["atom_mask"][..., const.prot_bb_atom14_idxs].reshape(N_atoms)
+    ad_feats["coords"] = feats["x"][..., const.prot_bb_atom14_idxs, :].reshape(B, N_atoms, 3)  # B, N*4, 3
+    ad_feats["atom_resolved_mask"] = feats["atom_mask"][..., const.prot_bb_atom14_idxs].reshape(B, N_atoms)
     ad_feats["token_pad_mask"] = feats["seq_mask"]
-    ad_feats["atom_pad_mask"] = feats["seq_mask"].repeat_interleave(4)
+    ad_feats["atom_pad_mask"] = feats["seq_mask"].repeat_interleave(4, dim=1)
     ad_feats["label_seq_id"] = feats.get("label_seq_id", feats["residue_index"])
     ad_feats["auth_seq_id"] = feats.get("auth_seq_id", feats["residue_index"])
     ad_feats["pdb_icode"] = feats.get("pdb_icode", torch.zeros_like(feats["residue_index"]))
     ad_feats["asym_id"] = feats["chain_index"]
     ad_feats["entity_id"] = feats["entity_id"]
     ad_feats["mol_type"] = torch.full_like(feats["residue_index"], const.chain_type_ids["PROTEIN"])
-    ad_feats["atom_to_token"] = F.one_hot(torch.arange(N_tokens).repeat_interleave(4), num_classes=N_tokens)
 
-    ref_element = torch.tensor([7, 6, 6, 8], device=feats["seq_mask"].device).repeat(N_tokens)  # N, Ca, C, O
-    ad_feats["ref_element"] = F.one_hot(ref_element, num_classes=ref_element.max() + 1)
-    ref_atom_name_chars = torch.tensor([[ord("N") - 32, 0, 0, 0],
-                                        [ord("C") - 32, ord("A") - 32, 0, 0],
-                                        [ord("C") - 32, 0, 0, 0],
-                                        [ord("O") - 32, 0, 0, 0]], device=feats["seq_mask"].device).repeat(N_tokens, 1)
+    atom_to_token_1d = torch.arange(N_tokens, device=feats["seq_mask"].device).repeat_interleave(4)
+    ad_feats["atom_to_token"] = F.one_hot(atom_to_token_1d.expand(B, -1), num_classes=N_tokens)
+
+    ref_element_1d = torch.tensor([7, 6, 6, 8], device=feats["seq_mask"].device).repeat(N_tokens)  # N, Ca, C, O
+    ad_feats["ref_element"] = F.one_hot(ref_element_1d.expand(B, -1), num_classes=ref_element_1d.max() + 1)
+    ref_atom_name_chars_1d = torch.tensor([[ord("N") - 32, 0, 0, 0],
+                                            [ord("C") - 32, ord("A") - 32, 0, 0],
+                                            [ord("C") - 32, 0, 0, 0],
+                                            [ord("O") - 32, 0, 0, 0]], device=feats["seq_mask"].device).repeat(N_tokens, 1)
+    ref_atom_name_chars = ref_atom_name_chars_1d.unsqueeze(0).expand(B, -1, -1)
     ad_feats["ref_atom_name_chars"] = F.one_hot(ref_atom_name_chars, num_classes=ref_atom_name_chars.max() + 1)
+
+    if is_unbatched:
+        ad_feats = {k: v.squeeze(0) if isinstance(v, torch.Tensor) else v for k, v in ad_feats.items()}
 
     write_sd_feats_to_mmcif(ad_feats, input_structs=None, filenames=filenames, keep_auth=True)

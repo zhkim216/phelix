@@ -41,7 +41,7 @@ def main(cfg: DictConfig):
         yaml.safe_dump(cfg_dict, f)
 
     # Load in PDB files to eval on
-    pdb_names = [Path(x).name for x in glob.glob(f"{cfg.conformer_dir}/*")]
+    pdb_names = [Path(x).name for x in glob.glob(f"{cfg.conformer_dir}/*") if Path(x).is_dir()]
 
     # first, collect per-PDB conformer lists
     conformer_groups = []
