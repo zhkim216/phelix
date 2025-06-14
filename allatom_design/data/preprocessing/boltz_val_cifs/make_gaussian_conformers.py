@@ -13,7 +13,7 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 
 from allatom_design.data.types import Record
-from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
+from allatom_design.data.write.mmcif import write_feats_to_mmcif
 from allatom_design.eval.eval_utils.eval_setup_utils import (get_pdb_files,
                                                              process_pdb_files)
 from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
@@ -71,14 +71,14 @@ def generate_gaussian_conformers(processed_struct_file: str, data_cfg: DictConfi
         # Save original cif
         conformer_out_dir = f"{out_dir}/eps{eps}/{record.id}"
         Path(conformer_out_dir).mkdir(parents=True, exist_ok=True)
-        write_sd_feats_to_mmcif(example, input_structure, [f"{conformer_out_dir}/{record.id}.cif"])
+        write_feats_to_mmcif(example, input_structure, f"{conformer_out_dir}/{record.id}.cif")
 
         for i in range(num_conformers):
             example_noised = copy.deepcopy(example)
             # Add Gaussian noise to the coordinates
             example_noised["coords"] = example_noised["coords"] + torch.randn_like(example_noised["coords"]) * eps
             example_noised["coords"] = example_noised["coords"] * example_noised["atom_pad_mask"].unsqueeze(-1)
-            write_sd_feats_to_mmcif(example_noised, input_structure, [f"{conformer_out_dir}/{record.id}_conf{i}.cif"])
+            write_feats_to_mmcif(example_noised, input_structure, f"{conformer_out_dir}/{record.id}_conf{i}.cif")
 
 
 if __name__ == "__main__":

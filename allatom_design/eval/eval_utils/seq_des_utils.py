@@ -27,7 +27,7 @@ from allatom_design.data.datasets.boltz_sd_dataset import (
     crop_batch_to_protein_only, sd_collator)
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     load_input, mmcif_to_pdb)
-from allatom_design.data.write.mmcif import write_sd_feats_to_mmcif
+from allatom_design.data.write.mmcif import batch_write_feats_to_mmcif
 from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
@@ -167,7 +167,7 @@ def run_seq_des(model: SeqDenoiser,
 
                 sample_stems = [f"{Path(pdb_file).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_file in enumerate(batch_struct_files)]
                 batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
-                write_sd_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
+                batch_write_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
                 run_aux["out_pdbs"].extend(batch_out_files)
                 run_aux["input_struct_files"].extend(batch_struct_files)
 
@@ -358,7 +358,7 @@ def run_seq_des_multistate(model: SeqDenoiser,
                 rep_batch_pdb_names = [batch_pdb_names[i] for i in unique_rep_idx]
                 sample_stems = [f"{pdb_name}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(rep_batch_pdb_names)]
                 batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
-                write_sd_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
+                batch_write_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
 
                 # Get energies for each sample
                 rep_U = [aux["U"][i].item() for i in unique_rep_idx]
