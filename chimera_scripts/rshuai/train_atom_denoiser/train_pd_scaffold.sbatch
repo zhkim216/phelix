@@ -23,7 +23,7 @@ export TORCH_HOME=/scratch/hielab/rshuai/cache/torch
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=spd0_a0
+EXP_NAME=spd0_a1
 GROUP=backbone
 
 # Dataset paths
@@ -54,6 +54,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser.dit.hidden_size=768 \
     train.batch_size=8 \
     denoiser.training_batch_size_mult=8 \
+    denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.5 \
     data.samples_per_epoch=16000 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}

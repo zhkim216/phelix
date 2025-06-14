@@ -30,11 +30,11 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
 WANDB_ID=richardshuai
-EXP_NAME=spd0_a0
+EXP_NAME=spd0_a1
 GROUP=backbone
 
 # Dataset paths
-PDB_PATH=/scratch/users/rshuai/datasets/augmented_af3_monomer_v2_boltz
+PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 # Run training script
 cd ${BASE_DIR}
@@ -61,6 +61,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser.dit.hidden_size=768 \
     train.batch_size=8 \
     denoiser.training_batch_size_mult=8 \
+    denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.5 \
     data.samples_per_epoch=16000 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}
