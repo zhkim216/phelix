@@ -14,13 +14,13 @@ from tqdm import tqdm
 
 import allatom_design.data.const as const
 from allatom_design.data.write.mmcif import write_feats_to_mmcif
+from allatom_design.eval.benchmarking.benchmarking_utils import thread_sequence_onto_example
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.eval_setup_utils import (get_pdb_files,
                                                              process_pdb_files,
                                                              wandb_setup)
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
-from allatom_design.eval.benchmarking.benchmarking_utils import thread_sequence_onto_example
 
 
 @hydra.main(config_path="../../configs/eval/benchmarking", config_name="ligandmpnn_sc_eval", version_base="1.3.2")
