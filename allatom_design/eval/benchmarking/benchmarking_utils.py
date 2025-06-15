@@ -5,12 +5,13 @@ import torch.nn.functional as F
 from torchtyping import TensorType
 
 import allatom_design.data.const as const
+from allatom_design.data.write.mmcif import _unbatch_feats
 
 
 def thread_sequence_onto_example(example: dict[str, TensorType["1 n ..."]],
                                  new_res_type: TensorType["n2 c", int],
                                  label_seq_id: TensorType["n2", int],
-                                 mask: TensorType["n2", bool] | None = None) -> dict[str, TensorType["1 n ..."]]:
+                                 mask: TensorType["n2", bool] | None = None) -> dict[str, TensorType["n ..."]]:
     """
     Thread a sequence onto an example. Returns a deepcopy of the example.
 
@@ -40,5 +41,7 @@ def thread_sequence_onto_example(example: dict[str, TensorType["1 n ..."]],
     example["res_type"][protein_mask] = protein_res_type.unsqueeze(0)
     example["coords"][example["prot_scn_atom_mask"].bool()] = 0.0
     example["atom_resolved_mask"][example["prot_scn_atom_mask"].bool()] = False
+
+    example = _unbatch_feats(example)[0]  # squeeze out batch dimension
 
     return example
