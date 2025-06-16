@@ -55,6 +55,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     train.batch_size=8 \
     denoiser.training_batch_size_mult=8 \
     denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.5 \
-    data.samples_per_epoch=16000 \
+    data.samples_per_epoch=8000 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}
