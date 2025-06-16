@@ -261,7 +261,7 @@ def score_samples(model: SeqDenoiser,
     return score_outputs
 
 
-def run_seq_des_multistate(model: SeqDenoiser,
+def run_seq_des_ensemble(model: SeqDenoiser,
                            data_cfg: DictConfig,
                            cfg: DictConfig,  # sampling config
                            conformer_struct_files: list[tuple[str, list[str]]],  # maps from a given pdb name to its conformer structure files

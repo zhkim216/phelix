@@ -64,7 +64,7 @@ echo "--------------------"
 
 # Run training script
 cd ${BASE_DIR}
-python3 allatom_design/eval/sampling/seq_des_single_multistate.py \
+python3 allatom_design/eval/sampling/seq_des_single_ensemble.py \
     ckpt_path=${CKPT_PATH} \
     pdb_dir=${PDB_DIR} \
     fixed_pos_seq=\"${FIXED_POS}\" \
