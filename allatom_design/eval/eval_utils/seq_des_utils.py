@@ -2,6 +2,7 @@
 Utils for sampling from sequence design models.
 """
 import copy
+import itertools
 import re
 from collections import defaultdict
 from contextlib import nullcontext
@@ -27,14 +28,14 @@ from allatom_design.data.datasets.boltz_sd_dataset import (
     crop_batch_to_protein_only, sd_collator)
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     load_input, mmcif_to_pdb)
-from allatom_design.data.write.mmcif import batch_write_feats_to_mmcif
+from allatom_design.data.types import Structure
+from allatom_design.data.write.mmcif import (batch_write_feats_to_mmcif,
+                                             write_feats_to_mmcif)
 from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
+from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import \
+    compute_potts_energy
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
-from allatom_design.data.types import Structure
-import itertools
-from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import compute_potts_energy
-
 
 
 def get_seq_des_model(cfg: DictConfig, device: str) -> Dict[str, Any]:
@@ -95,11 +96,10 @@ def run_seq_des(model: SeqDenoiser,
 
     If out_dir is not None, PDBs with sampled sequences will be saved to the provided directory. In this case, run_aux will be a dictionary with the following keys:
         - "out_pdbs": list of output PDB paths
-        - "input_struct_files": list of input PDB names
         - "pred_seqs": list of predicted sequences as a string for each sample
     """
     # Set up output directory
-    run_aux = defaultdict(list)
+    outputs = defaultdict(list)
 
     if out_dir is not None:
         sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
@@ -121,17 +121,16 @@ def run_seq_des(model: SeqDenoiser,
         print(f"Omitting aatype sampling for: {cfg.omit_aas}")
 
     # Process PDBs in batches of size B
-    struct_file_paths_repeated = np.repeat(struct_file_paths, cfg.num_seqs_per_pdb)
-    pbar = tqdm(total=len(struct_file_paths_repeated), desc=f"Sampling {len(struct_file_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
+    pbar = tqdm(total=len(struct_file_paths), desc=f"Sampling {len(struct_file_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
 
     input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
-        for i in range(0, len(struct_file_paths_repeated), cfg.batch_size):
-            batch_struct_files = struct_file_paths_repeated[i:i+cfg.batch_size]
+        for i in range(0, len(struct_file_paths), cfg.batch_size):
+            batch_struct_files = struct_file_paths[i:i+cfg.batch_size]
             B = len(batch_struct_files)
             batch, input_structs = get_sd_batch(batch_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
-            run_aux["pdb_keys"].extend(batch["pdb_key"])
+            outputs["pdb_keys"].extend(batch["pdb_key"])
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
@@ -148,48 +147,25 @@ def run_seq_des(model: SeqDenoiser,
                 batch["token_exists_override"] = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
 
             # Run sampling
-            res_type_pred, _ = model.sample(batch, sampling_inputs=sampling_inputs)
+            output_feats, aux = model.sample(batch, sampling_inputs=sampling_inputs)
 
-            # Save PDB with predicted sequences
-            output_feats = copy.deepcopy(to(batch, device="cpu"))
-            output_feats["res_type"] = torch.where(batch["seq_cond_mask"][..., None].bool().cpu(),
-                                                   output_feats["res_type"],
-                                                   F.one_hot(res_type_pred, num_classes=len(const.tokens)).cpu())
-            output_feats["coords"] = output_feats["coords"] * output_feats["atom_cond_mask"].unsqueeze(-1)
-            output_feats["atom_resolved_mask"] = output_feats["atom_resolved_mask"] * output_feats["atom_cond_mask"]
-
-            # Save outputs to disk
+            # Save outputs to cif files
             if out_dir is not None:
-                # Save as cif
-                if cfg["save_protein_only"]:
-                    # crop to protein-only features; useful for ablations to only fold with protein sequence
-                    output_feats = crop_batch_to_protein_only(output_feats)
+                for si in range(len(output_feats)):
+                    feats_si = output_feats[si]
+                    if cfg["save_protein_only"]:
+                        # crop to protein-only features; useful for ablations to only fold with protein sequence
+                        feats_si = crop_batch_to_protein_only(feats_si)
 
-                sample_stems = [f"{Path(pdb_file).stem}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_file in enumerate(batch_struct_files)]
-                batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
-                batch_write_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
-                run_aux["out_pdbs"].extend(batch_out_files)
-                run_aux["input_struct_files"].extend(batch_struct_files)
+                    sample_stems = [f"{Path(pdb_file).stem}_sample{si}" for pdb_file in batch_struct_files]
+                    batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
+                    batch_write_feats_to_mmcif(feats_si, input_structs=input_structs, filenames=batch_out_files)
+                    outputs["out_pdbs"].extend(batch_out_files)
 
             pbar.update(B)
     pbar.close()
 
-    # For each input pdb, aggregate all sequence design samples
-    preds = defaultdict(dict)
-    for pdb, samples_list in input_pdb_to_samples.items():
-        for k in samples_list[0].keys():
-            preds[pdb][k] = torch.stack([s[k] for s in samples_list])
-
-        # Get sampled sequences for this PDB as a list of strings
-        aatype_denoised = preds[pdb]["res_type_pred"]
-
-        pred_seqs = []
-        for i in range(aatype_denoised.shape[0]):
-            pred_seq = "".join([rc.restypes_with_x[aatype_denoised[i, j]] for j in range(aatype_denoised.shape[1])])
-            pred_seqs.append(pred_seq)
-        preds[pdb]["pred_seqs"] = pred_seqs
-
-    return preds, run_aux
+    return outputs
 
 
 def score_samples(model: SeqDenoiser,
@@ -217,18 +193,17 @@ def score_samples(model: SeqDenoiser,
             bb_batch = initialize_sampling_masks(bb_batch)
 
             sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
-            sampling_inputs["skip_sampling"] = True  # do not sample new sequences, just get potts parameters
 
             if cfg["use_protein_only"]:
                 # subset to standard protein-only features; useful for ablations to only condition on protein
                 bb_batch["token_exists_override"] = (bb_batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & bb_batch["is_standard"]
 
             # Get potts parameters for each input backbone
-            _, aux = model.sample(bb_batch, sampling_inputs=sampling_inputs)
+            potts_decoder_aux, _ = model.denoiser.compute_potts_parameters(bb_batch, sampling_inputs=sampling_inputs)
 
             # Load in samples to score for each input backbone
             for i in tqdm(range(B), desc=f"Scoring samples with Potts parameters...", leave=False):
-                potts_decoder_aux_i = {k: v[i] for k, v in aux["potts_decoder_aux"].items()}
+                potts_decoder_aux_i = {k: v[i] for k, v in potts_decoder_aux.items()}
 
                 # Load in samples to score for each input backbone
                 sample_struct_files = bb_to_sample_files[batch_bb_struct_files[i]]
@@ -268,22 +243,21 @@ def run_seq_des_ensemble(model: SeqDenoiser,
                            device: str,
                            pos_constraint_df: Optional[pd.DataFrame] = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
                            out_dir: Optional[str] = None,
-                           ) -> Tuple[Dict[str, Dict[str, torch.Tensor]], Dict]:
+                           ) -> dict[str, Any]:
     """
     Given a list of processed structure files, run sequence design on them.
     """
     # Set up output directory
-    run_aux = {}
+    outputs = {}
 
     if out_dir is not None:
         sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
         Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
 
-        run_aux["out_pdbs"] = []  # store output PDB paths
-        run_aux["input_struct_files"] = []  # store input PDB names
-        run_aux["pred_seqs"] = []  # store predicted sequences as a string for each sample
-        run_aux["n_conformers"] = []  # store number of conformers for each PDB (some may have been skipped due to parsing issues)
-        run_aux["U"] = []  # store energies for each sample
+        outputs["out_pdbs"] = []  # store output PDB paths
+        outputs["pred_seqs"] = []  # store predicted sequences as a string for each sample
+        outputs["n_conformers"] = []  # store number of conformers for each PDB (some may have been skipped due to parsing issues)
+        outputs["U"] = []  # store energies for each sample
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
@@ -300,25 +274,17 @@ def run_seq_des_ensemble(model: SeqDenoiser,
     if cfg.verbose and cfg.omit_aas is not None:
         print(f"Omitting aatype sampling for: {cfg.omit_aas}")
 
-    # Process PDBs in batches of size B
-    conformer_struct_files_repeated = list(itertools.chain(*itertools.repeat(conformer_struct_files, cfg.num_seqs_per_pdb)))
-    pbar = tqdm(total=len(conformer_struct_files_repeated), desc=f"Sampling {len(conformer_struct_files)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
-
     input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
-        for i in range(0, len(conformer_struct_files_repeated), cfg.batch_size):
-            # Extract batch of conformer struct files
-            batch_conformer_struct_files = conformer_struct_files_repeated[i:i+cfg.batch_size]
-            batch_pdb_names, batch_struct_files = zip(*batch_conformer_struct_files)
-            B_conformers = len(batch_conformer_struct_files)
+        for i in tqdm(range(len(conformer_struct_files)), desc=f"Sampling {len(conformer_struct_files)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB..."):
+            # Extract conformer struct files for this PDB
+            pdb_name, struct_files = conformer_struct_files[i]
+            n_conformers = len(struct_files)
 
             # Flatten struct_files and create tied_sampling_ids
-            n_conformers = [len(struct_files) for struct_files in batch_struct_files]
-            batch_pdb_names = list(itertools.chain(*[[pdb_name] * n_conformers[i] for i, pdb_name in enumerate(batch_pdb_names)]))
-            batch_struct_files = list(itertools.chain(*batch_struct_files))
-            batch, input_structs = get_sd_batch(batch_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
-            batch["tied_sampling_ids"] = torch.tensor(list(itertools.chain(*[[i] * n_conformers[i] for i in range(B_conformers)])), device=device, dtype=torch.long)
+            batch, input_structs = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+            batch["tied_sampling_ids"] = torch.zeros(len(struct_files), device=device, dtype=torch.long)  # tie all samples together
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
@@ -335,60 +301,25 @@ def run_seq_des_ensemble(model: SeqDenoiser,
                 batch["token_exists_override"] = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
 
             # Run sampling
-            res_type_pred, aux = model.sample(batch, sampling_inputs=sampling_inputs)
-            unique_rep_idx = aux["tied_sampling_inputs"]["rep_idx"].unique()  # indices of representative sequences, [B_conformers]
-            res_type_pred = res_type_pred[unique_rep_idx]
+            output_feats, aux = model.sample(batch, sampling_inputs=sampling_inputs)
 
-            # Save PDB with predicted sequences
-            output_feats = copy.deepcopy(to(batch, device="cpu"))
-            output_feats = {k: v[unique_rep_idx.cpu()] for k, v in output_feats.items() if isinstance(v, torch.Tensor)}
-            output_feats["res_type"] = torch.where(output_feats["seq_cond_mask"][..., None].bool().cpu(),
-                                                   output_feats["res_type"],
-                                                   F.one_hot(res_type_pred, num_classes=len(const.tokens)).cpu())
-            output_feats["coords"] = output_feats["coords"] * output_feats["atom_cond_mask"].unsqueeze(-1)
-
-            # Save outputs to disk
+            # Save outputs to cif files
             if out_dir is not None:
-                # Save as cif
-                if cfg["save_protein_only"]:
-                    # crop to protein-only features; useful for ablations to only fold with protein sequence
-                    output_feats = crop_batch_to_protein_only(output_feats)
+                for si in range(len(output_feats)):
+                    feats_si = output_feats[si]
+                    U_si = aux["U"][si].item()
+                    if cfg["save_protein_only"]:
+                        # crop to protein-only features; useful for ablations to only fold with protein sequence
+                        feats_si = crop_batch_to_protein_only(feats_si)
 
-                rep_batch_struct_files = [batch_struct_files[i] for i in unique_rep_idx]
-                rep_batch_pdb_names = [batch_pdb_names[i] for i in unique_rep_idx]
-                sample_stems = [f"{pdb_name}_sample{(i+j) % cfg.num_seqs_per_pdb}" for j, pdb_name in enumerate(rep_batch_pdb_names)]
-                batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
-                batch_write_feats_to_mmcif(output_feats, input_structs=input_structs, filenames=batch_out_files)
+                    out_file = f"{sample_out_dir}/{pdb_name}_sample{si}.cif"
+                    batch_write_feats_to_mmcif(output_feats[si], input_structs=input_structs[0:1], filenames=[out_file])
 
-                # Get energies for each sample
-                rep_U = [aux["U"][i].item() for i in unique_rep_idx]
+                    outputs["out_pdbs"].append(out_file)
+                    outputs["n_conformers"].append(len(input_structs))
+                    outputs["U"].append(U_si)
 
-                run_aux["out_pdbs"].extend(batch_out_files)
-                run_aux["input_struct_files"].extend(batch_struct_files)
-                run_aux["n_conformers"].extend(n_conformers)
-                run_aux["U"].extend(rep_U)
-
-
-            pbar.update(B_conformers)
-    pbar.close()
-
-    # For each input pdb, aggregate all sequence design samples
-    preds = defaultdict(dict)
-    for pdb, samples_list in input_pdb_to_samples.items():
-        for k in samples_list[0].keys():
-            preds[pdb][k] = torch.stack([s[k] for s in samples_list])
-
-        # Get sampled sequences for this PDB as a list of strings
-        aatype_denoised = preds[pdb]["res_type_pred"]
-
-        pred_seqs = []
-        for i in range(aatype_denoised.shape[0]):
-            pred_seq = "".join([rc.restypes_with_x[aatype_denoised[i, j]] for j in range(aatype_denoised.shape[1])])
-            pred_seqs.append(pred_seq)
-        preds[pdb]["pred_seqs"] = pred_seqs
-
-    return preds, run_aux
-
+    return outputs
 
 
 def get_sd_batch(struct_file_paths: list[str], device: str,

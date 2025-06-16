@@ -73,9 +73,9 @@ def main(cfg: DictConfig):
         L.seed_everything(cfg.seed)
 
         # Run sequence design model
-        _, aux = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
+        outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
                              struct_file_paths=processed_struct_files, device=device, out_dir=log_dir_i)
-        sampled_pdbs = aux["out_pdbs"]
+        sampled_pdbs = outputs["out_pdbs"]
 
         # Run self-consistency evaluation
         out_metrics = defaultdict(list)

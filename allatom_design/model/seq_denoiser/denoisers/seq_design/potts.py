@@ -817,7 +817,7 @@ def sample_potts(
     if return_trajectory:
         S_trajectory = []
         U_trajectory = []
-    for i, T_i in enumerate(tqdm(temperatures, desc="Potts Sampling")):
+    for i, T_i in enumerate(tqdm(temperatures, desc="Potts Sampling", leave=False)):
         # Cycle through Gibbs updates random sites to the update with fixed prob
         if proposal == "chromatic":
             mask_update = schedule.eq(i % num_colors)

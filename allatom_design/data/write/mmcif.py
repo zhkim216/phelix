@@ -17,6 +17,7 @@ from torchtyping import TensorType
 
 from allatom_design.data import const, data
 from allatom_design.data.data import to
+from allatom_design.data.feature.feature_utils import unbatch_feats
 from allatom_design.data.feature.seq_des_featurizer import crop_sd_feats
 from allatom_design.data.types import Structure
 
@@ -263,8 +264,6 @@ def create_assembly_from_feats(feats: dict[str, TensorType["n ..."]],
     """
     Create an assembly from a dictionary of Boltz features. Also returns the asym_unit_map mapping from chain_id to asym_unit within the assembly.
     """
-    feats = crop_sd_feats(feats, feats["token_pad_mask"].bool(), max_tokens=None, max_atoms=None, in_place=False)
-
     # Map entities to chain_ids
     entity_to_chains = {}
     entity_to_moltype = {}
@@ -450,6 +449,7 @@ def write_feats_to_mmcif(feats: dict[str, TensorType["n ..."]],
     """
     system = System()
 
+    feats = crop_sd_feats(feats, feats["token_pad_mask"].bool(), max_tokens=None, max_atoms=None, in_place=False)
     assembly, asym_unit_map = create_assembly_from_feats(feats, input_struct, keep_auth)
     model = ModelFromFeats(assembly=assembly, name="Model", asym_unit_map=asym_unit_map, feats=feats, keep_auth=keep_auth)
     model_group = ModelGroup([model], name="All models")
@@ -462,26 +462,6 @@ def write_feats_to_mmcif(feats: dict[str, TensorType["n ..."]],
         f.write(mmcif_str)
 
 
-def _unbatch_feats(batched: dict[str, torch.Tensor]) -> list[dict[str, torch.Tensor]]:
-    """
-    Turn dict[B, …] → list[dict[…]]  (keeps non‑tensor, non-list entries verbatim).
-    TODO: move to some feature_utils.py
-    """
-    B = next(v for v in batched.values() if isinstance(v, torch.Tensor)).shape[0]
-    out: list[dict[str, torch.Tensor]] = []
-    for b in range(B):
-        slice_b: dict[str, torch.Tensor] = {}
-        for k, v in batched.items():
-            if isinstance(v, torch.Tensor):
-                slice_b[k] = v[b]
-            elif isinstance(v, list):
-                slice_b[k] = v[b]
-            else:
-                slice_b[k] = v
-        out.append(slice_b)
-    return out
-
-
 def batch_write_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
                                input_structs: list[Structure | None] | None,  # needed for ligand sequence info
                                filenames: list[str],
@@ -492,7 +472,7 @@ def batch_write_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]],
     feats = to(feats, "cpu")
 
     # Unbatch feats into a list of dicts
-    feats_list = _unbatch_feats(feats)
+    feats_list = unbatch_feats(feats)
 
     # Handle input_structs
     if input_structs is None:
@@ -547,7 +527,8 @@ def write_diffusion_inputs_to_ensemble(feats: dict[str, TensorType["b n ..."]],
                                                                  boltz_feats["coords"][0:1].expand(B, -1, -1),
                                                                  ca_atom_mask.expand(B, -1), return_aligned=True)
 
-    feats_list = _unbatch_feats(boltz_feats)
+    feats_list = unbatch_feats(boltz_feats)
+    feats_list = [crop_sd_feats(feats_i, feats_i["token_pad_mask"].bool(), max_tokens=None, max_atoms=None, in_place=False) for feats_i in feats_list]
 
     # Create assembly from first model
     assembly, asym_unit_map = create_assembly_from_feats(feats_list[0], input_struct=None, keep_auth=True)

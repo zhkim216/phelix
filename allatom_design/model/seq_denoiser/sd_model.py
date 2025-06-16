@@ -103,9 +103,9 @@ class SeqDenoiser(nn.Module):
 
         # Choose sampling method
         if sampling_inputs["use_potts_sampling"]:
-            res_type_pred, aux = self.denoiser.potts_sample(batch, sampling_inputs)
+            output_feats, aux = self.denoiser.potts_sample(batch, sampling_inputs)
 
-        return res_type_pred, aux
+        return output_feats, aux
 
 
 def get_denoiser(cfg: DictConfig,

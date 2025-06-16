@@ -62,13 +62,13 @@ def main(cfg: DictConfig):
     })
 
     # Run sequence design model
-    _, aux = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
+    outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
                          struct_file_paths=processed_struct_file, device=device, pos_constraint_df=pos_constraint_df,
                          out_dir=out_dir)
 
     if cfg.run_self_consistency_eval:
         id_to_metrics = eval_metrics.run_self_consistency_eval_boltz(
-            aux["out_pdbs"],
+            outputs["out_pdbs"],
             struct_pred_model,
             cfg.pdb_processing_cfg,
             out_dir=pred_out_dir)

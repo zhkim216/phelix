@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torchtyping import TensorType
 
 import allatom_design.data.const as const
-from allatom_design.data.write.mmcif import _unbatch_feats
+from allatom_design.data.feature.feature_utils import unbatch_feats
 
 
 def thread_sequence_onto_example(example: dict[str, TensorType["1 n ..."]],
@@ -42,6 +42,6 @@ def thread_sequence_onto_example(example: dict[str, TensorType["1 n ..."]],
     example["coords"][example["prot_scn_atom_mask"].bool()] = 0.0
     example["atom_resolved_mask"][example["prot_scn_atom_mask"].bool()] = False
 
-    example = _unbatch_feats(example)[0]  # squeeze out batch dimension
+    example = unbatch_feats(example)[0]  # squeeze out batch dimension
 
     return example
