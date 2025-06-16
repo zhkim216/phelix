@@ -30,6 +30,8 @@ comparisons:
   # - ["aicath_pd90_noreg_ps500", "aicath_pd90_LCP_ps500"]
   # - ["aicath_pd90_noreg_ps5000", "aicath_pd90_LCP_ps500"]
   - ["chroma", "aicath_pd90_LCP_ps500"]
+  - ["chroma", "aicath_pd90_LCP_ps5000"]
+  - ["aicath_pd90_LCP_ps500", "aicath_pd90_LCP_ps5000"]
 
 model_csvs:
   - model_name: "chroma"
@@ -100,6 +102,9 @@ model_csvs:
   - model_name: "aicath_pd90_LCP_ps500"
     csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_ms_sweep10_idx2_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
     plot_name: "AI-CATH, pd90, LCP regularization, 500 sweeps"
+  - model_name: "aicath_pd90_LCP_ps5000"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_ms_sweep10_idx3_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "AI-CATH, pd90, LCP regularization, 5000 sweeps"
 
 
 # Which models that need to use subset_pdb_names
