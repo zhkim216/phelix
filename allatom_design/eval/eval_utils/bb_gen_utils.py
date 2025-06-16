@@ -137,7 +137,6 @@ def run_bb_partial_diffusion(model: AtomDenoiser,
                              device: str,
                              struct_file_paths: list[str],
                              n_samples_per_pdb: int,
-                             save_as_ensemble: bool,
                              out_dir: str) -> list[str]:
     """
     Run partial diffusion on a set of structures.
@@ -145,6 +144,14 @@ def run_bb_partial_diffusion(model: AtomDenoiser,
     # Set up output directories
     sample_out_dir = Path(out_dir, "samples")
     Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
+
+    # Set motif selection type
+    unconditional_motif_cfg = {"name": "unconditional",
+                               "motif_type": "unconditional",
+                               "restype_mask_type": "all",
+                               "residx_mask_type": "none",
+                               "motif_atom_type": "protein_backbone"}  # TODO: find a better way to handle unconditional sampling from scaffolding models / creation of empty motifs
+    data_cfg["motif_selector"].set_motif_cond_type_cfg(unconditional_motif_cfg)
 
     # Load in input PDB
     sampled_pdb_paths = []
@@ -157,7 +164,6 @@ def run_bb_partial_diffusion(model: AtomDenoiser,
             B = len(struct_file_batch_paths)
 
             # Get batch of inputs
-            unconditional_motif_cfg = {"name": "unconditional", "motif_type": "unconditional"}  # TODO: find a better way to handle unconditional sampling from scaffolding models / creation of empty motifs
             batch, input_structures = get_bb_batch(struct_file_batch_paths, data_cfg, unconditional_motif_cfg, device, parallel_pool)
 
             # Set up backbone diffusion inputs
@@ -178,14 +184,9 @@ def run_bb_partial_diffusion(model: AtomDenoiser,
             # Save samples
             out_feats = copy.deepcopy(batch["diffusion_inputs"])
             out_feats["x"][..., const.prot_bb_atom14_idxs, :] = x_bb_denoised
-            if save_as_ensemble:
-                filename = f"{sample_out_dir}/sample_{batch['pdb_key'][0]}.cif"
-                write_diffusion_inputs_to_ensemble(to(out_feats, "cpu"), filename)
-                sampled_pdb_paths.append(filename)
-            else:
-                filenames = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{(i+j) % n_samples_per_pdb}.cif" for j in range(B)]
-                write_diffusion_inputs_to_mmcif(to(out_feats, "cpu"), filenames)
-                sampled_pdb_paths.extend(filenames)
+            filenames = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{(i+j) % n_samples_per_pdb}.cif" for j in range(B)]
+            write_diffusion_inputs_to_mmcif(to(out_feats, "cpu"), filenames)
+            sampled_pdb_paths.extend(filenames)
 
             pbar.update(B)
         pbar.close()

@@ -375,3 +375,25 @@ def load_input(structure_path: str) -> Input:
     )
 
     return Input(structure, msa={})  # we don't load in the MSAs
+
+
+def split_ensemble_cif(ensemble_cif_path: str, out_dir: str) -> list[str]:
+    """
+    Split an ensemble CIF file into individual CIF files.
+    Returns a list of output file paths.
+    """
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    structure = gemmi.read_structure(ensemble_cif_path)
+
+    out_files = []
+    for i, model in enumerate(structure):
+        new_structure = gemmi.Structure()
+        new_structure.name = f"{structure.name}_model_{i}"
+        new_structure.add_model(model.clone())
+        new_structure.setup_entities()
+        new_structure.assign_label_seq_id()
+        out_file = Path(out_dir) / f"{Path(ensemble_cif_path).stem}_model_{i}.cif"
+        new_structure.make_mmcif_document().write_file(str(out_file))
+        out_files.append(str(out_file))
+
+    return out_files
