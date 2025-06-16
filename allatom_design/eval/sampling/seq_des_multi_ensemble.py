@@ -18,10 +18,10 @@ from allatom_design.eval.eval_utils.eval_setup_utils import (process_pdb_files,
                                                              wandb_setup)
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import (
-    get_seq_des_model, run_seq_des_multistate)
+    get_seq_des_model, run_seq_des_ensemble)
 
 
-@hydra.main(config_path="../../configs/eval/sampling", config_name="seq_des_multi_multistate", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/sampling", config_name="seq_des_multi_ensemble", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Script for designing sequences for multiple conformers of multiple PDBs.
@@ -84,7 +84,7 @@ def main(cfg: DictConfig):
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     # Run sequence design model
-    _, aux = run_seq_des_multistate(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
+    _, aux = run_seq_des_ensemble(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
                                     conformer_struct_files=conformer_struct_files, device=device, pos_constraint_df=None,
                                     out_dir=log_dir)
 

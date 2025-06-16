@@ -46,7 +46,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
 CKPT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a2_cfg1/checkpoints/ema/sd-step17500-epoch22-ema0.99.ckpt
-BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep
+BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a2_cfg1/ensemble_sweep
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
@@ -55,7 +55,7 @@ EXP_NAME=sd3_a2_cfg1_ms_sweep10_idx${SLURM_ARRAY_TASK_ID}_bvc_${LIST_STEM}_${STR
 
 # Run training script
 cd ${BASE_DIR}
-python3 allatom_design/eval/sampling/seq_des_multi_multistate.py \
+python3 allatom_design/eval/sampling/seq_des_multi_ensemble.py \
     wandb.no_wandb=false \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
