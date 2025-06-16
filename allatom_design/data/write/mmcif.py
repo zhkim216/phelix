@@ -15,7 +15,7 @@ from rdkit import Chem
 from torch import Tensor
 from torchtyping import TensorType
 
-from allatom_design.data import const
+from allatom_design.data import const, data
 from allatom_design.data.data import to
 from allatom_design.data.feature.seq_des_featurizer import crop_sd_feats
 from allatom_design.data.types import Structure
@@ -523,9 +523,13 @@ def write_diffusion_inputs_to_mmcif(feats: dict[str, TensorType["b n ..."]], fil
 
 
 def write_diffusion_inputs_to_ensemble(feats: dict[str, TensorType["b n ..."]],
-                                       filename: str) -> None:
+                                       filename: str,
+                                       align_on_first_model: bool = True,
+                                       ) -> None:
     """
     Write diffusion inputs to a single ensemble file. Items in the batch are written to separate models in the ensemble.
+
+    If align_on_first_model is True, we CA-align all models to the first model.
     """
     feats = to(feats, "cpu")
     boltz_feats = diffusion_inputs_to_boltz_feats(feats)
@@ -533,6 +537,15 @@ def write_diffusion_inputs_to_ensemble(feats: dict[str, TensorType["b n ..."]],
     # Create ensemble
     system = System()
     models = []
+
+    # Align on first model
+    if align_on_first_model:
+        B = boltz_feats["coords"].shape[0]
+        ca_atom_mask = torch.zeros_like(boltz_feats["atom_resolved_mask"][0:1])
+        ca_atom_mask[:, 1::4] = True  # N, CA, C, O
+        _, (boltz_feats["coords"], _) = data.torch_rmsd_weighted(boltz_feats["coords"],
+                                                                 boltz_feats["coords"][0:1].expand(B, -1, -1),
+                                                                 ca_atom_mask.expand(B, -1), return_aligned=True)
 
     feats_list = _unbatch_feats(boltz_feats)
 

@@ -53,25 +53,25 @@ def main(cfg: DictConfig):
     bb_gen_model = get_bb_gen_model(cfg.bb_gen_cfg, device=device)
     sampled_pdb_paths = run_bb_partial_diffusion(bb_gen_model["model"], bb_gen_model["data_cfg"], bb_gen_model["sampling_cfg"], device,
                                                  processed_struct_files,
-                                                 n_samples_per_pdb=cfg.n_samples_per_pdb, save_as_ensemble=cfg.save_as_ensemble,
+                                                 n_samples_per_pdb=cfg.n_samples_per_pdb,
                                                  out_dir=partial_diffusion_dir)
 
-    # # Rename files to expected format for multistate seq des
-    # for pdb_file in pdb_files:
-    #     record_id = Path(pdb_file).stem
-    #     pdb_out_dir = f"{log_dir}/{record_id}"
-    #     Path(pdb_out_dir).mkdir(parents=True, exist_ok=True)
+    # Rename files to expected format for multistate seq des
+    for pdb_file in pdb_files:
+        record_id = Path(pdb_file).stem
+        pdb_out_dir = f"{log_dir}/{record_id}"
+        Path(pdb_out_dir).mkdir(parents=True, exist_ok=True)
 
-    #     # Copy over original pdb file
-    #     shutil.copy(pdb_file, f"{pdb_out_dir}/{Path(pdb_file).name}")
+        # Copy over original pdb file
+        shutil.copy(pdb_file, f"{pdb_out_dir}/{Path(pdb_file).name}")
 
-    #     # Copy over sampled pdb files
-    #     for sampled_pdb_path in sampled_pdb_paths:
-    #         if record_id in sampled_pdb_path:
-    #             shutil.copy(sampled_pdb_path, f"{pdb_out_dir}/{Path(sampled_pdb_path).stem}.cif")
+        # Copy over sampled pdb files
+        for sampled_pdb_path in sampled_pdb_paths:
+            if record_id in sampled_pdb_path:
+                shutil.copy(sampled_pdb_path, f"{pdb_out_dir}/{Path(sampled_pdb_path).stem}.cif")
 
-    # # Delete partial diffusion temp dir
-    # shutil.rmtree(partial_diffusion_dir)
+    # Delete partial diffusion temp dir
+    shutil.rmtree(partial_diffusion_dir)
 
     if not cfg.wandb.no_wandb:
         wandb.finish()

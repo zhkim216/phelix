@@ -76,7 +76,7 @@ class MotifSelector:
             motif_type = self.motif_type[torch.multinomial(torch.tensor(self.motif_probs), 1).item()]
         else:
             # Use motif type from motif conditioning type configuration
-            motif_type = self.motif_cond_type_cfg.motif_type
+            motif_type = self.motif_cond_type_cfg["motif_type"]
 
         if motif_type == "unconditional":
             return select_unconditional(tokenized)
@@ -98,7 +98,7 @@ class MotifSelector:
             restype_mask_type = self.restype_mask_type[torch.multinomial(torch.tensor(self.restype_mask_probs), 1).item()]
         else:
             # Use restype mask type from motif conditioning type configuration
-            restype_mask_type = self.motif_cond_type_cfg.restype_mask_type
+            restype_mask_type = self.motif_cond_type_cfg["restype_mask_type"]
 
         if restype_mask_type == "all":
             # Mask out all restypes
@@ -126,7 +126,7 @@ class MotifSelector:
             residx_mask_type = self.residx_mask_type[torch.multinomial(torch.tensor(self.residx_mask_probs), 1).item()]
         else:
             # Use residx mask type from motif conditioning type configuration
-            residx_mask_type = self.motif_cond_type_cfg.residx_mask_type
+            residx_mask_type = self.motif_cond_type_cfg["residx_mask_type"]
 
         if residx_mask_type == "all":
             residx_mask = torch.zeros(len(tokenized.tokens))
@@ -150,7 +150,7 @@ class MotifSelector:
             motif_atom_type = self.motif_atom_type[torch.multinomial(torch.tensor(self.motif_atom_probs), 1).item()]
         else:
             # Use motif atom type from motif conditioning type configuration
-            motif_atom_type = self.motif_cond_type_cfg.motif_atom_type
+            motif_atom_type = self.motif_cond_type_cfg["motif_atom_type"]
 
         if motif_atom_type == "all":
             return select_all_atoms(feats)
