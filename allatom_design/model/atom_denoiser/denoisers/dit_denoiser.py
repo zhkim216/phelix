@@ -53,10 +53,15 @@ class DiTDenoiser(nn.Module):
         self.dit = DiT(cfg.dit, self.interpolant)
 
         # Autoguidance
+        self.guiding_model = None
         self.use_autoguidance = cfg.autoguidance.enabled
         if self.use_autoguidance:
             self.autoguidance_train_p = 1 / cfg.autoguidance.subsample_train_iter_mult
             self.guiding_model = DiT(OmegaConf.merge(cfg.dit, cfg.autoguidance.dit), self.interpolant)  # override with autoguidance config
+
+
+    def get_compile_targets(self) -> list[nn.Module]:
+        return [self.dit, self.motif_embedder, self.guiding_model]
 
 
     def setup(self):

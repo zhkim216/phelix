@@ -27,6 +27,10 @@ class AtomDenoiser(nn.Module):
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
 
 
+    def get_compile_targets(self) -> list[nn.Module]:
+        return self.denoiser.get_compile_targets()
+
+
     def setup(self):
         # Initialize denoiser pre-trained weights if needed
         self.denoiser.setup()
