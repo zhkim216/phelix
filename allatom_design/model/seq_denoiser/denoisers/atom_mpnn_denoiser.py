@@ -6,15 +6,18 @@ import torch.nn.functional as F
 from einops import rearrange
 from omegaconf import DictConfig
 from torchtyping import TensorType
+from tqdm import tqdm
 
 import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.data.data import to
+from allatom_design.data.feature.feature_utils import slice_feats
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn import \
     AtomMPNN
 from chroma.layers import complexity
+import copy
 
 
 class AtomMPNNDenoiser(BaseSeqDenoiser):
@@ -130,8 +133,20 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
 
     def potts_sample(self, batch: dict[str, TensorType["b ..."]], sampling_inputs: dict[str, Any]):
+        """
+        Potts sampling for sequence design.
+
+        Returns:
+            output_feats: list[dict[str, TensorType["b ..."]]]: list of length (n_samples_per_pdb) of output features for each sample
+            aux: dict[str, Any]: auxiliary outputs
+        """
         aux = {}
 
+        # Compute potts parameters
+        potts_decoder_aux, token_exists_mask = self.compute_potts_params(batch, sampling_inputs)
+        aux["potts_decoder_aux"] = to(potts_decoder_aux, "cpu")
+
+        # Set up Potts sampling
         potts_sampling_cfg = sampling_inputs["potts_sampling_cfg"]
         regularization = potts_sampling_cfg["regularization"]
         potts_sweeps = potts_sampling_cfg["potts_sweeps"]
@@ -159,18 +174,9 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         penalty_func = None
         mask_ij_coloring = None
         edge_idx_coloring = None
-        symmetry_order = None
         if regularization == "LCP":
-            # C_complexity = (
-            #     C
-            #     if symmetry_order is None
-            #     else C[:, : C.shape[1] // symmetry_order]
-            # )
             C_complexity = batch["token_pad_mask"].clone()
             penalty_func = lambda _S: complexity.complexity_lcp(_S, C_complexity)
-            # edge_idx_coloring, mask_ij_coloring = complexity.graph_lcp(C, edge_idx, mask_ij)
-
-        _, aux_preds = self(batch, is_sampling=True, sampling_inputs=sampling_inputs)
 
         # If provided, handle tied sampling across different inputs in the batch
         if "tied_sampling_ids" in batch:
@@ -188,14 +194,11 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         else:
             tied_sampling_inputs = None
 
-        potts_decoder_aux = aux_preds["potts_decoder_aux"]
-        aux["potts_decoder_aux"] = to(potts_decoder_aux, "cpu")
+        S = []  # keep track of sequences for each sample
+        aux["U"] = []  # keep track of energies for each sample
 
-        if sampling_inputs.get("skip_sampling", False):
-            # Skip sampling, just return potts_decoder_aux and initial sequence
-            S_sample = S_init
-        else:
-            # Sample sequence
+        # Design sequences
+        for _ in tqdm(range(sampling_inputs["num_seqs_per_pdb"]), desc="Sampling sequences", leave=False):
             S_sample, U_sample = self.atom_mpnn.decoder_S_potts.sample(
                 potts_decoder_aux["h"],
                 potts_decoder_aux["J"],
@@ -214,56 +217,60 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 mask_ij_coloring=mask_ij_coloring,
                 tied_sampling_inputs=tied_sampling_inputs,
             )
-            aux["U"] = U_sample
 
-        # Set all tokens that don't exist in the graph to unknown
-        for chain_type, unk_token_id in const.unk_token_ids.items():
-            chain_type_id = const.chain_type_ids[chain_type]
-            unk_mask = (~batch["token_exists_mask"].bool()) & (batch["mol_type"] == chain_type_id)
-            S_sample[unk_mask] = unk_token_id
+            # Set all tokens that don't exist in the graph to unknown
+            for chain_type, unk_token_id in const.unk_token_ids.items():
+                chain_type_id = const.chain_type_ids[chain_type]
+                unk_mask = (~token_exists_mask.bool()) & (batch["mol_type"] == chain_type_id)
+                S_sample[unk_mask] = unk_token_id
 
-        return S_sample, aux
+            aux["U"].append(U_sample.cpu())
+            S.append(S_sample.cpu())
+
+        batch = to(batch, device="cpu")
+
+        # Thread sequences onto original batch
+        output_feats = []
+        for si in range(len(S)):
+            feats_si = copy.deepcopy(batch)
+            feats_si["res_type"] = torch.where(feats_si["seq_cond_mask"][..., None].bool(),
+                                               feats_si["res_type"],
+                                               F.one_hot(S[si], num_classes=len(const.tokens)))
+            feats_si["coords"] = feats_si["coords"] * feats_si["atom_cond_mask"].unsqueeze(-1)
+            feats_si["atom_resolved_mask"] = feats_si["atom_resolved_mask"] * feats_si["atom_cond_mask"]
+            output_feats.append(feats_si)
+
+        # For tied sampling, only return representative outputs
+        if tied_sampling_inputs is not None:
+            unique_rep_idx = aux["tied_sampling_inputs"]["rep_idx"].unique().cpu()  # indices of representative sequences
+            output_feats = [slice_feats(feats_si, unique_rep_idx) for feats_si in output_feats]
+            aux["U"] = [U_sample[unique_rep_idx] for U_sample in aux["U"]]
+
+        return output_feats, aux
 
 
-    def sample_aatype(self,
-                      seq_logits: TensorType["b n k", float],
-                      aux_inputs: Dict[str, Any],
-                      is_sampling: bool,
-                      ) -> Tuple[TensorType["b n", int], TensorType["b n k", float]]:
+    def compute_potts_params(self, batch: dict[str, TensorType["b ..."]],
+                             sampling_inputs: dict[str, Any]) -> tuple[dict[str, TensorType["b ..."]], TensorType["b n_tokens", float]]:
         """
-        Sample aatype from seq logits
-        If training, just take argmax (this will be teacher-forced to the ground truth aatype during sidechain diffusion)
-        If sampling, sample from (possibly temperature-scaled) logits
+        Run model and collect potts parameters over a batch of samples.
 
         Returns:
-        - aatype_pred: Tensor["b n", int]
-        - scaled_seq_probs: Tensor["b n k", float]: seq_probs scaled by temperature and sampling modifications
+            potts_decoder_aux: dict[str, TensorType["b ..."]]: potts parameters
+            token_exists_mask: TensorType["b n_tokens", float]: mask of which tokens exist in the graph
         """
-        if not is_sampling:
-            return seq_logits.argmax(dim=-1), F.softmax(seq_logits, dim=-1)
+        subbatch_size = sampling_inputs["batch_size"]
+        B = batch["res_type"].shape[0]
 
-        # Handle aatype restrictions
-        seq_logits[..., rc.restype_order_with_x["X"]] = -1e9  # do not sample mask/unknowns
-        omit_aas = aux_inputs.get("omit_aas", None)
-        if omit_aas is not None:
-            for aa in omit_aas:
-                seq_logits[..., rc.restype_order_with_x[aa]] = -1e9  # omit the specified aatypes
+        # Run model and collect potts parameters
+        potts_decoder_aux = {}  # potts parameters
+        token_exists_mask = []  # keep track of the tokens that exist in the graph
+        for bi in tqdm(range(0, B, subbatch_size), desc="Computing potts parameters", leave=False):
+            subbatch = slice_feats(batch, slice(bi, bi + subbatch_size))
+            _, aux_preds_i = self(subbatch, is_sampling=True, sampling_inputs=sampling_inputs)
+            for k, v in aux_preds_i["potts_decoder_aux"].items():
+                potts_decoder_aux.setdefault(k, []).append(v)
+            token_exists_mask.append(aux_preds_i["token_exists_mask"])
+        potts_decoder_aux = {k: torch.cat(v, dim=0) for k, v in potts_decoder_aux.items()}
+        token_exists_mask = torch.cat(token_exists_mask, dim=0)
 
-        pos_restrict_aatype = aux_inputs.get("pos_restrict_aatype", None)
-        if pos_restrict_aatype is not None:
-            restrict_pos_mask, allowed_aatype_mask = pos_restrict_aatype  # (B, N), (B, N, K)
-            restrict_pos_mask = restrict_pos_mask.unsqueeze(-1).expand_as(seq_logits)
-            disallowed_positions = (restrict_pos_mask == 1.0) & (allowed_aatype_mask == 0.0)  # only allow specified aatypes
-            seq_logits[disallowed_positions] = -1e9
-
-        # Handle temperature scaling
-        tau = aux_inputs.get("temperature", 1.0)
-        B, N = seq_logits.shape[:2]
-        if tau == 0.0:
-            aatype_pred = seq_logits.argmax(dim=-1)
-            scaled_seq_probs = F.softmax(seq_logits, dim=-1)  # don't scale for argmax sampling
-        else:
-            scaled_logits = seq_logits / tau
-            scaled_seq_probs = F.softmax(scaled_logits, dim=-1)
-            aatype_pred = torch.multinomial(scaled_seq_probs.view(B * N, -1), num_samples=1).view(B, N)
-        return aatype_pred, scaled_seq_probs
+        return potts_decoder_aux, token_exists_mask

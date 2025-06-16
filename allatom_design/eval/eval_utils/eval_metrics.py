@@ -28,7 +28,7 @@ from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     finalize, mmcif_to_pdb)
-from allatom_design.data.write.mmcif import write_feats_to_mmcif
+from allatom_design.data.write.mmcif import batch_write_feats_to_mmcif
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
@@ -249,7 +249,7 @@ def compute_self_consistency_metrics_boltz(pred_struct_file: str,
 
     # Write aligned coords to mmcif
     pred_example["coords"] = ca_aligned_pred_coords
-    write_feats_to_mmcif(pred_example, pred_structure, f"{out_dir}/{Path(pred_struct_file).stem}.cif")
+    batch_write_feats_to_mmcif(pred_example, pred_structure, [f"{out_dir}/{Path(pred_struct_file).stem}.cif"])
 
     # Compute metrics
     for metric in ["sc_ca_rmsd", "sc_center_rmsd", "sc_nonpolymer_rmsd",
@@ -365,7 +365,7 @@ def run_esmfold_from_boltz_feats(design_struct_files: str,
 
         # Write to mmcif
         out_pdb = f"{pred_dir}/esmfold_{Path(design_struct_file).stem}.cif"
-        write_feats_to_mmcif(design_example, design_structure, out_pdb)
+        batch_write_feats_to_mmcif(design_example, design_structure, [out_pdb])
         out_pdbs.append(out_pdb)
 
         # Format plddt to match boltz format

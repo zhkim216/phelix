@@ -84,13 +84,13 @@ def main(cfg: DictConfig):
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     # Run sequence design model
-    _, aux = run_seq_des_ensemble(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
+    outputs = run_seq_des_ensemble(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
                                     conformer_struct_files=conformer_struct_files, device=device, pos_constraint_df=None,
                                     out_dir=log_dir)
 
     if cfg.run_self_consistency_eval:
         id_to_metrics = eval_metrics.run_self_consistency_eval_boltz(
-            aux["out_pdbs"],
+            outputs["out_pdbs"],
             struct_pred_model,
             cfg.pdb_processing_cfg,
             out_dir=pred_out_dir)
@@ -99,8 +99,8 @@ def main(cfg: DictConfig):
         metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
 
         # Add n_conformers to metrics, since sometimes we are missing some conformers due to processing errors
-        record_ids = [Path(x).stem.lower() for x in aux["out_pdbs"]]
-        n_conformers_df = pd.DataFrame({"record_id": record_ids, "n_conformers": aux["n_conformers"]})
+        record_ids = [Path(x).stem.lower() for x in outputs["out_pdbs"]]
+        n_conformers_df = pd.DataFrame({"record_id": record_ids, "n_conformers": outputs["n_conformers"]})
         metrics_df = pd.merge(metrics_df, n_conformers_df, on="record_id", how="left")
 
         metrics_df.to_csv(f"{log_dir}/self_consistency_metrics.csv", index=False)
