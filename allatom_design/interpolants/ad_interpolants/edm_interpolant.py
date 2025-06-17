@@ -345,6 +345,8 @@ class EDM(ADInterpolant):
         return 1 / 4 * torch.log(sigma)
 
 
+
+    @torch.compiler.disable
     def setup_preconditioning(self,
                               x_noised: TensorType["b n a 3", float],
                               x_self_cond: Optional[TensorType["b n a 3", float]],
