@@ -498,6 +498,7 @@ Token = np.dtype(
     ("auth_seq_id", np.dtype("i4")),
     ("pdb_icode", np.dtype("i4")),
     ("is_standard", np.dtype("?")),
+    ("sse", np.dtype("i1")),
 ],
 align=True)
 

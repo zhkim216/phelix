@@ -3,6 +3,7 @@ from dataclasses import astuple, dataclass
 import numpy as np
 
 from allatom_design.data import const
+from allatom_design.data.sse import annotate_sse
 from allatom_design.data.tokenize.tokenizer import Tokenizer
 from allatom_design.data.types import Input, Token, TokenBond, Tokenized
 
@@ -29,6 +30,7 @@ class TokenData:
     auth_seq_id: int
     pdb_icode: int
     is_standard: bool
+    sse: int
 
 
 class BoltzTokenizer(Tokenizer):
@@ -66,7 +68,16 @@ class BoltzTokenizer(Tokenizer):
             res_start = chain["res_idx"]
             res_end = chain["res_idx"] + chain["res_num"]
 
-            for res in struct.residues[res_start:res_end]:
+            # Annotate secondary structure for protein chains
+            sse = np.zeros_like(struct.residues["res_idx"], dtype=np.int8)
+            if chain["mol_type"] == const.chain_type_ids["PROTEIN"]:
+                ca_coords = struct.atoms[struct.residues["atom_center"]]["coords"]
+                try:
+                    sse = annotate_sse(ca_coords, struct.residues["res_idx"])
+                except Exception as e:
+                    print(f"Error annotating secondary structure, defaulting to all unknown/masked annotations: {e}")
+
+            for ri, res in enumerate(struct.residues[res_start:res_end]):
                 # Get atom indices
                 atom_start = res["atom_idx"]
                 atom_end = res["atom_idx"] + res["atom_num"]
@@ -105,6 +116,7 @@ class BoltzTokenizer(Tokenizer):
                         auth_seq_id=res["auth_seq_id"],
                         pdb_icode=convert_icode_to_token(res["pdb_icode"]),
                         is_standard=res["is_standard"],
+                        sse=sse[ri],
                     )
                     token_data.append(astuple(token))
 
@@ -150,6 +162,7 @@ class BoltzTokenizer(Tokenizer):
                             auth_seq_id=res["auth_seq_id"],
                             pdb_icode=convert_icode_to_token(res["pdb_icode"]),
                             is_standard=res["is_standard"],
+                            sse=sse[ri],
                         )
                         token_data.append(astuple(token))
 

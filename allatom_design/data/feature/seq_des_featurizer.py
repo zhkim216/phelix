@@ -14,7 +14,6 @@ from allatom_design.data import const
 from allatom_design.data.feature.pad import crop_dim, pad_dim
 from allatom_design.data.tokenize.boltz import Tokenized
 
-
 # Keep track of the token/atom dimensions of the features for padding & cropping
 FEAT_TO_TOKEN_DIM = {
     # Maps feature name to the token dimension
@@ -35,6 +34,7 @@ FEAT_TO_TOKEN_DIM = {
     "auth_seq_id": [0],
     "pdb_icode": [0],
     "is_standard": [0],
+    "sse": [0],
 
     # atom features
     "atom_to_token": [1],
@@ -158,6 +158,7 @@ def process_sd_token_features(
     auth_seq_id = from_numpy(token_data["auth_seq_id"]).long()
     pdb_icode = from_numpy(token_data["pdb_icode"]).long()
     is_standard = from_numpy(token_data["is_standard"]).bool()
+    sse = from_numpy(token_data["sse"]).long()
 
     # Token mask features
     pad_mask = torch.ones(len(token_data), dtype=torch.float)
@@ -193,6 +194,7 @@ def process_sd_token_features(
         "auth_seq_id": auth_seq_id,
         "pdb_icode": pdb_icode,
         "is_standard": is_standard,
+        "sse": sse,
     }
     return token_features
 
