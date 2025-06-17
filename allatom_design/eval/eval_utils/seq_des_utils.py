@@ -255,7 +255,6 @@ def run_seq_des_ensemble(model: SeqDenoiser,
         Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
 
         outputs["out_pdbs"] = []  # store output PDB paths
-        outputs["pred_seqs"] = []  # store predicted sequences as a string for each sample
         outputs["n_conformers"] = []  # store number of conformers for each PDB (some may have been skipped due to parsing issues)
         outputs["U"] = []  # store energies for each sample
 

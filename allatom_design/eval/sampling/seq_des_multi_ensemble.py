@@ -88,6 +88,8 @@ def main(cfg: DictConfig):
                                     conformer_struct_files=conformer_struct_files, device=device, pos_constraint_df=None,
                                     out_dir=log_dir)
 
+    del seq_des_model
+
     if cfg.run_self_consistency_eval:
         id_to_metrics = eval_metrics.run_self_consistency_eval_boltz(
             outputs["out_pdbs"],
