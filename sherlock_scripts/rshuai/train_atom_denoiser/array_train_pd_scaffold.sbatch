@@ -1,10 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name=sd4_a0
-#SBATCH -p bioe
+#SBATCH --job-name=spd0_a3
+#SBATCH -p possu
 #SBATCH --array=0-2
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
+#SBATCH --exclude=sh03-18n05
 #
 #SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%A_%a.err
@@ -29,24 +30,24 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME_BASE=sd4_a0
-GROUP=seq_des
+EXP_NAME_BASE=spd0_a3
+GROUP=pd_scaffold
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 # Inputs config
 CONFIGS=(
-"denoiser.augment_eps=0.1"
-"denoiser.augment_eps=0.2"
-"denoiser.augment_eps=0.4"
+"denoiser.dit.depth=15 denoiser.dit.hidden_size=768 denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.5"
+"denoiser.dit.depth=15 denoiser.dit.hidden_size=768 denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.6"
+"denoiser.dit.depth=12 denoiser.dit.hidden_size=384 denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.6"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
 
 # Run training script
 cd ${BASE_DIR}
-WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
     wandb.no_wandb=false \
@@ -54,16 +55,20 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     exp_name=${EXP_NAME} \
     data.pdb_path=${PDB_PATH} \
     data.max_tokens=512 \
-    data.max_atoms=4608 \
+    data.cropper._target_=allatom_design.data.crop.boltz.BoltzCropper \
+    data.use_auth_as_residx=false \
+    task=scaffold \
+    motif_selector.atom_p.all=0.0 \
+    motif_selector.atom_p.protein_sidechain=0.0 \
+    motif_selector.atom_p.protein_backbone=1.0 \
+    motif_selector.residx_mask_p.all=0.0 \
+    motif_selector.residx_mask_p.none=1.0 \
+    motif_selector.residx_mask_p.uniform=0.0 \
+    denoiser=dit_denoiser \
+    denoiser.dit.pos_encoding=af3 \
     train.batch_size=8 \
-    trainer.accumulate_grad_batches=4 \
+    denoiser.training_batch_size_mult=8 \
+    data.samples_per_epoch=8000 \
     train.compile_model=true \
-    mask_selector.restype_masking_schedule=uniform_t \
-    denoiser.mpnn.use_atom_encoder=false \
-    denoiser.mpnn.token_features.ca_only=false \
-    denoiser.mpnn.n_layers=3 \
-    data.filters.4.max_residues=2048 \
-    checkpointing.save_latest_every_n_steps=2500 \
-    trainer.check_val_every_n_epoch=2 \
     ${OVERRIDES} \
     hydra.run.dir=${HYDRA_DIR}
