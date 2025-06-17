@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import json
 import shutil
+from contextlib import nullcontext
 from pathlib import Path
 
 import hydra
+import torch
+from joblib import Parallel, delayed
 from omegaconf import DictConfig
 from tqdm import tqdm
 
@@ -12,9 +15,10 @@ from allatom_design.data.filter.dynamic.chain_type_size import \
 from allatom_design.data.filter.dynamic.max_residues import MaxResiduesFilter
 from allatom_design.data.filter.dynamic.size import SizeFilter
 from allatom_design.data.types import Record
-from allatom_design.data.write.mmcif import write_feats_to_mmcif
+from allatom_design.data.write.mmcif import batch_write_feats_to_mmcif
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
 from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
+from allatom_design.data.feature.feature_utils import unbatch_feats
 
 
 @hydra.main(config_path="../../../configs/data/preprocessing/boltz_val_cifs", config_name="build_dataset", version_base="1.3.2")
@@ -49,12 +53,22 @@ def main(cfg: DictConfig):
     pdb_dir = f"{cfg.out_dir}/pdbs"
     Path(pdb_dir).mkdir(parents=True, exist_ok=True)
     data_cfg = hydra.utils.instantiate(cfg.data_cfg)
-    for processed_struct_file in tqdm(processed_struct_files, desc="Copying mmCIF files to output directory"):
-        # TODO: this can be easily parallelized
-        record = Record.from_dict(json.load(open(f"{processed_struct_dir}/records/{Path(processed_struct_file).stem}.json")))
-        processed_struct_file = f"{processed_struct_dir}/structures/{record.id}.npz"
-        example, input_structure = get_sd_batch([processed_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
-        write_feats_to_mmcif(example, input_structure, f"{pdb_dir}/{record.id}.cif")
+    parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
+
+    # Store features in memory
+    record_id_to_feats = {}
+    with parallel_context:
+        B = 32
+        for i in tqdm(range(0, len(processed_struct_files), B), desc="Copying mmCIF files to output directory"):
+            batch_struct_files = processed_struct_files[i:i+B]
+            batch, input_structs = get_sd_batch(batch_struct_files, device="cpu", data_cfg=data_cfg, parallel_pool=None)
+            filenames = [f"{pdb_dir}/{Path(struct_file).stem}.cif" for struct_file in batch_struct_files]
+            # batch_write_feats_to_mmcif(batch, input_structs, filenames)
+
+            feats_list = unbatch_feats(batch)
+            for bi in range(len(batch["pdb_key"])):
+                record_id = batch["pdb_key"][bi]
+                record_id_to_feats[record_id] = feats_list[bi]
 
     # Load in records and filter
     record_dir = f"{processed_struct_dir}/records"
@@ -102,6 +116,18 @@ def main(cfg: DictConfig):
             for record in filtered_records:
                 num_residues = sum(chain.num_residues for chain in record.chains)
                 f.write(f"{record.id},{num_residues}\n")
+
+        # Save sse to .pt file
+        sse_anno_dir = f"{cfg.out_dir}/sse_anno"
+        Path(sse_anno_dir).mkdir(parents=True, exist_ok=True)
+        record_id_to_sse = {}
+        for record in filtered_records:
+            record_id = record.id
+            sse = record_id_to_feats[record_id]["sse"]
+            token_pad_mask = record_id_to_feats[record_id]["token_pad_mask"]
+            token_resolved_mask = record_id_to_feats[record_id]["token_resolved_mask"]
+            record_id_to_sse[record_id] = sse[token_resolved_mask.bool() & token_pad_mask.bool()]
+        torch.save(record_id_to_sse, f"{sse_anno_dir}/{val_subset_name}.pt")
 
         if cfg.copy_subset_cifs:
             subset_cif_dir = f"{cfg.out_dir}/subset_cifs/{val_subset_name}"

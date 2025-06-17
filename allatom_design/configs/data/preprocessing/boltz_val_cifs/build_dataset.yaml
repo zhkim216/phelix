@@ -1,6 +1,6 @@
 mmcif_dir: /media/scratch/datasets/boltz_val_cifs/mmCIF
 val_ids_txt: /media/scratch/datasets/boltz_v2/splits/validation_ids.txt
-out_dir: /media/scratch/datasets/boltz_val_cifs
+out_dir: /media/scratch/datasets/boltz_val_cifs_debug
 num_workers: 8
 
 # PDB file processing
