@@ -100,7 +100,7 @@ def main(cfg: DictConfig):
     finalize(outdir=Path(processed_targets_dir))
 
     # Based on manifest.csv, load in designability info and add to manifest.json
-    update_manifest_from_csv(manifest_path=f"{processed_targets_dir}/manifest.json", manifest_df=manifest_df)
+    update_manifest_from_csv(manifest_path=f"{processed_targets_dir}/manifest_unclustered.json", manifest_df=manifest_df)
     print("Updated manifest records from CSV.")
 
 
@@ -145,7 +145,8 @@ def update_manifest_from_csv(manifest_path: str, manifest_df: pd.DataFrame) -> N
         new_records.append(asdict(record))
 
     # Save manifest records back to file
-    with open(manifest_path, "w") as f:
+    new_manifest_path = manifest_path.replace("_unclustered", "")
+    with open(new_manifest_path, "w") as f:
         json.dump(new_records, f)
 
 
