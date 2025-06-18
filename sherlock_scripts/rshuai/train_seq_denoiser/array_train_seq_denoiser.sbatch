@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd4_a0
-#SBATCH -p bioe
-#SBATCH --array=0-2
+#SBATCH --job-name=sd4_a1
+#SBATCH -p possu
+#SBATCH --array=0
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -29,7 +29,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME_BASE=sd4_a0
+EXP_NAME_BASE=sd4_a1
 GROUP=seq_des
 
 # Dataset paths
@@ -37,9 +37,7 @@ PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 # Inputs config
 CONFIGS=(
-"denoiser.augment_eps=0.1"
-"denoiser.augment_eps=0.2"
-"denoiser.augment_eps=0.4"
+"denoiser.mpnn.k_neighbors=64"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
