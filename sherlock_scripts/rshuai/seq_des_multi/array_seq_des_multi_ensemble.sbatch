@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a8_ens2
-#SBATCH -p bioe
-#SBATCH --array=0-7
+#SBATCH --job-name=sd3_a8_ens3
+#SBATCH -p bioe,possu
+#SBATCH --array=0-19%10
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -33,14 +33,27 @@ LIST_STEM=protein_monomer_32_512_no_ligand
 CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-90
 
 CONFIGS=(
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=1"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=2"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=4"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=8"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=1"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=2"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=4"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=8"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=1"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=2"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=4"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=8"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=16"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=1"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=2"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=4"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=8"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=16"
+
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=1"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=2"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=4"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=8"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=16"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=1"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=2"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=4"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=8"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=16"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 
@@ -49,7 +62,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
-BASE_EXP_NAME=sd3_a8_ens2
+BASE_EXP_NAME=sd3_a8_ens3
 BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/ensemble_design/${BASE_EXP_NAME}
 
 # Wandb settings / experiment name
@@ -72,5 +85,4 @@ python3 allatom_design/eval/sampling/seq_des_multi_ensemble.py \
     sampling_cfg_overrides.batch_size=8 \
     sampling_cfg_overrides.num_seqs_per_pdb=8 \
     ${OVERRIDES} \
-    include_primary_conformer=false \
     hydra.run.dir=${HYDRA_DIR}
