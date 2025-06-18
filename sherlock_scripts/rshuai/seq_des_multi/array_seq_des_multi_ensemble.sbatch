@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a8_ens1_seed1
+#SBATCH --job-name=sd3_a8_ens2
 #SBATCH -p bioe
 #SBATCH --array=0-7
 #SBATCH --gpus-per-node=1
@@ -49,7 +49,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
-BASE_EXP_NAME=sd3_a8_ens1_seed1
+BASE_EXP_NAME=sd3_a8_ens2
 BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/ensemble_design/${BASE_EXP_NAME}
 
 # Wandb settings / experiment name
@@ -60,7 +60,6 @@ EXP_NAME=${BASE_EXP_NAME}_idx${SLURM_ARRAY_TASK_ID}_bvc_${LIST_STEM}_${STRUCT_PR
 # Run training script
 cd ${BASE_DIR}
 python3 allatom_design/eval/sampling/seq_des_multi_ensemble.py \
-    seed=1 \
     wandb.no_wandb=false \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
@@ -73,4 +72,5 @@ python3 allatom_design/eval/sampling/seq_des_multi_ensemble.py \
     sampling_cfg_overrides.batch_size=8 \
     sampling_cfg_overrides.num_seqs_per_pdb=8 \
     ${OVERRIDES} \
+    include_primary_conformer=false \
     hydra.run.dir=${HYDRA_DIR}
