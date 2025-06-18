@@ -30,7 +30,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Set experiment name and grouop
 WANDB_ID=richardshuai
-EXP_NAME=s5_a4
+EXP_NAME=s6_a2
 GROUP=backbone
 
 # Dataset paths
@@ -45,7 +45,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
     data.pdb_path=${PDB_PATH} \
-    data.filters.3.max_scrmsd=1.0 \
+    data.augmented_filters.3.max_scrmsd=1.0 \
+    data.use_auth_as_residx=true \
     task=scaffold \
     motif_selector.atom_p.all=0.0 \
     motif_selector.atom_p.protein_sidechain=0.0 \
