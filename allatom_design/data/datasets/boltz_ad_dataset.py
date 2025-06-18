@@ -31,6 +31,22 @@ from allatom_design.data.types import (Connection, Manifest, Record, Structure,
 from allatom_design.data.data import pad_atom_feats_to_tokenwise
 from allatom_design.data.write.mmcif import write_motif_feats_to_mmcif, write_diffusion_inputs_to_mmcif
 
+DIFFUSION_INPUTS_DTYPES = {
+    "residue_index": torch.long,
+    "chain_index": torch.long,
+    "seq_mask": torch.float,
+    "token_index": torch.long,
+    "sym_id": torch.long,
+    "entity_id": torch.long,
+    "label_seq_id": torch.long,
+    "auth_seq_id": torch.long,
+    "pdb_icode": torch.long,
+    "x": torch.float,
+    "atom_mask": torch.float,
+    "bb_atom_mask": torch.float,
+}
+
+
 class BoltzADDataModule(L.LightningDataModule):
     def __init__(self, cfg: DictConfig):
         super().__init__()
@@ -417,8 +433,8 @@ def featurize_diffusion_inputs(tokenized: Tokenized, use_auth_as_residx: bool, m
     diffusion_feats["atom_mask"] = tokenized.tokenwise_atom_feats["atom_resolved_mask"]
     diffusion_feats["bb_atom_mask"] = diffusion_feats["atom_mask"][..., const.prot_bb_atom14_idxs]
 
-    # Convert to torch
-    diffusion_feats = {k: torch.from_numpy(v.copy()) for k, v in diffusion_feats.items()}
+    # Convert to torch and cast to appropriate dtypes
+    diffusion_feats = {k: torch.from_numpy(v.copy()).to(DIFFUSION_INPUTS_DTYPES[k]) for k, v in diffusion_feats.items()}
 
     # Pad to max tokens
     if max_tokens is not None:
