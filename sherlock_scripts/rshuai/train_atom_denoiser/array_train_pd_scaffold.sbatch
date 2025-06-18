@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=spd0_a3
+#SBATCH --job-name=spd0_a4
 #SBATCH -p possu
-#SBATCH --array=0-2
+#SBATCH --array=0-1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -30,7 +30,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME_BASE=spd0_a3
+EXP_NAME_BASE=spd0_a4
 GROUP=pd_scaffold
 
 # Dataset paths
@@ -38,9 +38,8 @@ PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 # Inputs config
 CONFIGS=(
-"denoiser.dit.depth=15 denoiser.dit.hidden_size=768 denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.5"
-"denoiser.dit.depth=15 denoiser.dit.hidden_size=768 denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.6"
-"denoiser.dit.depth=12 denoiser.dit.hidden_size=384 denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.6"
+"denoiser.dit.depth=15 denoiser.dit.hidden_size=768 denoiser.dit.num_heads=12 denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.5"
+"denoiser.dit.depth=15 denoiser.dit.hidden_size=768 denoiser.dit.num_heads=12 denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.6"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
