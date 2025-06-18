@@ -52,6 +52,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser.dit.pos_encoding=af3 \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
+    denoiser.dit.num_heads=12 \
     train.batch_size=8 \
     denoiser.training_batch_size_mult=8 \
     denoiser.interpolant.training_noise_cfg.lognormal.t_min=0.5 \
