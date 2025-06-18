@@ -49,6 +49,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser=dit_denoiser \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
+    denoiser.dit.num_heads=12 \
     denoiser.dit.num_registers=10 \
     train.batch_size=8 \
     denoiser.training_batch_size_mult=16 \
