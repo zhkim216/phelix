@@ -16,24 +16,14 @@ comparisons:
   # - ["md_cath_pd90", "aicath_pd90"]
   # - ["aicath_pd90", "aicath_pd110_ode"]
   # - ["baseline", "eps0.3"]
-  # - ["baseline_noreg", "eps0.3"]
-  # - ["s6_a0_t0.7", "eps0.3"]
-  # - ["eps0.1", "eps0.3"]
-  # - ["eps0.3", "eps0.5"]
-  # - ["eps0.3", "aicath_pd90"]
-  # - ["baseline", "aicath_pd90"]
-  # - ["s6_a0_t0.7", "aicath_pd90"]
-  # - ["eps0.5", "aicath_pd90"]
-  # - ["eps0.5", "s6_a0_t0.7"]
-  # - ["eps0.3", "s6_a0_t0.7"]
-  # - ["aicath_pd90", "aicath_pd90_no_primary"]
-  # - ["aicath_pd90_noreg_ps500", "aicath_pd90_LCP_ps500"]
-  # - ["aicath_pd90_noreg_ps5000", "aicath_pd90_LCP_ps500"]
-  # - ["chroma", "aicath_pd90_LCP_ps500"]
-  # - ["chroma", "aicath_pd90_LCP_ps5000"]
-  # - ["aicath_pd90_LCP_ps500", "aicath_pd90_LCP_ps5000"]
-  # - ["aicath_pd90_LCP_ps500", "baseline"]
-  - ["baseline_noreg", "eps0.5"]
+  # - ["sd3_a8_S_25k", "sd3_a8_S_100k"]
+  # - ["sd3_a8_L_25k", "sd3_a8_L_100k"]
+  # - ["sd3_a8_S_25k", "sd3_a8_L_25k"]
+  # - ["sd3_a8_S_100k", "sd3_a8_L_100k"]
+  - ["sd4_a0_eps0.1_pd80", "sd4_a0_eps0.2_pd80"]
+  - ["sd4_a0_eps0.1_pd80", "sd4_a0_eps0.4_pd80"]
+  - ["sd4_a0_eps0.2_pd80", "sd4_a0_eps0.4_pd80"]
+  - ["sd4_a0_eps0.4_pd70", "sd4_a0_eps0.4_pd100"]
 
 model_csvs:
   - model_name: "chroma"
@@ -108,6 +98,57 @@ model_csvs:
     csv: /media/scratch/huang_lab/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep/sd3_a2_cfg1_ms_sweep10_idx3_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
     plot_name: "AI-CATH, pd90, LCP regularization, 5000 sweeps"
 
+  # sd3_a8_ens0: check scaling and checkpoints
+  - model_name: "sd3_a8_S_25k"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd3_a8_ens0/sd3_a8_ens0_idx0_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd3_a8_S, 25k steps"
+  - model_name: "sd3_a8_S_100k"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd3_a8_ens0/sd3_a8_ens0_idx3_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd3_a8_S, 50k steps"
+  - model_name: "sd3_a8_L_25k"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd3_a8_ens0/sd3_a8_ens0_idx4_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd3_a8_L, 25k steps"
+  - model_name: "sd3_a8_L_100k"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd3_a8_ens0/sd3_a8_ens0_idx7_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd3_a8_L, 100k steps"
+
+  # sd4_a0_ens0: compare models trained with different amounts of gaussian noise
+  - model_name: "sd4_a0_eps0.1_pd70"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx0_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.1, aicath pd=70"
+  - model_name: "sd4_a0_eps0.1_pd80"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx1_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.1, aicath pd=80"
+  - model_name: "sd4_a0_eps0.1_pd90"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx2_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.1, aicath pd=90"
+  - model_name: "sd4_a0_eps0.1_pd100"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx3_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.1, aicath pd=100"
+  - model_name: "sd4_a0_eps0.2_pd70"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx5_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.2, aicath pd=70"
+  - model_name: "sd4_a0_eps0.2_pd80"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx6_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.2, aicath pd=80"
+  - model_name: "sd4_a0_eps0.2_pd90"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx7_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.2, aicath pd=90"
+  - model_name: "sd4_a0_eps0.2_pd100"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx8_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.2, aicath pd=100"
+  - model_name: "sd4_a0_eps0.4_pd70"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx10_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.4, aicath pd=70"
+  - model_name: "sd4_a0_eps0.4_pd80"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx11_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.4, aicath pd=80"
+  - model_name: "sd4_a0_eps0.4_pd90"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx12_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.4, aicath pd=90"
+  - model_name: "sd4_a0_eps0.4_pd100"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx13_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "sd4_a0, eps=0.4, aicath pd=100"
 
 # Which models that need to use subset_pdb_names
 subset_pdb_names: /media/scratch/datasets/boltz_val_cifs/pdb_name_lists/protein_monomer_32_256_no_ligand.txt

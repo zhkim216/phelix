@@ -45,6 +45,7 @@ def get_bb_gen_model(cfg: DictConfig, device: str) -> dict[str, Any]:
     """
     Load in a backbone generation model.
     """
+
     lit_ad_model = LitAtomDenoiser.load_from_checkpoint(cfg.ckpt_path).eval()
     model_cfg, _ = get_cfg_from_ckpt(cfg.ckpt_path)
     data_cfg = hydra.utils.instantiate(model_cfg.data)
