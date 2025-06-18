@@ -32,7 +32,8 @@ comparisons:
   # - ["chroma", "aicath_pd90_LCP_ps500"]
   # - ["chroma", "aicath_pd90_LCP_ps5000"]
   # - ["aicath_pd90_LCP_ps500", "aicath_pd90_LCP_ps5000"]
-  - ["aicath_pd90_LCP_ps500", "baseline"]
+  # - ["aicath_pd90_LCP_ps500", "baseline"]
+  - ["baseline_noreg", "eps0.5"]
 
 model_csvs:
   - model_name: "chroma"
