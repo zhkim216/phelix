@@ -42,5 +42,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     denoiser=dit_denoiser \
     denoiser.dit.depth=15 \
     denoiser.dit.hidden_size=768 \
+    denoiser.dit.num_heads=12 \
     train.compile_model=true \
     hydra.run.dir=${HYDRA_DIR}
