@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=sd4_a1
 #SBATCH -p possu
-#SBATCH --array=0
+#SBATCH --array=1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -38,6 +38,7 @@ PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 # Inputs config
 CONFIGS=(
 "denoiser.mpnn.k_neighbors=64"
+"denoiser.mpnn.k_neighbors=96"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
