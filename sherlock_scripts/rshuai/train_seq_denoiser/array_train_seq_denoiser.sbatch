@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd4_a2
+#SBATCH --job-name=sd4_a3
 #SBATCH -p bioe
-#SBATCH --array=0-5
+#SBATCH --array=0-6
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -29,7 +29,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME_BASE=sd4_a2
+EXP_NAME_BASE=sd4_a3
 GROUP=seq_des
 
 # Dataset paths
@@ -37,6 +37,7 @@ PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 # Inputs config
 CONFIGS=(
+"denoiser.mpnn.k_neighbors=64"
 "denoiser.mpnn.k_neighbors=48 denoiser.mpnn.potts.k_neighbors_potts=32"
 "denoiser.mpnn.k_neighbors=64 denoiser.mpnn.potts.k_neighbors_potts=32"
 "denoiser.mpnn.k_neighbors=64 denoiser.mpnn.potts.k_neighbors_potts=48"
@@ -65,6 +66,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.mpnn.use_atom_encoder=false \
     denoiser.mpnn.token_features.ca_only=false \
     denoiser.mpnn.n_layers=3 \
+    denoiser.augment_eps=0.3 \
     data.filters.4.max_residues=2048 \
     checkpointing.save_latest_every_n_steps=2500 \
     trainer.check_val_every_n_epoch=2 \
