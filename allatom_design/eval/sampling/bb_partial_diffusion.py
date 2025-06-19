@@ -63,12 +63,12 @@ def main(cfg: DictConfig):
         Path(pdb_out_dir).mkdir(parents=True, exist_ok=True)
 
         # Copy over original pdb file
-        shutil.copy(pdb_file, f"{pdb_out_dir}/{Path(pdb_file).name}")
+        shutil.copy(pdb_file, f"{pdb_out_dir}/{Path(pdb_file).name.lower()}")
 
         # Copy over sampled pdb files
         for sampled_pdb_path in sampled_pdb_paths:
             if record_id in sampled_pdb_path:
-                shutil.copy(sampled_pdb_path, f"{pdb_out_dir}/{Path(sampled_pdb_path).stem}.cif")
+                shutil.copy(sampled_pdb_path, f"{pdb_out_dir}/{Path(sampled_pdb_path).name}")
 
     # Delete partial diffusion temp dir
     shutil.rmtree(partial_diffusion_dir)

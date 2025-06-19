@@ -47,7 +47,18 @@ def main(cfg: DictConfig):
     conformer_groups = []
     for pdb_name in pdb_names:
         all_conformers = natsorted(glob.glob(f"{cfg.conformer_dir}/{pdb_name}/*"))
-        primary_conformer = f"{cfg.conformer_dir}/{pdb_name}/{pdb_name}.cif"
+
+        # Try to find primary conformer with either .cif or .pdb extension
+        primary_conformer_cif = f"{cfg.conformer_dir}/{pdb_name}/{pdb_name}.cif"
+        primary_conformer_pdb = f"{cfg.conformer_dir}/{pdb_name}/{pdb_name}.pdb"
+
+        if Path(primary_conformer_cif).exists():
+            primary_conformer = primary_conformer_cif
+        elif Path(primary_conformer_pdb).exists():
+            primary_conformer = primary_conformer_pdb
+        else:
+            raise FileNotFoundError(f"Primary conformer not found for {pdb_name}. Expected either {primary_conformer_cif} or {primary_conformer_pdb}")
+
         all_conformers.remove(primary_conformer)
         if cfg.include_primary_conformer:
             conformers = [primary_conformer] + all_conformers[:cfg.max_num_conformers - 1]
