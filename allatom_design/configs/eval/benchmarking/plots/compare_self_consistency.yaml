@@ -20,10 +20,15 @@ comparisons:
   # - ["sd3_a8_L_25k", "sd3_a8_L_100k"]
   # - ["sd3_a8_S_25k", "sd3_a8_L_25k"]
   # - ["sd3_a8_S_100k", "sd3_a8_L_100k"]
-  - ["sd4_a0_eps0.1_pd80", "sd4_a0_eps0.2_pd80"]
-  - ["sd4_a0_eps0.1_pd80", "sd4_a0_eps0.4_pd80"]
-  - ["sd4_a0_eps0.2_pd80", "sd4_a0_eps0.4_pd80"]
-  - ["sd4_a0_eps0.4_pd70", "sd4_a0_eps0.4_pd100"]
+  # - ["sd4_a0_eps0.1_pd80", "sd4_a0_eps0.2_pd80"]
+  # - ["sd4_a0_eps0.1_pd80", "sd4_a0_eps0.4_pd80"]
+  # - ["sd4_a0_eps0.2_pd80", "sd4_a0_eps0.4_pd80"]
+  # - ["sd4_a0_eps0.4_pd70", "sd4_a0_eps0.4_pd100"]
+
+  # relax_db comparisons
+  - ["sd3_a8_ens4_baseline", "sd3_a8_ens4_s6_a0"]
+  - ["sd3_a8_ens4_baseline", "sd3_a8_ens4_spd0_a3_cfg2_700K"]
+  - ["sd3_a8_ens4_s6_a0", "sd3_a8_ens4_spd0_a3_cfg2_700K"]
 
 model_csvs:
   - model_name: "chroma"
@@ -150,6 +155,17 @@ model_csvs:
     csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd4_a0_ens0/sd4_a0_ens0_idx13_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
     plot_name: "sd4_a0, eps=0.4, aicath pd=100"
 
+  # relax_db models (sd3_a8_ens4)
+  - model_name: "sd3_a8_ens4_baseline"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd3_a8_ens4/sd3_a8_ens4_idx0_af2pdbs_relaxdb_initial/self_consistency_metrics.csv
+    plot_name: "af2pdbs_relaxdb, baseline"
+  - model_name: "sd3_a8_ens4_s6_a0"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd3_a8_ens4/sd3_a8_ens4_idx1_af2pdbs_relaxdb_initial/self_consistency_metrics.csv
+    plot_name: "af2pdbs_relaxdb, s6_a0"
+  - model_name: "sd3_a8_ens4_spd0_a3_cfg2_700K"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd3_a8_ens4/sd3_a8_ens4_idx3_af2pdbs_relaxdb_initial/self_consistency_metrics.csv
+    plot_name: "af2pdbs_relaxdb, partial diffusion ensemble"
+
 # Which models that need to use subset_pdb_names
 subset_pdb_names: /media/scratch/datasets/boltz_val_cifs/pdb_name_lists/protein_monomer_32_256_no_ligand.txt
 
@@ -157,11 +173,13 @@ use_subset_models:
   - s6_a0_t0.7
 
 # Add lengths
-length_csv: /media/scratch/datasets/boltz_val_cifs/length_lists/protein_monomer_32_512_no_ligand.csv
+length_csv: null
+# length_csv: /media/scratch/datasets/boltz_val_cifs/length_lists/protein_monomer_32_512_no_ligand.csv
 length_legend_range: [32, 512]
 
 # Add secondary structure annotations
-sse_pt: /media/scratch/datasets/boltz_val_cifs/sse_anno/protein_monomer_32_512_no_ligand.pt
+sse_pt: null
+# sse_pt: /media/scratch/datasets/boltz_val_cifs/sse_anno/protein_monomer_32_512_no_ligand.pt
 
 hydra:
   run:
