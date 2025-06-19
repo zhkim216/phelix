@@ -2,6 +2,7 @@
 Utils for sampling from backbone generation models.
 """
 import copy
+import os
 import re
 from contextlib import nullcontext
 from functools import partial
@@ -17,7 +18,8 @@ from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
 from tqdm import tqdm
 
-from allatom_design.checkpoint_utils import get_cfg_from_ckpt
+from allatom_design.checkpoint_utils import (get_cfg_from_ckpt,
+                                             repair_state_dict)
 from allatom_design.data import const
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.conditioning_labels import create_cond_labels_input
@@ -31,9 +33,9 @@ from allatom_design.data.pdb_utils import write_batched_to_pdb
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     load_input
 from allatom_design.data.types import Structure, Tokenized
-from allatom_design.data.write.mmcif import (write_diffusion_inputs_to_ensemble,
-                                             write_batched_structures_to_mmcif,
-                                             write_diffusion_inputs_to_mmcif)
+from allatom_design.data.write.mmcif import (
+    write_batched_structures_to_mmcif, write_diffusion_inputs_to_ensemble,
+    write_diffusion_inputs_to_mmcif)
 from allatom_design.eval.eval_utils import eval_metrics, sampling_utils
 from allatom_design.interpolants.ad_interpolants.sampling_schedule import \
     NoiseSchedule
@@ -45,10 +47,17 @@ def get_bb_gen_model(cfg: DictConfig, device: str) -> dict[str, Any]:
     """
     Load in a backbone generation model.
     """
+    lit_model_cfg, lit_model_ckpt = get_cfg_from_ckpt(cfg.ckpt_path)
 
-    lit_ad_model = LitAtomDenoiser.load_from_checkpoint(cfg.ckpt_path).eval()
-    model_cfg, _ = get_cfg_from_ckpt(cfg.ckpt_path)
-    data_cfg = hydra.utils.instantiate(model_cfg.data)
+    # undo torch.compile since inference uses dynamic shapes
+    lit_model_cfg["train"]["compile_model"] = False
+    lit_model_ckpt["state_dict"] = repair_state_dict(lit_model_ckpt["state_dict"])
+
+    # Load model
+    lit_ad_model = LitAtomDenoiser(lit_model_cfg).eval().to(device)
+    lit_ad_model.load_state_dict(lit_model_ckpt["state_dict"])
+
+    data_cfg = hydra.utils.instantiate(lit_model_cfg.data)
     sampling_cfg = OmegaConf.load(cfg.sampling_cfg)
     sampling_cfg = OmegaConf.merge(sampling_cfg, OmegaConf.to_container(cfg.overrides, resolve=True))
     bb_gen_model = {"model": lit_ad_model.model,

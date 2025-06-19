@@ -58,7 +58,7 @@ def main(cfg: DictConfig):
 
     # Rename files to expected format for multistate seq des
     for pdb_file in pdb_files:
-        record_id = Path(pdb_file).stem
+        record_id = Path(pdb_file).stem.lower()
         pdb_out_dir = f"{log_dir}/{record_id}"
         Path(pdb_out_dir).mkdir(parents=True, exist_ok=True)
 
