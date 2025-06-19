@@ -46,6 +46,8 @@ mpnn:
     edge_n_channel: ${denoiser.mpnn.n_channel}
 
   potts:
+    k_neighbors_potts: 48
+    max_dist_potts: null
     use_potts: true
     parameterization: "factor"
     num_factors: null

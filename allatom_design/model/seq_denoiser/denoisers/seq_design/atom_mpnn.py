@@ -82,6 +82,8 @@ class AtomMPNN(nn.Module):
         # Potts decoder
         self.use_potts = cfg.potts.use_potts
         if self.use_potts:
+            self.k_neighbors_potts = cfg.potts.get("k_neighbors_potts", None)
+            self.max_dist_potts = cfg.potts.get("max_dist_potts", None)
             self.parameterization = cfg.potts.parameterization
             self.num_factors = cfg.potts.num_factors
             self.decoder_S_potts = potts.GraphPotts(
@@ -130,7 +132,7 @@ class AtomMPNN(nn.Module):
         h_S = self.W_s(res_type)
 
         # Build graph and get edge features
-        h_E, E_idx = self.token_features(batch)
+        h_E, E_idx, D_neighbors = self.token_features(batch)
 
         # Pass through encoder layers
         h_V = h_V + h_S
@@ -149,6 +151,15 @@ class AtomMPNN(nn.Module):
 
         # Potts model
         if self.use_potts:
+            if self.max_dist_potts is not None:
+                token_mask_2d = token_mask_2d * (D_neighbors <= self.max_dist_potts)  # mask out edges that are too far away
+
+            if self.k_neighbors_potts is not None:
+                # truncate to k_neighbors_potts
+                h_ESV = h_ESV[:, :, :self.k_neighbors_potts]
+                E_idx = E_idx[:, :, :self.k_neighbors_potts]
+                token_mask_2d = token_mask_2d[:, :, :self.k_neighbors_potts]
+
             h, J = self.decoder_S_potts(h_V, h_ESV, E_idx, token_mask, token_mask_2d)
             potts_decoder_aux = {
                 "h": h,
@@ -291,7 +302,7 @@ class TokenFeatures(nn.Module):
         E = torch.cat((E_positional, RBF_all, token_bonds), -1)
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
-        return E, E_idx
+        return E, E_idx, D_neighbors
 
 
     def _get_token_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n 3", float]:
@@ -311,7 +322,7 @@ class TokenFeatures(nn.Module):
         D = mask_2D * torch.sqrt(torch.sum(dX**2, 3) + eps)
         D_max, _ = torch.max(D, -1, keepdim=True)
         D_adjust = D + (1. - mask_2D) * D_max
-        D_neighbors, E_idx = torch.topk(D_adjust, np.minimum(self.k_neighbors, X.shape[1]), dim=-1, largest=False)
+        D_neighbors, E_idx = torch.topk(D_adjust, np.minimum(self.k_neighbors, X.shape[1]), dim=-1, sorted=True, largest=False)
         return D_neighbors, E_idx
 
     def _rbf(self, D):
