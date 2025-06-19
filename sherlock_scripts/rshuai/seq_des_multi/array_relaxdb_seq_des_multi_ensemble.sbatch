@@ -29,31 +29,15 @@ STRUCT_PRED_MODEL=boltz1
 BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
-LIST_STEM=protein_monomer_32_512_no_ligand
-CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-90
+LIST_STEM=af2pdbs_relaxdb_initial
+# CONFORMER_DIR=/scratch/users/rshuai/datasets/af2pdbs_relaxdb_initial/conformers/s6_a0_conformers
+BASE_CONFORMER_DIR=/scratch/users/rshuai/datasets/af2pdbs_relaxdb_initial/conformers
 
 CONFIGS=(
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=1"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=2"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=4"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=8"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=16"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=1"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=2"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=4"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=8"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step100000-epoch63-ema0.99.ckpt max_num_conformers=16"
-
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=1"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=2"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=4"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=8"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=16"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=1"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=2"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=4"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=8"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_L/checkpoints/ema/sd-step75000-epoch47-ema0.99.ckpt max_num_conformers=16"
+"conformer_dir=${BASE_CONFORMER_DIR}/s6_a0_conformers/t0.7 max_num_conformers=1"
+"conformer_dir=${BASE_CONFORMER_DIR}/s6_a0_conformers/t0.7 max_num_conformers=16"
+"conformer_dir=${BASE_CONFORMER_DIR}/spd0_a3_cfg2_700K_conformers/t0.7 max_num_conformers=1"
+"conformer_dir=${BASE_CONFORMER_DIR}/spd0_a3_cfg2_700K_conformers/t0.7 max_num_conformers=16"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 
@@ -62,23 +46,24 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
-BASE_EXP_NAME=sd3_a8_ens3
+CKPT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt
+BASE_EXP_NAME=sd3_a8_ens4
 BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/ensemble_design/${BASE_EXP_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 GROUP=seq_des
-EXP_NAME=${BASE_EXP_NAME}_idx${SLURM_ARRAY_TASK_ID}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
+EXP_NAME=${BASE_EXP_NAME}_idx${SLURM_ARRAY_TASK_ID}_${LIST_STEM}
 
 # Run training script
 cd ${BASE_DIR}
 python3 allatom_design/eval/sampling/seq_des_multi_ensemble.py \
+    ckpt_path=${CKPT_PATH} \
     wandb.no_wandb=false \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
     exp_name=${EXP_NAME} \
     base_out_dir=${BASE_OUT_DIR} \
-    conformer_dir=${CONFORMER_DIR} \
     struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
     struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
     run_self_consistency_eval=true \
