@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sd4_a1_ens1
+#SBATCH --job-name=sd4_a3_ens0
 #SBATCH -p bioe
 #SBATCH --array=0-5
 #SBATCH --gpus-per-node=1
@@ -34,12 +34,12 @@ LIST_STEM=protein_monomer_32_512_no_ligand
 BASE_CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-
 
 CONFIGS=(
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a1_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}70"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a1_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}80"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a1_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}90"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a1_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}100"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a1_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}110"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a1_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}120"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a3_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}70"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a3_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}80"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a3_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}90"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a3_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}100"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a3_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}110"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a3_cfg0/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt conformer_dir=${BASE_CONFORMER_DIR}120"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 
@@ -48,7 +48,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
-BASE_EXP_NAME=sd4_a1_ens1
+BASE_EXP_NAME=sd4_a3_ens0
 BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/ensemble_design/${BASE_EXP_NAME}
 
 # Wandb settings / experiment name
