@@ -835,14 +835,16 @@ def sample_potts(
             counts = torch.bincount(inverse)
 
             U_sums = U.new_zeros(unique_ids.size(0)).scatter_add_(0, inverse, U)
-            U_means = U_sums / counts.to(U_sums.dtype)
-            U = U_means[inverse]
+            U = U_sums[inverse]
+            # U_means = U_sums / counts.to(U_sums.dtype)
+            # U = U_means[inverse]
 
             B, N, K = logp.shape
             logp_sums = logp.new_zeros(unique_ids.size(0), N, K)
             logp_sums = logp_sums.index_add(0, inverse, logp)
-            logp_means = logp_sums / counts.view(-1, 1, 1).to(logp_sums.dtype)
-            logp = logp_means[inverse]
+            logp = logp_sums[inverse]
+            # logp_means = logp_sums / counts.view(-1, 1, 1).to(logp_sums.dtype)
+            # logp = logp_means[inverse]
 
         # Propose
         S_new = torch.distributions.categorical.Categorical(logits=logp).sample()
@@ -888,8 +890,9 @@ def sample_potts(
         if tied_sampling_inputs is not None:
             # replace U with the mean across tied sampling ids
             U_sums = U.new_zeros(unique_ids.size(0)).scatter_add_(0, inverse, U)
-            U_means = U_sums / counts.to(U_sums.dtype)
-            U = U_means[inverse]
+            U = U_sums[inverse]
+            # U_means = U_sums / counts.to(U_sums.dtype)
+            # U = U_means[inverse]
         # print(f"Iteration {i}: {U[tied_sampling_inputs['rep_idx'].unique()]}")  # DEBUG
 
     # Use first sequence of each tied group as the representative sequence
