@@ -169,30 +169,41 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         mask_sample, _, S_init = potts.init_sampling_masks(
             logits_init, mask_sample=mask_sample, S=batch["res_type"].argmax(dim=-1), ban_S=ban_S, pos_restrict_aatype=sampling_inputs.get("pos_restrict_aatype", None)
         )
-
-        # Complexity regularization
-        penalty_func = None
-        mask_ij_coloring = None
-        edge_idx_coloring = None
-        if regularization == "LCP":
-            C_complexity = batch["token_pad_mask"].clone()
-            penalty_func = lambda _S: complexity.complexity_lcp(_S, C_complexity)
-
+        
         # If provided, handle tied sampling across different inputs in the batch
         if "tied_sampling_ids" in batch:
             tied_sampling_inputs = {"tied_sampling_ids": batch["tied_sampling_ids"]}
             device = batch["tied_sampling_ids"].device
             tied_sampling_inputs["unique_ids"], tied_sampling_inputs["inverse"] = tied_sampling_inputs["tied_sampling_ids"].unique(return_inverse=True)
 
-            # use first sequence of each tied group as the representative sequence
+            # use first index of each tied group as the representative index
+            B = batch["res_type"].shape[0]
             batch_idx = torch.arange(B, device=device)
             n_unique_ids = tied_sampling_inputs["unique_ids"].shape[0]
             first_idxs = torch.full((n_unique_ids, ), B, device=device)
             first_idxs.scatter_reduce_(0, tied_sampling_inputs["inverse"], batch_idx, reduce="amin", include_self=True)
             tied_sampling_inputs["rep_idx"] = first_idxs[tied_sampling_inputs["inverse"]]
             aux["tied_sampling_inputs"] = tied_sampling_inputs
+            
+            # slice to representative elements
+            unique_rep_idxs = tied_sampling_inputs["rep_idx"].unique().tolist()
+            batch = slice_feats(batch, unique_rep_idxs)  # get representative batch elements
+            token_exists_mask = token_exists_mask[unique_rep_idxs]  # get representative token exists masks
+            S_init = S_init[unique_rep_idxs]  # get representative initial sequences
+            mask_sample = mask_sample[unique_rep_idxs]  # get representative sampling masks
+            
+            # aggregate potts parameters across tied groups
+            potts_decoder_aux = _aggregate_potts_params(potts_decoder_aux, tied_sampling_inputs)
         else:
             tied_sampling_inputs = None
+
+        # Complexity regularization
+        penalty_func = None
+        mask_ij_coloring = None
+        edge_idx_coloring = None
+        if regularization == "LCP":
+            C_complexity = batch["token_pad_mask"].clone()  # TODO: check multichain handling
+            penalty_func = lambda _S: complexity.complexity_lcp(_S, C_complexity)
 
         S = []  # keep track of sequences for each sample
         aux["U"] = []  # keep track of energies for each sample
@@ -215,7 +226,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 verbose=False,
                 edge_idx_coloring=edge_idx_coloring,
                 mask_ij_coloring=mask_ij_coloring,
-                tied_sampling_inputs=tied_sampling_inputs,
             )
 
             # Set all tokens that don't exist in the graph to unknown
@@ -239,12 +249,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             feats_si["coords"] = feats_si["coords"] * feats_si["atom_cond_mask"].unsqueeze(-1)
             feats_si["atom_resolved_mask"] = feats_si["atom_resolved_mask"] * feats_si["atom_cond_mask"]
             output_feats.append(feats_si)
-
-        # For tied sampling, only return representative outputs
-        if tied_sampling_inputs is not None:
-            unique_rep_idx = aux["tied_sampling_inputs"]["rep_idx"].unique().cpu()  # indices of representative sequences
-            output_feats = [slice_feats(feats_si, unique_rep_idx) for feats_si in output_feats]
-            aux["U"] = [U_sample[unique_rep_idx] for U_sample in aux["U"]]
 
         return output_feats, aux
 
@@ -274,3 +278,43 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         token_exists_mask = torch.cat(token_exists_mask, dim=0)
 
         return potts_decoder_aux, token_exists_mask
+
+
+def _aggregate_potts_params(potts_decoder_aux: dict[str, TensorType["b ..."]], tied_sampling_inputs: dict[str, Any]) -> dict[str, TensorType["b ..."]]:
+    """
+    Aggregate potts parameters across tied groups.
+    """
+    h, J, edge_idx, mask_i, mask_ij = potts_decoder_aux["h"], potts_decoder_aux["J"], potts_decoder_aux["edge_idx"], potts_decoder_aux["mask_i"], potts_decoder_aux["mask_ij"]
+    inverse, unique_ids = tied_sampling_inputs["inverse"], tied_sampling_inputs["unique_ids"]
+    
+    # handle 1D features
+    counts = torch.bincount(inverse)
+    h_new = h.new_zeros(unique_ids.shape[0], *h.shape[1:]).index_add(0, inverse, h)
+    node_counts = mask_i.new_zeros(unique_ids.shape[0], *mask_i.shape[1:]).index_add(0, inverse, mask_i)
+    mask_i_new = (node_counts == counts.view(-1, 1)).float()  # node i is unmasked only if node i is present across all inputs in the tied group
+    
+    # handle 2D features
+    n_grp = unique_ids.shape[0]
+    B, N, K = edge_idx.shape
+    C = J.shape[-1]
+    edge_counts = mask_ij.new_zeros(n_grp, N, N)
+    J_new = J.new_zeros(n_grp, N, N, C, C)
+    for bi in range(B):
+        g = inverse[bi]
+        
+        edge_indices_flat = (edge_idx[bi] + torch.arange(N, device=edge_idx.device)[:, None] * N).reshape(-1)
+        edge_counts[g].view(-1).index_add_(0, edge_indices_flat, mask_ij[bi].view(-1))  # count number of edges between each pair of nodes
+        J_new[g].view(-1, C, C).index_add_(0, edge_indices_flat, J[bi].view(-1, C, C))  # add in the pairwise interactions for this graph
+    
+    mask_ij_new = (edge_counts > 0) * (mask_i_new[:, :, None] * mask_i_new[:, None, :])  # edge i,j is present only if both nodes are present and there exists some edge between them
+    edge_idx_new = torch.arange(N, device=edge_idx.device).expand(1, 1, -1).repeat(n_grp, N, 1)  # new edge indices are given in the full NxN grid
+
+    potts_decoder_aux_new = {
+        "h": h_new,
+        "J": J_new,
+        "edge_idx": edge_idx_new,
+        "mask_i": mask_i_new,
+        "mask_ij": mask_ij_new,
+    }
+
+    return potts_decoder_aux_new

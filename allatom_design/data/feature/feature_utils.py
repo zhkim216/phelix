@@ -20,7 +20,7 @@ def unbatch_feats(batched: dict[str, torch.Tensor]) -> list[dict[str, torch.Tens
     return out
 
 
-def slice_feats(feats: dict[str, torch.Tensor], indices: slice) -> dict[str, torch.Tensor]:
+def slice_feats(feats: dict[str, torch.Tensor], indices: slice | list[int]) -> dict[str, torch.Tensor]:
     """
     Slice a dictionary of features by a list of indices.
     Keeps non-tensor, non-list entries verbatim.
@@ -30,7 +30,10 @@ def slice_feats(feats: dict[str, torch.Tensor], indices: slice) -> dict[str, tor
         if isinstance(v, torch.Tensor):
             sliced_feats[k] = v[indices]
         elif isinstance(v, list):
-            sliced_feats[k] = v[indices]
+            if isinstance(indices, slice):
+                sliced_feats[k] = v[indices]
+            else:
+                sliced_feats[k] = [v[i] for i in indices]
         else:
             sliced_feats[k] = v
     return sliced_feats
