@@ -280,9 +280,14 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         return potts_decoder_aux, token_exists_mask
 
 
-def _aggregate_potts_params(potts_decoder_aux: dict[str, TensorType["b ..."]], tied_sampling_inputs: dict[str, Any]) -> dict[str, TensorType["b ..."]]:
+def _aggregate_potts_params(potts_decoder_aux: dict[str, TensorType["b ..."]], 
+                            tied_sampling_inputs: dict[str, Any],
+                            use_mean: bool = True,
+                            ) -> dict[str, TensorType["b ..."]]:
     """
     Aggregate potts parameters across tied groups.
+    
+    If use_mean, we take the mean of the potts parameters across the tied groups (equivalent to geometric mean in probability space)
     """
     h, J, edge_idx, mask_i, mask_ij = potts_decoder_aux["h"], potts_decoder_aux["J"], potts_decoder_aux["edge_idx"], potts_decoder_aux["mask_i"], potts_decoder_aux["mask_ij"]
     inverse, unique_ids = tied_sampling_inputs["inverse"], tied_sampling_inputs["unique_ids"]
@@ -308,6 +313,10 @@ def _aggregate_potts_params(potts_decoder_aux: dict[str, TensorType["b ..."]], t
     
     mask_ij_new = (edge_counts > 0) * (mask_i_new[:, :, None] * mask_i_new[:, None, :])  # edge i,j is present only if both nodes are present and there exists some edge between them
     edge_idx_new = torch.arange(N, device=edge_idx.device).expand(1, 1, -1).repeat(n_grp, N, 1)  # new edge indices are given in the full NxN grid
+    
+    if use_mean:
+        J_new = J_new / counts.view(-1, 1, 1, 1, 1)
+        h_new = h_new / counts.view(-1, 1, 1)
 
     potts_decoder_aux_new = {
         "h": h_new,
