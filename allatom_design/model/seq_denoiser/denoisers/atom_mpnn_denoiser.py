@@ -196,6 +196,12 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             potts_decoder_aux = _aggregate_potts_params(potts_decoder_aux, tied_sampling_inputs)
         else:
             tied_sampling_inputs = None
+            
+        # Reweight potts parameters
+        h_weight = potts_sampling_cfg.get("h_weight", 1.0)
+        J_weight = potts_sampling_cfg.get("J_weight", 1.0)
+        potts_decoder_aux["h"] = potts_decoder_aux["h"] * h_weight
+        potts_decoder_aux["J"] = potts_decoder_aux["J"] * J_weight
 
         # Complexity regularization
         penalty_func = None

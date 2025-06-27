@@ -24,6 +24,10 @@ potts_sampling_cfg:
   potts_sweeps: 500
   potts_proposal: "dlmc"
   potts_temperature: 0.01  # this is the default in Chroma
+  
+  # reweighting options
+  h_weight: 1.0
+  J_weight: 1.0
 
 mlm_sampling_cfg:
   num_steps: 50
