@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a8_ens8
+#SBATCH --job-name=sd3_a8_ens9
 #SBATCH -p bioe
-#SBATCH --array=0-4
+#SBATCH --array=0-9%5
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -33,11 +33,14 @@ LIST_STEM=protein_monomer_32_512_no_ligand
 CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-90
 
 CONFIGS=(
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=1"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=2"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=4"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=8"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.h_weight=0.0"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.h_weight=0.2"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.h_weight=0.5"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.h_weight=2.0"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.J_weight=0.0"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.J_weight=0.2"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.J_weight=0.5"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.J_weight=2.0"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 
@@ -46,7 +49,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
-BASE_EXP_NAME=sd3_a8_ens8
+BASE_EXP_NAME=sd3_a8_ens9
 BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/ensemble_design/${BASE_EXP_NAME}
 
 # Wandb settings / experiment name
@@ -68,5 +71,6 @@ python3 allatom_design/eval/sampling/seq_des_multi_ensemble.py \
     run_self_consistency_eval=true \
     sampling_cfg_overrides.batch_size=8 \
     sampling_cfg_overrides.num_seqs_per_pdb=8 \
+    max_num_conformers=16 \
     ${OVERRIDES} \
     hydra.run.dir=${HYDRA_DIR}
