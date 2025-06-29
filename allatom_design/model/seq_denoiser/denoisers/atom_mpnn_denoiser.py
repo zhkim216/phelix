@@ -142,6 +142,12 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         """
         aux = {}
 
+        # If specified, add noise to inputs
+        noise_std = sampling_inputs["potts_sampling_cfg"].get("noise_std", 0.0)
+        if noise_std > 0:
+            batch["coords"] = batch["coords"] + torch.randn_like(batch["coords"]) * noise_std
+            batch["coords"] = batch["coords"] * batch["atom_pad_mask"].unsqueeze(-1) * batch["atom_resolved_mask"].unsqueeze(-1)
+
         # Compute potts parameters
         potts_decoder_aux, token_exists_mask = self.compute_potts_params(batch, sampling_inputs)
         aux["potts_decoder_aux"] = to(potts_decoder_aux, "cpu")
@@ -169,7 +175,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         mask_sample, _, S_init = potts.init_sampling_masks(
             logits_init, mask_sample=mask_sample, S=batch["res_type"].argmax(dim=-1), ban_S=ban_S, pos_restrict_aatype=sampling_inputs.get("pos_restrict_aatype", None)
         )
-        
+
         # If provided, handle tied sampling across different inputs in the batch
         if "tied_sampling_ids" in batch:
             tied_sampling_inputs = {"tied_sampling_ids": batch["tied_sampling_ids"]}
@@ -184,19 +190,19 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             first_idxs.scatter_reduce_(0, tied_sampling_inputs["inverse"], batch_idx, reduce="amin", include_self=True)
             tied_sampling_inputs["rep_idx"] = first_idxs[tied_sampling_inputs["inverse"]]
             aux["tied_sampling_inputs"] = tied_sampling_inputs
-            
+
             # slice to representative elements
             unique_rep_idxs = tied_sampling_inputs["rep_idx"].unique().tolist()
             batch = slice_feats(batch, unique_rep_idxs)  # get representative batch elements
             token_exists_mask = token_exists_mask[unique_rep_idxs]  # get representative token exists masks
             S_init = S_init[unique_rep_idxs]  # get representative initial sequences
             mask_sample = mask_sample[unique_rep_idxs]  # get representative sampling masks
-            
+
             # aggregate potts parameters across tied groups
             potts_decoder_aux = _aggregate_potts_params(potts_decoder_aux, tied_sampling_inputs)
         else:
             tied_sampling_inputs = None
-            
+
         # Reweight potts parameters
         h_weight = potts_sampling_cfg.get("h_weight", 1.0)
         J_weight = potts_sampling_cfg.get("J_weight", 1.0)
@@ -276,7 +282,9 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         token_exists_mask = []  # keep track of the tokens that exist in the graph
         for bi in tqdm(range(0, B, subbatch_size), desc="Computing potts parameters", leave=False):
             subbatch = slice_feats(batch, slice(bi, bi + subbatch_size))
+
             _, aux_preds_i = self(subbatch, is_sampling=True, sampling_inputs=sampling_inputs)
+
             for k, v in aux_preds_i["potts_decoder_aux"].items():
                 potts_decoder_aux.setdefault(k, []).append(v)
             token_exists_mask.append(aux_preds_i["token_exists_mask"])
@@ -286,24 +294,24 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         return potts_decoder_aux, token_exists_mask
 
 
-def _aggregate_potts_params(potts_decoder_aux: dict[str, TensorType["b ..."]], 
+def _aggregate_potts_params(potts_decoder_aux: dict[str, TensorType["b ..."]],
                             tied_sampling_inputs: dict[str, Any],
                             use_mean: bool = True,
                             ) -> dict[str, TensorType["b ..."]]:
     """
     Aggregate potts parameters across tied groups.
-    
+
     If use_mean, we take the mean of the potts parameters across the tied groups (equivalent to geometric mean in probability space)
     """
     h, J, edge_idx, mask_i, mask_ij = potts_decoder_aux["h"], potts_decoder_aux["J"], potts_decoder_aux["edge_idx"], potts_decoder_aux["mask_i"], potts_decoder_aux["mask_ij"]
     inverse, unique_ids = tied_sampling_inputs["inverse"], tied_sampling_inputs["unique_ids"]
-    
+
     # handle 1D features
     counts = torch.bincount(inverse)
     h_new = h.new_zeros(unique_ids.shape[0], *h.shape[1:]).index_add(0, inverse, h)
     node_counts = mask_i.new_zeros(unique_ids.shape[0], *mask_i.shape[1:]).index_add(0, inverse, mask_i)
     mask_i_new = (node_counts == counts.view(-1, 1)).float()  # node i is unmasked only if node i is present across all inputs in the tied group
-    
+
     # handle 2D features
     n_grp = unique_ids.shape[0]
     B, N, K = edge_idx.shape
@@ -312,14 +320,14 @@ def _aggregate_potts_params(potts_decoder_aux: dict[str, TensorType["b ..."]],
     J_new = J.new_zeros(n_grp, N, N, C, C)
     for bi in range(B):
         g = inverse[bi]
-        
+
         edge_indices_flat = (edge_idx[bi] + torch.arange(N, device=edge_idx.device)[:, None] * N).reshape(-1)
         edge_counts[g].view(-1).index_add_(0, edge_indices_flat, mask_ij[bi].view(-1))  # count number of edges between each pair of nodes
         J_new[g].view(-1, C, C).index_add_(0, edge_indices_flat, J[bi].view(-1, C, C))  # add in the pairwise interactions for this graph
-    
+
     mask_ij_new = (edge_counts > 0) * (mask_i_new[:, :, None] * mask_i_new[:, None, :])  # edge i,j is present only if both nodes are present and there exists some edge between them
     edge_idx_new = torch.arange(N, device=edge_idx.device).expand(1, 1, -1).repeat(n_grp, N, 1)  # new edge indices are given in the full NxN grid
-    
+
     if use_mean:
         J_new = J_new / counts.view(-1, 1, 1, 1, 1)
         h_new = h_new / counts.view(-1, 1, 1)

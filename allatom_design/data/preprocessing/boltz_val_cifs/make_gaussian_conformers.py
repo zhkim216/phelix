@@ -77,7 +77,7 @@ def generate_gaussian_conformers(processed_struct_file: str, data_cfg: DictConfi
             example_noised = copy.deepcopy(example)
             # Add Gaussian noise to the coordinates
             example_noised["coords"] = example_noised["coords"] + torch.randn_like(example_noised["coords"]) * eps
-            example_noised["coords"] = example_noised["coords"] * example_noised["atom_pad_mask"].unsqueeze(-1)
+            example_noised["coords"] = example_noised["coords"] * example_noised["atom_pad_mask"].unsqueeze(-1) * example_noised["atom_resolved_mask"].unsqueeze(-1)
             write_feats_to_mmcif(example_noised, input_structure, f"{conformer_out_dir}/{record.id}_conf{i}.cif")
 
 
