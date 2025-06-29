@@ -276,7 +276,8 @@ class TokenFeatures(nn.Module):
         if self.ca_only:
             RBF_all = self._rbf(D_neighbors)
         else:
-            X_all = get_tokenwise_coords(batch)
+            X_all, tokenwise_atom_cond_mask = get_tokenwise_coords(batch)
+            X_all = torch.where(tokenwise_atom_cond_mask.unsqueeze(-1).bool(), X_all, X[..., None, :])  # replace all masked atoms with center atom for the residue
 
             RBF_all = []
             for i in range(X_all.shape[-2]):
@@ -749,7 +750,7 @@ def knn_neighbors_batched(
     return neighbors
 
 
-def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_tokens 23 3", float]:
+def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]]) -> tuple[TensorType["b n_tokens 23 3", float], TensorType["b n_tokens 23"]]:
     """
     Get token-level coordinates (padded to max_num_atoms per token). Batched version of pad_atom_feats_to_tokenwise for just coords.
     """
@@ -769,7 +770,7 @@ def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]]) -> TensorType["b
     tokenwise_atom_cond_mask = batched_gather(batch["atom_cond_mask"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.max_num_atoms)
 
     X_all = X_all * tokenwise_atom_cond_mask.unsqueeze(-1)  # zero out masked atoms
-    return X_all
+    return X_all, tokenwise_atom_cond_mask
 
 
 def get_atomwise_coords(
