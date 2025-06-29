@@ -33,7 +33,9 @@ comparisons:
   # - ["sd3_a8_ens7_nc8", "sd3_a8_ens8_nc8"]
   # - ["sd3_a8_ens7_nc16", "sd3_a8_ens8_nc16"]
   # - ["chroma", "sd3_a8_ens8_nc16"]
-  - ["baseline", "sd3_a8_ens8_nc16"]
+  # - ["baseline", "sd3_a8_ens8_nc16"]
+  - ["sd3_a8_ens10_nc8", "sd3_a8_ens8_nc8"]
+
 
   # # relax_db comparisons
   # - ["sd3_a8_ens4_baseline", "sd3_a8_ens4_s6_a0"]
@@ -175,7 +177,7 @@ model_csvs:
   - model_name: "sd3_a8_ens4_spd0_a3_cfg2_700K"
     csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd3_a8_ens4/sd3_a8_ens4_idx3_af2pdbs_relaxdb_initial/self_consistency_metrics.csv
     plot_name: "af2pdbs_relaxdb, partial diffusion ensemble"
-    
+
   # sum-aggregated potts models (sd3_a8_ens7)
   - model_name: "sd3_a8_ens7_nc4"
     csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd3_a8_ens7/sd3_a8_ens7_idx2_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
@@ -197,6 +199,11 @@ model_csvs:
   - model_name: "sd3_a8_ens8_nc16"
     csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd3_a8_ens8/sd3_a8_ens8_idx4_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
     plot_name: "sd3_a8_S, mean, nc=16"
+
+  # compare with spd0_a4_cfg2
+  - model_name: "sd3_a8_ens10_nc8"
+    csv: /media/scratch/huang_lab/allatom_design/allatom_design/ensemble_design/sd3_a8_ens10/sd3_a8_ens10_idx8_bvc_protein_monomer_32_512_no_ligand_boltz1/self_consistency_metrics.csv
+    plot_name: "spd0_a4_cfg2, t=0.7, nc=8"
 
 # Which models that need to use subset_pdb_names
 subset_pdb_names: /media/scratch/datasets/boltz_val_cifs/pdb_name_lists/protein_monomer_32_256_no_ligand.txt

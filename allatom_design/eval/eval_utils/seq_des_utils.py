@@ -376,7 +376,7 @@ def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str
     # Initialize sequence mask: always condition on non-protein or non-standard residues
     standard_prot_mask = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
     batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
-    batch["seq_cond_mask"] = torch.where(standard_prot_mask, torch.zeros_like(batch["seq_cond_mask"]), batch["token_pad_mask"])
+    batch["seq_cond_mask"] = torch.where(standard_prot_mask, torch.zeros_like(batch["seq_cond_mask"]), batch["token_resolved_mask"])
 
     # Initialize atom mask: condition on backbone atoms, non-protein atoms, and non-standard residues
     batch["atom_cond_mask"] = batch["prot_bb_atom_mask"]  # condition on backbone atoms
