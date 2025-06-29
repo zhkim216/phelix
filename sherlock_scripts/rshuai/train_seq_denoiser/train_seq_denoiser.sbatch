@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a8_S
+#SBATCH --job-name=sd3_a9_S
 #SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -27,7 +27,7 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=sd3_a8_S
+EXP_NAME=sd3_a9_S
 GROUP=seq_des
 
 # Dataset paths
