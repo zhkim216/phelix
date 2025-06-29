@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a8_ens11
+#SBATCH --job-name=sd3_a8_ens12
 #SBATCH -p possu
-#SBATCH --array=0-7
+#SBATCH --array=0-5
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -35,15 +35,12 @@ BASE_CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LI
 CONFOMER_DIR_ORIG=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-90
 
 CONFIGS=(
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.6 +sampling_cfg_overrides.potts_sampling_cfg.noise_std=0.1"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.7 +sampling_cfg_overrides.potts_sampling_cfg.noise_std=0.1"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.8 +sampling_cfg_overrides.potts_sampling_cfg.noise_std=0.1"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.6 +sampling_cfg_overrides.potts_sampling_cfg.noise_std=0.3"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.7 +sampling_cfg_overrides.potts_sampling_cfg.noise_std=0.3"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.8 +sampling_cfg_overrides.potts_sampling_cfg.noise_std=0.3"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${CONFOMER_DIR_ORIG}"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${CONFOMER_DIR_ORIG} +sampling_cfg_overrides.potts_sampling_cfg.noise_std=0.1"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${CONFOMER_DIR_ORIG} +sampling_cfg_overrides.potts_sampling_cfg.noise_std=0.3"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=1 conformer_dir=${BASE_CONFORMER_DIR}/t0.6 include_primary_conformer=false"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.6 include_primary_conformer=false"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=1 conformer_dir=${BASE_CONFORMER_DIR}/t0.7 include_primary_conformer=false"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.7 include_primary_conformer=false"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=1 conformer_dir=${BASE_CONFORMER_DIR}/t0.8 include_primary_conformer=false"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.8 include_primary_conformer=false"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 
@@ -52,7 +49,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
-BASE_EXP_NAME=sd3_a8_ens11
+BASE_EXP_NAME=sd3_a8_ens12
 BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/ensemble_design/${BASE_EXP_NAME}
 
 # Wandb settings / experiment name
