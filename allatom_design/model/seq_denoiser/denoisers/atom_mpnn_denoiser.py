@@ -71,11 +71,16 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         """
         Build various masks for AtomMPNN.
 
-        Updates batch (in place) with:
+        Ensures that the conditioning masks only contain non-pad, resolved entries.
+        Also, updates batch (in place) with:
         - atomwise_token_idx: Tensor["b n_atoms", int]: index of the token that the atom belongs to, 0 for pad atoms
         - atomwise_seq_cond_mask: Tensor["b n_atoms", float]: 1 if the atom is part of an unmasked residue type, or 0 otherwise
         - token_exists_mask: Tensor["b n_tokens", float]: 1 if there exists any unmasked atom in the token, or 0 otherwise
         """
+        # Ensure the conditioning masks only contain non-pad, resolved entries
+        batch["seq_cond_mask"] = batch["seq_cond_mask"] * batch["token_pad_mask"] * batch["token_resolved_mask"]
+        batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
+
         # Get the index of the token that each atom belongs to
         _, batch["atomwise_token_idx"] = torch.max(batch["atom_to_token"], dim=-1)  # [b, n_atoms]
 

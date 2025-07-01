@@ -23,12 +23,10 @@ from allatom_design.checkpoint_utils import (get_cfg_from_ckpt,
 from allatom_design.data import const
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.conditioning_labels import create_cond_labels_input
-from allatom_design.data.data import (atom_apply_random_augmentation,
-                                      atom_center_random_augmentation,
-                                      center_random_augmentation, to)
+from allatom_design.data.data import atom_apply_random_augmentation, to
 from allatom_design.data.datasets.boltz_ad_dataset import (
-    ad_collator, add_tokenwise_atom_feats, featurize_diffusion_inputs,
-    featurize_motif_inputs)
+    ad_collator, add_tokenwise_atom_feats, apply_se3_augmentation,
+    featurize_diffusion_inputs, featurize_motif_inputs)
 from allatom_design.data.pdb_utils import write_batched_to_pdb
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     load_input
@@ -195,7 +193,7 @@ def run_bb_partial_diffusion(model: AtomDenoiser,
             out_feats = copy.deepcopy(batch["diffusion_inputs"])
             out_feats["x"][..., const.prot_bb_atom14_idxs, :] = x_bb_denoised
             filenames = [f"{sample_out_dir}/sample_{batch['pdb_key'][j]}_{(i+j) % n_samples_per_pdb}.cif" for j in range(B)]
-            write_diffusion_inputs_to_mmcif(to(out_feats, "cpu"), filenames)
+            write_diffusion_inputs_to_mmcif(to(out_feats, "cpu"), filenames, full_feats=batch["full_feats"])
             sampled_pdb_paths.extend(filenames)
 
             pbar.update(B)
@@ -242,6 +240,9 @@ def get_bb_example(struct_file_path: str,
     tokenized = data_cfg["tokenizer"].tokenize(input_data)
     tokenized = add_tokenwise_atom_feats(tokenized, data_cfg["featurizer"])
 
+    # Featurize full features (for saving to mmcif)
+    example["full_feats"] = data_cfg["featurizer"].process(tokenized, use_auth_as_residx=data_cfg["use_auth_as_residx"])
+
     # Featurize diffusion inputs
     example["diffusion_inputs"] = featurize_diffusion_inputs(tokenized, use_auth_as_residx=data_cfg["use_auth_as_residx"], max_tokens=None)
 
@@ -251,19 +252,16 @@ def get_bb_example(struct_file_path: str,
                                                      motif_cond_type_cfg=motif_cond_type_cfg)
 
     # Center motif atoms and apply random augmentation
-    if example["motif_inputs"]["token_pad_mask"].sum() > 0:
-        # Center on motif atoms
-        centered_motif_coords, transforms = atom_center_random_augmentation(example["motif_inputs"]["motif_coords"],
-                                                                            example["motif_inputs"]["motif_atom_mask"],
-                                                                            apply_random_augmentation=data_cfg["se3_augment_cfg"]["enabled"],
-                                                                            translation_scale=data_cfg["se3_augment_cfg"]["translation_scale"],
-                                                                            return_transforms=True)
-        example["motif_inputs"]["motif_coords"] = centered_motif_coords
+    example, transforms = apply_se3_augmentation(example,
+                                                 center_on_motif=True,
+                                                 apply_random_augmentation=data_cfg["se3_augment_cfg"]["enabled"],
+                                                 translation_scale=data_cfg["se3_augment_cfg"]["translation_scale"],
+                                                 return_transforms=True)
 
-        # Apply transformation to input structure
-        input_data.structure.atoms["coords"] = atom_apply_random_augmentation(torch.tensor(input_data.structure.atoms["coords"]),
-                                                                              torch.tensor(input_data.structure.atoms["is_present"]),
-                                                                              transforms)
+    # Apply transformation to input structure
+    input_data.structure.atoms["coords"] = atom_apply_random_augmentation(torch.tensor(input_data.structure.atoms["coords"]),
+                                                                          torch.tensor(input_data.structure.atoms["is_present"]),
+                                                                          transforms)
 
 
 

@@ -263,30 +263,11 @@ class ADDataset(data.Dataset):
 
 
     def _apply_se3_augmentation(self, example: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        N, A, _ = example["diffusion_inputs"]["x"].shape
-        if self.requires_motif and example["motif_inputs"]["motif_atom_mask"].sum() > 0:
-            # Conditional: center on motif atoms
-            x_motif, transforms = atom_center_random_augmentation(example["motif_inputs"]["motif_coords"],
-                                                                  example["motif_inputs"]["motif_atom_mask"],
-                                                                  apply_random_augmentation=self.se3_augment_cfg.enabled,
-                                                                  translation_scale=self.se3_augment_cfg.translation_scale,
-                                                                  return_transforms=True)
-            example["motif_inputs"]["motif_coords"] = x_motif
-
-            # apply transforms to diffusion inputs
-            x = atom_apply_random_augmentation(example["diffusion_inputs"]["x"].view(N * A, 3),
-                                               example["diffusion_inputs"]["atom_mask"].view(N * A),
-                                               transforms)
-            example["diffusion_inputs"]["x"] = x.view(N, A, 3)
-        else:
-            # Unconditional: center on diffusion input atoms
-            x = atom_center_random_augmentation(example["diffusion_inputs"]["x"].view(N * A, 3),
-                                                example["diffusion_inputs"]["atom_mask"].view(N * A),
-                                                apply_random_augmentation=self.se3_augment_cfg.enabled,
-                                                translation_scale=self.se3_augment_cfg.translation_scale,
-                                                return_transforms=False)
-            example["diffusion_inputs"]["x"] = x.view(N, A, 3)
-
+        example = apply_se3_augmentation(example,
+                                         center_on_motif=self.requires_motif,
+                                         apply_random_augmentation=self.se3_augment_cfg.enabled,
+                                         translation_scale=self.se3_augment_cfg.translation_scale,
+                                         return_transforms=False)
         return example
 
 
@@ -548,3 +529,43 @@ def ad_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
         # Stack the values
         collated[key] = values
     return collated
+
+
+def apply_se3_augmentation(example: dict[str, torch.Tensor],
+                           center_on_motif: bool,
+                           apply_random_augmentation: bool,
+                           translation_scale: float,
+                           return_transforms: bool = False,
+                           ) -> dict[str, torch.Tensor] | tuple[dict[str, torch.Tensor], torch.Tensor]:
+    """
+    Apply SE3 augmentation to the example.
+    If center_on_motif is True and motif_inputs are present, center on motif atoms.
+    Otherwise, center on diffusion input atoms.
+    """
+    N, A, _ = example["diffusion_inputs"]["x"].shape
+    if center_on_motif and example["motif_inputs"]["motif_atom_mask"].sum() > 0:
+        # Conditional: center on motif atoms
+        x_motif, transforms = atom_center_random_augmentation(example["motif_inputs"]["motif_coords"],
+                                                              example["motif_inputs"]["motif_atom_mask"],
+                                                              apply_random_augmentation=apply_random_augmentation,
+                                                              translation_scale=translation_scale,
+                                                              return_transforms=True)
+        example["motif_inputs"]["motif_coords"] = x_motif
+
+        # apply transforms to diffusion inputs
+        x = atom_apply_random_augmentation(example["diffusion_inputs"]["x"].view(N * A, 3),
+                                           example["diffusion_inputs"]["atom_mask"].view(N * A),
+                                           transforms)
+        example["diffusion_inputs"]["x"] = x.view(N, A, 3)
+    else:
+        # Unconditional: center on diffusion input atoms
+        x, transforms = atom_center_random_augmentation(example["diffusion_inputs"]["x"].view(N * A, 3),
+                                                        example["diffusion_inputs"]["atom_mask"].view(N * A),
+                                                        apply_random_augmentation=apply_random_augmentation,
+                                                        translation_scale=translation_scale,
+                                                        return_transforms=True)
+        example["diffusion_inputs"]["x"] = x.view(N, A, 3)
+
+    if return_transforms:
+        return example, transforms
+    return example

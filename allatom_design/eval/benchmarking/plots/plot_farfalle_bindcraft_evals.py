@@ -67,14 +67,14 @@ def main(cfg: DictConfig) -> None:
             model_df = model_data[model_name]["df"].copy()
             plot_name = model_data[model_name]["plot_name"]
             plot_names_in_group.append(plot_name)
-            
+
             model_df['model_name'] = plot_name
             all_dfs.append(model_df)
 
         if not all_dfs:
             print(f"No data to plot for comparison group {comp_name}. Skipping.")
             continue
-        
+
         group_df = pd.concat(all_dfs, ignore_index=True)
 
         # Plot min/max aggregated metrics
@@ -118,8 +118,8 @@ def main(cfg: DictConfig) -> None:
         # Plot number of successes, defined by ipae < 0.35, iptm > 0.5, and rmsd < 2
         group_df['success'] = (
             (group_df['ipae'] < 0.35) &
-            (group_df['iptm'] > 0.5) &
-            (group_df['rmsd'] < 2)
+            (group_df['iptm'] > 0.5)
+            # (group_df['rmsd'] < 2)
         )
         success_summary = group_df.groupby(['model_name', 'motif_name'])['success'].sum().reset_index()
         create_bar_chart(
@@ -127,7 +127,7 @@ def main(cfg: DictConfig) -> None:
             models_in_group=plot_names_in_group,
             metric='success',
             y_label="Number of Successes",
-            title=f"{comp_name}, Number of Successes \n (ipAE < 0.35, ipTM > 0.5, RMSD < 2)",
+            title=f"{comp_name}, Number of Successes \n (ipAE < 0.35, ipTM > 0.5)",
             out_path=out_dir_for_comp / "success_count_comparison.png"
         )
 
@@ -149,15 +149,15 @@ def create_bar_chart(
     x = np.arange(len(motifs))  # the label locations
     total_width = 0.8
     width = total_width / n_models
-    
+
     fig, ax = plt.subplots(figsize=(max(12, 2 * len(motifs)), 6))
 
     for i, model_plot_name in enumerate(models_in_group):
         model_data = data[data['model_name'] == model_plot_name]
-        
+
         # Create a map of motif to metric value for quick lookup
         metric_map = model_data.set_index('motif_name')[metric]
-        
+
         # Get values in the correct order of motifs, filling with NaN if a motif is missing
         values = [metric_map.get(motif, np.nan) for motif in motifs]
 
@@ -171,7 +171,7 @@ def create_bar_chart(
     ax.set_xticks(x, motifs, rotation=45, ha="right")
     ax.legend(title="Models", bbox_to_anchor=(1.04, 1), loc="upper left")
     ax.grid(True, axis='y', linestyle='--', alpha=0.7)
-    
+
     # Set custom y-tick spacing
     ymin, ymax = ax.get_ylim()
     step = None
@@ -181,7 +181,7 @@ def create_bar_chart(
         ax.set_ylim(top=10)
         ymin, ymax = ax.get_ylim()
         step = 1.0
-    
+
     if step is not None:
         start = np.floor(ymin / step) * step
         ticks = np.arange(start, ymax + step, step)

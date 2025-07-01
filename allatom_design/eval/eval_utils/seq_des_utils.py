@@ -273,13 +273,11 @@ def run_seq_des_ensemble(model: SeqDenoiser,
     if cfg.verbose and cfg.omit_aas is not None:
         print(f"Omitting aatype sampling for: {cfg.omit_aas}")
 
-    input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
         for i in tqdm(range(len(conformer_struct_files)), desc=f"Sampling {len(conformer_struct_files)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB..."):
             # Extract conformer struct files for this PDB
             pdb_name, struct_files = conformer_struct_files[i]
-            n_conformers = len(struct_files)
 
             # Flatten struct_files and create tied_sampling_ids
             batch, input_structs = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
