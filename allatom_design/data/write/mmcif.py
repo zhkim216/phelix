@@ -493,12 +493,34 @@ def write_motif_feats_to_mmcif(feats: dict[str, TensorType["b n ..."]], *args, *
     batch_write_feats_to_mmcif(feats, *args, **kwargs)
 
 
-def write_diffusion_inputs_to_mmcif(feats: dict[str, TensorType["b n ..."]], filenames: list[str]) -> None:
+def write_diffusion_inputs_to_mmcif(feats: dict[str, TensorType["b n ..."]], filenames: list[str],
+                                    full_feats: dict[str, TensorType["n ..."]] | None = None) -> None:
     """
     Write diffusion inputs to a list of files. Creates dummy features to resemble boltz features, then calls batch_write_feats_to_mmcif.
+
+    If full_feats is provided, we use it to keep SEQRES records when saving diffusion inputs.
     """
     feats = to(feats, "cpu")
     boltz_feats = diffusion_inputs_to_boltz_feats(feats)
+
+    if full_feats is not None:
+        # TODO; find a better way to do this
+        full_feats = to(full_feats, "cpu")
+        _, atomwise_token_idx = torch.max(full_feats["atom_to_token"], dim=-1)
+        gather_mask = (torch.isin(atomwise_token_idx, boltz_feats["token_index"]) * full_feats["prot_bb_atom_mask"]).bool()
+        B = boltz_feats["token_index"].shape[0]
+
+        # overwrite coords and atom_resolved_mask with diffusion inputs
+        for bi in range(B):
+            full_feats["coords"][bi][gather_mask[bi]] = boltz_feats["coords"][bi]
+            full_feats["atom_resolved_mask"][bi][gather_mask[bi]] = boltz_feats["atom_resolved_mask"][bi].bool()
+
+        # overwrite res_type with diffusion inputs
+        batch_indices, dest_indices, src_indices = torch.where((full_feats["token_index"].unsqueeze(-1) == boltz_feats["token_index"].unsqueeze(-2)))
+        full_feats["res_type"][batch_indices, dest_indices] = boltz_feats["res_type"][batch_indices, src_indices]
+
+        boltz_feats = full_feats
+
     batch_write_feats_to_mmcif(boltz_feats, input_structs=None, filenames=filenames, keep_auth=True)
 
 
@@ -560,6 +582,7 @@ def diffusion_inputs_to_boltz_feats(feats: dict[str, TensorType["b n ..."]]) -> 
     B, N_tokens = feats["seq_mask"].shape
     N_atoms = N_tokens * 4  # 4 backbone atoms
     boltz_feats = {}
+    boltz_feats["token_index"] = feats["token_index"]
     boltz_feats["res_type"] = F.one_hot(torch.full_like(feats["residue_index"], const.token_ids["GLY"], dtype=torch.long), num_classes=len(const.tokens))
     boltz_feats["coords"] = feats["x"][..., const.prot_bb_atom14_idxs, :].reshape(B, N_atoms, 3)  # B, N*4, 3
     boltz_feats["atom_resolved_mask"] = feats["atom_mask"][..., const.prot_bb_atom14_idxs].reshape(B, N_atoms)

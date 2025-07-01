@@ -1,15 +1,15 @@
-base_out_dir: out_dir/plot_farfalle_bindcraft_evals
-sampling_results_dir: /media/scratch/huang_lab/farfalle/sampling_results/bindcraft_exp0
+base_out_dir: out_dir/plot_farfalle_bindcraft_evals/bindcraft_exp0_fix_pos
+sampling_results_dir: /media/scratch/huang_lab/farfalle/sampling_results/bindcraft_exp0_fix_pos
 
 comparisons:
   # all epoch 1000
   - name: "epoch1000"
     models: ["cc74_epoch1000", "cc75_epoch1000", "cc78_epoch1000", "cc79_epoch1000", "cc80_epoch1000", "cc81_epoch1000", "cc83_epoch1000", "cc84_epoch1000", "cc85_epoch1000", "cc86_epoch1000"]
 
-  # all latest checkpoints  
+  # all latest checkpoints
   - name: "latest_checkpoints"
     models: ["cc74_epoch1095", "cc75_epoch1115", "cc78_epoch1431", "cc79_epoch2061", "cc80_epoch1252", "cc81_epoch1377", "cc82_epoch1377", "cc83_epoch2616", "cc84_epoch2431", "cc85_epoch2541", "cc86_epoch1586"]
-    
+
   # all epoch 1000 cc83/84/85/86
   - name: "epoch1000_cc83_84_85_86"
     models: ["cc83_epoch1000", "cc84_epoch1000", "cc85_epoch1000", "cc86_epoch1000"]
