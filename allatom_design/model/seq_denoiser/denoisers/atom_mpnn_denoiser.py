@@ -163,6 +163,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         potts_sweeps = potts_sampling_cfg["potts_sweeps"]
         potts_proposal = potts_sampling_cfg["potts_proposal"]
         potts_temperature = potts_sampling_cfg["potts_temperature"]
+        rejection_step = potts_sampling_cfg.get("rejection_step", potts_proposal == "chromatic")
 
         B, N, _ = batch["res_type"].shape
         logits_init = torch.zeros((B, N, len(const.tokens)), device=batch["res_type"].device).float()
@@ -239,7 +240,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 num_sweeps=potts_sweeps,
                 penalty_func=penalty_func,
                 proposal=potts_proposal,
-                rejection_step=(potts_proposal == "chromatic"),
+                rejection_step=rejection_step,
                 verbose=False,
                 edge_idx_coloring=edge_idx_coloring,
                 mask_ij_coloring=mask_ij_coloring,
