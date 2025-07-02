@@ -169,7 +169,7 @@ optim:
   adam_inv_sqrt:
     ref_lr: 1.0e-3
     ref_steps: 30000
-    warmup_steps: 10000
+    warmup_steps: 20000
 
 logging:
   log_dir: ${out_dir}

@@ -1,44 +1,15 @@
-base_out_dir: out_dir/plot_farfalle_bindcraft_evals/bindcraft_exp0_fix_pos
-sampling_results_dir: /media/scratch/huang_lab/farfalle/sampling_results/bindcraft_exp0_fix_pos
+base_out_dir: out_dir/plot_farfalle_bindcraft_evals/bindcraft_exp1
+sampling_results_dir: /media/scratch/huang_lab/farfalle/sampling_results/bindcraft_exp1
 
 comparisons:
-  # all epoch 1000
-  - name: "epoch1000"
-    models: ["cc74_epoch1000", "cc75_epoch1000", "cc78_epoch1000", "cc79_epoch1000", "cc80_epoch1000", "cc81_epoch1000", "cc83_epoch1000", "cc84_epoch1000", "cc85_epoch1000", "cc86_epoch1000"]
+  # all cc95 epochs
+  # - name: "cc95_epochs"
+  #   models: ["cc95_epoch2700", "cc95_epoch2750", "cc95_epoch2800", "cc95_epoch2850", "cc95_epoch2900", "cc95_epoch2950", "cc95_epoch3000", "cc95_epoch3050", "cc95_epoch3100", "cc95_epoch3150", "cc95_epoch3200", "cc95_epoch3250", "cc95_epoch3300", "cc95_epoch3350", "cc95_epoch3400", "cc95_epoch3450"]
 
-  # all latest checkpoints
-  - name: "latest_checkpoints"
-    models: ["cc74_epoch1095", "cc75_epoch1115", "cc78_epoch1431", "cc79_epoch2061", "cc80_epoch1252", "cc81_epoch1377", "cc82_epoch1377", "cc83_epoch2616", "cc84_epoch2431", "cc85_epoch2541", "cc86_epoch1586"]
+  # cc95 vs. cc83
+  - name: "cc95_vs_cc83"
+    models: ["cc95_epoch3450", "cc83_epoch2616"]
 
-  # all epoch 1000 cc83/84/85/86
-  - name: "epoch1000_cc83_84_85_86"
-    models: ["cc83_epoch1000", "cc84_epoch1000", "cc85_epoch1000", "cc86_epoch1000"]
-
-  # all latest checkpoints cc83/84/85/86
-  - name: "latest_checkpoints_cc83_84_85_86"
-    models: ["cc83_epoch2616", "cc84_epoch2431", "cc85_epoch2541", "cc86_epoch1586"]
-
-  # individual models, epoch 1000 against latest checkpoints
-  - name: "cc74_epoch1000_vs_latest"
-    models: ["cc74_epoch1000", "cc74_epoch1095"]
-  - name: "cc75_epoch1000_vs_latest"
-    models: ["cc75_epoch1000", "cc75_epoch1115"]
-  - name: "cc78_epoch1000_vs_latest"
-    models: ["cc78_epoch1000", "cc78_epoch1431"]
-  - name: "cc79_epoch1000_vs_latest"
-    models: ["cc79_epoch1000", "cc79_epoch2061"]
-  - name: "cc80_epoch1000_vs_latest"
-    models: ["cc80_epoch1000", "cc80_epoch1252"]
-  # - name: "cc81_epoch1000_vs_latest"
-  #   models: ["cc81_epoch1000", "cc81_epoch1377"]
-  - name: "cc83_epoch1000_vs_latest"
-    models: ["cc83_epoch1000", "cc83_epoch2616"]
-  - name: "cc84_epoch1000_vs_latest"
-    models: ["cc84_epoch1000", "cc84_epoch2431"]
-  - name: "cc85_epoch1000_vs_latest"
-    models: ["cc85_epoch1000", "cc85_epoch2541"]
-  - name: "cc86_epoch1000_vs_latest"
-    models: ["cc86_epoch1000", "cc86_epoch1586"]
 
 model_csvs:
   - model_name: "cc74_epoch1000"
@@ -98,7 +69,7 @@ model_csvs:
     plot_name: "cc83, epoch1000"
 
   - model_name: "cc83_epoch2616"
-    csv: ${sampling_results_dir}/cc83-epoch2616-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc83-epoch2616-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    csv: /media/scratch/huang_lab/farfalle/sampling_results/bindcraft_exp0_fix_pos/cc83-epoch2616-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc83-epoch2616-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
     plot_name: "cc83, epoch2616"
 
   - model_name: "cc84_epoch1000"
@@ -125,6 +96,55 @@ model_csvs:
     csv: ${sampling_results_dir}/cc86-epoch1586-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc86-epoch1586-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
     plot_name: "cc86, epoch1586"
 
+  # cc95
+  - model_name: "cc95_epoch2700"
+    csv: ${sampling_results_dir}/cc95-epoch2700-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch2700-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch2700"
+  - model_name: "cc95_epoch2750"
+    csv: ${sampling_results_dir}/cc95-epoch2750-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch2750-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch2750"
+  - model_name: "cc95_epoch2800"
+    csv: ${sampling_results_dir}/cc95-epoch2800-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch2800-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch2800"
+  - model_name: "cc95_epoch2850"
+    csv: ${sampling_results_dir}/cc95-epoch2850-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch2850-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch2850"
+  - model_name: "cc95_epoch2900"
+    csv: ${sampling_results_dir}/cc95-epoch2900-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch2900-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch2900"
+  - model_name: "cc95_epoch2950"
+    csv: ${sampling_results_dir}/cc95-epoch2950-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch2950-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch2950"
+  - model_name: "cc95_epoch3000"
+    csv: ${sampling_results_dir}/cc95-epoch3000-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch3000-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch3000"
+  - model_name: "cc95_epoch3050"
+    csv: ${sampling_results_dir}/cc95-epoch3050-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch3050-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch3050"
+  - model_name: "cc95_epoch3100"
+    csv: ${sampling_results_dir}/cc95-epoch3100-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch3100-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch3100"
+  - model_name: "cc95_epoch3150"
+    csv: ${sampling_results_dir}/cc95-epoch3150-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch3150-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch3150"
+  - model_name: "cc95_epoch3200"
+    csv: ${sampling_results_dir}/cc95-epoch3200-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch3200-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch3200"
+  - model_name: "cc95_epoch3250"
+    csv: ${sampling_results_dir}/cc95-epoch3250-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch3250-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch3250"
+  - model_name: "cc95_epoch3300"
+    csv: ${sampling_results_dir}/cc95-epoch3300-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch3300-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch3300"
+  - model_name: "cc95_epoch3350"
+    csv: ${sampling_results_dir}/cc95-epoch3350-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch3350-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch3350"
+  - model_name: "cc95_epoch3400"
+    csv: ${sampling_results_dir}/cc95-epoch3400-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch3400-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch3400"
+  - model_name: "cc95_epoch3450"
+    csv: ${sampling_results_dir}/cc95-epoch3450-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0/cc95-epoch3450-sampling_sidechain_conditional-autoguidance-None-ss1.2-schurn200-reconcustom10.0-cfg1.0-ccstart0.0-dx0.0-dy0.0-dz0.0_metrics.csv
+    plot_name: "cc95, epoch3450"
 
 hydra:
   run:
