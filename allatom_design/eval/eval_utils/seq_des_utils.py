@@ -256,7 +256,7 @@ def score_sequences_ensemble(model: SeqDenoiser,
 
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
-        for pdb_name, struct_files in tqdm(pdb_to_processed_conformers.items(), desc=f"Sampling {len(pdb_to_processed_conformers)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB..."):
+        for pdb_name, struct_files in tqdm(pdb_to_processed_conformers.items(), desc=f"Scoring {len(pdb_to_processed_conformers)} PDBs..."):
             # Flatten struct_files and create tied_sampling_ids
             batch, input_structs = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
             batch["tied_sampling_ids"] = torch.zeros(len(struct_files), device=device, dtype=torch.long)  # tie all samples together
@@ -267,15 +267,20 @@ def score_sequences_ensemble(model: SeqDenoiser,
             sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
 
             # Get potts parameters for each input backbone
-            potts_decoder_aux, _ = model.denoiser.compute_potts_parameters(batch, sampling_inputs=sampling_inputs)
+            potts_decoder_aux, batch = model.score_samples(batch, sampling_inputs=sampling_inputs)
 
             # Score sequences
+            S = []
             for seq in pdb_to_sequences[pdb_name]:
-                batch["res_type"] = torch.tensor([const.token_ids[const.prot_letter_to_token[aa]] for aa in seq], device=device)
-                potts_decoder_aux_i = {k: v[None].expand(1, *(v.ndim * (-1, ))) for k, v in potts_decoder_aux.items()}  # expand to match B_sample
-                U, U_i = compute_potts_energy(batch["res_type"], potts_decoder_aux_i["h"], potts_decoder_aux_i["J"], potts_decoder_aux_i["edge_idx"])
+                S.append(torch.tensor([const.token_ids[const.prot_letter_to_token[aa]] for aa in seq], device=device))
+            S = torch.stack(S, dim=0)
+            potts_decoder_aux = {k: v.expand(S.shape[0], *((v.ndim - 1) * (-1, ))) for k, v in potts_decoder_aux.items()}  # expand to match S
+            U, _ = compute_potts_energy(S, potts_decoder_aux["h"], potts_decoder_aux["J"], potts_decoder_aux["edge_idx"])
 
+            # Store results
+            outputs[pdb_name] = U.cpu()
 
+    return outputs
 
 
 def run_seq_des_ensemble(model: SeqDenoiser,

@@ -8,6 +8,7 @@ import lightning as L
 import numpy as np
 import pandas as pd
 import torch
+import scipy.stats
 import wandb
 import yaml
 from natsort import natsorted
@@ -45,9 +46,12 @@ def main(cfg: DictConfig):
     # Process conformer directories
     pdb_to_processed_conformers = process_conformer_dirs(conformer_dirs, cfg.max_num_conformers, cfg.include_primary_conformer, f"{log_dir}/processed_structures", cfg.pdb_processing_cfg)
 
-    # Read in Megascale CSV and map from pdb name to sequences
+    # Read in Megascale CSV
     megascale_df = pd.read_csv(cfg.megascale_csv)
     megascale_df["pdb"] = megascale_df["WT_name"].apply(lambda x: Path(x).stem.lower())
+    megascale_df = megascale_df.drop_duplicates(subset=["pdb", "mut_type"])
+
+    # Map from pdb name to sequences
     pdb_to_sequences = defaultdict(list)
     for _, row in megascale_df.iterrows():
         pdb_to_sequences[row["pdb"]].append(row["aa_seq"])
@@ -59,12 +63,28 @@ def main(cfg: DictConfig):
     # Load in sequence design model
     seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
 
-    # Run sequence design model
+    # Score sequences
     outputs = score_sequences_ensemble(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
                                        pdb_to_processed_conformers=pdb_to_processed_conformers,
                                        pdb_to_sequences=pdb_to_sequences,
                                        device=device,
                                        out_dir=log_dir)
+
+    # Add energies to megascale df
+    for pdb_name, U in outputs.items():
+        megascale_df.loc[megascale_df["pdb"] == pdb_name, "U"] = U.tolist()
+
+    # Calculate ddG_pred by subtracting the wildtype U for each pdb
+    wt_energies = megascale_df[megascale_df.mut_type == "wt"].groupby("pdb")["U"].first()
+    megascale_df["U_wt"] = megascale_df["pdb"].map(wt_energies)
+    megascale_df["ddG_pred"] = megascale_df["U"] - megascale_df["U_wt"]
+
+    # Filter to only mutants
+    mutants_df = megascale_df[megascale_df.mut_type != "wt"].copy()
+
+    # Compute spearman correlation
+    spearman_corr = scipy.stats.spearmanr(mutants_df["ddG_ML"], mutants_df["ddG_pred"]).correlation
+    print(f"Spearman Correlation: {spearman_corr}")
 
     del seq_des_model
 
