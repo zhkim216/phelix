@@ -26,10 +26,6 @@ potts_sampling_cfg:
   potts_temperature: 0.01  # this is the default in Chroma
   rejection_step: false
 
-  # reweighting options
-  h_weight: 1.0
-  J_weight: 1.0
-
   # add gaussian noise to inputs
   noise_std: 0.0
 

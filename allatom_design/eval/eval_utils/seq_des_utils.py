@@ -236,6 +236,48 @@ def score_samples(model: SeqDenoiser,
     return score_outputs
 
 
+def score_sequences_ensemble(model: SeqDenoiser,
+                             data_cfg: DictConfig,
+                             cfg: DictConfig,  # sampling config
+                             pdb_to_processed_conformers: dict[str, list[str]],  # maps from a given pdb name to its processed conformer structure files
+                             pdb_to_sequences: dict[str, list[str]],  # maps from a given pdb name to its sequences
+                             device: str,
+                             out_dir: Optional[str] = None,
+                             ) -> dict[str, Any]:
+    """
+    Score sequences using Potts parameters computed from input backbones.
+    """
+    # Set up output directory
+    outputs = {}
+
+    if out_dir is not None:
+        sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
+        Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
+
+    parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
+    with parallel_context as parallel_pool:
+        for pdb_name, struct_files in tqdm(pdb_to_processed_conformers.items(), desc=f"Sampling {len(pdb_to_processed_conformers)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB..."):
+            # Flatten struct_files and create tied_sampling_ids
+            batch, input_structs = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+            batch["tied_sampling_ids"] = torch.zeros(len(struct_files), device=device, dtype=torch.long)  # tie all samples together
+
+            # Initialize seq_cond and atom_cond masks
+            batch = initialize_sampling_masks(batch)
+
+            sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
+
+            # Get potts parameters for each input backbone
+            potts_decoder_aux, _ = model.denoiser.compute_potts_parameters(batch, sampling_inputs=sampling_inputs)
+
+            # Score sequences
+            for seq in pdb_to_sequences[pdb_name]:
+                batch["res_type"] = torch.tensor([const.token_ids[const.prot_letter_to_token[aa]] for aa in seq], device=device)
+                potts_decoder_aux_i = {k: v[None].expand(1, *(v.ndim * (-1, ))) for k, v in potts_decoder_aux.items()}  # expand to match B_sample
+                U, U_i = compute_potts_energy(batch["res_type"], potts_decoder_aux_i["h"], potts_decoder_aux_i["J"], potts_decoder_aux_i["edge_idx"])
+
+
+
+
 def run_seq_des_ensemble(model: SeqDenoiser,
                          data_cfg: DictConfig,
                          cfg: DictConfig,  # sampling config

@@ -44,7 +44,7 @@ def main(cfg: DictConfig):
     conformer_dirs = get_conformer_dirs(**cfg.input_cfg)
 
     # Process conformer directories
-    pdb_to_processed_conformers = process_conformer_dirs(conformer_dirs, cfg.max_num_conformers, cfg.include_primary_conformer, f"{log_dir}/processed_structures", cfg.pdb_processing_cfg, cfg.num_workers)
+    pdb_to_processed_conformers = process_conformer_dirs(conformer_dirs, cfg.max_num_conformers, cfg.include_primary_conformer, f"{log_dir}/processed_structures", cfg.pdb_processing_cfg)
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
@@ -61,8 +61,8 @@ def main(cfg: DictConfig):
 
     # Run sequence design model
     outputs = run_seq_des_ensemble(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                                    pdb_to_processed_conformers=pdb_to_processed_conformers, device=device, pos_constraint_df=None,
-                                    out_dir=log_dir)
+                                   pdb_to_processed_conformers=pdb_to_processed_conformers, device=device, pos_constraint_df=None,
+                                   out_dir=log_dir)
 
     del seq_des_model
 

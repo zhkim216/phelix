@@ -154,7 +154,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             batch["coords"] = batch["coords"] * batch["atom_pad_mask"].unsqueeze(-1) * batch["atom_resolved_mask"].unsqueeze(-1)
 
         # Compute potts parameters
-        potts_decoder_aux, token_exists_mask = self.compute_potts_params(batch, sampling_inputs)
+        potts_decoder_aux, batch = self.compute_potts_params(batch, sampling_inputs)
         aux["potts_decoder_aux"] = to(potts_decoder_aux, "cpu")
 
         # Set up Potts sampling
@@ -181,39 +181,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         mask_sample, _, S_init = potts.init_sampling_masks(
             logits_init, mask_sample=mask_sample, S=batch["res_type"].argmax(dim=-1), ban_S=ban_S, pos_restrict_aatype=sampling_inputs.get("pos_restrict_aatype", None)
         )
-
-        # If provided, handle tied sampling across different inputs in the batch
-        if "tied_sampling_ids" in batch:
-            tied_sampling_inputs = {"tied_sampling_ids": batch["tied_sampling_ids"]}
-            device = batch["tied_sampling_ids"].device
-            tied_sampling_inputs["unique_ids"], tied_sampling_inputs["inverse"] = tied_sampling_inputs["tied_sampling_ids"].unique(return_inverse=True)
-
-            # use first index of each tied group as the representative index
-            B = batch["res_type"].shape[0]
-            batch_idx = torch.arange(B, device=device)
-            n_unique_ids = tied_sampling_inputs["unique_ids"].shape[0]
-            first_idxs = torch.full((n_unique_ids, ), B, device=device)
-            first_idxs.scatter_reduce_(0, tied_sampling_inputs["inverse"], batch_idx, reduce="amin", include_self=True)
-            tied_sampling_inputs["rep_idx"] = first_idxs[tied_sampling_inputs["inverse"]]
-            aux["tied_sampling_inputs"] = tied_sampling_inputs
-
-            # slice to representative elements
-            unique_rep_idxs = tied_sampling_inputs["rep_idx"].unique().tolist()
-            batch = slice_feats(batch, unique_rep_idxs)  # get representative batch elements
-            token_exists_mask = token_exists_mask[unique_rep_idxs]  # get representative token exists masks
-            S_init = S_init[unique_rep_idxs]  # get representative initial sequences
-            mask_sample = mask_sample[unique_rep_idxs]  # get representative sampling masks
-
-            # aggregate potts parameters across tied groups
-            potts_decoder_aux = _aggregate_potts_params(potts_decoder_aux, tied_sampling_inputs)
-        else:
-            tied_sampling_inputs = None
-
-        # Reweight potts parameters
-        h_weight = potts_sampling_cfg.get("h_weight", 1.0)
-        J_weight = potts_sampling_cfg.get("J_weight", 1.0)
-        potts_decoder_aux["h"] = potts_decoder_aux["h"] * h_weight
-        potts_decoder_aux["J"] = potts_decoder_aux["J"] * J_weight
 
         # Complexity regularization
         penalty_func = None
@@ -249,7 +216,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             # Set all tokens that don't exist in the graph to unknown
             for chain_type, unk_token_id in const.unk_token_ids.items():
                 chain_type_id = const.chain_type_ids[chain_type]
-                unk_mask = (~token_exists_mask.bool()) & (batch["mol_type"] == chain_type_id)
+                unk_mask = (~batch["token_exists_mask"].bool()) & (batch["mol_type"] == chain_type_id)
                 S_sample[unk_mask] = unk_token_id
 
             aux["U"].append(U_sample.cpu())
@@ -276,9 +243,11 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         """
         Run model and collect potts parameters over a batch of samples.
 
+        If "tied_sampling_ids" is in batch, we will aggregate potts parameters across tied groups and slice batch to representative elements.
+
         Returns:
             potts_decoder_aux: dict[str, TensorType["b ..."]]: potts parameters
-            token_exists_mask: TensorType["b n_tokens", float]: mask of which tokens exist in the graph
+            batch: dict[str, TensorType["b ..."]]: batch with token_exists_mask added
         """
         subbatch_size = sampling_inputs["batch_size"]
         B = batch["res_type"].shape[0]
@@ -296,8 +265,20 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             token_exists_mask.append(aux_preds_i["token_exists_mask"])
         potts_decoder_aux = {k: torch.cat(v, dim=0) for k, v in potts_decoder_aux.items()}
         token_exists_mask = torch.cat(token_exists_mask, dim=0)
+        batch["token_exists_mask"] = token_exists_mask  # store in batch for downstream use
 
-        return potts_decoder_aux, token_exists_mask
+        # Handle tied sampling
+        if "tied_sampling_ids" in batch:
+            tied_sampling_inputs = _construct_tied_sampling_inputs(batch)
+
+            # slice to representative elements
+            unique_rep_idxs = tied_sampling_inputs["rep_idx"].unique().tolist()
+            batch = slice_feats(batch, unique_rep_idxs)  # get representative batch elements
+
+            # aggregate potts parameters across tied groups
+            potts_decoder_aux = _aggregate_potts_params(potts_decoder_aux, tied_sampling_inputs)
+
+        return potts_decoder_aux, batch
 
 
 def _aggregate_potts_params(potts_decoder_aux: dict[str, TensorType["b ..."]],
@@ -347,3 +328,18 @@ def _aggregate_potts_params(potts_decoder_aux: dict[str, TensorType["b ..."]],
     }
 
     return potts_decoder_aux_new
+
+
+def _construct_tied_sampling_inputs(batch: dict[str, TensorType["b ..."]]) -> dict[str, Any]:
+    tied_sampling_inputs = {"tied_sampling_ids": batch["tied_sampling_ids"]}
+    device = batch["tied_sampling_ids"].device
+    tied_sampling_inputs["unique_ids"], tied_sampling_inputs["inverse"] = tied_sampling_inputs["tied_sampling_ids"].unique(return_inverse=True)
+
+    # use first index of each tied group as the representative index
+    B = batch["res_type"].shape[0]
+    batch_idx = torch.arange(B, device=device)
+    n_unique_ids = tied_sampling_inputs["unique_ids"].shape[0]
+    first_idxs = torch.full((n_unique_ids, ), B, device=device)
+    first_idxs.scatter_reduce_(0, tied_sampling_inputs["inverse"], batch_idx, reduce="amin", include_self=True)
+    tied_sampling_inputs["rep_idx"] = first_idxs[tied_sampling_inputs["inverse"]]
+    return tied_sampling_inputs
