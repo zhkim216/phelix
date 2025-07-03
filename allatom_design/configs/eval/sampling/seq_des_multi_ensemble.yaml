@@ -15,8 +15,14 @@ base_out_dir: null
 exp_name: null  # experiment name; used for wandb and output directory
 
 # PDB file inputs
-conformer_dir: null
-max_num_conformers: 4
+input_cfg:
+  conformer_dir: null
+  pdb_name_list: null
+  array_id: null
+  num_arrays: null
+
+# Ensemble parameters
+max_num_conformers: 16
 include_primary_conformer: true
 
 # Positional contraints

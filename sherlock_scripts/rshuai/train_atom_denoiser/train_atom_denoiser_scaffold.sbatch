@@ -38,7 +38,6 @@ PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 # Run training script
 cd ${BASE_DIR}
-cd ${BASE_DIR}
 WANDB__SERVICE_WAIT=300 python3 allatom_design/train_atom_denoiser.py \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \

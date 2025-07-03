@@ -15,7 +15,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.eval_setup_utils import (process_pdb_files,
-                                                             wandb_setup)
+                                                             wandb_setup, get_conformer_dirs, process_conformer_dirs)
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import (
     get_seq_des_model, run_seq_des_ensemble)
@@ -40,46 +40,11 @@ def main(cfg: DictConfig):
     with open(Path(log_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
-    # Load in PDB files to eval on
-    pdb_names = [Path(x).name for x in glob.glob(f"{cfg.conformer_dir}/*") if Path(x).is_dir()]
+    # Load in conformer directories to eval on
+    conformer_dirs = get_conformer_dirs(**cfg.input_cfg)
 
-    # first, collect per-PDB conformer lists
-    conformer_groups = []
-    for pdb_name in pdb_names:
-        all_conformers = natsorted(glob.glob(f"{cfg.conformer_dir}/{pdb_name}/*"))
-
-        # Try to find primary conformer with either .cif or .pdb extension
-        primary_conformer_cif = f"{cfg.conformer_dir}/{pdb_name}/{pdb_name}.cif"
-        primary_conformer_pdb = f"{cfg.conformer_dir}/{pdb_name}/{pdb_name}.pdb"
-
-        if Path(primary_conformer_cif).exists():
-            primary_conformer = primary_conformer_cif
-        elif Path(primary_conformer_pdb).exists():
-            primary_conformer = primary_conformer_pdb
-        else:
-            raise FileNotFoundError(f"Primary conformer not found for {pdb_name}. Expected either {primary_conformer_cif} or {primary_conformer_pdb}")
-
-        all_conformers.remove(primary_conformer)
-        if cfg.include_primary_conformer:
-            conformers = [primary_conformer] + all_conformers[:cfg.max_num_conformers - 1]
-        else:
-            conformers = all_conformers[:cfg.max_num_conformers]
-        conformer_groups.append((pdb_name, conformers))
-
-    # flatten and process everything in one go
-    all_confs_flat = [c for _, group in conformer_groups for c in group]
-    processed_flat = process_pdb_files(all_confs_flat, processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg, keep_order=True)
-
-    # then split the flat list back into per-PDB results
-    conformer_struct_files = []
-    offset = 0
-    for pdb_name, group in conformer_groups:
-        n = len(group)
-        conformer_struct_files.append((pdb_name, processed_flat[offset:offset + n]))
-        offset += n
-
-    # filter out conformers that failed to process
-    conformer_struct_files = [(pdb_name, [x for x in struct_files if x is not None]) for pdb_name, struct_files in conformer_struct_files]
+    # Process conformer directories
+    pdb_to_processed_conformers = process_conformer_dirs(conformer_dirs, cfg.max_num_conformers, cfg.include_primary_conformer, f"{log_dir}/processed_structures", cfg.pdb_processing_cfg, cfg.num_workers)
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
@@ -96,7 +61,7 @@ def main(cfg: DictConfig):
 
     # Run sequence design model
     outputs = run_seq_des_ensemble(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                                    conformer_struct_files=conformer_struct_files, device=device, pos_constraint_df=None,
+                                    pdb_to_processed_conformers=pdb_to_processed_conformers, device=device, pos_constraint_df=None,
                                     out_dir=log_dir)
 
     del seq_des_model

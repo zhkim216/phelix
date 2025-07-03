@@ -30,14 +30,14 @@ BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
 LIST_STEM=af2pdbs_relaxdb_initial
-# CONFORMER_DIR=/scratch/users/rshuai/datasets/af2pdbs_relaxdb_initial/conformers/s6_a0_conformers
+# input_cfg.conformer_dir=/scratch/users/rshuai/datasets/af2pdbs_relaxdb_initial/conformers/s6_a0_conformers
 BASE_CONFORMER_DIR=/scratch/users/rshuai/datasets/af2pdbs_relaxdb_initial/conformers
 
 CONFIGS=(
-"conformer_dir=${BASE_CONFORMER_DIR}/s6_a0_conformers/t0.7 max_num_conformers=1"
-"conformer_dir=${BASE_CONFORMER_DIR}/s6_a0_conformers/t0.7 max_num_conformers=16"
-"conformer_dir=${BASE_CONFORMER_DIR}/spd0_a3_cfg2_700K_conformers/t0.7 max_num_conformers=1"
-"conformer_dir=${BASE_CONFORMER_DIR}/spd0_a3_cfg2_700K_conformers/t0.7 max_num_conformers=16"
+"input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/s6_a0_conformers/t0.7 max_num_conformers=1"
+"input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/s6_a0_conformers/t0.7 max_num_conformers=16"
+"input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/spd0_a3_cfg2_700K_conformers/t0.7 max_num_conformers=1"
+"input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/spd0_a3_cfg2_700K_conformers/t0.7 max_num_conformers=16"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 

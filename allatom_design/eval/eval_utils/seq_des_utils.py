@@ -237,13 +237,13 @@ def score_samples(model: SeqDenoiser,
 
 
 def run_seq_des_ensemble(model: SeqDenoiser,
-                           data_cfg: DictConfig,
-                           cfg: DictConfig,  # sampling config
-                           conformer_struct_files: list[tuple[str, list[str]]],  # maps from a given pdb name to its conformer structure files
-                           device: str,
-                           pos_constraint_df: Optional[pd.DataFrame] = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
-                           out_dir: Optional[str] = None,
-                           ) -> dict[str, Any]:
+                         data_cfg: DictConfig,
+                         cfg: DictConfig,  # sampling config
+                         pdb_to_processed_conformers: dict[str, list[str]],  # maps from a given pdb name to its processed conformer structure files
+                         device: str,
+                         pos_constraint_df: Optional[pd.DataFrame] = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
+                         out_dir: Optional[str] = None,
+                         ) -> dict[str, Any]:
     """
     Given a list of processed structure files, run sequence design on them.
     """
@@ -275,10 +275,7 @@ def run_seq_des_ensemble(model: SeqDenoiser,
 
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
-        for i in tqdm(range(len(conformer_struct_files)), desc=f"Sampling {len(conformer_struct_files)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB..."):
-            # Extract conformer struct files for this PDB
-            pdb_name, struct_files = conformer_struct_files[i]
-
+        for pdb_name, struct_files in tqdm(pdb_to_processed_conformers.items(), desc=f"Sampling {len(pdb_to_processed_conformers)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB..."):
             # Flatten struct_files and create tied_sampling_ids
             batch, input_structs = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
             batch["tied_sampling_ids"] = torch.zeros(len(struct_files), device=device, dtype=torch.long)  # tie all samples together

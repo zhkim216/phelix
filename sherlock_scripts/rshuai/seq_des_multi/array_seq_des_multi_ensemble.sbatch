@@ -30,21 +30,21 @@ BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
 LIST_STEM=protein_monomer_32_512_no_ligand
-# CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-90
+# input_cfg.conformer_dir=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-90
 BASE_CONFORMER_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/spd0_a4_cfg2_conformers
 CONFOMER_DIR_ORIG=/scratch/users/rshuai/datasets/boltz_val_cifs/conformers/${LIST_STEM}/md_pd_conformers-sde-aicath-no-recurrence/sde-aicath-no-recurrence-richards-structures-90
 CKPT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt
 
 CONFIGS=(
-"ckpt_path=${CKPT_PATH} max_num_conformers=1 conformer_dir=${BASE_CONFORMER_DIR}/t0.7"
-"ckpt_path=${CKPT_PATH} max_num_conformers=2 conformer_dir=${BASE_CONFORMER_DIR}/t0.7"
-"ckpt_path=${CKPT_PATH} max_num_conformers=4 conformer_dir=${BASE_CONFORMER_DIR}/t0.7"
-"ckpt_path=${CKPT_PATH} max_num_conformers=8 conformer_dir=${BASE_CONFORMER_DIR}/t0.7"
-"ckpt_path=${CKPT_PATH} max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.7"
-"ckpt_path=${CKPT_PATH} max_num_conformers=8 conformer_dir=${BASE_CONFORMER_DIR}/t0.7 +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000"
-"ckpt_path=${CKPT_PATH} max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.7 +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000"
-"ckpt_path=${CKPT_PATH} max_num_conformers=8 conformer_dir=${BASE_CONFORMER_DIR}/t0.7 +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.rejection_step=true"
-"ckpt_path=${CKPT_PATH} max_num_conformers=16 conformer_dir=${BASE_CONFORMER_DIR}/t0.7 +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.rejection_step=true"
+"ckpt_path=${CKPT_PATH} max_num_conformers=1 input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.7"
+"ckpt_path=${CKPT_PATH} max_num_conformers=2 input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.7"
+"ckpt_path=${CKPT_PATH} max_num_conformers=4 input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.7"
+"ckpt_path=${CKPT_PATH} max_num_conformers=8 input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.7"
+"ckpt_path=${CKPT_PATH} max_num_conformers=16 input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.7"
+"ckpt_path=${CKPT_PATH} max_num_conformers=8 input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.7 +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000"
+"ckpt_path=${CKPT_PATH} max_num_conformers=16 input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.7 +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000"
+"ckpt_path=${CKPT_PATH} max_num_conformers=8 input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.7 +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.rejection_step=true"
+"ckpt_path=${CKPT_PATH} max_num_conformers=16 input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.7 +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.rejection_step=true"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 
