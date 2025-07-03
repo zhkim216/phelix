@@ -17,7 +17,7 @@ from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.eval_setup_utils import (wandb_setup, get_conformer_dirs, process_conformer_dirs)
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import (
-    get_seq_des_model, run_seq_des_ensemble)
+    get_seq_des_model, run_seq_des_ensemble, score_sequences_ensemble)
 
 
 @hydra.main(config_path="../../configs/eval/fitness_evals", config_name="eval_megascale", version_base="1.3.2")
@@ -45,6 +45,13 @@ def main(cfg: DictConfig):
     # Process conformer directories
     pdb_to_processed_conformers = process_conformer_dirs(conformer_dirs, cfg.max_num_conformers, cfg.include_primary_conformer, f"{log_dir}/processed_structures", cfg.pdb_processing_cfg)
 
+    # Read in Megascale CSV and map from pdb name to sequences
+    megascale_df = pd.read_csv(cfg.megascale_csv)
+    megascale_df["pdb"] = megascale_df["WT_name"].apply(lambda x: Path(x).stem.lower())
+    pdb_to_sequences = defaultdict(list)
+    for _, row in megascale_df.iterrows():
+        pdb_to_sequences[row["pdb"]].append(row["aa_seq"])
+
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -53,12 +60,13 @@ def main(cfg: DictConfig):
     seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
 
     # Run sequence design model
-    outputs = run_seq_des_ensemble(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                                    pdb_to_processed_conformers=pdb_to_processed_conformers, device=device, pos_constraint_df=None,
-                                    out_dir=log_dir)
+    outputs = score_sequences_ensemble(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
+                                       pdb_to_processed_conformers=pdb_to_processed_conformers,
+                                       pdb_to_sequences=pdb_to_sequences,
+                                       device=device,
+                                       out_dir=log_dir)
 
     del seq_des_model
-
 
 
 if __name__ == "__main__":
