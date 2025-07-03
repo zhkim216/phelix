@@ -108,6 +108,24 @@ class SeqDenoiser(nn.Module):
         return output_feats, aux
 
 
+    def score_samples(self, batch: dict[str, TensorType["b ..."]], sampling_inputs: dict[str, Any]):
+        """
+        Score samples using Potts parameters computed from input backbones.
+        """
+        batch["noise_labels"] = sampling_inputs.get("noise_labels", None)
+        batch["noise"] = None
+
+        if batch["noise_labels"] is not None:
+            raise NotImplementedError("Noise labels are not implemented yet")
+
+        if sampling_inputs["add_noise"]:
+            raise NotImplementedError("Adding noise is not implemented yet")
+
+        potts_decoder_aux, batch = self.denoiser.compute_potts_params(batch, sampling_inputs=sampling_inputs)
+
+        return potts_decoder_aux, batch
+
+
 def get_denoiser(cfg: DictConfig,
                  sigma_data: TensorType[(), float]
                  ) -> BaseSeqDenoiser:

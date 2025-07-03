@@ -239,7 +239,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
 
     def compute_potts_params(self, batch: dict[str, TensorType["b ..."]],
-                             sampling_inputs: dict[str, Any]) -> tuple[dict[str, TensorType["b ..."]], TensorType["b n_tokens", float]]:
+                             sampling_inputs: dict[str, Any]) -> tuple[dict[str, TensorType["b ..."]], dict[str, TensorType["b ..."]]]:
         """
         Run model and collect potts parameters over a batch of samples.
 
