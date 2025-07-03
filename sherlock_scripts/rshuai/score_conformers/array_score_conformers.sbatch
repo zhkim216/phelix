@@ -64,7 +64,7 @@ CONFORMER_IDX=$(( SLURM_ARRAY_TASK_ID / NUM_SAMPLES ))
 SAMPLE_IDX=$(( SLURM_ARRAY_TASK_ID % NUM_SAMPLES ))
 
 CONFORMER_NAME=${CONFORMER_NAMES[${CONFORMER_IDX}]}
-CONFORMER_DIR=${CONFORMER_BASE_DIR}/${CONFORMER_DIRS[${CONFORMER_IDX}]}
+input_cfg.conformer_dir=${CONFORMER_BASE_DIR}/${CONFORMER_DIRS[${CONFORMER_IDX}]}
 SAMPLE_NAME=${SAMPLE_NAMES[${SAMPLE_IDX}]}
 SAMPLE_DIR=${SAMPLE_BASE_DIR}/${SAMPLE_DIRS[${SAMPLE_IDX}]}
 
@@ -81,7 +81,7 @@ OUT_DIR=${BASE_OUT_DIR}/${CONFORMER_NAME}/${SAMPLE_NAME}
 cd ${BASE_DIR}
 python3 allatom_design/eval/sampling/score_conformers.py \
     ckpt_path=${CKPT_PATH} \
-    conformer_dir=${CONFORMER_DIR} \
+    input_cfg.conformer_dir=${CONFORMER_DIR} \
     sample_dir=${SAMPLE_DIR} \
     out_dir=${OUT_DIR} \
     hydra.run.dir=${HYDRA_DIR}

@@ -11,7 +11,7 @@ from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.eval.eval_utils import eval_metrics
-from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
+from allatom_design.eval.eval_utils.eval_setup_utils import process_conformer_dirs
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import (
     get_seq_des_model, run_seq_des_ensemble)
@@ -38,10 +38,7 @@ def main(cfg: DictConfig):
         yaml.safe_dump(cfg_dict, f)
 
     # Load in PDB file to eval on
-    pdb_paths = glob.glob(f"{cfg.pdb_dir}/*.pdb") + glob.glob(f"{cfg.pdb_dir}/*.cif")
-    pdb_paths = natsorted(pdb_paths)[:cfg.max_num_conformers]  # subset to max_num_conformers
-    processed_struct_files = process_pdb_files(pdb_paths, processed_struct_dir=f"{out_dir}/processed_structures", **cfg.pdb_processing_cfg, keep_order=True)
-    conformer_struct_files = [(Path(cfg.pdb_dir).name, processed_struct_files)]
+    pdb_to_processed_conformers = process_conformer_dirs([cfg.pdb_dir], cfg.max_num_conformers, cfg.include_primary_conformer, f"{out_dir}/processed_structures", cfg.pdb_processing_cfg)
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
@@ -56,7 +53,7 @@ def main(cfg: DictConfig):
         Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
-    conformer_pdb_keys = [Path(struct_file).stem for struct_file in conformer_struct_files[0][1]]
+    conformer_pdb_keys = [Path(struct_file).stem for struct_file in pdb_to_processed_conformers[Path(cfg.pdb_dir).name]]
     pos_constraint_df = pd.DataFrame({
         "pdb_key": conformer_pdb_keys,
         "fixed_pos_seq": [cfg.fixed_pos_seq] * len(conformer_pdb_keys),
@@ -67,7 +64,7 @@ def main(cfg: DictConfig):
 
     # Run sequence design model
     outputs = run_seq_des_ensemble(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                                  conformer_struct_files=conformer_struct_files, device=device, pos_constraint_df=pos_constraint_df,
+                                  pdb_to_processed_conformers=pdb_to_processed_conformers, device=device, pos_constraint_df=pos_constraint_df,
                                   out_dir=out_dir)
 
     if cfg.run_self_consistency_eval:

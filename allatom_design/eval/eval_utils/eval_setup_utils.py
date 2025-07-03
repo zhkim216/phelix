@@ -6,6 +6,8 @@ import re
 import socket
 import subprocess
 import time
+from collections import defaultdict
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -14,12 +16,11 @@ import wandb
 from joblib import Parallel, delayed
 from natsort import natsorted
 from omegaconf import DictConfig
+from p_tqdm import p_map, p_umap
 from tqdm import tqdm
 
-from functools import partial
-from p_tqdm import p_umap, p_map
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
-    Resource, fetch, pdb_to_mmcif, process_structure, PDB)
+    PDB, Resource, fetch, pdb_to_mmcif, process_structure)
 
 
 def get_pdb_files(pdb_dir: str,
@@ -187,46 +188,6 @@ def parallel_process_structures(pdbs: list[PDB], resource: Resource, outdir: Pat
     return processed_struct_files
 
 
-def load_pdb_files_from_manifest(pdb_dir: str, **manifest_kwargs) -> list[str]:
-    """
-    Load PDB files from a manifest CSV file.
-
-    Optional filters:
-        phase: str
-        subset_length_range: tuple[int, int]
-        scrmsd_range: tuple[float, float]
-        rel_rog_range: tuple[float, float]
-        cluster_sample_first: bool
-    """
-    pdb_keys_df = pd.read_csv(manifest_kwargs["pdb_manifest_csv"])
-    if manifest_kwargs.get("phase") is not None:
-        pdb_keys_df = pdb_keys_df[pdb_keys_df["phase"] == manifest_kwargs["phase"]]
-    if manifest_kwargs.get("subset_length_range") is not None:
-        min_len, max_len = manifest_kwargs["subset_length_range"]
-        pdb_keys_df = pdb_keys_df[pdb_keys_df["seq_length"].between(min_len, max_len)]
-    if manifest_kwargs.get("scrmsd_range") is not None:
-        min_scrmsd, max_scrmsd = manifest_kwargs["scrmsd_range"]
-        if min_scrmsd is None:
-            min_scrmsd = -np.inf
-        if max_scrmsd is None:
-            max_scrmsd = np.inf
-        pdb_keys_df = pdb_keys_df[pdb_keys_df["sc_ca_rmsd"].between(min_scrmsd, max_scrmsd)]
-    if manifest_kwargs.get("rel_rog_range") is not None:
-        min_rel_rog, max_rel_rog = manifest_kwargs["rel_rog_range"]
-        if min_rel_rog is None:
-            min_rel_rog = -np.inf
-        if max_rel_rog is None:
-            max_rel_rog = np.inf
-        pdb_keys_df = pdb_keys_df[pdb_keys_df["rel_rog"].between(min_rel_rog, max_rel_rog)]
-
-    if manifest_kwargs.get("cluster_sample_first") is not None:
-        # always take first for reproducibility
-        pdb_keys_df = pdb_keys_df.groupby("cluster_id", as_index=False).first().reset_index(drop=True)
-
-    pdb_files = [f"{pdb_dir}/{manifest_kwargs.get('pdb_name_prefix', '')}{pdb_name}" for pdb_name in pdb_keys_df["pdb_name"].tolist()]
-    return pdb_files
-
-
 def get_training_checkpoints(
     denoiser_train_dir: str,
     model_type: str,
@@ -336,3 +297,107 @@ def wandb_setup(
         )
 
     return log_dir
+
+
+def get_conformer_dirs(conformer_dir: str,
+                       pdb_name_list: str | list[str] | None,
+                       # slurm array parameters for parallelization
+                       array_id: int | None,
+                       num_arrays: int | None) -> list[str]:
+    """
+    Get a list of conformer directories from a directory, either by specifying a list of pdb_names or by getting all files.
+
+    pdb_name_list can be a list of pdb names or a path to a file containing a list of pdb names.
+    """
+    if pdb_name_list is not None:
+        # get conformer directories corresponding to pdb_names in the list
+        if isinstance(pdb_name_list, str):
+            with open(pdb_name_list, "r") as f:
+                pdb_names = f.read().splitlines()
+        else:
+            pdb_names = pdb_name_list
+        conformer_dirs = [f"{conformer_dir}/{Path(pdb_name).stem}" for pdb_name in pdb_names]
+    else:
+        # get all directories in the conformer_dir
+        conformer_dirs = natsorted(list(glob.glob(f"{conformer_dir}/*")))
+        conformer_dirs = [conformer_dir for conformer_dir in conformer_dirs if Path(conformer_dir).is_dir()]
+
+    # Parallelization: split PDB files into chunks based on array id
+    if array_id is not None:
+        array_id = array_id
+        num_arrays = num_arrays
+        chunk_size = math.ceil(len(conformer_dirs) / num_arrays)
+
+        start_idx = array_id * chunk_size
+        end_idx = min(start_idx + chunk_size, len(conformer_dirs))
+        conformer_dirs = conformer_dirs[start_idx:end_idx]
+
+    print(f"Using {len(conformer_dirs)} conformer directories")
+    return conformer_dirs
+
+
+def process_conformer_dirs(conformer_dirs: list[str],
+                           max_num_conformers: int,
+                           include_primary_conformer: bool,
+                           processed_struct_dir: str,
+                           pdb_processing_cfg: DictConfig,
+                           ) -> list[str]:
+    """
+    Process PDB/CIF structures in all conformer directories.
+
+    If include_primary_conformer is True, we will also include the primary conformer, which must share the same PDB name as the conformer directory (either .pdb or .cif).
+
+    For each conformer directory, we will grab all PDB/CIF files, natsort them, and take until we have max_num_conformers files (including the primary conformer if include_primary_conformer is True).
+
+    Returns:
+        List of processed structure files, one per conformer directory.
+    """
+    # First, collect a list of conformers for each PDB
+    pdb_to_conformer_list = defaultdict(list)  # maps from a given pdb name to its conformer structure files
+    for conformer_dir in conformer_dirs:
+        pdb_name = Path(conformer_dir).name
+        all_conformers = natsorted(glob.glob(f"{conformer_dir}/*.pdb") + glob.glob(f"{conformer_dir}/*.cif"))
+
+        # Try to find primary conformer with either .cif or .pdb extension
+        primary_conformer_cif = f"{conformer_dir}/{pdb_name}.cif"
+        primary_conformer_pdb = f"{conformer_dir}/{pdb_name}.pdb"
+
+        if Path(primary_conformer_cif).exists():
+            primary_conformer = primary_conformer_cif
+        elif Path(primary_conformer_pdb).exists():
+            primary_conformer = primary_conformer_pdb
+        else:
+            raise FileNotFoundError(f"Primary conformer not found for {pdb_name}. Expected either {primary_conformer_cif} or {primary_conformer_pdb}")
+
+        all_conformers.remove(primary_conformer)
+
+        # Then, take the first max_num_conformers conformers (including the primary conformer if include_primary_conformer is True)
+        if include_primary_conformer:
+            conformers = [primary_conformer] + all_conformers[:max_num_conformers - 1]
+        else:
+            conformers = all_conformers[:max_num_conformers]
+        pdb_to_conformer_list[pdb_name].extend(conformers)
+
+    # To process PDB files, we flatten all conformers for each PDB into a single list
+    all_confs_flat = [c for _, group in pdb_to_conformer_list.items() for c in group]
+    processed_flat = process_pdb_files(all_confs_flat, processed_struct_dir=processed_struct_dir, **pdb_processing_cfg, keep_order=True)
+
+    # Create a mapping from conformer file to processed structure file
+    conf_to_processed_file = {}
+    for conf_file, processed_file in zip(all_confs_flat, processed_flat):
+        conf_to_processed_file[conf_file] = processed_file
+        if processed_file is None:
+            # this structure failed to process
+            continue
+
+        # sanity check the processed structure file name (making sure the original order was preserved)
+        expected_processed_name = Path(conf_file).with_suffix(".npz").name
+        assert Path(processed_file).name == expected_processed_name, f"Processed structure file name mismatch: {processed_file} != {expected_processed_name}"
+
+    # Map from PDB name to valid processed structure files
+    pdb_to_processed_conformers = defaultdict(list)
+    for pdb_name, conformers in pdb_to_conformer_list.items():
+        # filter out conformers that failed to process
+        pdb_to_processed_conformers[pdb_name].extend([conf_to_processed_file[k] for k in conformers if conf_to_processed_file[k] is not None])
+
+    return pdb_to_processed_conformers
