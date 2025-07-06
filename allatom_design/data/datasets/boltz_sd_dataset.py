@@ -27,6 +27,7 @@ from allatom_design.data.sample.sampler import Sample, Sampler
 from allatom_design.data.tokenize.tokenizer import Tokenized, Tokenizer
 from allatom_design.data.types import (Connection, Input, Manifest, Record,
                                        Structure)
+from allatom_design.data.write.mmcif import write_feats_to_mmcif
 
 
 class BoltzSDDataModule(L.LightningDataModule):
@@ -217,6 +218,15 @@ class SDDataset(data.Dataset):
 
         feats["pdb_key"] = record_id
         example = feats
+
+        # # DEBUG: visualize examples
+        # out_dir = f"out_dir/viz_centered/sd_feats_n40"
+        # Path(out_dir).mkdir(parents=True, exist_ok=True)
+        # out_file = f"{out_dir}/{record_id}_sd_feats.cif"
+        # try:
+        #     write_feats_to_mmcif(example, None, out_file, keep_auth=True)
+        # except Exception as e:
+        #     print(f"Failed to write example to {out_file} with error {e}. Skipping.")
         return example
 
 

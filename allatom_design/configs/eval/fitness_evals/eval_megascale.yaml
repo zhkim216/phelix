@@ -12,13 +12,14 @@ num_workers: 8  # for dataloading
 # Inputs
 ckpt_path: null
 megascale_csv: /media/scratch/datasets/megascale/thermompnn_data/mega_all.csv
+phase: "train"
+
 base_out_dir: null
 exp_name: null  # experiment name; used for wandb and output directory
 
 # PDB file inputs
 input_cfg:
   conformer_dir: null
-  pdb_name_list: null
   array_id: null
   num_arrays: null
 

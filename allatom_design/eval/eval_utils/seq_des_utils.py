@@ -257,25 +257,33 @@ def score_sequences_ensemble(model: SeqDenoiser,
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
         for pdb_name, struct_files in tqdm(pdb_to_processed_conformers.items(), desc=f"Scoring {len(pdb_to_processed_conformers)} PDBs..."):
-            # Flatten struct_files and create tied_sampling_ids
+            # Get batch of conformers
             batch, input_structs = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
-            batch["tied_sampling_ids"] = torch.zeros(len(struct_files), device=device, dtype=torch.long)  # tie all samples together
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
 
+            # Get potts parameters for each conformer
             sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
-
-            # Get potts parameters for each input backbone
             potts_decoder_aux, batch = model.score_samples(batch, sampling_inputs=sampling_inputs)
 
-            # Score sequences
+            # Get sequences
             S = []
             for seq in pdb_to_sequences[pdb_name]:
                 S.append(torch.tensor([const.token_ids[const.prot_letter_to_token[aa]] for aa in seq], device=device))
             S = torch.stack(S, dim=0)
-            potts_decoder_aux = {k: v.expand(S.shape[0], *((v.ndim - 1) * (-1, ))) for k, v in potts_decoder_aux.items()}  # expand to match S
-            U, _ = compute_potts_energy(S, potts_decoder_aux["h"], potts_decoder_aux["J"], potts_decoder_aux["edge_idx"])
+
+            # Score sequences for each conformer
+            n_conformers = potts_decoder_aux["h"].shape[0]
+            U = torch.zeros(n_conformers, S.shape[0], device=device)
+            for ci in range(n_conformers):
+                potts_decoder_aux_ci = {k: v[ci] for k, v in potts_decoder_aux.items()}
+                potts_decoder_aux_ci = {k: v.expand(S.shape[0], *(v.ndim * (-1, ))) for k, v in potts_decoder_aux_ci.items()}  # expand to match S
+                U_ci, _ = compute_potts_energy(S, potts_decoder_aux_ci["h"], potts_decoder_aux_ci["J"], potts_decoder_aux_ci["edge_idx"])
+                U[ci] = U_ci
+
+            # Take minimum over conformers to get final energy
+            U = U.min(dim=0)[0]
 
             # Store results
             outputs[pdb_name] = U.cpu()

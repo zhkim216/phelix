@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd4_a3
+#SBATCH --job-name=sd4_a4
 #SBATCH -p bioe
-#SBATCH --array=0-6
+#SBATCH --array=0-9
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -29,7 +29,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME_BASE=sd4_a3
+EXP_NAME_BASE=sd4_a4
 GROUP=seq_des
 
 # Dataset paths
@@ -37,16 +37,19 @@ PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 # Inputs config
 CONFIGS=(
-"denoiser.mpnn.k_neighbors=64"
-"denoiser.mpnn.k_neighbors=48 denoiser.mpnn.potts.k_neighbors_potts=32"
-"denoiser.mpnn.k_neighbors=64 denoiser.mpnn.potts.k_neighbors_potts=32"
-"denoiser.mpnn.k_neighbors=64 denoiser.mpnn.potts.k_neighbors_potts=48"
-"denoiser.mpnn.k_neighbors=48 denoiser.mpnn.potts.max_dist_potts=15.0"
-"denoiser.mpnn.k_neighbors=48 denoiser.mpnn.potts.max_dist_potts=10.0"
-"denoiser.mpnn.k_neighbors=64 denoiser.mpnn.potts.max_dist_potts=10.0"
+"data.sampler.beta_chain=0.5 data.sampler.beta_interface=1.0 +data.cropper.max_neighborhood=40"
+"data.sampler.beta_chain=0.5 data.sampler.beta_interface=1.0 +data.cropper.max_neighborhood=100"
+"data.sampler.beta_chain=0.5 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=1"
+"data.sampler.beta_chain=0.5 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=10"
+"data.sampler.beta_chain=0.5 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=40"
+"data.sampler.beta_chain=0.5 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=100"
+"data.sampler.beta_chain=1.0 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=10"
+"data.sampler.beta_chain=1.0 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=40"
+"data.sampler.beta_chain=1.0 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=100"
+"data.sampler.beta_chain=3.0 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=40"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
-EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
+EXP_NAME="${EXP_NAME_BASE}_cfg$(printf "%02d" $SLURM_ARRAY_TASK_ID)"
 
 # Run training script
 cd ${BASE_DIR}
@@ -68,6 +71,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     denoiser.mpnn.n_layers=3 \
     denoiser.augment_eps=0.3 \
     data.filters.4.max_residues=2048 \
+    data.cropper._target_=allatom_design.data.crop.boltz.BoltzCropper \
     checkpointing.save_latest_every_n_steps=2500 \
     trainer.check_val_every_n_epoch=2 \
     ${OVERRIDES} \
