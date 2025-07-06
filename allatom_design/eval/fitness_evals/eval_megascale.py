@@ -40,16 +40,17 @@ def main(cfg: DictConfig):
     with open(Path(log_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
+    # Read in Megascale CSV
+    megascale_df = pd.read_csv(cfg.megascale_csv)
+    megascale_df = megascale_df[megascale_df["phase"] == cfg.phase].reset_index(drop=True)
+    megascale_df["pdb"] = megascale_df["WT_name"].apply(lambda x: Path(x).stem.lower())
+    megascale_df = megascale_df.drop_duplicates(subset=["pdb", "mut_type"])
+
     # Load in conformer directories to eval on
-    conformer_dirs = get_conformer_dirs(**cfg.input_cfg)
+    conformer_dirs = get_conformer_dirs(**cfg.input_cfg, pdb_name_list=megascale_df["pdb"].unique())
 
     # Process conformer directories
     pdb_to_processed_conformers = process_conformer_dirs(conformer_dirs, cfg.max_num_conformers, cfg.include_primary_conformer, f"{log_dir}/processed_structures", cfg.pdb_processing_cfg)
-
-    # Read in Megascale CSV
-    megascale_df = pd.read_csv(cfg.megascale_csv)
-    megascale_df["pdb"] = megascale_df["WT_name"].apply(lambda x: Path(x).stem.lower())
-    megascale_df = megascale_df.drop_duplicates(subset=["pdb", "mut_type"])
 
     # Map from pdb name to sequences
     pdb_to_sequences = defaultdict(list)

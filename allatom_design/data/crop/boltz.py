@@ -2,6 +2,7 @@
 Adapted from Boltz-1.
 """
 
+import copy
 from dataclasses import replace
 from typing import Optional
 
@@ -133,7 +134,9 @@ class BoltzCropper(Cropper):
     """Interpolate between contiguous and spatial crops."""
 
     def __init__(self, min_neighborhood: int = 0, max_neighborhood: int = 40,
-                 subset_chain_types: list[str] | None = None) -> None:
+                 subset_chain_types: list[str] | None = None,
+                 only_keep_resolved: bool = False,
+                 ) -> None:
         """Initialize the cropper.
 
         Modulates the type of cropping to be performed.
@@ -148,11 +151,16 @@ class BoltzCropper(Cropper):
             The minimum neighborhood size, by default 0.
         max_neighborhood : int
             The maximum neighborhood size, by default 40.
+        subset_chain_types : list[str], optional
+            The chain types to subset to, by default None.
+        only_keep_resolved : bool, optional
+            Whether to only keep resolved tokens during cropping, by default False.
 
         """
         sizes = list(range(min_neighborhood, max_neighborhood + 1, 2))
         self.neighborhood_sizes = sizes
         self.subset_chain_types = subset_chain_types
+        self.only_keep_resolved = only_keep_resolved
 
     def crop(  # noqa: PLR0915
         self,
@@ -217,8 +225,11 @@ class BoltzCropper(Cropper):
         valid_interfaces = valid_interfaces[mask[valid_interfaces["chain_1"]]]
         valid_interfaces = valid_interfaces[mask[valid_interfaces["chain_2"]]]
 
-        # Filter to resolved tokens
-        valid_tokens = token_data[token_data["resolved_mask"]]
+        # Filter tokens for picking center tokens for cropping
+        valid_tokens = token_data[token_data["resolved_mask"]]  # only resolved tokens
+        if self.subset_chain_types is not None:
+            # filter to subset of chain types
+            valid_tokens = valid_tokens[np.isin(valid_tokens["mol_type"], subset_chain_type_ids)]
 
         # Check if we have any valid tokens
         if not valid_tokens.size:
@@ -254,6 +265,15 @@ class BoltzCropper(Cropper):
 
             # Get all tokens from this chain
             chain_tokens = token_data[token_data["asym_id"] == token["asym_id"]]
+            if self.only_keep_resolved:
+                # filter to resolved tokens before cropping
+                chain_tokens = chain_tokens[chain_tokens["resolved_mask"]]
+
+                # cropping relies on a contiguous res_idx, so we need to make it contiguous after we've filtered to resolved tokens
+                _, chain_tokens["res_idx"] = np.unique(chain_tokens["res_idx"], return_inverse=True)
+
+                # get new res_idx for center token
+                token["res_idx"] = chain_tokens[chain_tokens["token_idx"] == token["token_idx"]]["res_idx"][0]
 
             # Pick the whole chain if possible, otherwise select
             # a contiguous subset centered at the query token
