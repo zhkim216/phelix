@@ -297,6 +297,7 @@ def run_seq_des_ensemble(model: SeqDenoiser,
                          pdb_to_processed_conformers: dict[str, list[str]],  # maps from a given pdb name to its processed conformer structure files
                          device: str,
                          pos_constraint_df: Optional[pd.DataFrame] = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
+                         use_primary_res_type: bool = True,  # if True, use res_type from primary structure, otherwise use res_type from conformer struct file
                          out_dir: Optional[str] = None,
                          ) -> dict[str, Any]:
     """
@@ -334,6 +335,10 @@ def run_seq_des_ensemble(model: SeqDenoiser,
             # Flatten struct_files and create tied_sampling_ids
             batch, input_structs = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
             batch["tied_sampling_ids"] = torch.zeros(len(struct_files), device=device, dtype=torch.long)  # tie all samples together
+
+            # Use res_type from primary structure
+            if use_primary_res_type:
+                batch["res_type"] = batch["res_type"][0:1].expand(len(struct_files), *((batch["res_type"].ndim - 1) * (-1, )))  # use res_type from primary structure
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
@@ -790,13 +795,14 @@ def visualize_sequences(example: dict[str, torch.Tensor],
     for chain_id in example["asym_id"].unique().tolist():
         chain_mask = example["asym_id"] == chain_id
         mol_type = example["mol_type"][chain_mask].unique().tolist()[0]
+        cond_mask_chain = cond_mask[chain_mask]
         if mol_type != const.chain_type_ids["NONPOLYMER"]:
             # Extract sequence from the features
             # Get the unpadded sequence for this chain
             res_type = example["res_type"][chain_mask].argmax(dim=-1)
             res_type = res_type[example["token_pad_mask"][chain_mask].bool()].tolist()
             sequence = [const.tokens[res_type[ri]] for ri in range(len(res_type))]
-            sequences[chain_id] = "".join([x if cond_mask[j] else "-" for j, x in enumerate(gemmi.one_letter_code(sequence))])
+            sequences[chain_id] = "".join([x if cond_mask_chain[j] else "-" for j, x in enumerate(gemmi.one_letter_code(sequence))])
         else:
             # Extract sequence from the input structure, since non-polymer chains are never redesigned
             chain_i = input_struct.chains[chain_map[chain_id]]
