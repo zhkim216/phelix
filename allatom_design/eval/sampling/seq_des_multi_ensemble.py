@@ -67,6 +67,8 @@ def main(cfg: DictConfig):
         pos_constraint_df["pdb_key"] = pos_constraint_df["pdb_key"].str.lower()
         conformer_dfs = []
         for pdb_key in pos_constraint_df["pdb_key"].unique():
+            if pdb_key not in pdb_to_processed_conformers:
+                continue
             conformer_df = pos_constraint_df[pos_constraint_df["pdb_key"] == pdb_key]
             conformer_df = pd.concat([conformer_df] * len(pdb_to_processed_conformers[pdb_key]), ignore_index=True)
             conformer_df["pdb_key"] = [Path(x).stem for x in pdb_to_processed_conformers[pdb_key]]
@@ -82,6 +84,10 @@ def main(cfg: DictConfig):
 
     del seq_des_model
 
+    record_ids = [Path(x).stem.lower() for x in outputs["out_pdbs"]]
+    output_df = pd.DataFrame({"record_id": record_ids, "seq": outputs["seqs"], "out_pdb": outputs["out_pdbs"], "n_conformers": outputs["n_conformers"], "U": outputs["U"]})
+    output_df.to_csv(f"{log_dir}/seq_des_outputs.csv", index=False)
+
     if cfg.run_self_consistency_eval:
         id_to_metrics = eval_metrics.run_self_consistency_eval_boltz(
             outputs["out_pdbs"],
@@ -91,12 +97,7 @@ def main(cfg: DictConfig):
 
         # Save metrics as CSV
         metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
-
-        # Add n_conformers to metrics, since sometimes we are missing some conformers due to processing errors
-        record_ids = [Path(x).stem.lower() for x in outputs["out_pdbs"]]
-        n_conformers_df = pd.DataFrame({"record_id": record_ids, "n_conformers": outputs["n_conformers"]})
-        metrics_df = pd.merge(metrics_df, n_conformers_df, on="record_id", how="left")
-
+        metrics_df = pd.merge(metrics_df, output_df, on="record_id", how="left")
         metrics_df.to_csv(f"{log_dir}/self_consistency_metrics.csv", index=False)
 
         if not cfg.wandb.no_wandb:
