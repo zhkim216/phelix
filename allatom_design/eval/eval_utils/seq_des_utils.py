@@ -304,15 +304,11 @@ def run_seq_des_ensemble(model: SeqDenoiser,
     Given a list of processed structure files, run sequence design on them.
     """
     # Set up output directory
-    outputs = {}
+    outputs = defaultdict(list)
 
     if out_dir is not None:
         sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
         Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
-
-        outputs["out_pdbs"] = []  # store output PDB paths
-        outputs["n_conformers"] = []  # store number of conformers for each PDB (some may have been skipped due to parsing issues)
-        outputs["U"] = []  # store energies for each sample
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
@@ -369,9 +365,18 @@ def run_seq_des_ensemble(model: SeqDenoiser,
                     out_file = f"{sample_out_dir}/{pdb_name}_sample{si}.cif"
                     batch_write_feats_to_mmcif(output_feats[si], input_structs=input_structs[0:1], filenames=[out_file])
 
-                    outputs["out_pdbs"].append(out_file)
-                    outputs["n_conformers"].append(len(input_structs))
-                    outputs["U"].append(U_si)
+                    outputs["out_pdbs"].append(out_file)  # store output PDB paths
+                    outputs["n_conformers"].append(len(input_structs))  # store number of conformers for each PDB (some may have been skipped due to parsing issues)
+                    outputs["U"].append(U_si)  # store energies for each sample
+
+                    # get sequences as a string, with ":" to separate chains
+                    chain_seqs = []
+                    for chain_id in feats_si["asym_id"].unique():
+                        chain_mask = (feats_si["asym_id"] == chain_id).squeeze(0)
+                        chain_res_type = feats_si["res_type"].squeeze(0).argmax(dim=-1)[chain_mask]
+                        chain_seq = [const.prot_token_to_letter[const.tokens[x]] for x in chain_res_type]
+                        chain_seqs.append("".join(chain_seq))
+                    outputs["seqs"].append(":".join(chain_seqs))  # store sequences for each sample
 
     return outputs
 
@@ -795,14 +800,14 @@ def visualize_sequences(example: dict[str, torch.Tensor],
     for chain_id in example["asym_id"].unique().tolist():
         chain_mask = example["asym_id"] == chain_id
         mol_type = example["mol_type"][chain_mask].unique().tolist()[0]
-        cond_mask_chain = cond_mask[chain_mask]
+        chain_cond_mask = cond_mask[chain_mask]
         if mol_type != const.chain_type_ids["NONPOLYMER"]:
             # Extract sequence from the features
             # Get the unpadded sequence for this chain
             res_type = example["res_type"][chain_mask].argmax(dim=-1)
             res_type = res_type[example["token_pad_mask"][chain_mask].bool()].tolist()
             sequence = [const.tokens[res_type[ri]] for ri in range(len(res_type))]
-            sequences[chain_id] = "".join([x if cond_mask_chain[j] else "-" for j, x in enumerate(gemmi.one_letter_code(sequence))])
+            sequences[chain_id] = "".join([x if chain_cond_mask[j] else "-" for j, x in enumerate(gemmi.one_letter_code(sequence))])
         else:
             # Extract sequence from the input structure, since non-polymer chains are never redesigned
             chain_i = input_struct.chains[chain_map[chain_id]]
