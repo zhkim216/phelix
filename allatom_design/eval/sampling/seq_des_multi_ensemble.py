@@ -53,15 +53,31 @@ def main(cfg: DictConfig):
     # Load in sequence design model
     seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
 
-    # # Load structure prediction model for self-consistency evaluation
+    # Load structure prediction model for self-consistency evaluation
     if cfg.run_self_consistency_eval:
         pred_out_dir = f"{log_dir}/preds"  # directory for structure predictions
         Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
+    # Load in positional constraints
+    if cfg.pos_constraint_csv is not None:
+        pos_constraint_df = pd.read_csv(cfg.pos_constraint_csv)
+
+        # expand pdb_key to all conformers
+        pos_constraint_df["pdb_key"] = pos_constraint_df["pdb_key"].str.lower()
+        conformer_dfs = []
+        for pdb_key in pos_constraint_df["pdb_key"].unique():
+            conformer_df = pos_constraint_df[pos_constraint_df["pdb_key"] == pdb_key]
+            conformer_df = pd.concat([conformer_df] * len(pdb_to_processed_conformers[pdb_key]), ignore_index=True)
+            conformer_df["pdb_key"] = [Path(x).stem for x in pdb_to_processed_conformers[pdb_key]]
+            conformer_dfs.append(conformer_df)
+        pos_constraint_df = pd.concat(conformer_dfs)
+    else:
+        pos_constraint_df = None
+
     # Run sequence design model
     outputs = run_seq_des_ensemble(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                                   pdb_to_processed_conformers=pdb_to_processed_conformers, device=device, pos_constraint_df=None,
+                                   pdb_to_processed_conformers=pdb_to_processed_conformers, device=device, pos_constraint_df=pos_constraint_df,
                                    out_dir=log_dir)
 
     del seq_des_model

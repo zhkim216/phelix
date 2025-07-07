@@ -154,7 +154,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             batch["coords"] = batch["coords"] * batch["atom_pad_mask"].unsqueeze(-1) * batch["atom_resolved_mask"].unsqueeze(-1)
 
         # Compute potts parameters
-        potts_decoder_aux, batch = self.compute_potts_params(batch, sampling_inputs)
+        potts_decoder_aux, batch, sampling_inputs = self.compute_potts_params(batch, sampling_inputs)
         aux["potts_decoder_aux"] = to(potts_decoder_aux, "cpu")
 
         # Set up Potts sampling
@@ -239,7 +239,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
 
     def compute_potts_params(self, batch: dict[str, TensorType["b ..."]],
-                             sampling_inputs: dict[str, Any]) -> tuple[dict[str, TensorType["b ..."]], dict[str, TensorType["b ..."]]]:
+                             sampling_inputs: dict[str, Any]) -> tuple[dict[str, TensorType["b ..."]], dict[str, TensorType["b ..."]], dict[str, Any]]:
         """
         Run model and collect potts parameters over a batch of samples.
 
@@ -248,6 +248,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         Returns:
             potts_decoder_aux: dict[str, TensorType["b ..."]]: potts parameters
             batch: dict[str, TensorType["b ..."]]: batch with token_exists_mask added
+            sampling_inputs: dict[str, Any]: sampling inputs with pos_restrict_aatype sliced to representative elements
         """
         subbatch_size = sampling_inputs["batch_size"]
         B = batch["res_type"].shape[0]
@@ -275,10 +276,13 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             unique_rep_idxs = tied_sampling_inputs["rep_idx"].unique().tolist()
             batch = slice_feats(batch, unique_rep_idxs)  # get representative batch elements
 
+            if "pos_restrict_aatype" in sampling_inputs:
+                sampling_inputs["pos_restrict_aatype"] = [x[unique_rep_idxs] for x in sampling_inputs["pos_restrict_aatype"]]
+
             # aggregate potts parameters across tied groups
             potts_decoder_aux = _aggregate_potts_params(potts_decoder_aux, tied_sampling_inputs)
 
-        return potts_decoder_aux, batch
+        return potts_decoder_aux, batch, sampling_inputs
 
 
 def _aggregate_potts_params(potts_decoder_aux: dict[str, TensorType["b ..."]],
