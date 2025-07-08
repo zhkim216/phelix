@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd4_a0_eval_seq_des
+#SBATCH --job-name=sd4_a4_eval_seq_des
 #SBATCH -p bioe,possu
-#SBATCH --array=0-2
+#SBATCH --array=0-9
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -39,9 +39,16 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to evaluate
 MODEL_NAMES=(
-    "sd4_a0_cfg0"
-    "sd4_a0_cfg1"
-    "sd4_a0_cfg2"
+    "sd4_a4_cfg00"
+    "sd4_a4_cfg01"
+    "sd4_a4_cfg02"
+    "sd4_a4_cfg03"
+    "sd4_a4_cfg04"
+    "sd4_a4_cfg05"
+    "sd4_a4_cfg06"
+    "sd4_a4_cfg07"
+    "sd4_a4_cfg08"
+    "sd4_a4_cfg09"
 )
 MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
