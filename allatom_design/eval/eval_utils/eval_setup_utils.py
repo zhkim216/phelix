@@ -341,6 +341,7 @@ def process_conformer_dirs(conformer_dirs: list[str],
                            include_primary_conformer: bool,
                            processed_struct_dir: str,
                            pdb_processing_cfg: DictConfig,
+                           ignore_missing_primary_conformer: bool = False,
                            ) -> list[str]:
     """
     Process PDB/CIF structures in all conformer directories.
@@ -366,13 +367,17 @@ def process_conformer_dirs(conformer_dirs: list[str],
             primary_conformer = primary_conformer_cif
         elif Path(primary_conformer_pdb).exists():
             primary_conformer = primary_conformer_pdb
+        elif ignore_missing_primary_conformer:
+            print(f"Warning: Primary conformer not found for {pdb_name}, defaulting to first conformer in natsorted list {all_conformers[0]}")
+            primary_conformer = None
         else:
             raise FileNotFoundError(f"Primary conformer not found for {pdb_name}. Expected either {primary_conformer_cif} or {primary_conformer_pdb}")
 
-        all_conformers.remove(primary_conformer)
+        if primary_conformer is not None:
+            all_conformers.remove(primary_conformer)
 
         # Then, take the first max_num_conformers conformers (including the primary conformer if include_primary_conformer is True)
-        if include_primary_conformer:
+        if include_primary_conformer and primary_conformer is not None:
             conformers = [primary_conformer] + all_conformers[:max_num_conformers - 1]
         else:
             conformers = all_conformers[:max_num_conformers]
@@ -391,7 +396,7 @@ def process_conformer_dirs(conformer_dirs: list[str],
             continue
 
         # sanity check the processed structure file name (making sure the original order was preserved)
-        expected_processed_name = Path(conf_file).with_suffix(".npz").name
+        expected_processed_name = Path(conf_file).with_suffix(".npz").name.lower()
         assert Path(processed_file).name == expected_processed_name, f"Processed structure file name mismatch: {processed_file} != {expected_processed_name}"
 
     # Map from PDB name to valid processed structure files

@@ -10,6 +10,7 @@ out_dir: null
 pdb_dir: null
 max_num_conformers: 16
 include_primary_conformer: true
+ignore_missing_primary_conformer: false
 
 # Positional contraints
 fixed_pos_seq: # comma-separated, chain + residue index specification, e.g. "A1-100,B1-100"

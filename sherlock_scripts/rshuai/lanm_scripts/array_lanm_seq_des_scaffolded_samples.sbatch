@@ -49,9 +49,9 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
-CKPT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt
-BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a8_S/lanm_scaffolded
-EXP_NAME=sd3_a8_S_lanm_scaffolded_sweep1_idx${SLURM_ARRAY_TASK_ID}
+CKPT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt
+BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/lanm_scaffolded
+EXP_NAME=sd3_a9_S_lanm_scaffolded_sweep1_idx${SLURM_ARRAY_TASK_ID}
 OUT_DIR=${BASE_OUT_DIR}/${EXP_NAME}
 
 # Log the specific parameters for this job for easier debugging
@@ -75,7 +75,6 @@ python3 allatom_design/eval/sampling/seq_des_single_ensemble.py \
     max_num_conformers=16 \
     sampling_cfg_overrides.batch_size=1 \
     sampling_cfg_overrides.num_seqs_per_pdb=8 \
-    +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=500 \
-    +sampling_cfg_overrides.potts_sampling_cfg.regularization=LCP \
     +sampling_cfg_overrides.omit_aas=['C'] \
+    ignore_missing_primary_conformer=true \
     hydra.run.dir=${HYDRA_DIR}
