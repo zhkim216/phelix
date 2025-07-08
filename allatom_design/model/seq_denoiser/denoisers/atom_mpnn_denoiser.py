@@ -226,6 +226,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         # Thread sequences onto original batch
         output_feats = []
+        aux["input_res_type"] = []  # keep track of original res_types
         for si in range(len(S)):
             feats_si = copy.deepcopy(batch)
             feats_si["res_type"] = torch.where(feats_si["seq_cond_mask"][..., None].bool(),
@@ -234,6 +235,9 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             feats_si["coords"] = feats_si["coords"] * feats_si["atom_cond_mask"].unsqueeze(-1)
             feats_si["atom_resolved_mask"] = feats_si["atom_resolved_mask"] * feats_si["atom_cond_mask"]
             output_feats.append(feats_si)
+
+            # Return input res_type
+            aux["input_res_type"].append(batch["res_type"].cpu())
 
         return output_feats, aux
 
@@ -276,7 +280,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             unique_rep_idxs = tied_sampling_inputs["rep_idx"].unique().tolist()
             batch = slice_feats(batch, unique_rep_idxs)  # get representative batch elements
 
-            if "pos_restrict_aatype" in sampling_inputs:
+            if sampling_inputs.get("pos_restrict_aatype", None) is not None:
                 sampling_inputs["pos_restrict_aatype"] = [x[unique_rep_idxs] for x in sampling_inputs["pos_restrict_aatype"]]
 
             # aggregate potts parameters across tied groups

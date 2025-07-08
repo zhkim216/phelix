@@ -1203,3 +1203,21 @@ def motif_master_search(motif_pdb_path: str,
     Path(match_out).unlink(missing_ok=True)
 
     return df
+
+
+def compute_seq_recovery(native_seq: str, sampled_seq: str, ignore_unk: bool = True) -> float:
+    """
+    Compute sequence recovery between native and sampled sequences.
+
+    If ignore_unk is True, we ignore unknown residues (e.g. X) in the native sequence.
+    """
+    native_seq = native_seq.replace(":", "")
+    sampled_seq = sampled_seq.replace(":", "")
+    native_seq = np.array(list(native_seq))
+    sampled_seq = np.array(list(sampled_seq))
+    if ignore_unk:
+        unk_mask = native_seq == "X"
+        native_seq = native_seq[~unk_mask]
+        sampled_seq = sampled_seq[~unk_mask]
+
+    return np.mean(native_seq == sampled_seq)
