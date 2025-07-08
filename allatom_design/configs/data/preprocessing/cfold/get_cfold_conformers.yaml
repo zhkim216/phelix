@@ -1,0 +1,6 @@
+out_dir: /media/scratch/datasets/cfold
+num_workers: 8
+
+cfold_train_confs_dir: /media/scratch/datasets/cfold/native_structures_with_train_confs
+cfold_test_confs_dir: /media/scratch/datasets/cfold/native_structures_with_test_confs
+boltz_v2_manifest: /media/scratch/datasets/boltz_v2/processed_targets/full_manifest.json

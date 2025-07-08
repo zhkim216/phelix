@@ -39,6 +39,9 @@ class BoltzSDDataModule(L.LightningDataModule):
         # Load in manifest
         manifest = self._load_manifest_from_file()
 
+        # Hold out cluster IDs for testing
+        manifest = self._hold_out_test_cluster_ids(manifest, cfg.test_holdout_txts)
+
         # Load in validation split
         if Path(self.pdb_path).name in ["boltz", "boltz_v2"]:
             with open(f"{self.pdb_path}/splits/validation_ids.txt", "r") as f:
@@ -157,6 +160,47 @@ class BoltzSDDataModule(L.LightningDataModule):
         else:
             processed_targets_dir = f"{self.pdb_path}/processed_targets"
         return processed_targets_dir
+
+
+    def _hold_out_test_cluster_ids(self, manifest: Manifest, test_holdout_txts: str | list[str] | None) -> Manifest:
+        """
+        Given a list of test_holdout_txts containing record IDs, hold out the cluster IDs corresponding to these record IDs.
+        """
+        if test_holdout_txts is None:
+            return manifest
+
+        records = manifest.records
+
+        # Get test record IDs
+        test_holdout_ids = set()
+        if isinstance(test_holdout_txts, str):
+            with open(test_holdout_txts, "r") as f:
+                test_holdout_ids = set(f.read().splitlines())
+        else:
+            for txt_file in test_holdout_txts:
+                with open(txt_file, "r") as f:
+                    test_holdout_ids.update(f.read().splitlines())
+
+        test_holdout_ids = {Path(x).stem.lower() for x in test_holdout_ids}  # get rid of extensions if present
+        print(f"Holding out {len(test_holdout_ids)} record IDs for testing")
+
+        # Get all cluster IDs corresponding to these record IDs
+        test_cluster_ids = set()
+        found = set()
+        for record in records:
+            if record.id in test_holdout_ids:
+                cluster_ids = set([c.cluster_id for c in record.chains])
+                test_cluster_ids.update(cluster_ids)
+                found.add(record.id)
+
+        if len(found) != len(test_holdout_ids):
+            not_found = test_holdout_ids - found
+            print(f"WARNING: did not find {len(not_found)} record IDs for test holdout in manifest: {not_found}")
+
+        # Filter out records that have any cluster IDs in the test holdout
+        filtered_records = [record for record in manifest.records if not any(c.cluster_id in test_cluster_ids for c in record.chains)]
+        filtered_manifest = Manifest(records=filtered_records)
+        return filtered_manifest
 
 
 class SDDataset(data.Dataset):
