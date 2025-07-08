@@ -38,7 +38,8 @@ def main(cfg: DictConfig):
         yaml.safe_dump(cfg_dict, f)
 
     # Load in PDB file to eval on
-    pdb_to_processed_conformers = process_conformer_dirs([cfg.pdb_dir], cfg.max_num_conformers, cfg.include_primary_conformer, f"{out_dir}/processed_structures", cfg.pdb_processing_cfg)
+    pdb_to_processed_conformers = process_conformer_dirs([cfg.pdb_dir], cfg.max_num_conformers, cfg.include_primary_conformer, f"{out_dir}/processed_structures", cfg.pdb_processing_cfg,
+                                                         ignore_missing_primary_conformer=cfg.ignore_missing_primary_conformer)
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
