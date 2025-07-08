@@ -353,30 +353,41 @@ def run_seq_des_ensemble(model: SeqDenoiser,
             # Run sampling
             output_feats, aux = model.sample(batch, sampling_inputs=sampling_inputs)
 
-            # Save outputs to cif files
-            if out_dir is not None:
-                for si in range(len(output_feats)):
-                    feats_si = output_feats[si]
-                    U_si = aux["U"][si].item()
-                    if cfg["save_protein_only"]:
-                        # crop to protein-only features; useful for ablations to only fold with protein sequence
-                        feats_si = crop_batch_to_protein_only(feats_si)
+            # Format outputs
+            for si in range(len(output_feats)):  # iterate over number of sampled sequences per PDB
+                feats_si = output_feats[si]
+                U_si = aux["U"][si].item()
 
+                if cfg["save_protein_only"]:
+                    # crop to protein-only features; useful for ablations to only fold with protein sequence
+                    feats_si = crop_batch_to_protein_only(feats_si)
+
+                if out_dir is not None:
+                    # ave outputs to cif files
                     out_file = f"{sample_out_dir}/{pdb_name}_sample{si}.cif"
-                    batch_write_feats_to_mmcif(output_feats[si], input_structs=input_structs[0:1], filenames=[out_file])
+                    batch_write_feats_to_mmcif(feats_si, input_structs=input_structs[0:1], filenames=[out_file])
 
-                    outputs["out_pdbs"].append(out_file)  # store output PDB paths
-                    outputs["n_conformers"].append(len(input_structs))  # store number of conformers for each PDB (some may have been skipped due to parsing issues)
-                    outputs["U"].append(U_si)  # store energies for each sample
+                outputs["out_pdbs"].append(out_file)  # store output PDB paths
+                outputs["n_conformers"].append(len(input_structs))  # store number of conformers for each PDB (some may have been skipped due to parsing issues)
+                outputs["U"].append(U_si)  # store energies for each sample
 
-                    # get sequences as a string, with ":" to separate chains
-                    chain_seqs = []
-                    for chain_id in feats_si["asym_id"].unique():
-                        chain_mask = (feats_si["asym_id"] == chain_id).squeeze(0)
-                        chain_res_type = feats_si["res_type"].squeeze(0).argmax(dim=-1)[chain_mask]
-                        chain_seq = [const.prot_token_to_letter[const.tokens[x]] for x in chain_res_type]
-                        chain_seqs.append("".join(chain_seq))
-                    outputs["seqs"].append(":".join(chain_seqs))  # store sequences for each sample
+                # get sampled sequences as a string, with ":" to separate chains
+                chain_seqs = []
+                chain_input_seqs = []
+                for chain_id in feats_si["asym_id"].unique():
+                    # store sampled sequence as a string
+                    chain_mask = (feats_si["asym_id"] == chain_id).squeeze(0)
+                    chain_res_type = feats_si["res_type"].squeeze(0).argmax(dim=-1)[chain_mask]
+                    chain_seq = [const.prot_token_to_letter[const.tokens[x]] for x in chain_res_type]
+                    chain_seqs.append("".join(chain_seq))
+
+                    # store input sequence as a string
+                    chain_input_res_type = aux["input_res_type"][si].squeeze(0).argmax(dim=-1)[chain_mask]
+                    chain_input_seq = [const.prot_token_to_letter[const.tokens[x]] for x in chain_input_res_type]
+                    chain_input_seqs.append("".join(chain_input_seq))
+
+                outputs["seqs"].append(":".join(chain_seqs))  # store sampled sequences for each sample
+                outputs["input_seqs"].append(":".join(chain_input_seqs))  # store input sequences for each sample
 
     return outputs
 

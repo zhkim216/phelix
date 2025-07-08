@@ -337,7 +337,7 @@ def get_conformer_dirs(conformer_dir: str,
 
 
 def process_conformer_dirs(conformer_dirs: list[str],
-                           max_num_conformers: int,
+                           max_num_conformers: int | None,
                            include_primary_conformer: bool,
                            processed_struct_dir: str,
                            pdb_processing_cfg: DictConfig,
@@ -346,6 +346,7 @@ def process_conformer_dirs(conformer_dirs: list[str],
     """
     Process PDB/CIF structures in all conformer directories.
 
+    If max_num_conformers is None, we will include all conformers found in the conformer directories.
     If include_primary_conformer is True, we will also include the primary conformer, which must share the same PDB name as the conformer directory (either .pdb or .cif).
 
     For each conformer directory, we will grab all PDB/CIF files, natsort them, and take until we have max_num_conformers files (including the primary conformer if include_primary_conformer is True).
@@ -358,6 +359,9 @@ def process_conformer_dirs(conformer_dirs: list[str],
     for conformer_dir in conformer_dirs:
         pdb_name = Path(conformer_dir).name
         all_conformers = natsorted(glob.glob(f"{conformer_dir}/*.pdb") + glob.glob(f"{conformer_dir}/*.cif"))
+
+        if max_num_conformers is None:
+            max_num_conformers = len(all_conformers)
 
         # Try to find primary conformer with either .cif or .pdb extension
         primary_conformer_cif = f"{conformer_dir}/{pdb_name}.cif"
