@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sd4_a5_S
+#SBATCH --job-name=sd5_a0
 #SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -27,12 +27,12 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
-EXP_NAME=sd4_a5
+EXP_NAME=sd5_a0
 GROUP=seq_des
 
 # Dataset paths
 PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
-TEST_HOLDOUT_TXTS=["/scratch/users/rshuai/datasets/cfold/holdout_pdb_keys/holdout_pdb_keys.txt"]
+TEST_HOLDOUT_TXTS=["/scratch/users/rshuai/datasets/boltz_v2/holdout_pdb_keys/bpti.txt"]
 
 # Run training script
 cd ${BASE_DIR}
@@ -43,9 +43,9 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     out_dir=${OUT_DIR} \
     exp_name=${EXP_NAME} \
     data.pdb_path=${PDB_PATH} \
+    data.test_holdout_txts=${TEST_HOLDOUT_TXTS} \
     data.max_tokens=512 \
     data.max_atoms=4608 \
-    data.test_holdout_txts=${TEST_HOLDOUT_TXTS} \
     train.batch_size=8 \
     trainer.accumulate_grad_batches=4 \
     train.compile_model=true \
