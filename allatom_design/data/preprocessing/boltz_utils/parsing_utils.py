@@ -263,11 +263,11 @@ def pdb_to_mmcif(pdb_path: str, mmcif_out: Path,
             model_sequence = raw_chain.extract_sequence()
             subchain_id = raw_chain.subchain_id()
             if set_seqid_gaps_to_X:
-                # assume seqid should be 1-indexed, and where there are gaps, we should set SEQRES to X
-                # note that we won't be able to know how long the missing residues at the end are
+                # assume first residue is the start of the sequence, and where there are gaps, we should set SEQRES to X
+                # note we also truncate missing residues at the end, since this is impossible to know without the true SEQRES records
                 new_sequence = []
-                residx = 1
                 residues = list(raw_chain)
+                residx = residues[0].seqid.num
 
                 for idx, residue in enumerate(residues):
                     curr_num = residue.seqid.num
