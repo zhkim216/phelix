@@ -52,7 +52,7 @@ EXP_NAME=${BASE_EXP_NAME}_idx${SLURM_ARRAY_TASK_ID}_cfold_${STRUCT_PRED_MODEL}
 
 # Run training script
 cd ${BASE_DIR}
-python3 allatom_design/eval/sampling/seq_des_multi_ensemble.py \
+python3 allatom_design/eval/eval_cfold.py \
     wandb.no_wandb=true \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \

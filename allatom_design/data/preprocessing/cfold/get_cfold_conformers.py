@@ -12,6 +12,7 @@ from natsort import natsorted
 from omegaconf import DictConfig
 from tqdm import tqdm
 
+from allatom_design.data.data import get_seq_from_res_type
 from allatom_design.data.feature.feature_utils import unbatch_feats
 from allatom_design.data.types import Manifest
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
@@ -59,20 +60,29 @@ def main(cfg: DictConfig):
     cfold_manifest_df = pd.DataFrame(mapping_data).sort_values(by="conformer_dir").reset_index(drop=True)
     cfold_manifest_df["source_pdb_key"] = cfold_manifest_df["pdb_key"].str.split("_").str[0]
 
-    # Get lengths from PDBs
+    # Load features into memory
     pdb_files = natsorted(glob.glob(f"{cfg.out_dir}/pdbs/*.pdb"))
     record_id_to_feats = get_feats_from_pdb_files(pdb_files, cfg.data_cfg, cfg.num_workers, cfg.pdb_processing_cfg, cfg.out_dir)
-    record_id_to_length = {record_id: feats_i["token_pad_mask"].sum().long().item() for record_id, feats_i in record_id_to_feats.items()}  # length includes gaps, which we set to X
 
-    # Add lengths to manifest
+    # Get lengths and add to manifest
+    record_id_to_length = {record_id: feats_i["token_pad_mask"].sum().long().item() for record_id, feats_i in record_id_to_feats.items()}  # length includes gaps, which we set to X
     cfold_manifest_df["length"] = cfold_manifest_df["pdb_key"].map(record_id_to_length)
     cfold_manifest_df = cfold_manifest_df[~pd.isna(cfold_manifest_df["length"])]  # filter out PDBs that failed to process
 
-    # If both pdb_keys are not in boltz_v2 manifest, remove the sequence entirely since we cannot hold these out easily
+    # Remove source_pdb_keys not in boltz_v2 manifest, since we cannot hold these out easily
     manifest = Manifest.load(Path(cfg.boltz_v2_manifest))
     record_ids = set([r.id for r in manifest.records])
     cfold_manifest_df = cfold_manifest_df[cfold_manifest_df["source_pdb_key"].isin(record_ids)].reset_index(drop=True)
-    cfold_manifest_df = cfold_manifest_df.groupby("conformer_dir").filter(lambda x: len(x) > 1)
+
+    # Get sequences (with gaps) and add to manifest
+    record_id_to_seq = {record_id: get_seq_from_res_type(feats_i["res_type"][feats_i["token_pad_mask"].bool()]) for record_id, feats_i in record_id_to_feats.items()}
+    cfold_manifest_df["seq"] = cfold_manifest_df["pdb_key"].map(record_id_to_seq)
+
+    # Ensure all sequences within a conformer_dir are the same; also handles where there are residx alignment issues
+    cfold_manifest_df = cfold_manifest_df.groupby("conformer_dir").filter(lambda x: len(x["seq"].unique()) == 1)
+
+    # Of the remaining PDBs, remove those with less than 2 conformers
+    cfold_manifest_df = cfold_manifest_df.groupby("conformer_dir").filter(lambda x: len(x) >= 2)
 
     print(f"Saving manifest to {cfg.out_dir}/manifest.csv")
     cfold_manifest_df.to_csv(f"{cfg.out_dir}/manifest.csv", index=False)
