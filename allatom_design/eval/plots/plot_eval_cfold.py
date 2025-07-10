@@ -84,10 +84,11 @@ def main(cfg: DictConfig) -> None:
             "seq_recovery": "seq_recovery_state1"
         })
 
-        # Calculate the best sequence recovery between state0 and state1
-        final_df['seq_recovery_best_state'] = final_df[
-            ['seq_recovery_state0', 'seq_recovery_state1']
-        ].max(axis=1)
+        # Calculate the best and mean of state0/state1 for each metric
+        for metric in ["avg_ca_plddt", "seq_recovery"]:
+            state_cols = [f"{metric}_state0", f"{metric}_state1"]
+            final_df[f'{metric}_best_state'] = final_df[state_cols].max(axis=1)
+            final_df[f'{metric}_mean_state'] = final_df[state_cols].mean(axis=1)
 
         # If manifest is available, merge length data
         if manifest_df is not None:
@@ -117,12 +118,36 @@ def main(cfg: DictConfig) -> None:
         )
 
         # Create the best-of-states sequence recovery scatter plot
-        plot_best_state_scatter(
+        plot_comparison_scatter(
             df=final_df,
             metric="seq_recovery",
             metric_title="Sequence Recovery",
+            comparison_type="best_state",
+            x_axis_label="Best of State 0/1",
             plot_name=plot_name,
             out_path=out_dir_for_job / "seq_recovery_best_state_scatter.png",
+            length_legend_range=length_legend_range
+        )
+
+        # Create the mean-of-states plots
+        plot_comparison_scatter(
+            df=final_df,
+            metric="seq_recovery",
+            metric_title="Sequence Recovery",
+            comparison_type="mean_state",
+            x_axis_label="Mean of State 0/1",
+            plot_name=plot_name,
+            out_path=out_dir_for_job / "seq_recovery_mean_state_scatter.png",
+            length_legend_range=length_legend_range
+        )
+        plot_comparison_scatter(
+            df=final_df,
+            metric="avg_ca_plddt",
+            metric_title="Average C-alpha pLDDT",
+            comparison_type="mean_state",
+            x_axis_label="Mean of State 0/1",
+            plot_name=plot_name,
+            out_path=out_dir_for_job / "plddt_mean_state_scatter.png",
             length_legend_range=length_legend_range
         )
 
@@ -169,6 +194,27 @@ def plot_combined_scatter(
         label="State 1"
     )
 
+    # Optionally annotate each point with its pdb_id
+    # (Comment out if it clutters the plot)
+    for pdb_id, x, y in zip(df["pdb_id"], df[x_col0], df[y_col]):
+        ax.annotate(
+            pdb_id.split("_")[0],
+            (x, y),
+            textcoords="offset points",
+            xytext=(0, -8),
+            ha='center',
+            fontsize=4
+        )
+    for pdb_id, x, y in zip(df["pdb_id"], df[x_col1], df[y_col]):
+        ax.annotate(
+            pdb_id.split("_")[0],
+            (x, y),
+            textcoords="offset points",
+            xytext=(0, -8),
+            ha='center',
+            fontsize=4
+        )
+
     # Determine plot limits to be square and include all data
     all_vals = pd.concat([df[y_col], df[x_col0], df[x_col1]]).dropna()
     lower = all_vals.min() * 0.95
@@ -190,23 +236,25 @@ def plot_combined_scatter(
     plt.close()
 
 
-def plot_best_state_scatter(
+def plot_comparison_scatter(
     df: pd.DataFrame,
     metric: str,
     metric_title: str,
+    comparison_type: str,
+    x_axis_label: str,
     plot_name: str,
     out_path: Path,
-    length_legend_range: list = None
+    length_legend_range: list = None,
 ) -> None:
     """
-    Generates a scatter plot of an ensemble metric (y-axis) against the
-    best of state0/state1 (x-axis), colored by protein length.
+    Generates a scatter plot of an ensemble metric vs. a comparison
+    (e.g., 'best_state', 'mean_state'), colored by protein length.
     """
     plt.figure(figsize=(6, 6))
     ax = plt.gca()
 
     y_col = f"{metric}_ensemble"
-    x_col = f"{metric}_best_state"
+    x_col = f"{metric}_{comparison_type}"
 
     x_vals = df[x_col]
     y_vals = df[y_col]
@@ -215,7 +263,7 @@ def plot_best_state_scatter(
     if 'length' in df.columns and not df['length'].isnull().all():
         length_vals = df["length"]
         vmin, vmax = (length_legend_range if length_legend_range is not None else (None, None))
-        sc = ax.scatter(
+        ax.scatter(
             x_vals, y_vals, s=30, c=length_vals, cmap="viridis",
             alpha=0.8, edgecolor="k", linewidth=0.5, vmin=vmin, vmax=vmax
         )
@@ -224,6 +272,18 @@ def plot_best_state_scatter(
         ax.scatter(
             x_vals, y_vals, s=30, color="steelblue",
             alpha=0.8, edgecolor="k", linewidth=0.5
+        )
+
+    # Optionally annotate each point with its pdb_id
+    # (Comment out if it clutters the plot)
+    for pdb_id, xi, yi in zip(df["pdb_id"], x_vals, y_vals):
+        ax.annotate(
+            pdb_id.split("_")[0],
+            (xi, yi),
+            textcoords="offset points",
+            xytext=(0, -8),
+            ha='center',
+            fontsize=4
         )
 
     # Determine plot limits
@@ -237,9 +297,9 @@ def plot_best_state_scatter(
     ax.plot([lower, upper], [lower, upper], 'k--', alpha=0.8)
 
     # Labels, title, and grid
-    ax.set_xlabel(f"Best of State 0/1 {metric_title}")
+    ax.set_xlabel(f"{x_axis_label} {metric_title}")
     ax.set_ylabel(f"Ensemble {metric_title}")
-    ax.set_title(f"{plot_name}: Best-of-States {metric_title}")
+    ax.set_title(f"{plot_name}: {x_axis_label} {metric_title}")
     plt.grid(True, alpha=0.5)
 
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
