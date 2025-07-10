@@ -342,7 +342,8 @@ def process_conformer_dirs(conformer_dirs: list[str],
                            processed_struct_dir: str,
                            pdb_processing_cfg: DictConfig,
                            ignore_missing_primary_conformer: bool = False,
-                           ) -> list[str]:
+                           return_original_conformer_files: bool = False,
+                           ) -> dict[str, list[str]] | tuple[dict[str, list[str]], dict[str, list[str]]]:
     """
     Process PDB/CIF structures in all conformer directories.
 
@@ -408,5 +409,11 @@ def process_conformer_dirs(conformer_dirs: list[str],
     for pdb_name, conformers in pdb_to_conformer_list.items():
         # filter out conformers that failed to process
         pdb_to_processed_conformers[pdb_name].extend([conf_to_processed_file[k] for k in conformers if conf_to_processed_file[k] is not None])
+
+    # Return original conformer files if requested
+    if return_original_conformer_files:
+        processed_file_to_conf = {v: k for k, v in conf_to_processed_file.items()}
+        pdb_to_conformer_files = {k: [processed_file_to_conf[v_i] for v_i in v] for k, v in pdb_to_processed_conformers.items()}
+        return pdb_to_processed_conformers, pdb_to_conformer_files
 
     return pdb_to_processed_conformers
