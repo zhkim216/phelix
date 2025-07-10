@@ -69,6 +69,19 @@ struct_pred_cfg:
   esmfold:
     max_tokens_per_batch: 1024
 
+# AF2Rank config
+run_af2rank: false
+af2:
+  data_dir: /media/scratch/huang_lab/model_params/af2
+  model_nums: [1, 2]
+
+af2rank_cfg:
+  recycles: 1
+  iterations: 1
+  rm_seq: true
+  rm_sc: true
+  rm_ic: true
+
 hydra:
   run:
     dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

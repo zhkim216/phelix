@@ -14,11 +14,11 @@ from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.eval.eval_utils import eval_metrics
-from allatom_design.eval.eval_utils.eval_setup_utils import (process_pdb_files,
-                                                             wandb_setup, get_conformer_dirs, process_conformer_dirs)
+from allatom_design.eval.eval_utils.eval_setup_utils import (
+    get_conformer_dirs, process_conformer_dirs, process_pdb_files, wandb_setup)
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
-from allatom_design.eval.eval_utils.seq_des_utils import (
-    get_seq_des_model, run_seq_des_ensemble)
+from allatom_design.eval.eval_utils.seq_des_utils import (get_seq_des_model,
+                                                          run_seq_des_ensemble)
 
 
 @hydra.main(config_path="../configs/eval", config_name="eval_cfold", version_base="1.3.2")
@@ -42,13 +42,16 @@ def main(cfg: DictConfig):
 
     # Load in conformer directories to eval on
     conformer_dirs = get_conformer_dirs(**cfg.input_cfg)
+    # DEBUG
+    conformer_dirs = conformer_dirs[:3]
 
     # Process conformer directories
-    pdb_to_processed_conformers = process_conformer_dirs(conformer_dirs,
-                                                         max_num_conformers=None,
-                                                         include_primary_conformer=True,
-                                                         processed_struct_dir=f"{log_dir}/processed_structures",
-                                                         pdb_processing_cfg=cfg.pdb_processing_cfg)
+    pdb_to_processed_conformers, pdb_to_conformer_files = process_conformer_dirs(conformer_dirs,
+                                                                                 max_num_conformers=None,
+                                                                                 include_primary_conformer=True,
+                                                                                 processed_struct_dir=f"{log_dir}/processed_structures",
+                                                                                 pdb_processing_cfg=cfg.pdb_processing_cfg,
+                                                                                 return_original_conformer_files=True)
 
     # Filter out pdbs where either conformer did not pass processing
     pdb_to_processed_conformers = {k: v for k, v in pdb_to_processed_conformers.items() if len(v) == 2}
@@ -126,6 +129,43 @@ def main(cfg: DictConfig):
 
                 # Log metrics to wandb
                 wandb.log(out_metrics, step=0)
+
+
+    # Run af2rank
+    if cfg.run_af2rank:
+        from colabdesign import clear_mem
+        from allatom_design.eval.colabdesign_utils.rank import af2rank
+
+        clear_mem()
+
+        for model_num in cfg.af2.model_nums:
+            # set up af model
+            model_name = f"model_{model_num}_ptm"
+            af = af2rank(model_name=model_name, model_names=[model_name], data_dir=cfg.af2.data_dir)
+            af2rank_cfg = dict(cfg.af2rank_cfg)
+            af2rank_cfg["model_name"] = model_name
+
+            for mi, mode in enumerate(modes):
+                log_dir_mode = f"{log_dir}/{mode}"
+                preds_dir_mode = f"{log_dir_mode}/af2rank_preds"
+                Path(preds_dir_mode).mkdir(parents=True, exist_ok=True)
+
+                out_df_mi = out_dfs[mi]
+
+                for ri, row in out_df_mi.iterrows():
+                    pdb_name = row["record_id"].rsplit("_", 1)[0]  # split out sampleX suffix
+
+                    for ci in range(2):
+                        # score sequence on each conformer
+                        conformer_file = pdb_to_conformer_files[pdb_name][ci]
+                        af.set_pdb(conformer_file)
+                        af.set_seq(row["seqs"])
+                        output_pdb = f"{preds_dir_mode}/{pdb_name}_c{ci}_model{model_num}.pdb"
+                        score = af.predict(**af2rank_cfg, output_pdb=output_pdb)
+                        for k, v in score.items():
+                            out_df_mi.loc[ri, f"af2rank_c{ci}_model{model_num}_{k}"] = v
+
+                out_df_mi.to_csv(f"{log_dir_mode}/af2rank_outputs.csv", index=False)
 
 
 if __name__ == "__main__":

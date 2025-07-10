@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd4_a5_cfold1
+#SBATCH --job-name=sd4_a5_cfold2
 #SBATCH -p possu
-#SBATCH --array=0-1
+#SBATCH --array=0-2
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -33,6 +33,7 @@ CFOLD_CONFORMER_DIR=/scratch/users/rshuai/datasets/cfold/conformers
 PDB_NAME_LIST=/scratch/users/rshuai/datasets/cfold/pdb_name_lists/conformer_dirs_L32_256.txt
 
 CONFIGS=(
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a5/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt"
 "ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a5/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.regularization=LCP"
 "ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd4_a5/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.regularization=none"
 )
@@ -43,7 +44,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
-BASE_EXP_NAME=sd4_a5_cfold1
+BASE_EXP_NAME=sd4_a5_cfold2
 BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/eval_cfold/${BASE_EXP_NAME}
 
 # Wandb settings / experiment name
