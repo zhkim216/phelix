@@ -66,7 +66,7 @@ python3 allatom_design/eval/eval_cfold.py \
     struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
     struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
     af2.data_dir=${AF2_DATA_DIR} \
-    run_self_consistency_eval=true \
+    run_self_consistency_eval=false \
     run_af2rank=true \
     sampling_cfg_overrides.batch_size=8 \
     sampling_cfg_overrides.num_seqs_per_pdb=1 \

@@ -156,12 +156,16 @@ def main(cfg: DictConfig):
                     for ci in range(2):
                         # score sequence on each conformer
                         conformer_file = pdb_to_conformer_files[pdb_name][ci]
-                        af.set_pdb(conformer_file)
-                        af.set_seq(row["seqs"])
-                        output_pdb = f"{preds_dir_mode}/{pdb_name}_c{ci}_model{model_num}.pdb"
-                        score = af.predict(**af2rank_cfg, output_pdb=output_pdb)
-                        for k, v in score.items():
-                            out_df_mi.loc[ri, f"af2rank_c{ci}_model{model_num}_{k}"] = v
+                        try:
+                            af.set_pdb(conformer_file)
+                            af.set_seq(row["seqs"].replace("X", ""))  # remove missing residues
+                            output_pdb = f"{preds_dir_mode}/{pdb_name}_c{ci}_model{model_num}.pdb"
+                            score = af.predict(**af2rank_cfg, output_pdb=output_pdb)
+                            for k, v in score.items():
+                                out_df_mi.loc[ri, f"af2rank_c{ci}_model{model_num}_{k}"] = v
+                        except Exception as e:
+                            print(f"Error predicting {pdb_name}_c{ci}_model{model_num}: {e}, skipping")
+                            continue
 
                 out_df_mi.to_csv(f"{log_dir_mode}/af2rank_outputs.csv", index=False)
 
