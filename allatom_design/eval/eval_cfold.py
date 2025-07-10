@@ -42,8 +42,6 @@ def main(cfg: DictConfig):
 
     # Load in conformer directories to eval on
     conformer_dirs = get_conformer_dirs(**cfg.input_cfg)
-    # DEBUG
-    conformer_dirs = conformer_dirs[:3]
 
     # Process conformer directories
     pdb_to_processed_conformers, pdb_to_conformer_files = process_conformer_dirs(conformer_dirs,

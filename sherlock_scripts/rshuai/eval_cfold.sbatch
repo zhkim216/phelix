@@ -27,6 +27,7 @@ export SOFTWARE_PATH=${SOFTWARE_PATH}  # required for mmseqs, foldseek, redis, e
 # Model params (if running self-consistency eval)
 STRUCT_PRED_MODEL=boltz1
 BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
+AF2_DATA_DIR=/scratch/users/rshuai/model_params/af2
 
 # Inputs config
 CFOLD_CONFORMER_DIR=/scratch/users/rshuai/datasets/cfold/conformers
@@ -64,7 +65,9 @@ python3 allatom_design/eval/eval_cfold.py \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
     struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
     struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
+    af2.data_dir=${AF2_DATA_DIR} \
     run_self_consistency_eval=true \
+    run_af2rank=true \
     sampling_cfg_overrides.batch_size=8 \
     sampling_cfg_overrides.num_seqs_per_pdb=1 \
     ${OVERRIDES} \
