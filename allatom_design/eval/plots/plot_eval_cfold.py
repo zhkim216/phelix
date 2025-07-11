@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 import yaml
 from matplotlib.colorbar import ColorbarBase
+from matplotlib.lines import Line2D
 from omegaconf import DictConfig, OmegaConf
 
 
@@ -150,6 +151,59 @@ def main(cfg: DictConfig) -> None:
             out_path=out_dir_for_job / "plddt_mean_state_scatter.png",
             length_legend_range=length_legend_range
         )
+
+        # Define paths to the af2rank metrics files
+        af2rank_ensemble_csv = eval_dir / "ensemble" / "af2rank_outputs.csv"
+        af2rank_state0_csv = eval_dir / "state0" / "af2rank_outputs.csv"
+        af2rank_state1_csv = eval_dir / "state1" / "af2rank_outputs.csv"
+
+        # Load the af2rank dataframes if they exist
+        af2rank_ensemble_df = pd.read_csv(af2rank_ensemble_csv) if af2rank_ensemble_csv.exists() else None
+        af2rank_state0_df = pd.read_csv(af2rank_state0_csv) if af2rank_state0_csv.exists() else None
+        af2rank_state1_df = pd.read_csv(af2rank_state1_csv) if af2rank_state1_csv.exists() else None
+
+        # Create the composite score plots if all data is available
+        if all([df is not None for df in [af2rank_ensemble_df, af2rank_state0_df, af2rank_state1_df]]):
+            plot_composite_scores(
+                ensemble_df=af2rank_ensemble_df,
+                state0_df=af2rank_state0_df,
+                state1_df=af2rank_state1_df,
+                plot_name=plot_name,
+                out_path=out_dir_for_job / "composite_scores.png"
+            )
+
+            # Filter for and plot high-scoring designs
+            x_col = "af2rank_c0_model1_composite"
+            y_col = "af2rank_c1_model1_composite"
+
+            # Find record_ids with high scores in each dataframe
+            high_scorers_ensemble = af2rank_ensemble_df[
+                (af2rank_ensemble_df[x_col] > 0.7) | (af2rank_ensemble_df[y_col] > 0.7)
+            ]['record_id']
+            high_scorers_state0 = af2rank_state0_df[
+                (af2rank_state0_df[x_col] > 0.7) | (af2rank_state0_df[y_col] > 0.7)
+            ]['record_id']
+            high_scorers_state1 = af2rank_state1_df[
+                (af2rank_state1_df[x_col] > 0.7) | (af2rank_state1_df[y_col] > 0.7)
+            ]['record_id']
+
+            # Combine all high-scoring record_ids into a unique set
+            all_high_scorer_ids = set(high_scorers_ensemble) | set(high_scorers_state0) | set(high_scorers_state1)
+
+            if all_high_scorer_ids:
+                # Filter the original dataframes
+                ensemble_df_filtered = af2rank_ensemble_df[af2rank_ensemble_df['record_id'].isin(all_high_scorer_ids)]
+                state0_df_filtered = af2rank_state0_df[af2rank_state0_df['record_id'].isin(all_high_scorer_ids)]
+                state1_df_filtered = af2rank_state1_df[af2rank_state1_df['record_id'].isin(all_high_scorer_ids)]
+
+                # Call the new plotting function
+                plot_composite_scores_high_scorers(
+                    ensemble_df=ensemble_df_filtered,
+                    state0_df=state0_df_filtered,
+                    state1_df=state1_df_filtered,
+                    plot_name=plot_name,
+                    out_path=out_dir_for_job / "composite_scores_high_scorers.png"
+                )
 
 
 def plot_combined_scatter(
@@ -320,6 +374,164 @@ def save_length_colorbar(vmin: float, vmax: float, out_path: Path) -> None:
     ).set_label("Protein length")
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
+
+
+def plot_composite_scores(
+    ensemble_df: pd.DataFrame,
+    state0_df: pd.DataFrame,
+    state1_df: pd.DataFrame,
+    plot_name: str,
+    out_path: Path
+) -> None:
+    """
+    Generates a scatter plot of af2rank composite scores, comparing c1 vs c0.
+    """
+    plt.figure(figsize=(6, 6))
+    ax = plt.gca()
+
+    x_col = "af2rank_c0_model1_composite"
+    y_col = "af2rank_c1_model1_composite"
+
+    # Scatter plot for ensemble (black)
+    ax.scatter(
+        ensemble_df[x_col],
+        ensemble_df[y_col],
+        s=30,
+        color="black",
+        alpha=0.7,
+        edgecolor="k",
+        linewidth=0.5,
+        label="Ensemble"
+    )
+
+    # Scatter plot for state0 (green)
+    ax.scatter(
+        state0_df[x_col],
+        state0_df[y_col],
+        s=30,
+        color="green",
+        alpha=0.7,
+        edgecolor="k",
+        linewidth=0.5,
+        label="State 0"
+    )
+
+    # Scatter plot for state1 (blue)
+    ax.scatter(
+        state1_df[x_col],
+        state1_df[y_col],
+        s=30,
+        color="blue",
+        alpha=0.7,
+        edgecolor="k",
+        linewidth=0.5,
+        label="State 1"
+    )
+
+    # Determine plot limits to be square and include all data
+    all_x_vals = pd.concat([ensemble_df[x_col], state0_df[x_col], state1_df[x_col]]).dropna()
+    all_y_vals = pd.concat([ensemble_df[y_col], state0_df[y_col], state1_df[y_col]]).dropna()
+    all_vals = pd.concat([all_x_vals, all_y_vals])
+    lower = all_vals.min() * 0.95
+    upper = all_vals.max() * 1.05
+    ax.set_xlim(lower, upper)
+    ax.set_ylim(lower, upper)
+
+    # Plot diagonal y=x line
+    ax.plot([lower, upper], [lower, upper], 'k--', alpha=0.8)
+
+    # Labels, title, legend, and grid
+    ax.set_xlabel("Composite Score (state 0)")
+    ax.set_ylabel("Composite Score (state 1)")
+    ax.set_title(f"{plot_name}: AF2Rank Composite Score")
+    ax.legend()
+    plt.grid(True, alpha=0.5)
+
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def plot_composite_scores_high_scorers(
+    ensemble_df: pd.DataFrame,
+    state0_df: pd.DataFrame,
+    state1_df: pd.DataFrame,
+    plot_name: str,
+    out_path: Path
+) -> None:
+    """
+    Generates a scatter plot of af2rank composite scores for designs
+    with at least one composite score > 0.7.
+
+    Uses markers to denote state and color to denote PDB ID.
+    """
+    plt.figure(figsize=(6, 6))
+    ax = plt.gca()
+
+    x_col = "af2rank_c0_model1_composite"
+    y_col = "af2rank_c1_model1_composite"
+
+    # Get unique PDB IDs from the record_id to assign colors
+    unique_pdb_ids = sorted(ensemble_df['record_id'].apply(lambda r: r.split('_sample')[0]).unique())
+
+    # Create a color map for PDBs using a high-contrast colormap
+    colors = plt.cm.get_cmap('tab20', len(unique_pdb_ids))
+    color_map = {pdb_id: colors(i) for i, pdb_id in enumerate(unique_pdb_ids)}
+
+    # Plot each PDB with a unique color, using markers for state
+    for pdb_id, color in color_map.items():
+        # Filter data for the current PDB
+        ens_subset = ensemble_df[ensemble_df['record_id'].str.startswith(pdb_id)]
+        s0_subset = state0_df[state0_df['record_id'].str.startswith(pdb_id)]
+        s1_subset = state1_df[state1_df['record_id'].str.startswith(pdb_id)]
+
+        # Plot points for this PDB
+        if not ens_subset.empty:
+            ax.scatter(ens_subset[x_col], ens_subset[y_col], marker='X', s=50, color=color, alpha=0.8, edgecolor='black', linewidth=0.5)
+        if not s0_subset.empty:
+            ax.scatter(s0_subset[x_col], s0_subset[y_col], marker='s', s=50, color=color, alpha=0.8, edgecolor='black', linewidth=0.5)
+        if not s1_subset.empty:
+            ax.scatter(s1_subset[x_col], s1_subset[y_col], marker='o', s=50, color=color, alpha=0.8, edgecolor='black', linewidth=0.5)
+
+    # --- Annotation Logic ---
+    # Annotate ensemble points
+    for _, row in ensemble_df.iterrows():
+        label = row['record_id'].split('_sample')[0].split('_')[0]
+        ax.annotate(label, (row[x_col], row[y_col]), textcoords="offset points", xytext=(0, 2), ha='center', fontsize=3)
+    # Annotate state0 points
+    for _, row in state0_df.iterrows():
+        label = row['record_id'].split('_sample')[0].split('_')[0]
+        ax.annotate(label, (row[x_col], row[y_col]), textcoords="offset points", xytext=(0, 2), ha='right', fontsize=3)
+    # Annotate state1 points
+    for _, row in state1_df.iterrows():
+        label = row['record_id'].split('_sample')[0].split('_')[0]
+        ax.annotate(label, (row[x_col], row[y_col]), textcoords="offset points", xytext=(0, 2), ha='left', fontsize=3)
+
+    # --- Plot Limits and Formatting ---
+    all_x_vals = pd.concat([ensemble_df[x_col], state0_df[x_col], state1_df[x_col]]).dropna()
+    all_y_vals = pd.concat([ensemble_df[y_col], state0_df[y_col], state1_df[y_col]]).dropna()
+    all_vals = pd.concat([all_x_vals, all_y_vals])
+    lower = all_vals.min() * 0.95
+    upper = all_vals.max() * 1.05
+    ax.set_xlim(lower, upper)
+    ax.set_ylim(lower, upper)
+
+    ax.plot([lower, upper], [lower, upper], 'k--', alpha=0.8)
+
+    # --- Custom Legend for Markers ---
+    legend_elements = [
+        Line2D([0], [0], marker='X', color='grey', label='Ensemble', linestyle='None', markersize=4),
+        Line2D([0], [0], marker='s', color='grey', label='State 0', linestyle='None', markersize=4),
+        Line2D([0], [0], marker='o', color='grey', label='State 1', linestyle='None', markersize=4)
+    ]
+    ax.legend(handles=legend_elements, title="States")
+
+    ax.set_xlabel("Composite Score (state 0)")
+    ax.set_ylabel("Composite Score (state 1)")
+    ax.set_title(f"{plot_name}: AF2Rank Composite Score (> 0.7)")
+    plt.grid(True, alpha=0.5)
+
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close()
 
 
 if __name__ == "__main__":
