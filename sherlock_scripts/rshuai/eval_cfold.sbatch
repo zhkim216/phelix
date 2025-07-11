@@ -51,7 +51,7 @@ BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/eval_cfold/${BA
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 GROUP=seq_des
-EXP_NAME=${BASE_EXP_NAME}_idx${SLURM_ARRAY_TASK_ID}_cfold_${STRUCT_PRED_MODEL}
+EXP_NAME=${BASE_EXP_NAME}_idx${SLURM_ARRAY_TASK_ID}_${STRUCT_PRED_MODEL}
 
 # Run training script
 cd ${BASE_DIR}

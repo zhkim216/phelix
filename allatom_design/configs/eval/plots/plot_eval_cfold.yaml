@@ -2,8 +2,8 @@ base_out_dir: out_dir/plot_eval_cfold
 
 # A list of evaluation directories to process
 eval_dirs:
-  - path: /media/scratch/huang_lab/allatom_design/allatom_design/eval_cfold/sd4_a5_cfold/sd4_a5_cfold_idx_cfold_boltz1
-    plot_name: "sd4_a5_cfold"
+  - path: /media/scratch/huang_lab/allatom_design/allatom_design/eval_cfold/sd4_a5_cfold2/sd4_a5_cfold2_idx0_cfold_boltz1
+    plot_name: "sd4_a5_cfold2_idx0_cfold_boltz1"
 
 
 # optional manifest csv for plotting lengths
