@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd6_a0
-#SBATCH -p possu
-#SBATCH --array=0-2
+#SBATCH --job-name=sd6_a1
+#SBATCH -p bioe
+#SBATCH --array=0-3
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -29,7 +29,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME_BASE=sd6_a0
+EXP_NAME_BASE=sd6_a1
 GROUP=seq_des
 
 # Dataset paths
@@ -37,9 +37,10 @@ PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 # Inputs config
 CONFIGS=(
-"denoiser.mpnn.n_channel=196 denoiser.mpnn.n_layers=3"
-"denoiser.mpnn.n_channel=196 denoiser.mpnn.n_layers=5"
-"denoiser.mpnn.n_channel=256 denoiser.mpnn.n_layers=5"
+"denoiser.mpnn.n_layers=3 trainer.accumulate_grad_batches=2"
+"denoiser.mpnn.n_layers=3 trainer.accumulate_grad_batches=8"
+"denoiser.mpnn.n_layers=3 trainer.accumulate_grad_batches=16"
+"denoiser.mpnn.n_layers=3 trainer.accumulate_grad_batches=32"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg$(printf "%02d" $SLURM_ARRAY_TASK_ID)"
@@ -56,7 +57,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.max_tokens=512 \
     data.max_atoms=4608 \
     train.batch_size=8 \
-    trainer.accumulate_grad_batches=4 \
     train.compile_model=true \
     denoiser.per_residue_eps=false \
     denoiser.augment_eps=0.3 \
