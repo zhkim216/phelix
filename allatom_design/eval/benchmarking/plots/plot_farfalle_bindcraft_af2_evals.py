@@ -47,13 +47,19 @@ def main(cfg: DictConfig) -> None:
         df = pd.read_csv(mcsv)
 
         # The new CSV format has different column names and needs motif extraction.
-        # Rename columns to match the old format expected by the plotting functions.
-        # For now, we are only considering `model_0` metrics.
-        df = df.rename(columns={
-            'model_0_binder_rmsd': 'rmsd',
-            'model_0_complex_i_ptm': 'iptm',
-            'model_0_complex_i_pae': 'ipae',
-        })
+        # First, for each row, get the best metric between model_0 and model_1.
+        # Best RMSD/iPAE is min, best iPTM is max.
+        df['rmsd_per_run'] = df[['model_0_binder_rmsd', 'model_1_binder_rmsd']].min(axis=1)
+        df['iptm_per_run'] = df[['model_0_complex_i_ptm', 'model_1_complex_i_ptm']].max(axis=1)
+        df['ipae_per_run'] = df[['model_0_complex_i_pae', 'model_1_complex_i_pae']].min(axis=1)
+
+        # Now, group by the source PDB ('pdb_path') to get the single best metric
+        # across all samples for that PDB. This results in one row per pdb_path.
+        df = df.groupby('pdb_path').agg(
+            rmsd=('rmsd_per_run', 'min'),
+            iptm=('iptm_per_run', 'max'),
+            ipae=('ipae_per_run', 'min')
+        ).reset_index()
 
         # Extract motif name from the pdb_path
         # e.g., /path/to/stuff/0_PD-1/something.pdb -> 0_PD-1
