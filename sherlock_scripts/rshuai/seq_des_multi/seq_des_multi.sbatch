@@ -29,38 +29,26 @@ BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
 PDB_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/pdbs
-LIST_STEM=protein_monomer_32_512_no_ligand
-PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/${LIST_STEM}.txt
+PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/debug.txt
+POS_CONSTRAINT_CSV=/scratch/users/rshuai/datasets/boltz_val_cifs/fixed_pos_csvs/debug.csv
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
-CKPT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a2_cfg1/checkpoints/ema/sd-step17500-epoch22-ema0.99.ckpt
-BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a2_cfg1/multistate_sweep
-
-# Wandb settings / experiment name
-WANDB_ID=richardshuai
-GROUP=seq_des
-EXP_NAME=sd3_a2_cfg1_baseline_ps5000_noreg_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
+CKPT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt
+OUT_DIR=/scratch/users/rshuai/test_seq_des_multi
 
 # Run training script
 cd ${BASE_DIR}
 python3 allatom_design/eval/sampling/seq_des_multi.py \
-    wandb.no_wandb=false \
-    wandb.wandb_id=${WANDB_ID} \
-    wandb.group=${GROUP} \
-    exp_name=${EXP_NAME} \
     ckpt_path=${CKPT_PATH} \
-    base_out_dir=${BASE_OUT_DIR} \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
-    struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
-    struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
-    run_self_consistency_eval=true \
+    pos_constraint_csv=${POS_CONSTRAINT_CSV} \
+    run_self_consistency_eval=false \
     sampling_cfg_overrides.batch_size=16 \
-    sampling_cfg_overrides.num_seqs_per_pdb=8 \
-    +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 \
-    +sampling_cfg_overrides.potts_sampling_cfg.regularization=null \
+    sampling_cfg_overrides.num_seqs_per_pdb=3 \
+    base_out_dir=${OUT_DIR} \
     hydra.run.dir=${HYDRA_DIR}
