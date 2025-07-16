@@ -130,7 +130,6 @@ def run_seq_des(model: SeqDenoiser,
             batch_struct_files = struct_file_paths[i:i+cfg.batch_size]
             B = len(batch_struct_files)
             batch, input_structs = get_sd_batch(batch_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
-            outputs["pdb_keys"].extend(batch["pdb_key"])
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
@@ -161,6 +160,32 @@ def run_seq_des(model: SeqDenoiser,
                     batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
                     batch_write_feats_to_mmcif(feats_si, input_structs=input_structs, filenames=batch_out_files)
                     outputs["out_pdbs"].extend(batch_out_files)
+                    outputs["pdb_keys"].extend(output_feats[si]["pdb_key"])
+
+                    # get sampled sequences as a string, with ":" to separate chains
+                    for bi in range(output_feats[si]["asym_id"].shape[0]):
+                        chain_seqs = []
+                        chain_input_seqs = []
+                        for chain_id in feats_si["asym_id"][bi].unique():
+                            chain_mask = (feats_si["asym_id"][bi] == chain_id).squeeze(0)
+                            chain_mask = chain_mask * feats_si["token_pad_mask"][bi].bool().squeeze(0)
+                            # temporary: don't save non-protein tokens
+                            chain_mask = chain_mask & (feats_si["mol_type"][bi] == const.chain_type_ids["PROTEIN"])
+                            if not chain_mask.any():
+                                continue
+
+                            # store sampled sequence as a string
+                            chain_res_type = feats_si["res_type"][bi].squeeze(0).argmax(dim=-1)[chain_mask]
+                            chain_seq = [const.prot_token_to_letter[const.tokens[x]] for x in chain_res_type]
+                            chain_seqs.append("".join(chain_seq))
+
+                            # store input sequence as a string
+                            chain_input_res_type = aux["input_res_type"][si][bi].squeeze(0).argmax(dim=-1)[chain_mask]
+                            chain_input_seq = [const.prot_token_to_letter[const.tokens[x]] for x in chain_input_res_type]
+                            chain_input_seqs.append("".join(chain_input_seq))
+
+                        outputs["seqs"].append(":".join(chain_seqs))  # store sampled sequences for each sample
+                        outputs["input_seqs"].append(":".join(chain_input_seqs))  # store input sequences for each sample
 
             pbar.update(B)
     pbar.close()

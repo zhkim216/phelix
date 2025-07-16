@@ -66,6 +66,11 @@ def main(cfg: DictConfig):
                          struct_file_paths=processed_struct_file, device=device, pos_constraint_df=pos_constraint_df,
                          out_dir=out_dir)
 
+    # Save outputs to CSV
+    record_ids = [Path(x).stem.lower() for x in outputs["out_pdbs"]]
+    output_df = pd.DataFrame({"record_id": record_ids, "pdb_key": outputs["pdb_keys"], "seq": outputs["seqs"], "input_seq": outputs["input_seqs"]})
+    output_df.to_csv(f"{out_dir}/seq_des_outputs.csv", index=False)
+
     if cfg.run_self_consistency_eval:
         id_to_metrics = eval_metrics.run_self_consistency_eval_boltz(
             outputs["out_pdbs"],
