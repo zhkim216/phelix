@@ -4,7 +4,6 @@ Cluster the sequences of the processed targets and update the manifest with the 
 """
 
 import glob
-import hashlib
 import json
 import os
 import pickle
@@ -23,7 +22,7 @@ from tqdm import tqdm
 
 from allatom_design.data import const
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
-    Resource, load_input)
+    Resource, load_input, hash_sequence)
 from allatom_design.data.types import Manifest, Record
 
 
@@ -123,17 +122,12 @@ def main(cfg: DictConfig) -> None:
     # Load in manifest_unclustered.json and add cluster IDs to the manifest
     manifest = Manifest.load(f"{cfg.processed_targets_dir}/manifest_unclustered.json")
 
-    fn = partial(add_cluster_id_to_record, clustering=clustering, key_to_seq=key_to_seq, processed_targets_dir=cfg.processed_targets_dir)
+    fn = partial(add_cluster_id_to_record, clustering=clustering, key_to_seq=key_to_seq)
     new_records = [fn(record) for record in tqdm(manifest.records, desc="Adding cluster IDs to manifest")]
     new_records = [asdict(r) for r in new_records]
 
     with open(f"{cfg.processed_targets_dir}/manifest.json", "w") as f:
         json.dump(new_records, f)
-
-
-def hash_sequence(seq: str) -> str:
-    """Hash a sequence."""
-    return hashlib.sha256(seq.encode()).hexdigest()
 
 
 def process_structure_file(structure_file: str) -> tuple[set[str], set[str], set[str], set[str], dict[str, str]]:
@@ -182,8 +176,7 @@ def process_structure_file(structure_file: str) -> tuple[set[str], set[str], set
     )
 
 
-def add_cluster_id_to_record(record: Record, clustering: dict[str, int], key_to_seq: dict[str, str],
-                             processed_targets_dir: str) -> Record:
+def add_cluster_id_to_record(record: Record, clustering: dict[str, int], key_to_seq: dict[str, str]) -> Record:
     """Returns a new record with the cluster ID added."""
     new_chain_infos = []
     for chain_info in record.chains:
