@@ -6,14 +6,15 @@ import numpy as np
 
 from allatom_design.data import const
 from allatom_design.data.types import MSA, MSADeletion, MSAResidue, MSASequence
+from allatom_design.data.preprocessing.boltz_utils.parsing_utils import hash_sequence
 
 
 def _parse_a3m(  # noqa: C901
     lines: TextIO,
     taxonomy: Optional[dict[str, str]],
     max_seqs: Optional[int] = None,
-) -> MSA:
-    """Process an MSA file.
+) -> tuple[MSA, str]:
+    """Process an MSA file. Also returns the hash of the query sequence.
 
     Parameters
     ----------
@@ -36,6 +37,7 @@ def _parse_a3m(  # noqa: C901
     residues = []
 
     seq_idx = 0
+    query_hash = None
     for line in lines:
         line: str
         line = line.strip()  # noqa: PLW2901
@@ -54,6 +56,10 @@ def _parse_a3m(  # noqa: C901
             else:
                 taxonomy_id = -1
             continue
+
+        # Store query sequence
+        if seq_idx == 0:
+            query_hash = hash_sequence(line.replace("-", "").upper())
 
         # Skip if duplicate sequence
         str_seq = line.replace("-", "").upper()
@@ -99,14 +105,14 @@ def _parse_a3m(  # noqa: C901
         deletions=np.array(deletions, dtype=MSADeletion),
         sequences=np.array(sequences, dtype=MSASequence),
     )
-    return msa
+    return msa, query_hash
 
 
 def parse_a3m(
     path: Path,
     taxonomy: Optional[dict[str, str]],
     max_seqs: Optional[int] = None,
-) -> MSA:
+) -> tuple[MSA, str]:
     """Process an A3M file.
 
     Parameters
@@ -120,16 +126,16 @@ def parse_a3m(
 
     Returns
     -------
-    MSA
-        The MSA object.
+    tuple[MSA, str]
+        The MSA object and the hash of the query sequence.
 
     """
     # Read the file
     if path.suffix == ".gz":
         with gzip.open(str(path), "rt") as f:
-            msa = _parse_a3m(f, taxonomy, max_seqs)
+            msa, query_hash = _parse_a3m(f, taxonomy, max_seqs)
     else:
         with path.open("r") as f:
-            msa = _parse_a3m(f, taxonomy, max_seqs)
+            msa, query_hash = _parse_a3m(f, taxonomy, max_seqs)
 
-    return msa
+    return msa, query_hash

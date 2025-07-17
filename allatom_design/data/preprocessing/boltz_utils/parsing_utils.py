@@ -3,7 +3,7 @@ Contains various utils from Boltz-1 rcsb.py for parsing mmCIF files.
 Adapted and extended for use in allatom_design by Richard Shuai.
 """
 
-
+import hashlib
 import json
 import pickle
 import traceback
@@ -397,3 +397,8 @@ def split_ensemble_cif(ensemble_cif_path: str, out_dir: str) -> list[str]:
         out_files.append(str(out_file))
 
     return out_files
+
+
+def hash_sequence(seq: str) -> str:
+    """Hash a sequence."""
+    return hashlib.sha256(seq.encode()).hexdigest()
