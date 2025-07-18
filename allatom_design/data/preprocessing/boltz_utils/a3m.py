@@ -41,7 +41,6 @@ def _parse_a3m(  # noqa: C901
     for line in lines:
         line: str
         line = line.strip()  # noqa: PLW2901
-        print(line)
         if not line or line.startswith("#"):
             continue
 
