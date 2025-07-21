@@ -112,6 +112,7 @@ def run_seq_des(model: SeqDenoiser,
             # columns in input df must be a subset of valid columns
             raise ValueError(f"Invalid columns in pos_constraint_df. Expected subset of {valid_columns}. Found: {pos_constraint_df.columns}")
         pos_constraint_df = pos_constraint_df.set_index("pdb_key")  # set index to pdb name
+        pos_constraint_df.index = pos_constraint_df.index.str.lower()  # convert to lowercase
 
         # set empty string to NaN for easier parsing
         pos_constraint_df = pos_constraint_df.replace("", np.nan)
@@ -342,6 +343,7 @@ def run_seq_des_ensemble(model: SeqDenoiser,
             # columns in input df must be a subset of valid columns
             raise ValueError(f"Invalid columns in pos_constraint_df. Expected subset of {valid_columns}. Found: {pos_constraint_df.columns}")
         pos_constraint_df = pos_constraint_df.set_index("pdb_key")  # set index to pdb name
+        pos_constraint_df.index = pos_constraint_df.index.str.lower()  # convert to lowercase
 
         # set empty string to NaN for easier parsing
         pos_constraint_df = pos_constraint_df.replace("", np.nan)
