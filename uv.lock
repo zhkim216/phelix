@@ -81,6 +81,7 @@ jupyterlab-widgets==3.0.15
 kiwisolver==1.4.8
 lightning==2.5.1.post0
 lightning-utilities==0.11.8
+llvmlite==0.44.0
 loguru==0.7.3
 markupsafe==2.1.5
 marshmallow==4.0.0
@@ -103,6 +104,7 @@ networkx==3.3
 nglview==3.1.4
 notebook==7.4.2
 notebook-shim==0.2.4
+numba==0.61.2
 numpy==1.26.3
 nvidia-cublas-cu12==12.4.5.8
 nvidia-cuda-cupti-cu12==12.4.127
