@@ -11,6 +11,7 @@ from torch import Tensor, from_numpy
 from torch.nn.functional import one_hot
 
 from allatom_design.data import const
+from allatom_design.data.feature.msa import process_msa_features, pad_msa_feats
 from allatom_design.data.feature.pad import crop_dim, pad_dim
 from allatom_design.data.tokenize.boltz import Tokenized
 
@@ -77,6 +78,8 @@ class SequenceDesignFeaturizer:
         num_bins: int = 64,
         max_tokens: Optional[int] = None,
         max_atoms: Optional[int] = None,
+        max_seqs: Optional[int] = None,
+        process_msa_feats: bool = False,
     ) -> dict[str, Tensor]:
         """Compute features.
 
@@ -92,6 +95,8 @@ class SequenceDesignFeaturizer:
             The maximum number of tokens.
         max_atoms : int, optional
             The maximum number of atoms
+        max_seqs: int, optional
+            The maximum number of sequences to include in the MSA.
         max_seqs : int, optional
             The maximum number of sequences.
 
@@ -117,6 +122,16 @@ class SequenceDesignFeaturizer:
 
         # Pad features
         feats = pad_sd_feats(feats, max_tokens, max_atoms, atoms_per_window_queries)
+
+        # Process MSA features
+        if process_msa_feats:
+            msa_features = process_msa_features(data, max_seqs)
+
+            # Pad MSA features
+            msa_features = pad_msa_feats(msa_features, max_tokens, max_seqs)
+
+            # Concatenate features
+            feats = {**feats, **msa_features}
 
         return feats
 

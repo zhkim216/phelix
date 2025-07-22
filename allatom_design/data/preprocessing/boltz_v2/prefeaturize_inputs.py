@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import glob
 from dataclasses import asdict, replace
+from functools import partial
 from pathlib import Path
 
 import hydra
@@ -14,7 +15,8 @@ from allatom_design.data.feature.seq_des_featurizer import \
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     load_input
 from allatom_design.data.tokenize.tokenizer import Tokenizer
-from functools import partial
+from allatom_design.data.types import Manifest, Record
+
 
 @hydra.main(config_path="../../../configs/data/preprocessing/boltz_v2", config_name="prefeaturize_inputs", version_base="1.3.2")
 def main(cfg: DictConfig):
@@ -32,12 +34,13 @@ def main(cfg: DictConfig):
     tokenizer = hydra.utils.instantiate(cfg.tokenizer)
     featurizer = hydra.utils.instantiate(cfg.featurizer)
 
-    # Get all processed structure files
-    processed_structure_files = glob.glob(f"{cfg.pdb_path}/processed_targets/structures/*.npz")
+    # Load in manifest for processing MSAs
+    manifest = Manifest.load(f"{cfg.pdb_path}/processed_targets/manifest.json")
 
     # Tokenize each structure
     use_parallel = cfg.num_workers > 1
     featurize_fn = partial(featurize_structure_to_disk,
+                           pdb_path=cfg.pdb_path,
                            tokenizer=tokenizer,
                            featurizer=featurizer,
                            atoms_per_window_queries=cfg.atoms_per_window_queries,
@@ -47,14 +50,15 @@ def main(cfg: DictConfig):
                            out_featurized_dir=out_featurized_dir)
     if use_parallel:
         with Parallel(n_jobs=cfg.num_workers) as parallel_pool:
-            jobs = [delayed(featurize_fn)(processed_structure_file) for processed_structure_file in processed_structure_files]
+            jobs = [delayed(featurize_fn)(record) for record in manifest.records]
             list(parallel_pool(tqdm(jobs, total=len(jobs), desc="Featurizing structures")))
     else:
-        for processed_structure_file in tqdm(processed_structure_files, desc="Featurizing structures"):
-            featurize_fn(processed_structure_file)
+        for record in tqdm(manifest.records, desc="Featurizing structures"):
+            featurize_fn(record)
 
 
-def featurize_structure_to_disk(processed_structure_file: str,
+def featurize_structure_to_disk(record: Record,
+                                pdb_path: str,
                                 tokenizer: Tokenizer,
                                 featurizer: SequenceDesignFeaturizer,
                                 atoms_per_window_queries: int,
@@ -68,6 +72,7 @@ def featurize_structure_to_disk(processed_structure_file: str,
 
     - If max_residues_to_process is not None, we skip any structures that have more residues than max_residues_to_process.
     """
+    processed_structure_file = f"{pdb_path}/processed_targets/structures/{record.id}.npz"
     out_tokenized_file = f"{out_tokenized_dir}/{Path(processed_structure_file).stem}.npz"
     out_featurized_file = f"{out_featurized_dir}/{Path(processed_structure_file).stem}.npz"
 
@@ -76,8 +81,7 @@ def featurize_structure_to_disk(processed_structure_file: str,
         return
 
     # Get structure
-    input_data = load_input(processed_structure_file)
-
+    input_data = load_input(processed_structure_file, record, msa_dir=f"{pdb_path}/processed_msas")
     if max_residues_to_process is not None and len(input_data.structure.residues) > max_residues_to_process:
         print(f"Skipping structure {processed_structure_file} because it has {len(input_data.structure.residues)} residues, which is greater than max_residues_to_process={max_residues_to_process}.")
         return
@@ -95,7 +99,11 @@ def featurize_structure_to_disk(processed_structure_file: str,
 
     # Featurize structure (without padding to max_tokens or max_atoms)
     try:
-        feats = featurizer.process(tokenized, use_auth_as_residx=False, atoms_per_window_queries=atoms_per_window_queries, num_bins=num_bins)
+        feats = featurizer.process(tokenized,
+                                   use_auth_as_residx=False,
+                                   atoms_per_window_queries=atoms_per_window_queries,
+                                   num_bins=num_bins,
+                                   process_msa_feats=True)
     except Exception as e:
         print(f"Error featurizing structure {processed_structure_file}: {e}. Skipping.")
         return

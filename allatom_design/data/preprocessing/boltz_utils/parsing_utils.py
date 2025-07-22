@@ -18,7 +18,7 @@ from redis import Redis
 
 from allatom_design.data.filter.static.filter import StaticFilter
 from allatom_design.data.preprocessing.boltz_utils.mmcif import parse_mmcif
-from allatom_design.data.types import (ChainInfo, Connection, Input,
+from allatom_design.data.types import (MSA, ChainInfo, Connection, Input,
                                        InterfaceInfo, Record, Structure,
                                        Target)
 
@@ -348,7 +348,9 @@ class Resource:
         return out
 
 
-def load_input(structure_path: str) -> Input:
+def load_input(structure_path: str,
+               record: Record | None = None,  # only used if msa_dir is not None
+               msa_dir: str | None = None) -> Input:
     """Load the given input data.
 
     Parameters
@@ -374,7 +376,21 @@ def load_input(structure_path: str) -> Input:
         mask=structure["mask"],
     )
 
-    return Input(structure, msa={})  # we don't load in the MSAs
+    msas = {}
+    if msa_dir is not None:
+        for chain in record.chains:
+            msa_id = chain.msa_id
+            msa_file = f"{msa_dir}/{msa_id}.npz"
+            # Load the MSA for this chain, if any
+            if msa_id != -1 and msa_id != "":
+                try:
+                    msa = np.load(msa_file)
+                    msas[chain.chain_id] = MSA(**msa)
+                except FileNotFoundError:
+                    print(f"File not found: {msa_file}. Skipping MSA for chain {chain.chain_id} of {record.id}.")
+                    continue
+
+    return Input(structure, msa=msas)
 
 
 def split_ensemble_cif(ensemble_cif_path: str, out_dir: str) -> list[str]:
