@@ -66,7 +66,8 @@ class SDLoss(nn.Module):
                 if potts_decoder_aux.get("h_msa") is not None:
                     aux["potts_composite_loss_msa"] = msa_potts_composite_loss(batch["msa"], batch["msa_mask"], potts_decoder_aux,
                                                                                self.cfg.potts.label_smoothing,
-                                                                               self.cfg.potts.per_token_avg)
+                                                                               self.cfg.potts.per_token_avg,
+                                                                               self.cfg.potts.compile_msa_loss)
 
         # Aggregate losses
         total_loss = 0
@@ -188,12 +189,13 @@ def msa_potts_composite_loss(S_msa: TensorType["b m n", int],
                              msa_mask: TensorType["b m n", bool],  # masks out pad tokens and pad sequences
                              potts_decoder_aux: dict[str, TensorType["b ...", float]],
                              label_smoothing: float,
-                             per_token_avg: bool) -> TensorType["b", float]:
+                             per_token_avg: bool,
+                             compile_msa_loss: bool) -> TensorType["b", float]:
     """
     Compute composite likelihood loss for MSA Potts model by computing across each sequence in the MSA.
 
     Uses checkpointing to avoid OOM.
-    TODO: this can be chunked for faster computation
+    TODO: this can in theory be chunked for faster computation, but this leads to unexpected behavior with grads
     """
     B, M, N = S_msa.shape
 
@@ -204,6 +206,7 @@ def msa_potts_composite_loss(S_msa: TensorType["b m n", int],
         if not mask_mi.any():
             continue
 
+        @torch.compile(disable=not compile_msa_loss)
         def _single_seq_composite_loss(S, mask_mi, potts_decoder_aux, label_smoothing):
             logp_ij, mask_p_ij = potts.log_composite_likelihood(
                 S,
