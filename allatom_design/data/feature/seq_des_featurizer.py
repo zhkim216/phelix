@@ -11,7 +11,7 @@ from torch import Tensor, from_numpy
 from torch.nn.functional import one_hot
 
 from allatom_design.data import const
-from allatom_design.data.feature.msa import process_msa_features, pad_msa_feats
+from allatom_design.data.feature.msa import process_msa_features, pad_msa_feats, MSA_FEAT_TO_TOKEN_DIM, MSA_FEAT_TO_SEQ_DIM
 from allatom_design.data.feature.pad import crop_dim, pad_dim
 from allatom_design.data.tokenize.boltz import Tokenized
 
@@ -79,7 +79,6 @@ class SequenceDesignFeaturizer:
         max_tokens: Optional[int] = None,
         max_atoms: Optional[int] = None,
         max_seqs: Optional[int] = None,
-        process_msa_feats: bool = False,
     ) -> dict[str, Tensor]:
         """Compute features.
 
@@ -118,20 +117,13 @@ class SequenceDesignFeaturizer:
             num_bins,
         )
 
-        feats = {**token_features, **atom_features}
+        # Compute MSA features
+        msa_features = process_msa_features(data, max_seqs)
+
+        feats = {**token_features, **atom_features, **msa_features}
 
         # Pad features
-        feats = pad_sd_feats(feats, max_tokens, max_atoms, atoms_per_window_queries)
-
-        # Process MSA features
-        if process_msa_feats:
-            msa_features = process_msa_features(data, max_seqs)
-
-            # Pad MSA features
-            msa_features = pad_msa_feats(msa_features, max_tokens, max_seqs)
-
-            # Concatenate features
-            feats = {**feats, **msa_features}
+        feats = pad_sd_feats(feats, max_tokens, max_atoms, max_seqs, atoms_per_window_queries)
 
         return feats
 
@@ -355,6 +347,7 @@ def select_subset_from_mask(mask, p):
 def pad_sd_feats(feats: dict[str, Tensor],
                  max_tokens: int | None,
                  max_atoms: int | None,
+                 max_seqs: int | None,  # for MSA features
                  atoms_per_window_queries: int) -> dict[str, Tensor]:
     """Pad the token and atom features to the maximum number of tokens and atoms.
     """
@@ -384,6 +377,9 @@ def pad_sd_feats(feats: dict[str, Tensor],
             for dim_to_pad in v:
                 feats[k] = pad_dim(feats[k], dim_to_pad, atom_pad_len)
 
+    # Pad MSA features
+    feats = pad_msa_feats(feats, max_tokens, max_seqs)
+
     return feats
 
 
@@ -391,6 +387,7 @@ def crop_sd_feats(feats: dict[str, Tensor],
                   token_crop_mask: np.ndarray,
                   max_tokens: int | None,
                   max_atoms: int | None,
+                  max_seqs: int | None,
                   atoms_per_window_queries: int = 32,
                   in_place: bool = True
                   ) -> dict[str, Tensor]:
@@ -424,7 +421,25 @@ def crop_sd_feats(feats: dict[str, Tensor],
         for dim_to_crop in v:
             feats[k] = crop_dim(feats[k], dim_to_crop, atom_crop_mask)
 
+    # Subset MSA features at the token level
+    for k, v in MSA_FEAT_TO_TOKEN_DIM.items():
+        if k not in feats:
+            continue
+        for dim_to_crop in v:
+            feats[k] = crop_dim(feats[k], dim_to_crop, token_crop_mask)
+
+    # Randomly select a subset of sequences from the MSA, always keeping the first sequence
+    S_msa = feats["msa"].shape[0]
+    if max_seqs is not None and max_seqs < S_msa:
+        indices = np.random.choice(list(range(1, S_msa)), size=max_seqs - 1, replace=False).tolist()
+        indices = [0] + indices
+        for k, v in MSA_FEAT_TO_SEQ_DIM.items():
+            if k not in feats:
+                continue
+            for dim_to_crop in v:
+                feats[k] = feats[k].index_select(dim_to_crop, torch.tensor(indices, device=feats[k].device))
+
     # Pad each feature back to max tokens and atoms, accounting for atoms_per_window_queries
-    feats = pad_sd_feats(feats, max_tokens, max_atoms, atoms_per_window_queries)
+    feats = pad_sd_feats(feats, max_tokens, max_atoms, max_seqs, atoms_per_window_queries)
 
     return feats

@@ -18,6 +18,7 @@ from allatom_design.data.datasets.boltz_sd_dataset import \
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
 from chroma.layers.structure import diffusion
+from functools import partial
 
 # https://github.com/pyg-team/pytorch_geometric/issues/8747
 knn_graph = torch.compiler.disable(knn_graph)
@@ -81,12 +82,14 @@ class AtomMPNN(nn.Module):
 
         # Potts decoder
         self.use_potts = cfg.potts.use_potts
+        self.use_msa_potts = cfg.potts.use_msa_potts
         if self.use_potts:
             self.k_neighbors_potts = cfg.potts.get("k_neighbors_potts", None)
             self.max_dist_potts = cfg.potts.get("max_dist_potts", None)
             self.parameterization = cfg.potts.parameterization
             self.num_factors = cfg.potts.num_factors
-            self.decoder_S_potts = potts.GraphPotts(
+
+            potts_init = partial(potts.GraphPotts,
                 dim_nodes=self.node_features,
                 dim_edges=self.decoder_in,
                 num_states=len(const.tokens),
@@ -95,6 +98,10 @@ class AtomMPNN(nn.Module):
                 symmetric_J=cfg.potts.symmetric_J,
                 dropout=cfg.dropout_p,
             )
+            self.decoder_S_potts = potts_init()
+
+            if self.use_msa_potts:
+                self.msa_potts = potts_init()
 
         # Output layers
         self.W_out = nn.Linear(self.hidden_dim, len(const.tokens), bias=True)
@@ -168,6 +175,11 @@ class AtomMPNN(nn.Module):
                 "mask_i": token_mask,
                 "mask_ij": token_mask_2d,
             }
+
+            if self.use_msa_potts:
+                h_msa, J_msa = self.msa_potts(h_V, h_ESV, E_idx, token_mask, token_mask_2d)
+                potts_decoder_aux["h_msa"] = h_msa
+                potts_decoder_aux["J_msa"] = J_msa
 
         logits = self.W_out(h_V)
 
