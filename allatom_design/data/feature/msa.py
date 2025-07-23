@@ -64,7 +64,7 @@ def process_msa_features(
 
     # Prepare features
     msa = torch.nn.functional.one_hot(msa, num_classes=const.num_tokens)
-    msa_mask = torch.ones_like(msa[:, :, 0])
+    msa_mask = torch.ones_like(msa[:, :, 0])  # denotes pad tokens and sequences
     profile = msa.float().mean(dim=0)
     has_deletion = deletion > 0
     deletion = np.pi / 2 * np.arctan(deletion / 3)

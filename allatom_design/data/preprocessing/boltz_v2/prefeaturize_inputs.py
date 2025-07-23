@@ -102,8 +102,7 @@ def featurize_structure_to_disk(record: Record,
         feats = featurizer.process(tokenized,
                                    use_auth_as_residx=False,
                                    atoms_per_window_queries=atoms_per_window_queries,
-                                   num_bins=num_bins,
-                                   process_msa_feats=True)
+                                   num_bins=num_bins)
     except Exception as e:
         print(f"Error featurizing structure {processed_structure_file}: {e}. Skipping.")
         return

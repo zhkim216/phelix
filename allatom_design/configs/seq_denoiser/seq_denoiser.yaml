@@ -87,6 +87,7 @@ data:
   # Dataset options
   max_tokens: 512 # 256
   max_atoms: 9216 # 4608
+  max_seqs: 64
   pad_to_max_tokens: true
   pad_to_max_atoms: true
   samples_per_epoch: 50000
@@ -128,6 +129,7 @@ loss:
   loss_weights:
     seq_loss: 1.0
     potts_composite_loss: 1.0
+    potts_composite_loss_msa: 1.0
 
   # loss configs
   seq_loss:

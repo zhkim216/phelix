@@ -25,7 +25,7 @@ from allatom_design.data.feature.seq_des_featurizer import (
     SequenceDesignFeaturizer, crop_sd_feats)
 from allatom_design.data.sample.sampler import Sample, Sampler
 from allatom_design.data.tokenize.tokenizer import Tokenized, Tokenizer
-from allatom_design.data.types import (Connection, Input, Manifest, Record,
+from allatom_design.data.types import (MSA, Connection, Manifest, Record,
                                        Structure)
 from allatom_design.data.write.mmcif import write_feats_to_mmcif
 
@@ -90,6 +90,7 @@ class BoltzSDDataModule(L.LightningDataModule):
                                      samples_per_epoch=cfg.samples_per_epoch,
                                      max_atoms=cfg.max_atoms,
                                      max_tokens=cfg.max_tokens,
+                                     max_seqs=cfg.max_seqs,
                                      pad_to_max_atoms=cfg.pad_to_max_atoms,
                                      pad_to_max_tokens=cfg.pad_to_max_tokens,
                                      atoms_per_window_queries=cfg.atoms_per_window_queries,
@@ -212,6 +213,7 @@ class SDDataset(data.Dataset):
         samples_per_epoch: int,
         max_atoms: int,
         max_tokens: int,
+        max_seqs: int,
         pad_to_max_atoms: bool = False,
         pad_to_max_tokens: bool = False,
         atoms_per_window_queries: int = 32,
@@ -225,6 +227,7 @@ class SDDataset(data.Dataset):
         self.samples_per_epoch = samples_per_epoch
         self.max_tokens = max_tokens
         self.max_atoms = max_atoms
+        self.max_seqs = max_seqs
         self.pad_to_max_tokens = pad_to_max_tokens
         self.pad_to_max_atoms = pad_to_max_atoms
         self.atoms_per_window_queries = atoms_per_window_queries
@@ -338,7 +341,7 @@ class SDDataset(data.Dataset):
                 feats["coords"] = feats["coords"].squeeze(0)
 
             if self.max_tokens is not None:
-                feats = crop_sd_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.atoms_per_window_queries)
+                feats = crop_sd_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.max_seqs, self.atoms_per_window_queries)
 
         except Exception as e:
             print(f"Failed to load featurized data for {sample.record.id} with error: {e}. Skipping.")
@@ -374,7 +377,10 @@ def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
         interfaces=structure["interfaces"],
         mask=structure["mask"],
     )
-    return Tokenized(tokens=tokenized["tokens"], bonds=tokenized["bonds"], structure=structure, msa={})
+    msas = {}
+    for chain_id, msa in tokenized["msa"].item().items():
+        msas[chain_id] = MSA(**msa)
+    return Tokenized(tokens=tokenized["tokens"], bonds=tokenized["bonds"], structure=structure, msa=msas)
 
 
 def load_featurized(record: Record,

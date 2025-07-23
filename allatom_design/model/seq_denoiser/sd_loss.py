@@ -30,7 +30,7 @@ class SDLoss(nn.Module):
 
         # Define losses based on task
         if self.task == "seq_des":
-            self.loss_keys = {"seq_loss", "potts_composite_loss"}
+            self.loss_keys = {"seq_loss", "potts_composite_loss", "potts_composite_loss_msa"}
         else:
             raise ValueError(f"Unrecognized task: {self.task}")
 
@@ -61,6 +61,11 @@ class SDLoss(nn.Module):
                 aux["potts_composite_loss"] = potts_composite_loss(target_res_type, potts_decoder_aux,
                                                                    self.cfg.potts.label_smoothing,
                                                                    self.cfg.potts.per_token_avg)
+
+                if potts_decoder_aux.get("h_msa") is not None:
+                    aux["potts_composite_loss_msa"] = msa_potts_composite_loss(batch["msa"], batch["msa_mask"], potts_decoder_aux,
+                                                                               self.cfg.potts.label_smoothing,
+                                                                               self.cfg.potts.per_token_avg)
 
         # Aggregate losses
         total_loss = 0
@@ -176,3 +181,52 @@ def potts_composite_loss(S: TensorType["b n", int],
         loss = -(logp_i * mask).sum(dim=-1) / N
 
     return loss
+
+
+def msa_potts_composite_loss(S_msa: TensorType["b m n", int],
+                             msa_mask: TensorType["b m n", bool],  # masks out pad tokens and pad sequences
+                             potts_decoder_aux: dict[str, TensorType["b ...", float]],
+                             label_smoothing: float,
+                             per_token_avg: bool) -> TensorType["b", float]:
+    """Compute composite likelihood loss for MSA Potts model by computing across each sequence in the MSA."""
+    B, M, N = S_msa.shape
+
+    total_loss = 0
+    for mi in range(M):
+        S = S_msa[:, mi]
+        mask_mi = msa_mask[:, mi]
+        if not mask_mi.any():
+            continue
+
+        logp_ij, mask_p_ij = potts.log_composite_likelihood(
+            S,
+            potts_decoder_aux["h_msa"],
+            potts_decoder_aux["J_msa"],
+            potts_decoder_aux["edge_idx"],
+            potts_decoder_aux["mask_i"],
+            potts_decoder_aux["mask_ij"],
+            smoothing_alpha=label_smoothing,
+        )
+
+        # Map into approximate local likelihoods
+        logp_i = (
+            potts_decoder_aux["mask_i"]
+            * torch.sum(mask_p_ij * logp_ij, dim=-1)
+            / (2.0 * torch.sum(mask_p_ij, dim=-1) + 1e-3)
+        )
+
+        # Get loss per sample
+        mask = mask_mi * potts_decoder_aux["mask_i"]  # account for padded sequences
+        if per_token_avg:
+            # average loss per token
+            loss = (-logp_i * mask).sum(dim=-1) / mask.sum(dim=-1).clamp(min=1e-8)
+        else:
+            # divide by constant N to get loss on roughly the same scale as per_token_avg
+            N = mask.shape[1]
+            loss = -(logp_i * mask).sum(dim=-1) / N
+
+        total_loss += loss
+
+    # divide by number of sequences in each MSA
+    total_loss = total_loss / msa_mask.any(dim=-1).sum(dim=-1).clamp(min=1e-8)
+    return total_loss
