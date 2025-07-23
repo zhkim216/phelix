@@ -87,7 +87,7 @@ data:
   # Dataset options
   max_tokens: 512 # 256
   max_atoms: 9216 # 4608
-  max_seqs: 64
+  max_seqs: 32
   pad_to_max_tokens: true
   pad_to_max_atoms: true
   samples_per_epoch: 50000
@@ -139,6 +139,7 @@ loss:
   potts:
     label_smoothing: 0.1
     per_token_avg: false
+    compile_msa_loss: true
 
 optim:
   optimizer: "noam"
