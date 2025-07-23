@@ -154,7 +154,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             batch["coords"] = batch["coords"] * batch["atom_pad_mask"].unsqueeze(-1) * batch["atom_resolved_mask"].unsqueeze(-1)
 
         # Compute potts parameters
-        potts_decoder_aux, batch, sampling_inputs = self.compute_potts_params(batch, sampling_inputs)
+        potts_decoder_aux, batch, sampling_inputs = self.compute_potts_params(batch, sampling_inputs,
+                                                                              use_msa_potts=sampling_inputs["potts_sampling_cfg"].get("use_msa_potts", False))
         aux["potts_decoder_aux"] = to(potts_decoder_aux, "cpu")
 
         # Set up Potts sampling
@@ -243,7 +244,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
 
     def compute_potts_params(self, batch: dict[str, TensorType["b ..."]],
-                             sampling_inputs: dict[str, Any]) -> tuple[dict[str, TensorType["b ..."]], dict[str, TensorType["b ..."]], dict[str, Any]]:
+                             sampling_inputs: dict[str, Any],
+                             use_msa_potts: bool = False) -> tuple[dict[str, TensorType["b ..."]], dict[str, TensorType["b ..."]], dict[str, Any]]:
         """
         Run model and collect potts parameters over a batch of samples.
 
@@ -271,6 +273,11 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         potts_decoder_aux = {k: torch.cat(v, dim=0) for k, v in potts_decoder_aux.items()}
         token_exists_mask = torch.cat(token_exists_mask, dim=0)
         batch["token_exists_mask"] = token_exists_mask  # store in batch for downstream use
+
+        # If using MSA potts, we use h_msa and J_msa instead of h and J
+        if use_msa_potts:
+            potts_decoder_aux["h"] = potts_decoder_aux.pop("h_msa")
+            potts_decoder_aux["J"] = potts_decoder_aux.pop("J_msa")
 
         # Handle tied sampling
         if "tied_sampling_ids" in batch:
