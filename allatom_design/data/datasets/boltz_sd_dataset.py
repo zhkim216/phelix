@@ -366,7 +366,7 @@ def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
     Load tokenized data for a given record.
     We pre-tokenize the input structure with tokenwise atom feats so we can speed up dataloading.
     """
-    tokenized = np.load(f"{pdb_path}/processed_targets/tokenized/{record.id}.npz", allow_pickle=True)
+    tokenized = np.load(f"{pdb_path}/processed_targets/tokenized_with_msa/{record.id}.npz", allow_pickle=True)
     structure = tokenized["structure"].item()
     structure = Structure(
         atoms=structure["atoms"],
@@ -389,7 +389,7 @@ def load_featurized(record: Record,
     """
     Load featurized data for a given record.
     """
-    featurized = np.load(f"{pdb_path}/processed_targets/featurized/{record.id}.npz", allow_pickle=True)
+    featurized = np.load(f"{pdb_path}/processed_targets/featurized_with_msa/{record.id}.npz", allow_pickle=True)
     feats = {}
     for k, v in featurized.items():
         feats[k] = torch.from_numpy(v)

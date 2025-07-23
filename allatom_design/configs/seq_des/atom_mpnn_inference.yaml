@@ -20,6 +20,7 @@ use_protein_only: false  # only condition on protein for sequence design
 save_protein_only: false  # save CIFs with only protein sequence
 
 potts_sampling_cfg:
+  use_msa_potts: false
   regularization: "LCP"
   potts_sweeps: 500
   potts_proposal: "dlmc"
