@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from omegaconf import DictConfig
+from torch.utils.checkpoint import checkpoint
 from torchtyping import TensorType
 
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
@@ -188,7 +189,12 @@ def msa_potts_composite_loss(S_msa: TensorType["b m n", int],
                              potts_decoder_aux: dict[str, TensorType["b ...", float]],
                              label_smoothing: float,
                              per_token_avg: bool) -> TensorType["b", float]:
-    """Compute composite likelihood loss for MSA Potts model by computing across each sequence in the MSA."""
+    """
+    Compute composite likelihood loss for MSA Potts model by computing across each sequence in the MSA.
+
+    Uses checkpointing to avoid OOM.
+    TODO: this can be chunked for faster computation
+    """
     B, M, N = S_msa.shape
 
     total_loss = 0
@@ -198,33 +204,37 @@ def msa_potts_composite_loss(S_msa: TensorType["b m n", int],
         if not mask_mi.any():
             continue
 
-        logp_ij, mask_p_ij = potts.log_composite_likelihood(
-            S,
-            potts_decoder_aux["h_msa"],
-            potts_decoder_aux["J_msa"],
-            potts_decoder_aux["edge_idx"],
-            potts_decoder_aux["mask_i"],
-            potts_decoder_aux["mask_ij"],
-            smoothing_alpha=label_smoothing,
-        )
+        def _single_seq_composite_loss(S, mask_mi, potts_decoder_aux, label_smoothing):
+            logp_ij, mask_p_ij = potts.log_composite_likelihood(
+                S,
+                potts_decoder_aux["h_msa"],
+                potts_decoder_aux["J_msa"],
+                potts_decoder_aux["edge_idx"],
+                potts_decoder_aux["mask_i"],
+                potts_decoder_aux["mask_ij"],
+                smoothing_alpha=label_smoothing,
+            )
 
-        # Map into approximate local likelihoods
-        logp_i = (
-            potts_decoder_aux["mask_i"]
-            * torch.sum(mask_p_ij * logp_ij, dim=-1)
-            / (2.0 * torch.sum(mask_p_ij, dim=-1) + 1e-3)
-        )
+            # Map into approximate local likelihoods
+            logp_i = (
+                potts_decoder_aux["mask_i"]
+                * torch.sum(mask_p_ij * logp_ij, dim=-1)
+                / (2.0 * torch.sum(mask_p_ij, dim=-1) + 1e-3)
+            )
 
-        # Get loss per sample
-        mask = mask_mi * potts_decoder_aux["mask_i"]  # account for padded sequences
-        if per_token_avg:
-            # average loss per token
-            loss = (-logp_i * mask).sum(dim=-1) / mask.sum(dim=-1).clamp(min=1e-8)
-        else:
-            # divide by constant N to get loss on roughly the same scale as per_token_avg
-            N = mask.shape[1]
-            loss = -(logp_i * mask).sum(dim=-1) / N
+            # Get loss per sample
+            mask = mask_mi * potts_decoder_aux["mask_i"]  # account for padded sequences
+            if per_token_avg:
+                # average loss per token
+                loss = (-logp_i * mask).sum(dim=-1) / mask.sum(dim=-1).clamp(min=1e-8)
+            else:
+                # divide by constant N to get loss on roughly the same scale as per_token_avg
+                N = mask.shape[1]
+                loss = -(logp_i * mask).sum(dim=-1) / N
 
+            return loss
+
+        loss = checkpoint(_single_seq_composite_loss, S, mask_mi, potts_decoder_aux, label_smoothing, use_reentrant=False)
         total_loss += loss
 
     # divide by number of sequences in each MSA
