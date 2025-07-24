@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd4_a4_eval_seq_des
-#SBATCH -p bioe,possu
-#SBATCH --array=0-9
+#SBATCH --job-name=sd7_a0_eval_seq_des
+#SBATCH -p bioe
+#SBATCH --array=0-3
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -39,23 +39,17 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to evaluate
 MODEL_NAMES=(
-    "sd4_a4_cfg00"
-    "sd4_a4_cfg01"
-    "sd4_a4_cfg02"
-    "sd4_a4_cfg03"
-    "sd4_a4_cfg04"
-    "sd4_a4_cfg05"
-    "sd4_a4_cfg06"
-    "sd4_a4_cfg07"
-    "sd4_a4_cfg08"
-    "sd4_a4_cfg09"
+    "sd7_a0_cfg00"
+    "sd7_a0_cfg01"
+    "sd7_a0_cfg02"
+    "sd7_a0_cfg03"
 )
 MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_seq_des_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
+EXP_NAME=${MODEL_NAME}_eval_seq_des_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}_msa
 GROUP=seq_des
 
 # Run training script
@@ -69,6 +63,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
     struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
+    +sampling_cfg_overrides.potts_sampling_cfg.use_msa_potts=true \
     start_step=0 \
     end_step=null \
     eval_every_n_ckpts=1 \

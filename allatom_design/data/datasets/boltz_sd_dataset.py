@@ -467,7 +467,7 @@ def crop_batch_to_protein_only(batch: dict[str, TensorType["b n ..."]], return_c
     cropped_batch = []
     for i in range(batch["mol_type"].shape[0]):
         example = {k: v[i] for k, v in batch.items() if v is not None}
-        cropped_example = crop_sd_feats(example, protein_token_mask[i], max_tokens=None, max_atoms=None)
+        cropped_example = crop_sd_feats(example, protein_token_mask[i], max_tokens=None, max_atoms=None, max_seqs=None)
         cropped_batch.append(cropped_example)
     cropped_batch = sd_collator(cropped_batch)
     cropped_batch = to(cropped_batch, device)
