@@ -347,7 +347,7 @@ def create_assembly_from_feats(feats: dict[str, TensorType["n ..."]],
     for chain_id in feats["asym_id"].unique().tolist():
         # Crop feats to this chain
         chain_mask = feats["asym_id"] == chain_id
-        chain_feats_i = crop_sd_feats(feats, chain_mask, max_tokens=None, max_atoms=None, in_place=False)
+        chain_feats_i = crop_sd_feats(feats, chain_mask, max_tokens=None, max_atoms=None, max_seqs=None, in_place=False)
 
         if keep_auth:
             # Map from label_seq_id to auth_seq_id
@@ -395,7 +395,7 @@ class ModelFromFeats(AbInitioModel):
         for chain_id in self.feats["asym_id"].unique().tolist():
             # First, subset relevant feats to this chain
             chain_mask = self.feats["asym_id"] == chain_id
-            chain_feats_i = crop_sd_feats(self.feats, chain_mask, max_tokens=None, max_atoms=None, in_place=False)
+            chain_feats_i = crop_sd_feats(self.feats, chain_mask, max_tokens=None, max_atoms=None, max_seqs=None, in_place=False)
 
             # Get het flag
             het = chain_feats_i["mol_type"].unique().tolist()[0] == const.chain_type_ids["NONPOLYMER"]
@@ -449,7 +449,7 @@ def write_feats_to_mmcif(feats: dict[str, TensorType["n ..."]],
     """
     system = System()
 
-    feats = crop_sd_feats(feats, feats["token_pad_mask"].bool(), max_tokens=None, max_atoms=None, in_place=False)
+    feats = crop_sd_feats(feats, feats["token_pad_mask"].bool(), max_tokens=None, max_atoms=None, max_seqs=None, in_place=False)
     assembly, asym_unit_map = create_assembly_from_feats(feats, input_struct, keep_auth)
     model = ModelFromFeats(assembly=assembly, name="Model", asym_unit_map=asym_unit_map, feats=feats, keep_auth=keep_auth)
     model_group = ModelGroup([model], name="All models")
@@ -550,7 +550,8 @@ def write_diffusion_inputs_to_ensemble(feats: dict[str, TensorType["b n ..."]],
                                                                  ca_atom_mask.expand(B, -1), return_aligned=True)
 
     feats_list = unbatch_feats(boltz_feats)
-    feats_list = [crop_sd_feats(feats_i, feats_i["token_pad_mask"].bool(), max_tokens=None, max_atoms=None, in_place=False) for feats_i in feats_list]
+    feats_list = [crop_sd_feats(feats_i, feats_i["token_pad_mask"].bool(),
+                                max_tokens=None, max_atoms=None, max_seqs=None, in_place=False) for feats_i in feats_list]
 
     # Create assembly from first model
     assembly, asym_unit_map = create_assembly_from_feats(feats_list[0], input_struct=None, keep_auth=True)
