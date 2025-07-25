@@ -16,6 +16,7 @@ import numpy as np
 from natsort import natsorted
 from redis import Redis
 
+from allatom_design.data import const
 from allatom_design.data.filter.static.filter import StaticFilter
 from allatom_design.data.preprocessing.boltz_utils.mmcif import parse_mmcif
 from allatom_design.data.types import (MSA, ChainInfo, Connection, Input,
@@ -418,3 +419,49 @@ def split_ensemble_cif(ensemble_cif_path: str, out_dir: str) -> list[str]:
 def hash_sequence(seq: str) -> str:
     """Hash a sequence."""
     return hashlib.sha256(seq.encode()).hexdigest()
+
+
+def get_polymer_seqs(structure_file: str) -> tuple[set[str], set[str], set[str], set[str], dict[str, str]]:
+    """
+    Parses a single structure file and returns:
+        - sets of proteins, shorts, nucleotides, nonpolymer_seqs
+        - the key_to_seq mapping for that file, where key is the of form <pdb_id>_<chain_name>
+    """
+    struct = load_input(structure_file).structure
+    pdb_id = Path(structure_file).stem.lower()
+
+    proteins = set()
+    shorts = set()
+    nucleotides = set()
+    nonpolymer_seqs = set()
+    key_to_seq = {}
+
+    for chain in struct.chains:
+        key = f"{pdb_id}_{chain['name']}"
+        res_start = chain["res_idx"]
+        res_end = chain["res_idx"] + chain["res_num"]
+
+        # For non-polymer chains, use the sequence of CCD codes as the sequence
+        if chain["mol_type"] == const.chain_type_ids["NONPOLYMER"]:
+            ccd_seq = "".join(struct.residues[res_start:res_end]["name"].tolist())
+            key_to_seq[key] = ccd_seq
+            nonpolymer_seqs.add(ccd_seq)
+            continue
+
+        # For polymers, separate the sequences into proteins, nucleotides and short sequences
+        seq = gemmi.one_letter_code(struct.residues[res_start:res_end]["name"])
+        key_to_seq[key] = seq
+        if set(seq).issubset({"A", "C", "G", "T", "U", "N"}):
+            nucleotides.add(seq)
+        elif len(seq) < 10:
+            shorts.add(seq)
+        else:
+            proteins.add(seq)
+
+    return (
+        proteins,
+        shorts,
+        nucleotides,
+        nonpolymer_seqs,
+        key_to_seq,
+    )
