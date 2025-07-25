@@ -85,7 +85,7 @@ def main(cfg: DictConfig):
     del seq_des_model
 
     record_ids = [Path(x).stem.lower() for x in outputs["out_pdbs"]]
-    output_df = pd.DataFrame({"record_id": record_ids, "seq": outputs["seqs"], "out_pdb": outputs["out_pdbs"], "n_conformers": outputs["n_conformers"], "U": outputs["U"]})
+    output_df = pd.DataFrame({"record_id": record_ids, "seq": outputs["seqs"], "out_pdb": outputs["out_pdbs"], "n_conformers": outputs["n_conformers"], "U": outputs["U"], "input_seq": outputs["input_seqs"]})
     output_df.to_csv(f"{log_dir}/seq_des_outputs.csv", index=False)
 
     if cfg.run_self_consistency_eval:
