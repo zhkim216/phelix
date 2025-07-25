@@ -1,7 +1,7 @@
 import copy
 import math
 import random
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -388,6 +388,7 @@ def crop_sd_feats(feats: dict[str, Tensor],
                   max_tokens: int | None,
                   max_atoms: int | None,
                   max_seqs: int | None,
+                  msa_crop_kwargs: dict[str, Any] = {},
                   atoms_per_window_queries: int = 32,
                   in_place: bool = True
                   ) -> dict[str, Tensor]:
@@ -428,11 +429,17 @@ def crop_sd_feats(feats: dict[str, Tensor],
         for dim_to_crop in v:
             feats[k] = crop_dim(feats[k], dim_to_crop, token_crop_mask)
 
-    # Randomly select a subset of sequences from the MSA, always keeping the first sequence
+    # Randomly select a subset of sequences from the MSA
     S_msa = feats["msa"].shape[0]
     if max_seqs is not None and max_seqs < S_msa:
-        indices = np.random.choice(list(range(1, S_msa)), size=max_seqs - 1, replace=False).tolist()
-        indices = [0] + indices
+        if msa_crop_kwargs.get("keep_first_seq", True):
+            # always keep the first sequence
+            indices = np.random.choice(list(range(1, S_msa)), size=max_seqs - 1, replace=False).tolist()
+            indices = [0] + indices
+        else:
+            # randomly select a subset of sequences
+            indices = np.random.choice(list(range(S_msa)), size=max_seqs, replace=False).tolist()
+
         for k, v in MSA_FEAT_TO_SEQ_DIM.items():
             if k not in feats:
                 continue

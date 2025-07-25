@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import List, Union
+from typing import Any, List, Union
 
 import lightning as L
 import numpy as np
@@ -93,6 +93,7 @@ class BoltzSDDataModule(L.LightningDataModule):
                                      max_seqs=cfg.max_seqs,
                                      pad_to_max_atoms=cfg.pad_to_max_atoms,
                                      pad_to_max_tokens=cfg.pad_to_max_tokens,
+                                     msa_crop_kwargs=cfg.msa_crop_kwargs,
                                      atoms_per_window_queries=cfg.atoms_per_window_queries,
                                      num_bins=cfg.num_bins,
                                      )
@@ -214,6 +215,7 @@ class SDDataset(data.Dataset):
         max_atoms: int,
         max_tokens: int,
         max_seqs: int,
+        msa_crop_kwargs: dict[str, Any] = {},
         pad_to_max_atoms: bool = False,
         pad_to_max_tokens: bool = False,
         atoms_per_window_queries: int = 32,
@@ -228,6 +230,7 @@ class SDDataset(data.Dataset):
         self.max_tokens = max_tokens
         self.max_atoms = max_atoms
         self.max_seqs = max_seqs
+        self.msa_crop_kwargs = msa_crop_kwargs
         self.pad_to_max_tokens = pad_to_max_tokens
         self.pad_to_max_atoms = pad_to_max_atoms
         self.atoms_per_window_queries = atoms_per_window_queries
@@ -341,7 +344,8 @@ class SDDataset(data.Dataset):
                 feats["coords"] = feats["coords"].squeeze(0)
 
             if self.max_tokens is not None:
-                feats = crop_sd_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.max_seqs, self.atoms_per_window_queries)
+                feats = crop_sd_feats(feats, token_crop_mask, self.max_tokens, self.max_atoms, self.max_seqs, self.msa_crop_kwargs,
+                                      self.atoms_per_window_queries)
 
         except Exception as e:
             print(f"Failed to load featurized data for {sample.record.id} with error: {e}. Skipping.")
