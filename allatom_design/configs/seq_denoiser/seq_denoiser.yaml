@@ -97,6 +97,8 @@ data:
   atoms_per_window_queries: 32
   num_bins: 64
   n_random_subset: null  # number to subset after filtering
+  msa_crop_kwargs:
+    keep_first_seq: true
 
 # Model options
 defaults:
