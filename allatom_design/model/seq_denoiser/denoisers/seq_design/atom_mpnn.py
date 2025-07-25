@@ -82,7 +82,7 @@ class AtomMPNN(nn.Module):
 
         # Potts decoder
         self.use_potts = cfg.potts.use_potts
-        self.use_msa_potts = cfg.potts.use_msa_potts
+        self.use_msa_potts = cfg.potts.get("use_msa_potts", False)
         if self.use_potts:
             self.k_neighbors_potts = cfg.potts.get("k_neighbors_potts", None)
             self.max_dist_potts = cfg.potts.get("max_dist_potts", None)
