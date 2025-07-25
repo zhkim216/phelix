@@ -20,9 +20,8 @@ from joblib import Parallel, delayed
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-from allatom_design.data import const
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
-    Resource, load_input, hash_sequence)
+    Resource, get_polymer_seqs, hash_sequence, load_input)
 from allatom_design.data.types import Manifest, Record
 
 
@@ -48,7 +47,7 @@ def main(cfg: DictConfig) -> None:
     if use_parallel:
         # process in parallel
         results = Parallel(n_jobs=cfg.num_workers)(
-            delayed(process_structure_file)(structure_file)
+            delayed(get_polymer_seqs)(structure_file)
             for structure_file in tqdm(structure_files, desc="Parsing polymer sequences")
         )
         # merge all results
@@ -61,7 +60,7 @@ def main(cfg: DictConfig) -> None:
     else:
         # process sequentially
         for structure_file in tqdm(structure_files, desc="Parsing polymer sequences"):
-            p, s, n, npoly, k2s = process_structure_file(structure_file)
+            p, s, n, npoly, k2s = get_polymer_seqs(structure_file)
             proteins.update(p)
             shorts.update(s)
             nucleotides.update(n)
@@ -129,51 +128,6 @@ def main(cfg: DictConfig) -> None:
     with open(f"{cfg.processed_targets_dir}/manifest.json", "w") as f:
         json.dump(new_records, f)
 
-
-def process_structure_file(structure_file: str) -> tuple[set[str], set[str], set[str], set[str], dict[str, str]]:
-    """
-    Parses a single structure file and returns:
-        - sets of proteins, shorts, nucleotides, nonpolymer_seqs
-        - the key_to_seq mapping for that file
-    """
-    struct = load_input(structure_file).structure
-    pdb_id = Path(structure_file).stem.lower()
-
-    proteins = set()
-    shorts = set()
-    nucleotides = set()
-    nonpolymer_seqs = set()
-    key_to_seq = {}
-
-    for chain in struct.chains:
-        key = f"{pdb_id}_{chain['name']}"
-        res_start = chain["res_idx"]
-        res_end = chain["res_idx"] + chain["res_num"]
-
-        # For non-polymer chains, use the sequence of CCD codes as the sequence
-        if chain["mol_type"] == const.chain_type_ids["NONPOLYMER"]:
-            ccd_seq = "".join(struct.residues[res_start:res_end]["name"].tolist())
-            key_to_seq[key] = ccd_seq
-            nonpolymer_seqs.add(ccd_seq)
-            continue
-
-        # For polymers, separate the sequences into proteins, nucleotides and short sequences
-        seq = gemmi.one_letter_code(struct.residues[res_start:res_end]["name"])
-        key_to_seq[key] = seq
-        if set(seq).issubset({"A", "C", "G", "T", "U", "N"}):
-            nucleotides.add(seq)
-        elif len(seq) < 10:
-            shorts.add(seq)
-        else:
-            proteins.add(seq)
-
-    return (
-        proteins,
-        shorts,
-        nucleotides,
-        nonpolymer_seqs,
-        key_to_seq,
-    )
 
 
 def add_cluster_id_to_record(record: Record, clustering: dict[str, int], key_to_seq: dict[str, str]) -> Record:
