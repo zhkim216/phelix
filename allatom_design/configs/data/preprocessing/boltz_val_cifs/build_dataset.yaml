@@ -3,6 +3,9 @@ val_ids_txt: /media/scratch/datasets/boltz_v2/splits/validation_ids.txt
 out_dir: /media/scratch/datasets/boltz_val_cifs_debug
 num_workers: 8
 
+# PDBs to explicitly exclude
+exclude_pdb_keys: ["7w5q"]
+
 # PDB file processing
 pdb_processing_cfg:
   num_workers: ${num_workers}

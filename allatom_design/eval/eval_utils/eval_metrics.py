@@ -7,6 +7,7 @@ import subprocess
 import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -34,7 +35,13 @@ from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
 from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched
 from allatom_design.eval.eval_utils.proteinmpnn_utils import run_mpnn
-from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch, crop_batch_to_protein_only
+from allatom_design.eval.eval_utils.seq_des_utils import (
+    crop_batch_to_protein_only, get_sd_batch)
+
+try:
+    from colabdesign.shared.utils import copy_dict
+except ImportError:
+    pass
 
 
 def compute_per_pdb_info(pdbs: list[str],
@@ -211,6 +218,89 @@ def run_self_consistency_eval_boltz(pdbs: list[str],
 
     # === Clean up temp dir === #
     shutil.rmtree(processed_dir)
+
+    return id_to_metrics
+
+
+def run_af2_interface_eval(pdbs: list[str],
+                           binder_chain_ids: list[str],
+                           struct_pred_model: dict[str, Any],  # must be AF2
+                           out_dir: str) -> dict[str, dict[str, TensorType]]:
+    """
+    Run AF2 interface evaluation on a list of PDBs with designed sequences.
+
+    Assumes each PDB is an interface with only 2 chains labeled A and B.
+    - binder_chain_ids: list of chain IDs denoting the binder chain for each PDB
+    """
+    if struct_pred_model["model_name"] != "af2_interface":
+        raise ValueError("AF2 interface evaluation must use AF2 interface model")
+
+    # Set up models
+    complex_model = struct_pred_model["af_model_complex"]
+    binder_model = struct_pred_model["af_model_binder"]
+    model_cfg = struct_pred_model["cfg"]["af2_interface"]
+
+    unique_id = uuid.uuid4().hex  # unique ID for temp processing dir
+    temp_dir = Path(f"{out_dir}/temp/{unique_id}")  # directory for processed structures
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    struct_pred_dir = f"{out_dir}/struct_preds/af2_interface"
+    Path(struct_pred_dir).mkdir(parents=True, exist_ok=True)
+
+    # === Run structure prediction === #
+    id_to_metrics = {}
+    for pdb, binder_chain_id in tqdm(zip(pdbs, binder_chain_ids),
+                                     desc="Running AF2 interface structure prediction", total=len(pdbs)):
+        temp_file = f"{temp_dir}/{Path(pdb).stem}.pdb"
+
+        # Convert to pdb for colabdesign
+        if Path(pdb).suffix == ".cif":
+            mmcif_to_pdb(pdb, temp_file, assign_label_seq_id=False)
+        else:
+            shutil.copy(pdb, temp_file)
+
+        # Prep inputs for complex model
+        target_chain = "A" if binder_chain_id == "B" else "B"
+        complex_prep_input_fn = partial(complex_model.prep_inputs, pdb_filename=temp_file, chain=target_chain, binder_chain=binder_chain_id, binder_len=None,
+                                rm_target_seq=False, rm_target_sc=False, rm_template_ic=False)
+        if model_cfg["hard_target"]:
+            # use binder template
+            complex_prep_input_fn(use_binder_template=True)
+        else:
+            # no binder template
+            complex_prep_input_fn(use_binder_template=False)
+
+        # Prep inputs for binder model
+        binder_model.prep_inputs(temp_file, chain=binder_chain_id)
+
+        # Run structure prediction
+        prediction_metrics = {}
+        for model_num in model_cfg["prediction_models"]:
+            # predict complex
+            # TODO: need to fix the residues on the target
+            complex_prefix = f"complex_{binder_chain_id}_model{model_num}"
+            complex_model.predict(models=[model_num], num_recycles=model_cfg["num_recycles"], verbose=False)
+            complex_model._save_results(save_best=True, verbose=False)
+            complex_model.save_current_pdb(f"{struct_pred_dir}/{complex_prefix}_{Path(pdb).stem}.pdb")
+
+            complex_prediction_metrics = copy_dict(complex_model.aux["log"])
+            for k, v in complex_prediction_metrics.items():
+                if k in ["plddt", "ptm", "i_ptm", "pae", "i_pae"]:
+                    prediction_metrics[f"{complex_prefix}_{k}"] = v
+
+            # predict binder in isolation
+            binder_prefix = f"binder_{binder_chain_id}_model{model_num}"
+            binder_model.predict(num_models=1, num_recycles=model_cfg["num_recycles"], verbose=False)
+            binder_model._save_results(save_best=True, verbose=False)
+            binder_model.save_current_pdb(f"{struct_pred_dir}/{binder_prefix}_{Path(pdb).stem}.pdb")
+
+            binder_prediction_metrics = copy_dict(binder_model.aux["log"])
+            for k, v in binder_prediction_metrics.items():
+                if k in ["plddt", "ptm", "i_ptm", "pae", "i_pae"]:
+                    prediction_metrics[f"{binder_prefix}_{k}"] = v
+
+            # store metrics
+            id_to_metrics[Path(pdb).stem] = prediction_metrics
 
     return id_to_metrics
 
