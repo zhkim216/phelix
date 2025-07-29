@@ -7,7 +7,7 @@ wandb:
 
 # Outputs
 exp_name: null  # experiment name; used for wandb and output directory
-base_out_dir: ${denoiser_train_dir}/eval_seq_des_training  # outputs will be saved to base_out_dir/exp_name
+base_out_dir: ${denoiser_train_dir}/eval_seq_des_interface_training  # outputs will be saved to base_out_dir/exp_name
 
 # Run settings
 seed: 0
