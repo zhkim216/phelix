@@ -262,7 +262,7 @@ def run_af2_interface_eval(pdbs: list[str],
         # Prep inputs for complex model
         target_chain = "A" if binder_chain_id == "B" else "B"
         complex_prep_input_fn = partial(complex_model.prep_inputs, pdb_filename=temp_file, chain=target_chain, binder_chain=binder_chain_id, binder_len=None,
-                                rm_target_seq=False, rm_target_sc=False, rm_template_ic=False)
+                                rm_target_seq=model_cfg["rm_target_seq"], rm_target_sc=model_cfg["rm_target_sc"], rm_template_ic=model_cfg["rm_template_ic"])
         if model_cfg["hard_target"]:
             # use binder template
             complex_prep_input_fn(use_binder_template=True)

@@ -32,3 +32,6 @@ af2_interface:
   prediction_models: [0, 1]
   use_multimer: false
   hard_target: false
+  rm_target_seq: true
+  rm_target_sc: true
+  rm_template_ic: false
