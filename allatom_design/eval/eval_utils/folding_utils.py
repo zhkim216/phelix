@@ -19,6 +19,12 @@ from allatom_design.data import data
 from allatom_design.data.residue_constants import STANDARD_ATOM_MASK
 from allatom_design.data.write.writer import BoltzWriter
 
+try:
+    from colabdesign import clear_mem, mk_afdesign_model
+    from colabdesign.af import mk_af_model
+except ImportError:
+    print("ColabDesign not installed, skipping import")
+
 
 def run_esmfold(sequence_list: List[str],
                 residue_index: TensorType["b n", torch.long],
@@ -341,6 +347,75 @@ def make_boltz_trainer(processed_data_dir: str,
     return trainer, data_module
 
 
+
+def run_af2(sequences_list: list[str],
+            residue_index_list: list[TensorType["n_s", int]],
+            chain_index_list: list[TensorType["n_s", int]],
+            pdbs: list[str],  # used for extracting residue index. TODO remove dependence on pdb file
+            af_model: mk_af_model,
+            out_dir: str,
+            num_models: int,
+            sample_models: bool,
+            num_recycles: int,
+            save_best: bool = True,
+            rm_template_interchain: bool = False,
+            chains: str | None = None,
+            **kwargs) -> tuple[dict[str, torch.Tensor], list[str]]:
+    """
+    Predict sequences with AlphaFold2.
+
+    Return a tuple (dictionary of outputs, output filenames).
+    """
+    Path(out_dir).mkdir(exist_ok=True, parents=True)
+    output_files = []
+
+    # Predict structures
+    for _, (seq, pdb, residue_index, chain_index) in enumerate(zip(sequences_list, pdbs, residue_index_list, chain_index_list)):
+        output_pdb = f"{out_dir}/af2_{Path(pdb).stem}.pdb"
+        assert len(chain_index_list[0].unique()) == 1, "Multi-chain prediction not supported yet"
+        # af_model.prep_inputs(pdb, chains, ignore_missing=False)
+        _prep_struct_pred(af_model, residue_index)
+
+        af_model.restart()
+        af_model.set_opt("template", rm_ic=rm_template_interchain)
+        af_model.predict(seq=seq,
+                         num_models=num_models,
+                         sample_models=sample_models,
+                         num_recycles=num_recycles,
+                         verbose=False)
+
+        af_model._save_results(save_best=save_best, best_metric="plddt", verbose=False)
+
+        if save_best:
+            save_best_model(af_model, output_pdb)
+        else:
+            af_model.save_current_pdb(output_pdb)
+
+        output_files.append(output_pdb)
+
+    preds = [data.load_feats_from_pdb(pdb) for pdb in output_files]
+
+    # Preprocess plddt-CA
+    plddt = [pred["b_factors"] for pred in preds]
+    ca_plddt = [pred["b_factors"][:, 1] for pred in preds]
+    avg_ca_plddt = [torch.mean(ca_plddt, dim=0, keepdim=True) for ca_plddt in ca_plddt]  # keep sequence dim for consistency
+
+    # Prepare AF2 outputs
+    af2_outputs = {
+        "pred_coords": [pred["all_atom_positions"] for pred in preds],
+        "plddt": plddt,
+        "ca_plddt": ca_plddt,
+        "seq_mask": [pred["seq_mask"] for pred in preds],
+        "aatype": [pred["aatype"] for pred in preds],
+        "residue_index": [pred["residue_index"].long() for pred in preds],
+        "avg_ca_plddt": avg_ca_plddt,
+        "atom_mask": [pred["all_atom_mask"] for pred in preds],
+    }
+
+    return af2_outputs, output_files
+
+
+
 def get_boltz_model(boltz_cfg: DictConfig, device: str) -> Boltz1:
     diffusion_params = BoltzDiffusionParams()
     steering_args = BoltzSteeringParams()
@@ -378,10 +453,13 @@ def get_struct_pred_model(cfg: DictConfig,
     struct_pred_cfg:
         model_name: "esmfold"  # ["esmfold", "boltz1"]
         boltz1:
-
-
         esmfold:
             max_tokens_per_batch: 1024
+        af2_interface:
+            data_dir: # directory containing "params/" with af2 model params
+            num_models: 1
+            num_recycles: 3
+            use_multimer: false
     """
     model_name = cfg.model_name
     base_cfg = OmegaConf.load(cfg.base_cfg)
@@ -399,9 +477,27 @@ def get_struct_pred_model(cfg: DictConfig,
         struct_pred_model["esmfold"] = esmfold
         struct_pred_model["tokenizer"] = tokenizer
         struct_pred_model["data_cfg"] = hydra.utils.instantiate(cfg.boltz1.data_cfg)  # useful to have boltz tokenizer/featurizer
+    elif model_name == "af2_interface":
+        clear_mem()
+        af2_cfg = cfg.af2_interface
+
+        # get AF2 model for predicting complex
+        if af2_cfg.hard_target:
+            complex_prediction_model = mk_afdesign_model(protocol="binder", num_recycles=af2_cfg.num_recycles, data_dir=af2_cfg.data_dir,
+                                                         use_multimer=False, use_initial_guess=True, use_initial_atom_pos=False)
+        else:
+            complex_prediction_model = mk_afdesign_model(protocol="binder", num_recycles=af2_cfg.num_recycles, data_dir=af2_cfg.data_dir,
+                                                         use_multimer=False, use_initial_guess=False, use_initial_atom_pos=False)
+
+        # get AF2 model for predicting binder in isolation
+        af_model = mk_af_model(use_multimer=False,
+                               use_templates=False,
+                               best_metric="ptm",
+                               data_dir=af2_cfg.data_dir)
+
+        struct_pred_model["af_model_complex"] = complex_prediction_model
+        struct_pred_model["af_model_binder"] = af_model
     else:
         raise ValueError(f"Invalid model name: {model_name}")
 
     return struct_pred_model
-
-

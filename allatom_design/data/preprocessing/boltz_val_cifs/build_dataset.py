@@ -45,6 +45,12 @@ def main(cfg: DictConfig):
     else:
         print("Successfully found all PDB IDs in the mmCIF directory.")
 
+    # Exclude PDBs
+    if cfg.exclude_pdb_keys is not None:
+        print(f"Excluding PDBs: {cfg.exclude_pdb_keys}, len(mmcif_files): {len(mmcif_files)}")
+        mmcif_files = [f for f in mmcif_files if Path(f).stem.lower() not in cfg.exclude_pdb_keys]
+        print(f"Found {len(mmcif_files)} mmCIF files after excluding PDBs")
+
     # Process mmCIF files to get info about them (e.g. taking only first bioassembly)
     processed_struct_dir = f"{cfg.out_dir}/processed_structures"
     processed_struct_files = process_pdb_files(mmcif_files, processed_struct_dir=processed_struct_dir, **cfg.pdb_processing_cfg)
@@ -78,24 +84,34 @@ def main(cfg: DictConfig):
             records.append(Record.from_dict(json.load(f)))
 
     val_subset_filters = {
-        "protein_monomer_32_512": [
-            ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
-            MaxResiduesFilter(min_residues=32, max_residues=512),
-        ],
-        "protein_monomer_32_256": [
-            ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
+        # "protein_monomer_32_512": [
+        #     ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
+        #     MaxResiduesFilter(min_residues=32, max_residues=512),
+        # ],
+        # "protein_monomer_32_256": [
+        #     ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
+        #     MaxResiduesFilter(min_residues=32, max_residues=256),
+        # ],
+        # "protein_monomer_32_512_no_ligand": [
+        #     ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
+        #     MaxResiduesFilter(min_residues=32, max_residues=512),
+        #     SizeFilter(max_chains=1),
+        # ],
+        # "protein_monomer_32_256_no_ligand": [
+        #     ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
+        #     MaxResiduesFilter(min_residues=32, max_residues=256),
+        #     SizeFilter(max_chains=1),
+        # ],
+        "protein_interface_32_256_no_ligand": [
+            ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=2, max_chains=2, min_residues=None, max_residues=None),
             MaxResiduesFilter(min_residues=32, max_residues=256),
+            SizeFilter(max_chains=2),
         ],
-        "protein_monomer_32_512_no_ligand": [
-            ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
+        "protein_interface_32_512_no_ligand": [
+            ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=2, max_chains=2, min_residues=None, max_residues=None),
             MaxResiduesFilter(min_residues=32, max_residues=512),
-            SizeFilter(max_chains=1),
-        ],
-        "protein_monomer_32_256_no_ligand": [
-            ChainTypeSizeFilter(chain_type="PROTEIN", min_chains=1, max_chains=1, min_residues=None, max_residues=None),
-            MaxResiduesFilter(min_residues=32, max_residues=256),
-            SizeFilter(max_chains=1),
-        ],
+            SizeFilter(max_chains=2),
+        ]
     }
 
     for val_subset_name, filters in val_subset_filters.items():

@@ -107,7 +107,7 @@ def run_seq_des(model: SeqDenoiser,
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
-        valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype"]
+        valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype", "use_label_asym_id"]
         if not set(pos_constraint_df.columns).issubset(valid_columns):
             # columns in input df must be a subset of valid columns
             raise ValueError(f"Invalid columns in pos_constraint_df. Expected subset of {valid_columns}. Found: {pos_constraint_df.columns}")
@@ -523,12 +523,17 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
         ### Get fixed positions from df ###
         row = pos_constraint_df.loc[pdb_key]
         fixed_pos_seq, fixed_pos_scn = row.get("fixed_pos_seq", np.nan), row.get("fixed_pos_scn", np.nan)  # get fixed positions for this PDB
+        use_label_asym_id = row.get("use_label_asym_id", False)
 
         # Set up example
         example = {k: v[i] for k, v in batch.items()}
         input_struct = input_structs[i]
-        chain_to_asym_id = {c["auth_asym_name"]: c["asym_id"] for c in input_struct.chains}  # we use auth_asym_name as the chain name for fixing positions, not the label_asym_name
-        asym_id_to_chain = {c["asym_id"]: c["auth_asym_name"] for c in input_struct.chains}
+        if use_label_asym_id:
+            chain_to_asym_id = {c["name"]: c["asym_id"] for c in input_struct.chains}  # we use label_asym_name as the chain name for fixing positions
+            asym_id_to_chain = {c["asym_id"]: c["name"] for c in input_struct.chains}
+        else:
+            chain_to_asym_id = {c["auth_asym_name"]: c["asym_id"] for c in input_struct.chains}  # we use auth_asym_name as the chain name for fixing positions, not the label_asym_name
+            asym_id_to_chain = {c["asym_id"]: c["auth_asym_name"] for c in input_struct.chains}
 
         ### Override sequence at specified positions and condition on them ###
         fixed_pos_override_seq = row.get("fixed_pos_override_seq", np.nan)
@@ -679,11 +684,11 @@ def parse_fixed_pos_str(fixed_pos_str: str,
                         residue_index: TensorType["n", int],
                         chain_index: TensorType["n", int]) -> TensorType["k", int]:
     """
-    Parse a list of fixed positions in the format ["A1", "A10-25", ...] and
+    Parse a list of fixed positions in the format ["A", "B1", "C10-25", ...] and
     return the corresponding list of absolute indices.
 
     Args:
-        fixed_pos_list (str): Comma-separated string representing fixed positions (e.g., "A1,A10-25").
+        fixed_pos_list (str): Comma-separated string representing fixed positions (e.g., "A,B1,C10-25").
         chain_id_mapping (dict): Mapping of chain letter to chain index (e.g., {'A': 0, 'B': 1}).
         residue_index (torch.Tensor): Tensor of residue indices (shape: [N]).
         chain_index (torch.Tensor): Tensor of chain indices (shape: [N]).
@@ -701,35 +706,48 @@ def parse_fixed_pos_str(fixed_pos_str: str,
 
     for pos in fixed_pos_list:
         # Match pattern like "A10" or "A10-25"
-        match = re.match(r"([A-Za-z])(\d+)(?:-(\d+))?$", pos)
-        if not match:
+        match_with_residues = re.match(r"([A-Za-z])(\d+)(?:-(\d+))?$", pos)
+        # Match pattern for just a chain ID, e.g., "A"
+        match_chain_only = re.match(r"([A-Za-z])$", pos)
+
+        if match_with_residues:
+            chain_letter = match_with_residues.group(1)
+            start_residue = int(match_with_residues.group(2))
+            end_residue = int(match_with_residues.group(3)) if match_with_residues.group(3) else start_residue
+
+            if chain_letter not in chain_id_mapping:
+                raise ValueError(f"Chain ID {chain_letter} not found in mapping.")
+
+            # For the given chain, create a mask for all residues in the desired range
+            chain_i = chain_id_mapping[chain_letter]
+            range_mask = (chain_index == chain_i) & (residue_index >= start_residue) & (residue_index <= end_residue)
+            matching_indices = torch.where(range_mask)[0]
+
+            # Check that each residue in the requested range; warn if not found
+            found_residues = residue_index[matching_indices].tolist()
+            found_residues_set = set(found_residues)
+
+            for r in range(start_residue, end_residue + 1):
+                if r not in found_residues_set:
+                    print(f"Warning: Requested position {chain_letter}{r} not found in structure.")
+
+            # Extend our fixed indices with whatever we did find
+            fixed_indices.extend(matching_indices.tolist())
+        elif match_chain_only:
+            chain_letter = match_chain_only.group(1)
+
+            if chain_letter not in chain_id_mapping:
+                raise ValueError(f"Chain ID {chain_letter} not found in mapping.")
+
+            # For the given chain, create a mask for all residues
+            chain_i = chain_id_mapping[chain_letter]
+            chain_mask = (chain_index == chain_i)
+            matching_indices = torch.where(chain_mask)[0]
+            fixed_indices.extend(matching_indices.tolist())
+        else:
             raise ValueError(f"Invalid position format: {pos}")
 
-        chain_letter = match.group(1)
-        start_residue = int(match.group(2))
-        end_residue = int(match.group(3)) if match.group(3) else start_residue
-
-        if chain_letter not in chain_id_mapping:
-            raise ValueError(f"Chain ID {chain_letter} not found in mapping.")
-
-        # For the given chain, create a mask for all residues in the desired range
-        chain_i = chain_id_mapping[chain_letter]
-        range_mask = (chain_index == chain_i) & (residue_index >= start_residue) & (residue_index <= end_residue)
-        matching_indices = torch.where(range_mask)[0]
-
-        # Check that each residue in the requested range; warn if not found
-        found_residues = residue_index[matching_indices].tolist()
-        found_residues_set = set(found_residues)
-
-        for r in range(start_residue, end_residue + 1):
-            if r not in found_residues_set:
-                print(f"Warning: Requested position {chain_letter}{r} not found in structure.")
-
-        # Extend our fixed indices with whatever we did find
-        fixed_indices.extend(matching_indices.tolist())
-
     return fixed_indices
-
 
 def parse_fixed_pos_override_seq_str(override_str: str,
                                  chain_id_mapping: dict[str, int],
