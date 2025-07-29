@@ -55,7 +55,7 @@ DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_N
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_seq_des_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}_rmseq
+EXP_NAME=${MODEL_NAME}_eval_seq_des_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}_inv
 GROUP=seq_des
 
 # Run training script
