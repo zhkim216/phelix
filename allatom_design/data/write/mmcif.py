@@ -20,6 +20,7 @@ from allatom_design.data.data import to
 from allatom_design.data.feature.feature_utils import unbatch_feats
 from allatom_design.data.feature.seq_des_featurizer import crop_sd_feats
 from allatom_design.data.types import Structure
+from collections import defaultdict
 
 # Ignore warnings about empty entities in mmCIF files
 warnings.filterwarnings(
@@ -264,24 +265,10 @@ def create_assembly_from_feats(feats: dict[str, TensorType["n ..."]],
     """
     Create an assembly from a dictionary of Boltz features. Also returns the asym_unit_map mapping from chain_id to asym_unit within the assembly.
     """
-    # Map entities to chain_ids
-    entity_to_chains = {}
-    entity_to_moltype = {}
-
+    # First, map each sequence to chains to determine unique entities
+    seq_to_chains = defaultdict(list)
+    seq_to_moltype = {}
     for chain_id in feats["asym_id"].unique().tolist():
-        chain_mask = feats["asym_id"] == chain_id
-        entity_id = feats["entity_id"][chain_mask].unique().tolist()
-        assert len(entity_id) == 1, f"Expected exactly one unique entity_id for chain {chain_id}, got {len(entity_id)}"
-
-        entity_id = entity_id[0]
-        entity_to_chains.setdefault(entity_id, []).append(chain_id)
-        entity_to_moltype[entity_id] = feats["mol_type"][chain_mask].unique().tolist()[0]
-
-    # Map entities to sequences
-    sequences = {}
-    for entity_id in entity_to_chains:
-        # Get the first chain
-        chain_id = entity_to_chains[entity_id][0]
         chain_mask = feats["asym_id"] == chain_id
         mol_type = feats["mol_type"][chain_mask].unique().tolist()[0]
         if mol_type != const.chain_type_ids["NONPOLYMER"]:
@@ -290,7 +277,6 @@ def create_assembly_from_feats(feats: dict[str, TensorType["n ..."]],
             res_type = feats["res_type"][chain_mask].argmax(dim=-1)
             res_type = res_type[feats["token_pad_mask"][chain_mask].bool()].tolist()
             sequence = [const.tokens[res_type[ri]] for ri in range(len(res_type))]
-            sequences[entity_id] = sequence
         elif mol_type == const.chain_type_ids["NONPOLYMER"]:
             if input_struct is None:
                 raise ValueError("input_struct is required for labeling non-polymer chains")
@@ -301,7 +287,20 @@ def create_assembly_from_feats(feats: dict[str, TensorType["n ..."]],
             res_start = chain_i["res_idx"]
             res_end = chain_i["res_idx"] + chain_i["res_num"]
             sequence = input_struct.residues[res_start:res_end]["name"].tolist()
-            sequences[entity_id] = sequence
+
+        # map sequence to chains and moltype
+        seq_to_chains[tuple(sequence)].append(chain_id)
+        seq_to_moltype[tuple(sequence)] = mol_type
+
+    # Now, map a new entity_id to each sequence
+    sequences = {k: list(v) for k, v in zip(range(len(seq_to_chains)), seq_to_chains.keys())}
+
+    # Map entities to chain_ids and moltypes
+    entity_to_chains = {}
+    entity_to_moltype = {}
+    for entity_id, sequence in sequences.items():
+        entity_to_chains[entity_id] = seq_to_chains[tuple(sequence)]
+        entity_to_moltype[entity_id] = seq_to_moltype[tuple(sequence)]
 
     # Create entity objects
     lig_entity = None

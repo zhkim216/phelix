@@ -76,6 +76,9 @@ def main(cfg: DictConfig):
         id_to_metrics = defaultdict(dict)
         for binder_chain_id in ["A", "B"]:
             # Create constraint_df for conditioning on target chain
+            chain_log_dir = f"{log_dir_i}/binder_{binder_chain_id}"
+            Path(chain_log_dir).mkdir(parents=True, exist_ok=True)
+
             target_chain_id = "A" if binder_chain_id == "B" else "B"
             pos_constraint_df = pd.DataFrame({
                 "pdb_key": [Path(x).stem.lower() for x in processed_struct_files],
@@ -85,7 +88,7 @@ def main(cfg: DictConfig):
 
             # Run sequence design model
             outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                                struct_file_paths=processed_struct_files, device=device, out_dir=log_dir_i,
+                                struct_file_paths=processed_struct_files, device=device, out_dir=chain_log_dir,
                                 pos_constraint_df=pos_constraint_df)
             sampled_pdbs = outputs["out_pdbs"]
 
@@ -96,7 +99,7 @@ def main(cfg: DictConfig):
                 sampled_pdbs,
                 binder_chain_ids=[binder_chain_id] * len(sampled_pdbs),
                 struct_pred_model=struct_pred_model,
-                out_dir=log_dir_i)
+                out_dir=chain_log_dir)
 
             for record_id, metrics in binder_chain_id_to_metrics.items():
                 id_to_metrics[record_id].update(metrics)

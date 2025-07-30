@@ -289,7 +289,7 @@ class TokenFeatures(nn.Module):
             RBF_all = self._rbf(D_neighbors)
         else:
             X_all, tokenwise_atom_cond_mask = get_tokenwise_coords(batch)
-            X_all = torch.where(tokenwise_atom_cond_mask.unsqueeze(-1).bool(), X_all, X[..., None, :])  # replace all masked atoms with center atom for the residue
+            # X_all = torch.where(tokenwise_atom_cond_mask.unsqueeze(-1).bool(), X_all, X[..., None, :])  # replace all masked atoms with center atom for the residue
 
             RBF_all = []
             for i in range(X_all.shape[-2]):
