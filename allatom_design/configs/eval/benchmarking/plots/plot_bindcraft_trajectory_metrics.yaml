@@ -1,2 +1,3 @@
 base_out_dir: out_dir/plot_bindcraft_trajectory_metrics
 bindcraft_data_dir: /media/scratch/datasets/BindCraft_data_Possu
+farfalle_bindcraft_dir: /media/scratch/huang_lab/farfalle/bindcraft_results
