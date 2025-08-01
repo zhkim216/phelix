@@ -8,6 +8,7 @@ num_workers: 8  # number of workers for data loading
 
 # Sequence design options
 use_potts_sampling: true
+
 skip_sampling: false  # if true, skip sampling and just return potts parameters
 
 omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
@@ -16,16 +17,17 @@ add_noise: false  # add noise equal to noise_labels to the input backbone
 t: null  # timestep to condition on for chroma polymer diffusion
 
 # Ablation options
-use_protein_only: false  # only condition on protein for sequence design
+use_protein_only: true  # only condition on protein for sequence design
 save_protein_only: false  # save CIFs with only protein sequence
 
 potts_sampling_cfg:
-  use_msa_potts: false
   regularization: "LCP"
   potts_sweeps: 500
   potts_proposal: "dlmc"
   potts_temperature: 0.01  # this is the default in Chroma
   rejection_step: false
+  potts_only_cond: false  # only condition on sequence in the potts model
+  use_msa_potts: false
 
   # add gaussian noise to inputs
   noise_std: 0.0

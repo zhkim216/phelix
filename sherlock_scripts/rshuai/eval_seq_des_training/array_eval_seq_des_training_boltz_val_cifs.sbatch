@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd7_a1_eval_seq_des
+#SBATCH --job-name=sd3_a9_eval_seq_des
 #SBATCH -p bioe
-#SBATCH --array=0-3
+#SBATCH --array=0-1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -39,10 +39,8 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to evaluate
 MODEL_NAMES=(
-    "sd7_a1_cfg00"
-    "sd7_a1_cfg01"
-    "sd7_a1_cfg02"
-    "sd7_a1_cfg03"
+    "sd3_a9_S"
+    "sd3_a9_L"
 )
 MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
 DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
@@ -63,9 +61,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
     struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
-    +sampling_cfg_overrides.potts_sampling_cfg.use_msa_potts=true \
-    +sampling_cfg_overrides.potts_sampling_cfg.regularization=null \
-    +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 \
     start_step=0 \
     end_step=null \
     eval_every_n_ckpts=1 \
