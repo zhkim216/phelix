@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a9_eval_seq_des
+#SBATCH --job-name=sd3_a9
 #SBATCH -p bioe
-#SBATCH --array=0-1
+#SBATCH --array=0-3
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -24,44 +24,52 @@ HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, redis
 export SOFTWARE_PATH=${SOFTWARE_PATH}  # required for mmseqs, foldseek, redis, etc.
 
-# Model params
+# Model params (if running self-consistency eval)
 STRUCT_PRED_MODEL=boltz1
 BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
 PDB_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/pdbs
-LIST_STEM=protein_monomer_32_256
+LIST_STEM=protein_monomer_32_512_no_ligand
 PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/${LIST_STEM}.txt
+FIXED_POS_SWEEP_CSV=/scratch/users/rshuai/datasets/boltz_val_cifs/fixed_pos_sweep_csvs/${LIST_STEM}/fixed_pos_sweep.csv
+
+
+CONFIGS=(
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_only_cond=true"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_L/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_L/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_only_cond=true"
+)
+OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 
 # Set cache directories
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
-# Model to evaluate
-MODEL_NAMES=(
-    "sd3_a9_S"
-    "sd3_a9_L"
-)
-MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
-DENOISER_TRAIN_DIR=/scratch/users/rshuai/allatom_design/allatom_design/${MODEL_NAME}
+BASE_EXP_NAME=sd3_a9_ctx0
+BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/seq_des_context_sweep/${BASE_EXP_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME=${MODEL_NAME}_eval_seq_des_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
 GROUP=seq_des
+EXP_NAME=${BASE_EXP_NAME}_idx${SLURM_ARRAY_TASK_ID}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
 
 # Run training script
 cd ${BASE_DIR}
-WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_seq_des_training.py \
+python3 allatom_design/eval/eval_seq_des_context_sweep.py \
+    wandb.no_wandb=false \
     wandb.wandb_id=${WANDB_ID} \
     wandb.group=${GROUP} \
     exp_name=${EXP_NAME} \
-    denoiser_train_dir=${DENOISER_TRAIN_DIR} \
-    struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
-    struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
+    base_out_dir=${BASE_OUT_DIR} \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
-    start_step=0 \
-    end_step=null \
-    eval_every_n_ckpts=1 \
+    fixed_pos_sweep_csv=${FIXED_POS_SWEEP_CSV} \
+    struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
+    struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
+    run_self_consistency_eval=true \
+    sampling_cfg_overrides.batch_size=16 \
+    sampling_cfg_overrides.num_seqs_per_pdb=1 \
+    ${OVERRIDES} \
     hydra.run.dir=${HYDRA_DIR}
