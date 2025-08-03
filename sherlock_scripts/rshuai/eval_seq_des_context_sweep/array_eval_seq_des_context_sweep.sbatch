@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=sd3_a9_ctx2
 #SBATCH -p bioe
-#SBATCH --array=0-3
+#SBATCH --array=0-4
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -37,8 +37,9 @@ FIXED_POS_SWEEP_CSV=/scratch/users/rshuai/datasets/boltz_val_cifs/fixed_pos_swee
 CONFIGS=(
 "ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt"
 "ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_only_cond=true"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_L/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt"
-"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_L/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_only_cond=true"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_only_cond=true fix_scn=true"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.regularization=none"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_only_cond=true  +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.regularization=none"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 

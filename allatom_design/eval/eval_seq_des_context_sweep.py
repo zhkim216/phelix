@@ -18,6 +18,7 @@ from allatom_design.eval.eval_utils.eval_setup_utils import (get_pdb_files,
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import (get_seq_des_model,
                                                           run_seq_des)
+import random
 
 
 @hydra.main(config_path="../configs/eval", config_name="eval_seq_des_context_sweep", version_base="1.3.2")
@@ -57,8 +58,12 @@ def main(cfg: DictConfig):
         Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
-    # Load in fixed position sweep csv
+    # Load in fixed position sweep csv and randomize order of fixed positions
     fixed_pos_sweep_df = pd.read_csv(cfg.fixed_pos_sweep_csv)
+    rng = np.random.RandomState(cfg.seed)  # fix seed explicitly just in case
+    fixed_pos_sweep_df["fixed_pos_seq"] = fixed_pos_sweep_df["fixed_pos_seq"].apply(lambda x: x.split(","))
+    fixed_pos_sweep_df["fixed_pos_seq"].apply(lambda x: rng.shuffle(x))
+    fixed_pos_sweep_df["fixed_pos_seq"] = fixed_pos_sweep_df["fixed_pos_seq"].apply(lambda x: ",".join(x))
 
     # Ensure that all processed_struct_files are in fixed_pos_sweep_df
     pdb_keys = [Path(x).stem.lower() for x in processed_struct_files]
@@ -76,6 +81,12 @@ def main(cfg: DictConfig):
         pos_constraint_df = fixed_pos_sweep_df.copy()
         pos_constraint_df["fixed_pos_seq"] = pos_constraint_df["fixed_pos_seq"].apply(lambda x: x.split(",")[:int(t * len(x.split(",")))])
         pos_constraint_df["fixed_pos_seq"] = pos_constraint_df["fixed_pos_seq"].apply(lambda x: ",".join(x))
+        if cfg.fix_scn:
+            # fix ground truth sidechains as well
+            pos_constraint_df["fixed_pos_scn"] = pos_constraint_df["fixed_pos_seq"]
+
+        # save pos_constraint_df to csv
+        pos_constraint_df.to_csv(f"{log_dir_t}/pos_constraint_df.csv", index=False)
 
         # Run sequence design with this partial context
         outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
