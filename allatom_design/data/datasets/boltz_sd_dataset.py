@@ -39,8 +39,9 @@ class BoltzSDDataModule(L.LightningDataModule):
         # Load in manifest
         manifest = self._load_manifest_from_file()
 
-        # Hold out cluster IDs for testing
-        manifest = self._hold_out_test_cluster_ids(manifest, cfg.test_holdout_txts)
+        # Hold out record IDs and cluster IDs for testing
+        manifest = self._hold_out_cluster_ids(manifest, cfg.holdout_id_cluster_txts)
+        manifest = self._hold_out_test_ids(manifest, cfg.holdout_id_txts)
 
         # Load in validation split
         if Path(self.pdb_path).name in ["boltz", "boltz_v2"]:
@@ -143,7 +144,7 @@ class BoltzSDDataModule(L.LightningDataModule):
             # records = [Record.from_dict(r) for r in data if r["id"] in ids]
             manifest = Manifest(records=records)
         else:
-            manifest_path = f"{processed_targets_dir}/manifest.json"
+            manifest_path = f"{processed_targets_dir}/full_manifest.json"
             print(f"Loading in manifest from {manifest_path}...")
             manifest = Manifest.load(Path(manifest_path))
             # DEBUG
@@ -164,43 +165,75 @@ class BoltzSDDataModule(L.LightningDataModule):
         return processed_targets_dir
 
 
-    def _hold_out_test_cluster_ids(self, manifest: Manifest, test_holdout_txts: str | list[str] | None) -> Manifest:
+    def _hold_out_cluster_ids(self, manifest: Manifest, holdout_id_cluster_txts: str | list[str] | None) -> Manifest:
         """
         Given a list of test_holdout_txts containing record IDs, hold out the cluster IDs corresponding to these record IDs.
         """
-        if test_holdout_txts is None:
+        if holdout_id_cluster_txts is None:
             return manifest
 
         records = manifest.records
 
-        # Get test record IDs
-        test_holdout_ids = set()
-        if isinstance(test_holdout_txts, str):
-            with open(test_holdout_txts, "r") as f:
-                test_holdout_ids = set(f.read().splitlines())
-        else:
-            for txt_file in test_holdout_txts:
-                with open(txt_file, "r") as f:
-                    test_holdout_ids.update(f.read().splitlines())
+        # Read in holdout record IDs
+        files = [holdout_id_cluster_txts] if isinstance(holdout_id_cluster_txts, str) else holdout_id_cluster_txts
+        holdout_ids = set()
+        for file_path in files:
+            with open(file_path, "r") as f:
+                holdout_ids.update(f.read().splitlines())
 
-        test_holdout_ids = {Path(x).stem.lower() for x in test_holdout_ids}  # get rid of extensions if present
-        print(f"Holding out {len(test_holdout_ids)} record IDs for testing")
+        holdout_ids = {Path(x).stem.lower() for x in holdout_ids}  # get rid of extensions if present
+        print(f"Holding out {len(holdout_ids)} record IDs for testing")
 
         # Get all cluster IDs corresponding to these record IDs
         test_cluster_ids = set()
         found = set()
         for record in records:
-            if record.id in test_holdout_ids:
+            if record.id in holdout_ids:
                 cluster_ids = set([c.cluster_id for c in record.chains])
                 test_cluster_ids.update(cluster_ids)
                 found.add(record.id)
 
-        if len(found) != len(test_holdout_ids):
-            not_found = test_holdout_ids - found
-            print(f"WARNING: did not find {len(not_found)} record IDs for test holdout in manifest: {not_found}")
+        if len(found) != len(holdout_ids):
+            not_found = holdout_ids - found
+            print(f"WARNING: did not find {len(not_found)} record IDs for holdout in manifest: {not_found}")
 
         # Filter out records that have any cluster IDs in the test holdout
         filtered_records = [record for record in manifest.records if not any(c.cluster_id in test_cluster_ids for c in record.chains)]
+        filtered_manifest = Manifest(records=filtered_records)
+        return filtered_manifest
+
+
+    def _hold_out_test_ids(self, manifest: Manifest, holdout_id_txts: str | list[str] | None) -> Manifest:
+        """
+        Given a list of test_holdout_txts containing record IDs, hold out the records corresponding to these record IDs.
+        """
+        if holdout_id_txts is None:
+            return manifest
+
+        # Read in holdout record IDs
+        files = [holdout_id_txts] if isinstance(holdout_id_txts, str) else holdout_id_txts
+        holdout_ids = set()
+        for file_path in files:
+            with open(file_path, "r") as f:
+                holdout_ids.update(f.read().splitlines())
+
+        holdout_ids = {Path(x).stem.lower() for x in holdout_ids}  # get rid of extensions if present
+        print(f"Holding out {len(holdout_ids)} record IDs for testing")
+
+        # Filter out records matching any of the holdout IDs
+        found = set()
+        filtered_records = []
+        for record in manifest.records:
+            if record.id in holdout_ids:
+                # skip if record ID is in holdout IDs
+                found.add(record.id)
+                continue
+            filtered_records.append(record)
+
+        if len(found) != len(holdout_ids):
+            not_found = holdout_ids - found
+            print(f"WARNING: did not find {len(not_found)} record IDs for holdout in manifest.")
+
         filtered_manifest = Manifest(records=filtered_records)
         return filtered_manifest
 
