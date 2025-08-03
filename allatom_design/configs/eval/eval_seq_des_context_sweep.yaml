@@ -16,6 +16,7 @@ exp_name: null  # experiment name; used for wandb and output directory
 
 fixed_pos_sweep_csv: null  # path to fixed position sweep csv
 t_sweep: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]  # amounts of partial sequence context to provide
+fix_scn: false
 
 # PDB file inputs
 input_cfg:

@@ -19,7 +19,7 @@ from allatom_design.eval.eval_utils.seq_des_utils import get_sd_example
 @hydra.main(config_path="../../../configs/data/preprocessing/boltz_val_cifs", config_name="make_fixed_pos_sweep_csv", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
-    Given PDBs from boltz_val_cifs, generate a dataframe of fixed positions in random order to provide random sequence context for each PDB.
+    Given PDBs from boltz_val_cifs, generate a dataframe of all possible fixed positions for each PDB.
     """
     # Set seeds
     L.seed_everything(cfg.seed)
@@ -41,21 +41,16 @@ def main(cfg: DictConfig):
     for struct_file in tqdm(processed_struct_files, desc="Retrieving fixed positions for each PDB"):
         example, input_structure = get_sd_example(struct_file, data_cfg)
 
-        # get <auth_asym_name+residue_index> for all positions where the token is resolved
+        # get <auth_asym_name+auth_seq_id> for all positions where the token is resolved
         example = crop_sd_feats(example, example["token_resolved_mask"], max_tokens=None, max_atoms=None, max_seqs=None)
         asym_id_to_chain = {c["asym_id"]: c["auth_asym_name"] for c in input_structure.chains}
-        residue_index, asym_id = example["residue_index"].tolist(), example["asym_id"].tolist()
+        auth_seq_id, asym_id = example["auth_seq_id"].tolist(), example["asym_id"].tolist()
         auth_asym_name = [asym_id_to_chain[i] for i in asym_id]
-        fixed_pos_list = [f"{i}{j}" for i, j in zip(auth_asym_name, residue_index)]
-
-        # randomize sequence context order
-        random.shuffle(fixed_pos_list)
-
+        fixed_pos_list = [f"{i}{j}" for i, j in zip(auth_asym_name, auth_seq_id)]
 
         # add fixed positions to df
         fixed_pos_df["pdb_key"].append(example["pdb_key"])
         fixed_pos_df["fixed_pos_seq"].append(",".join(fixed_pos_list))
-
 
     # Save to csv
     df = pd.DataFrame(fixed_pos_df)
