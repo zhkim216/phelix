@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a9
+#SBATCH --job-name=sd3_a9_ctx2
 #SBATCH -p bioe
 #SBATCH --array=0-3
 #SBATCH --gpus-per-node=1
@@ -34,7 +34,6 @@ LIST_STEM=protein_monomer_32_512_no_ligand
 PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/${LIST_STEM}.txt
 FIXED_POS_SWEEP_CSV=/scratch/users/rshuai/datasets/boltz_val_cifs/fixed_pos_sweep_csvs/${LIST_STEM}/fixed_pos_sweep.csv
 
-
 CONFIGS=(
 "ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt"
 "ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_only_cond=true"
@@ -47,7 +46,7 @@ OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
-BASE_EXP_NAME=sd3_a9_ctx0
+BASE_EXP_NAME=sd3_a9_ctx2
 BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/seq_des_context_sweep/${BASE_EXP_NAME}
 
 # Wandb settings / experiment name
@@ -70,6 +69,6 @@ python3 allatom_design/eval/eval_seq_des_context_sweep.py \
     struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
     run_self_consistency_eval=true \
     sampling_cfg_overrides.batch_size=16 \
-    sampling_cfg_overrides.num_seqs_per_pdb=1 \
+    sampling_cfg_overrides.num_seqs_per_pdb=8 \
     ${OVERRIDES} \
     hydra.run.dir=${HYDRA_DIR}
