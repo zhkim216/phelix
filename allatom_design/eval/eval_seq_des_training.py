@@ -9,6 +9,7 @@ import pandas as pd
 import torch
 import wandb
 import yaml
+from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
@@ -46,6 +47,7 @@ def main(cfg: DictConfig):
     # Load in PDB files to eval on
     pdb_files = get_pdb_files(**cfg.input_cfg)
     processed_struct_files = process_pdb_files(pdb_files, processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg)
+    processed_struct_files = natsorted(processed_struct_files)
 
     # Load in structure prediction model for co-design self-consistency evals
     struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)

@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 import wandb
 import yaml
+from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.eval.eval_utils import eval_metrics
@@ -41,7 +42,7 @@ def main(cfg: DictConfig):
     # Load in PDB file to eval on
     pdb_files = get_pdb_files(**cfg.input_cfg)
     processed_struct_files = process_pdb_files(pdb_files, processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg)
-    processed_struct_files = processed_struct_files
+    processed_struct_files = natsorted(processed_struct_files)
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
@@ -67,6 +68,9 @@ def main(cfg: DictConfig):
     for t in cfg.t_sweep:
         log_dir_t = f"{log_dir}/t{t}"
         Path(log_dir_t).mkdir(parents=True, exist_ok=True)
+
+        # We set the seed each time we run the model
+        L.seed_everything(cfg.seed)
 
         # subset to partial sequence context
         pos_constraint_df = fixed_pos_sweep_df.copy()
