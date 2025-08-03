@@ -43,7 +43,8 @@ resume:
 
 data:
   pdb_path: /media/scratch/datasets/boltz
-  test_holdout_txts: null  # if not null, provide a list of txt files, each containing record IDs whose cluster IDs we should hold out for testing
+  holdout_id_cluster_txts: null  # if not null, provide a list of txt files, each containing record IDs whose clusters we should hold out for testing
+  holdout_id_txts: null  # if not null, provide a list of txt files, each containing record IDs we should hold out for testing
   tokenizer:
     _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
   featurizer:
