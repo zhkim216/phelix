@@ -124,7 +124,6 @@ def run_seq_des(model: SeqDenoiser,
     # Process PDBs in batches of size B
     pbar = tqdm(total=len(struct_file_paths), desc=f"Sampling {len(struct_file_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
 
-    input_pdb_to_samples = defaultdict(list)  # maps from a given input pdb path to its samples
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
         for i in range(0, len(struct_file_paths), cfg.batch_size):
@@ -188,78 +187,19 @@ def run_seq_des(model: SeqDenoiser,
                         outputs["seqs"].append(":".join(chain_seqs))  # store sampled sequences for each sample
                         outputs["input_seqs"].append(":".join(chain_input_seqs))  # store input sequences for each sample
 
+                # If specified, save potts parameters
+                if cfg.get("save_potts_params", False):
+                    potts_params_dir = f"{out_dir}/potts_params"
+                    Path(potts_params_dir).mkdir(parents=True, exist_ok=True)
+                    sample_stems = [f"{Path(pdb_file).stem}_sample{si}" for pdb_file in batch_struct_files]
+                    for i, sample_stem in enumerate(sample_stems):
+                        potts_params = {k: v[i] for k, v in aux["potts_decoder_aux"].items()}
+                        torch.save(potts_params, f"{potts_params_dir}/{sample_stem}.pt")
+
             pbar.update(B)
     pbar.close()
 
     return outputs
-
-
-def score_samples(model: SeqDenoiser,
-                  data_cfg: DictConfig,
-                  cfg: DictConfig,  # sampling config
-                  bb_to_sample_files: dict[str, list[str]],  # maps from input backbone path to list of sample paths, all preprocessed
-                  device: str):
-    """
-    Score samples using Potts parameters computed from input backbones.
-    """
-    score_outputs = {}  # store results for each input backbone
-
-    # Process PDBs in batches of size B
-    pbar = tqdm(total=len(bb_to_sample_files), desc=f"Scoring samples with {len(bb_to_sample_files)} input backbones...")
-
-    parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
-    bb_struct_files = list(bb_to_sample_files.keys())
-    with parallel_context as parallel_pool:
-        for i in range(0, len(bb_struct_files), cfg.batch_size):
-            batch_bb_struct_files = bb_struct_files[i:i+cfg.batch_size]
-            B = len(batch_bb_struct_files)
-            bb_batch, _ = get_sd_batch(batch_bb_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
-
-            # Initialize seq_cond and atom_cond masks
-            bb_batch = initialize_sampling_masks(bb_batch)
-
-            sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
-
-            if cfg["use_protein_only"]:
-                # subset to standard protein-only features; useful for ablations to only condition on protein
-                bb_batch["token_exists_override"] = (bb_batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & bb_batch["is_standard"]
-
-            # Get potts parameters for each input backbone
-            potts_decoder_aux, _ = model.denoiser.compute_potts_parameters(bb_batch, sampling_inputs=sampling_inputs)
-
-            # Load in samples to score for each input backbone
-            for i in tqdm(range(B), desc=f"Scoring samples with Potts parameters...", leave=False):
-                potts_decoder_aux_i = {k: v[i] for k, v in potts_decoder_aux.items()}
-
-                # Load in samples to score for each input backbone
-                sample_struct_files = bb_to_sample_files[batch_bb_struct_files[i]]
-                sample_batch, _ = get_sd_batch(sample_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
-                B_sample = len(sample_struct_files)
-
-                # Score
-                S_sample = sample_batch["res_type"].argmax(dim=-1).to(device)
-
-                # temporary hack: handle the case where we didn't add enough UNK tokens in the conformers
-                if S_sample.shape[1] > bb_batch["res_type"].shape[1]:
-                    length_diff = S_sample.shape[1] - bb_batch["res_type"].shape[1]
-                    assert (sample_batch["token_resolved_mask"][..., -length_diff:] == 0).all(), "Expected all UNK tokens to be unresolved in the samples"
-                    S_sample = S_sample[..., :bb_batch["res_type"].shape[1]]
-
-                potts_decoder_aux_i = to(potts_decoder_aux_i, device=device)
-                potts_decoder_aux_i = {k: v[None].expand(B_sample, *(v.ndim * (-1, ))) for k, v in potts_decoder_aux_i.items()}  # expand to match B_sample
-                U, U_i = compute_potts_energy(S_sample, potts_decoder_aux_i["h"], potts_decoder_aux_i["J"], potts_decoder_aux_i["edge_idx"])
-
-                # Store results
-                outputs = {"bb_pdb_key": [bb_batch["pdb_key"][i]] * B_sample,
-                           "sample_pdb_key": sample_batch["pdb_key"],
-                           "U": U,
-                           "U_i": U_i}
-                score_outputs[batch_bb_struct_files[i]] = to(outputs, "cpu")
-
-            pbar.update(B)
-    pbar.close()
-
-    return score_outputs
 
 
 def score_sequences_ensemble(model: SeqDenoiser,
@@ -415,6 +355,13 @@ def run_seq_des_ensemble(model: SeqDenoiser,
 
                 outputs["seqs"].append(":".join(chain_seqs))  # store sampled sequences for each sample
                 outputs["input_seqs"].append(":".join(chain_input_seqs))  # store input sequences for each sample
+
+            # If specified, save potts parameters
+            if cfg.get("save_potts_params", False):
+                potts_params_dir = f"{out_dir}/potts_params"
+                Path(potts_params_dir).mkdir(parents=True, exist_ok=True)
+                potts_params = {k: v[0] for k, v in aux["potts_decoder_aux"].items()}
+                torch.save(potts_params, f"{potts_params_dir}/{pdb_name}.pt")
 
     return outputs
 

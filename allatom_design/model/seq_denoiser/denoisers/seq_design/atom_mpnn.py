@@ -1,4 +1,5 @@
 import math
+from functools import partial
 from typing import Optional, Union
 
 import numpy as np
@@ -18,7 +19,6 @@ from allatom_design.data.datasets.boltz_sd_dataset import \
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
 from chroma.layers.structure import diffusion
-from functools import partial
 
 # https://github.com/pyg-team/pytorch_geometric/issues/8747
 knn_graph = torch.compiler.disable(knn_graph)

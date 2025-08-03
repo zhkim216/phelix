@@ -154,7 +154,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             batch["coords"] = batch["coords"] * batch["atom_pad_mask"].unsqueeze(-1) * batch["atom_resolved_mask"].unsqueeze(-1)
 
         # If specified, condition on sequence only in the potts model
-        seq_cond_mask_potts = batch["seq_cond_mask"]
+        batch["seq_cond_mask_potts"] = batch["seq_cond_mask"].clone()
         if sampling_inputs["potts_sampling_cfg"].get("potts_only_cond", False):
             print("Conditioning on sequence only in the potts model")
             batch["seq_cond_mask"] = torch.zeros_like(batch["seq_cond_mask"])  # zero out model-level sequence conditioning mask
@@ -184,7 +184,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         ban_S.extend([const.token_ids[x] for x in const.tokens if x not in const.prot_only_tokens])  # ban all non-protein tokens
 
         # Initialize random sequence and sampling masks
-        mask_sample = (1 - seq_cond_mask_potts) * batch["token_pad_mask"]  # 1 where we can sample, 0 where we can't
+        mask_sample = (1 - batch["seq_cond_mask_potts"]) * batch["token_pad_mask"]  # 1 where we can sample, 0 where we can't
         mask_sample, _, S_init = potts.init_sampling_masks(
             logits_init, mask_sample=mask_sample, S=batch["res_type"].argmax(dim=-1), ban_S=ban_S, pos_restrict_aatype=sampling_inputs.get("pos_restrict_aatype", None)
         )
