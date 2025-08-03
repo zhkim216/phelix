@@ -1,0 +1,23 @@
+base_out_dir: out_dir/plot_seq_des_context_sweep/sd3_a9_ctx1
+
+# comparisons: ["sd3_a9_ctx1_idx0", "sd3_a9_ctx1_idx1", "sd3_a9_ctx1_idx2", "sd3_a9_ctx1_idx3"]
+comparisons: ["sd3_a9_ctx1_idx0", "sd3_a9_ctx1_idx1"]
+
+model_csvs:
+  - model_name: "sd3_a9_ctx1_idx0"
+    base_dir: /media/scratch/huang_lab/allatom_design/allatom_design/seq_des_context_sweep/sd3_a9_ctx1/sd3_a9_ctx1_idx0_bvc_protein_monomer_32_512_no_ligand_boltz1
+    plot_name: "sd3_a9_ctx1_idx0"
+  - model_name: "sd3_a9_ctx1_idx1"
+    base_dir: /media/scratch/huang_lab/allatom_design/allatom_design/seq_des_context_sweep/sd3_a9_ctx1/sd3_a9_ctx1_idx1_bvc_protein_monomer_32_512_no_ligand_boltz1
+    plot_name: "sd3_a9_ctx1_idx1"
+  - model_name: "sd3_a9_ctx1_idx2"
+    base_dir: /media/scratch/huang_lab/allatom_design/allatom_design/seq_des_context_sweep/sd3_a9_ctx1/sd3_a9_ctx1_idx2_bvc_protein_monomer_32_512_no_ligand_boltz1
+    plot_name: "sd3_a9_ctx1_idx2"
+  - model_name: "sd3_a9_ctx1_idx3"
+    base_dir: /media/scratch/huang_lab/allatom_design/allatom_design/seq_des_context_sweep/sd3_a9_ctx1/sd3_a9_ctx1_idx3_bvc_protein_monomer_32_512_no_ligand_boltz1
+    plot_name: "sd3_a9_ctx1_idx3"
+
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
