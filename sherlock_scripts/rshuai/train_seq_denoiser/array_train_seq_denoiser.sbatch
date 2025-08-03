@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd7_a1
+#SBATCH --job-name=sd3_a10
 #SBATCH -p possu
-#SBATCH --array=0-3
+#SBATCH --array=0-2
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -29,7 +29,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME_BASE=sd7_a1
+EXP_NAME_BASE=sd3_a10
 GROUP=seq_des
 
 # Dataset paths
@@ -37,10 +37,9 @@ PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 # Inputs config
 CONFIGS=(
-"denoiser.mpnn.n_layers=3 denoiser.augment_eps=0.3"
-"denoiser.mpnn.n_layers=3 denoiser.augment_eps=0.2"
-"denoiser.mpnn.n_layers=5 denoiser.augment_eps=0.3"
-"denoiser.mpnn.n_layers=5 denoiser.mpnn.n_channel=196 denoiser.augment_eps=0.3"
+"denoiser.mpnn.n_layers=3"
+"denoiser.mpnn.n_layers=5 denoiser.mpnn.n_channel=256"
+"denoiser.mpnn.n_layers=3 data.holdout_id_txts=/scratch/users/rshuai/datasets/boltz_v2/splits/soluble_exclude_pdbs.txt"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg$(printf "%02d" $SLURM_ARRAY_TASK_ID)"
@@ -56,11 +55,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.pdb_path=${PDB_PATH} \
     data.max_tokens=512 \
     data.max_atoms=4608 \
-    data.msa_crop_kwargs.keep_first_seq=false \
     train.batch_size=8 \
     trainer.accumulate_grad_batches=4 \
     train.compile_model=true \
-    denoiser.mpnn.potts.use_msa_potts=true \
+    denoiser.augment_eps=0.3 \
     mask_selector.restype_masking_schedule=uniform_t \
     data.filters.4.max_residues=2048 \
     checkpointing.save_latest_every_n_steps=2500 \

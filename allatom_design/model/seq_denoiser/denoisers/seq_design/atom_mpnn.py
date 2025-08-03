@@ -309,6 +309,12 @@ class TokenFeatures(nn.Module):
 
         # AF3 token_bond feature
         token_bonds = batch["token_bonds"]
+
+        # (JH): fix to remove polymer-polymer bonds
+        token_bonds_mask = (batch["mol_type"] == const.chain_type_ids["NONPOLYMER"]) # [B, L]
+        token_bonds_mask = (token_bonds_mask[:,:,None] | token_bonds_mask[:,None,:])[..., None] # [B, L, L, 1]
+        token_bonds = token_bonds * token_bonds_mask
+
         token_bonds = gather_edges(token_bonds, E_idx)
 
         # Concatenate edge features and embed
