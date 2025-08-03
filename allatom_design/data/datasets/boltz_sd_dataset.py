@@ -144,7 +144,7 @@ class BoltzSDDataModule(L.LightningDataModule):
             # records = [Record.from_dict(r) for r in data if r["id"] in ids]
             manifest = Manifest(records=records)
         else:
-            manifest_path = f"{processed_targets_dir}/full_manifest.json"
+            manifest_path = f"{processed_targets_dir}/manifest.json"
             print(f"Loading in manifest from {manifest_path}...")
             manifest = Manifest.load(Path(manifest_path))
             # DEBUG
@@ -403,7 +403,7 @@ def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
     Load tokenized data for a given record.
     We pre-tokenize the input structure with tokenwise atom feats so we can speed up dataloading.
     """
-    tokenized = np.load(f"{pdb_path}/processed_targets/tokenized_with_msa/{record.id}.npz", allow_pickle=True)
+    tokenized = np.load(f"{pdb_path}/processed_targets/tokenized/{record.id}.npz", allow_pickle=True)
     structure = tokenized["structure"].item()
     structure = Structure(
         atoms=structure["atoms"],
@@ -415,8 +415,9 @@ def load_tokenized(record: Record, pdb_path: str) -> Tokenized:
         mask=structure["mask"],
     )
     msas = {}
-    for chain_id, msa in tokenized["msa"].item().items():
-        msas[chain_id] = MSA(**msa)
+    if "msa" in tokenized:
+        for chain_id, msa in tokenized["msa"].item().items():
+            msas[chain_id] = MSA(**msa)
     return Tokenized(tokens=tokenized["tokens"], bonds=tokenized["bonds"], structure=structure, msa=msas)
 
 
@@ -426,7 +427,7 @@ def load_featurized(record: Record,
     """
     Load featurized data for a given record.
     """
-    featurized = np.load(f"{pdb_path}/processed_targets/featurized_with_msa/{record.id}.npz", allow_pickle=True)
+    featurized = np.load(f"{pdb_path}/processed_targets/featurized/{record.id}.npz", allow_pickle=True)
     feats = {}
     for k, v in featurized.items():
         feats[k] = torch.from_numpy(v)
