@@ -279,6 +279,7 @@ def run_af2_interface_eval(pdbs: list[str],
             # predict complex
             # TODO: need to fix the residues on the target
             complex_prefix = f"complex_{binder_chain_id}_model{model_num}"
+            complex_model.set_seq(mode="wt")
             complex_model.predict(models=[model_num], num_recycles=model_cfg["num_recycles"], verbose=False)
             complex_model._save_results(save_best=True, verbose=False)
             complex_model.save_current_pdb(f"{struct_pred_dir}/{complex_prefix}_{Path(pdb).stem}.pdb")
@@ -290,7 +291,8 @@ def run_af2_interface_eval(pdbs: list[str],
 
             # predict binder in isolation
             binder_prefix = f"binder_{binder_chain_id}_model{model_num}"
-            binder_model.predict(num_models=1, num_recycles=model_cfg["num_recycles"], verbose=False)
+            binder_model.set_seq(mode="wt")
+            binder_model.predict(models=[model_num], num_recycles=model_cfg["num_recycles"], verbose=False)
             binder_model._save_results(save_best=True, verbose=False)
             binder_model.save_current_pdb(f"{struct_pred_dir}/{binder_prefix}_{Path(pdb).stem}.pdb")
 
@@ -1295,19 +1297,26 @@ def motif_master_search(motif_pdb_path: str,
     return df
 
 
-def compute_seq_recovery(native_seq: str, sampled_seq: str, ignore_unk: bool = True) -> float:
+def compute_seq_recovery(native_seq: str, sampled_seq: str,
+                         ignore_native_unk: bool = True,
+                         ignore_sampled_unk: bool = True) -> float:
     """
     Compute sequence recovery between native and sampled sequences.
 
-    If ignore_unk is True, we ignore unknown residues (e.g. X) in the native sequence.
+    If ignore_native_unk is True, we ignore unknown residues (e.g. X) in the native sequence.
+    If ignore_sampled_unk is True, we ignore unknown residues (e.g. X) in the sampled sequence.
     """
     native_seq = native_seq.replace(":", "")
     sampled_seq = sampled_seq.replace(":", "")
     native_seq = np.array(list(native_seq))
     sampled_seq = np.array(list(sampled_seq))
-    if ignore_unk:
-        unk_mask = native_seq == "X"
-        native_seq = native_seq[~unk_mask]
-        sampled_seq = sampled_seq[~unk_mask]
+
+    unk_mask = np.zeros_like(native_seq, dtype=bool)
+    if ignore_native_unk:
+        unk_mask = unk_mask | (native_seq == "X")
+    if ignore_sampled_unk:
+        unk_mask = unk_mask | (sampled_seq == "X")
+    native_seq = native_seq[~unk_mask]
+    sampled_seq = sampled_seq[~unk_mask]
 
     return np.mean(native_seq == sampled_seq)

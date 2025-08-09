@@ -567,7 +567,7 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
     allowed_aatype_mask = torch.ones((B, N, K), dtype=torch.float32, device=batch["token_pad_mask"].device)
 
     if verbose:
-        print("\n======================== Position-wise amino acid restrictions ========================")
+        print("\n Position-wise amino acid restrictions:")
 
     for i, pdb_key in enumerate(batch["pdb_key"]):
         if pdb_key not in pos_constraint_df.index:
