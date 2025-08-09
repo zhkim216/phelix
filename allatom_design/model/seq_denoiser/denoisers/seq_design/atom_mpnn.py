@@ -289,7 +289,7 @@ class TokenFeatures(nn.Module):
             RBF_all = self._rbf(D_neighbors)
         else:
             X_all, tokenwise_atom_cond_mask = get_tokenwise_coords(batch)
-            # X_all = torch.where(tokenwise_atom_cond_mask.unsqueeze(-1).bool(), X_all, X[..., None, :])  # replace all masked atoms with center atom for the residue
+            X_all = torch.where(tokenwise_atom_cond_mask.unsqueeze(-1).bool(), X_all, X[..., None, :])  # replace all masked atoms with center atom for the residue
 
             RBF_all = []
             for i in range(X_all.shape[-2]):
@@ -302,7 +302,10 @@ class TokenFeatures(nn.Module):
         offset = residue_index[:,:,None] - residue_index[:,None,:]
         offset = gather_edges(offset[:,:,:,None], E_idx)[:,:,:,0]  # [B, L, K]
 
-        chain_labels = batch["asym_id"]
+        chain_labels = torch.zeros_like(batch["asym_id"])
+        if self.cfg.get("use_multichain_encoding", False):
+            # only use multichain encoding if the model has been trained with it TODO: need to also handle residue index
+            chain_labels = batch["asym_id"]
         d_chains = ((chain_labels[:, :, None] - chain_labels[:,None,:])==0).long()  # find self vs non-self interaction
         E_chains = gather_edges(d_chains[:,:,:,None], E_idx)[:,:,:,0]
         E_positional = self.embeddings(offset.long(), E_chains)
