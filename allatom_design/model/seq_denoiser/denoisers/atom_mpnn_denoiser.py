@@ -194,7 +194,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         mask_ij_coloring = None
         edge_idx_coloring = None
         if regularization == "LCP":
-            C_complexity = batch["token_pad_mask"].clone()  # TODO: check multichain handling
+            C_complexity = batch["asym_id"] - torch.min(batch["asym_id"]) + 1  # renumber asym_id to have min value of 1
+            C_complexity = C_complexity * batch["token_pad_mask"] * batch["token_exists_mask"]  # mask out pad tokens and tokens that don't exist in the graph
             penalty_func = lambda _S: complexity.complexity_lcp(_S, C_complexity)
 
         S = []  # keep track of sequences for each sample
