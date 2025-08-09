@@ -1,20 +1,19 @@
 # Wandb configuration
 wandb:
-  no_wandb: false  # Disable wandb logging
+  no_wandb: true  # Disable wandb logging
   project: "allatom_design"  # Wandb project name
   wandb_id: "richardshuai"  # Wandb username
   group: "debug" # Wandb group name
 
-# Outputs
-exp_name: null  # experiment name; used for wandb and output directory
-base_out_dir: ${denoiser_train_dir}/eval_seq_des_interface_training  # outputs will be saved to base_out_dir/exp_name
-
 # Run settings
 seed: 0
 num_workers: 8  # for dataloading
-start_step: 0  # start evaluation after this step, 0 or null to start from the beginning
-end_step: null  # end evaluation after this step (inclusive), null to evaluate until the end
-eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
+
+# Inputs
+ckpt_path: null
+base_out_dir: null
+exp_name: null  # experiment name; used for wandb and output directory
+bindcraft_data_dir: null
 
 # PDB file inputs
 input_cfg:
@@ -42,12 +41,12 @@ pdb_processing_cfg:
     ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
 
 
-# Denoiser options
-denoiser_train_dir:
+# Sampling config
+run_self_consistency_eval: false
 sampling_cfg_overrides:
   batch_size: 16
-  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
-  num_steps: 50
+  num_seqs_per_pdb: 16  # number of sequences to sample per pdb
+  omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
   num_workers: ${num_workers}
 
@@ -55,7 +54,7 @@ sampling_cfg_overrides:
 seq_des_cfg:
   model_name: "atom_mpnn"
   atom_mpnn:
-    ckpt_path: null  # overridden with training checkpoint paths
+    ckpt_path: ${ckpt_path}
     sampling_cfg: allatom_design/configs/seq_des/atom_mpnn_inference.yaml
     overrides: ${sampling_cfg_overrides}
 
@@ -66,7 +65,7 @@ struct_pred_cfg:
   # overrides to base config
   af2_interface:
     data_dir: /media/scratch/huang_lab/model_params/af2
-    prediction_models: [0]  # only model 0 for efficiency, but comprehensive eval should use [0, 1]
+    prediction_models: [0, 1]
 
 
 hydra:
