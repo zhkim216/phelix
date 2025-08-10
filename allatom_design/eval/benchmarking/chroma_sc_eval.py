@@ -84,12 +84,12 @@ def main(cfg: DictConfig):
                 # in case we don't want to run on all samples
                 break
 
-            example = thread_sequence_onto_example(example, chroma_restype[bi], label_seq_id[bi],
-                                                   mask=chain_labels[bi] > 0)  # set missing residues to X; chroma does not update seq for missing residues but also does not use them for sampling
+            threaded_example = thread_sequence_onto_example(example, chroma_restype[bi], label_seq_id[bi],
+                                                            mask=chain_labels[bi] > 0)  # set missing residues to X; chroma does not update seq for missing residues but also does not use them for sampling
 
             # Save structure with Chroma sequence threaded on
             threaded_pdb = f"{threaded_pdb_dir}/{record_id}_sample{bi}.cif"
-            write_feats_to_mmcif(example, input_structure, threaded_pdb)
+            write_feats_to_mmcif(threaded_example, input_structure, threaded_pdb)
             threaded_pdbs.append(threaded_pdb)
 
             # Get energies
