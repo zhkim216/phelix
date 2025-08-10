@@ -13,7 +13,6 @@ num_workers: 8  # for dataloading
 ckpt_path: null
 base_out_dir: null
 exp_name: null  # experiment name; used for wandb and output directory
-bindcraft_data_dir: null
 
 # PDB file inputs
 input_cfg:
@@ -21,6 +20,7 @@ input_cfg:
   pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
   pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
   n_subsample: null  # randomly sample this many pdb keys, null to use all
+
 
 # PDB file processing
 pdb_processing_cfg:
@@ -44,19 +44,30 @@ pdb_processing_cfg:
 # Sampling config
 run_self_consistency_eval: false
 sampling_cfg_overrides:
-  batch_size: 16
-  num_seqs_per_pdb: 16  # number of sequences to sample per pdb
+  batch_size: 4
+  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
   num_workers: ${num_workers}
 
 # Sampling config
+use_proteinmpnn: false
 seq_des_cfg:
   model_name: "atom_mpnn"
   atom_mpnn:
     ckpt_path: ${ckpt_path}
     sampling_cfg: allatom_design/configs/seq_des/atom_mpnn_inference.yaml
     overrides: ${sampling_cfg_overrides}
+
+proteinmpnn_cfg:
+  # if using proteinmpnn
+  model_path: v_48_020
+  mpnn_weights: soluble
+  backbone_noise: 0.0
+  mpnn_fix_interface: true
+  omit_AAs: null
+  sampling_temp: 0.1
+  num_seqs: 1
 
 # Structure prediction model args
 struct_pred_cfg:

@@ -225,12 +225,15 @@ def run_self_consistency_eval_boltz(pdbs: list[str],
 def run_af2_interface_eval(pdbs: list[str],
                            binder_chain_ids: list[str],
                            struct_pred_model: dict[str, Any],  # must be AF2
-                           out_dir: str) -> dict[str, dict[str, TensorType]]:
+                           out_dir: str,
+                           binder_seqs: list[str] | None = None,
+                           ) -> dict[str, dict[str, TensorType]]:
     """
     Run AF2 interface evaluation on a list of PDBs with designed sequences.
 
     Assumes each PDB is an interface with only 2 chains labeled A and B.
     - binder_chain_ids: list of chain IDs denoting the binder chain for each PDB
+    - binder_seqs: list of binder sequences for each PDB. If None, use the sequences in the PDBs.
     """
     if struct_pred_model["model_name"] != "af2_interface":
         raise ValueError("AF2 interface evaluation must use AF2 interface model")
@@ -249,7 +252,7 @@ def run_af2_interface_eval(pdbs: list[str],
 
     # === Run structure prediction === #
     id_to_metrics = {}
-    for pdb, binder_chain_id in tqdm(zip(pdbs, binder_chain_ids),
+    for i, (pdb, binder_chain_id) in tqdm(enumerate(zip(pdbs, binder_chain_ids)),
                                      desc="Running AF2 interface structure prediction", total=len(pdbs)):
         temp_file = f"{temp_dir}/{Path(pdb).stem}.pdb"
 
@@ -277,9 +280,13 @@ def run_af2_interface_eval(pdbs: list[str],
         prediction_metrics = {}
         for model_num in model_cfg["prediction_models"]:
             # predict complex
-            # TODO: need to fix the residues on the target
             complex_prefix = f"complex_{binder_chain_id}_model{model_num}"
-            complex_model.set_seq(mode="wt")
+            if binder_seqs is None:
+                # use the sequence in the PDB
+                complex_model.set_seq(mode="wt")
+            else:
+                # use the sequence in binder_seqs
+                complex_model.set_seq(binder_seqs[i])
             complex_model.predict(models=[model_num], num_recycles=model_cfg["num_recycles"], verbose=False)
             complex_model._save_results(save_best=True, verbose=False)
             complex_model.save_current_pdb(f"{struct_pred_dir}/{complex_prefix}_{Path(pdb).stem}.pdb")
@@ -291,7 +298,12 @@ def run_af2_interface_eval(pdbs: list[str],
 
             # predict binder in isolation
             binder_prefix = f"binder_{binder_chain_id}_model{model_num}"
-            binder_model.set_seq(mode="wt")
+            if binder_seqs is None:
+                # use the sequence in the PDB
+                binder_model.set_seq(mode="wt")
+            else:
+                # use the sequence in binder_seqs
+                binder_model.set_seq(binder_seqs[i])
             binder_model.predict(models=[model_num], num_recycles=model_cfg["num_recycles"], verbose=False)
             binder_model._save_results(save_best=True, verbose=False)
             binder_model.save_current_pdb(f"{struct_pred_dir}/{binder_prefix}_{Path(pdb).stem}.pdb")
@@ -303,6 +315,9 @@ def run_af2_interface_eval(pdbs: list[str],
 
             # store metrics
             id_to_metrics[Path(pdb).stem] = prediction_metrics
+
+    # === Clean up temp dir === #
+    shutil.rmtree(temp_dir)
 
     return id_to_metrics
 

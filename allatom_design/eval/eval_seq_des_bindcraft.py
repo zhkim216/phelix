@@ -1,5 +1,6 @@
 import ast
 import glob
+import shutil
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
 from scipy.spatial import cKDTree
 
-from allatom_design.eval.eval_utils import eval_metrics
+from allatom_design.eval.eval_utils import bindcraft_utils, eval_metrics
 from allatom_design.eval.eval_utils.eval_setup_utils import (get_pdb_files,
                                                              process_pdb_files,
                                                              wandb_setup)
@@ -47,69 +48,78 @@ def main(cfg: DictConfig):
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Load in sequence design model
-    seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
+    if not cfg.use_proteinmpnn:
+        # Load in sequence design model
+        seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
 
     # # Load structure prediction model for self-consistency evaluation
     if cfg.run_self_consistency_eval:
-        pred_out_dir = f"{log_dir}/preds"  # directory for structure predictions
-        Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
         struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
+    target_chain, binder_chain = "A", "B"  # for bindcraft targets, target is always chain A, and binder is chain B
 
-    target_dirs = glob.glob(f"{cfg.bindcraft_data_dir}/*")
-    # DEBUG
-    target_dirs = target_dirs[:1]
+    # Load and preprocess the trajectory pdbs
+    traj_pdbs = get_pdb_files(**cfg.input_cfg)
+    processed_struct_files = process_pdb_files(traj_pdbs, processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg)
+    processed_struct_files = natsorted(processed_struct_files)
 
-    for target_dir in target_dirs:
-        # for bindcraft targets, target is always chain A, and binder is chain B
-        target_chain, binder_chain = "A", "B"
-        target_name = Path(target_dir).stem
-        log_dir_i = f"{log_dir}/{target_name}"
-        traj_df = pd.read_csv(f"{target_dir}/trajectory_stats.csv")
+    # Recompute interface residues
+    key_to_fixed_pos_seq = {}
+    for traj_pdb in traj_pdbs:
+        pdb_key = Path(traj_pdb).stem
+        interface_residues_map = hotspot_residues(traj_pdb, binder_chain)
+        fixed_pos_seq = ",".join([f"{binder_chain}{i}" for i in interface_residues_map])
 
-        # some sanity checks on the inputs
-        mpnn_stats_df = pd.read_csv(f"{target_dir}/mpnn_design_stats.csv")
-        mpnn_stats_df["design_name"] = mpnn_stats_df["Design"].str.rsplit("_").str[:-1].str.join("_")
-        assert set(mpnn_stats_df["design_name"]) == set(traj_df["Design"]), f"design_name mismatch between trajectory_stats.csv and mpnn_design_stats.csv for {target_dir}"
-        traj_pdbs = glob.glob(f"{target_dir}/Trajectory/Relaxed/*.pdb")
-        traj_pdb_stems = [Path(x).stem for x in traj_pdbs]
-        assert set(traj_pdb_stems) == set(traj_df["Design"]), f"design_name mismatch between trajectory_stats.csv and Trajectory/Relaxed/*.pdb for {target_dir}"
+        # # ensure the interface residues are the same as the original bindcraft interface residues
+        # interface_aa_counts_original = ast.literal_eval(row["InterfaceAAs"])
+        # interface_aa_counts_recomputed = {aa: 0 for aa in 'ACDEFGHIKLMNPQRSTVWY'}
+        # interface_aa_counts_recomputed.update(dict(Counter(interface_residues_map.values())))
+        # assert interface_aa_counts_original == interface_aa_counts_recomputed, f"interface_aa_counts_original != interface_aa_counts_recomputed for {design_name}"
 
-        # preprocess the trajectory pdbs
-        processed_struct_files = process_pdb_files(traj_pdbs, processed_struct_dir=f"{log_dir_i}/processed_structures", **cfg.pdb_processing_cfg)
-        processed_struct_files = natsorted(processed_struct_files)
-        processed_struct_files = processed_struct_files[:2]  # DEBUG
+        # also fix the target chain
+        fixed_pos_seq = f"{target_chain},{fixed_pos_seq}"
 
-        # fix interface positions
-        key_to_fixed_pos_seq = {}
-        for _, row in traj_df.iterrows():
-            # recompute interface residues
-            design_name = row["Design"]
-            traj_pdb = f"{target_dir}/Trajectory/Relaxed/{design_name}.pdb"
-            interface_residues_map = hotspot_residues(traj_pdb, binder_chain)
-            fixed_pos_seq = ",".join([f"{binder_chain}{i}" for i in interface_residues_map])
+        # add to key_to_fixed_pos_seq
+        key_to_fixed_pos_seq[pdb_key] = fixed_pos_seq
 
-            # ensure the interface residues are the same as the original bindcraft interface residues
-            interface_aa_counts_original = ast.literal_eval(row["InterfaceAAs"])
-            interface_aa_counts_recomputed = {aa: 0 for aa in 'ACDEFGHIKLMNPQRSTVWY'}
-            interface_aa_counts_recomputed.update(dict(Counter(interface_residues_map.values())))
-            assert interface_aa_counts_original == interface_aa_counts_recomputed, f"interface_aa_counts_original != interface_aa_counts_recomputed for {design_name}"
+    if cfg.use_proteinmpnn:
+        # Run proteinmpnn
+        temp_dir = f"{log_dir}/proteinmpnn_temp"  # directory for input PDBs for af2 prediction
+        Path(temp_dir).mkdir(parents=True, exist_ok=True)
 
-            # also fix the target chain
-            # fixed_pos_seq = f"{target_chain},{fixed_pos_seq}"
-            # DEBUG: fix everything
-            fixed_pos_seq = "A,B"
+        input_pdbs, binder_seqs = [], []
+        for traj_pdb in traj_pdbs:
+            pdb_key = Path(traj_pdb).stem
+            fixed_pos_seq = key_to_fixed_pos_seq[pdb_key]
+            mpnn_sequences = bindcraft_utils.mpnn_gen_sequence(traj_pdb, binder_chain, fixed_pos_seq, cfg.proteinmpnn_cfg)
 
-            # add to key_to_fixed_pos_seq
-            key_to_fixed_pos_seq[design_name] = fixed_pos_seq
+            for si in range(cfg.proteinmpnn_cfg.num_seqs):
+                input_pdb = f"{temp_dir}/{pdb_key.lower()}_sample{si}.pdb"
+                shutil.copy(traj_pdb, input_pdb)
+                input_pdbs.append(input_pdb)  # do not have the sequences threaded on
+                mpnn_seq = mpnn_sequences["seq"][si]
+                binder_seq = mpnn_seq.split("/")[-1]  # assume binder sequence is the 2nd sequence
+            binder_seqs.append(binder_seq)
 
+        if cfg.run_self_consistency_eval:
+            id_to_metrics = eval_metrics.run_af2_interface_eval(
+                input_pdbs,
+                binder_chain_ids=[binder_chain] * len(input_pdbs),
+                struct_pred_model=struct_pred_model,
+                binder_seqs=binder_seqs,
+                out_dir=log_dir)
+
+        # remove temp dir
+        shutil.rmtree(temp_dir)
+
+    else:
+        # Run our sequence design model
         # create fixed position df
         pos_constraint_df = pd.DataFrame(key_to_fixed_pos_seq.items(), columns=["pdb_key", "fixed_pos_seq"])
 
         # Run sequence design model
         outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                              struct_file_paths=processed_struct_files, device=device, out_dir=log_dir_i,
+                              struct_file_paths=processed_struct_files, device=device, out_dir=log_dir,
                               pos_constraint_df=pos_constraint_df)
         sampled_pdbs = outputs["out_pdbs"]
 
@@ -119,32 +129,31 @@ def main(cfg: DictConfig):
         output_df.to_csv(f"{log_dir}/seq_des_outputs.csv", index=False)
 
         if cfg.run_self_consistency_eval:
-            # DEBUG
-            sampled_pdbs = [f"/media/scratch/datasets/BindCraft_data_Possu/DerF21/MPNN/Relaxed/DerF21_l70_s16792_mpnn1_model1.pdb",
-                            f"/media/scratch/datasets/BindCraft_data_Possu/DerF21/MPNN/Relaxed/DerF21_l70_s16792_mpnn2_model2.pdb"]
             id_to_metrics = eval_metrics.run_af2_interface_eval(
                 sampled_pdbs,
                 binder_chain_ids=[binder_chain] * len(sampled_pdbs),
                 struct_pred_model=struct_pred_model,
-                out_dir=log_dir_i)
+                out_dir=log_dir)
 
-            # Save metrics as CSV
-            metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
-            metrics_df.to_csv(f"{log_dir_i}/self_consistency_metrics.csv", index=False)
+    # Log self-consistency metrics
+    if cfg.run_self_consistency_eval:
+        # Save metrics as CSV
+        metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
+        metrics_df.to_csv(f"{log_dir}/self_consistency_metrics.csv", index=False)
 
-            if not cfg.wandb.no_wandb:
-                # Aggregate results
-                sc_metrics = defaultdict(list)
-                for record_id, metrics in id_to_metrics.items():
-                    for k, v in metrics.items():
-                        sc_metrics[f"{k}"].append(v)
+        if not cfg.wandb.no_wandb:
+            # Aggregate results
+            sc_metrics = defaultdict(list)
+            for metrics in id_to_metrics.values():
+                for k, v in metrics.items():
+                    sc_metrics[f"{k}"].append(v)
 
-                # Update metrics
-                out_metrics = {f"seq_des/mean/{k}": np.nanmean(v) for k, v in sc_metrics.items() if k != "record_id"}
-                out_metrics.update({f"seq_des/median/{k}": np.nanmedian(v) for k, v in sc_metrics.items() if k != "record_id"})
+            # Update metrics
+            out_metrics = {f"seq_des/mean/{k}": np.nanmean(v) for k, v in sc_metrics.items() if k != "record_id"}
+            out_metrics.update({f"seq_des/median/{k}": np.nanmedian(v) for k, v in sc_metrics.items() if k != "record_id"})
 
-                # Log metrics to wandb
-                wandb.log(out_metrics)
+            # Log metrics to wandb
+            wandb.log(out_metrics)
 
 
 # identify interacting residues at the binder interface
