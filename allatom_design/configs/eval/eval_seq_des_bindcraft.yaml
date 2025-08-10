@@ -77,6 +77,8 @@ struct_pred_cfg:
   af2_interface:
     data_dir: /media/scratch/huang_lab/model_params/af2
     prediction_models: [0, 1]
+    rm_target_seq: false
+    rm_target_sc: false
 
 
 hydra:
