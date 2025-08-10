@@ -77,11 +77,11 @@ def main(cfg: DictConfig):
                 # in case we don't want to run on all samples
                 break
 
-            example = thread_sequence_onto_example(example, ligandmpnn_restype[bi], label_seq_id[bi])
+            threaded_example = thread_sequence_onto_example(example, ligandmpnn_restype[bi], label_seq_id[bi])
 
             # Save structure with ligandMPNN sequence threaded on
             threaded_pdb = f"{threaded_pdb_dir}/{record_id}_sample{bi}.cif"
-            write_feats_to_mmcif(example, input_structure, threaded_pdb)
+            write_feats_to_mmcif(threaded_example, input_structure, threaded_pdb)
             threaded_pdbs.append(threaded_pdb)
 
 
