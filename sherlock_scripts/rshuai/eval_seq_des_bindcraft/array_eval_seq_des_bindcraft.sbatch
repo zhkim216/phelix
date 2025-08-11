@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=seq_des_bindcraft
 #SBATCH -p possu
-#SBATCH --array=0-1
+#SBATCH --array=0-2
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -31,9 +31,14 @@ AF2_DATA_DIR=/scratch/users/rshuai/model_params/af2
 PDB_DIR=/scratch/users/rshuai/datasets/bindcraft_traj_benchmark/pdbs
 PDB_NAME_LIST=/scratch/users/rshuai/datasets/bindcraft_traj_benchmark/pdb_name_lists/subset_20.txt
 
+# Ensemble design config
+CONFORMER_DIR=/scratch/users/rshuai/datasets/bindcraft_traj_benchmark/conformers/spd0_a4_cfg2/t0.7
+PDB_NAME_LIST=/scratch/users/rshuai/datasets/bindcraft_traj_benchmark/pdb_name_lists/subset_20.txt
+
 CONFIGS=(
 "ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a10_cfg02/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt"
 "use_proteinmpnn=true"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a10_cfg02/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt ensemble_design=true"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 
@@ -60,6 +65,8 @@ python3 allatom_design/eval/eval_seq_des_bindcraft.py \
     struct_pred_cfg.af2_interface.data_dir=${AF2_DATA_DIR} \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
+    ensemble_input_cfg.conformer_dir=${CONFORMER_DIR} \
+    ensemble_input_cfg.pdb_name_list=${PDB_NAME_LIST} \
     run_self_consistency_eval=true \
     ${OVERRIDES} \
     hydra.run.dir=${HYDRA_DIR}

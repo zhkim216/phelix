@@ -15,7 +15,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.eval_setup_utils import (process_pdb_files,
-                                                             wandb_setup, get_conformer_dirs, process_conformer_dirs)
+                                                             wandb_setup, get_conformer_dirs, process_conformer_dirs, get_ensemble_constraint_df)
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import (
     get_seq_des_model, run_seq_des_ensemble)
@@ -64,16 +64,7 @@ def main(cfg: DictConfig):
         pos_constraint_df = pd.read_csv(cfg.pos_constraint_csv)
 
         # expand pdb_key to all conformers
-        pos_constraint_df["pdb_key"] = pos_constraint_df["pdb_key"].str.lower()
-        conformer_dfs = []
-        for pdb_key in pos_constraint_df["pdb_key"].unique():
-            if pdb_key not in pdb_to_processed_conformers:
-                continue
-            conformer_df = pos_constraint_df[pos_constraint_df["pdb_key"] == pdb_key]
-            conformer_df = pd.concat([conformer_df] * len(pdb_to_processed_conformers[pdb_key]), ignore_index=True)
-            conformer_df["pdb_key"] = [Path(x).stem for x in pdb_to_processed_conformers[pdb_key]]
-            conformer_dfs.append(conformer_df)
-        pos_constraint_df = pd.concat(conformer_dfs)
+        pos_constraint_df = get_ensemble_constraint_df(pos_constraint_df, pdb_to_processed_conformers)
     else:
         pos_constraint_df = None
 

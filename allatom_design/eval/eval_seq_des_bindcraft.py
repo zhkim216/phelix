@@ -19,10 +19,14 @@ from scipy.spatial import cKDTree
 from allatom_design.eval.eval_utils import bindcraft_utils, eval_metrics
 from allatom_design.eval.eval_utils.eval_setup_utils import (get_pdb_files,
                                                              process_pdb_files,
-                                                             wandb_setup)
+                                                             get_conformer_dirs,
+                                                             process_conformer_dirs,
+                                                             wandb_setup,
+                                                             get_ensemble_constraint_df)
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import (get_seq_des_model,
-                                                          run_seq_des)
+                                                          run_seq_des,
+                                                          run_seq_des_ensemble)
 
 
 @hydra.main(config_path="../configs/eval", config_name="eval_seq_des_bindcraft", version_base="1.3.2")
@@ -58,10 +62,24 @@ def main(cfg: DictConfig):
 
     target_chain, binder_chain = "A", "B"  # for bindcraft targets, target is always chain A, and binder is chain B
 
-    # Load and preprocess the trajectory pdbs
-    traj_pdbs = get_pdb_files(**cfg.input_cfg)
-    processed_struct_files = process_pdb_files(traj_pdbs, processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg)
-    processed_struct_files = natsorted(processed_struct_files)
+    if not cfg.use_proteinmpnn and cfg.ensemble_design:
+        # Load in conformer directories to eval on
+        conformer_dirs = get_conformer_dirs(**cfg.ensemble_input_cfg)
+        conformer_dirs = natsorted(conformer_dirs)
+
+        # Process conformer directories
+        pdb_to_processed_conformers, pdb_to_conformer_files = process_conformer_dirs(conformer_dirs,
+                                                             cfg.ensemble_cfg.max_num_conformers,
+                                                             cfg.ensemble_cfg.include_primary_conformer,
+                                                             f"{log_dir}/processed_structures",
+                                                             cfg.pdb_processing_cfg,
+                                                             return_original_conformer_files=True)
+        traj_pdbs = [v[0] for v in pdb_to_conformer_files.values()]
+    else:
+        # Load and preprocess the trajectory pdbs
+        traj_pdbs = get_pdb_files(**cfg.input_cfg)
+        processed_struct_files = process_pdb_files(traj_pdbs, processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg)
+        processed_struct_files = natsorted(processed_struct_files)
 
     # Recompute interface residues
     key_to_fixed_pos_seq = {}
@@ -117,15 +135,21 @@ def main(cfg: DictConfig):
         # create fixed position df
         pos_constraint_df = pd.DataFrame(key_to_fixed_pos_seq.items(), columns=["pdb_key", "fixed_pos_seq"])
 
-        # Run sequence design model
-        outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                              struct_file_paths=processed_struct_files, device=device, out_dir=log_dir,
-                              pos_constraint_df=pos_constraint_df)
+        if cfg.ensemble_design:
+            pos_constraint_df = get_ensemble_constraint_df(pos_constraint_df, pdb_to_processed_conformers)
+            outputs = run_seq_des_ensemble(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
+                                           pdb_to_processed_conformers=pdb_to_processed_conformers, device=device, pos_constraint_df=pos_constraint_df,
+                                           out_dir=log_dir)
+
+        else:
+            outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
+                                struct_file_paths=processed_struct_files, device=device, out_dir=log_dir,
+                                pos_constraint_df=pos_constraint_df)
         sampled_pdbs = outputs["out_pdbs"]
 
         # Save outputs to CSV
         record_ids = [Path(x).stem.lower() for x in outputs["out_pdbs"]]
-        output_df = pd.DataFrame({"record_id": record_ids, "pdb_key": outputs["pdb_keys"], "seq": outputs["seqs"], "input_seq": outputs["input_seqs"]})
+        output_df = pd.DataFrame({"record_id": record_ids, "seq": outputs["seqs"], "input_seq": outputs["input_seqs"]})
         output_df.to_csv(f"{log_dir}/seq_des_outputs.csv", index=False)
 
         if cfg.run_self_consistency_eval:
