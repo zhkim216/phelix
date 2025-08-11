@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=ligandmpnn_sc_eval
 #SBATCH -p bioe,possu
-#SBATCH --array=0-4
+#SBATCH --array=0-5
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -33,18 +33,19 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Inputs config
-PDB_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/pdbs
+PDB_DIR=/scratch/users/rshuai/datasets/boltz_test_cifs/pdbs
 PDB_LIST_STEM=protein_monomer_32_512_no_ligand
-PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/${PDB_LIST_STEM}.txt
-EVALS_BASE_DIR=/scratch/users/rshuai/allatom_design/allatom_design/boltz_val_cifs_evals/${PDB_LIST_STEM}
+PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_test_cifs/pdb_name_lists/${PDB_LIST_STEM}.txt
+EVALS_BASE_DIR=/scratch/users/rshuai/allatom_design/allatom_design/boltz_test_cifs_evals/${PDB_LIST_STEM}
 
 # Model to evaluate
 EVAL_NAMES=(
-    "ligandmpnn_spd0_a4_cfg2_t0.7_nc1"
-    "ligandmpnn_spd0_a4_cfg2_t0.7_nc2"
-    "ligandmpnn_spd0_a4_cfg2_t0.7_nc4"
-    "ligandmpnn_spd0_a4_cfg2_t0.7_nc8"
-    "ligandmpnn_spd0_a4_cfg2_t0.7_nc16"
+    "ligandmpnn_spd0_a4_cfg2_t0.65_n175_nc16"
+    "ligandmpnn_spd0_a4_cfg2_t0.7_n150_nc16"
+    "ligandmpnn_spd0_a4_cfg2_t0.75_n125_nc16"
+    "ligandmpnn_spd0_a4_cfg2_t0.8_n100_nc16"
+    "ligandmpnn_spd0_a4_cfg2_t0.85_n75_nc16"
+    "ligandmpnn_spd0_a4_cfg2_t0.9_n50_nc16"
 )
 EVAL_NAME=${EVAL_NAMES[$SLURM_ARRAY_TASK_ID]}
 LIGANDMPNN_OUTPUTS_DIR=${EVALS_BASE_DIR}/${EVAL_NAME}/designs
@@ -67,5 +68,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/benchmarking/ligandmpnn_sc_e
     ligandmpnn_outputs_dir=${LIGANDMPNN_OUTPUTS_DIR} \
     input_cfg.pdb_dir=${PDB_DIR} \
     input_cfg.pdb_name_list=${PDB_NAME_LIST} \
+    input_cfg.skip_pdb_names="['8add.cif', '8qcw.cif']" \
     max_samples_per_pdb=8 \
     hydra.run.dir=${HYDRA_DIR}
