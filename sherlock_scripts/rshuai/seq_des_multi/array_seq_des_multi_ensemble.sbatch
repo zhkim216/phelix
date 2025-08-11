@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=sd3_a10_ens
 #SBATCH -p bioe
-#SBATCH --array=0-6
+#SBATCH --array=0-7
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -25,7 +25,7 @@ SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, red
 export SOFTWARE_PATH=${SOFTWARE_PATH}  # required for mmseqs, foldseek, redis, etc.
 
 # Model params (if running self-consistency eval)
-STRUCT_PRED_MODEL=boltz1
+STRUCT_PRED_MODEL=esmfold
 BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
 
 # Inputs config
