@@ -581,7 +581,7 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
 
         if pd.isna(pos_restrict_aatype):
             if verbose:
-                print(f"{pdb_key}: No amino acid restrictions specified.")
+                print(f"{pdb_key}: No position-wise amino acid restrictions specified.")
             continue
 
         # Set up example

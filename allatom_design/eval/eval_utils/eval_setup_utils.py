@@ -303,7 +303,10 @@ def get_conformer_dirs(conformer_dir: str,
                        pdb_name_list: str | list[str] | None,
                        # slurm array parameters for parallelization
                        array_id: int | None,
-                       num_arrays: int | None) -> list[str]:
+                       num_arrays: int | None,
+                       # other options
+                       use_lowercase_pdb_names: bool = False,
+                       ) -> list[str]:
     """
     Get a list of conformer directories from a directory, either by specifying a list of pdb_names or by getting all files.
 
@@ -316,6 +319,9 @@ def get_conformer_dirs(conformer_dir: str,
                 pdb_names = f.read().splitlines()
         else:
             pdb_names = pdb_name_list
+        if use_lowercase_pdb_names:
+            # helpful since outputs of partial diffusion are all lowercase
+            pdb_names = [pdb_name.lower() for pdb_name in pdb_names]
         conformer_dirs = [f"{conformer_dir}/{Path(pdb_name).stem}" for pdb_name in pdb_names]
     else:
         # get all directories in the conformer_dir
@@ -417,3 +423,23 @@ def process_conformer_dirs(conformer_dirs: list[str],
         return pdb_to_processed_conformers, pdb_to_conformer_files
 
     return pdb_to_processed_conformers
+
+
+def get_ensemble_constraint_df(pos_constraint_df: pd.DataFrame,
+                               pdb_to_processed_conformers: dict[str, list[str]],
+                               ) -> pd.DataFrame:
+    """
+    Expand a pos_constraint_df to include all conformers
+    """
+    # expand pdb_key to all conformers
+    pos_constraint_df["pdb_key"] = pos_constraint_df["pdb_key"].str.lower()
+    conformer_dfs = []
+    for pdb_key in pos_constraint_df["pdb_key"].unique():
+        if pdb_key not in pdb_to_processed_conformers:
+            continue
+        conformer_df = pos_constraint_df[pos_constraint_df["pdb_key"] == pdb_key]
+        conformer_df = pd.concat([conformer_df] * len(pdb_to_processed_conformers[pdb_key]), ignore_index=True)
+        conformer_df["pdb_key"] = [Path(x).stem for x in pdb_to_processed_conformers[pdb_key]]
+        conformer_dfs.append(conformer_df)
+    pos_constraint_df = pd.concat(conformer_dfs)
+    return pos_constraint_df

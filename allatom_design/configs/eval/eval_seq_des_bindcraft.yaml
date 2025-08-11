@@ -21,6 +21,18 @@ input_cfg:
   pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
   n_subsample: null  # randomly sample this many pdb keys, null to use all
 
+ensemble_input_cfg:
+  conformer_dir: null
+  pdb_name_list: null
+  array_id: null
+  num_arrays: null
+  use_lowercase_pdb_names: true  # helpful since outputs of partial diffusion are all lowercase
+
+# Ensemble parameters
+ensemble_design: false
+ensemble_cfg:
+  max_num_conformers: 16
+  include_primary_conformer: true
 
 # PDB file processing
 pdb_processing_cfg:
@@ -77,8 +89,8 @@ struct_pred_cfg:
   af2_interface:
     data_dir: /media/scratch/huang_lab/model_params/af2
     prediction_models: [0, 1]
-    rm_target_seq: false
-    rm_target_sc: false
+    rm_target_seq: true
+    rm_target_sc: true
 
 
 hydra:
