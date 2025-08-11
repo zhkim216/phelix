@@ -32,14 +32,15 @@ export TORCH_HOME=/scratch/users/rshuai/cache/torch
 # PDB_DIR=/scratch/users/rshuai/datasets/bindcraft_traj_benchmark/pdbs
 # PDB_NAME_LIST=/scratch/users/rshuai/datasets/bindcraft_traj_benchmark/pdb_name_lists/subset_20.txt
 PDB_DIR=/scratch/users/rshuai/datasets/boltz_test_cifs/pdbs
-PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_test_cifs/pdb_name_lists/protein_monomer_32_512_no_ligand.txt
+LIST_STEM=protein_monomer_32_512_no_ligand
+PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_test_cifs/pdb_name_lists/${LIST_STEM}.txt
 
 # Denoiser checkpoint
 CKPT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/spd0_a4_cfg2/checkpoints/ema/ad-step625000-epoch624-ema0.99.ckpt
 
 # Outputs config
 # BASE_OUT_DIR=/scratch/users/rshuai/datasets/bindcraft_traj_benchmark/conformers/spd0_a4_cfg2
-BASE_OUT_DIR=/scratch/users/rshuai/datasets/boltz_test_cifs/conformers/spd0_a4_cfg2
+BASE_OUT_DIR=/scratch/users/rshuai/datasets/boltz_test_cifs/conformers/${LIST_STEM}/spd0_a4_cfg2
 
 # Sweep params
 T_VALS=(
