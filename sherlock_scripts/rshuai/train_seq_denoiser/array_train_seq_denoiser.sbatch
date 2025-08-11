@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sd3_a10
-#SBATCH -p possu
-#SBATCH --array=0-2
+#SBATCH --job-name=sd8_a0
+#SBATCH -p bioe,possu
+#SBATCH --array=0-7
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -29,7 +29,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
-EXP_NAME_BASE=sd3_a10
+EXP_NAME_BASE=sd8_a0
 GROUP=seq_des
 
 # Dataset paths
@@ -37,9 +37,14 @@ PDB_PATH=/scratch/users/rshuai/datasets/boltz_v2
 
 # Inputs config
 CONFIGS=(
-"denoiser.mpnn.n_layers=3"
-"denoiser.mpnn.n_layers=5 denoiser.mpnn.n_channel=256"
-"denoiser.mpnn.n_layers=3 data.holdout_id_txts=/scratch/users/rshuai/datasets/boltz_v2/splits/soluble_exclude_pdbs.txt"
+"data.sampler.beta_chain=0.5 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=1"
+"data.sampler.beta_chain=0.5 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=10"
+"data.sampler.beta_chain=0.5 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=40"
+"data.sampler.beta_chain=0.5 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=100"
+"data.sampler.beta_chain=1.0 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=10"
+"data.sampler.beta_chain=1.0 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=40"
+"data.sampler.beta_chain=1.0 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=100"
+"data.sampler.beta_chain=3.0 data.sampler.beta_interface=1.0 +data.cropper.only_keep_resolved=true +data.cropper.max_neighborhood=40"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg$(printf "%02d" $SLURM_ARRAY_TASK_ID)"
@@ -58,9 +63,10 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     train.batch_size=8 \
     trainer.accumulate_grad_batches=4 \
     train.compile_model=true \
-    denoiser.augment_eps=0.3 \
     mask_selector.restype_masking_schedule=uniform_t \
+    denoiser.augment_eps=0.3 \
     data.filters.4.max_residues=2048 \
+    data.cropper._target_=allatom_design.data.crop.boltz.BoltzCropper \
     checkpointing.save_latest_every_n_steps=2500 \
     trainer.check_val_every_n_epoch=2 \
     ${OVERRIDES} \
