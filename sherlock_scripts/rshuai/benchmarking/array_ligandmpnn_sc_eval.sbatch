@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=ligandmpnn_sc_eval
 #SBATCH -p bioe,possu
-#SBATCH --array=0-5
+#SBATCH --array=0
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -40,12 +40,7 @@ EVALS_BASE_DIR=/scratch/users/rshuai/allatom_design/allatom_design/boltz_test_ci
 
 # Model to evaluate
 EVAL_NAMES=(
-    "ligandmpnn_spd0_a4_cfg2_t0.65_n175_nc16"
-    "ligandmpnn_spd0_a4_cfg2_t0.7_n150_nc16"
-    "ligandmpnn_spd0_a4_cfg2_t0.75_n125_nc16"
-    "ligandmpnn_spd0_a4_cfg2_t0.8_n100_nc16"
-    "ligandmpnn_spd0_a4_cfg2_t0.85_n75_nc16"
-    "ligandmpnn_spd0_a4_cfg2_t0.9_n50_nc16"
+    "ligandmpnn"
 )
 EVAL_NAME=${EVAL_NAMES[$SLURM_ARRAY_TASK_ID]}
 LIGANDMPNN_OUTPUTS_DIR=${EVALS_BASE_DIR}/${EVAL_NAME}/designs
