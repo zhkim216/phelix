@@ -268,6 +268,7 @@ class TokenFeatures(nn.Module):
         self.num_rbf = cfg.num_rbf
         self.num_positional_embeddings = cfg.num_positional_embeddings
         self.edge_n_channel = cfg.edge_n_channel
+        self.use_multichain_encoding = cfg.get("use_multichain_encoding", False)
 
         # Layers
         self.embeddings = PositionalEncodings(self.num_positional_embeddings)
@@ -303,7 +304,7 @@ class TokenFeatures(nn.Module):
         offset = gather_edges(offset[:,:,:,None], E_idx)[:,:,:,0]  # [B, L, K]
 
         chain_labels = torch.zeros_like(batch["asym_id"])
-        if self.cfg.get("use_multichain_encoding", False):
+        if self.use_multichain_encoding:
             # only use multichain encoding if the model has been trained with it TODO: need to also handle residue index
             chain_labels = batch["asym_id"]
         d_chains = ((chain_labels[:, :, None] - chain_labels[:,None,:])==0).long()  # find self vs non-self interaction

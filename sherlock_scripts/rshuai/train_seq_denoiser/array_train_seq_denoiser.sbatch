@@ -69,5 +69,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/train_seq_denoiser.py \
     data.cropper._target_=allatom_design.data.crop.boltz.BoltzCropper \
     checkpointing.save_latest_every_n_steps=2500 \
     trainer.check_val_every_n_epoch=2 \
+    denoiser.mpnn.token_features.use_multichain_encoding=true \
     ${OVERRIDES} \
     hydra.run.dir=${HYDRA_DIR}

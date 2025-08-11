@@ -44,6 +44,7 @@ mpnn:
     num_rbf: 16
     num_positional_embeddings: 16
     edge_n_channel: ${denoiser.mpnn.n_channel}
+    use_multichain_encoding: false
 
   potts:
     k_neighbors_potts: 48
