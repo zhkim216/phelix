@@ -377,8 +377,8 @@ restype_atom_bb = torch.zeros(num_tokens, max_num_atoms) # 1 if atom is backbone
 restype_atom_scn = torch.zeros(num_tokens, max_num_atoms) # 1 if atom is sidechain atom, 0 otherwise, shape: (num_tokens, max_num_atoms)
 
 for res3, atom_list in ref_atoms.items():
-    if (res3 not in prot_token_to_letter) or (res3 in unk_token.values()):
-        # Skip non-protein residues or unknown residues
+    if (res3 not in prot_token_to_letter):
+        # Skip non-protein residues
         continue
     id = token_ids[res3]
     for i, atom in enumerate(atom_list):

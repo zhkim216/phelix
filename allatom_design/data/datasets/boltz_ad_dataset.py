@@ -389,7 +389,7 @@ def featurize_diffusion_inputs(tokenized: Tokenized, use_auth_as_residx: bool, m
     # Get mask for standard protein tokens
     protein_token_mask = (tokenized.tokens["mol_type"] == const.chain_type_ids["PROTEIN"]) & (tokenized.tokens["is_standard"])
 
-    # Also only include resolved tokens  # TODO: is this the right place to put this?
+    # Also only include resolved tokens
     protein_token_mask = protein_token_mask * tokenized.tokens["resolved_mask"]
 
     # Subset tokenized data to only include protein tokens

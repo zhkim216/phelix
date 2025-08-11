@@ -260,8 +260,7 @@ def process_sd_atom_features(
 
         # Fill in protein backbone and sidechain atom masks
         chain_type = const.chain_types[token["mol_type"]]
-        if chain_type == "PROTEIN":
-            # TODO: make this use is_standard, and allow backbone atoms to be included for UNK tokens
+        if (chain_type == "PROTEIN") and (token["is_standard"]):
             restype = const.token_ids[const.tokens[token["res_type"]]]
             prot_bb_atom_mask.extend(const.restype_atom_bb[restype].tolist()[:atom_num])
             prot_scn_atom_mask.extend(const.restype_atom_scn[restype].tolist()[:atom_num])

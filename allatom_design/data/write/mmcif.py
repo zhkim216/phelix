@@ -503,20 +503,25 @@ def write_diffusion_inputs_to_mmcif(feats: dict[str, TensorType["b n ..."]], fil
     boltz_feats = diffusion_inputs_to_boltz_feats(feats)
 
     if full_feats is not None:
-        # TODO; find a better way to do this
         full_feats = to(full_feats, "cpu")
-        _, atomwise_token_idx = torch.max(full_feats["atom_to_token"], dim=-1)
-        gather_mask = (torch.isin(atomwise_token_idx, boltz_feats["token_index"]) * full_feats["prot_bb_atom_mask"]).bool()
-        B = boltz_feats["token_index"].shape[0]
-
-        # overwrite coords and atom_resolved_mask with diffusion inputs
-        for bi in range(B):
-            full_feats["coords"][bi][gather_mask[bi]] = boltz_feats["coords"][bi]
-            full_feats["atom_resolved_mask"][bi][gather_mask[bi]] = boltz_feats["atom_resolved_mask"][bi].bool()
 
         # overwrite res_type with diffusion inputs
         batch_indices, dest_indices, src_indices = torch.where((full_feats["token_index"].unsqueeze(-1) == boltz_feats["token_index"].unsqueeze(-2)))
         full_feats["res_type"][batch_indices, dest_indices] = boltz_feats["res_type"][batch_indices, src_indices]
+
+        _, atomwise_token_idx = torch.max(full_feats["atom_to_token"], dim=-1)
+        atomwise_token_resolved_mask = full_feats["token_resolved_mask"].gather(dim=-1, index=atomwise_token_idx)
+        B = boltz_feats["token_index"].shape[0]
+        for bi in range(B):
+            # create gather_mask as True for all backbone atoms in original structure, False otherwise
+            gather_mask = (torch.isin(atomwise_token_idx[bi], boltz_feats["token_index"]) * full_feats["prot_bb_atom_mask"][bi])
+            gather_mask = gather_mask * atomwise_token_resolved_mask[bi]  # mask out atoms where token is not resolved
+            gather_mask = gather_mask.bool()
+
+            # overwrite coords and atom_resolved_mask with diffusion inputs
+            atom_pad_mask_i = boltz_feats["atom_pad_mask"][bi].bool()
+            full_feats["coords"][bi][gather_mask] = boltz_feats["coords"][bi][atom_pad_mask_i]
+            full_feats["atom_resolved_mask"][bi][gather_mask] = boltz_feats["atom_resolved_mask"][bi][atom_pad_mask_i].bool()
 
         boltz_feats = full_feats
 
