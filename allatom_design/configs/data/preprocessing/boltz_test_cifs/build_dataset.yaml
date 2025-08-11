@@ -1,0 +1,39 @@
+mmcif_dir: /media/scratch/datasets/boltz_test_cifs/mmCIF
+test_ids_txt: /media/scratch/datasets/boltz_v2/splits/test_ids.txt
+out_dir: /media/scratch/datasets/boltz_test_cifs
+num_workers: 8
+
+# PDBs to explicitly exclude
+exclude_pdb_keys: ["8tvl"]
+
+# PDB file processing
+pdb_processing_cfg:
+  num_workers: ${num_workers}
+
+  # if we have to convert PDBs to mmCIFs
+  pdb_to_cif_conversion_cfg:
+    assign_label_seq_id: false  # if true, automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
+
+  # CCD
+  ccd_cfg:
+    use_redis: true
+
+    # If using redis (fast)
+    ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
+
+    # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)
+    ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
+
+# Tokenizer and featurizer configs
+data_cfg:
+  atoms_per_window_queries: 32
+  num_bins: 64
+
+  tokenizer:
+    _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
+
+  # Featurizer for prefeaturizing inputs
+  featurizer:
+    _target_: allatom_design.data.feature.seq_des_featurizer.SequenceDesignFeaturizer
+
+copy_subset_cifs: false  # if true, copy the subset cifs to a new directory for convenience in visualization
