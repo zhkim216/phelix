@@ -49,12 +49,13 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
-BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/ensemble_design/sd3_a9_ens2
+BASE_EXP_NAMe
+BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/ensemble_design/${BASE_EXP_NAME}
 
 # Wandb settings / experiment name
 WANDB_ID=richardshuai
 GROUP=seq_des
-EXP_NAME=sd3_a9_idx${SLURM_ARRAY_TASK_ID}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
+EXP_NAME=${BASE_EXP_NAME}_idx${SLURM_ARRAY_TASK_ID}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
 
 # Run training script
 cd ${BASE_DIR}
