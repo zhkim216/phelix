@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=sd3_a10_ens
 #SBATCH -p bioe
-#SBATCH --array=0-7
+#SBATCH --array=0
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
@@ -36,12 +36,6 @@ CKPT_PATH=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a10_cfg00/chec
 
 CONFIGS=(
 "ckpt_path=${CKPT_PATH} input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.6_n200"
-"ckpt_path=${CKPT_PATH} input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.65_n175"
-"ckpt_path=${CKPT_PATH} input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.7_n150"
-"ckpt_path=${CKPT_PATH} input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.75_n125"
-"ckpt_path=${CKPT_PATH} input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.8_n100"
-"ckpt_path=${CKPT_PATH} input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.85_n75"
-"ckpt_path=${CKPT_PATH} input_cfg.conformer_dir=${BASE_CONFORMER_DIR}/t0.9_n50"
 )
 OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
 
@@ -50,7 +44,7 @@ export HF_HOME=/scratch/users/rshuai/cache/huggingface
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 
 # Model to use
-BASE_EXP_NAME=sd3_a10_test_ens0
+BASE_EXP_NAME=sd3_a10_test_ens1
 BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/ensemble_design/${BASE_EXP_NAME}
 
 # Wandb settings / experiment name
@@ -66,7 +60,7 @@ python3 allatom_design/eval/sampling/seq_des_multi_ensemble.py \
     wandb.group=${GROUP} \
     exp_name=${EXP_NAME} \
     base_out_dir=${BASE_OUT_DIR} \
-    max_num_conformers=16 \
+    max_num_conformers=1 \
     struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
     struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
     run_self_consistency_eval=true \
