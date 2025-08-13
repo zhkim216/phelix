@@ -158,7 +158,9 @@ def plot_metric_vs_t(
 
     # Set y-axis limits specifically for pLDDT
     if is_plddt:
-        ax.set_ylim(0, 100)
+        ax.set_ylim(50, 100)
+    else:
+        ax.set_ylim(0, 8)
 
     # Save the figure with a tight bounding box
     plt.savefig(out_path, dpi=300, bbox_inches="tight")

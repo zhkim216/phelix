@@ -126,6 +126,11 @@ def plot_metrics_vs_timestep(
 
     ax.set_xlabel("Timestep")
     ax.set_ylabel(y_label)
+
+    if metric_col == "seq_recovery":
+        # plot y=x line
+        ax.plot([0, 1], [0, 1], linestyle='--', color='gray')
+
     ax.set_title(title)
     ax.grid(True, alpha=0.5)
     ax.legend()

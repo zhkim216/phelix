@@ -13,8 +13,9 @@ from omegaconf import DictConfig, OmegaConf
 @hydra.main(version_base=None, config_path="../../../configs/eval/benchmarking/plots", config_name="compare_self_consistency")
 def main(cfg: DictConfig) -> None:
     """
-    Iterate over pairs in cfg.comparisons, flipping the axes so the first
-    element of each pair becomes the y-axis and the second becomes the x-axis.
+    Iterate over comparison configs in cfg.comparisons.
+    The first model in the `models` list is the y-axis, the second is the x-axis.
+    The `struct_model_name` is used for plot titles.
     """
     # Create the base output directory
     Path(cfg.base_out_dir).mkdir(parents=True, exist_ok=True)
@@ -66,10 +67,10 @@ def main(cfg: DictConfig) -> None:
         )
 
 
-    # Get all models that we need to load
+    # Get all models that we need to load based on the new structure
     required_models = set()
-    for comparison in cfg.comparisons:
-        required_models.update(comparison)
+    for comp_cfg in cfg.comparisons:
+        required_models.update(comp_cfg.models)
     required_models = list(required_models)
 
     # Build a dictionary for all models defined in `model_csvs` that we require for the comparisons
@@ -102,9 +103,13 @@ def main(cfg: DictConfig) -> None:
             "plot_name": mplot
         }
 
-    # Iterate over all comparisons
-    for comparison in cfg.comparisons:
-        y_model_name, x_model_name = comparison
+    # Iterate over all comparisons from the config
+    for comp_cfg in cfg.comparisons:
+        y_model_name, x_model_name = comp_cfg.models
+        struct_name = comp_cfg.struct_model_name
+
+        # Generate a safe prefix for filenames from the structure model name
+        prefix = struct_name.lower().replace("-", "").replace("_", "")
 
         # Grab the dataframes + plot names
         x_df = model_data[x_model_name]["df"].copy()
@@ -116,16 +121,16 @@ def main(cfg: DictConfig) -> None:
         out_dir_for_comp = Path(cfg.base_out_dir) / f"{y_model_name}-vs-{x_model_name}"
         out_dir_for_comp.mkdir(parents=True, exist_ok=True)
 
-        # For scRMSD (best is min) and pLDDT (best is max)
+        # Create plots for scRMSD and pLDDT with dynamic titles
         create_scatter_plots(
             model1_df=x_df,        # x-axis
             model2_df=y_df,        # y-axis
             model1_name=x_plot_name,
             model2_name=y_plot_name,
             out_dir=out_dir_for_comp,
-            prefix="boltz",
+            prefix=prefix,
             metric="sc_ca_rmsd",
-            metric_title="Boltz-1x scRMSD",
+            metric_title=f"{struct_name} scRMSD",
             best_is_min=True,
             length_df=length_df,
             length_legend_range=length_legend_range
@@ -136,9 +141,9 @@ def main(cfg: DictConfig) -> None:
             model1_name=x_plot_name,
             model2_name=y_plot_name,
             out_dir=out_dir_for_comp,
-            prefix="boltz",
+            prefix=prefix,
             metric="avg_ca_plddt",
-            metric_title="Boltz-1x average pLDDT",
+            metric_title=f"{struct_name} average pLDDT",
             best_is_min=False,
             length_df=length_df,
             length_legend_range=length_legend_range
@@ -168,9 +173,9 @@ def main(cfg: DictConfig) -> None:
                 model1_name=x_plot_name,
                 model2_name=y_plot_name,
                 out_dir=out_dir_for_comp,
-                prefix="boltz",
+                prefix=prefix,
                 metric="sc_ca_rmsd",
-                metric_title="Boltz-1x scRMSD",
+                metric_title=f"{struct_name} scRMSD",
                 best_is_min=True,
                 sse_df=sse_df,
                 loop_prop_range=loop_prop_range
@@ -181,9 +186,9 @@ def main(cfg: DictConfig) -> None:
                 model1_name=x_plot_name,
                 model2_name=y_plot_name,
                 out_dir=out_dir_for_comp,
-                prefix="boltz",
+                prefix=prefix,
                 metric="avg_ca_plddt",
-                metric_title="Boltz-1x average pLDDT",
+                metric_title=f"{struct_name} average pLDDT",
                 best_is_min=False,
                 sse_df=sse_df,
                 loop_prop_range=loop_prop_range
@@ -273,9 +278,6 @@ def create_scatter_plots(
                 vmin=vmin,
                 vmax=vmax
             )
-            # # Put a colorbar below the plot
-            # cbar = plt.colorbar(sc, ax=ax, orientation='horizontal', pad=0.15, fraction=0.046)
-            # cbar.set_label("Protein Length")
         else:
             # If no length info, just use a single color (e.g., steelblue)
             ax.scatter(
