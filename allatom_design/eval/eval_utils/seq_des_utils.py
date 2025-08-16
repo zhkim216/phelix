@@ -31,7 +31,6 @@ from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
 from allatom_design.data.types import Structure
 from allatom_design.data.write.mmcif import (batch_write_feats_to_mmcif,
                                              write_feats_to_mmcif)
-from allatom_design.eval.eval_utils.proteinmpnn_utils import load_mpnn
 from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import \
     compute_potts_energy
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
@@ -71,13 +70,6 @@ def get_seq_des_model(cfg: DictConfig, device: str) -> Dict[str, Any]:
         seq_des_model["model"] = lit_sd_model.model
         seq_des_model["data_cfg"] = data_cfg
         seq_des_model["sampling_cfg"] = sampling_cfg
-
-    elif model_name == "proteinmpnn":
-        mpnn_cfg = OmegaConf.load(cfg.proteinmpnn.mpnn_cfg)
-        mpnn_cfg = OmegaConf.merge(mpnn_cfg, cfg.proteinmpnn.overrides)  # override base mpnn config with mpnn.overrides
-        mpnn_model = load_mpnn(cfg.proteinmpnn.mpnn_params_dir, mpnn_cfg, device=device)
-        seq_des_model["mpnn_model"] = mpnn_model
-        seq_des_model["mpnn_cfg"] = mpnn_cfg
 
     return seq_des_model
 
