@@ -17,7 +17,7 @@ from atomworks.ml.transforms.encoding import EncodeAtomArray
 from p_tqdm import p_umap
 
 
-@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="process_cifs", version_base="1.3.2")
+@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="build_metadata_parquet", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Process a set of mmCIFs using AtomWorks.
@@ -61,23 +61,9 @@ def main(cfg: DictConfig):
     df = pd.DataFrame(itertools.chain(*df))  # flatten list of lists
     save_to_parquet(df, dataset_name, cfg.mmcif_dir, f"{cfg.out_dir}/metadata.parquet")  # save to parquet
 
-    ### Cache examples ###
-    cache_dir = f"{cfg.out_dir}/cache"
-    Path(cache_dir).mkdir(parents=True, exist_ok=True)
-    with open_dict(cfg):
-        cfg.dataset.cif_parser_args["cache_dir"] = cache_dir
-        cfg.dataset.dataset.name = dataset_name
-
     # for caching, we need to save a parquet with unique cif paths to avoid race conditions
     df_cache = df.groupby("path").first().reset_index()
     save_to_parquet(df_cache, dataset_name, cfg.mmcif_dir, f"{cfg.out_dir}/metadata_for_caching.parquet")  # save to parquet
-
-    # iterate over the dataset, and the caching will happen automatically
-    struct_dataset = hydra.utils.instantiate(cfg.dataset)
-    if use_parallel:
-        p_umap(struct_dataset.__getitem__, range(len(struct_dataset)), num_cpus=cfg.num_workers, desc="Caching examples")
-    else:
-        list(tqdm(struct_dataset, desc="Caching examples"))
 
 
 def get_cif_paths(mmcif_dir: str, max_file_size: int | None = None) -> list[str]:
