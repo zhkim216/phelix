@@ -1,0 +1,43 @@
+mmcif_dir: /media/scratch/datasets/boltz_val_cifs/mmCIF
+out_dir: /media/scratch/datasets/atomworks_debug
+
+num_workers: 8
+max_file_size: 1000000
+
+# CIF parser args
+cif_parser_args:
+  add_missing_atoms: true
+  remove_waters: true
+  remove_ccds: []
+  fix_ligands_at_symmetry_centers: true
+  fix_arginines: true
+  convert_mse_to_met: true
+  hydrogen_policy: "remove"
+
+# Data preprocessor
+data_preprocessor_cfg:
+  # args to specify in addition to the cif parser args
+  from_rcsb: true
+  build_assembly: "first"
+
+  # Cutoff distances
+  close_distance: 30.0
+  contact_distance: 5
+  clash_distance: 1.0
+  # Misc
+  ignore_residues: []
+  # Efficiency
+  polymer_pn_unit_limit: 500
+
+
+dataset:
+    _target_: atomworks.ml.datasets.datasets.StructuralDatasetWrapper
+    dataset_parser:
+        _target_: atomworks.ml.datasets.parsers.GenericDFParser
+    dataset:
+        _target_: atomworks.ml.datasets.datasets.PandasDataset
+        name: null
+        id_column: example_id
+        data: ${out_dir}/metadata_for_caching.parquet
+    cif_parser_args: ${cif_parser_args}
+
