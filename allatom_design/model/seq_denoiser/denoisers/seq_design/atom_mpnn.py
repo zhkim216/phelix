@@ -13,14 +13,9 @@ from torchtyping import TensorType
 import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.data.data import batched_gather
-from allatom_design.data.datasets.boltz_sd_dataset import \
-    crop_batch_to_protein_only
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
 from chroma.layers.structure import diffusion
-
-# https://github.com/pyg-team/pytorch_geometric/issues/8747
-from chroma.data.protein import Protein
 
 
 class AtomMPNN(nn.Module):
@@ -203,53 +198,6 @@ class AtomMPNN(nn.Module):
         # Add noise to input coordinates
         noised_coords = batch["coords"] + batch["noise"]
         return noised_coords
-
-
-    @torch.compiler.disable
-    def polymer_noise_perturb(self, batch: dict[str, TensorType["b ..."]], is_sampling: bool) -> dict[str, TensorType["b ..."]]:
-        """
-        Apply polymer backbone diffusion noise to the input coordinates.
-        """
-        if not is_sampling and self.training:
-            # Sample timestep
-            t = self.noise_perturb.sample_t(batch["token_pad_mask"])
-            t = t * self.t_max
-        else:
-            # Use provided timestep or zero if not provided
-            t = batch.get("t", batch["token_pad_mask"].new_zeros(batch["token_pad_mask"].shape[0]))
-
-        # Get protein coordinates and apply noise to the backbone atoms
-        protein_batch, protein_token_mask = crop_batch_to_protein_only(batch, return_crop_mask=True)
-        X_prot = get_tokenwise_coords(protein_batch)
-        X_prot_bb = X_prot[..., const.prot_bb_atom14_idxs, :]
-        if self.canonicalize:
-            X = X_prot_bb
-            C = torch.where(protein_batch["token_exists_mask"].bool(), protein_batch["asym_id"] + 1, -(protein_batch["asym_id"] + 1))
-            S = torch.zeros_like(protein_batch["token_exists_mask"])
-            Xs, Cs, Ss = [], [], []
-            for i in range(X.shape[0]):
-                protein = Protein.from_XCS(X[i:i+1], C[i:i+1], S[i:i+1])
-                protein.canonicalize()
-                X_i, C_i, S_i = protein.to_XCS()
-                Xs.append(X_i)
-                C_i = C_i.squeeze(0)[protein_batch["token_pad_mask"][i].bool()]
-                batch["token_exists_mask"][i, protein_token_mask[i]] = (C_i > 0).float()   # update token_exists_mask to reflect canonicalization
-            X = torch.cat(Xs, dim=0)
-            X_prot_bb = X
-
-        if not is_sampling and self.training:
-            # Only apply noise if not sampling and training
-            X_prot_bb = self.noise_perturb(X_prot_bb, protein_batch["token_exists_mask"], t)
-
-        X_prot[..., const.prot_bb_atom14_idxs, :] = X_prot_bb  # update protein coordinates with possibly canonicalized and noised backbone atoms
-
-        # Scatter back to atom coordinates
-        X_all = get_tokenwise_coords(batch)
-        for i in range(X_all.shape[0]):
-            X_all[i, protein_token_mask[i]] = X_prot[i][protein_batch["token_pad_mask"][i].bool()]
-        batch["coords"] = get_atomwise_coords(batch, X_all)
-        batch["t"] = t
-        return batch
 
 
 class TokenFeatures(nn.Module):

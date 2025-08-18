@@ -180,9 +180,6 @@ def update_config(cfg: DictConfig) -> None:
         cfg.model.inf = 1e4
         cfg.model.eps = 1e-4
 
-    # Fill in dataset name based on pdb_path
-    cfg.data.dataset.name = Path(cfg.data.pdb_path).name
-
 
 if __name__ == "__main__":
     main()

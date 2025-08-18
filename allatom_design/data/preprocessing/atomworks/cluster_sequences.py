@@ -14,6 +14,7 @@ import hydra
 import numpy as np
 import pandas as pd
 from atomworks.ml.utils.misc import hash_sequence
+import atomworks.ml.preprocessing.constants as aw_const
 from omegaconf import DictConfig
 from tqdm import tqdm
 
@@ -36,7 +37,7 @@ def main(cfg: DictConfig) -> None:
     for _, row in tqdm(df.iterrows(), desc="Sorting sequences by type"):
         chain_type = row["q_pn_unit_type"]
         if chain_type in aw_enums.ChainTypeInfo.PROTEINS:
-            if len(row["q_pn_unit_processed_entity_canonical_sequence"]) < 10:
+            if len(row["q_pn_unit_processed_entity_canonical_sequence"]) <= aw_const.PEPTIDE_MAX_RESIDUES:
                 # short sequence
                 shorts.add(row["q_pn_unit_processed_entity_canonical_sequence"])
             else:
@@ -100,6 +101,7 @@ def main(cfg: DictConfig) -> None:
     if df["q_pn_unit_cluster_id"].isna().any():
         print(f"WARNING: {df['q_pn_unit_cluster_id'].isna().sum()} missing values in q_pn_unit_cluster_id")
 
+    df["q_pn_unit_cluster_id"] = df["q_pn_unit_cluster_id"].fillna(-1).astype(np.int32)  # fill missing cluster IDs with -1
     df.to_parquet(f"{cfg.pdb_path}/metadata_clustered.parquet")
     print(f"Saved clustered metadata to {cfg.pdb_path}/metadata_clustered.parquet")
 

@@ -27,53 +27,46 @@ from atomworks.ml.transforms.filters import (
     FilterToSpecifiedPNUnits, HandleUndesiredResTokens, RemoveHydrogens,
     RemoveNucleicAcidTerminalOxygen, RemovePolymersWithTooFewResolvedResidues,
     RemoveTerminalOxygen, RemoveUnresolvedPNUnits)
+from atomworks.ml.transforms.crop import (CropContiguousLikeAF3, CropSpatialLikeAF3)
 
 
-def featurizer(
-    # Preprocessing
-    undesired_res_names: list[str] = AF3_EXCLUDED_LIGANDS,
-    b_factor_min: float | None = None,
-    b_factor_max: float | None = None,
-    # Featurization
-    conformer_generation_timeout: float = 5.0,  # seconds
-    use_element_for_atom_names_of_atomized_tokens: bool = True,
+def sd_featurizer(
+    # cropping
+    max_tokens: int | None = None,
+    max_atoms: int | None = None,
+    crop_center_cutoff_distance: float = 15.0,
+    crop_spatial_p: float = 0.0,
 ) -> Transform:
     """
-    Build a transform pipeline for featurizing a structure parsed by the AtomWorks CIF parser.
+    Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
     """
-    af3_sequence_encoding = AF3SequenceEncoding()
+    # Cropping
+    crop_contiguous_p = 1.0 - crop_spatial_p
+    cropping_transform = Identity()
+    if max_tokens is not None:
+        cropping_transform = RandomRoute(
+            transforms=[
+                CropContiguousLikeAF3(
+                    crop_size=max_tokens,
+                    keep_uncropped_atom_array=True,
+                    max_atoms_in_crop=max_atoms,
+                ),
+                CropSpatialLikeAF3(
+                    crop_size=max_tokens,
+                    crop_center_cutoff_distance=crop_center_cutoff_distance,
+                    keep_uncropped_atom_array=True,
+                    max_atoms_in_crop=max_atoms,
+                ),
+            ],
+            probs=[crop_contiguous_p, crop_spatial_p],
+        )
 
-    # preprocesing transforms
-    preprocessing_transforms = [
-        RemoveHydrogens(),
-        # filter to non-clashing PN units
-        FilterToSpecifiedPNUnits(extra_info_key_with_pn_unit_iids_to_keep="all_pn_unit_iids_after_processing"),
-        RemoveTerminalOxygen(),
-        SetOccToZeroOnBfactor(b_factor_min, b_factor_max),
-        RemoveUnresolvedPNUnits(),
-        RemovePolymersWithTooFewResolvedResidues(min_residues=4),
-        MaskPolymerResiduesWithUnresolvedFrameAtoms(),
-        # NOTE: For inference, we must keep UNL to support ligands that are not in the CCD
-        HandleUndesiredResTokens(undesired_res_tokens=undesired_res_names),  # e.g., non-standard residues
-        FlagAndReassignCovalentModifications(),
-        FlagNonPolymersForAtomization(),
-        AddGlobalAtomIdAnnotation(allow_overwrite=True),
-        AtomizeByCCDName(
-            atomize_by_default=True,
-            res_names_to_ignore=STANDARD_AA + STANDARD_RNA + STANDARD_DNA,
-            move_atomized_part_to_end=False,
-            validate_atomize=False,
-        ),
-        RemoveNucleicAcidTerminalOxygen(),
-        AddWithinChainInstanceResIdx(),
-        AddWithinPolyResIdxAnnotation(),
-    ]
 
-    # featurization transforms
+    # Featurization
     featurization_transforms = [
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
-        EncodeAF3TokenLevelFeatures(sequence_encoding=af3_sequence_encoding),
-        # TODO: for now, we ignore ref pos features because they are too slow to compute
+        EncodeAF3TokenLevelFeatures(sequence_encoding=AF3SequenceEncoding()),
+        # NOTE: for now, we ignore ref pos features because they are too slow to compute
         # GetAF3ReferenceMoleculeFeatures(
         #     conformer_generation_timeout=conformer_generation_timeout,
         #     use_element_for_atom_names_of_atomized_tokens=use_element_for_atom_names_of_atomized_tokens,
@@ -96,5 +89,6 @@ def featurizer(
         "atom_array",
         "extra_info",
     ]
-    transforms = preprocessing_transforms + featurization_transforms + [SubsetToKeys(keys=keys_to_keep)]
+    transforms = [cropping_transform] + featurization_transforms + [SubsetToKeys(keys=keys_to_keep)]
+
     return Compose(transforms)
