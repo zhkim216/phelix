@@ -61,8 +61,8 @@ def main(cfg: DictConfig):
     df = pd.DataFrame(itertools.chain(*df))  # flatten list of lists
     save_to_parquet(df, dataset_name, cfg.mmcif_dir, f"{cfg.out_dir}/metadata.parquet")  # save to parquet
 
-    # for caching, we need to save a parquet with unique cif paths to avoid race conditions
-    df_cache = df.groupby("path").first().reset_index()
+    # for caching, we need to save a parquet with unique pdb IDs to avoid race conditions
+    df_cache = df.groupby("pdb_id").first().reset_index()
     save_to_parquet(df_cache, dataset_name, cfg.mmcif_dir, f"{cfg.out_dir}/metadata_for_caching.parquet")  # save to parquet
 
 

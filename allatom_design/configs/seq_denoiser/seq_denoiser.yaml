@@ -42,64 +42,23 @@ resume:
   # overrides: {}  # add any specific overrides to apply to the config
 
 data:
-  pdb_path: /media/scratch/datasets/boltz
-  holdout_id_cluster_txts: null  # if not null, provide a list of txt files, each containing record IDs whose clusters we should hold out for testing
-  holdout_id_txts: null  # if not null, provide a list of txt files, each containing record IDs we should hold out for testing
-  tokenizer:
-    _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
-  featurizer:
-    _target_: allatom_design.data.feature.seq_des_featurizer.SequenceDesignFeaturizer
+  pdb_path: /media/scratch/datasets/atomworks_debug
+  dataset:
+    _target_: atomworks.ml.datasets.datasets.PandasDataset
+    name: null  # filled in based on pdb_path
+    id_column: example_id
+    data: ${data.pdb_path}/metadata.parquet
+  dataset_parser:
+    _target_: atomworks.ml.datasets.parsers.GenericDFParser
+  transform:
+    _target_: allatom_design.data.transform.training.sd_featurizer
 
-  filters:
-    - _target_: allatom_design.data.filter.dynamic.size.SizeFilter
-      min_chains: 1
-      max_chains: 50
-    - _target_: allatom_design.data.filter.dynamic.date.DateFilter
-      date: "2021-09-30"
-      ref: released
-    - _target_: allatom_design.data.filter.dynamic.resolution.ResolutionFilter
-      resolution: 9.0
-    - _target_: allatom_design.data.filter.dynamic.max_residues.MaxResiduesFilter
-      min_residues: 16
-      max_residues: 4096
-    - _target_: allatom_design.data.filter.dynamic.chain_type_size.ChainTypeSizeFilter
-      chain_type: "PROTEIN"
-      min_chains: 1
-      max_chains: null
-      min_residues: 32
-      max_residues: 512
-
-  val_filters:
-    - ${data.filters.0}
-    - ${data.filters.3}
-    - ${data.filters.4}
-
-  sampler:
-    _target_: allatom_design.data.sample.cluster.ClusterSampler
-    alpha_prot: 1.0
-    alpha_nucl: 0.0
-    alpha_ligand: 0.0
-    beta_chain: 1.0
-    beta_interface: 0.0
-  cropper:
-    _target_: allatom_design.data.crop.contiguous.ContiguousCropper
-    subset_chain_types: ["PROTEIN"]
-
-  # Dataset options
-  max_tokens: 512 # 256
-  max_atoms: 9216 # 4608
-  max_seqs: 32
-  pad_to_max_tokens: true
-  pad_to_max_atoms: true
   samples_per_epoch: 50000
+
   batch_size: ${train.batch_size}
   num_workers: ${num_workers}
   random_seed: ${train.seed}
-  atoms_per_window_queries: 32
-  num_bins: 64
-  n_random_subset: null  # number to subset after filtering
-  msa_crop_kwargs:
-    keep_first_seq: true
+
 
 # Model options
 defaults:
