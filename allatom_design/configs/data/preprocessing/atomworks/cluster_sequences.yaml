@@ -1,0 +1,9 @@
+pdb_path: /media/scratch/datasets/atomworks_debug
+
+clustering_cfgs:
+  - __target__: atomworks.ml.preprocessing.utils.clustering.MMSeqs2Config
+    cluster_identity: 0.4  # Sequence identity threshold for clustering
+    coverage: 0.8  # Coverage threshold: usage depends on coverage mode
+    sensitivity: 8.0  # Sensitivity: ~1.0 faster; ~4.0 fast; ~7.5 sensitive
+    cluster_mode: 0  # CoverageMode.GREEDY_SET_COVER
+    coverage_mode: 0  # CoverageMode.BIDIRECTIONAL

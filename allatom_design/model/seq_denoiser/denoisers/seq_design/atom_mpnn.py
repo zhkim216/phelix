@@ -8,7 +8,6 @@ import torch.nn as nn
 from boltz.model.modules.utils import LinearNoBias
 from omegaconf import DictConfig
 from torch.nn import functional as F
-from torch_cluster import knn_graph
 from torchtyping import TensorType
 
 import allatom_design.data.const as const
@@ -21,7 +20,6 @@ from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
 from chroma.layers.structure import diffusion
 
 # https://github.com/pyg-team/pytorch_geometric/issues/8747
-knn_graph = torch.compiler.disable(knn_graph)
 from chroma.data.protein import Protein
 
 
