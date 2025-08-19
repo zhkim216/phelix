@@ -352,7 +352,7 @@ def run_af2(sequences_list: list[str],
             residue_index_list: list[TensorType["n_s", int]],
             chain_index_list: list[TensorType["n_s", int]],
             pdbs: list[str],  # used for extracting residue index. TODO remove dependence on pdb file
-            af_model: mk_af_model,
+            af_model: "mk_af_model",
             out_dir: str,
             num_models: int,
             sample_models: bool,
