@@ -1,33 +1,74 @@
 
+from typing import Any, override
+
+import atomworks.enums as aw_enums
+import atomworks.io.constants as aw_const
+import numpy as np
+import torch
 from atomworks.io.constants import (AF3_EXCLUDED_LIGANDS, STANDARD_AA,
                                     STANDARD_DNA, STANDARD_RNA)
-from atomworks.ml.encoding_definitions import AF3SequenceEncoding
-from atomworks.ml.transforms.atom_array import (AddGlobalAtomIdAnnotation,
-                                                AddGlobalTokenIdAnnotation,
-                                                AddWithinChainInstanceResIdx,
-                                                AddWithinPolyResIdxAnnotation,
+import allatom_design.data.const as const
+from atomworks.ml.transforms.atom_array import (AddGlobalTokenIdAnnotation,
                                                 ComputeAtomToTokenMap)
-from atomworks.ml.transforms.atomize import (AtomizeByCCDName,
-                                             FlagNonPolymersForAtomization)
 from atomworks.ml.transforms.base import (AddData, Compose, ConditionalRoute,
                                           ConvertToTorch, Identity,
                                           RandomRoute, SubsetToKeys, Transform)
-from atomworks.ml.transforms.bfactor_conditioned_transforms import \
-    SetOccToZeroOnBfactor
 from atomworks.ml.transforms.bonds import AddAF3TokenBondFeatures
-from atomworks.ml.transforms.covalent_modifications import \
-    FlagAndReassignCovalentModifications
+from atomworks.ml.transforms.crop import (CropContiguousLikeAF3,
+                                          CropSpatialLikeAF3)
 from atomworks.ml.transforms.encoding import (EncodeAF3TokenLevelFeatures,
                                               EncodeAtomArray)
 from atomworks.ml.transforms.featurize_unresolved_residues import (
-    MaskPolymerResiduesWithUnresolvedFrameAtoms,
+    MaskResiduesWithSpecificUnresolvedAtoms,
     PlaceUnresolvedTokenAtomsOnRepresentativeAtom,
     PlaceUnresolvedTokenOnClosestResolvedTokenInSequence)
-from atomworks.ml.transforms.filters import (
-    FilterToSpecifiedPNUnits, HandleUndesiredResTokens, RemoveHydrogens,
-    RemoveNucleicAcidTerminalOxygen, RemovePolymersWithTooFewResolvedResidues,
-    RemoveTerminalOxygen, RemoveUnresolvedPNUnits)
-from atomworks.ml.transforms.crop import (CropContiguousLikeAF3, CropSpatialLikeAF3)
+from atomworks.ml.utils.token import (apply_token_wise,
+                                      get_af3_token_center_masks,
+                                      get_af3_token_center_idxs,
+                                      get_af3_token_representative_masks,
+                                      spread_token_wise)
+
+from allatom_design.data.transform.pad import pad_dim
+
+# Keep track of the token/atom dimensions of the features for padding & cropping
+FEAT_TO_TOKEN_DIM = {
+    # Maps feature name to the token dimension
+    # token features
+    "residue_index": [0],
+    "token_index": [0],
+    "asym_id": [0],
+    "entity_id": [0],
+    "sym_id": [0],
+    "restype": [0],
+    "is_protein": [0],
+    "is_rna": [0],
+    "is_dna": [0],
+    "is_ligand": [0],
+    "is_atomized": [0],
+    "token_bonds": [0, 1],
+    "token_to_center_atom": [0],
+    "token_pad_mask": [0],
+    "token_resolved_mask": [0],
+
+    # optional features that might not be present
+    "seq_cond_mask": [0],
+    "token_exists_mask": [0],
+}
+
+FEAT_TO_ATOM_DIM = {
+    # Maps feature name to the atom dimension
+    # atom features
+    "coords": [0],
+    "atom_pad_mask": [0],
+    "atom_resolved_mask": [0],
+    "atom_to_token_map": [0],
+
+    "prot_bb_atom_mask": [0],
+    "prot_scn_atom_mask": [0],
+
+    # optional features that might not be present
+    "atom_cond_mask": [0],
+}
 
 
 def sd_featurizer(
@@ -40,6 +81,14 @@ def sd_featurizer(
     """
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
     """
+    # Featurization that must be done before cropping
+    featurization_transforms_pre_crop = [
+        MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={
+            aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_FRAME_ATOM_NAMES,
+            aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_FRAME_ATOM_NAMES,
+        }),
+    ]
+
     # Cropping
     crop_contiguous_p = 1.0 - crop_spatial_p
     cropping_transform = Identity()
@@ -63,32 +112,105 @@ def sd_featurizer(
 
 
     # Featurization
-    featurization_transforms = [
+    # NOTE: for now, we ignore ref pos features because they are too slow to compute
+    featurization_transforms_post_crop = [
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
-        EncodeAF3TokenLevelFeatures(sequence_encoding=AF3SequenceEncoding()),
-        # NOTE: for now, we ignore ref pos features because they are too slow to compute
-        # GetAF3ReferenceMoleculeFeatures(
-        #     conformer_generation_timeout=conformer_generation_timeout,
-        #     use_element_for_atom_names_of_atomized_tokens=use_element_for_atom_names_of_atomized_tokens,
-        # ),
-        # FindAutomorphismsWithNetworkX(),  # Adds the  "automorphisms" key to the data dictionary
+        EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_SEQUENCE_ENCODING),
         ComputeAtomToTokenMap(),
-        # GetRDKitChiralCenters(),
-        # AddAF3ChiralFeatures(),
         AddAF3TokenBondFeatures(),
         ConvertToTorch(keys=["encoded", "feats"]),
 
         # handle missing atoms and tokens
         PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
         PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"),
+
+        # Add features from the atom_array
+        AddCoordsAndAtomMasks(),
     ]
 
-    keys_to_keep = [
-        "example_id",
-        "feats",
-        "atom_array",
-        "extra_info",
-    ]
-    transforms = [cropping_transform] + featurization_transforms + [SubsetToKeys(keys=keys_to_keep)]
-
+    transforms = [*featurization_transforms_pre_crop,
+                  cropping_transform,
+                  *featurization_transforms_post_crop,
+                  PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
+                  SubsetToKeys(keys=["example_id", "feats"]),
+                  FlattenFeats()]
     return Compose(transforms)
+
+class AddCoordsAndAtomMasks(Transform):
+    """Add coordinates and atom masks to feats."""
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        atom_array = data["atom_array"]
+        feats = data["feats"]
+
+        # Get coordinates
+        feats["coords"] = torch.tensor(atom_array.coord)
+
+                # Get token and atom resolved masks
+        feats["token_resolved_mask"] = torch.tensor(apply_token_wise(atom_array, atom_array.occupancy > 0, np.any)).float()
+        feats["atom_resolved_mask"] = torch.tensor(atom_array.occupancy > 0).float()
+
+        # Make pad masks
+        feats["token_pad_mask"] = torch.ones_like(feats["token_resolved_mask"])
+        feats["atom_pad_mask"] = torch.ones_like(feats["atom_resolved_mask"])
+
+        # Get protein backbone and sidechain atom masks
+        feats["atom_to_token_map"] = feats["atom_to_token_map"].long()
+        atomwise_is_prot = feats["is_protein"].gather(dim=-1, index=feats["atom_to_token_map"])
+
+        atomized = torch.tensor(atom_array.atomize)
+        bb_atom_mask = torch.tensor(atom_array.is_backbone_atom)
+
+        feats["prot_bb_atom_mask"] = bb_atom_mask * ~atomized * atomwise_is_prot
+        feats["prot_scn_atom_mask"] = ~bb_atom_mask * ~atomized * atomwise_is_prot
+        feats["token_to_center_atom"] = torch.tensor(get_af3_token_center_idxs(atom_array))
+
+        return data
+
+
+class PadSDFeats(Transform):
+    """Pad the token and atom features to the maximum number of tokens and atoms."""
+
+    def __init__(self, max_tokens: int | None, max_atoms: int | None):
+        self.max_tokens = max_tokens
+        self.max_atoms = max_atoms
+
+    @override
+    def forward(self,
+                data: dict[str, Any],
+                ) -> dict[str, Any]:
+        feats = data["feats"]
+
+        # Pad to max tokens if given
+        if self.max_tokens is not None:
+            token_pad_len = self.max_tokens - len(feats["token_index"])
+            if token_pad_len > 0:
+                for k, v in FEAT_TO_TOKEN_DIM.items():
+                    if k not in feats:
+                        continue
+                    for dim_to_pad in v:
+                        feats[k] = pad_dim(feats[k], dim_to_pad, token_pad_len)
+
+        # Pad to max atoms if given
+        if self.max_atoms is not None:
+            atom_pad_len = self.max_atoms - len(feats["atom_resolved_mask"])
+            if atom_pad_len > 0:
+                for k, v in FEAT_TO_ATOM_DIM.items():
+                    if k not in feats:
+                        continue
+                    for dim_to_pad in v:
+                        feats[k] = pad_dim(feats[k], dim_to_pad, atom_pad_len)
+
+        return data
+
+
+class FlattenFeats(Transform):
+    """Flatten features into the data dict."""
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        feats = data.pop("feats")
+        for k, v in feats.items():
+            data[k] = v
+        return data
