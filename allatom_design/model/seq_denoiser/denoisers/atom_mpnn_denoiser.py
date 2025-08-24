@@ -11,7 +11,8 @@ from tqdm import tqdm
 import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.data.data import to
-from allatom_design.data.feature.feature_utils import slice_feats
+# from allatom_design.data.feature.feature_utils import slice_feats
+import allatom_design.data.const as const
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn import \
@@ -81,13 +82,9 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         batch["seq_cond_mask"] = batch["seq_cond_mask"] * batch["token_pad_mask"] * batch["token_resolved_mask"]
         batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
 
-        # Get the index of the token that each atom belongs to
-        _, batch["atomwise_token_idx"] = torch.max(batch["atom_to_token"], dim=-1)  # [b, n_atoms]
-
         # Create atom-level mask which is 1 if the atom is part of an unmasked residue type, or 0 otherwise
-        B, N_atoms, N_tokens = batch["atom_to_token"].shape
-        batch["atomwise_seq_cond_mask"] = batch["seq_cond_mask"].gather(dim=-1, index=batch["atomwise_token_idx"])  # [b, n_atoms]
-        batch["atomwise_seq_cond_mask"] = batch["atomwise_seq_cond_mask"] * batch["atom_pad_mask"]  # re-mask out pad atoms, since atomwise_token_idx is 0 for pad atoms
+        batch["atomwise_seq_cond_mask"] = batch["seq_cond_mask"].gather(dim=-1, index=batch["atom_to_token_map"])  # [b, n_atoms]
+        batch["atomwise_seq_cond_mask"] = batch["atomwise_seq_cond_mask"] * batch["atom_pad_mask"]  # re-mask out pad atoms, since atom_to_token_map is 0 for pad atoms
 
         # Build mask for which tokens to include in the token-level grpah
         ## ensure center atom is present, since graph nodes are the center atom
@@ -115,14 +112,15 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             return batch
 
         ## Training: choose random backbone noise ##
-        B, N_atoms, N_tokens = batch["atom_to_token"].shape
-        device = batch["atom_to_token"].device
+        B, N_atoms = batch["atom_pad_mask"].shape
+        N_tokens = batch["token_pad_mask"].shape[1]
+        device = batch["atom_pad_mask"].device
 
         if self.per_residue_eps:
             # per-residue noise. Unlike Cho et al., we sample noise stds from a uniform distribution and apply different noise to each atom in a residue
             # randomly sample noise labels
             noise_labels = torch.rand((B, N_tokens), device=device) * self.augment_eps  # sample std for each residue from uniform [0, augment_eps]
-            atomwise_noise_labels = noise_labels.gather(dim=-1, index=batch["atomwise_token_idx"]) * batch["atom_pad_mask"] # [b, n_atoms]
+            atomwise_noise_labels = noise_labels.gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] # [b, n_atoms]
             noise = torch.randn((B, N_atoms, 3), device=device) * atomwise_noise_labels.unsqueeze(-1)
             noise = noise * batch["atom_cond_mask"].unsqueeze(-1)
         else:
@@ -173,7 +171,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         rejection_step = potts_sampling_cfg.get("rejection_step", potts_proposal == "chromatic")
 
         B, N, _ = batch["res_type"].shape
-        logits_init = torch.zeros((B, N, len(const.tokens)), device=batch["res_type"].device).float()
+        logits_init = torch.zeros((B, N, const.AF3_SEQUENCE_ENCODING.n_tokens), device=batch["res_type"].device).float()
 
         # Handle banned amino acids and aatype restrictions
         ban_S = {"X"}
@@ -239,7 +237,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             feats_si = copy.deepcopy(batch)
             feats_si["res_type"] = torch.where(feats_si["seq_cond_mask"][..., None].bool(),
                                                feats_si["res_type"],
-                                               F.one_hot(S[si], num_classes=len(const.tokens)))
+                                               F.one_hot(S[si], num_classes=const.AF3_SEQUENCE_ENCODING.n_tokens))
             feats_si["coords"] = feats_si["coords"] * feats_si["atom_cond_mask"].unsqueeze(-1)
             feats_si["atom_resolved_mask"] = feats_si["atom_resolved_mask"] * feats_si["atom_cond_mask"]
             output_feats.append(feats_si)

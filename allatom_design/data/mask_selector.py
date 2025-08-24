@@ -41,7 +41,7 @@ class MaskSelector:
         seq_cond_mask = torch.rand(B, N, device=device) < rearrange(t, "b -> b 1")
 
         # Non-protein restypes are always kept
-        seq_cond_mask = torch.where(batch["mol_type"] != const.chain_type_ids["PROTEIN"],
+        seq_cond_mask = torch.where(~batch["is_protein"],
                                     torch.ones_like(seq_cond_mask),
                                     seq_cond_mask)
 
@@ -54,7 +54,7 @@ class MaskSelector:
         Create a mask denoting which atoms to mask out.
         0 if we should mask, 1 if we should keep.
         """
-        B, N_atoms, N_tokens = batch["atom_to_token"].shape
+        B, _ = batch["atom_to_token_map"].shape
         device = batch["atom_resolved_mask"].device
 
         atom_cond_mask = batch["atom_resolved_mask"].clone()  # [n_atoms]
@@ -64,13 +64,12 @@ class MaskSelector:
         tok_keep_scn_p = torch.rand(B, device=device)
         tok_keep_scn_mask = torch.rand_like(batch["seq_cond_mask"]) < rearrange(tok_keep_scn_p, "b -> b 1")
         tok_keep_scn_mask = tok_keep_scn_mask * batch["seq_cond_mask"]  # sidechains should be masked where seq is masked
-        tok_keep_scn_mask = torch.where(batch["mol_type"] != const.chain_type_ids["PROTEIN"],  # non-protein tokens should be kept
+        tok_keep_scn_mask = torch.where(~batch["is_protein"],  # non-protein tokens should be kept
                                         torch.ones_like(tok_keep_scn_mask),
                                         tok_keep_scn_mask)
 
         ## convert to atomwise mask
-        _, atom_token_idx = torch.max(batch["atom_to_token"], dim=-1)  # [b, n_atoms]
-        atomwise_tok_keep_scn_mask = tok_keep_scn_mask.gather(dim=-1, index=atom_token_idx) * batch["atom_pad_mask"]  # [b, n_atoms]
+        atomwise_tok_keep_scn_mask = tok_keep_scn_mask.gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]  # [b, n_atoms]
 
         atom_cond_mask = torch.where(atomwise_tok_keep_scn_mask.bool(),
                                      atom_cond_mask,

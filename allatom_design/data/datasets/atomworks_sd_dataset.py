@@ -17,6 +17,7 @@ from atomworks.ml.utils.io import read_parquet_with_metadata
 from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader, WeightedRandomSampler
+from allatom_design.data.transform.pad import pad_to_max
 
 logger = logging.getLogger(__name__)
 
@@ -160,31 +161,19 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
 
     # Collate the data
     collated = {}
-    # for key in keys:
-    #     values = [d[key] for d in data]
+    for key in keys:
+        values = [d[key] for d in data]
 
-    #     if key not in [
-    #         "pdb_key",
-    #         "all_coords",
-    #         "all_resolved_mask",
-    #         "crop_to_all_atom_map",
-    #         "chain_symmetries",
-    #         "amino_acids_symmetries",
-    #         "ligand_symmetries",
-    #     ]:
-    #         if key == "tokenwise_feats":
-    #             # recursively collate tokenwise feats
-    #             values = sd_collator(values)
-    #         else:
-    #             # Check if all have the same shape
-    #             shape = values[0].shape
-    #             if not all(v.shape == shape for v in values):
-    #                 values, _ = pad_to_max(values, 0)
-    #             else:
-    #                 values = torch.stack(values, dim=0)
+        if key not in ["example_id"]:
+            # Check if all have the same shape
+            shape = values[0].shape
+            if not all(v.shape == shape for v in values):
+                values, _ = pad_to_max(values, 0)
+            else:
+                values = torch.stack(values, dim=0)
 
-    #     # Stack the values
-    #     collated[key] = values
+        # Stack the values
+        collated[key] = values
 
     return collated
 
