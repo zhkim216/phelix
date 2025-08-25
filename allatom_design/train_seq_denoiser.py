@@ -41,9 +41,6 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.deterministic = True  # nonrandom CUDNN convolution algo, maybe slower
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
-    # Instantiate config
-    cfg = hydra.utils.instantiate(cfg)
-
     # Set up LightningDataModule
     datamodule = AtomworksSDDataModule(cfg.data)
 

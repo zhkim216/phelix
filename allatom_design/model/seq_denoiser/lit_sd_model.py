@@ -1,19 +1,16 @@
-import itertools
 from collections import defaultdict
-from typing import Any, Dict
+from typing import Dict
 
 import lightning as L
-import numpy as np
 import torch
-from einops import rearrange
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import DictConfig
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import LinearLR
 from torchtyping import TensorType
 
-from allatom_design.model.lr_schedule import InverseSqrtLR, NoamLR
 from allatom_design.model.ema.phema import PowerFunctionEMA
+from allatom_design.model.lr_schedule import InverseSqrtLR, NoamLR
 from allatom_design.model.seq_denoiser.sd_loss import SDLoss
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 

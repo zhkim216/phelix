@@ -54,8 +54,7 @@ data:
     betas:
       beta_chain: 1.0
       beta_interface: 0.0
-  transform:
-    _target_: allatom_design.data.transform.sd_featurizer.sd_featurizer
+  featurizer_cfg:
     max_tokens: 512
     max_atoms: 7168
     crop_center_cutoff_distance: 15.0
@@ -81,9 +80,7 @@ model:
   denoiser: ${denoiser}
 
   # Masking options
-  mask_selector:
-    _target_: allatom_design.data.mask_selector.MaskSelector
-    cfg: ${mask_selector}
+  mask_selector: ${mask_selector}
 
   ema:
     use_phema: false  # use post-hoc EMA

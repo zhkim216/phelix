@@ -34,8 +34,7 @@ from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
 from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched
-from allatom_design.eval.eval_utils.seq_des_utils import (
-    crop_batch_to_protein_only, get_sd_batch)
+from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
 
 try:
     from colabdesign.shared.utils import copy_dict

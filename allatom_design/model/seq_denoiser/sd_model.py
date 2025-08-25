@@ -12,6 +12,7 @@ from allatom_design.model.seq_denoiser.denoisers.atom_mpnn_denoiser import \
     AtomMPNNDenoiser
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
+from allatom_design.data.mask_selector import MaskSelector
 
 
 class SeqDenoiser(nn.Module):
@@ -36,7 +37,7 @@ class SeqDenoiser(nn.Module):
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
 
         # Mask selector
-        self.mask_selector = cfg.mask_selector
+        self.mask_selector = MaskSelector(cfg.mask_selector)
 
 
     def setup(self):
