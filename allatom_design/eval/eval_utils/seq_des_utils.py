@@ -24,8 +24,7 @@ import allatom_design.data.const as const
 from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import atom_center_random_augmentation, to
-from allatom_design.data.datasets.boltz_sd_dataset import (
-    crop_batch_to_protein_only, sd_collator)
+from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     load_input, mmcif_to_pdb)
 from allatom_design.data.types import Structure
@@ -61,15 +60,14 @@ def get_seq_des_model(cfg: DictConfig, device: str) -> Dict[str, Any]:
     model_name = cfg.model_name
     seq_des_model = {"model_name": model_name, "cfg": cfg, "device": device}
 
-    if model_name == "atom_mpnn":
-        lit_sd_model = LitSeqDenoiser.load_from_checkpoint(cfg.atom_mpnn.ckpt_path).eval()
-        model_cfg, _ = get_cfg_from_ckpt(cfg.atom_mpnn.ckpt_path)
-        data_cfg = hydra.utils.instantiate(model_cfg.data)
-        sampling_cfg = OmegaConf.load(cfg.atom_mpnn.sampling_cfg)
-        sampling_cfg = OmegaConf.merge(sampling_cfg, OmegaConf.to_container(cfg.atom_mpnn.overrides, resolve=True))
-        seq_des_model["model"] = lit_sd_model.model
-        seq_des_model["data_cfg"] = data_cfg
-        seq_des_model["sampling_cfg"] = sampling_cfg
+    lit_sd_model = LitSeqDenoiser.load_from_checkpoint(cfg.atom_mpnn.ckpt_path).eval()
+    model_cfg, _ = get_cfg_from_ckpt(cfg.atom_mpnn.ckpt_path)
+    data_cfg = hydra.utils.instantiate(model_cfg.data)
+    sampling_cfg = OmegaConf.load(cfg.atom_mpnn.sampling_cfg)
+    sampling_cfg = OmegaConf.merge(sampling_cfg, OmegaConf.to_container(cfg.atom_mpnn.overrides, resolve=True))
+    seq_des_model["model"] = lit_sd_model.model
+    seq_des_model["data_cfg"] = data_cfg
+    seq_des_model["sampling_cfg"] = sampling_cfg
 
     return seq_des_model
 
@@ -77,12 +75,12 @@ def get_seq_des_model(cfg: DictConfig, device: str) -> Dict[str, Any]:
 def run_seq_des(model: SeqDenoiser,
                 data_cfg: DictConfig,
                 cfg: DictConfig,  # sampling config
-                struct_file_paths: List[str],
+                pdb_paths: list[str],
                 device: str,
                 pos_constraint_df: Optional[pd.DataFrame] = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
                 out_dir: Optional[str] = None,
-                ) -> Tuple[Dict[str, Dict[str, torch.Tensor]],
-                          Dict]:
+                ) -> tuple[dict[str, dict[str, torch.Tensor]],
+                           dict[str, Any]]:
     """
     Given a list of processed structure files, run sequence design on them.
 
@@ -114,14 +112,14 @@ def run_seq_des(model: SeqDenoiser,
         print(f"Omitting aatype sampling for: {cfg.omit_aas}")
 
     # Process PDBs in batches of size B
-    pbar = tqdm(total=len(struct_file_paths), desc=f"Sampling {len(struct_file_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
+    pbar = tqdm(total=len(pdb_paths), desc=f"Sampling {len(pdb_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
 
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
-        for i in range(0, len(struct_file_paths), cfg.batch_size):
-            batch_struct_files = struct_file_paths[i:i+cfg.batch_size]
-            B = len(batch_struct_files)
-            batch, input_structs = get_sd_batch(batch_struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+        for i in range(0, len(pdb_paths), cfg.batch_size):
+            batch_pdb_paths = pdb_paths[i:i+cfg.batch_size]
+            B = len(batch_pdb_paths)
+            batch, input_structs = get_sd_batch(batch_pdb_paths, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
@@ -358,17 +356,17 @@ def run_seq_des_ensemble(model: SeqDenoiser,
     return outputs
 
 
-def get_sd_batch(struct_file_paths: list[str], device: str,
+def get_sd_batch(pdb_paths: list[str], device: str,
                  data_cfg: DictConfig,
                  parallel_pool: Parallel | None) -> tuple[dict[str, TensorType["b n ..."]],
                                                           list[str],
                                                           list[Dict[str, int]]]:
     if parallel_pool is None:
         # Load PDBs sequentially
-        batch_examples, input_structures = zip(*[get_sd_example(struct_file_path, data_cfg) for struct_file_path in struct_file_paths])
+        batch_examples, input_structures = zip(*[get_sd_example(pdb_path, data_cfg) for pdb_path in pdb_paths])
     else:
         # Load PDBs in parallel
-        batch_examples, input_structures = zip(*parallel_pool(delayed(get_sd_example)(struct_file_path, data_cfg) for struct_file_path in struct_file_paths))
+        batch_examples, input_structures = zip(*parallel_pool(delayed(get_sd_example)(pdb_path, data_cfg) for pdb_path in pdb_paths))
 
     # Collate examples
     batch = sd_collator(batch_examples)
@@ -377,7 +375,7 @@ def get_sd_batch(struct_file_paths: list[str], device: str,
     return batch, input_structures
 
 
-def get_sd_example(struct_file_path: str, data_cfg: DictConfig) -> tuple[dict[str, TensorType["b n ..."]],
+def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, TensorType["b n ..."]],
                                                                          dict[str, Any]]:
     """
     Given a structure file path, return a batch of features and the input structure.

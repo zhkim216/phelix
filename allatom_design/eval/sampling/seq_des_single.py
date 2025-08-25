@@ -35,9 +35,6 @@ def main(cfg: DictConfig):
     with open(Path(out_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
 
-    # Load in PDB file to eval on
-    processed_struct_file = process_pdb_files([cfg.pdb_path], processed_struct_dir=f"{out_dir}/processed_structures", **cfg.pdb_processing_cfg)
-
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -45,7 +42,7 @@ def main(cfg: DictConfig):
     # Load in sequence design model
     seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
 
-    # # Load structure prediction model for self-consistency evaluation
+    # Load structure prediction model for self-consistency evaluation
     if cfg.run_self_consistency_eval:
         pred_out_dir = f"{out_dir}/preds"  # directory for structure predictions
         Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
@@ -63,8 +60,8 @@ def main(cfg: DictConfig):
 
     # Run sequence design model
     outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                         struct_file_paths=processed_struct_file, device=device, pos_constraint_df=pos_constraint_df,
-                         out_dir=out_dir)
+                          pdb_paths=[cfg.pdb_path], device=device, pos_constraint_df=pos_constraint_df,
+                          out_dir=out_dir)
 
     # Save outputs to CSV
     record_ids = [Path(x).stem.lower() for x in outputs["out_pdbs"]]

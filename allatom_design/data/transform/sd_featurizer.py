@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from atomworks.io.constants import (AF3_EXCLUDED_LIGANDS, STANDARD_AA,
                                     STANDARD_DNA, STANDARD_RNA)
-import allatom_design.data.const as const
 from atomworks.ml.transforms.atom_array import (AddGlobalTokenIdAnnotation,
                                                 ComputeAtomToTokenMap)
 from atomworks.ml.transforms.base import (AddData, Compose, ConditionalRoute,
@@ -22,12 +21,19 @@ from atomworks.ml.transforms.featurize_unresolved_residues import (
     MaskResiduesWithSpecificUnresolvedAtoms,
     PlaceUnresolvedTokenAtomsOnRepresentativeAtom,
     PlaceUnresolvedTokenOnClosestResolvedTokenInSequence)
+from atomworks.ml.transforms.filters import (FilterToProteins,
+                                             RemoveUnresolvedTokens,
+                                             filter_to_specified_pn_units,
+                                             RemoveUnsupportedChainTypes)
+from atomworks.ml.utils.geometry import (masked_center,
+                                         random_rigid_augmentation)
 from atomworks.ml.utils.token import (apply_token_wise,
-                                      get_af3_token_center_masks,
                                       get_af3_token_center_idxs,
+                                      get_af3_token_center_masks,
                                       get_af3_token_representative_masks,
                                       spread_token_wise)
 
+import allatom_design.data.const as const
 from allatom_design.data.transform.pad import pad_dim
 
 # Keep track of the token/atom dimensions of the features for padding & cropping
@@ -87,6 +93,10 @@ def sd_featurizer(
             aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_FRAME_ATOM_NAMES,
             aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_FRAME_ATOM_NAMES,
         }),
+        FilterToProteins(),
+        FilterToQueryPNUnits(),
+        RemoveUnresolvedTokens(),
+        RemoveUnsupportedChainTypes(),
     ]
 
     # Cropping
@@ -126,13 +136,14 @@ def sd_featurizer(
 
         # Add features from the atom_array
         AddCoordsAndAtomMasks(),
+        CenterRandomAugmentation(scale=1.0),
     ]
 
     transforms = [*featurization_transforms_pre_crop,
                   cropping_transform,
                   *featurization_transforms_post_crop,
                   PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
-                  SubsetToKeys(keys=["example_id", "feats"]),
+                  SubsetToKeys(keys=["example_id", "feats", "atom_array", "crop_info"]),
                   FlattenFeats()]
     return Compose(transforms)
 
@@ -147,7 +158,7 @@ class AddCoordsAndAtomMasks(Transform):
         # Get coordinates
         feats["coords"] = torch.tensor(atom_array.coord)
 
-                # Get token and atom resolved masks
+        # Get token and atom resolved masks
         feats["token_resolved_mask"] = torch.tensor(apply_token_wise(atom_array, atom_array.occupancy > 0, np.any)).float()
         feats["atom_resolved_mask"] = torch.tensor(atom_array.occupancy > 0).float()
 
@@ -213,4 +224,31 @@ class FlattenFeats(Transform):
         feats = data.pop("feats")
         for k, v in feats.items():
             data[k] = v
+        return data
+
+
+class CenterRandomAugmentation(Transform):
+    """Randomly augment the center of the atom array."""
+    def __init__(self, scale: float = 0.1):
+        self.scale = scale
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        coords = data["feats"]["coords"]
+        mask = data["feats"]["atom_resolved_mask"].bool()
+        centered_coords = coords.clone()
+        centered_coords = masked_center(centered_coords, mask)
+        centered_coords = random_rigid_augmentation(centered_coords[None], batch_size=1, s=self.scale).squeeze(0)
+        data["feats"]["coords"] = centered_coords
+
+        return data
+
+
+class FilterToQueryPNUnits(Transform):
+    """Filter the atom array to the query PN units."""
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        atom_array = data["atom_array"]
+        data["atom_array"] = filter_to_specified_pn_units(atom_array, data["query_pn_unit_iids"])
         return data

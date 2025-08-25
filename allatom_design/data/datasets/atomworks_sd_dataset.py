@@ -18,6 +18,9 @@ from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from allatom_design.data.transform.pad import pad_to_max
+from atomworks.io.utils.io_utils import to_cif_file
+from atomworks.ml.common import parse_example_id
+from allatom_design.data.transform.sd_featurizer import sd_featurizer
 
 logger = logging.getLogger(__name__)
 
@@ -26,19 +29,10 @@ class AtomworksSDDataModule(L.LightningDataModule):
         super().__init__()
         self.cfg = cfg
         self.pdb_path = cfg.pdb_path
-
-        # self._train_set = SDDataset(phase="train",
-        #                             pdb_path=cfg.pdb_path,
-        #                             dataset=cfg.dataset,
-        #                             dataset_parser=cfg.dataset_parser,
-        #                             transform=cfg.transform,
-        #                             samples_per_epoch=cfg.samples_per_epoch)
         self._train_set = SDDataset(pdb_path=cfg.pdb_path,
                                     parquet_path=cfg.parquet_path,
                                     sampling_weights=cfg.sampling_weights,
-                                    transform=cfg.transform)
-
-
+                                    featurizer_cfg=cfg.featurizer_cfg)
 
 
     def train_dataloader(self) -> DataLoader:
@@ -57,20 +51,19 @@ class AtomworksSDDataModule(L.LightningDataModule):
         return train_loader
 
 
-
 class SDDataset(BaseDataset):
     def __init__(self,
                  pdb_path: str,
                  parquet_path: str,
                  sampling_weights: dict[str, dict[str, float]],
-                 transform: Transform | Compose | None,
+                 featurizer_cfg: Transform | Compose | None,
                  ):
         super().__init__()
 
         self.pdb_path = pdb_path
         self.parquet_path = parquet_path
         self.sampling_weights = sampling_weights
-        self.transform = transform
+        self.featurizer = sd_featurizer(**featurizer_cfg)
 
         # Read in chain metadata parquet
         self.chain_df = read_parquet_with_metadata(parquet_path)
@@ -110,11 +103,13 @@ class SDDataset(BaseDataset):
     @override
     def __getitem__(self, idx: int):
         example_id = self.idx_to_id(idx)
-        row = self.parsed_df.loc[example_id]
-        example = self._load_cached_example(row["extra_info"]["pdb_id"])
+        parsed_row = self.parsed_df.loc[example_id]
+        example = self._load_cached_example(parsed_row["extra_info"]["pdb_id"])
+        example.update(parsed_row)  # add in query_pn_unit_iids
 
         # apply train-time transforms
-        feats = self.transform(example)
+        feats = self.featurizer(example)
+
         return feats
 
     @override
@@ -164,7 +159,7 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     for key in keys:
         values = [d[key] for d in data]
 
-        if key not in ["example_id"]:
+        if key not in ["example_id", "atom_array", "crop_info"]:
             # Check if all have the same shape
             shape = values[0].shape
             if not all(v.shape == shape for v in values):
@@ -176,7 +171,6 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
         collated[key] = values
 
     return collated
-
 
 
 def build_interface_df(df: pd.DataFrame, dataset_name: str) -> pd.DataFrame:
