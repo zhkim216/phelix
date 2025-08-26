@@ -382,7 +382,7 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, Tenso
     """
     example = {}
 
-    input_data = load_input(struct_file_path)
+    input_data = load_input(pdb_path)
 
     # Tokenize structure (no cropping applied)
     tokenized = data_cfg["tokenizer"].tokenize(input_data)
@@ -398,7 +398,7 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, Tenso
                                                       translation_scale=0.0,
                                                       return_transforms=False)
 
-    example["pdb_key"] = Path(struct_file_path).stem
+    example["pdb_key"] = Path(pdb_path).stem
     example.update(feats)
     return example, input_data.structure
 
