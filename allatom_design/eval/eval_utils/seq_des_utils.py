@@ -121,17 +121,17 @@ def run_seq_des(model: SeqDenoiser,
         for i in range(0, len(pdb_paths), cfg.batch_size):
             batch_pdb_paths = pdb_paths[i:i+cfg.batch_size]
             B = len(batch_pdb_paths)
-            batch, input_structs = get_sd_batch(batch_pdb_paths, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+            batch = get_sd_batch(batch_pdb_paths, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
 
             # Parse fixed positions
-            batch = parse_fixed_pos_info(batch, input_structs, pos_constraint_df, verbose=cfg.verbose)
+            batch = parse_fixed_pos_info(batch, pos_constraint_df, verbose=cfg.verbose)
 
             # Restrict aatype sampling at certain positions
             sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
-            sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(batch, input_structs, pos_constraint_df, verbose=cfg.verbose)
+            sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(batch, pos_constraint_df, verbose=cfg.verbose)
 
             if cfg["use_protein_only"]:
                 # subset to standard protein-only features; useful for ablations to only condition on protein
@@ -215,7 +215,7 @@ def score_sequences_ensemble(model: SeqDenoiser,
     with parallel_context as parallel_pool:
         for pdb_name, struct_files in tqdm(pdb_to_processed_conformers.items(), desc=f"Scoring {len(pdb_to_processed_conformers)} PDBs..."):
             # Get batch of conformers
-            batch, input_structs = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+            batch = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
@@ -287,7 +287,7 @@ def run_seq_des_ensemble(model: SeqDenoiser,
     with parallel_context as parallel_pool:
         for pdb_name, struct_files in tqdm(pdb_to_processed_conformers.items(), desc=f"Sampling {len(pdb_to_processed_conformers)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB..."):
             # Flatten struct_files and create tied_sampling_ids
-            batch, input_structs = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+            batch = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
             batch["tied_sampling_ids"] = torch.zeros(len(struct_files), device=device, dtype=torch.long)  # tie all samples together
 
             # Use res_type from primary structure
@@ -298,11 +298,11 @@ def run_seq_des_ensemble(model: SeqDenoiser,
             batch = initialize_sampling_masks(batch)
 
             # Parse fixed positions
-            batch = parse_fixed_pos_info(batch, input_structs, pos_constraint_df, verbose=cfg.verbose)
+            batch = parse_fixed_pos_info(batch, pos_constraint_df, verbose=cfg.verbose)
 
             # Restrict aatype sampling at certain positions
             sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
-            sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(batch, input_structs, pos_constraint_df, verbose=cfg.verbose)
+            sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(batch, pos_constraint_df, verbose=cfg.verbose)
 
             if cfg["use_protein_only"]:
                 # subset to standard protein-only features; useful for ablations to only condition on protein
@@ -364,16 +364,16 @@ def get_sd_batch(pdb_paths: list[str], device: str,
                                                           list[Dict[str, int]]]:
     if parallel_pool is None:
         # Load PDBs sequentially
-        batch_examples, input_structures = zip(*[get_sd_example(pdb_path, data_cfg) for pdb_path in pdb_paths])
+        batch_examples = [get_sd_example(pdb_path, data_cfg) for pdb_path in pdb_paths]
     else:
         # Load PDBs in parallel
-        batch_examples, input_structures = zip(*parallel_pool(delayed(get_sd_example)(pdb_path, data_cfg) for pdb_path in pdb_paths))
+        batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path, data_cfg) for pdb_path in pdb_paths)
 
     # Collate examples
     batch = sd_collator(batch_examples)
     batch = to(batch, device)  # move to device
 
-    return batch, input_structures
+    return batch
 
 
 def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, TensorType["b n ..."]],
@@ -392,7 +392,7 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, Tenso
     # Run the pipeline on the CIF data
     cif_out = pipeline(
         data={
-            "example_id": Path(pdb_path).stem,
+            "example_id": Path(pdb_path.upper()).stem,
             "atom_array": atom_array_from_cif,
             "chain_info": input_data["chain_info"],
         }
@@ -400,28 +400,7 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, Tenso
 
     featurizer = sd_featurizer()
 
-    cif_out["query_pn_unit_iids"] = ['A_1'] #! TODO: get this from user input
-
     example = featurizer(cif_out)
-
-    #! Old Boltz
-    # Tokenize structure (no cropping applied)
-    # tokenized = data_cfg["tokenizer"].tokenize(input_data)
-    # feats = data_cfg["featurizer"].process(tokenized,
-    #                                        use_auth_as_residx=False,
-    #                                        atoms_per_window_queries=data_cfg["atoms_per_window_queries"],
-    #                                        num_bins=data_cfg["num_bins"])
-    # feats["coords"] = feats["coords"].squeeze(0)  # remove batch dimension
-
-    # # Centers coordinates at origin
-    # feats["coords"] = atom_center_random_augmentation(feats["coords"], feats["atom_pad_mask"] * feats["atom_resolved_mask"],
-    #                                                   apply_random_augmentation=False,
-    #                                                   translation_scale=0.0,
-    #                                                   return_transforms=False)
-
-    # example["pdb_key"] = Path(pdb_path).stem
-    # example.update(feats)
-    #! End of Old Boltz
 
     return example
 
@@ -431,6 +410,7 @@ def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str
     """
     Initialize the sampling masks for the batch. Modifies batch in place and returns it.
     """
+    import ipdb; ipdb.set_trace()
     # Initialize sequence mask: always condition on non-protein or non-standard residues
     standard_prot_mask = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
     batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
@@ -448,7 +428,7 @@ def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str
 
 
 def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
-                         input_structs: list[Structure],
+                        #  input_structs: list[Structure],
                          pos_constraint_df: pd.DataFrame | None,
                          verbose: bool = False) -> dict[str, torch.Tensor]:
 
@@ -487,7 +467,18 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
 
         # Set up example
         example = {k: v[i] for k, v in batch.items()}
-        input_struct = input_structs[i]
+
+        #* make chain_to_asym_id mapping directly from batch[i]
+        import ipdb; ipdb.set_trace()
+        batch_i = batch[i]
+
+        # batch_i should have these features:
+        # ['example_id', 'atom_array', 'residue_index', 'token_index', 'asym_id', 'entity_id',
+        #   'sym_id', 'restype', 'is_protein', 'is_rna', 'is_dna', 'is_ligand', 'is_atomized',
+        #     'atom_to_token_map', 'token_bonds', 'coords', 'token_resolved_mask',
+        #       'atom_resolved_mask', 'token_pad_mask', 'atom_pad_mask', 'prot_bb_atom_mask',
+        #         'prot_scn_atom_mask', 'token_to_center_atom']
+
         if use_label_asym_id:
             chain_to_asym_id = {c["name"]: c["asym_id"] for c in input_struct.chains}  # we use label_asym_name as the chain name for fixing positions
             asym_id_to_chain = {c["asym_id"]: c["name"] for c in input_struct.chains}
@@ -519,9 +510,9 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
             seq_cond_mask[i, abs_fixed_pos_seq] = 1
 
             # print fixed sequence
-            if verbose:
-                print("Fixed sequence:")
-                visualize_sequences(example, seq_cond_mask[i], input_struct, asym_id_to_chain)
+            # if verbose:
+            #     print("Fixed sequence:")
+            #     visualize_sequences(example, seq_cond_mask[i], input_struct, asym_id_to_chain)
         else:
             if verbose:
                 print(f"{pdb_key}: No fixed sequence positions specified.")
@@ -540,9 +531,9 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
                 assert (scn_cond_num_atoms[override_abs_pos] == 0).all(), "Cannot fix sidechains at positions where the sequence from the PDB is overridden."
 
             # print fixed sidechains
-            if verbose:
-                print("Fixed sidechains:")
-                visualize_sequences(example, scn_cond_num_atoms > 0, input_struct, asym_id_to_chain)
+            # if verbose:
+            #     print("Fixed sidechains:")
+            #     visualize_sequences(example, scn_cond_num_atoms > 0, input_struct, asym_id_to_chain)
         else:
             if verbose:
                 print(f"{pdb_key}: No fixed sidechain positions specified.")

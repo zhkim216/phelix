@@ -250,5 +250,10 @@ class FilterToQueryPNUnits(Transform):
     @override
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
         atom_array = data["atom_array"]
-        data["atom_array"] = filter_to_specified_pn_units(atom_array, data["query_pn_unit_iids"])
+        
+        #* From atomworks.ml.datasets.parsers.GenericDFParser: "During VALIDATION, then we do not crop, and query_pn_unit_iids should be None."
+        if "query_pn_unit_iids" in data:
+            atom_array = filter_to_specified_pn_units(atom_array, data["query_pn_unit_iids"])
+        
+        data["atom_array"] = atom_array
         return data
