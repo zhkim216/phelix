@@ -382,26 +382,25 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, Tenso
     Given a structure file path, return a batch of features and the input structure.
     """
 
-    import ipdb; ipdb.set_trace()
     input_data = aw_parse(pdb_path, extra_fields=["auth_seq_id"], hydrogen_policy="remove",)
 
     pipeline = preprocess_transform()
 
     transformation_id = "1"
-    atom_array_from_cif = input_data["assemblies"][transformation_id][0]
+    atom_array_from_cif = input_data["assemblies"][transformation_id][0] # (1, num_atoms) -> (num_atoms)
 
     # Run the pipeline on the CIF data
     cif_out = pipeline(
         data={
-            "example_id": pdb_path.stem,
+            "example_id": Path(pdb_path).stem,
             "atom_array": atom_array_from_cif,
             "chain_info": input_data["chain_info"],
         }
     )
 
-    print(cif_out["feats"]["ref_pos"].shape)
-
     featurizer = sd_featurizer()
+
+    cif_out["query_pn_unit_iids"] = ['A_1'] #! TODO: get this from user input
 
     example = featurizer(cif_out)
 
@@ -424,7 +423,7 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, Tenso
     # example.update(feats)
     #! End of Old Boltz
 
-    return example, input_data.structure
+    return example
 
 
 
