@@ -136,7 +136,7 @@ def sd_featurizer(
 
         # Add features from the atom_array
         AddCoordsAndAtomMasks(),
-        CenterRandomAugmentation(scale=1.0),
+        CenterRandomAugmentation(scale=1.0), #! turn on/off depending on train/eval?
     ]
 
     transforms = [*featurization_transforms_pre_crop,
@@ -238,7 +238,7 @@ class CenterRandomAugmentation(Transform):
         mask = data["feats"]["atom_resolved_mask"].bool()
         centered_coords = coords.clone()
         centered_coords = masked_center(centered_coords, mask)
-        centered_coords = random_rigid_augmentation(centered_coords[None], batch_size=1, s=self.scale).squeeze(0)
+        centered_coords = random_rigid_augmentation(centered_coords[None], batch_size=1, s=self.scale).squeeze(0) #! dummy atom coords masked later?
         data["feats"]["coords"] = centered_coords
 
         return data
