@@ -9,13 +9,13 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from atomworks.io.parser import parse as aw_parse
 import gemmi
 import hydra
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
+from atomworks.io.parser import parse as aw_parse
 from joblib import Parallel, delayed
 from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
@@ -27,16 +27,22 @@ from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import atom_center_random_augmentation, to
 from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
-    load_input, mmcif_to_pdb)
+    load_input,
+    mmcif_to_pdb,
+)
 from allatom_design.data.transform.preprocess import preprocess_transform
 from allatom_design.data.transform.sd_featurizer import sd_featurizer
 from allatom_design.data.types import Structure
-from allatom_design.data.write.mmcif import (batch_write_feats_to_mmcif,
-                                             write_feats_to_mmcif)
-from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import \
-    compute_potts_energy
+from allatom_design.data.write.mmcif import (
+    batch_write_feats_to_mmcif,
+    write_feats_to_mmcif,
+)
+from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import (
+    compute_potts_energy,
+)
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
+
 
 def get_seq_des_model(cfg: DictConfig, device: str) -> Dict[str, Any]:
     """
@@ -410,15 +416,14 @@ def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str
     """
     Initialize the sampling masks for the batch. Modifies batch in place and returns it.
     """
-    import ipdb; ipdb.set_trace()
     # Initialize sequence mask: always condition on non-protein or non-standard residues
-    standard_prot_mask = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
+    standard_prot_mask = batch['is_protein']
     batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
     batch["seq_cond_mask"] = torch.where(standard_prot_mask, torch.zeros_like(batch["seq_cond_mask"]), batch["token_resolved_mask"])
 
     # Initialize atom mask: condition on backbone atoms, non-protein atoms, and non-standard residues
     batch["atom_cond_mask"] = batch["prot_bb_atom_mask"]  # condition on backbone atoms
-
+    import ipdb; ipdb.set_trace()
     ## condition on non-protein atoms and non-standard residues
     _, batch["atomwise_token_idx"] = torch.max(batch["atom_to_token"], dim=-1)  # [b, n_atoms]
     atomwise_standard_prot_mask = torch.gather(standard_prot_mask, dim=-1, index=batch["atomwise_token_idx"]) * batch["atom_pad_mask"]
