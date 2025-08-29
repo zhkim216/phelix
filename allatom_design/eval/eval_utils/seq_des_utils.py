@@ -9,6 +9,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from atomworks.io.parser import parse as aw_parse
 import gemmi
 import hydra
 import numpy as np
@@ -27,6 +28,8 @@ from allatom_design.data.data import atom_center_random_augmentation, to
 from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
     load_input, mmcif_to_pdb)
+from allatom_design.data.transform.preprocess import preprocess_transform
+from allatom_design.data.transform.sd_featurizer import sd_featurizer
 from allatom_design.data.types import Structure
 from allatom_design.data.write.mmcif import (batch_write_feats_to_mmcif,
                                              write_feats_to_mmcif)
@@ -34,7 +37,6 @@ from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import \
     compute_potts_energy
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
-
 
 def get_seq_des_model(cfg: DictConfig, device: str) -> Dict[str, Any]:
     """
@@ -140,8 +142,7 @@ def run_seq_des(model: SeqDenoiser,
 
             # Save outputs to cif files
             if out_dir is not None:
-                for si in range(len(output_feats)):
-                    feats_si = output_feats[si]
+                for si, feats_si in enumerate(output_feats):
                     if cfg["save_protein_only"]:
                         # crop to protein-only features; useful for ablations to only fold with protein sequence
                         feats_si = crop_batch_to_protein_only(feats_si)
@@ -380,26 +381,49 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, Tenso
     """
     Given a structure file path, return a batch of features and the input structure.
     """
-    example = {}
 
-    input_data = load_input(pdb_path)
+    import ipdb; ipdb.set_trace()
+    input_data = aw_parse(pdb_path, extra_fields=["auth_seq_id"], hydrogen_policy="remove",)
 
+    pipeline = preprocess_transform()
+
+    transformation_id = "1"
+    atom_array_from_cif = input_data["assemblies"][transformation_id][0]
+
+    # Run the pipeline on the CIF data
+    cif_out = pipeline(
+        data={
+            "example_id": pdb_path.stem,
+            "atom_array": atom_array_from_cif,
+            "chain_info": input_data["chain_info"],
+        }
+    )
+
+    print(cif_out["feats"]["ref_pos"].shape)
+
+    featurizer = sd_featurizer()
+
+    example = featurizer(cif_out)
+
+    #! Old Boltz
     # Tokenize structure (no cropping applied)
-    tokenized = data_cfg["tokenizer"].tokenize(input_data)
-    feats = data_cfg["featurizer"].process(tokenized,
-                                           use_auth_as_residx=False,
-                                           atoms_per_window_queries=data_cfg["atoms_per_window_queries"],
-                                           num_bins=data_cfg["num_bins"])
-    feats["coords"] = feats["coords"].squeeze(0)  # remove batch dimension
+    # tokenized = data_cfg["tokenizer"].tokenize(input_data)
+    # feats = data_cfg["featurizer"].process(tokenized,
+    #                                        use_auth_as_residx=False,
+    #                                        atoms_per_window_queries=data_cfg["atoms_per_window_queries"],
+    #                                        num_bins=data_cfg["num_bins"])
+    # feats["coords"] = feats["coords"].squeeze(0)  # remove batch dimension
 
-    # Centers coordinates at origin
-    feats["coords"] = atom_center_random_augmentation(feats["coords"], feats["atom_pad_mask"] * feats["atom_resolved_mask"],
-                                                      apply_random_augmentation=False,
-                                                      translation_scale=0.0,
-                                                      return_transforms=False)
+    # # Centers coordinates at origin
+    # feats["coords"] = atom_center_random_augmentation(feats["coords"], feats["atom_pad_mask"] * feats["atom_resolved_mask"],
+    #                                                   apply_random_augmentation=False,
+    #                                                   translation_scale=0.0,
+    #                                                   return_transforms=False)
 
-    example["pdb_key"] = Path(pdb_path).stem
-    example.update(feats)
+    # example["pdb_key"] = Path(pdb_path).stem
+    # example.update(feats)
+    #! End of Old Boltz
+
     return example, input_data.structure
 
 
