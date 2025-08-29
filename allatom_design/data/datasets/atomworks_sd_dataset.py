@@ -9,7 +9,8 @@ import lightning as L
 import numpy as np
 import pandas as pd
 import torch
-from atomworks.ml.common import generate_example_id
+from atomworks.io.utils.io_utils import to_cif_file
+from atomworks.ml.common import generate_example_id, parse_example_id
 from atomworks.ml.datasets.datasets import BaseDataset
 from atomworks.ml.datasets.parsers import GenericDFParser
 from atomworks.ml.transforms.base import Compose, Transform
@@ -17,9 +18,8 @@ from atomworks.ml.utils.io import read_parquet_with_metadata
 from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader, WeightedRandomSampler
+
 from allatom_design.data.transform.pad import pad_to_max
-from atomworks.io.utils.io_utils import to_cif_file
-from atomworks.ml.common import parse_example_id
 from allatom_design.data.transform.sd_featurizer import sd_featurizer
 
 logger = logging.getLogger(__name__)
@@ -29,10 +29,7 @@ class AtomworksSDDataModule(L.LightningDataModule):
         super().__init__()
         self.cfg = cfg
         self.pdb_path = cfg.pdb_path
-        self._train_set = SDDataset(pdb_path=cfg.pdb_path,
-                                    parquet_path=cfg.parquet_path,
-                                    sampling_weights=cfg.sampling_weights,
-                                    featurizer_cfg=cfg.featurizer_cfg)
+        self._train_set = SDDataset(cfg, phase="train")
 
 
     def train_dataloader(self) -> DataLoader:
@@ -52,49 +49,78 @@ class AtomworksSDDataModule(L.LightningDataModule):
 
 
 class SDDataset(BaseDataset):
-    def __init__(self,
-                 pdb_path: str,
-                 parquet_path: str,
-                 sampling_weights: dict[str, dict[str, float]],
-                 featurizer_cfg: Transform | Compose | None,
-                 ):
+    def __init__(self, cfg: DictConfig, phase: str):
         super().__init__()
 
-        self.pdb_path = pdb_path
-        self.parquet_path = parquet_path
-        self.sampling_weights = sampling_weights
-        self.featurizer = sd_featurizer(**featurizer_cfg)
+        self.cfg = cfg
+        self.phase = phase
+        self.featurizer = sd_featurizer(**cfg.featurizer_cfg)
 
         # Read in chain metadata parquet
-        self.chain_df = read_parquet_with_metadata(parquet_path)
-        self.chain_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
-        self.chain_df["q_pn_unit_contacting_pn_unit_iids"] = self.chain_df["q_pn_unit_contacting_pn_unit_iids"].apply(json.loads)
-        self.chain_df["sampling_weight"] = get_sampling_weights(self.chain_df,
-                                                                 alphas=sampling_weights["alphas"],
-                                                                 beta=sampling_weights["betas"]["beta_chain"],
-                                                                 chain_type_cols=["q_pn_unit_type"],
-                                                                 cluster_cols=["q_pn_unit_cluster_id"],
-                                                                 seq_length_cols=["q_pn_unit_sequence_length"])
-
-        # Apply filters
+        self.chain_df = self._process_chain_df()
 
         # Build interface df from contacts in chain df
-        self.interface_df = build_interface_df(self.chain_df, dataset_name=Path(parquet_path).parent.name)
-        self.interface_df["sampling_weight"] = get_sampling_weights(self.interface_df,
-                                                                 alphas=sampling_weights["alphas"],
-                                                                 beta=sampling_weights["betas"]["beta_interface"],
-                                                                 chain_type_cols=["q_pn_unit_type_1", "q_pn_unit_type_2"],
-                                                                 cluster_cols=["q_pn_unit_cluster_id_1", "q_pn_unit_cluster_id_2"],
-                                                                 seq_length_cols=["q_pn_unit_sequence_length_1", "q_pn_unit_sequence_length_2"])
+        self.interface_df = self._process_interface_df()
 
-        # Parse dfs into a common format
-        self.chain_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid"])
-        self.interface_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid_1", "q_pn_unit_iid_2"])
+        # Parse dfs into a common format and concatenate
+        self.parsed_df = self._parse_dfs()
 
-        self.parsed_df = pd.concat([
-            self.chain_df.apply(self.chain_parser.parse, axis=1),
-            self.interface_df.apply(self.interface_parser.parse, axis=1)
+
+    def _process_chain_df(self) -> pd.DataFrame:
+        """
+        Processes the chain dataframe. Adds chain counts info and sampling weights, and applies filters.
+        """
+        # Read in chain parquet
+        chain_df = read_parquet_with_metadata(self.cfg.parquet_path)
+        chain_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
+        chain_df["q_pn_unit_contacting_pn_unit_iids"] = chain_df["q_pn_unit_contacting_pn_unit_iids"].apply(json.loads)
+
+        # Add chain counts info and sampling weights
+        chain_df = add_chain_counts_info(chain_df,
+                                         chain_type_cols=["q_pn_unit_type"],
+                                         seq_length_cols=["q_pn_unit_sequence_length"])
+        chain_df = add_sampling_weights_info(chain_df,
+                                             alphas=self.cfg.sampling_weights["alphas"],
+                                             beta=self.cfg.sampling_weights["betas"]["beta_chain"],
+                                             cluster_cols=["q_pn_unit_cluster_id"])
+
+        # Apply filters
+        chain_df = self._apply_filters(self.cfg.chain_filters, chain_df)
+
+        return chain_df
+
+
+    def _process_interface_df(self) -> pd.DataFrame:
+        """
+        Processes the interface dataframe based on the filtered chain dataframe. Adds chain counts info and sampling weights.
+        """
+        interface_df = build_interface_df(self.chain_df, dataset_name=Path(self.cfg.parquet_path).parent.name)
+        interface_df = add_chain_counts_info(interface_df,
+                                             chain_type_cols=["q_pn_unit_type_1", "q_pn_unit_type_2"],
+                                             seq_length_cols=["q_pn_unit_sequence_length_1", "q_pn_unit_sequence_length_2"])
+        interface_df = add_sampling_weights_info(interface_df,
+                                                      alphas=self.cfg.sampling_weights["alphas"],
+                                                      beta=self.cfg.sampling_weights["betas"]["beta_interface"],
+                                                      cluster_cols=["q_pn_unit_cluster_id_1", "q_pn_unit_cluster_id_2"])
+
+        return interface_df
+
+
+    def _parse_dfs(self) -> pd.DataFrame:
+        """
+        Parses the chain and interface dataframes into a common format and concatenates them.
+        """
+        chain_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid"])
+        interface_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid_1", "q_pn_unit_iid_2"])
+
+        print(f"Found {len(self.chain_df)} chains and {len(self.interface_df)} interfaces in {self.phase} dataset")
+
+        parsed_df = pd.concat([
+            self.chain_df.apply(chain_parser.parse, axis=1),
+            self.interface_df.apply(interface_parser.parse, axis=1)
         ], axis=0)
+
+        return parsed_df
 
 
     def get_sampling_weights(self) -> pd.Series:
@@ -131,10 +157,89 @@ class SDDataset(BaseDataset):
 
 
     def _load_cached_example(self, pdb_id: str) -> dict[str, torch.Tensor]:
-        cached_example_path = f"{self.pdb_path}/cached_examples/{pdb_id}.pt"
+        cached_example_path = f"{self.cfg.pdb_path}/cached_examples/{pdb_id}.pt"
         if not Path(cached_example_path).exists():
-            raise FileNotFoundError(f"Cached example for {pdb_id} not found in {self.pdb_path}/cached_examples")
+            raise FileNotFoundError(f"Cached example for {pdb_id} not found in {self.cfg.pdb_path}/cached_examples")
         return torch.load(cached_example_path, weights_only=False)
+
+
+    def _apply_filters(self, filters: list[str] | None, df: pd.DataFrame) -> None:
+        """
+        Apply filters to the data based on the provided list of query strings.
+        For documentation on pandas query syntax, see: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.query.html
+
+        Args:
+            filters (List[str]): List of query strings to apply to the data.
+
+        Raises:
+            ValueError: If the data is not initialized or if a query removes all rows.
+            Warning: If a query does not remove any rows.
+
+        Exampleelse:
+            logger.info(
+                f"Query '{query}' filtered dataset from {original_num_rows:,} to {filtered_num_rows:,} rows (dropped {original_num_rows - filtered_num_rows:,} rows)"
+            ):
+            queries = [
+                "deposition_date < '2020-01-01'",
+                "resolution < 2.5 and ~method.str.contains('NMR')",
+                "cluster.notnull()",
+                "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
+            ]
+        """
+        if filters is None:
+            return df
+
+        # Apply queries one by one, confirming the impact of each
+        for query in filters:
+            df = self._apply_query(query, df)
+
+        return df
+
+    def _apply_query(self, query: str, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply a single query to the data.
+
+        Args:
+            query (str): A query string to apply to the data.
+        """
+        # Filter using query and validate impact
+        original_num_rows = len(df)
+        df = df.query(query)
+        filtered_num_rows = len(df)
+        self._validate_filter_impact(query, original_num_rows, filtered_num_rows)
+        return df
+
+
+    def _validate_filter_impact(self, query: str, original_num_rows: int, filtered_num_rows: int) -> None:
+        """
+        Validate the impact of the filter.
+
+        Args:
+            query (str): The query string that was applied.
+            original_num_rows (int): The number of rows before applying the filter.
+            filtered_num_rows (int): The number of rows after applying the filter.
+
+        Raises:
+            Warning: If the filter did not remove any rows.
+            ValueError: If the filter removed all rows.
+        """
+        rows_removed = original_num_rows - filtered_num_rows
+        percent_removed = (rows_removed / original_num_rows) * 100
+        percent_remaining = (filtered_num_rows / original_num_rows) * 100
+
+        if filtered_num_rows == original_num_rows:
+            logger.warning(f"Query '{query}' on dataset did not remove any rows.")
+        elif filtered_num_rows == 0:
+            raise ValueError(f"Query '{query}' on dataset removed all rows.")
+        else:
+            logger.info(
+                f"\n+-------------------------------------------+\n"
+                f"Query '{query}' on dataset:\n"
+                f"  - Started with: {original_num_rows:,} rows\n"
+                f"  - Removed: {rows_removed:,} rows ({percent_removed:.2f}%)\n"
+                f"  - Remaining: {filtered_num_rows:,} rows ({percent_remaining:.2f}%)\n"
+                f"+-------------------------------------------+\n"
+            )
 
 
 def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
@@ -173,42 +278,42 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     return collated
 
 
-def build_interface_df(df: pd.DataFrame, dataset_name: str) -> pd.DataFrame:
-    # bring example_id into a column if it's the index
-    df = df.reset_index(drop=True)
+def build_interface_df(chain_df: pd.DataFrame, dataset_name: str) -> pd.DataFrame:
+    # Bring example_id into a column if it's the index
+    chain_df = chain_df.reset_index(drop=True)
 
-    # columns we need from the source df
-    chain_specific_cols = ["q_pn_unit_iid", "q_pn_unit_type", "q_pn_unit_sequence_length", "q_pn_unit_cluster_id"]
+    # Get columns we'll need from the source df
+    chain_specific_cols = ["q_pn_unit_iid", "q_pn_unit_type", "q_pn_unit_sequence_length", "q_pn_unit_cluster_id"]  # columns we need for each chain
     base_cols = [
         "example_id", "pdb_id", "assembly_id", "path", "q_pn_unit_contacting_pn_unit_iids",
         *chain_specific_cols,
     ]
-    interface_df = df[base_cols].copy()
+    interface_df = chain_df[base_cols].copy()
 
-    # explode interface contacts
+    # Explode interface contacts
     interface_df = interface_df.explode("q_pn_unit_contacting_pn_unit_iids", ignore_index=True)
     interface_df = interface_df.dropna(subset=["q_pn_unit_contacting_pn_unit_iids"])  # drop pn_units without interface contacts
 
-    # extract the contacted iid
+    # Extract the contacted iid
     interface_df["q_pn_unit_iid_2"] = interface_df["q_pn_unit_contacting_pn_unit_iids"].map(
         lambda d: d.get("pn_unit_iid") if isinstance(d, dict) else None
     )
     interface_df = interface_df.dropna(subset=["q_pn_unit_iid_2"])
 
-    # join back to get chain info for chain_2
-    right = df[["pdb_id", "assembly_id"] + chain_specific_cols].rename(
+    # Join back to get chain info for chain_2
+    right = chain_df[["pdb_id", "assembly_id"] + chain_specific_cols].rename(
                     columns={f"{c}": f"{c}_2" for c in chain_specific_cols})
     interface_df = interface_df.merge(
-        right, on=["pdb_id", "assembly_id", "q_pn_unit_iid_2"], how="left", validate="many_to_one"
+        right, on=["pdb_id", "assembly_id", "q_pn_unit_iid_2"], how="inner", validate="many_to_one"  # inner join gets rid of interfaces where chain_2 was not in the input chain df
     )
 
-    # canonicalize pair ordering to dedupe (A_1, B_1) == (B_1, A_1)
+    # Canonicalize pair ordering to dedupe (A_1, B_1) == (B_1, A_1)
     interface_df = _canonicalize_pair_columns(interface_df, order_by="q_pn_unit_iid", paired_cols=chain_specific_cols)
 
-    # drop exact duplicate interfaces within (pdb_id, assembly_id)
+    # Drop exact duplicate interfaces within (pdb_id, assembly_id)
     interface_df = interface_df.drop_duplicates(subset=["pdb_id", "assembly_id", "q_pn_unit_iid_1", "q_pn_unit_iid_2"], keep="first")
 
-    # build example_id for interfaces by appending 'interfaces' to the source dataset_names
+    # Build example_id for interfaces by appending 'interfaces' to the source dataset_names
     def _get_interface_example_id(row):
         dataset_names = [dataset_name, "interfaces"]
         query_pn_unit_iids = [row["q_pn_unit_iid_1"], row["q_pn_unit_iid_2"]]
@@ -216,7 +321,7 @@ def build_interface_df(df: pd.DataFrame, dataset_name: str) -> pd.DataFrame:
 
     interface_df["example_id"] = interface_df.apply(_get_interface_example_id, axis=1)
 
-    # final selection / order of columns
+    # Final selection / order of columns
     interface_df = interface_df[
         ["example_id", "pdb_id", "assembly_id", "path"] + [f"{c}_1" for c in chain_specific_cols] + [f"{c}_2" for c in chain_specific_cols]
     ].reset_index(drop=True)
@@ -257,22 +362,11 @@ def _canonicalize_pair_columns(
     return out
 
 
-def get_sampling_weights(df: pd.DataFrame,
-                         alphas: dict[str, float],
-                         beta: float,
-                         chain_type_cols: list[str],
-                         cluster_cols: list[str],
-                         seq_length_cols: list[str]) -> pd.DataFrame:
+def add_chain_counts_info(df: pd.DataFrame, chain_type_cols: list[str], seq_length_cols: list[str]) -> pd.DataFrame:
     """
-    Based on the cluster ID in cluster_col and chain types in chain_type_col, get the sampling weights for each example.
+    Add chain type and sequence length columns to the dataframe.
+    Modifies the dataframe in place and returns it.
     """
-    df = df.copy()
-
-    # Get cluster size
-    df["clusters"] = df[cluster_cols].apply(lambda x: tuple(sorted(tuple(x))), axis=1)  # sort cluster ids to dedupe
-    cluster_id_to_size = df["clusters"].value_counts()
-    df["cluster_size"] = df["clusters"].map(cluster_id_to_size)
-
     # Compute chain type counts
     chain_count_cols = ["n_prot", "n_nuc", "n_ligand", "n_peptide", "is_loi"]
     df["chain_types"] = df[chain_type_cols].apply(lambda x: tuple(x), axis=1)
@@ -298,6 +392,27 @@ def get_sampling_weights(df: pd.DataFrame,
 
     df[chain_count_cols] = df.apply(_get_chain_type_counts, axis=1)
 
+    # Delete intermediate columns
+    del df["chain_types"]
+    del df["seq_lengths"]
+    return df
+
+
+def add_sampling_weights_info(df: pd.DataFrame,
+                              alphas: dict[str, float],
+                              beta: float,
+                              cluster_cols: list[str]) -> pd.DataFrame:
+    """
+    Based on the cluster ID in cluster_col and chain counts info, add a sampling weights column to the dataframe.
+    Modifies the dataframe in place and returns it.
+    """
+    assert all(col in df.columns for col in ["n_prot", "n_peptide", "n_nuc", "n_ligand", "is_loi"]), "Need to add chain counts info before computing sampling weights"
+
+    # Get cluster size
+    df["clusters"] = df[cluster_cols].apply(lambda x: tuple(sorted(tuple(x))), axis=1)  # sort cluster ids to dedupe
+    cluster_id_to_size = df["clusters"].value_counts()
+    df["cluster_size"] = df["clusters"].map(cluster_id_to_size)
+
     # Compute weights
     missing_alphas = set(alphas.keys()) - {"a_prot", "a_peptide", "a_nuc", "a_ligand", "a_loi"}
     missing_counts = {"n_prot", "n_peptide", "n_nuc", "n_ligand"} - set(df.columns)
@@ -318,4 +433,5 @@ def get_sampling_weights(df: pd.DataFrame,
         + alphas.get("a_loi", 0) * df["is_loi"]  # always 0 for now
     )
 
-    return weights
+    df["sampling_weight"] = weights
+    return df

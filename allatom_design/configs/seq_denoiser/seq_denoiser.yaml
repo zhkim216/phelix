@@ -54,6 +54,12 @@ data:
     betas:
       beta_chain: 1.0
       beta_interface: 0.0
+  chain_filters:
+    - "num_polymer_pn_units < 50"
+    - "deposition_date <= '2021-09-30'"
+    - "resolution < 9.0"
+    - "16 < q_pn_unit_sequence_length < 2048"
+    - "n_prot > 0"
   featurizer_cfg:
     max_tokens: 512
     max_atoms: 7168
