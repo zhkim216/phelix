@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=cache_features
+#SBATCH --job-name=preprocess_examples
 #SBATCH -p cpu_batch
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=64
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -22,7 +22,7 @@ BASE_DIR=/home/talal/rshuai/allatom-design
 
 cd ${BASE_DIR}
 # Run script
-python3 allatom_design/data/preprocessing/atomworks/cache_features.py \
+python3 allatom_design/data/preprocessing/atomworks/preprocess_examples.py \
     mmcif_dir=/large_storage/hielab/rshuai/datasets/mmCIF \
     out_dir=/scratch/hielab/rshuai/datasets/atomworks \
     num_workers=64

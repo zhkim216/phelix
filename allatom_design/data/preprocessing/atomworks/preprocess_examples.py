@@ -12,6 +12,8 @@ from atomworks.ml.datasets.datasets import StructuralDatasetWrapper
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
 
+from allatom_design.data.preprocessing.atomworks.sharding_utils import \
+    take_shard, use_sharding
 from allatom_design.data.transform.preprocess import preprocess_transform
 
 # tame BLAS threads inside each worker
@@ -30,9 +32,10 @@ def main(cfg: DictConfig):
     Path(cfg.out_dir).mkdir(parents=True, exist_ok=True)
 
     # Preserve the original config
-    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-    with open(Path(cfg.out_dir, "config.yaml"), "w") as f:
-        yaml.safe_dump(cfg_dict, f)
+    if not use_sharding(cfg.shard_id, cfg.num_shards) or (cfg.shard_id == 0):
+        cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+        with open(Path(cfg.out_dir, "config.yaml"), "w") as f:
+            yaml.safe_dump(cfg_dict, f)
 
     # Setup
     use_parallel = cfg.num_workers > 1
@@ -51,14 +54,16 @@ def main(cfg: DictConfig):
 
     # iterate over the dataset, and the caching will happen automatically
     struct_dataset = hydra.utils.instantiate(cfg.dataset, transform=preprocess_transform())
+    indices = list(range(len(struct_dataset)))
+    indices = take_shard(indices, shard_id=cfg.shard_id, num_shards=cfg.num_shards)
+
     if use_parallel:
-        indices = range(len(struct_dataset))
         with ProcessPoolExecutor(max_workers=cfg.num_workers, mp_context=mp.get_context("forkserver"),
                                  initializer=_init_dataset, initargs=(cfg.dataset,)) as executor:
-            for _ in tqdm(executor.map(cache_fn, indices), total=len(struct_dataset), desc="Caching examples"):
+            for _ in tqdm(executor.map(cache_fn, indices), total=len(indices), desc="Caching examples"):
                 pass
     else:
-        for idx in tqdm(range(len(struct_dataset)), desc="Caching examples"):
+        for idx in tqdm(indices, desc="Caching examples"):
             cache_fn(idx, dataset=struct_dataset)
 
 

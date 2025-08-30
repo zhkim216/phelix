@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import glob
 import itertools
-from functools import partial
 from pathlib import Path
 
 import hydra
@@ -10,32 +9,42 @@ import yaml
 from atomworks.ml.common import generate_example_id
 from atomworks.ml.preprocessing.get_pn_unit_data_from_structure import \
     DataPreprocessor
-from joblib import Parallel, delayed
-from omegaconf import DictConfig, OmegaConf, open_dict
-from tqdm import tqdm
-from atomworks.ml.transforms.encoding import EncodeAtomArray
+from natsort import natsorted
+from omegaconf import DictConfig, OmegaConf
 from p_tqdm import p_umap
+from tqdm import tqdm
+
+from allatom_design.data.preprocessing.atomworks.sharding_utils import \
+    take_shard, use_sharding
 
 
-@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="build_metadata_parquet", version_base="1.3.2")
+@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="build_metadata_parquet_shards", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Process a set of mmCIFs using AtomWorks.
+    This script supports sharding by setting:
+      - num_shards (int) and shard_id (int)
     """
-    # Create dataset directory
-    Path(cfg.out_dir).mkdir(parents=True, exist_ok=True)
+    # Create dataset directory + shard dir
+    out_dir = Path(cfg.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    shard_dir = out_dir / "shards"
+    shard_dir.mkdir(parents=True, exist_ok=True)
 
-    # Preserve the original config
-    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
-    with open(Path(cfg.out_dir, "config.yaml"), "w") as f:
-        yaml.safe_dump(cfg_dict, f)
+    # Only one shard writes the canonical config.yaml to avoid races
+    if not use_sharding(cfg.shard_id, cfg.num_shards) or (cfg.shard_id == 0):
+        cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+        with open(out_dir / "config.yaml", "w") as f:
+            yaml.safe_dump(cfg_dict, f)
 
     # Setup
     use_parallel = cfg.num_workers > 1
     dataset_name = Path(cfg.out_dir).stem
 
-    # Get CIF paths
-    cif_paths = get_cif_paths(cfg.mmcif_dir, cfg.max_file_size)
+    # Get all CIF paths then take this shard's slice
+    cif_paths_all = get_cif_paths(cfg.mmcif_dir, cfg.max_file_size)
+    cif_paths = take_shard(cif_paths_all, shard_id=cfg.shard_id, num_shards=cfg.num_shards)
+    print(f"Shard {cfg.shard_id}/{cfg.num_shards}: {len(cif_paths)} mmCIFs.")
 
     # Initialize data preprocessor
     processor = DataPreprocessor(**{
@@ -54,16 +63,26 @@ def main(cfg: DictConfig):
             return []
 
     ### Process each CIF and save to parquet ###
+    if len(cif_paths) == 0:
+        print(f"Shard {cfg.shard_id}: no files to process, exiting.")
+        return
+
     if use_parallel:
-        df = p_umap(_process_cif, cif_paths, num_cpus=cfg.num_workers, desc="Processing mmCIFs")
+        df = p_umap(_process_cif, cif_paths, num_cpus=cfg.num_workers, desc=f"Processing mmCIFs (shard {cfg.shard_id})")
     else:
         df = [_process_cif(cif_path) for cif_path in tqdm(cif_paths)]
-    df = pd.DataFrame(itertools.chain(*df))  # flatten list of lists
-    save_to_parquet(df, dataset_name, cfg.mmcif_dir, f"{cfg.out_dir}/metadata.parquet")  # save to parquet
 
-    # for caching, we need to save a parquet with unique pdb IDs to avoid race conditions
-    df_cache = df.groupby("pdb_id").first().reset_index()
-    save_to_parquet(df_cache, dataset_name, cfg.mmcif_dir, f"{cfg.out_dir}/metadata_for_caching.parquet")  # save to parquet
+    df = pd.DataFrame(itertools.chain(*df))  # flatten list of lists
+
+    # If nothing produced, skip writing
+    if df.empty:
+        print(f"Shard {cfg.shard_id}: produced 0 rows, skipping parquet write.")
+        return
+
+    # Write one parquet per shard
+    shard_out = shard_dir / f"metadata_shard_{cfg.shard_id:05d}.parquet"
+    save_to_parquet(df, dataset_name, cfg.mmcif_dir, str(shard_out))
+    print(f"Shard {cfg.shard_id}: wrote {len(df)} rows to {shard_out}")
 
 
 def get_cif_paths(mmcif_dir: str, max_file_size: int | None = None) -> list[str]:
@@ -83,11 +102,6 @@ def save_to_parquet(df: pd.DataFrame,
     """
     Save a dataframe to parquet.
     Also adds an example_id column based on the name of the dataset.
-
-    - df: dataframe to save
-    - dataset_name: name of the dataset
-    - pdb_in_dir: base path of the input directory
-    - out_path: path to save the parquet file
     """
     # Convert all object columns to string to save to parquet
     for col in df.columns:

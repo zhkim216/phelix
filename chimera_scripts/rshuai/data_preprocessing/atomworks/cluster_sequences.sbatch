@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=build_metadata_parquet
+#SBATCH --job-name=cluster_sequences
 #SBATCH -p cpu_batch
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=8
 #SBATCH --time=96:00:00
 #
 # Send stdout and stderr to logs
@@ -22,7 +22,5 @@ BASE_DIR=/home/talal/rshuai/allatom-design
 
 cd ${BASE_DIR}
 # Run script
-python3 allatom_design/data/preprocessing/atomworks/build_metadata_parquet.py \
-    mmcif_dir=/large_storage/hielab/rshuai/datasets/mmCIF \
-    out_dir=/scratch/hielab/rshuai/datasets/atomworks \
-    num_workers=64
+python3 allatom_design/data/preprocessing/atomworks/cluster_sequences.py \
+    pdb_path=/scratch/hielab/rshuai/datasets/atomworks
