@@ -63,10 +63,14 @@ def main(cfg: DictConfig):
 
 
 def _cache_examples(idx: int,
-                 cached_example_dir: str,
-                 *,
-                 dataset: StructuralDatasetWrapper | None = None) -> str:
-    feats = dataset[idx] if dataset is not None else _DATASET[idx]  # indexing the dataset triggers structure caching
+                    cached_example_dir: str,
+                    *,
+                    dataset: StructuralDatasetWrapper | None = None) -> str:
+    try:
+        feats = dataset[idx] if dataset is not None else _DATASET[idx]  # indexing the dataset triggers structure caching
+    except Exception as e:
+        print(f"Error caching example {idx}: {e}")
+        return None
 
     # save feats to disk
     pdb_id = feats["extra_info"]["pdb_id"]
