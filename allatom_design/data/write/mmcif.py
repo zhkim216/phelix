@@ -18,7 +18,6 @@ from torchtyping import TensorType
 from allatom_design.data import const, data
 from allatom_design.data.data import to
 from allatom_design.data.feature.feature_utils import unbatch_feats
-from allatom_design.data.feature.seq_des_featurizer import crop_sd_feats
 from allatom_design.data.types import Structure
 from collections import defaultdict
 
