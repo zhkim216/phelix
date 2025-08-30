@@ -1,6 +1,6 @@
 import copy
 import math
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 import torch
 import torch.nn as nn
@@ -12,6 +12,7 @@ from allatom_design.model.seq_denoiser.denoisers.atom_mpnn_denoiser import \
     AtomMPNNDenoiser
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
+from allatom_design.data.mask_selector import MaskSelector
 
 
 class SeqDenoiser(nn.Module):
@@ -36,7 +37,7 @@ class SeqDenoiser(nn.Module):
         self.denoiser = get_denoiser(cfg.denoiser, self.sigma_data)
 
         # Mask selector
-        self.mask_selector = cfg.mask_selector
+        self.mask_selector = MaskSelector(cfg.mask_selector)
 
 
     def setup(self):
@@ -132,23 +133,8 @@ def get_denoiser(cfg: DictConfig,
     """
     Get the denoiser specified in the config.
     """
-    if cfg.name == "fampnn" or cfg.name == "minimpnn":  # backwards compatibility
-        from allatom_design.model.seq_denoiser.denoisers.fampnn_denoiser import \
-            FAMPNNDenoiser
-        return FAMPNNDenoiser(cfg, sigma_data)
-    elif cfg.name == "atom_mpnn":
+    if cfg.name == "atom_mpnn":
         return AtomMPNNDenoiser(cfg, sigma_data)
     else:
         raise ValueError(f"Unknown denoiser: {cfg.name}")
 
-
-def truncated_half_normal_like(x: TensorType["...", float],
-                               std: float, max_val: Optional[float]) -> TensorType["...", float]:
-    if max_val is None:
-        # return half-normal with no truncation
-        return torch.abs(torch.randn_like(x) * std)
-    u = torch.rand_like(x)
-    truncated_factor = torch.erf(torch.tensor(max_val / (math.sqrt(2) * std)))
-    u_scaled = u * truncated_factor
-    samples = std * math.sqrt(2) * torch.erfinv(u_scaled)
-    return samples

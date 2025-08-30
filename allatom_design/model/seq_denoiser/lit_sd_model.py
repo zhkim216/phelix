@@ -1,19 +1,16 @@
-import itertools
 from collections import defaultdict
-from typing import Any, Dict
+from typing import Dict
 
 import lightning as L
-import numpy as np
 import torch
-from einops import rearrange
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import DictConfig
 from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import LinearLR
 from torchtyping import TensorType
 
-from allatom_design.model.lr_schedule import InverseSqrtLR, NoamLR
 from allatom_design.model.ema.phema import PowerFunctionEMA
+from allatom_design.model.lr_schedule import InverseSqrtLR, NoamLR
 from allatom_design.model.seq_denoiser.sd_loss import SDLoss
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 
@@ -99,19 +96,6 @@ class LitSeqDenoiser(L.LightningModule):
             aux_t = {k: torch.stack(v).mean().item() for k, v in aux_t.items()}
             self._log(batch, None, aux_t, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix="_avg_t")
 
-        # # eval sidechain packing over edm sidechain noise, fully unmasked sequence
-        # if self.model.task in ["allatom_seq_des", "scn_pack"]:
-        #     B = batch["seq_mask"].shape[0]
-        #     t_seq = torch.full((B, ), fill_value=0).to(self.device)
-
-        #     for t_scd in self.cfg.eval.eval_timesteps:
-        #         batch["t_scd"] = t_scd
-        #         outputs = self(batch, t=t_seq)
-        #         _, aux = self.loss(outputs, batch, eval_seq = False, eval_total = False, return_aux=True)
-        #         aux = {k: v for k, v in aux.items() if "scn/" in k}  # trim aux to sidechain diffusion metrics
-        #         aux = {k: v for k, v in aux.items() if "unweighted" not in k}  # trim out unweighted loss
-        #         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix="/scn_diff",
-        #                     key_suffix=f"_t_scd{t_scd}")
 
     def _log(self,
              batch: Dict[str, TensorType["b ..."]],
@@ -125,7 +109,7 @@ class LitSeqDenoiser(L.LightningModule):
         phase_suffix: used to differentiate between different phases of validation (e.g. different fixed sizes), should include a leading "/"
         key_suffix: adds a suffix to the key
         """
-        bs = len(batch["pdb_key"])
+        bs = len(batch["example_id"])
 
         log_dict = {}
         for k, v in aux.items():

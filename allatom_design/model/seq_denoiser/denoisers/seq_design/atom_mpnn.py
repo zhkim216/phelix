@@ -8,21 +8,14 @@ import torch.nn as nn
 from boltz.model.modules.utils import LinearNoBias
 from omegaconf import DictConfig
 from torch.nn import functional as F
-from torch_cluster import knn_graph
 from torchtyping import TensorType
 
 import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
+import allatom_design.data.const as const
 from allatom_design.data.data import batched_gather
-from allatom_design.data.datasets.boltz_sd_dataset import \
-    crop_batch_to_protein_only
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
-from chroma.layers.structure import diffusion
-
-# https://github.com/pyg-team/pytorch_geometric/issues/8747
-knn_graph = torch.compiler.disable(knn_graph)
-from chroma.data.protein import Protein
 
 
 class AtomMPNN(nn.Module):
@@ -36,37 +29,14 @@ class AtomMPNN(nn.Module):
         self.num_encoder_layers = cfg.n_layers
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
+        self.n_tokens = const.AF3_SEQUENCE_ENCODING.n_tokens
 
         self.token_features = TokenFeatures(cfg.token_features)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=False)
-        self.W_s = nn.Linear(len(const.tokens), self.hidden_dim, bias=False)
+        self.W_s = nn.Linear(self.n_tokens, self.hidden_dim, bias=False)
         self.decoder_in = self.hidden_dim * 3  # concat of h_E, h_S, h_V
 
         self.dropout = nn.Dropout(cfg.dropout_p)
-
-        # Polymer backbone diffusion
-        self.use_polymer_diffusion = cfg.get("use_polymer_diffusion", False)
-        if self.use_polymer_diffusion:
-            self.noise_perturb = diffusion.DiffusionChainCov(
-                noise_schedule=cfg.polymer_diffusion.noise_schedule,
-                beta_min=cfg.polymer_diffusion.noise_beta_range[0],
-                beta_max=cfg.polymer_diffusion.noise_beta_range[1],
-                log_snr_range=cfg.polymer_diffusion.noise_log_snr_range,
-                covariance_model=cfg.polymer_diffusion.noise_covariance_model,
-                complex_scaling=cfg.polymer_diffusion.noise_complex_scaling,
-            )
-            self.time_features = diffusion.NoiseTimeEmbedding(
-                dim_embedding=self.node_features,
-                noise_schedule=self.noise_perturb.noise_schedule,
-            )
-            self.t_max = cfg.polymer_diffusion.get("t_max", 1.0)
-            self.canonicalize = cfg.polymer_diffusion.get("canonicalize", False)
-
-        # Atom-level encoder
-        if cfg.use_atom_encoder:
-            self.atom_encoder = AtomGraphEncoder(cfg.atom_encoder)
-        else:
-            self.atom_encoder = None
 
         # Encoder layers
         self.encoder_layers = nn.ModuleList([
@@ -92,7 +62,7 @@ class AtomMPNN(nn.Module):
             potts_init = partial(potts.GraphPotts,
                 dim_nodes=self.node_features,
                 dim_edges=self.decoder_in,
-                num_states=len(const.tokens),
+                num_states=self.n_tokens,
                 parameterization=self.parameterization,
                 num_factors=self.num_factors,
                 symmetric_J=cfg.potts.symmetric_J,
@@ -104,7 +74,7 @@ class AtomMPNN(nn.Module):
                 self.msa_potts = potts_init()
 
         # Output layers
-        self.W_out = nn.Linear(self.hidden_dim, len(const.tokens), bias=True)
+        self.W_out = nn.Linear(self.hidden_dim, self.n_tokens, bias=True)
 
         # Initialize weights
         for p in self.parameters():
@@ -116,27 +86,17 @@ class AtomMPNN(nn.Module):
         # If provided, add noise to input coordinates
         batch["coords"] = self._add_noise(batch)
 
-        # Apply polymer backbone diffusion
-        if self.use_polymer_diffusion:
-            batch = self.polymer_noise_perturb(batch, is_sampling)
-
         # Get token-level features
-        if self.atom_encoder is not None:
-            h_V = self.atom_encoder(batch)
-        else:
-            B, N, C = batch["res_type"].shape
-            h_V = torch.zeros((B, N, self.node_features), device=batch["res_type"].device)
-
-        # Embed time step
-        if self.use_polymer_diffusion:
-            h_V = h_V + self.time_features(batch["t"])
+        B, N, C = batch["restype"].shape
+        h_V = torch.zeros((B, N, self.node_features), device=batch["restype"].device)
 
         # Concatenate residue-level features to h_V
         ## first, mask out residues using gap token
-        B, N, C = batch["res_type"].shape
-        masked = F.one_hot(torch.full((B, N), const.token_ids["-"], device=batch["res_type"].device), num_classes=C).float()
-        res_type = torch.where(batch["seq_cond_mask"].unsqueeze(-1).bool(), batch["res_type"], masked)
-        h_S = self.W_s(res_type)
+        B, N, C = batch["restype"].shape
+        masked = F.one_hot(torch.full((B, N), const.AF3_SEQUENCE_ENCODING.token_to_idx["<G>"],
+                                      device=batch["restype"].device), num_classes=C).float()
+        restype = torch.where(batch["seq_cond_mask"].unsqueeze(-1).bool(), batch["restype"], masked)
+        h_S = self.W_s(restype)
 
         # Build graph and get edge features
         h_E, E_idx, D_neighbors = self.token_features(batch)
@@ -207,53 +167,6 @@ class AtomMPNN(nn.Module):
         return noised_coords
 
 
-    @torch.compiler.disable
-    def polymer_noise_perturb(self, batch: dict[str, TensorType["b ..."]], is_sampling: bool) -> dict[str, TensorType["b ..."]]:
-        """
-        Apply polymer backbone diffusion noise to the input coordinates.
-        """
-        if not is_sampling and self.training:
-            # Sample timestep
-            t = self.noise_perturb.sample_t(batch["token_pad_mask"])
-            t = t * self.t_max
-        else:
-            # Use provided timestep or zero if not provided
-            t = batch.get("t", batch["token_pad_mask"].new_zeros(batch["token_pad_mask"].shape[0]))
-
-        # Get protein coordinates and apply noise to the backbone atoms
-        protein_batch, protein_token_mask = crop_batch_to_protein_only(batch, return_crop_mask=True)
-        X_prot = get_tokenwise_coords(protein_batch)
-        X_prot_bb = X_prot[..., const.prot_bb_atom14_idxs, :]
-        if self.canonicalize:
-            X = X_prot_bb
-            C = torch.where(protein_batch["token_exists_mask"].bool(), protein_batch["asym_id"] + 1, -(protein_batch["asym_id"] + 1))
-            S = torch.zeros_like(protein_batch["token_exists_mask"])
-            Xs, Cs, Ss = [], [], []
-            for i in range(X.shape[0]):
-                protein = Protein.from_XCS(X[i:i+1], C[i:i+1], S[i:i+1])
-                protein.canonicalize()
-                X_i, C_i, S_i = protein.to_XCS()
-                Xs.append(X_i)
-                C_i = C_i.squeeze(0)[protein_batch["token_pad_mask"][i].bool()]
-                batch["token_exists_mask"][i, protein_token_mask[i]] = (C_i > 0).float()   # update token_exists_mask to reflect canonicalization
-            X = torch.cat(Xs, dim=0)
-            X_prot_bb = X
-
-        if not is_sampling and self.training:
-            # Only apply noise if not sampling and training
-            X_prot_bb = self.noise_perturb(X_prot_bb, protein_batch["token_exists_mask"], t)
-
-        X_prot[..., const.prot_bb_atom14_idxs, :] = X_prot_bb  # update protein coordinates with possibly canonicalized and noised backbone atoms
-
-        # Scatter back to atom coordinates
-        X_all = get_tokenwise_coords(batch)
-        for i in range(X_all.shape[0]):
-            X_all[i, protein_token_mask[i]] = X_prot[i][protein_batch["token_pad_mask"][i].bool()]
-        batch["coords"] = get_atomwise_coords(batch, X_all)
-        batch["t"] = t
-        return batch
-
-
 class TokenFeatures(nn.Module):
     def __init__(self, cfg: DictConfig):
         """
@@ -315,9 +228,9 @@ class TokenFeatures(nn.Module):
         token_bonds = batch["token_bonds"]
 
         # (JH): fix to remove polymer-polymer bonds
-        token_bonds_mask = (batch["mol_type"] == const.chain_type_ids["NONPOLYMER"]) # [B, L]
-        token_bonds_mask = (token_bonds_mask[:,:,None] | token_bonds_mask[:,None,:])[..., None] # [B, L, L, 1]
-        token_bonds = token_bonds * token_bonds_mask
+        token_bonds_mask = batch["is_ligand"]  # [B, L]
+        token_bonds_mask = (token_bonds_mask[:,:,None] | token_bonds_mask[:,None,:])  # [B, L, L]
+        token_bonds = (token_bonds * token_bonds_mask)[..., None]  # [B, L, L, 1]
 
         token_bonds = gather_edges(token_bonds, E_idx)
 
@@ -333,8 +246,7 @@ class TokenFeatures(nn.Module):
         Get token-level coordinates as an average over all known, resolved atoms in the token.
         """
         B, N, _ = batch["coords"].shape
-        _, center_idx = torch.max(batch["token_to_center_atom"], dim=-1)
-        X = batch["coords"][torch.arange(B).unsqueeze(-1), center_idx]  # get center atom for each token
+        X = batch["coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token
         X = X * batch["token_exists_mask"].unsqueeze(-1)  # mask out padding and unresolved atoms
         return X
 
@@ -507,286 +419,23 @@ class EncLayer(nn.Module):
         return h_V, h_E
 
 
-class AtomGraphEncoder(nn.Module):
-    def __init__(self, cfg: DictConfig):
-        """
-        Similar to AF3 atom-attention encoder, but using structure to build a KNN graph rather than using
-        sequence-local attention.
-        """
-        super(AtomGraphEncoder, self).__init__()
-        self.cfg = cfg
-
-        self.k_atom_neighbors = cfg.k_atom_neighbors
-        self.atom_feature_dim = cfg.atom_feature_dim
-        self.token_n_channel = cfg.token_n_channel
-        self.atom_s = cfg.atom_s
-        self.atom_z = cfg.atom_z
-        self.dropout_p = cfg.dropout_p
-        self.n_layers = cfg.n_layers
-
-        # Embed 1D features
-        self.embed_atom_features = LinearNoBias(self.atom_feature_dim, self.atom_s)
-
-        # Embed 2D features
-        # Reference position embeddings
-        self.embed_ref_dist = LinearNoBias(1, self.atom_z)  # unlike AF3, we embed the distance, not the direction offset. TODO: switch to RBF?
-        self.embed_inv_ref_dist = LinearNoBias(1, self.atom_z)  # 1 / (1 + dist**2)
-        self.embed_v_mask = LinearNoBias(1, self.atom_z)  # embed mask for within-conformer edges
-
-        # Coordinate embeddings
-        self.embed_dist = LinearNoBias(1, self.atom_z)  # TODO: embed RBF?
-        self.embed_inv_dist = LinearNoBias(1, self.atom_z)  # 1 / (1 + dist**2)
-        self.embed_edge_mask = LinearNoBias(1, self.atom_z)  # embed mask for edges
-
-        # Edge embedding MLP
-        self.p_mlp = nn.Sequential(
-            nn.ReLU(),
-            LinearNoBias(self.atom_z, self.atom_z),
-            nn.ReLU(),
-            LinearNoBias(self.atom_z, self.atom_z),
-            nn.ReLU(),
-            LinearNoBias(self.atom_z, self.atom_z),
-        )
-
-        # Graph encoding layers
-        self.layers = nn.ModuleList([
-            AtomGraphEncoderLayer(self.atom_s, self.atom_z,
-                                  dropout=self.dropout_p,
-                                  is_last_layer=(i == self.n_layers - 1))
-            for i in range(self.n_layers)
-        ])
-
-        # Aggregation to token-level features
-        self.atom_to_token_trans = nn.Sequential(LinearNoBias(self.atom_s, self.token_n_channel),
-                                                 nn.ReLU())
-
-
-
-    def forward(self, batch: dict[str, TensorType["b ..."]]):
-        B, N, _ = batch["ref_pos"].shape
-        K = self.k_atom_neighbors
-
-        # Embed 1D features
-        atom_cond_mask = batch["atom_cond_mask"].float()
-        ref_charge = batch["ref_charge"] * atom_cond_mask
-        ref_element = batch["ref_element"] * atom_cond_mask.unsqueeze(-1)
-        ref_atom_name_chars = batch["ref_atom_name_chars"].reshape(B, N, 4 * 64) * atom_cond_mask.unsqueeze(-1)
-
-        atom_feats = torch.cat(
-            [
-                # atom_ref_pos,  # not invariant
-                atom_cond_mask.unsqueeze(-1),  # not needed?
-                ref_charge.unsqueeze(-1),
-                ref_element,
-                ref_atom_name_chars,
-            ],
-            dim=-1,
-        ).to(batch["coords"].dtype)
-        c = self.embed_atom_features(atom_feats)
-
-        # Build KNN graph on atoms we're conditioning on
-        X = batch["coords"] * atom_cond_mask.unsqueeze(-1)
-        E_idx = knn_neighbors_batched(X, atom_cond_mask, k=K)
-        mask_2d = gather_nodes(atom_cond_mask.unsqueeze(-1), E_idx).squeeze(-1)
-        mask_2d = mask_2d * atom_cond_mask.unsqueeze(-1)
-
-        # Embed offsets between reference positions
-        ## get valid mask (within-conformer edges)
-        atom_ref_pos = batch["ref_pos"] * batch["atomwise_seq_cond_mask"].unsqueeze(-1)  # if residue type is masked, set the whole ref_pos to 0 to avoid leakage
-        ref_space_uid = batch["ref_space_uid"] * atom_cond_mask
-
-        uid_neighbors = gather_nodes(ref_space_uid.unsqueeze(-1), E_idx).squeeze(-1)
-        v_mask = (ref_space_uid.view(B, N, 1) == uid_neighbors) * mask_2d  # [B, N, K]
-        v_mask = v_mask.unsqueeze(-1)  # [B, N, K, 1]
-
-        ## embed distances between reference positions
-        ref_pos_neighbors = gather_nodes(atom_ref_pos, E_idx)
-        d_ref = (atom_ref_pos.view(B, N, 1, 3) - ref_pos_neighbors).norm(dim=-1, keepdim=True)
-        inv_d_ref = 1 / (1 + d_ref**2)
-
-        p = self.embed_ref_dist(d_ref) * v_mask  # [B, N, K, atom_n_channel]
-        p = p + self.embed_inv_ref_dist(inv_d_ref) * v_mask
-        p = p + self.embed_v_mask(v_mask) * v_mask
-
-        # Embed distances between real positions
-        coords_neighbors = gather_nodes(X, E_idx)
-        d = (X.view(B, N, 1, 3) - coords_neighbors).norm(dim=-1, keepdim=True)
-        inv_d = 1 / (1 + d**2)
-        edge_mask = mask_2d.unsqueeze(-1)
-
-        p = p + self.embed_dist(d) * edge_mask
-        p = p + self.embed_inv_dist(inv_d) * edge_mask
-        p = p + self.embed_edge_mask(edge_mask) * edge_mask
-        p = p + self.p_mlp(p)  # embed 2D features
-
-        # Run graph encoding layers
-        q = c
-        for layer in self.layers:
-            q, p = layer(q, p, E_idx, mask_V=atom_cond_mask, mask_attend=mask_2d)
-
-        # Aggregate to token-level features
-        q_to_a = self.atom_to_token_trans(q) * atom_cond_mask.unsqueeze(-1)
-        cond_atom_to_token = batch["atom_to_token"] * atom_cond_mask.unsqueeze(-1)  # cond_atom_to_token ensures that we don't average over unresolved or masked atoms
-        atom_to_token_mean = cond_atom_to_token / (
-            cond_atom_to_token.sum(dim=1, keepdim=True) + 1e-6
-        )
-        with torch.autocast(device_type="cuda", enabled=False):
-            a = torch.bmm(atom_to_token_mean.transpose(1, 2), q_to_a)
-
-        return a
-
-
-class AtomGraphEncoderLayer(nn.Module):
-    def __init__(self, atom_s, atom_z, dropout=0.1, scale=30, is_last_layer=False):
-        super(AtomGraphEncoderLayer, self).__init__()
-        self.atom_s = atom_s
-        self.atom_z = atom_z
-        self.scale = scale
-        self.is_last_layer = is_last_layer
-
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
-        self.norm1 = nn.LayerNorm(atom_s)
-        self.norm2 = nn.LayerNorm(atom_s)
-
-        self.W1 = nn.Linear(2 * atom_s + atom_z, atom_s, bias=True)
-        self.W2 = nn.Linear(atom_s, atom_s, bias=True)
-        self.W3 = nn.Linear(atom_s, atom_s, bias=True)
-        self.act = torch.nn.GELU()
-        self.dense = PositionWiseFeedForward(atom_s, atom_s * 4)
-
-        if not is_last_layer:
-            # only initialize edge updates if not last layer to avoid unused parameters
-            self.W11 = nn.Linear(2 * atom_s + atom_z, atom_z, bias=True)
-            self.W12 = nn.Linear(atom_z, atom_z, bias=True)
-            self.W13 = nn.Linear(atom_z, atom_z, bias=True)
-            self.norm3 = nn.LayerNorm(atom_z)
-
-
-    def forward(self, h_V, h_E, E_idx, mask_V=None, mask_attend=None):
-        """ Parallel computation of full transformer layer """
-
-        h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
-        h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
-        h_EV = torch.cat([h_V_expand, h_EV], -1)
-        h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
-
-        if mask_attend is not None:
-            h_message = mask_attend.unsqueeze(-1) * h_message
-        dh = torch.sum(h_message, -2) / self.scale
-        h_V = self.norm1(h_V + self.dropout1(dh))
-
-        dh = self.dense(h_V)
-        h_V = self.norm2(h_V + self.dropout2(dh))
-        if mask_V is not None:
-            mask_V = mask_V.unsqueeze(-1)
-            h_V = mask_V * h_V
-
-        if not self.is_last_layer:
-            # Edge updates
-            h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
-            h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
-            h_EV = torch.cat([h_V_expand, h_EV], -1)
-            h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
-            h_E = self.norm3(h_E + self.dropout3(h_message))
-
-        return h_V, h_E
-
-
-
-def knn_neighbors_batched(
-    coords: TensorType["b n 3"],
-    atom_mask: TensorType["b n"],
-    k: int
-) -> TensorType["b n k"]:
-    """
-    Returns a [B, N, k] tensor of neighbor indices per atom, ignoring padded and non-existent atoms
-    and cutting off ties so each atom has at most k neighbors.
-    Neighbors are "arbitrary among ties" because knn_graph may return more than k
-    if distances tie. We keep only the first k that appear in its output.
-    Positions for padded or non-existent atoms (or if <k neighbors) are filled with 0.
-    """
-    device = coords.device
-    B, N, _ = coords.shape
-
-    # Flatten batch dimension
-    # shape = [B*N, 3], [B*N], etc.
-    coords_flat = coords.view(B*N, 3)
-    mask_flat = atom_mask.view(B*N)
-
-    # Identify which flattened indices are valid (unmasked)
-    valid_idx = mask_flat.nonzero(as_tuple=True)[0]  # 1D indices into [B*N]
-    coords_valid = coords_flat[valid_idx]            # [M, 3], M <= B*N
-
-    # For each valid flattened index, figure out (batch_idx, atom_idx_within_batch)
-    batch_indices = torch.arange(B, device=device).unsqueeze(1).expand(B, N).flatten()  # which batch each atom belongs to
-    atom_indices  = torch.arange(N, device=device).unsqueeze(0).expand(B, N).flatten()  # which atom index within that batch
-    valid_batch_idx = batch_indices[valid_idx]  # [M]
-    valid_atom_idx  = atom_indices[valid_idx]   # [M]
-
-    # Run knn_graph on the valid points (no cross-batch edges, thanks to batch=...)
-    # shape of edge_index is [2, E], row=src, col=dst each in [0..M-1].
-    edge_index = knn_graph(x=coords_valid, k=k, batch=valid_batch_idx, loop=False)
-    dst, src = edge_index
-
-    ###
-    # We might get more than k edges per node if there are distance ties.
-    # We'll keep only the first k edges per source node.
-    ###
-
-    # First, we group edges by their source node and count them up
-    src_batch = valid_batch_idx[src]
-    src_atom = valid_atom_idx[src]
-    src_key = src_batch * N + src_atom  # [E], denotes the source node for each edge, where the source node is indexed by [B*N]
-    E = src_key.size(0)
-
-    ## sort the edges by source node to ensure that edges for the same source node are consecutive
-    src_key_sorted, sorted_idx = torch.sort(src_key, stable=True)  # stable=True to preserve original edge order
-    dst_sorted = dst[sorted_idx]  # align the destination nodes with the sorted source nodes
-
-    ## count how many edges belong to each source node
-    counts = torch.bincount(src_key_sorted, minlength=B*N)  # [B*N], index i represents the number of edges for source node i
-
-    # Next, we filter out the edges that are not the first k edges per source node
-    cumsum_counts = counts.cumsum(dim=0)
-    start_offset = cumsum_counts[src_key_sorted] - counts[src_key_sorted]  # [E], represents the index of the first edge for the source node that this edge belongs to
-    local_idx = torch.arange(E, device=device) - start_offset  # [E], represents the index of this edge in the edge list for the source node
-
-    keep_edge_mask = local_idx < k  # keep only the first k edges per source node
-    src_key_final = src_key_sorted[keep_edge_mask]  # [E], represents the source node for each edge
-    dst_final = dst_sorted[keep_edge_mask]  # [E], represents the destination node for each edge
-    dst_atom_final = valid_atom_idx[dst_final]  # [E], represents the atom index of the destination node within the batch
-    local_idx_final = local_idx[keep_edge_mask]  # [E], represents the index of this edge in the edge list for the source node capped at k
-
-    # Build up neighbors, with -1 for padded or non-existent atoms
-    neighbors = torch.full((B, N, k), -1, device=device, dtype=torch.long)
-
-    ## get the destination node indices within the batch for each edge
-    neighbors_flat = neighbors.view(B * N * k)  # flatten for scatter
-    scatter_index = src_key_final * k + local_idx_final  # scatter_index denotes the position in neighbors_flat to store the destination node index
-    neighbors_flat.scatter_(0, scatter_index, dst_atom_final)  # scatter the destination node indices to the appropriate positions in neighbors_flat
-
-    neighbors = neighbors_flat.view(B, N, k)
-    neighbors = neighbors.clamp(min=0)  # clamp padding and non-existent atoms to 0
-    return neighbors
-
-
 def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]]) -> tuple[TensorType["b n_tokens 23 3", float], TensorType["b n_tokens 23"]]:
     """
     Get token-level coordinates (padded to max_num_atoms per token). Batched version of pad_atom_feats_to_tokenwise for just coords.
     """
+    # TODO: check this whole function carefully
     B = batch["coords"].shape[0]
     device = batch["coords"].device
 
     # Build padded atom idxs
-    n_atoms_per_token = batch["atom_to_token"].sum(dim=-2)
+    N_tokens = batch["token_pad_mask"].shape[1]
+    n_atoms_per_token = (F.one_hot(batch["atom_to_token_map"], num_classes=N_tokens) * batch["atom_pad_mask"][..., None]).sum(dim=-2)
     atom_idxs = torch.cat([torch.zeros((B, 1), device=device), n_atoms_per_token.cumsum(dim=-1)[:, :-1]], dim=-1).long()
     padded_atom_idxs = atom_idxs[..., None] + torch.arange(const.max_num_atoms, device=device)[None, None]
     pad_mask = torch.arange(const.max_num_atoms, device=device)[None, None, :] < n_atoms_per_token[..., None]
     padded_atom_idxs = padded_atom_idxs * pad_mask  # mask out ghost atoms
 
-    # Gather coords  # TODO: check this carefully
+    # Gather coords
     B, N, _ = padded_atom_idxs.shape
     X_all = batched_gather(batch["coords"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.max_num_atoms, 1)
     tokenwise_atom_cond_mask = batched_gather(batch["atom_cond_mask"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.max_num_atoms)

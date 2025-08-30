@@ -12,7 +12,7 @@ from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 
-from allatom_design.data.datasets.boltz_sd_dataset import BoltzSDDataModule
+from allatom_design.data.datasets.atomworks_sd_dataset import AtomworksSDDataModule
 from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
                                              repair_state_dict)
 from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
@@ -41,11 +41,8 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.deterministic = True  # nonrandom CUDNN convolution algo, maybe slower
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
-    # Instantiate config
-    cfg = hydra.utils.instantiate(cfg)
-
     # Set up LightningDataModule
-    datamodule = BoltzSDDataModule(cfg.data)
+    datamodule = AtomworksSDDataModule(cfg.data)
 
     # Init wandb only on node rank 0
     local_rank = os.environ.get("LOCAL_RANK", None)
@@ -179,10 +176,6 @@ def update_config(cfg: DictConfig) -> None:
     if str(cfg.trainer.precision) in ["16", "16-true", "16-mixed"]:
         cfg.model.inf = 1e4
         cfg.model.eps = 1e-4
-
-    if getattr(cfg.denoiser, "confidence_module", None) and cfg.denoiser.confidence_module.enabled:
-        # Confidence module parameters are not always used
-        cfg.trainer.strategy = "ddp_find_unused_parameters_true"
 
 
 if __name__ == "__main__":
