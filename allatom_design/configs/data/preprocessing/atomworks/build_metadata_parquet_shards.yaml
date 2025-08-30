@@ -27,3 +27,7 @@ cif_parser_args:
   fix_arginines: true
   convert_mse_to_met: true
   hydrogen_policy: "remove"
+
+# --- sharding for multi-node runs ---
+num_shards: 1       # total number of shards
+shard_id: 0         # per-job shard id
