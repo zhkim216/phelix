@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, List, Union, override
+from typing import Any, List, Literal, Union, override
 
 import atomworks.enums as aw_enums
 import atomworks.ml.preprocessing.constants as aw_const
@@ -30,6 +30,7 @@ class AtomworksSDDataModule(L.LightningDataModule):
         self.cfg = cfg
         self.pdb_path = cfg.pdb_path
         self._train_set = SDDataset(cfg, phase="train")
+        self._val_set = SDDataset(cfg, phase="val")
 
 
     def train_dataloader(self) -> DataLoader:
@@ -38,18 +39,29 @@ class AtomworksSDDataModule(L.LightningDataModule):
                                         replacement=True)
 
         train_loader = DataLoader(self._train_set,
-                                  sampler=sampler,
                                   batch_size=self.cfg.batch_size,
                                   num_workers=self.cfg.num_workers,
+                                  sampler=sampler,
                                   pin_memory=True,
                                   drop_last=True,
                                   collate_fn=sd_collator)
 
         return train_loader
 
+    def val_dataloader(self) -> DataLoader:
+        val_loader = DataLoader(self._val_set,
+                                batch_size=self.cfg.batch_size,
+                                num_workers=self.cfg.num_workers,
+                                shuffle=False,
+                                pin_memory=True,
+                                drop_last=True,
+                                collate_fn=sd_collator)
+
+        return val_loader
+
 
 class SDDataset(BaseDataset):
-    def __init__(self, cfg: DictConfig, phase: str):
+    def __init__(self, cfg: DictConfig, phase: Literal["train", "val"]):
         super().__init__()
 
         self.cfg = cfg
@@ -75,6 +87,14 @@ class SDDataset(BaseDataset):
         chain_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
         chain_df["q_pn_unit_contacting_pn_unit_iids"] = chain_df["q_pn_unit_contacting_pn_unit_iids"].apply(json.loads)
 
+        # Load in validation IDs and hold out based on phase. Case insensitive, no extension.
+        with open(self.cfg.validation_ids_txt, "r") as f:
+            print(f"Loading in validation IDs from {self.cfg.validation_ids_txt}...")
+            val_split = {x.lower() for x in f.read().splitlines()}
+        chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
+        chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"
+        chain_df = chain_df[chain_df["phase"] == self.phase]
+
         # Add chain counts info and sampling weights
         chain_df = add_chain_counts_info(chain_df,
                                          chain_type_cols=["q_pn_unit_type"],
@@ -84,8 +104,9 @@ class SDDataset(BaseDataset):
                                              beta=self.cfg.sampling_weights["betas"]["beta_chain"],
                                              cluster_cols=["q_pn_unit_cluster_id"])
 
-        # Apply filters
-        chain_df = self._apply_filters(self.cfg.chain_filters, chain_df)
+        # Apply chain filters
+        filters = self.cfg.train_filters.chain if self.phase == "train" else self.cfg.val_filters.chain
+        chain_df = self._apply_filters(filters, chain_df)
 
         return chain_df
 
