@@ -11,7 +11,7 @@ from tqdm import tqdm
 import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.data.data import to
-# from allatom_design.data.feature.feature_utils import slice_feats
+from allatom_design.data.feature.feature_utils import slice_feats
 import allatom_design.data.const as const
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
@@ -158,8 +158,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             batch["seq_cond_mask"] = torch.zeros_like(batch["seq_cond_mask"])  # zero out model-level sequence conditioning mask
 
         # Compute potts parameters
-        potts_decoder_aux, batch, sampling_inputs = self.compute_potts_params(batch, sampling_inputs,
-                                                                              use_msa_potts=sampling_inputs["potts_sampling_cfg"].get("use_msa_potts", False))
+        potts_decoder_aux, batch, sampling_inputs = self.compute_potts_params(batch, sampling_inputs)
         aux["potts_decoder_aux"] = to(potts_decoder_aux, "cpu")
 
         # Set up Potts sampling
@@ -170,8 +169,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         potts_temperature = potts_sampling_cfg["potts_temperature"]
         rejection_step = potts_sampling_cfg.get("rejection_step", potts_proposal == "chromatic")
 
-        B, N, _ = batch["res_type"].shape
-        logits_init = torch.zeros((B, N, const.AF3_SEQUENCE_ENCODING.n_tokens), device=batch["res_type"].device).float()
+        B, N, _ = batch["restype"].shape
+        logits_init = torch.zeros((B, N, const.AF3_SEQUENCE_ENCODING.n_tokens), device=batch["restype"].device).float()
 
         # Handle banned amino acids and aatype restrictions
         ban_S = {"X"}
@@ -249,8 +248,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
 
     def compute_potts_params(self, batch: dict[str, TensorType["b ..."]],
-                             sampling_inputs: dict[str, Any],
-                             use_msa_potts: bool = False) -> tuple[dict[str, TensorType["b ..."]], dict[str, TensorType["b ..."]], dict[str, Any]]:
+                             sampling_inputs: dict[str, Any]) -> tuple[dict[str, TensorType["b ..."]], dict[str, TensorType["b ..."]], dict[str, Any]]:
         """
         Run model and collect potts parameters over a batch of samples.
 
@@ -262,7 +260,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             sampling_inputs: dict[str, Any]: sampling inputs with pos_restrict_aatype sliced to representative elements
         """
         subbatch_size = sampling_inputs["batch_size"]
-        B = batch["res_type"].shape[0]
+        B = batch["restype"].shape[0]
 
         # Run model and collect potts parameters
         potts_decoder_aux = {}  # potts parameters
@@ -278,11 +276,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         potts_decoder_aux = {k: torch.cat(v, dim=0) for k, v in potts_decoder_aux.items()}
         token_exists_mask = torch.cat(token_exists_mask, dim=0)
         batch["token_exists_mask"] = token_exists_mask  # store in batch for downstream use
-
-        # If using MSA potts, we use h_msa and J_msa instead of h and J
-        if use_msa_potts:
-            potts_decoder_aux["h"] = potts_decoder_aux.pop("h_msa")
-            potts_decoder_aux["J"] = potts_decoder_aux.pop("J_msa")
 
         # Handle tied sampling
         if "tied_sampling_ids" in batch:

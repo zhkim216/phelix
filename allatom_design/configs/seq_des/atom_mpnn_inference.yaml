@@ -28,7 +28,6 @@ potts_sampling_cfg:
   potts_temperature: 0.01  # this is the default in Chroma
   rejection_step: false
   potts_only_cond: false  # only condition on sequence in the potts model
-  use_msa_potts: false
 
   # add gaussian noise to inputs
   noise_std: 0.0
