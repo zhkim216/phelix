@@ -22,6 +22,7 @@ OUT_DIR=/scratch/users/rshuai/allatom_design
 # Set cache directories
 export TORCH_HOME=/scratch/users/rshuai/cache/torch
 export HF_HOME=/scratch/users/rshuai/cache/huggingface
+export TRITON_LIBCUDA_PATH=/usr/local/cuda/compat/lib.real/lib  # needed for torch.compile
 
 # Wandb settings / experiment name
 EXP_NAME=sd9_a0_test

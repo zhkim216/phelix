@@ -7,7 +7,7 @@ class Sampler:
     def __init__(self, weights: np.ndarray):
         self.weights = weights / weights.sum()
 
-    def sample(self, random: np.random.RandomState) -> Iterator[int]:
+    def sample(self, rng: np.random.Generator):
         """
         Sample indices from the dataset infinitely.
 
@@ -18,5 +18,6 @@ class Sampler:
             Iterator[int]: Iterator of sampled indices.
         """
         while True:
-            idx = random.choice(len(self.weights), p=self.weights)  # O(n) per draw
+            # O(n) per draw
+            idx = rng.choice(len(self.weights), p=self.weights)
             yield idx
