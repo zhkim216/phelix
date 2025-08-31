@@ -1,7 +1,8 @@
 import json
 import logging
+import random
 from pathlib import Path
-from typing import Any, List, Literal, Union, override
+from typing import Literal, override
 
 import atomworks.enums as aw_enums
 import atomworks.ml.preprocessing.constants as aw_const
@@ -9,20 +10,17 @@ import lightning as L
 import numpy as np
 import pandas as pd
 import torch
-from atomworks.io.utils.io_utils import to_cif_file
-from atomworks.ml.common import generate_example_id, parse_example_id
+from atomworks.ml.common import generate_example_id
 from atomworks.ml.datasets.datasets import BaseDataset
 from atomworks.ml.datasets.parsers import GenericDFParser
-from atomworks.ml.transforms.base import Compose, Transform
 from atomworks.ml.utils.io import read_parquet_with_metadata
 from omegaconf import DictConfig
 from torch.utils import data
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader
 
+from allatom_design.data.sampler import Sampler
 from allatom_design.data.transform.pad import pad_to_max
 from allatom_design.data.transform.sd_featurizer import sd_featurizer
-from allatom_design.data.sampler import Sampler
-
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +40,11 @@ class AtomworksSDDataModule(L.LightningDataModule):
                                   shuffle=False,
                                   pin_memory=True,
                                   drop_last=True,
-                                  collate_fn=sd_collator)
+                                  collate_fn=sd_collator,
+                                  worker_init_fn=worker_init_fn)
 
         return train_loader
+
 
     def val_dataloader(self) -> DataLoader:
         val_loader = DataLoader(self._val_set,
@@ -53,9 +53,17 @@ class AtomworksSDDataModule(L.LightningDataModule):
                                 shuffle=False,
                                 pin_memory=True,
                                 drop_last=True,
-                                collate_fn=sd_collator)
+                                collate_fn=sd_collator,
+                                worker_init_fn=worker_init_fn)
 
         return val_loader
+
+
+def worker_init_fn(_):
+    """Initialize per-worker global random number generators."""
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 class SDDataset(BaseDataset):
@@ -79,18 +87,18 @@ class SDDataset(BaseDataset):
         # Parse dfs into a common format and concatenate
         self.parsed_df = self._parse_dfs()
 
-        # Initialize sampler
-        self.sampler, self.samples = None, None
+        # Initialize per-worker random number generator
         if phase == "train":
-            self.sampler = Sampler(self.get_sampling_weights())
-            self.samples = self.sampler.sample(np.random)
+            self._sampler = Sampler(self.get_sampling_weights())
+            self._rng, self._samples = None, None
 
 
     @override
     def __getitem__(self, idx: int):
         if self.phase == "train":
             # For training, draw from infinite sampler.
-            idx = next(self.samples)
+            self._ensure_worker_rng()
+            idx = next(self._samples)
 
         example_id = self.idx_to_id(idx)
         parsed_row = self.parsed_df.loc[example_id]
@@ -114,6 +122,13 @@ class SDDataset(BaseDataset):
         return feats
 
 
+    def _ensure_worker_rng(self):
+        """Ensure that each worker has a unique random number generator."""
+        if self._rng is None:
+            self._rng = np.random.default_rng(torch.initial_seed() % 2**32)
+            self._samples = self._sampler.sample(self._rng)
+
+
     def _process_chain_df(self) -> pd.DataFrame:
         """
         Processes the chain dataframe. Adds chain counts info and sampling weights, and applies filters.
@@ -125,7 +140,7 @@ class SDDataset(BaseDataset):
 
         # Load in validation IDs and hold out based on phase. Case insensitive, no extension.
         with open(self.cfg.validation_ids_txt, "r") as f:
-            print(f"Loading in validation IDs from {self.cfg.validation_ids_txt}...")
+            logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_txt}...")
             val_split = {x.lower() for x in f.read().splitlines()}
         chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
         chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"
@@ -170,7 +185,7 @@ class SDDataset(BaseDataset):
         chain_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid"])
         interface_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid_1", "q_pn_unit_iid_2"])
 
-        print(f"Found {len(self.chain_df)} chains and {len(self.interface_df)} interfaces in {self.phase} dataset")
+        logger.info(f"Final {self.phase} dataset contains {len(self.chain_df)} chains and {len(self.interface_df)} interfaces")
 
         parsed_df = pd.concat([
             self.chain_df.apply(chain_parser.parse, axis=1),
