@@ -171,9 +171,9 @@ class SDDataset(BaseDataset):
                                              chain_type_cols=["q_pn_unit_type_1", "q_pn_unit_type_2"],
                                              seq_length_cols=["q_pn_unit_sequence_length_1", "q_pn_unit_sequence_length_2"])
         interface_df = add_sampling_weights_info(interface_df,
-                                                      alphas=self.cfg.sampling_weights["alphas"],
-                                                      beta=self.cfg.sampling_weights["betas"]["beta_interface"],
-                                                      cluster_cols=["q_pn_unit_cluster_id_1", "q_pn_unit_cluster_id_2"])
+                                                 alphas=self.cfg.sampling_weights["alphas"],
+                                                 beta=self.cfg.sampling_weights["betas"]["beta_interface"],
+                                                 cluster_cols=["q_pn_unit_cluster_id_1", "q_pn_unit_cluster_id_2"])
 
         return interface_df
 
