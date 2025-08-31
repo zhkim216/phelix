@@ -34,7 +34,7 @@ def main(cfg: DictConfig) -> None:
     nucleic_acids = set()
     nonpolymer_seqs = set()
 
-    for _, row in tqdm(df.iterrows(), desc="Sorting sequences by type"):
+    for _, row in tqdm(df.iterrows(), desc="Sorting sequences by type", total=len(df)):
         chain_type = row["q_pn_unit_type"]
         if chain_type in aw_enums.ChainTypeInfo.PROTEINS:
             if len(row["q_pn_unit_processed_entity_canonical_sequence"]) <= aw_const.PEPTIDE_MAX_RESIDUES:

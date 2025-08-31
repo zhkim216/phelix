@@ -17,9 +17,11 @@ source ${ENV_DIR}/allatom_design/bin/activate
 
 export PDB_MIRROR_PATH=""
 export CCD_MIRROR_PATH="/scratch/users/rshuai/datasets/ccd"
+export SOFTWARE_PATH=/scratch/users/rshuai/software
+
 BASE_DIR=/home/users/rshuai/code/allatom-design
 
-cd ${BASE_DIR}
 # Run script
+cd ${BASE_DIR}
 python3 allatom_design/data/preprocessing/atomworks/cluster_sequences.py \
     pdb_path=/scratch/users/rshuai/datasets/atomworks
