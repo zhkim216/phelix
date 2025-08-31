@@ -75,7 +75,7 @@ data:
 
   featurizer_cfg:
     max_tokens: 512
-    max_atoms: 7168
+    max_atoms: 4608
     crop_center_cutoff_distance: 15.0
     crop_spatial_p: 0.0
 
