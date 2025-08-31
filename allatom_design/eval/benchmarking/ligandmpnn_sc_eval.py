@@ -68,7 +68,7 @@ def main(cfg: DictConfig):
         # Load in ligandMPNN outputs
         ligandmpnn_features = np.load(f"{cfg.ligandmpnn_outputs_dir}/features/{record_id}.npz")
         label_seq_id = torch.from_numpy(ligandmpnn_features["R_idx_original"])  # 1-indexed
-        seq_token_ids = torch.tensor([[const.token_ids[const.prot_letter_to_token[res]] for res in seq] for seq in ligandmpnn_features["seq"]])
+        seq_token_ids = torch.tensor([const.AF3_ENCODING.encode_aa_seq(seq) for seq in ligandmpnn_features["seq"]])
         ligandmpnn_restype = F.one_hot(seq_token_ids, num_classes=example["res_type"].shape[-1])
         B = ligandmpnn_restype.shape[0]
 

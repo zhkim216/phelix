@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn.functional as F
+from atomworks.io.utils import sequence as aw_sequence
 from einops import rearrange
 from torchtyping import TensorType
 

@@ -130,7 +130,7 @@ def sd_featurizer(
     # NOTE: for now, we ignore ref pos features because they are too slow to compute
     featurization_transforms_post_crop = [
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
-        EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_SEQUENCE_ENCODING),
+        EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
         ComputeAtomToTokenMap(),
         AddAF3TokenBondFeatures(),
         ConvertToTorch(keys=["encoded", "feats"]),
@@ -181,7 +181,7 @@ class FeaturizeCoordsAndMasks(Transform):
         atomwise_is_prot = feats["is_protein"].gather(dim=-1, index=feats["atom_to_token_map"])
 
         atomized = torch.tensor(atom_array.atomize)
-        bb_atom_mask = torch.tensor(np.isin(atom_array.atom_name, const.prot_bb_atoms))
+        bb_atom_mask = torch.tensor(np.isin(atom_array.atom_name, const.PROT_BB_ATOMS))
 
         feats["prot_bb_atom_mask"] = bb_atom_mask * ~atomized * atomwise_is_prot
         feats["prot_scn_atom_mask"] = ~bb_atom_mask * ~atomized * atomwise_is_prot

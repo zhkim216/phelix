@@ -76,7 +76,7 @@ def main(cfg: DictConfig):
         chain_labels = torch.from_numpy(chroma_features["C"])  # [b, n]
         B, N = chain_labels.shape
         label_seq_id = torch.arange(N).unsqueeze(0).expand(B, N) + 1  # chroma denotes missing residues with negative values
-        seq_token_ids = torch.tensor([[const.token_ids[const.prot_letter_to_token[res]] for res in seq] for seq in chroma_features["seq"]])
+        seq_token_ids = torch.tensor([const.AF3_ENCODING.encode_aa_seq(seq) for seq in chroma_features["seq"]])
         chroma_restype = F.one_hot(seq_token_ids, num_classes=example["res_type"].shape[-1])
 
         for bi in range(B):

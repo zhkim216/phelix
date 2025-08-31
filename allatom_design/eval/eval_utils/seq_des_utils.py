@@ -233,7 +233,7 @@ def score_sequences_ensemble(model: SeqDenoiser,
             # Get sequences
             S = []
             for seq in pdb_to_sequences[pdb_name]:
-                S.append(torch.tensor([const.token_ids[const.prot_letter_to_token[aa]] for aa in seq], device=device))
+                S.append(torch.tensor(const.AF3_ENCODING.encode_aa_seq(seq), device=device))
             S = torch.stack(S, dim=0)
 
             # Score sequences for each conformer
@@ -484,7 +484,7 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
             # parse the override string into a list of positions and aatypes
             pdb_pos, override_abs_pos, override_aatypes = parse_fixed_pos_override_seq_str(fixed_pos_override_seq, chain_to_asym_id, example["auth_seq_id"], example["asym_id"])
             for abs_pos_i, aa in zip(override_abs_pos, override_aatypes):
-                batch["res_type"][i, abs_pos_i] = F.one_hot(torch.tensor(const.token_ids[const.prot_letter_to_token[aa]], device=batch["res_type"].device), num_classes=len(const.tokens))
+                batch["res_type"][i, abs_pos_i] = F.one_hot(torch.tensor(const.AF3_ENCODING.encode_aa_seq(aa), device=batch["res_type"].device), num_classes=len(const.tokens))
 
             # add to fixed_pos_seq
             fixed_pos_seq = f"{fixed_pos_seq}," if not pd.isna(fixed_pos_seq) else ""
@@ -603,8 +603,8 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
 
             # Then allow only the specified amino acids
             for aa in allowed_aa:
-                if aa in const.prot_letter_to_token:
-                    allowed_aatype_mask[i, pos_idx, const.token_ids[const.prot_letter_to_token[aa]]] = 1.0
+                if aa in const.PROT_LETTER_TO_TOKEN:
+                    allowed_aatype_mask[i, pos_idx, const.AF3_ENCODING.encode_aa(aa)] = 1.0
                 else:
                     print(f"Warning: Unknown amino acid '{aa}' in restriction for {pdb_key} at position {pdb_pos[abs_pos.index(pos_idx)]}")
 
