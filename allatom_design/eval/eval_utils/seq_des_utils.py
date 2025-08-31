@@ -137,11 +137,11 @@ def run_seq_des(model: SeqDenoiser,
 
             # Restrict aatype sampling at certain positions
             sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
-            sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(batch, pos_constraint_df, verbose=cfg.verbose)
+            # sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(batch, pos_constraint_df, verbose=cfg.verbose)
 
             if cfg["use_protein_only"]:
                 # subset to standard protein-only features; useful for ablations to only condition on protein
-                batch["token_exists_override"] = (batch["mol_type"] == const.chain_type_ids["PROTEIN"]) & batch["is_standard"]
+                batch["token_exists_override"] = (batch["is_protein"]) & ~batch["is_atomized"]
 
             # Run sampling
             output_feats, aux = model.sample(batch, sampling_inputs=sampling_inputs)
@@ -434,15 +434,13 @@ def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str
 
 
 def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
-                        #  input_structs: list[Structure],
                          pos_constraint_df: pd.DataFrame | None,
                          verbose: bool = False) -> dict[str, torch.Tensor]:
 
     """
     Given a pos_constraint_df containing fixed positions for each PDB, return a batch updated with:
-    - a mask for the aatype and sidechain overrides.
-    - possibly overridden "aatype"
-
+    - a mask for seq-level and atom-level conditioning
+    - possibly overridden "res_type"
 
     The pos_constraint_df should have the following format:
     index: PDB name (including extension)
@@ -474,22 +472,8 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
         # Set up example
         example = {k: v[i] for k, v in batch.items()}
 
-        #* make chain_to_asym_id mapping directly from batch[i]
-        batch_i = batch[i]
-
-        # batch_i should have these features:
-        # ['example_id', 'atom_array', 'residue_index', 'token_index', 'asym_id', 'entity_id',
-        #   'sym_id', 'restype', 'is_protein', 'is_rna', 'is_dna', 'is_ligand', 'is_atomized',
-        #     'atom_to_token_map', 'token_bonds', 'coords', 'token_resolved_mask',
-        #       'atom_resolved_mask', 'token_pad_mask', 'atom_pad_mask', 'prot_bb_atom_mask',
-        #         'prot_scn_atom_mask', 'token_to_center_atom']
-
-        if use_label_asym_id:
-            chain_to_asym_id = {c["name"]: c["asym_id"] for c in input_struct.chains}  # we use label_asym_name as the chain name for fixing positions
-            asym_id_to_chain = {c["asym_id"]: c["name"] for c in input_struct.chains}
-        else:
-            chain_to_asym_id = {c["auth_asym_name"]: c["asym_id"] for c in input_struct.chains}  # we use auth_asym_name as the chain name for fixing positions, not the label_asym_name
-            asym_id_to_chain = {c["asym_id"]: c["auth_asym_name"] for c in input_struct.chains}
+        # Make chain_to_asym_id mapping
+        chain_to_asym_id = get_chain_to_asym_id_mapping(example, use_label_asym_id)
 
         ### Override sequence at specified positions and condition on them ###
         fixed_pos_override_seq = row.get("fixed_pos_override_seq", np.nan)
@@ -515,9 +499,9 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
             seq_cond_mask[i, abs_fixed_pos_seq] = 1
 
             # print fixed sequence
-            # if verbose:
-            #     print("Fixed sequence:")
-            #     visualize_sequences(example, seq_cond_mask[i], input_struct, asym_id_to_chain)
+            if verbose:
+                print("Fixed sequence:")
+                visualize_sequences(example, seq_cond_mask[i], chain_to_asym_id)
         else:
             if verbose:
                 print(f"{example_id}: No fixed sequence positions specified.")
@@ -536,9 +520,9 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
                 assert (scn_cond_num_atoms[override_abs_pos] == 0).all(), "Cannot fix sidechains at positions where the sequence from the PDB is overridden."
 
             # print fixed sidechains
-            # if verbose:
-            #     print("Fixed sidechains:")
-            #     visualize_sequences(example, scn_cond_num_atoms > 0, input_struct, asym_id_to_chain)
+            if verbose:
+                print("Fixed sidechains:")
+                visualize_sequences(example, scn_cond_num_atoms > 0, chain_to_asym_id)
         else:
             if verbose:
                 print(f"{example_id}: No fixed sidechain positions specified.")
@@ -550,7 +534,6 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
 
 
 def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
-                                   input_structs: list[Structure],
                                    pos_constraint_df: Optional[pd.DataFrame],
                                    verbose: bool = False) -> Tuple[torch.Tensor, torch.Tensor] | None:
     """
@@ -595,9 +578,9 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
 
         # Set up example
         example = {k: v[i] for k, v in batch.items()}
-        input_struct = input_structs[i]
-        chain_to_asym_id = {c["auth_asym_name"]: c["asym_id"] for c in input_struct.chains}  # we use auth_asym_name as the chain name for fixing positions, not the label_asym_name
-        asym_id_to_chain = {c["asym_id"]: c["auth_asym_name"] for c in input_struct.chains}
+
+        # Make chain_to_asym_id mapping
+        chain_to_asym_id = get_chain_to_asym_id_mapping(example, use_label_asym_id=True)
 
         if verbose:
             print(f"{pdb_key}: Restricting amino acid sampling at positions {pos_restrict_aatype}")
@@ -798,37 +781,44 @@ def parse_pos_restrict_aatype_str(pos_restrict_str: str,
 
 def visualize_sequences(example: dict[str, torch.Tensor],
                         cond_mask: TensorType["n", int],
-                        input_struct: Structure,
-                        asym_id_to_chain: Dict[str, str],
+                        chain_to_asym_id: Dict[str, int],
                         ) -> str:
     """
     Visualize the conditioning sequence for a given batch of residues.
     """
-    # Construct chain map (map chain_id to index of chain in the input structure)
-    chain_map = {c["asym_id"]: i for i, c in enumerate(input_struct.chains)}
+    asym_id_to_chain = {i: c for c, i in chain_to_asym_id.items()}
 
     # first, get full sequence for each chain
     sequences = {}
-    for chain_id in example["asym_id"].unique().tolist():
-        chain_mask = example["asym_id"] == chain_id
-        mol_type = example["mol_type"][chain_mask].unique().tolist()[0]
+    for asym_id in example["asym_id"].unique().tolist():
+        chain_mask = example["asym_id"] == asym_id
+        is_ligand = example["is_ligand"][chain_mask].any()
         chain_cond_mask = cond_mask[chain_mask]
-        if mol_type != const.chain_type_ids["NONPOLYMER"]:
+        if not is_ligand:
             # Extract sequence from the features
             # Get the unpadded sequence for this chain
             res_type = example["res_type"][chain_mask].argmax(dim=-1)
             res_type = res_type[example["token_pad_mask"][chain_mask].bool()].tolist()
             sequence = [const.tokens[res_type[ri]] for ri in range(len(res_type))]
-            sequences[chain_id] = "".join([x if chain_cond_mask[j] else "-" for j, x in enumerate(gemmi.one_letter_code(sequence))])
+            sequences[asym_id] = "".join([x if chain_cond_mask[j] else "-" for j, x in enumerate(gemmi.one_letter_code(sequence))])
         else:
-            # Extract sequence from the input structure, since non-polymer chains are never redesigned
-            chain_i = input_struct.chains[chain_map[chain_id]]
-            res_start = chain_i["res_idx"]
-            res_end = chain_i["res_idx"] + chain_i["res_num"]
-            sequence = input_struct.residues[res_start:res_end]["name"].tolist()
-            sequence = "".join([f"<{x}>" for x in sequence])  # <> to denote CCD code, not 1-letter
-            sequences[chain_id] = sequence
+            # For now, skip ligands
+            continue
 
     # print sequences for each chain
-    for chain_id, seq in sequences.items():
-        print(f"Chain {asym_id_to_chain[chain_id]}: {seq}")
+    for asym_id, seq in sequences.items():
+        print(f"Chain {asym_id_to_chain[asym_id]}: {seq}")
+
+
+def get_chain_to_asym_id_mapping(example: dict[str, torch.Tensor],
+                                 use_label_asym_name: bool = False) -> dict[str, int]:
+    """
+    Map from chain name to asym_id. If use_label_asym_id is True, use label_asym_name as the chain name, otherwise use auth_asym_name.
+    We default to using auth_asym_name since we expect users to specify chain names based on auth_asym_name.
+    """
+    if use_label_asym_name:
+        return {c: i for i, c in enumerate(example["feat_metadata"]["asym_name"].tolist())}
+    else:
+        return {c: i for i, c in enumerate(example["feat_metadata"]["auth_asym_name"].tolist())}
+
+
