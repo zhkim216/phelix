@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader
 
 from allatom_design.data.sampler import Sampler
 from allatom_design.data.transform.pad import pad_to_max
-from allatom_design.data.transform.sd_featurizer import sd_featurizer
+from allatom_design.data.transform import sd_featurizer
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +75,8 @@ class SDDataset(BaseDataset):
 
         # Initialize featurizer
         # Note: We remove atom_array and crop_info to avoid cuda initialization issues during training.
-        self.featurizer = sd_featurizer(**cfg.featurizer_cfg,
-                                        remove_keys=["atom_array", "crop_info"])
+        self.featurizer = sd_featurizer.sd_featurizer(**cfg.featurizer_cfg,
+                                                      remove_keys=sd_featurizer.INFERENCE_ONLY_KEYS)
 
         # Read in chain metadata parquet
         self.chain_df = self._process_chain_df()
@@ -328,7 +328,7 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     for key in keys:
         values = [d[key] for d in data]
 
-        if key not in ["example_id", "atom_array", "crop_info"]:
+        if key not in ["example_id", *sd_featurizer.INFERENCE_ONLY_KEYS]:
             # Check if all have the same shape
             shape = values[0].shape
             if not all(v.shape == shape for v in values):

@@ -77,6 +77,9 @@ FEAT_TO_ATOM_DIM = {
     "atom_cond_mask": [0],
 }
 
+# Keep track of data dict keys only included at inference time
+INFERENCE_ONLY_KEYS = ["crop_info", "atom_array", "feat_metadata"]
+
 
 def sd_featurizer(
     # cropping
@@ -137,7 +140,8 @@ def sd_featurizer(
         PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"),
 
         # Add features from the atom_array
-        AddCoordsAndAtomMasks(),
+        FeaturizeCoordsAndMasks(),
+        FeaturizeAuthAnnotations(),
         CenterRandomAugmentation(scale=1.0), #! turn on/off depending on train/eval?
     ]
 
@@ -146,14 +150,14 @@ def sd_featurizer(
         cropping_transform,
         *featurization_transforms_post_crop,
         PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
-        SubsetToKeys(keys=["example_id", "feats", "atom_array", "crop_info"]),
+        SubsetToKeys(keys=["example_id", "feats", *INFERENCE_ONLY_KEYS]),
         FlattenFeatsDict(),
         RemoveKeys(keys=remove_keys),
     ]
 
     return Compose(transforms)
 
-class AddCoordsAndAtomMasks(Transform):
+class FeaturizeCoordsAndMasks(Transform):
     """Add coordinates and atom masks to feats."""
 
     @override
@@ -262,4 +266,20 @@ class FilterToQueryPNUnits(Transform):
             atom_array = filter_to_specified_pn_units(atom_array, data["query_pn_unit_iids"])
 
         data["atom_array"] = atom_array
+        return data
+
+
+class FeaturizeAuthAnnotations(Transform):
+    """If present in the atom array, add auth annotations to the feats."""
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        atom_array = data["atom_array"]
+        if "auth_seq_id" in atom_array.get_annotation_categories():
+            data["feats"]["auth_seq_id"] = torch.tensor(atom_array.auth_seq_id.astype(int))
+        if "auth_asym_id" in atom_array.get_annotation_categories():
+            asym_name, asym_id = np.unique(atom_array.auth_asym_id, return_inverse=True)
+            data["feats"]["auth_asym_id"] = torch.tensor(asym_id)
+            data["feat_metadata"]["auth_asym_name"] = asym_name
+
         return data
