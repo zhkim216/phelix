@@ -370,7 +370,7 @@ def add_tokenwise_atom_feats(tokenized: Tokenized, featurizer: ADFeaturizer) -> 
     # Featurize input tokens as atom23 tokens
     feats = featurizer.process(tokenized,
                                use_auth_as_residx=False)  # doesn't matter here, since we don't use residue indices from this featurizer
-    tokenwise_feats = pad_atom_feats_to_tokenwise(feats, max_atoms_per_token=const.max_num_atoms)  # max number of atoms across any token
+    tokenwise_feats = pad_atom_feats_to_tokenwise(feats, max_atoms_per_token=const.MAX_NUM_ATOMS)  # max number of atoms across any token
 
     # Construct tokenwise atom feats
     tokenwise_atom_feats = np.empty((tokenwise_feats["coords"].shape[:2]), dtype=TokenwiseAtomFeats)

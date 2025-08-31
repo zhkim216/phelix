@@ -154,7 +154,7 @@ def motif_proximity_weighted_mse(bb_pred: TensorType["b n_tokens 4 3", float],
     Compute a loss on backbone tokens with weights 1 / (1 + d^p) where d is the distance to closest motif coordinates.
     """
     # Compute distance of ground truth CA to motif coords
-    bb_target_ca = bb_target[..., const.prot_bb_atoms.index("CA"), :]
+    bb_target_ca = bb_target[..., const.PROT_BB_ATOMS.index("CA"), :]
     dists = torch.cdist(bb_target_ca, motif_coords)  # [b, n_tokens, n_atoms]
 
     # Compute weights for each token

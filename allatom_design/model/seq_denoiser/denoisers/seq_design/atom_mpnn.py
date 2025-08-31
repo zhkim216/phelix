@@ -29,7 +29,7 @@ class AtomMPNN(nn.Module):
         self.num_encoder_layers = cfg.n_layers
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
-        self.n_tokens = const.AF3_SEQUENCE_ENCODING.n_tokens
+        self.n_tokens = const.AF3_ENCODING.n_tokens
 
         self.token_features = TokenFeatures(cfg.token_features)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=False)
@@ -89,7 +89,7 @@ class AtomMPNN(nn.Module):
         # Concatenate residue-level features to h_V
         ## first, mask out residues using gap token
         B, N, C = batch["restype"].shape
-        masked = F.one_hot(torch.full((B, N), const.AF3_SEQUENCE_ENCODING.token_to_idx["<G>"],
+        masked = F.one_hot(torch.full((B, N), const.AF3_ENCODING.token_to_idx["<G>"],
                                       device=batch["restype"].device), num_classes=C).float()
         restype = torch.where(batch["seq_cond_mask"].unsqueeze(-1).bool(), batch["restype"], masked)
         h_S = self.W_s(restype)
@@ -176,7 +176,7 @@ class TokenFeatures(nn.Module):
 
         # Layers
         self.embeddings = PositionalEncodings(self.num_positional_embeddings)
-        num_pairwise_dists = 1 if self.ca_only else const.max_num_atoms ** 2
+        num_pairwise_dists = 1 if self.ca_only else const.MAX_NUM_ATOMS ** 2
         edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists + 1
         self.edge_embedding = nn.Linear(edge_in, self.edge_n_channel, bias=False)
         self.norm_edges = nn.LayerNorm(self.edge_n_channel)
@@ -422,14 +422,14 @@ def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]]) -> tuple[TensorT
     N_tokens = batch["token_pad_mask"].shape[1]
     n_atoms_per_token = (F.one_hot(batch["atom_to_token_map"], num_classes=N_tokens) * batch["atom_pad_mask"][..., None]).sum(dim=-2)
     atom_idxs = torch.cat([torch.zeros((B, 1), device=device), n_atoms_per_token.cumsum(dim=-1)[:, :-1]], dim=-1).long()
-    padded_atom_idxs = atom_idxs[..., None] + torch.arange(const.max_num_atoms, device=device)[None, None]
-    pad_mask = torch.arange(const.max_num_atoms, device=device)[None, None, :] < n_atoms_per_token[..., None]
+    padded_atom_idxs = atom_idxs[..., None] + torch.arange(const.MAX_NUM_ATOMS, device=device)[None, None]
+    pad_mask = torch.arange(const.MAX_NUM_ATOMS, device=device)[None, None, :] < n_atoms_per_token[..., None]
     padded_atom_idxs = padded_atom_idxs * pad_mask  # mask out ghost atoms
 
     # Gather coords
     B, N, _ = padded_atom_idxs.shape
-    X_all = batched_gather(batch["coords"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.max_num_atoms, 1)
-    tokenwise_atom_cond_mask = batched_gather(batch["atom_cond_mask"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.max_num_atoms)
+    X_all = batched_gather(batch["coords"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.MAX_NUM_ATOMS, 1)
+    tokenwise_atom_cond_mask = batched_gather(batch["atom_cond_mask"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.MAX_NUM_ATOMS)
 
     X_all = X_all * tokenwise_atom_cond_mask.unsqueeze(-1)  # zero out masked atoms
     return X_all, tokenwise_atom_cond_mask

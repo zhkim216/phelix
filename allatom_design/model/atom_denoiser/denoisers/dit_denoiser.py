@@ -194,7 +194,7 @@ class DiTDenoiser(nn.Module):
                 xt_bb = self.interpolant.noise_x(x_bb, t=diffusion_params["timesteps"][:, 0])
             else:
                 # Sample backbone from prior
-                A = len(const.prot_bb_atoms)
+                A = len(const.PROT_BB_ATOMS)
                 x0_bb = self.interpolant.sample_prior((B, N, A, 3), diffusion_inputs["seq_mask"].device)
                 xt_bb = x0_bb
 

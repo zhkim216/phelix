@@ -2,13 +2,16 @@
 from collections.abc import Sequence
 from functools import cached_property
 from itertools import cycle
+from typing import Final
 
 import biotite.structure as struc
 import numpy as np
-from atomworks.io.constants import (AA_LIKE_CHEM_TYPES, DNA_LIKE_CHEM_TYPES,
-                                    GAP, RNA_LIKE_CHEM_TYPES, STANDARD_AA,
+from atomworks.io.constants import (AA_LIKE_CHEM_TYPES, DICT_THREE_TO_ONE,
+                                    DNA_LIKE_CHEM_TYPES, GAP,
+                                    RNA_LIKE_CHEM_TYPES, STANDARD_AA,
                                     STANDARD_DNA, STANDARD_RNA, UNKNOWN_AA,
                                     UNKNOWN_DNA, UNKNOWN_RNA)
+from atomworks.io.utils import sequence as aw_sequence
 
 """Sequence tokens in AF3"""
 
@@ -82,18 +85,33 @@ class AF3SequenceEncoding:
     def n_tokens(self) -> int:
         return len(self.tokens)
 
-    def encode(self, res_names: Sequence[str]) -> np.ndarray:
-        # NOTE: Defined here rather than as attribute to allow pickling for multiprocessing
-        encode_func = np.vectorize(lambda x: self.af3_token_to_int.get(x, self.af3_token_to_int[UNKNOWN_AA]))
-        return encode_func(res_names)
+    @property
+    def protein_tokens(self) -> list[str]:
+        return [token for token in self.tokens if token in PROT_LETTER_TO_TOKEN.values()]
 
-    def decode(self, token_idxs: int | Sequence[int]) -> np.ndarray:
-        return self.idx_to_token[token_idxs]
+    @property
+    def non_protein_tokens(self) -> list[str]:
+        return [token for token in self.tokens if token not in PROT_LETTER_TO_TOKEN.values()]
+
+    def encode(self, res_names: Sequence[str]) -> list[int]:
+        return [self.af3_token_to_int.get(x, self.af3_token_to_int[UNKNOWN_AA]) for x in res_names]
+
+    def decode(self, token_idxs: int | Sequence[int]) -> list[str]:
+        if isinstance(token_idxs, int):
+            token_idxs = [token_idxs]
+        return [self.idx_to_token[idx] for idx in token_idxs]
+
+    def encode_aa(self, aa: str) -> int:
+        """First converts 1-letter AA name to protein token, then encodes to integer index."""
+        return self.af3_token_to_int.get(PROT_LETTER_TO_TOKEN[aa], self.af3_token_to_int[UNKNOWN_AA])
+
+    def encode_aa_seq(self, aa_seq: Sequence[str]) -> list[int]:
+        """First converts 1-letter AA names to protein tokens, then encodes to integer indices."""
+        return [self.encode_aa(aa) for aa in aa_seq]
 
 
-AF3_SEQUENCE_ENCODING = AF3SequenceEncoding()
+AF3_ENCODING: Final[AF3SequenceEncoding] = AF3SequenceEncoding()
 
-
-max_num_atoms = 23
-
-prot_bb_atoms = ["N", "CA", "C", "O"]
+MAX_NUM_ATOMS: Final[int] = 23
+PROT_BB_ATOMS: Final[list[str]] = ["N", "CA", "C", "O"]
+PROT_LETTER_TO_TOKEN: Final[dict[str, str]] = {**aw_sequence.aa_chem_comp_1to3(), "X": "UNK"}  # include "X" for unknown amino acids

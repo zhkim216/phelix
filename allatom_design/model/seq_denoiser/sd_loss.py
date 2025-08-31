@@ -49,7 +49,7 @@ class SDLoss(nn.Module):
             # compute sequence loss from sequence design module
             target_restype = batch["restype"].argmax(dim=-1)
             seq_loss_mask = outputs["token_exists_mask"] * (1 - outputs["seq_cond_mask"])  # compute loss only on masked tokens
-            seq_loss_mask = seq_loss_mask * (target_restype != const.AF3_SEQUENCE_ENCODING.token_to_idx["UNK"])  # mask out UNK tokens from loss
+            seq_loss_mask = seq_loss_mask * (target_restype != const.AF3_ENCODING.token_to_idx["UNK"])  # mask out UNK tokens from loss
 
             # DEBUG: ensure that we're only computing over protein tokens
             if (~batch["is_protein"][seq_loss_mask.bool()]).any():
@@ -106,7 +106,7 @@ def masked_cross_entropy(logits: TensorType["b n c", float],
     - label_smoothing: float, label smoothing factor
     - per_token_avg: bool, whether to average loss per token (false will divide by fixed_size)
     """
-    n_classes = const.AF3_SEQUENCE_ENCODING.n_tokens
+    n_classes = const.AF3_ENCODING.n_tokens
     target_oh = F.one_hot(target, num_classes=n_classes).float()
 
     # Unpack seq_loss_cfg

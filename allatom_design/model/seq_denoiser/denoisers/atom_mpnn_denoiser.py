@@ -1,5 +1,7 @@
+import copy
 from typing import Any, Dict, Optional, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,13 +14,11 @@ import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.data.data import to
 from allatom_design.data.feature.feature_utils import slice_feats
-import allatom_design.data.const as const
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn import \
     AtomMPNN
 from chroma.layers import complexity
-import copy
 
 
 class AtomMPNNDenoiser(BaseSeqDenoiser):
@@ -170,15 +170,15 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         rejection_step = potts_sampling_cfg.get("rejection_step", potts_proposal == "chromatic")
 
         B, N, _ = batch["restype"].shape
-        logits_init = torch.zeros((B, N, const.AF3_SEQUENCE_ENCODING.n_tokens), device=batch["restype"].device).float()
+        logits_init = torch.zeros((B, N, const.AF3_ENCODING.n_tokens), device=batch["restype"].device).float()
 
         # Handle banned amino acids and aatype restrictions
         ban_S = {"X"}
         omit_aas = sampling_inputs.get("omit_aas", None)
         if omit_aas is not None:
             ban_S = ban_S | set(omit_aas)
-        ban_S = [const.token_ids[const.prot_letter_to_token[aa]] for aa in ban_S]
-        ban_S.extend([const.token_ids[x] for x in const.tokens if x not in const.prot_only_tokens])  # ban all non-protein tokens
+        ban_S = const.AF3_ENCODING.encode_aa_seq(ban_S)
+        ban_S = ban_S + const.AF3_ENCODING.encode(const.AF3_ENCODING.non_protein_tokens)  # ban all non-protein tokens
 
         # Initialize random sequence and sampling masks
         mask_sample = (1 - batch["seq_cond_mask_potts"]) * batch["token_pad_mask"]  # 1 where we can sample, 0 where we can't
@@ -236,7 +236,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             feats_si = copy.deepcopy(batch)
             feats_si["res_type"] = torch.where(feats_si["seq_cond_mask"][..., None].bool(),
                                                feats_si["res_type"],
-                                               F.one_hot(S[si], num_classes=const.AF3_SEQUENCE_ENCODING.n_tokens))
+                                               F.one_hot(S[si], num_classes=const.AF3_ENCODING.n_tokens))
             feats_si["coords"] = feats_si["coords"] * feats_si["atom_cond_mask"].unsqueeze(-1)
             feats_si["atom_resolved_mask"] = feats_si["atom_resolved_mask"] * feats_si["atom_cond_mask"]
             output_feats.append(feats_si)
