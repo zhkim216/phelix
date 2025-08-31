@@ -11,7 +11,8 @@ from atomworks.ml.transforms.atom_array import (AddGlobalTokenIdAnnotation,
                                                 ComputeAtomToTokenMap)
 from atomworks.ml.transforms.base import (AddData, Compose, ConditionalRoute,
                                           ConvertToTorch, Identity,
-                                          RandomRoute, SubsetToKeys, Transform)
+                                          RandomRoute, RemoveKeys,
+                                          SubsetToKeys, Transform)
 from atomworks.ml.transforms.bonds import AddAF3TokenBondFeatures
 from atomworks.ml.transforms.crop import (CropContiguousLikeAF3,
                                           CropSpatialLikeAF3)
@@ -23,8 +24,8 @@ from atomworks.ml.transforms.featurize_unresolved_residues import (
     PlaceUnresolvedTokenOnClosestResolvedTokenInSequence)
 from atomworks.ml.transforms.filters import (FilterToProteins,
                                              RemoveUnresolvedTokens,
-                                             filter_to_specified_pn_units,
-                                             RemoveUnsupportedChainTypes)
+                                             RemoveUnsupportedChainTypes,
+                                             filter_to_specified_pn_units)
 from atomworks.ml.utils.geometry import (masked_center,
                                          random_rigid_augmentation)
 from atomworks.ml.utils.token import (apply_token_wise,
@@ -83,6 +84,7 @@ def sd_featurizer(
     max_atoms: int | None = None,
     crop_center_cutoff_distance: float = 15.0,
     crop_spatial_p: float = 0.0,
+    remove_keys: list[str] = [],
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
@@ -130,7 +132,7 @@ def sd_featurizer(
         AddAF3TokenBondFeatures(),
         ConvertToTorch(keys=["encoded", "feats"]),
 
-        # handle missing atoms and tokens
+        # Handle missing atoms and tokens
         PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
         PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"),
 
@@ -139,12 +141,16 @@ def sd_featurizer(
         CenterRandomAugmentation(scale=1.0), #! turn on/off depending on train/eval?
     ]
 
-    transforms = [*featurization_transforms_pre_crop,
-                  cropping_transform,
-                  *featurization_transforms_post_crop,
-                  PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
-                  SubsetToKeys(keys=["example_id", "feats", "atom_array", "crop_info"]),
-                  FlattenFeats()]
+    transforms = [
+        *featurization_transforms_pre_crop,
+        cropping_transform,
+        *featurization_transforms_post_crop,
+        PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
+        SubsetToKeys(keys=["example_id", "feats", "atom_array", "crop_info"]),
+        FlattenFeatsDict(),
+        RemoveKeys(keys=remove_keys),
+    ]
+
     return Compose(transforms)
 
 class AddCoordsAndAtomMasks(Transform):
@@ -216,7 +222,7 @@ class PadSDFeats(Transform):
         return data
 
 
-class FlattenFeats(Transform):
+class FlattenFeatsDict(Transform):
     """Flatten features into the data dict."""
 
     @override

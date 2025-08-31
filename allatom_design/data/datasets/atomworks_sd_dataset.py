@@ -21,6 +21,8 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from allatom_design.data.transform.pad import pad_to_max
 from allatom_design.data.transform.sd_featurizer import sd_featurizer
+from allatom_design.data.sampler import Sampler
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +36,10 @@ class AtomworksSDDataModule(L.LightningDataModule):
 
 
     def train_dataloader(self) -> DataLoader:
-        sampler = WeightedRandomSampler(self._train_set.get_sampling_weights(),
-                                        num_samples=self.cfg.samples_per_epoch,
-                                        replacement=True)
-
         train_loader = DataLoader(self._train_set,
                                   batch_size=self.cfg.batch_size,
                                   num_workers=self.cfg.num_workers,
-                                  sampler=sampler,
+                                  shuffle=False,
                                   pin_memory=True,
                                   drop_last=True,
                                   collate_fn=sd_collator)
@@ -66,7 +64,11 @@ class SDDataset(BaseDataset):
 
         self.cfg = cfg
         self.phase = phase
-        self.featurizer = sd_featurizer(**cfg.featurizer_cfg)
+
+        # Initialize featurizer
+        # Note: We remove atom_array and crop_info to avoid cuda initialization issues during training.
+        self.featurizer = sd_featurizer(**cfg.featurizer_cfg,
+                                        remove_keys=["atom_array", "crop_info"])
 
         # Read in chain metadata parquet
         self.chain_df = self._process_chain_df()
@@ -76,6 +78,40 @@ class SDDataset(BaseDataset):
 
         # Parse dfs into a common format and concatenate
         self.parsed_df = self._parse_dfs()
+
+        # Initialize sampler
+        self.sampler, self.samples = None, None
+        if phase == "train":
+            self.sampler = Sampler(self.get_sampling_weights())
+            self.samples = self.sampler.sample(np.random)
+
+
+    @override
+    def __getitem__(self, idx: int):
+        if self.phase == "train":
+            # For training, draw from infinite sampler.
+            idx = next(self.samples)
+
+        example_id = self.idx_to_id(idx)
+        parsed_row = self.parsed_df.loc[example_id]
+
+        # Load cached example.
+        try:
+            example = self._load_cached_example(parsed_row["extra_info"]["pdb_id"])
+        except FileNotFoundError:
+            logger.warning(f"Cached example for {parsed_row['extra_info']['pdb_id']} not found in {self.cfg.pdb_path}/cached_examples, skipping...")
+            return self.__getitem__(idx + 1)
+
+        example.update(parsed_row)  # add in query_pn_unit_iids
+
+        # Apply train-time transforms.
+        try:
+            feats = self.featurizer(example)
+        except Exception as e:
+            logger.error(f"Error applying train-time transforms to example {example_id}: {e}")
+            return self.__getitem__(idx + 1)
+
+        return feats
 
 
     def _process_chain_df(self) -> pd.DataFrame:
@@ -144,24 +180,16 @@ class SDDataset(BaseDataset):
         return parsed_df
 
 
-    def get_sampling_weights(self) -> pd.Series:
-        return self.parsed_df.apply(lambda x: x["extra_info"]["sampling_weight"])
+    def get_sampling_weights(self) -> np.ndarray:
+        return self.parsed_df.apply(lambda x: x["extra_info"]["sampling_weight"]).to_numpy()
 
-    @override
-    def __getitem__(self, idx: int):
-        example_id = self.idx_to_id(idx)
-        parsed_row = self.parsed_df.loc[example_id]
-        example = self._load_cached_example(parsed_row["extra_info"]["pdb_id"])
-        example.update(parsed_row)  # add in query_pn_unit_iids
-
-        # apply train-time transforms
-        feats = self.featurizer(example)
-
-        return feats
 
     @override
     def __len__(self) -> int:
+        if self.phase == "train":
+            return self.cfg.samples_per_epoch
         return len(self.parsed_df)
+
 
     @override
     def __contains__(self, example_id: str) -> bool:
@@ -172,6 +200,7 @@ class SDDataset(BaseDataset):
     def id_to_idx(self, example_id: str) -> int:
         return self.parsed_df.index.get_loc(example_id)
 
+
     @override
     def idx_to_id(self, idx: int) -> str:
         return self.parsed_df.index[idx]
@@ -179,12 +208,10 @@ class SDDataset(BaseDataset):
 
     def _load_cached_example(self, pdb_id: str) -> dict[str, torch.Tensor]:
         cached_example_path = f"{self.cfg.pdb_path}/cached_examples/{pdb_id}.pt"
-        if not Path(cached_example_path).exists():
-            raise FileNotFoundError(f"Cached example for {pdb_id} not found in {self.cfg.pdb_path}/cached_examples")
-        return torch.load(cached_example_path, weights_only=False)
+        return torch.load(cached_example_path, map_location="cpu", weights_only=False)
 
 
-    def _apply_filters(self, filters: list[str] | None, df: pd.DataFrame) -> None:
+    def _apply_filters(self, filters: list[str] | None, df: pd.DataFrame) -> pd.DataFrame:
         """
         Apply filters to the data based on the provided list of query strings.
         For documentation on pandas query syntax, see: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.query.html
@@ -215,6 +242,7 @@ class SDDataset(BaseDataset):
             df = self._apply_query(query, df)
 
         return df
+
 
     def _apply_query(self, query: str, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -285,7 +313,7 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     for key in keys:
         values = [d[key] for d in data]
 
-        if key not in ["example_id", "atom_array", "crop_info"]:
+        if key not in ["example_id"]:
             # Check if all have the same shape
             shape = values[0].shape
             if not all(v.shape == shape for v in values):
