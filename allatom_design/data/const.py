@@ -95,3 +95,5 @@ AF3_SEQUENCE_ENCODING = AF3SequenceEncoding()
 
 
 max_num_atoms = 23
+
+prot_bb_atoms = ["N", "CA", "C", "O"]

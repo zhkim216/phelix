@@ -387,18 +387,20 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, Tenso
     """
     Given a structure file path, return a batch of features and the input structure.
     """
-
-    input_data = aw_parse(pdb_path, extra_fields=["auth_seq_id"], hydrogen_policy="remove",)
-
-    pipeline = preprocess_transform()
-
-    transformation_id = "1"
+    transformation_id = "1"  # keep only the first assembly
+    input_data = aw_parse(pdb_path,
+                          extra_fields="all",
+                          hydrogen_policy="remove",
+                          build_assembly=[transformation_id],
+                          add_missing_atoms=False,  # True overrides extra_fields
+                          )
     atom_array_from_cif = input_data["assemblies"][transformation_id][0] # (1, num_atoms) -> (num_atoms)
 
     # Run the pipeline on the CIF data
+    pipeline = preprocess_transform()
     cif_out = pipeline(
         data={
-            "example_id": Path(pdb_path.upper()).stem,
+            "example_id": Path(pdb_path).stem,
             "atom_array": atom_array_from_cif,
             "chain_info": input_data["chain_info"],
         }
@@ -423,10 +425,9 @@ def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str
 
     # Initialize atom mask: condition on backbone atoms, non-protein atoms, and non-standard residues
     batch["atom_cond_mask"] = batch["prot_bb_atom_mask"]  # condition on backbone atoms
-    import ipdb; ipdb.set_trace()
+
     ## condition on non-protein atoms and non-standard residues
-    _, batch["atomwise_token_idx"] = torch.max(batch["atom_to_token"], dim=-1)  # [b, n_atoms]
-    atomwise_standard_prot_mask = torch.gather(standard_prot_mask, dim=-1, index=batch["atomwise_token_idx"]) * batch["atom_pad_mask"]
+    atomwise_standard_prot_mask = torch.gather(standard_prot_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]
     batch["atom_cond_mask"] = torch.where(atomwise_standard_prot_mask.bool(), batch["atom_cond_mask"], batch["atom_resolved_mask"])
 
     return batch
@@ -456,17 +457,17 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
             print("No fixed positions specified, redesigning all positions.")
         return batch
 
-    for i, pdb_key in enumerate(batch["pdb_key"]):
+    for i, example_id in enumerate(batch["example_id"]):
         if verbose:
-            print(f"\n======================== {pdb_key} ========================")
+            print(f"\n======================== {example_id} ========================")
 
-        if pdb_key not in pos_constraint_df.index:
+        if example_id not in pos_constraint_df.index:
             if verbose:
-                print(f"No fixed positions found for {pdb_key}")
+                print(f"No fixed positions found for {example_id}")
             continue
 
         ### Get fixed positions from df ###
-        row = pos_constraint_df.loc[pdb_key]
+        row = pos_constraint_df.loc[example_id]
         fixed_pos_seq, fixed_pos_scn = row.get("fixed_pos_seq", np.nan), row.get("fixed_pos_scn", np.nan)  # get fixed positions for this PDB
         use_label_asym_id = row.get("use_label_asym_id", False)
 
@@ -474,7 +475,6 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
         example = {k: v[i] for k, v in batch.items()}
 
         #* make chain_to_asym_id mapping directly from batch[i]
-        import ipdb; ipdb.set_trace()
         batch_i = batch[i]
 
         # batch_i should have these features:
@@ -495,7 +495,7 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
         fixed_pos_override_seq = row.get("fixed_pos_override_seq", np.nan)
         if not pd.isna(fixed_pos_override_seq):
             if verbose:
-                print(f"{pdb_key}: Overriding sequence at positions {fixed_pos_override_seq}")
+                print(f"{example_id}: Overriding sequence at positions {fixed_pos_override_seq}")
 
             # parse the override string into a list of positions and aatypes
             pdb_pos, override_abs_pos, override_aatypes = parse_fixed_pos_override_seq_str(fixed_pos_override_seq, chain_to_asym_id, example["auth_seq_id"], example["asym_id"])
@@ -510,7 +510,7 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
         if not pd.isna(fixed_pos_seq):
             # sequence override
             if verbose:
-                print(f"{pdb_key}: Fixing sequence at positions {fixed_pos_seq}")
+                print(f"{example_id}: Fixing sequence at positions {fixed_pos_seq}")
             abs_fixed_pos_seq = parse_fixed_pos_str(fixed_pos_seq, chain_to_asym_id, example["auth_seq_id"], example["asym_id"])
             seq_cond_mask[i, abs_fixed_pos_seq] = 1
 
@@ -520,12 +520,12 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
             #     visualize_sequences(example, seq_cond_mask[i], input_struct, asym_id_to_chain)
         else:
             if verbose:
-                print(f"{pdb_key}: No fixed sequence positions specified.")
+                print(f"{example_id}: No fixed sequence positions specified.")
 
         if not pd.isna(fixed_pos_scn):
             # sidechain override
             if verbose:
-                print(f"{pdb_key}: Fixing sidechains at positions {fixed_pos_scn}")
+                print(f"{example_id}: Fixing sidechains at positions {fixed_pos_scn}")
             abs_fixed_pos_scn = parse_fixed_pos_str(fixed_pos_scn, chain_to_asym_id, example["auth_seq_id"], example["asym_id"])
             scn_atom_mask = torch.isin(example["atomwise_token_idx"], torch.tensor(abs_fixed_pos_scn, device=example["atomwise_token_idx"].device))
             atom_cond_mask[i] = torch.where(scn_atom_mask, example["atom_resolved_mask"], atom_cond_mask[i])
@@ -541,7 +541,7 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
             #     visualize_sequences(example, scn_cond_num_atoms > 0, input_struct, asym_id_to_chain)
         else:
             if verbose:
-                print(f"{pdb_key}: No fixed sidechain positions specified.")
+                print(f"{example_id}: No fixed sidechain positions specified.")
 
     # Update batch
     batch["seq_cond_mask"] = seq_cond_mask
