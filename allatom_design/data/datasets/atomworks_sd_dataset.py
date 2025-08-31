@@ -328,7 +328,7 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     for key in keys:
         values = [d[key] for d in data]
 
-        if key not in ["example_id"]:
+        if key not in ["example_id", "atom_array", "crop_info"]:
             # Check if all have the same shape
             shape = values[0].shape
             if not all(v.shape == shape for v in values):
