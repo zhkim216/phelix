@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=sd9_a0_test
+#SBATCH --job-name=sd9_a0
 #SBATCH -p possu
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -19,13 +19,15 @@ BASE_DIR=/home/users/rshuai/code/allatom-design
 HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
 OUT_DIR=/scratch/users/rshuai/allatom_design
 
-# Set cache directories
-export TORCH_HOME=/scratch/users/rshuai/cache/torch
-export HF_HOME=/scratch/users/rshuai/cache/huggingface
+# Set environment variables
+export TORCH_HOME=/scratch/users/rshuai/cache/torch  # torch cache
+export HF_HOME=/scratch/users/rshuai/cache/huggingface  # huggingface cache
 export TRITON_LIBCUDA_PATH=/usr/local/cuda/compat/lib.real/lib  # needed for torch.compile
+export PDB_MIRROR_PATH=""
+export CCD_MIRROR_PATH="/scratch/users/rshuai/datasets/ccd"
 
 # Wandb settings / experiment name
-EXP_NAME=sd9_a0_test
+EXP_NAME=sd9_a0
 GROUP=seq_des
 
 # Dataset paths
