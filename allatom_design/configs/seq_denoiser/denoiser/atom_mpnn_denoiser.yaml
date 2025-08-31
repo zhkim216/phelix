@@ -30,7 +30,6 @@ mpnn:
     k_neighbors_potts: 48
     max_dist_potts: null
     use_potts: true
-    use_msa_potts: false
     parameterization: "factor"
     num_factors: null
     symmetric_J: true

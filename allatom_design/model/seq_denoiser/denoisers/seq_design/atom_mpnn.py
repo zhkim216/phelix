@@ -52,7 +52,6 @@ class AtomMPNN(nn.Module):
 
         # Potts decoder
         self.use_potts = cfg.potts.use_potts
-        self.use_msa_potts = cfg.potts.get("use_msa_potts", False)
         if self.use_potts:
             self.k_neighbors_potts = cfg.potts.get("k_neighbors_potts", None)
             self.max_dist_potts = cfg.potts.get("max_dist_potts", None)
@@ -69,9 +68,6 @@ class AtomMPNN(nn.Module):
                 dropout=cfg.dropout_p,
             )
             self.decoder_S_potts = potts_init()
-
-            if self.use_msa_potts:
-                self.msa_potts = potts_init()
 
         # Output layers
         self.W_out = nn.Linear(self.hidden_dim, self.n_tokens, bias=True)
@@ -135,11 +131,6 @@ class AtomMPNN(nn.Module):
                 "mask_i": token_mask,
                 "mask_ij": token_mask_2d,
             }
-
-            if self.use_msa_potts:
-                h_msa, J_msa = self.msa_potts(h_V, h_ESV, E_idx, token_mask, token_mask_2d)
-                potts_decoder_aux["h_msa"] = h_msa
-                potts_decoder_aux["J_msa"] = J_msa
 
         logits = self.W_out(h_V)
 
