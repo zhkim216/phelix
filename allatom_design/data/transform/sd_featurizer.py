@@ -102,7 +102,7 @@ def sd_featurizer(
         FilterToProteins(),
         FilterToQueryPNUnits(),
         RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
-        RemoveAtomizedTokens(),
+        MaskAtomizedTokens(),
         RemoveUnsupportedChainTypes(),
     ]
 
@@ -270,12 +270,12 @@ class FilterToQueryPNUnits(Transform):
         return data
 
 
-class RemoveAtomizedTokens(Transform):
-    """Remove atomized tokens from the atom array."""
+class MaskAtomizedTokens(Transform):
+    """Mask atomized tokens from the atom array."""
 
     @override
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
         atom_array = data["atom_array"]
-        atom_array = atom_array[~atom_array.atomize]
+        atom_array.occupancy[atom_array.atomize] = 0
         data["atom_array"] = atom_array
         return data

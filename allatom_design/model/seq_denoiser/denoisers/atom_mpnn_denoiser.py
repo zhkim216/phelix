@@ -1,10 +1,13 @@
 import copy
+from collections import defaultdict
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from atomworks.ml.utils.token import apply_token_wise, spread_token_wise
+from biotite.structure import AtomArray
 from einops import rearrange
 from omegaconf import DictConfig
 from torchtyping import TensorType
@@ -137,7 +140,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
     def potts_sample(self,
                      batch: dict[str, TensorType["b ..."]],
-                     sampling_inputs: dict[str, Any]):
+                     sampling_inputs: dict[str, Any]
+                     ) -> tuple[dict[str, list[AtomArray]], dict[str, Any]]:
         """
         Potts sampling for sequence design.
 
@@ -219,7 +223,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 edge_idx_coloring=edge_idx_coloring,
                 mask_ij_coloring=mask_ij_coloring,
             )
-
             # Set all tokens that don't exist in the graph to unknown
             S_sample = torch.where(~batch["token_exists_mask"].bool() & (batch["is_protein"] | batch["is_ligand"]),
                                    const.AF3_ENCODING.token_to_idx[const.UNKNOWN_AA],
@@ -236,22 +239,40 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         batch = to(batch, device="cpu")
 
-        # Thread sequences onto original batch
-        output_feats = []
-        aux["input_restype"] = []  # keep track of original res_types
-        for si in range(len(S)):
-            feats_si = copy.deepcopy(batch)
-            feats_si["restype"] = torch.where(feats_si["seq_cond_mask"][..., None].bool(),
-                                              feats_si["restype"],
-                                              F.one_hot(S[si], num_classes=const.AF3_ENCODING.n_tokens))
-            feats_si["coords"] = feats_si["coords"] * feats_si["atom_cond_mask"].unsqueeze(-1)
-            feats_si["atom_resolved_mask"] = feats_si["atom_resolved_mask"] * feats_si["atom_cond_mask"]
-            output_feats.append(feats_si)
+        # Thread sequences onto atom arrays.
+        id_to_atom_arrays = defaultdict(list)
+        for si in range(len(S)):  # iterate over num_seqs_per_pdb
+            atom_arrays = copy.deepcopy(batch["atom_array"])
 
-            # Return input res_type
-            aux["input_restype"].append(batch["restype"].cpu())
+            for bi in range(len(atom_arrays)):  # iterate over batch size
+                new_restype = S[si][bi]
+                new_coords = batch["coords"][bi]
 
-        return output_feats, aux
+                example_id = batch["example_id"][bi]
+                atom_array = atom_arrays[bi]
+                seq_cond_mask = batch["seq_cond_mask"][bi]
+                atom_cond_mask = batch["atom_cond_mask"][bi]
+                atom_resolved_mask = batch["atom_resolved_mask"][bi]
+
+                # Update resnames.
+                update_seq_mask = ~seq_cond_mask.numpy().astype(bool)  # update where seq_cond_mask is False
+                atomwise_update_seq_mask = spread_token_wise(atom_array, update_seq_mask)
+                atomwise_resnames = spread_token_wise(atom_array, const.AF3_ENCODING.idx_to_token[new_restype])
+                atomwise_resnames = np.where(atomwise_update_seq_mask,
+                                             atomwise_resnames,
+                                             atom_array.get_annotation("res_name"))
+                atom_array.set_annotation("res_name", atomwise_resnames)
+
+                # Update coords.
+                update_coords_mask = (atom_cond_mask * atom_resolved_mask).numpy().astype(bool)
+                atom_array.coord = np.where(update_coords_mask[..., None],
+                                            new_coords.numpy(),
+                                            np.nan)
+
+                # Add to id_to_atom_arrays.
+                id_to_atom_arrays[example_id].append(atom_array)
+
+        return id_to_atom_arrays, aux
 
 
     def compute_potts_params(self, batch: dict[str, TensorType["b ..."]],

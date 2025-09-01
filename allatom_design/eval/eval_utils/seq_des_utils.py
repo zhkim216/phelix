@@ -139,56 +139,30 @@ def run_seq_des(model: SeqDenoiser,
 
             # Restrict aatype sampling at certain positions
             sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
-            # sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(batch, pos_constraint_df, verbose=cfg.verbose)
+            # sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(batch, pos_constraint_df, verbose=cfg.verbose)  # TODO: re-implement
 
             # Run sampling
-            output_feats, aux = model.sample(batch, sampling_inputs=sampling_inputs)
+            id_to_atom_arrays, aux = model.sample(batch, sampling_inputs=sampling_inputs)
 
-            # Save outputs to cif files
+            # Save outputs.
             if out_dir is not None:
-                for si, feats_si in enumerate(output_feats):
-                    # if cfg["save_protein_only"]:
-                    #     # crop to protein-only features; useful for ablations to only fold with protein sequence
-                    #     feats_si = crop_batch_to_protein_only(feats_si)
-
-                    # TODO: make it clear that atom array is *not* updated after seq design yet.
-                    sample_stems = [f"{example_id}_sample{si}" for example_id in batch["example_id"]]
+                for example_id, atom_arrays in id_to_atom_arrays.items():
+                    # Save output atom arrays to cif files.
+                    sample_stems = [f"{example_id}_sample{si}" for si in range(len(atom_arrays))]
                     batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
 
-                    feats_si = unbatch_feats(feats_si)
-                    for bi in range(len(feats_si)):
-                        feats_i = feats_si[bi]
-
-                        # Update resnames
-                        atomwise_seq_cond_mask = spread_token_wise(feats_i["atom_array"], feats_i["seq_cond_mask"]).numpy().astype(bool)
-                        atomwise_resnames = spread_token_wise(feats_i["atom_array"], const.AF3_ENCODING.idx_to_token[feats_i["restype"].argmax(dim=-1)])
-                        atomwise_resnames = np.where(atomwise_seq_cond_mask,  # only update where seq_cond_mask is False
-                                                     feats_i["atom_array"].get_annotation("res_name"),
-                                                     atomwise_resnames)
-                        feats_i["atom_array"].set_annotation("res_name", atomwise_resnames)
-
-                        # Update coords
-                        feats_i["atom_array"].coord = np.where(feats_i["atom_resolved_mask"].numpy().astype(bool)[..., None],
-                                                               feats_i["coords"].numpy(),
-                                                               np.nan)
-
-                        # Subset to only resolved atoms
-                        # feats_i["atom_array"] = feats_i["atom_array"][feats_i["atom_resolved_mask"].numpy().astype(bool)]
-
-                        with open(batch_out_files[bi], "w") as f:
-                            f.write(to_cif_string(feats_i["atom_array"], include_entity_poly=True))
+                    for si in range(len(atom_arrays)):
+                        atom_array = atom_arrays[si]
+                        with open(batch_out_files[si], "w") as f:
+                            f.write(to_cif_string(atom_array, include_entity_poly=True, include_nan_coords=False))
 
                     outputs["out_pdbs"].extend(batch_out_files)
-                    outputs["example_ids"].extend(output_feats[si]["example_id"])
+                    outputs["example_ids"].extend(example_id)
 
-                    # get sampled sequences as a string, with ":" to separate chains
-                    for bi in range(len(feats_si)):
-                        feats_i = feats_si[bi]
-
-                        # Save sampled protein sequences, with ":" to separate chains
+                    # Get sampled sequences as a string, with ":" to separate chains.
+                    for si in range(len(atom_arrays)):
                         chain_seqs = []
-
-                        prot_atom_array = feats_i["atom_array"][struc.filter_amino_acids(feats_i["atom_array"])]
+                        prot_atom_array = atom_arrays[si][struc.filter_amino_acids(atom_arrays[si])]
                         prot_1to3_fn = np.vectorize(lambda x: aw_sequence.get_1_from_3_letter_code(x, aw_enums.ChainType.POLYPEPTIDE_L))
                         for asym_id in np.unique(prot_atom_array.pn_unit_iid):
                             asym_mask = prot_atom_array.pn_unit_iid == asym_id
@@ -198,14 +172,14 @@ def run_seq_des(model: SeqDenoiser,
                             chain_seqs.append(chain_seq)
                         outputs["seqs"].append(":".join(chain_seqs))
 
-                # If specified, save potts parameters
-                if cfg.get("save_potts_params", False):
-                    potts_params_dir = f"{out_dir}/potts_params"
-                    Path(potts_params_dir).mkdir(parents=True, exist_ok=True)
-                    sample_stems = [f"{example_id}_sample{si}" for example_id in batch["example_id"]]
-                    for i, sample_stem in enumerate(sample_stems):
-                        potts_params = {k: v[i] for k, v in aux["potts_decoder_aux"].items()}
-                        torch.save(potts_params, f"{potts_params_dir}/{sample_stem}.pt")
+                    # If specified, save potts parameters
+                    if cfg.get("save_potts_params", False):
+                        potts_params_dir = f"{out_dir}/potts_params"
+                        Path(potts_params_dir).mkdir(parents=True, exist_ok=True)
+                        sample_stems = [f"{example_id}_sample{si}" for example_id in batch["example_id"] for si in range(len(atom_arrays))]
+                        for i, sample_stem in enumerate(sample_stems):
+                            potts_params = {k: v[i] for k, v in aux["potts_decoder_aux"].items()}
+                            torch.save(potts_params, f"{potts_params_dir}/{sample_stem}.pt")
 
             pbar.update(B)
     pbar.close()
@@ -827,5 +801,3 @@ def get_chain_to_asym_id_mapping(example: dict[str, torch.Tensor],
         return {c: i for i, c in enumerate(example["feat_metadata"]["asym_name"].tolist())}
     else:
         return {c: i for i, c in enumerate(example["feat_metadata"]["auth_asym_name"].tolist())}
-
-

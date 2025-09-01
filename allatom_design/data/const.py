@@ -121,4 +121,4 @@ PROT_BB_ATOMS: Final[list[str]] = ["N", "CA", "C", "O"]
 PROT_LETTER_TO_TOKEN: Final[dict[str, str]] = {**aw_sequence.aa_chem_comp_1to3(), "X": "UNK"}  # include "X" for unknown amino acids
 PROT_TOKEN_TO_LETTER: Final[dict[str, str]] = {v: k for k, v in PROT_LETTER_TO_TOKEN.items()}
 
-DUMMY_SEQ_ID: Final[int] = -999  # dummy sequence id to use for auth_seq_id when not present
+DUMMY_SEQ_ID: Final[int] = -1  # dummy sequence id to use for auth_seq_id when not present

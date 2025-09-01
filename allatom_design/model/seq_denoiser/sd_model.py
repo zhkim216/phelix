@@ -4,15 +4,16 @@ from typing import Any, Dict, Tuple
 
 import torch
 import torch.nn as nn
+from biotite.structure import AtomArray
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
+from allatom_design.data.mask_selector import MaskSelector
 from allatom_design.data.pdb_utils import *
 from allatom_design.model.seq_denoiser.denoisers.atom_mpnn_denoiser import \
     AtomMPNNDenoiser
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
-from allatom_design.data.mask_selector import MaskSelector
 
 
 class SeqDenoiser(nn.Module):
@@ -87,7 +88,8 @@ class SeqDenoiser(nn.Module):
 
     def sample(self,
                batch: dict[str, TensorType["b ..."]],
-               sampling_inputs: dict[str, Any]):
+               sampling_inputs: dict[str, Any]
+               ) -> tuple[dict[str, list[AtomArray]], dict[str, Any]]:
 
         # Handle inference noise labels
         batch["noise_labels"] = sampling_inputs.get("noise_labels", None)
@@ -104,9 +106,9 @@ class SeqDenoiser(nn.Module):
 
         # Choose sampling method
         if sampling_inputs["use_potts_sampling"]:
-            output_feats, aux = self.denoiser.potts_sample(batch, sampling_inputs)
+            id_to_atom_arrays, aux = self.denoiser.potts_sample(batch, sampling_inputs)
 
-        return output_feats, aux
+        return id_to_atom_arrays, aux
 
 
     def score_samples(self, batch: dict[str, TensorType["b ..."]], sampling_inputs: dict[str, Any]):
