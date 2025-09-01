@@ -73,6 +73,16 @@ data:
       - "16 < q_pn_unit_sequence_length < 2048"
       - "n_prot > 0"
 
+  # CIF parser args. Not used during training since we've already cached the CIFs.
+  cif_parser_args:
+    add_missing_atoms: true
+    remove_waters: true
+    remove_ccds: []
+    fix_ligands_at_symmetry_centers: true
+    fix_arginines: true
+    convert_mse_to_met: true
+    hydrogen_policy: "remove"
+
   featurizer_cfg:
     max_tokens: 512
     max_atoms: 4608
