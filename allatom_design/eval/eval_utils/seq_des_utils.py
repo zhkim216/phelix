@@ -303,10 +303,12 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> dict[str, Any]:
     # BACKWARDS COMPATIBILITY  TODO: remove this once we've retrained the models
     if "cif_parser_args" not in data_cfg:
         data_cfg.cif_parser_args = {"add_missing_atoms": True, "remove_waters": True, "remove_ccds": [], "fix_ligands_at_symmetry_centers": True, "fix_arginines": True, "convert_mse_to_met": True, "hydrogen_policy": "remove"}
+    cif_parser_args = OmegaConf.to_container(data_cfg.cif_parser_args, resolve=True)
 
     # Read in the CIF data.
     transformation_id = "1"  # keep only the first assembly
-    input_data = aw_parse(pdb_path, build_assembly=[transformation_id], **data_cfg.cif_parser_args)
+    cif_parser_args["build_assembly"] = [transformation_id]
+    input_data = aw_parse(pdb_path, **cif_parser_args)
     atom_array_from_cif = input_data["assemblies"][transformation_id][0] # (1, num_atoms) -> (num_atoms)
 
     # Run the preprocessing pipeline on the CIF data.
@@ -323,11 +325,11 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> dict[str, Any]:
     example = featurizer(cif_out)
 
     # Add auth_seq_id and auth_asym_id to the example's atom array.
+    auth_cif_parser_args = cif_parser_args.copy()
+    auth_cif_parser_args["extra_fields"] = "all"
+    auth_cif_parser_args["add_missing_atoms"] = False  # True overrides extra_fields
     auth_data = aw_parse(pdb_path,
-                         extra_fields="all",
-                         hydrogen_policy="remove",
-                         build_assembly=[transformation_id],
-                         add_missing_atoms=False,  # True overrides extra_fields
+                         **auth_cif_parser_args,
                          )["assemblies"][transformation_id][0]
     mapping = {}
     for atom in auth_data:
