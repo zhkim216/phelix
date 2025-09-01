@@ -109,9 +109,16 @@ class AF3SequenceEncoding:
         """First converts 1-letter AA names to protein tokens, then encodes to integer indices."""
         return [self.encode_aa(aa) for aa in aa_seq]
 
+    def decode_aa_seq(self, token_idxs: Sequence[int]) -> str:
+        """First converts integer indices to tokens, then decodes to a string."""
+        return "".join([PROT_TOKEN_TO_LETTER[token] for token in self.decode(token_idxs)])
+
 
 AF3_ENCODING: Final[AF3SequenceEncoding] = AF3SequenceEncoding()
 
 MAX_NUM_ATOMS: Final[int] = 23
 PROT_BB_ATOMS: Final[list[str]] = ["N", "CA", "C", "O"]
 PROT_LETTER_TO_TOKEN: Final[dict[str, str]] = {**aw_sequence.aa_chem_comp_1to3(), "X": "UNK"}  # include "X" for unknown amino acids
+PROT_TOKEN_TO_LETTER: Final[dict[str, str]] = {v: k for k, v in PROT_LETTER_TO_TOKEN.items()}
+
+DUMMY_SEQ_ID: Final[int] = -999  # dummy sequence id to use for auth_seq_id when not present

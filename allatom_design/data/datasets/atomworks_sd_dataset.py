@@ -74,9 +74,10 @@ class SDDataset(BaseDataset):
         self.phase = phase
 
         # Initialize featurizer
-        # Note: We remove atom_array and crop_info to avoid cuda initialization issues during training.
+        # Note: We remove INFERENCE_ONLY_KEYS to avoid cuda initialization issues during training.
         self.featurizer = sd_featurizer.sd_featurizer(**cfg.featurizer_cfg,
-                                                      remove_keys=sd_featurizer.INFERENCE_ONLY_KEYS)
+                                                      remove_keys=sd_featurizer.INFERENCE_ONLY_KEYS,
+                                                      remove_unresolved_tokens=True)
 
         # Read in chain metadata parquet
         self.chain_df = self._process_chain_df()

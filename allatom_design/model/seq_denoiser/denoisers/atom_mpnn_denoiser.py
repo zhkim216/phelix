@@ -242,8 +242,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         for si in range(len(S)):
             feats_si = copy.deepcopy(batch)
             feats_si["restype"] = torch.where(feats_si["seq_cond_mask"][..., None].bool(),
-                                               feats_si["restype"],
-                                               F.one_hot(S[si], num_classes=const.AF3_ENCODING.n_tokens))
+                                              feats_si["restype"],
+                                              F.one_hot(S[si], num_classes=const.AF3_ENCODING.n_tokens))
             feats_si["coords"] = feats_si["coords"] * feats_si["atom_cond_mask"].unsqueeze(-1)
             feats_si["atom_resolved_mask"] = feats_si["atom_resolved_mask"] * feats_si["atom_cond_mask"]
             output_feats.append(feats_si)

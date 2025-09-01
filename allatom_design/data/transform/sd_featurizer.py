@@ -88,6 +88,7 @@ def sd_featurizer(
     crop_center_cutoff_distance: float = 15.0,
     crop_spatial_p: float = 0.0,
     remove_keys: list[str] = [],
+    remove_unresolved_tokens: bool = False,
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
@@ -100,7 +101,8 @@ def sd_featurizer(
         }),
         FilterToProteins(),
         FilterToQueryPNUnits(),
-        RemoveUnresolvedTokens(),
+        RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
+        RemoveAtomizedTokens(),
         RemoveUnsupportedChainTypes(),
     ]
 
@@ -141,7 +143,6 @@ def sd_featurizer(
 
         # Add features from the atom_array
         FeaturizeCoordsAndMasks(),
-        FeaturizeAuthAnnotations(),
         CenterRandomAugmentation(scale=1.0), #! turn on/off depending on train/eval?
     ]
 
@@ -269,17 +270,12 @@ class FilterToQueryPNUnits(Transform):
         return data
 
 
-class FeaturizeAuthAnnotations(Transform):
-    """If present in the atom array, add auth annotations to the feats."""
+class RemoveAtomizedTokens(Transform):
+    """Remove atomized tokens from the atom array."""
 
     @override
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
         atom_array = data["atom_array"]
-        if "auth_seq_id" in atom_array.get_annotation_categories():
-            data["feats"]["auth_seq_id"] = torch.tensor(atom_array.auth_seq_id.astype(int))
-        if "auth_asym_id" in atom_array.get_annotation_categories():
-            asym_name, asym_id = np.unique(atom_array.auth_asym_id, return_inverse=True)
-            data["feats"]["auth_asym_id"] = torch.tensor(asym_id)
-            data["feat_metadata"]["auth_asym_name"] = asym_name
-
+        atom_array = atom_array[~atom_array.atomize]
+        data["atom_array"] = atom_array
         return data

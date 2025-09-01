@@ -17,10 +17,6 @@ noise_labels: null  # per-residue noise labels, float for same noise for each re
 add_noise: false  # add noise equal to noise_labels to the input backbone
 t: null  # timestep to condition on for chroma polymer diffusion
 
-# Ablation options
-use_protein_only: true  # only condition on protein for sequence design
-save_protein_only: false  # save CIFs with only protein sequence
-
 potts_sampling_cfg:
   regularization: "LCP"
   potts_sweeps: 500

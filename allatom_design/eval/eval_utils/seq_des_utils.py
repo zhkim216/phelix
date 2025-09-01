@@ -9,6 +9,9 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import atomworks.enums as aw_enums
+import atomworks.io.utils.sequence as aw_sequence
+import biotite.structure as struc
 import gemmi
 import hydra
 import numpy as np
@@ -16,6 +19,9 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 from atomworks.io.parser import parse as aw_parse
+from atomworks.io.utils.io_utils import load_any, to_cif_string
+from atomworks.ml.utils.token import apply_token_wise, spread_token_wise, get_token_starts
+from biotite.structure import AtomArray
 from joblib import Parallel, delayed
 from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
@@ -26,20 +32,16 @@ from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data import residue_constants as rc
 from allatom_design.data.data import atom_center_random_augmentation, to
 from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
+from allatom_design.data.feature.feature_utils import unbatch_feats
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
-    load_input,
-    mmcif_to_pdb,
-)
+    load_input, mmcif_to_pdb)
 from allatom_design.data.transform.preprocess import preprocess_transform
 from allatom_design.data.transform.sd_featurizer import sd_featurizer
 from allatom_design.data.types import Structure
-from allatom_design.data.write.mmcif import (
-    batch_write_feats_to_mmcif,
-    write_feats_to_mmcif,
-)
-from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import (
-    compute_potts_energy,
-)
+from allatom_design.data.write.mmcif import (batch_write_feats_to_mmcif,
+                                             write_feats_to_mmcif)
+from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import \
+    compute_potts_energy
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 
@@ -105,7 +107,7 @@ def run_seq_des(model: SeqDenoiser,
 
     # Validate pos_constraint_df
     if pos_constraint_df is not None:
-        valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype", "use_label_asym_id"]
+        valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype", "use_label_asym_name"]
         if not set(pos_constraint_df.columns).issubset(valid_columns):
             # columns in input df must be a subset of valid columns
             raise ValueError(f"Invalid columns in pos_constraint_df. Expected subset of {valid_columns}. Found: {pos_constraint_df.columns}")
@@ -127,7 +129,7 @@ def run_seq_des(model: SeqDenoiser,
         for i in range(0, len(pdb_paths), cfg.batch_size):
             batch_pdb_paths = pdb_paths[i:i+cfg.batch_size]
             B = len(batch_pdb_paths)
-            batch = get_sd_batch(batch_pdb_paths, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
+            batch = get_sd_batch(batch_pdb_paths, device=device, parallel_pool=parallel_pool)
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
@@ -139,10 +141,6 @@ def run_seq_des(model: SeqDenoiser,
             sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
             # sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(batch, pos_constraint_df, verbose=cfg.verbose)
 
-            if cfg["use_protein_only"]:
-                # subset to standard protein-only features; useful for ablations to only condition on protein
-                batch["token_exists_override"] = (batch["is_protein"]) & ~batch["is_atomized"]
-
             # Run sampling
             output_feats, aux = model.sample(batch, sampling_inputs=sampling_inputs)
 
@@ -153,43 +151,58 @@ def run_seq_des(model: SeqDenoiser,
                     #     # crop to protein-only features; useful for ablations to only fold with protein sequence
                     #     feats_si = crop_batch_to_protein_only(feats_si)
 
-                    # TODO: atom array is *not* updated after seq design yet.
+                    # TODO: make it clear that atom array is *not* updated after seq design yet.
                     sample_stems = [f"{example_id}_sample{si}" for example_id in batch["example_id"]]
                     batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
-                    # batch_write_feats_to_mmcif(feats_si, input_structs=input_structs, filenames=batch_out_files)
+
+                    feats_si = unbatch_feats(feats_si)
+                    for bi in range(len(feats_si)):
+                        feats_i = feats_si[bi]
+
+                        # Update resnames
+                        atomwise_seq_cond_mask = spread_token_wise(feats_i["atom_array"], feats_i["seq_cond_mask"]).numpy().astype(bool)
+                        atomwise_resnames = spread_token_wise(feats_i["atom_array"], const.AF3_ENCODING.idx_to_token[feats_i["restype"].argmax(dim=-1)])
+                        atomwise_resnames = np.where(atomwise_seq_cond_mask,  # only update where seq_cond_mask is False
+                                                     feats_i["atom_array"].get_annotation("res_name"),
+                                                     atomwise_resnames)
+                        feats_i["atom_array"].set_annotation("res_name", atomwise_resnames)
+
+                        # Update coords
+                        feats_i["atom_array"].coord = np.where(feats_i["atom_resolved_mask"].numpy().astype(bool)[..., None],
+                                                               feats_i["coords"].numpy(),
+                                                               np.nan)
+
+                        # Subset to only resolved atoms
+                        # feats_i["atom_array"] = feats_i["atom_array"][feats_i["atom_resolved_mask"].numpy().astype(bool)]
+
+                        with open(batch_out_files[bi], "w") as f:
+                            f.write(to_cif_string(feats_i["atom_array"], include_entity_poly=True))
+
                     outputs["out_pdbs"].extend(batch_out_files)
-                    outputs["pdb_keys"].extend(output_feats[si]["pdb_key"])
+                    outputs["example_ids"].extend(output_feats[si]["example_id"])
 
                     # get sampled sequences as a string, with ":" to separate chains
-                    for bi in range(output_feats[si]["asym_id"].shape[0]):
+                    for bi in range(len(feats_si)):
+                        feats_i = feats_si[bi]
+
+                        # Save sampled protein sequences, with ":" to separate chains
                         chain_seqs = []
-                        chain_input_seqs = []
-                        for chain_id in feats_si["asym_id"][bi].unique():
-                            chain_mask = (feats_si["asym_id"][bi] == chain_id).squeeze(0)
-                            chain_mask = chain_mask * feats_si["token_pad_mask"][bi].bool().squeeze(0)
-                            # temporary: don't save non-protein tokens
-                            chain_mask = chain_mask & (feats_si["mol_type"][bi] == const.chain_type_ids["PROTEIN"])
-                            if not chain_mask.any():
-                                continue
 
-                            # store sampled sequence as a string
-                            chain_res_type = feats_si["res_type"][bi].squeeze(0).argmax(dim=-1)[chain_mask]
-                            chain_seq = [const.prot_token_to_letter[const.tokens[x]] for x in chain_res_type]
-                            chain_seqs.append("".join(chain_seq))
-
-                            # store input sequence as a string
-                            chain_input_res_type = aux["input_res_type"][si][bi].squeeze(0).argmax(dim=-1)[chain_mask]
-                            chain_input_seq = [const.prot_token_to_letter[const.tokens[x]] for x in chain_input_res_type]
-                            chain_input_seqs.append("".join(chain_input_seq))
-
-                        outputs["seqs"].append(":".join(chain_seqs))  # store sampled sequences for each sample
-                        outputs["input_seqs"].append(":".join(chain_input_seqs))  # store input sequences for each sample
+                        prot_atom_array = feats_i["atom_array"][struc.filter_amino_acids(feats_i["atom_array"])]
+                        prot_1to3_fn = np.vectorize(lambda x: aw_sequence.get_1_from_3_letter_code(x, aw_enums.ChainType.POLYPEPTIDE_L))
+                        for asym_id in np.unique(prot_atom_array.pn_unit_iid):
+                            asym_mask = prot_atom_array.pn_unit_iid == asym_id
+                            chain_atom_array = prot_atom_array[asym_mask]
+                            _, resnames = struc.get_residues(chain_atom_array)
+                            chain_seq = "".join(prot_1to3_fn(resnames))
+                            chain_seqs.append(chain_seq)
+                        outputs["seqs"].append(":".join(chain_seqs))
 
                 # If specified, save potts parameters
                 if cfg.get("save_potts_params", False):
                     potts_params_dir = f"{out_dir}/potts_params"
                     Path(potts_params_dir).mkdir(parents=True, exist_ok=True)
-                    sample_stems = [f"{Path(pdb_file).stem}_sample{si}" for pdb_file in batch_struct_files]
+                    sample_stems = [f"{example_id}_sample{si}" for example_id in batch["example_id"]]
                     for i, sample_stem in enumerate(sample_stems):
                         potts_params = {k: v[i] for k, v in aux["potts_decoder_aux"].items()}
                         torch.save(potts_params, f"{potts_params_dir}/{sample_stem}.pt")
@@ -365,16 +378,13 @@ def run_seq_des_ensemble(model: SeqDenoiser,
 
 
 def get_sd_batch(pdb_paths: list[str], device: str,
-                 data_cfg: DictConfig,
-                 parallel_pool: Parallel | None) -> tuple[dict[str, TensorType["b n ..."]],
-                                                          list[str],
-                                                          list[Dict[str, int]]]:
+                 parallel_pool: Parallel | None) -> dict[str, Any]:
     if parallel_pool is None:
         # Load PDBs sequentially
-        batch_examples = [get_sd_example(pdb_path, data_cfg) for pdb_path in pdb_paths]
+        batch_examples = [get_sd_example(pdb_path) for pdb_path in pdb_paths]
     else:
         # Load PDBs in parallel
-        batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path, data_cfg) for pdb_path in pdb_paths)
+        batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path) for pdb_path in pdb_paths)
 
     # Collate examples
     batch = sd_collator(batch_examples)
@@ -383,21 +393,15 @@ def get_sd_batch(pdb_paths: list[str], device: str,
     return batch
 
 
-def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, TensorType["b n ..."]],
-                                                                         dict[str, Any]]:
+def get_sd_example(pdb_path: str) -> dict[str, Any]:
     """
-    Given a structure file path, return a batch of features and the input structure.
+    Given a pdb file path, return a dictionary of sequence design model features.
     """
     transformation_id = "1"  # keep only the first assembly
-    input_data = aw_parse(pdb_path,
-                          extra_fields="all",
-                          hydrogen_policy="remove",
-                          build_assembly=[transformation_id],
-                          add_missing_atoms=False,  # True overrides extra_fields
-                          )
+    input_data = aw_parse(pdb_path, hydrogen_policy="remove", build_assembly=[transformation_id])
     atom_array_from_cif = input_data["assemblies"][transformation_id][0] # (1, num_atoms) -> (num_atoms)
 
-    # Run the pipeline on the CIF data
+    # Run the preprocessing pipeline on the CIF data.
     pipeline = preprocess_transform()
     cif_out = pipeline(
         data={
@@ -408,11 +412,26 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> tuple[dict[str, Tenso
     )
 
     featurizer = sd_featurizer()
-
     example = featurizer(cif_out)
 
-    return example
+    # Add auth_seq_id and auth_asym_id to the example's atom array.
+    auth_data = aw_parse(pdb_path,
+                         extra_fields="all",
+                         hydrogen_policy="remove",
+                         build_assembly=[transformation_id],
+                         add_missing_atoms=False,  # True overrides extra_fields
+                         )["assemblies"][transformation_id][0]
+    mapping = {}
+    for atom in auth_data:
+        # Create mapping of ("pn_unit_iid", "res_id") to ("auth_asym_id", "auth_seq_id").
+        mapping[(atom.pn_unit_iid, atom.res_id)] = (atom.auth_asym_id, int(atom.auth_seq_id))
 
+    # Add auth_asym_id and auth_seq_id to the example's atom array.
+    auth_asym_id, auth_seq_id = zip(*map(lambda x: mapping.get((x.pn_unit_iid, x.res_id), ("", const.DUMMY_SEQ_ID)), example["atom_array"]))
+    example["atom_array"].set_annotation("auth_asym_id", auth_asym_id)
+    example["atom_array"].set_annotation("auth_seq_id", auth_seq_id)
+
+    return example
 
 
 def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str, torch.Tensor]:
@@ -420,7 +439,7 @@ def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str
     Initialize the sampling masks for the batch. Modifies batch in place and returns it.
     """
     # Initialize sequence mask: always condition on non-protein or non-standard residues
-    standard_prot_mask = batch['is_protein']
+    standard_prot_mask = batch["is_protein"] & ~batch["is_atomized"]
     batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
     batch["seq_cond_mask"] = torch.where(standard_prot_mask, torch.zeros_like(batch["seq_cond_mask"]), batch["token_resolved_mask"])
 
@@ -468,13 +487,10 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
         ### Get fixed positions from df ###
         row = pos_constraint_df.loc[example_id]
         fixed_pos_seq, fixed_pos_scn = row.get("fixed_pos_seq", np.nan), row.get("fixed_pos_scn", np.nan)  # get fixed positions for this PDB
-        use_label_asym_id = row.get("use_label_asym_id", False)
+        use_label_asym_name = row.get("use_label_asym_name", False)
 
         # Set up example
         example = {k: v[i] for k, v in batch.items()}
-
-        # Make chain_to_asym_id mapping
-        chain_to_asym_id = get_chain_to_asym_id_mapping(example, use_label_asym_id)
 
         ### Override sequence at specified positions and condition on them ###
         fixed_pos_override_seq = row.get("fixed_pos_override_seq", np.nan)
@@ -483,7 +499,7 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
                 print(f"{example_id}: Overriding sequence at positions {fixed_pos_override_seq}")
 
             # parse the override string into a list of positions and aatypes
-            pdb_pos, override_abs_pos, override_aatypes = parse_fixed_pos_override_seq_str(fixed_pos_override_seq, chain_to_asym_id, example["auth_seq_id"], example["asym_id"])
+            pdb_pos, override_abs_pos, override_aatypes = parse_fixed_pos_override_seq_str(fixed_pos_override_seq, example["atom_array"], use_label_asym_name=use_label_asym_name)
             for abs_pos_i, aa in zip(override_abs_pos, override_aatypes):
                 batch["res_type"][i, abs_pos_i] = F.one_hot(torch.tensor(const.AF3_ENCODING.encode_aa_seq(aa), device=batch["res_type"].device), num_classes=len(const.tokens))
 
@@ -496,13 +512,13 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
             # sequence override
             if verbose:
                 print(f"{example_id}: Fixing sequence at positions {fixed_pos_seq}")
-            abs_fixed_pos_seq = parse_fixed_pos_str(fixed_pos_seq, chain_to_asym_id, example["auth_seq_id"], example["asym_id"])
+            abs_fixed_pos_seq = parse_fixed_pos_str(fixed_pos_seq, example["atom_array"], use_label_asym_name=use_label_asym_name)
             seq_cond_mask[i, abs_fixed_pos_seq] = 1
 
             # print fixed sequence
             if verbose:
                 print("Fixed sequence:")
-                visualize_sequences(example, seq_cond_mask[i], chain_to_asym_id)
+                visualize_sequences(example["atom_array"], seq_cond_mask[i])
         else:
             if verbose:
                 print(f"{example_id}: No fixed sequence positions specified.")
@@ -511,19 +527,19 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
             # sidechain override
             if verbose:
                 print(f"{example_id}: Fixing sidechains at positions {fixed_pos_scn}")
-            abs_fixed_pos_scn = parse_fixed_pos_str(fixed_pos_scn, chain_to_asym_id, example["auth_seq_id"], example["asym_id"])
-            scn_atom_mask = torch.isin(example["atomwise_token_idx"], torch.tensor(abs_fixed_pos_scn, device=example["atomwise_token_idx"].device))
+            abs_fixed_pos_scn = parse_fixed_pos_str(fixed_pos_scn, example["atom_array"], use_label_asym_name=use_label_asym_name)
+            scn_atom_mask = torch.isin(example["atom_to_token_map"], torch.tensor(abs_fixed_pos_scn, device=example["atom_to_token_map"].device))
             atom_cond_mask[i] = torch.where(scn_atom_mask, example["atom_resolved_mask"], atom_cond_mask[i])
 
             # ensure that we're not fixing sidechains when we override the PDB sequence
-            scn_cond_num_atoms = scn_atom_mask.float() @ example["atom_to_token"].float()  # number of atoms we're conditioning on at fixed_pos_scn
+            scn_cond_num_atoms = apply_token_wise(example["atom_array"], scn_atom_mask.cpu().numpy(), np.sum)
             if not pd.isna(fixed_pos_override_seq):
                 assert (scn_cond_num_atoms[override_abs_pos] == 0).all(), "Cannot fix sidechains at positions where the sequence from the PDB is overridden."
 
             # print fixed sidechains
             if verbose:
                 print("Fixed sidechains:")
-                visualize_sequences(example, scn_cond_num_atoms > 0, chain_to_asym_id)
+                visualize_sequences(example["atom_array"], scn_cond_num_atoms > 0)
         else:
             if verbose:
                 print(f"{example_id}: No fixed sidechain positions specified.")
@@ -581,7 +597,7 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
         example = {k: v[i] for k, v in batch.items()}
 
         # Make chain_to_asym_id mapping
-        chain_to_asym_id = get_chain_to_asym_id_mapping(example, use_label_asym_id=True)
+        chain_to_asym_id = get_chain_to_asym_id_mapping(example, use_label_asym_name=True)
 
         if verbose:
             print(f"{pdb_key}: Restricting amino acid sampling at positions {pos_restrict_aatype}")
@@ -620,22 +636,22 @@ def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
 
 
 def parse_fixed_pos_str(fixed_pos_str: str,
-                        chain_id_mapping: Dict[str, int],
-                        residue_index: TensorType["n", int],
-                        chain_index: TensorType["n", int]) -> TensorType["k", int]:
+                        atom_array: AtomArray,
+                        use_label_asym_name: bool = False) -> TensorType["k", int]:
     """
     Parse a list of fixed positions in the format ["A", "B1", "C10-25", ...] and
     return the corresponding list of absolute indices.
 
     Args:
         fixed_pos_list (str): Comma-separated string representing fixed positions (e.g., "A,B1,C10-25").
-        chain_id_mapping (dict): Mapping of chain letter to chain index (e.g., {'A': 0, 'B': 1}).
-        residue_index (torch.Tensor): Tensor of residue indices (shape: [N]).
-        chain_index (torch.Tensor): Tensor of chain indices (shape: [N]).
+        atom_array (AtomArray): AtomArray object containing the atom array.
+        use_label_asym_name (bool): Whether to use label_asym_name as the chain name.
 
     Returns:
-        List[int]: List of absolute indices to set to 1 in the masks.
+        TensorType["k", int]: List of absolute indices to set to 1 in the masks.
     """
+    chain_annotation = "pn_unit_iid" if use_label_asym_name else "auth_asym_id"
+    residue_index = atom_array.auth_seq_id[get_token_starts(atom_array)]
     fixed_indices = []
 
     fixed_pos_str = fixed_pos_str.strip()
@@ -655,20 +671,19 @@ def parse_fixed_pos_str(fixed_pos_str: str,
             start_residue = int(match_with_residues.group(2))
             end_residue = int(match_with_residues.group(3)) if match_with_residues.group(3) else start_residue
 
-            if chain_letter not in chain_id_mapping:
+            if chain_letter not in atom_array.get_annotation(chain_annotation):
                 raise ValueError(f"Chain ID {chain_letter} not found in mapping.")
 
             # For the given chain, create a mask for all residues in the desired range
-            chain_i = chain_id_mapping[chain_letter]
-            range_mask = (chain_index == chain_i) & (residue_index >= start_residue) & (residue_index <= end_residue)
-            matching_indices = torch.where(range_mask)[0]
+            atomwise_range_mask = (atom_array.get_annotation(chain_annotation) == chain_letter) & (atom_array.auth_seq_id >= start_residue) & (atom_array.auth_seq_id <= end_residue)
+            range_mask = apply_token_wise(atom_array, atomwise_range_mask, np.any)  # get per-token mask
+            matching_indices = np.where(range_mask)[0]
 
             # Check that each residue in the requested range; warn if not found
-            found_residues = residue_index[matching_indices].tolist()
-            found_residues_set = set(found_residues)
+            found_residues = set(residue_index[matching_indices].tolist())
 
             for r in range(start_residue, end_residue + 1):
-                if r not in found_residues_set:
+                if r not in found_residues:
                     print(f"Warning: Requested position {chain_letter}{r} not found in structure.")
 
             # Extend our fixed indices with whatever we did find
@@ -676,13 +691,13 @@ def parse_fixed_pos_str(fixed_pos_str: str,
         elif match_chain_only:
             chain_letter = match_chain_only.group(1)
 
-            if chain_letter not in chain_id_mapping:
+            if chain_letter not in atom_array.get_annotation(chain_annotation):
                 raise ValueError(f"Chain ID {chain_letter} not found in mapping.")
 
             # For the given chain, create a mask for all residues
-            chain_i = chain_id_mapping[chain_letter]
-            chain_mask = (chain_index == chain_i)
-            matching_indices = torch.where(chain_mask)[0]
+            atomwise_chain_mask = (atom_array.get_annotation(chain_annotation) == chain_letter)
+            chain_mask = apply_token_wise(atom_array, atomwise_chain_mask, np.any)
+            matching_indices = np.where(chain_mask)[0]
             fixed_indices.extend(matching_indices.tolist())
         else:
             raise ValueError(f"Invalid position format: {pos}")
@@ -780,41 +795,32 @@ def parse_pos_restrict_aatype_str(pos_restrict_str: str,
     return pdb_pos, abs_pos, allowed_aatypes
 
 
-def visualize_sequences(example: dict[str, torch.Tensor],
-                        cond_mask: TensorType["n", int],
-                        chain_to_asym_id: Dict[str, int],
-                        ) -> str:
+def visualize_sequences(atom_array: AtomArray,
+                        cond_mask: TensorType["n", int]) -> str:
     """
-    Visualize the conditioning sequence for a given batch of residues.
+    Visualize the conditioning sequence for a given atom array.
     """
-    asym_id_to_chain = {i: c for c, i in chain_to_asym_id.items()}
-
-    # first, get full sequence for each chain
     sequences = {}
-    for asym_id in example["asym_id"].unique().tolist():
-        chain_mask = example["asym_id"] == asym_id
-        is_ligand = example["is_ligand"][chain_mask].any()
-        chain_cond_mask = cond_mask[chain_mask]
-        if not is_ligand:
-            # Extract sequence from the features
-            # Get the unpadded sequence for this chain
-            res_type = example["res_type"][chain_mask].argmax(dim=-1)
-            res_type = res_type[example["token_pad_mask"][chain_mask].bool()].tolist()
-            sequence = [const.tokens[res_type[ri]] for ri in range(len(res_type))]
-            sequences[asym_id] = "".join([x if chain_cond_mask[j] else "-" for j, x in enumerate(gemmi.one_letter_code(sequence))])
-        else:
-            # For now, skip ligands
-            continue
+    token_array = atom_array[get_token_starts(atom_array)]  # get first atom per token
+    get_1to3_fn = np.vectorize(lambda x: aw_sequence.get_1_from_3_letter_code(x.res_name, aw_enums.ChainType(x.chain_type)))
 
-    # print sequences for each chain
-    for asym_id, seq in sequences.items():
-        print(f"Chain {asym_id_to_chain[asym_id]}: {seq}")
+    for asym_id in np.unique(token_array.pn_unit_iid):
+        asym_mask = token_array.pn_unit_iid == asym_id
+        chain_token_array = token_array[asym_mask]
+        chain_cond_mask = cond_mask[asym_mask]
+
+        seq_arr = get_1to3_fn(chain_token_array)
+        sequence = "".join([x if chain_cond_mask[i] else "-" for i, x in enumerate(seq_arr)])
+        sequences[asym_id] = sequence
+
+    for asym_id, sequence in sequences.items():
+        print(f"Chain {asym_id}: {sequence}")
 
 
 def get_chain_to_asym_id_mapping(example: dict[str, torch.Tensor],
                                  use_label_asym_name: bool = False) -> dict[str, int]:
     """
-    Map from chain name to asym_id. If use_label_asym_id is True, use label_asym_name as the chain name, otherwise use auth_asym_name.
+    Map from chain name to asym_id. If use_label_asym_name is True, use label_asym_name as the chain name, otherwise use auth_asym_name.
     We default to using auth_asym_name since we expect users to specify chain names based on auth_asym_name.
     """
     if use_label_asym_name:
