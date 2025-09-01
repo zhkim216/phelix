@@ -424,7 +424,7 @@ class GraphPotts(nn.Module):
         edge_idx_coloring: Optional[torch.LongTensor] = None,
         mask_ij_coloring: Optional[torch.Tensor] = None,
         symmetry_order: Optional[int] = None,
-    ) -> Tuple[torch.LongTensor, torch.Tensor]:
+    ) -> tuple[torch.LongTensor, torch.Tensor]:
         """Sample from Potts model with Chromatic Gibbs sampling.
 
         Args:
@@ -523,7 +523,7 @@ class GraphPotts(nn.Module):
 
 def compute_potts_energy(
     S: torch.LongTensor, h: torch.Tensor, J: torch.Tensor, edge_idx: torch.LongTensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute Potts model energies from sequence.
 
     Args:
@@ -565,7 +565,7 @@ def fold_symmetry(
     mask_i: torch.Tensor,
     mask_ij: torch.Tensor,
     normalize=True,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Fold Potts model symmetrically.
 
     Args:
@@ -701,8 +701,8 @@ def sample_potts(
     edge_idx_coloring: Optional[torch.LongTensor] = None,
     mask_ij_coloring: Optional[torch.Tensor] = None,
 ) -> Union[
-    Tuple[torch.LongTensor, torch.Tensor],
-    Tuple[torch.LongTensor, torch.Tensor, List[torch.LongTensor], List[torch.Tensor]],
+    tuple[torch.LongTensor, torch.Tensor],
+    tuple[torch.LongTensor, torch.Tensor, list[torch.LongTensor], list[torch.Tensor]],
 ]:
     """Sample from Potts model with Chromatic Gibbs sampling.
 
@@ -760,9 +760,9 @@ def sample_potts(
             shape `(num_batch, num_nodes)`.
         U (torch.Tensor): Sampled energies with shape `(num_batch)`. Lower is more
             favorable.
-        S_trajectory (List[torch.LongTensor]): List of sampled sequences through
+        S_trajectory (list[torch.LongTensor]): List of sampled sequences through
             time each with shape `(num_batch, num_nodes)`.
-        U_trajectory (List[torch.Tensor]): List of sampled energies through time
+        U_trajectory (list[torch.Tensor]): List of sampled energies through time
             each with shape `(num_batch)`.
     """
     # Initialize masked proposals and mask h
@@ -875,7 +875,7 @@ def init_sampling_masks(
     logits_init: torch.Tensor,
     mask_sample: Optional[torch.Tensor] = None,
     S: Optional[torch.LongTensor] = None,
-    ban_S: Optional[List[int]] = None,
+    ban_S: Optional[list[int]] = None,
     pos_restrict_aatype: tuple[torch.Tensor, torch.Tensor] | None = None,
 ):
     """Parse sampling masks and an initial sequence.
@@ -1053,7 +1053,7 @@ def log_composite_likelihood(
     mask_i: torch.Tensor,
     mask_ij: torch.Tensor,
     smoothing_alpha: float = 0.0,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Compute Potts pairwise composite likelihoods from sequence.
 
     Inputs:

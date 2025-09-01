@@ -27,7 +27,7 @@ from chroma.layers import complexity
 class AtomMPNNDenoiser(BaseSeqDenoiser):
     def __init__(self,
                  cfg: DictConfig,
-                 sigma_data: Tuple[TensorType[(), float], TensorType[(), float]]):
+                 sigma_data: tuple[TensorType[(), float], TensorType[(), float]]):
         super().__init__()
 
         self.cfg = cfg
@@ -47,7 +47,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 batch: dict[str, TensorType["b ..."]],
                 is_sampling: bool = False,
                 sampling_inputs: dict[str, Any] | None = None,
-                ) -> Tuple[TensorType["b n c", float],  # seq_logits
+                ) -> tuple[TensorType["b n c", float],  # seq_logits
                            dict[str, TensorType["b ..."]]]:
         # Build some helpful masks based on conditioning sequence and atoms
         batch = self.build_masks(batch)

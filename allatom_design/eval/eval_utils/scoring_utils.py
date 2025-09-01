@@ -19,8 +19,8 @@ def apply_mutation_batched(x: TensorType["b n a 3", float],
                    aatype: TensorType["b n", int],
                    seq_mask: TensorType["b n", int],
                    missing_atom_mask: TensorType["b n a", int],
-                   mutations: List[List[str]]
-                   ) -> Tuple[TensorType["b n a 3", float],
+                   mutations: list[list[str]]
+                   ) -> tuple[TensorType["b n a 3", float],
                               TensorType["b n", int],
                               TensorType["b n", int]]:
 
@@ -73,14 +73,14 @@ def apply_mutation_batched(x: TensorType["b n a 3", float],
 def mutate_whole_seq(model,
                      x: TensorType["b n a 3", float],
                      aatype: TensorType["b n", int],
-                     mutation_list: List[List[str]],
+                     mutation_list: list[list[str]],
                      seq_mask: TensorType["b n", int],
                      residue_index: TensorType["b n", int],
                      missing_atom_mask: TensorType["b n a", float],
                      chain_index: TensorType["b n", int],
                      scd_inputs: Dict,
                      max_number_muts: int,
-                    ) -> Tuple[TensorType["b n a 3", float],
+                    ) -> tuple[TensorType["b n a 3", float],
                               TensorType["b n", int]]:
     aatype_mut = aatype.clone()
     x_mut = x.clone()
@@ -154,7 +154,7 @@ def score_seq(model,
               residue_index: TensorType["b n", int],
               missing_atom_mask: TensorType["b n a", float],
               chain_index: TensorType["b n", int],
-              mutations: List[List[str]],
+              mutations: list[list[str]],
               scd_inputs: Dict,
               method: str
             ) -> TensorType["b n", int]:

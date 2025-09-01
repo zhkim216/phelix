@@ -74,7 +74,7 @@ class SeqDenoiser(nn.Module):
 
 
     def set_scale_factors(self,
-                          scale_factors: Dict[str, Tuple[float, float]]):
+                          scale_factors: dict[str, tuple[float, float]]):
         bb_mean, bb_std = scale_factors["bb"]
         self.bb_mean.data = torch.tensor(bb_mean)
         self.bb_std.data = torch.tensor(bb_std)

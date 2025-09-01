@@ -26,11 +26,11 @@ except ImportError:
     print("ColabDesign not installed, skipping import")
 
 
-def run_esmfold(sequence_list: List[str],
+def run_esmfold(sequence_list: list[str],
                 residue_index: TensorType["b n", torch.long],
                 model: EsmForProteinFolding,
                 tokenizer: EsmTokenizer
-                ) -> Dict[str, TensorType["b ..."]]:
+                ) -> dict[str, TensorType["b ..."]]:
     """
     Run ESMFold on a list of sequences.
 
@@ -93,13 +93,13 @@ def run_esmfold(sequence_list: List[str],
 
 
 
-def run_esmfold_batched(sequences_list: List[str],
-                        residue_index_list: List[TensorType["n_s", int]],
-                        chain_index_list: List[TensorType["n_s", int]],
+def run_esmfold_batched(sequences_list: list[str],
+                        residue_index_list: list[TensorType["n_s", int]],
+                        chain_index_list: list[TensorType["n_s", int]],
                         model: EsmForProteinFolding,
                         tokenizer: EsmTokenizer,
                         max_tokens_per_batch: int = 1024,
-                        ) -> Dict[str, List[TensorType["..."]]]:
+                        ) -> dict[str, list[TensorType["..."]]]:
     """
     Run ESMFold on a list of sequences, batching them by sequence length and to fit within a token limit.
 
@@ -185,9 +185,9 @@ def run_esmfold_batched(sequences_list: List[str],
 
 
 
-def create_batched_seq_dataset(all_sequences: List[str],
-                               all_residue_indices: List[TensorType["n_s", int]],
-                               all_chain_indices: List[TensorType["n_s", int]],
+def create_batched_seq_dataset(all_sequences: list[str],
+                               all_residue_indices: list[TensorType["n_s", int]],
+                               all_chain_indices: list[TensorType["n_s", int]],
                                max_tokens_per_batch: int = 1024,
                                ) -> Generator[dict, None, None]:
     """
@@ -201,7 +201,7 @@ def create_batched_seq_dataset(all_sequences: List[str],
     examples = sorted(examples, key=lambda x: len(x[0]))
 
     # Define collator
-    def collate_fn(examples: List[Tuple[str, TensorType["n", int], int]]) -> Dict[str, List]:
+    def collate_fn(examples: list[tuple[str, TensorType["n", int], int]]) -> dict[str, List]:
         """
         Given a list of examples, collate them into a batch with keys:
         - sequence: (b) sequence
@@ -445,7 +445,7 @@ def get_esmfold_model(device: str):
 
 
 def get_struct_pred_model(cfg: DictConfig,
-                          device: str) -> Dict[str, Any]:
+                          device: str) -> dict[str, Any]:
     """
     Get structure prediction model components as a dictionary based on config.
 

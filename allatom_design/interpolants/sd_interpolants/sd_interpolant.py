@@ -20,9 +20,9 @@ class SDInterpolant(nn.Module, ABC):
 
     @abstractmethod
     def forward(self,
-                batch: Dict[str, TensorType["b ..."]],
+                batch: dict[str, TensorType["b ..."]],
                 t: Optional[TensorType["b", float]] = None,
-                ) -> Dict[str, Any]:
+                ) -> dict[str, Any]:
         """
         Noises the inputs and returns:
         - t: the sampled timestep [b]
@@ -49,7 +49,7 @@ class SDInterpolant(nn.Module, ABC):
                       aatype: TensorType["b n", int],
                       t: TensorType["b"],
                       seq_mask: TensorType["b n"],
-                      ) -> Tuple[TensorType["b n a 3", float],
+                      ) -> tuple[TensorType["b n a 3", float],
                                  TensorType["b n", int],
                                  TensorType["b n", int]]:
         """

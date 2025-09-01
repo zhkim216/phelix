@@ -58,7 +58,7 @@ class LitAtomDenoiser(L.LightningModule):
             self.ema_tracker.reset()
 
 
-    def training_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int):
+    def training_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int):
         outputs = self(batch)
         loss, aux = self.loss(outputs, batch, return_aux=True)
 
@@ -75,7 +75,7 @@ class LitAtomDenoiser(L.LightningModule):
                 self.ema_tracker.update(t=self.trainer.global_step)
 
 
-    def validation_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
+    def validation_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
         # Lightning automatically disables grads + sets model to eval mode
         phase_suffixes = {0: "", 1: "2", 2: "2/backbone_scaffold", 3: "2/allatom_scaffold"}
         phase_suffix = phase_suffixes[dataloader_idx]
@@ -100,9 +100,9 @@ class LitAtomDenoiser(L.LightningModule):
 
 
     def _log(self,
-             batch: Dict[str, TensorType["b ..."]],
-             outputs: Dict[str, TensorType["b ..."]],
-             aux: Dict[str, float],
+             batch: dict[str, TensorType["b ..."]],
+             outputs: dict[str, TensorType["b ..."]],
+             aux: dict[str, float],
              batch_idx: int,
              phase: str,
              phase_suffix: str = "",

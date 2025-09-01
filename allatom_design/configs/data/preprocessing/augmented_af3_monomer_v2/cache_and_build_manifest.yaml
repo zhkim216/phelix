@@ -1,7 +1,0 @@
-pdb_path: /scratch/users/rshuai/datasets/augmented_af3_monomer_v2
-input_pdb_key_csv: /scratch/users/rshuai/datasets/augmented_af3_monomer_v2/preprocessing/parse_fampnn_multi/pdb_keys.csv
-
-overwrite_cache: false
-num_workers: 8
-n_eval2: 2000
-seed: 0

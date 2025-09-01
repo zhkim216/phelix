@@ -1,4 +1,3 @@
-from collections import defaultdict
 from pathlib import Path
 
 import hydra
@@ -12,7 +11,6 @@ from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import (get_seq_des_model,
                                                           run_seq_des)
-from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="seq_des_single", version_base="1.3.2")

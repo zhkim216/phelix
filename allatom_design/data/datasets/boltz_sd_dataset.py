@@ -113,7 +113,7 @@
 #         return train_loader
 
 
-#     def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
+#     def val_dataloader(self) -> Union[DataLoader, list[DataLoader]]:
 #         val_loader = DataLoader(self._val_set,
 #                                 batch_size=self.cfg.batch_size,
 #                                 num_workers=self.cfg.num_workers,

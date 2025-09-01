@@ -19,9 +19,9 @@ class ADInterpolant(nn.Module, ABC):
 
     @abstractmethod
     def forward(self,
-                batch: Dict[str, TensorType["b ..."]],
+                batch: dict[str, TensorType["b ..."]],
                 t: Optional[TensorType["b", float]] = None,
-                ) -> Dict[str, Any]:
+                ) -> dict[str, Any]:
         """
         Noises the inputs and returns:
         - t: the sampled timestep [b]
@@ -48,7 +48,7 @@ class ADInterpolant(nn.Module, ABC):
     def churn(self,
               xt: TensorType["b n a 3", float],
               t: TensorType["b", float],
-              churn_cfg: Optional[DictConfig]) -> Tuple[TensorType["b n a 3", float], TensorType["b", float]]:
+              churn_cfg: Optional[DictConfig]) -> tuple[TensorType["b n a 3", float], TensorType["b", float]]:
         """
         Add churn to current time step based on EDM stochatic sampler.
         """
@@ -64,10 +64,10 @@ class ADInterpolant(nn.Module, ABC):
                    t_next: TensorType["b", float],
                    noise_schedule: Optional[NoiseSchedule],
                    cfg_cfg: Optional[DictConfig],  # classifier-free guidance config
-                   aux_inputs: Optional[Dict[str, Any]] = None
-                   ) -> Tuple[TensorType["b n a 3", float],  # xt_next
+                   aux_inputs: Optional[dict[str, Any]] = None
+                   ) -> tuple[TensorType["b n a 3", float],  # xt_next
                               TensorType["b n", int],  # aatype_t_next
-                              Dict[str, TensorType["b ..."]]  # aux preds
+                              dict[str, TensorType["b ..."]]  # aux preds
                               ]:
         """
         Take an Euler step using the function f.
@@ -82,7 +82,7 @@ class ADInterpolant(nn.Module, ABC):
     @abstractmethod
     def setup_preconditioning(x_noised: TensorType["b n a 3", float],
                               x_self_cond: Optional[TensorType["b n a 3", float]],
-                              t: Tuple[TensorType["b", float], TensorType["b", float]]) -> Tuple[Callable, Callable]:
+                              t: tuple[TensorType["b", float], TensorType["b", float]]) -> tuple[Callable, Callable]:
         """
         Returns
         - a function that preconditions the input to the denoiser

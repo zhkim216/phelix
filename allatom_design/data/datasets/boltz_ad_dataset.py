@@ -123,7 +123,7 @@ class BoltzADDataModule(L.LightningDataModule):
         return train_loader
 
 
-    def val_dataloader(self) -> Union[DataLoader, List[DataLoader]]:
+    def val_dataloader(self) -> Union[DataLoader, list[DataLoader]]:
         """
         Called each epoch if reload_dataloaders_every_n_epochs > 0.
         """

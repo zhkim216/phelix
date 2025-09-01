@@ -27,12 +27,9 @@ import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
-from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
-    finalize, mmcif_to_pdb)
 from allatom_design.data.write.mmcif import batch_write_feats_to_mmcif
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
-from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
 from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched
 from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
 
@@ -146,7 +143,7 @@ def run_diversity_eval(pdbs: list[str],
     return diversity_metrics
 
 
-def compute_secondary_structure_content(pdbs: List[str]) -> Dict[str, Dict[str, float]]:
+def compute_secondary_structure_content(pdbs: list[str]) -> dict[str, dict[str, float]]:
     """
     Given a list of PDBs, compute the secondary structure content of each protein using the new method.
     Returns a dict mapping from the PDB to a dict containing:
@@ -492,15 +489,15 @@ def run_esmfold_from_boltz_feats(design_struct_files: str,
 
 
 
-def run_self_consistency_eval(pdbs: List[str],
-                              seq_des_model: Optional[Dict[str, Any]],  # contains sequence design model components. If None, use sequences in PDBs
-                              struct_pred_model: Dict[str, Any],  # contains struct pred model components
+def run_self_consistency_eval(pdbs: list[str],
+                              seq_des_model: Optional[dict[str, Any]],  # contains sequence design model components. If None, use sequences in PDBs
+                              struct_pred_model: dict[str, Any],  # contains struct pred model components
                               device: torch.device,
                               out_dir: str,
                               temp_dir: Optional[str] = None,
-                              metrics_to_compute: List[str] = ["sc_ca_rmsd", "sc_ca_tm", "sc_aa_rmsd"],
+                              metrics_to_compute: list[str] = ["sc_ca_rmsd", "sc_ca_tm", "sc_aa_rmsd"],
                               motif_info: dict = {},  # if evaluating motif scaffolding, maps from PDB path to scaffold coordinates and mask
-                              ) -> Dict[str, Dict[str, TensorType]]:
+                              ) -> dict[str, dict[str, TensorType]]:
     """
     Run self-consistency evaluation on a list of PDBs (sequence design -> structure prediction -> metrics).
 
@@ -509,7 +506,7 @@ def run_self_consistency_eval(pdbs: List[str],
     pdbs: List of PDB file paths to evaluate
     seq_des_model: Dictionary with sequence design model components (proteinmpnn or fampnn).
                    If None, uses the original PDB sequences.
-    struct_pred_model: Dictionary with structure prediction model components (af2, esmfold, or omegafold)
+    struct_pred_model: Dictionary with structure prediction model components (af2, esmfold)
     metrics_to_compute: Metrics to calculate, including:
                         - sc_ca_rmsd: RMSD between CA atoms
                         - sc_ca_tm: TM score between CA atoms
@@ -676,9 +673,9 @@ def run_self_consistency_eval(pdbs: List[str],
     return sc_info
 
 
-def load_sequence_and_residx_from_pdbs(pdbs: List[str]) -> Tuple[List[str],
-                                                                 List[TensorType["n_s", int]],
-                                                                 List[TensorType["n_s", int]]]:
+def load_sequence_and_residx_from_pdbs(pdbs: list[str]) -> tuple[list[str],
+                                                                 list[TensorType["n_s", int]],
+                                                                 list[TensorType["n_s", int]]]:
     examples = [load_feats_from_pdb(pdb) for pdb in pdbs]
     aatypes = [example["aatype"] for example in examples]
     sequences_list = ["".join([rc.restypes_with_x[x] for x in aatype]) for aatype in aatypes]
@@ -687,7 +684,7 @@ def load_sequence_and_residx_from_pdbs(pdbs: List[str]) -> Tuple[List[str],
     return sequences_list, residue_index_list, chain_index_list
 
 
-def compute_pairwise_tm_score(coords_list: List[TensorType["n 37 3"]],
+def compute_pairwise_tm_score(coords_list: list[TensorType["n 37 3"]],
                               temp_dir: str,
                               subsample_pairs: Optional[int] = None) -> float:
     """
@@ -735,9 +732,9 @@ def compute_pairwise_tm_score(coords_list: List[TensorType["n 37 3"]],
 def compute_structure_metrics(coords1: TensorType["b n 37 3"],
                               coords2: TensorType["b n 37 3"],
                               atom_mask: TensorType["b n 37"],
-                              metrics_to_compute: List[str],
+                              metrics_to_compute: list[str],
                               **kwargs,
-                              ) -> Tuple[Dict[str, float],
+                              ) -> tuple[dict[str, float],
                                          TensorType["b n 37 3"]
                                          ]:
     """
@@ -966,11 +963,11 @@ def get_sort_key_fn(metric_name: str) -> Callable[[float], float]:
         raise ValueError(f"Unknown metric: {metric_name}")
 
 
-def run_nntm_eval(pdbs: List[str],
+def run_nntm_eval(pdbs: list[str],
                   dataset: str,
                   out_dir: str,
                   tsv_prefix: str = "",
-                  ) -> Dict[str, float]:
+                  ) -> dict[str, float]:
     """
     Compute nnTM scores for a set of PDBs against a dataset.
 
@@ -1011,7 +1008,7 @@ def run_nntm_eval(pdbs: List[str],
     return pdb_to_nntm
 
 
-def run_tmalign(pdb_a: str, pdb_b: str) -> Tuple[float, float]:
+def run_tmalign(pdb_a: str, pdb_b: str) -> tuple[float, float]:
     """
     Runs TM-align between two PDB files and returns the TM-scores.
     """
@@ -1042,7 +1039,7 @@ def run_tm_align_coords_batch(a: TensorType["b n 3", float],
                               b: TensorType["b n 3", float],
                               mask_a: TensorType["b n", float],
                               mask_b: TensorType["b n", float],
-                              temp_dir: str) -> Tuple[TensorType["b", float], TensorType["b", float]]:
+                              temp_dir: str) -> tuple[TensorType["b", float], TensorType["b", float]]:
     """
     Given a batch of CA-only atom coordinates, aligns a to b and computes TM-score in parallel.
 
@@ -1099,7 +1096,7 @@ def run_tm_align_coords_batch(a: TensorType["b n 3", float],
     return tm_scores_a, tm_scores_b
 
 
-def foldseek_cluster(pdbs: List[str],
+def foldseek_cluster(pdbs: list[str],
                      out_dir: str,
                      temp_dir: str,
                      alignment_type: int,
@@ -1111,7 +1108,7 @@ def foldseek_cluster(pdbs: List[str],
     Cluster a list of PDBs using Foldseek's easy-cluster command.
 
     Args:
-        pdbs (List[str]): List of PDB files to cluster.
+        pdbs (list[str]): List of PDB files to cluster.
         out_dir (str): Directory to save clustering results.
         alignment-type (int): How to compute the alignment:
             - 0: 3di alignment  (for structure-only / backbone-only)
@@ -1165,7 +1162,7 @@ def foldseek_cluster(pdbs: List[str],
 
 def get_core_surface_mask(coords: TensorType["b n 37 3", float],
                           atom_mask: TensorType["b n 37", float],
-                          ) -> Tuple[TensorType["b n", bool], TensorType["b n", bool]]:
+                          ) -> tuple[TensorType["b n", bool], TensorType["b n", bool]]:
     """
     Get a mask for core and surface residues based on the coordinates of a protein, possibly batched.
 

@@ -37,8 +37,8 @@ class AtomDenoiser(nn.Module):
 
 
     def forward(self,
-                batch: Dict[str, TensorType["b ..."]],
-                ) -> Dict[str, TensorType["b ..."]]:
+                batch: dict[str, TensorType["b ..."]],
+                ) -> dict[str, TensorType["b ..."]]:
         outputs = {}
         # Deepcopy batch to avoid modifying original batch
         batch = copy.deepcopy(batch)
@@ -68,10 +68,10 @@ class AtomDenoiser(nn.Module):
 
 
     def sample(self,
-               diffusion_inputs: Dict[str, Any],
-               diffusion_params: Dict[str, Any],
+               diffusion_inputs: dict[str, Any],
+               diffusion_params: dict[str, Any],
                motif_inputs: dict[str, TensorType["b n ..."]] | None = None,
-               ) -> Tuple[TensorType["b n 4 3", float], Dict[str, torch.Tensor]]:
+               ) -> tuple[TensorType["b n 4 3", float], dict[str, torch.Tensor]]:
         """
         Sample from the model.
 
@@ -90,8 +90,8 @@ class AtomDenoiser(nn.Module):
 
 
     @staticmethod
-    def save_samples_to_pdb(samples: Dict[str, TensorType["b ..."]],
-                            filenames: List[str]
+    def save_samples_to_pdb(samples: dict[str, TensorType["b ..."]],
+                            filenames: list[str]
                             ) -> None:
         """
         Save samples from the denoiser to PDB files.
@@ -126,13 +126,13 @@ class AtomDenoiser(nn.Module):
 
 
     @staticmethod
-    def save_trajs_to_pdb(traj_aux: Dict[str, Any],
+    def save_trajs_to_pdb(traj_aux: dict[str, Any],
                           residue_index: TensorType["b n", int],
                           chain_index: TensorType["b n", int],
-                          save_traj_mask: List[bool],
-                          save_traj_steps: List[int],
+                          save_traj_mask: list[bool],
+                          save_traj_steps: list[int],
                           x_traj_key: str,
-                          filenames: List[str],
+                          filenames: list[str],
                           traj_conect: bool,
                           align_models_to_idx: Optional[int] = None):
         """

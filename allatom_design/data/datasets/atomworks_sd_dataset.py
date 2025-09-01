@@ -233,7 +233,7 @@ class SDDataset(BaseDataset):
         For documentation on pandas query syntax, see: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.query.html
 
         Args:
-            filters (List[str]): List of query strings to apply to the data.
+            filters (list[str]): List of query strings to apply to the data.
 
         Raises:
             ValueError: If the data is not initialized or if a query removes all rows.

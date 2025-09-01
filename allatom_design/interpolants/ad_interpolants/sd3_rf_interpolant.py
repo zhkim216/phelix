@@ -29,9 +29,9 @@ class SD3_RF(ADInterpolant):
 
     @torch.compiler.disable
     def forward(self,
-                batch: Dict[str, TensorType["b ..."]],
+                batch: dict[str, TensorType["b ..."]],
                 t: Optional[TensorType["b", float]] = None,
-                ) -> Dict[str, Any]:
+                ) -> dict[str, Any]:
         x1 = batch["x"]
         x0 = self.sample_prior(x1.shape, device=x1.device)
 
@@ -107,7 +107,7 @@ class SD3_RF(ADInterpolant):
     def churn(self,
               xt: TensorType["b n a 3", float],
               t: TensorType["b", float],
-              churn_cfg: Optional[DictConfig]) -> Tuple[TensorType["b n a 3", float], TensorType["b", float]]:
+              churn_cfg: Optional[DictConfig]) -> tuple[TensorType["b n a 3", float], TensorType["b", float]]:
         """
         Add churn to current time step based on EDM stochatic sampler.
         """
@@ -136,9 +136,9 @@ class SD3_RF(ADInterpolant):
                    noise_schedule: Optional[NoiseSchedule],
                    cfg_cfg: Optional[DictConfig],  # classifier-free guidance config
                    autoguidance_cfg: Optional[DictConfig],  # autoguidance config
-                   aux_inputs: Optional[Dict[str, Any]] = None
-                   ) -> Tuple[TensorType["b n a 3", float],  # xt_next
-                              Dict[str, TensorType["b ..."]]  # aux preds
+                   aux_inputs: Optional[dict[str, Any]] = None
+                   ) -> tuple[TensorType["b n a 3", float],  # xt_next
+                              dict[str, TensorType["b ..."]]  # aux preds
                               ]:
         """
         Take an Euler step using the function f.
@@ -187,12 +187,12 @@ class SD3_RF(ADInterpolant):
     def setup_preconditioning(self,
                               x_noised: TensorType["b n a 3", float],
                               x_self_cond: Optional[TensorType["b n a 3", float]],
-                              t: TensorType["b", float]) -> Tuple[Callable, Callable]:
+                              t: TensorType["b", float]) -> tuple[Callable, Callable]:
         """
         Set up preconditioning input and output functions.
         """
 
-        def precondition_in() -> Tuple[TensorType["b n a 3", float],  # x_noised
+        def precondition_in() -> tuple[TensorType["b n a 3", float],  # x_noised
                                        TensorType["b n a 3", float],  # x_self_cond
                                        TensorType["b", float]  # c_noise
                                        ]:

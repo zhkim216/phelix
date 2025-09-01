@@ -22,12 +22,12 @@ class BaseSeqDenoiser(nn.Module, ABC):
                 t: TensorType["b", float],  # possibly a tuple (t_seq, t_scn)
                 residue_index: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
-                cond_labels_in: Dict[str, TensorType["b", int]] = {},
+                cond_labels_in: dict[str, TensorType["b", int]] = {},
                 aux_inputs: Optional[Dict] = None,  # stores additional inputs for the model (different for training and sampling)
                 is_sampling: bool = False,
-                ) -> Tuple[TensorType["b n a 3", float],  # x1 pred
+                ) -> tuple[TensorType["b n a 3", float],  # x1 pred
                            TensorType["b n", int],  # aatype pred
-                           Dict[str, TensorType["b ..."]]  # aux_preds
+                           dict[str, TensorType["b ..."]]  # aux_preds
                            ]:
         pass
 
