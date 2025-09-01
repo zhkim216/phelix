@@ -129,7 +129,7 @@ def run_seq_des(model: SeqDenoiser,
         for i in range(0, len(pdb_paths), cfg.batch_size):
             batch_pdb_paths = pdb_paths[i:i+cfg.batch_size]
             B = len(batch_pdb_paths)
-            batch = get_sd_batch(batch_pdb_paths, device=device, parallel_pool=parallel_pool)
+            batch = get_sd_batch(batch_pdb_paths, data_cfg=data_cfg, device=device, parallel_pool=parallel_pool)
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
@@ -155,9 +155,8 @@ def run_seq_des(model: SeqDenoiser,
                         atom_array = atom_arrays[si]
                         with open(batch_out_files[si], "w") as f:
                             f.write(to_cif_string(atom_array, include_entity_poly=True, include_nan_coords=False))
-
+                        outputs["example_ids"].append(example_id)
                     outputs["out_pdbs"].extend(batch_out_files)
-                    outputs["example_ids"].extend(example_id)
 
                     # Get sampled sequences as a string, with ":" to separate chains.
                     for si in range(len(atom_arrays)):
@@ -351,14 +350,17 @@ def run_seq_des_ensemble(model: SeqDenoiser,
     return outputs
 
 
-def get_sd_batch(pdb_paths: list[str], device: str,
+def get_sd_batch(pdb_paths: list[str],
+                 *,
+                 data_cfg: DictConfig,
+                 device: str,
                  parallel_pool: Parallel | None) -> dict[str, Any]:
     if parallel_pool is None:
         # Load PDBs sequentially
-        batch_examples = [get_sd_example(pdb_path) for pdb_path in pdb_paths]
+        batch_examples = [get_sd_example(pdb_path, data_cfg) for pdb_path in pdb_paths]
     else:
         # Load PDBs in parallel
-        batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path) for pdb_path in pdb_paths)
+        batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path, data_cfg) for pdb_path in pdb_paths)
 
     # Collate examples
     batch = sd_collator(batch_examples)
@@ -367,12 +369,16 @@ def get_sd_batch(pdb_paths: list[str], device: str,
     return batch
 
 
-def get_sd_example(pdb_path: str) -> dict[str, Any]:
+def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> dict[str, Any]:
     """
     Given a pdb file path, return a dictionary of sequence design model features.
     """
+    # BACKWARDS COMPATIBILITY  TODO: remove this once we've retrained the models
+    if "cif_parser_args" not in data_cfg:
+        data_cfg.cif_parser_args = {"add_missing_atoms": True, "remove_waters": True, "remove_ccds": [], "fix_ligands_at_symmetry_centers": True, "fix_arginines": True, "convert_mse_to_met": True, "hydrogen_policy": "remove"}
+
     transformation_id = "1"  # keep only the first assembly
-    input_data = aw_parse(pdb_path, hydrogen_policy="remove", build_assembly=[transformation_id])
+    input_data = aw_parse(pdb_path, build_assembly=[transformation_id], **data_cfg.cif_parser_args)
     atom_array_from_cif = input_data["assemblies"][transformation_id][0] # (1, num_atoms) -> (num_atoms)
 
     # Run the preprocessing pipeline on the CIF data.
