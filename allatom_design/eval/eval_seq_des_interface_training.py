@@ -85,7 +85,7 @@ def main(cfg: DictConfig):
             pos_constraint_df = pd.DataFrame({
                 "pdb_key": [Path(x).stem.lower() for x in processed_struct_files],
                 "fixed_pos_seq": [target_chain_id] * len(processed_struct_files),
-                "use_label_asym_id": [True] * len(processed_struct_files),
+                "use_label_asym_name": [True] * len(processed_struct_files),
             })
 
             # Run sequence design model

@@ -40,8 +40,9 @@ class MaskSelector:
         # Create mask based on timestep
         seq_cond_mask = torch.rand(B, N, device=device) < rearrange(t, "b -> b 1")
 
-        # Non-protein restypes are always kept
-        seq_cond_mask = torch.where(~batch["is_protein"],
+        # Non-protein and non-standard restypes are always kept
+        standard_prot_mask = batch["is_protein"] & ~batch["is_atomized"]
+        seq_cond_mask = torch.where(~standard_prot_mask,
                                     torch.ones_like(seq_cond_mask),
                                     seq_cond_mask)
 
@@ -64,7 +65,8 @@ class MaskSelector:
         tok_keep_scn_p = torch.rand(B, device=device)
         tok_keep_scn_mask = torch.rand_like(batch["seq_cond_mask"]) < rearrange(tok_keep_scn_p, "b -> b 1")
         tok_keep_scn_mask = tok_keep_scn_mask * batch["seq_cond_mask"]  # sidechains should be masked where seq is masked
-        tok_keep_scn_mask = torch.where(~batch["is_protein"],  # non-protein tokens should be kept
+        standard_prot_mask = batch["is_protein"] & ~batch["is_atomized"]
+        tok_keep_scn_mask = torch.where(~standard_prot_mask,  # non-protein tokens should be kept
                                         torch.ones_like(tok_keep_scn_mask),
                                         tok_keep_scn_mask)
 
