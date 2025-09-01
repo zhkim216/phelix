@@ -19,7 +19,7 @@ def write_batched_to_pdb(
     residue_index: TensorType["b n"],
     chain_index: TensorType["b n"],
     b_factors: Optional[TensorType["b n 37"]],
-    filenames: List[str],
+    filenames: list[str],
     mode: str = "aa",
     conect: bool = False):
     """

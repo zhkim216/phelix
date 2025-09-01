@@ -33,7 +33,7 @@ from openfold.model.primitives import Linear
 class DiTDenoiser(nn.Module):
     def __init__(self,
                  cfg: DictConfig,
-                 sigma_data: Tuple[TensorType[(), float]]):
+                 sigma_data: tuple[TensorType[(), float]]):
         """
         Backbone diffusion with DiT
         """
@@ -73,8 +73,8 @@ class DiTDenoiser(nn.Module):
                 diffusion_inputs: dict[str, TensorType["b ..."]],
                 is_sampling: bool = False,
                 diffusion_params: dict[str, Any] | None = None,  # required only for sampling
-                ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred
-                           Dict[str, TensorType["b ..."]]]:
+                ) -> tuple[TensorType["b n 4 3", float],  # x1 pred
+                           dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
         if self.motif_embedder is not None:
@@ -97,8 +97,8 @@ class DiTDenoiser(nn.Module):
                            diffusion_inputs: dict[str, TensorType["b ..."]],
                            is_sampling: bool,
                            diffusion_params: dict[str, Any] | None,
-                           ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
-                                      Dict[str, TensorType["b ..."]]]:
+                           ) -> tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
+                                      dict[str, TensorType["b ..."]]]:
         """
         diffusion_inputs:
             - "x" (training only): TensorType["b n 4 3", float], ground truth backbone coordinates
@@ -366,8 +366,8 @@ class DiT(nn.Module):
                 motif_inputs: dict[str, TensorType["b ..."]],
                 x_self_cond: Optional[TensorType["b n 4 3", float]] = None,
                 multiplicity: int = 1,
-                ) -> Tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
-                           Dict[str, TensorType["b ..."]]]:
+                ) -> tuple[TensorType["b n 4 3", float],  # x1 pred of backbone
+                           dict[str, TensorType["b ..."]]]:
         """
         diffusion_inputs:
             - "seq_mask": TensorType["b n", float]
@@ -459,7 +459,7 @@ class DiT(nn.Module):
     def _add_motif_tokens(self,
                           x: TensorType["b n h"],
                           diffusion_inputs: dict[str, TensorType["b ..."]],
-                          motif_inputs: dict[str, TensorType["b ..."]]) -> Tuple[TensorType["b n+m h"], dict[str, TensorType["b ..."]], TensorType["b n+m"]]:
+                          motif_inputs: dict[str, TensorType["b ..."]]) -> tuple[TensorType["b n+m h"], dict[str, TensorType["b ..."]], TensorType["b n+m"]]:
         """
         Append motif conditioning tokens to the input.
         """
@@ -489,7 +489,7 @@ class DiT(nn.Module):
 
     def _remove_motif_tokens(self, x: TensorType["b n+m h"], c: TensorType["b n+m h"],
                              diffusion_inputs: dict[str, TensorType["b ..."]],
-                             num_motif_tokens: int) -> Tuple[TensorType["b n h"], TensorType["b n h"], dict[str, TensorType["b ..."]]]:
+                             num_motif_tokens: int) -> tuple[TensorType["b n h"], TensorType["b n h"], dict[str, TensorType["b ..."]]]:
         """
         Remove motif conditioning tokens from the input, assuming the last num_motif_tokens are the motif tokens.
         """

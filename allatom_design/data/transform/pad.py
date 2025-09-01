@@ -38,7 +38,7 @@ def pad_to_max(data: list[Tensor], value: float = 0) -> tuple[Tensor, Tensor]:
 
     Parameters
     ----------
-    data : List[Tensor]
+    data : list[Tensor]
         List of tensors to pad.
     value : float
         The value to use for padding.

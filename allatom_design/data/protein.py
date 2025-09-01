@@ -74,7 +74,7 @@ class Protein:
             )
 
 
-def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Optional[str] = None, max_conformers: int = 1) -> Tuple[Protein, Dict[str, int]]:
+def read_pdb(pdb_file: Union[str, Structure.Structure], chain_ids_override: Optional[str] = None, max_conformers: int = 1) -> tuple[Protein, dict[str, int]]:
     """Takes a PDB string and constructs a Protein object.
     WARNING: All non-standard residue types will be converted into UNK. All
       non-standard atoms will be ignored.

@@ -52,7 +52,7 @@ class LitSeqDenoiser(L.LightningModule):
             self.ema_tracker.reset()
 
 
-    def training_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int):
+    def training_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int):
         outputs = self(batch)
         loss, aux = self.loss(outputs, batch, return_aux=True)
 
@@ -69,7 +69,7 @@ class LitSeqDenoiser(L.LightningModule):
                 self.ema_tracker.update(t=self.trainer.global_step)
 
 
-    def validation_step(self, batch: Dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
+    def validation_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
         # Lightning automatically disables grads + sets model to eval mode
         phase_suffix = ""
 
@@ -98,9 +98,9 @@ class LitSeqDenoiser(L.LightningModule):
 
 
     def _log(self,
-             batch: Dict[str, TensorType["b ..."]],
-             outputs: Dict[str, TensorType["b ..."]],
-             aux: Dict[str, float],
+             batch: dict[str, TensorType["b ..."]],
+             outputs: dict[str, TensorType["b ..."]],
+             aux: dict[str, float],
              batch_idx: int,
              phase: str,
              phase_suffix: str = "",

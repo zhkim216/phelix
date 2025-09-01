@@ -109,7 +109,7 @@ def check_valid_interface(x, atom_mask, chain_index):
     # Check if any inter-chain distance is below the threshold
     return torch.any(d_valid < 5.01)
 
-def aa_to_bb_feats(feats: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+def aa_to_bb_feats(feats: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     """
     Convert features loaded from a PDB file to backbone-only features.
     """
@@ -145,7 +145,7 @@ def make_fixed_size_1d(data: TensorType["n ..."], fixed_size: int, start_idx: in
     return new_data
 
 
-def pad_to_max_len(batch: Dict[str, TensorType["b n ..."]], max_len: int):
+def pad_to_max_len(batch: dict[str, TensorType["b n ..."]], max_len: int):
     """
     Inverse of trim_to_max_len; pads a batch to a fixed length.
     """
@@ -256,7 +256,7 @@ def torch_rmsd_weighted(a: TensorType["b n x", float],
 def atom37_to_torsions_rad(aatype: TensorType["b n", int],
                            coords: TensorType["b n 37 3", float],
                            atom_mask: TensorType["b n 37", float]
-                           ) -> Tuple[TensorType["b n 7"], TensorType["b n 7"]]:
+                           ) -> tuple[TensorType["b n 7"], TensorType["b n 7"]]:
     """
     Uses OpenFold's atom37_to_torsion_angles to convert atom37 coordinates to torsion angles in radians.
     """
@@ -363,7 +363,7 @@ def center_random_augmentation(coords_in: TensorType["n a 3", float],
 
 
 def apply_random_augmentation(coords_in: TensorType["b n a 3", float],
-                              transforms: Tuple[TensorType["b 1 1 3", float], TensorType["b 3 3", float], TensorType["b 1 1 3", float]],
+                              transforms: tuple[TensorType["b 1 1 3", float], TensorType["b 3 3", float], TensorType["b 1 1 3", float]],
                               seq_mask: TensorType["b n", float],
                               atom_mask: TensorType["b n a", float]) -> TensorType["b n a 3", float]:
     """
@@ -410,7 +410,7 @@ def cat_bb_scn(x_bb: TensorType["... a1 3", float],
     return x
 
 
-def stack_aux_traj(aux_traj: List[Dict[str, Any]], dim: int = 1) -> Dict[str, Any]:
+def stack_aux_traj(aux_traj: list[dict[str, Any]], dim: int = 1) -> dict[str, Any]:
     """
     Stacks tensors from a list of dictionaries, recursively handling nested dictionaries.
     """
@@ -519,7 +519,7 @@ def transform_sidechain_frame(x_scn: TensorType["b n 33 3", float],
                               x_bb: TensorType["b n 4 3", float],
                               atom_mask_scn: TensorType["b n 33", float],
                               atom_mask_bb: TensorType["b n 4", float],
-                              to_local: bool) -> Tuple[
+                              to_local: bool) -> tuple[
                                   TensorType["b n 33 3", float],
                                   TensorType["b n", float]
                               ]:
@@ -546,7 +546,7 @@ def transform_sidechain_frame(x_scn: TensorType["b n 33 3", float],
     return x_scn, bb_frames_exists
 
 
-def get_length_from_pdb(pdb_file: str) -> Tuple[str, int]:
+def get_length_from_pdb(pdb_file: str) -> tuple[str, int]:
     data = load_feats_from_pdb(pdb_file)
     return pdb_file, len(data["aatype"])
 
@@ -661,7 +661,7 @@ def atom_center_random_augmentation(X: TensorType["b n_atoms 3", float],
 
 def atom_apply_random_augmentation(X: TensorType["b n_atoms 3", float],
                                    M: TensorType["b n_atoms", float],
-                                   transforms: Tuple[TensorType["b 1 3", float], TensorType["b 3 3", float], TensorType["b 1 3", float]]
+                                   transforms: tuple[TensorType["b 1 3", float], TensorType["b 3 3", float], TensorType["b 1 3", float]]
                                    ):
     """
     Apply random rotation and translation to atoms. Analogous to apply_random_augmentation, but for packed atom representation.

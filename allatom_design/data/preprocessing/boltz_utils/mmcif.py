@@ -268,7 +268,7 @@ def compute_covalent_ligands(
 
     Parameters
     ----------
-    connections: List[gemmi.Connection]
+    connections: list[gemmi.Connection]
         The connections to process.
     subchain_map: dict[tuple[str, int], str]
         The mapping from chain, residue index to subchain name.
@@ -317,14 +317,14 @@ def compute_interfaces(atom_data: np.ndarray, chain_data: np.ndarray) -> np.ndar
 
     Parameters
     ----------
-    atom_data : List[tuple]
+    atom_data : list[tuple]
         The atom data.
-    chain_data : List[tuple]
+    chain_data : list[tuple]
         The chain data.
 
     Returns
     -------
-    List[tuple[int, int]]
+    list[tuple[int, int]]
         The interfaces.
 
     """
@@ -756,14 +756,14 @@ def parse_connection(
     ----------
     connections : gemmi.ConnectionList
         The connection list to parse.
-    chains : List[Chain]
+    chains : list[Chain]
         The parsed chains.
     subchain_map : dict[tuple[str, int], str]
         The mapping from chain, residue index to subchain name.
 
     Returns
     -------
-    List[Connection]
+    list[Connection]
         The parsed connections.
 
     """

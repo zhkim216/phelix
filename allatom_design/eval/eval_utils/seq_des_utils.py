@@ -1,26 +1,23 @@
 """
 Utils for sampling from sequence design models.
 """
-import copy
-import itertools
 import re
 from collections import defaultdict
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional
 
 import atomworks.enums as aw_enums
 import atomworks.io.utils.sequence as aw_sequence
 import biotite.structure as struc
-import gemmi
 import hydra
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
 from atomworks.io.parser import parse as aw_parse
-from atomworks.io.utils.io_utils import load_any, to_cif_string
-from atomworks.ml.utils.token import apply_token_wise, spread_token_wise, get_token_starts
+from atomworks.io.utils.io_utils import to_cif_string
+from atomworks.ml.utils.token import apply_token_wise, get_token_starts
 from biotite.structure import AtomArray
 from joblib import Parallel, delayed
 from omegaconf import DictConfig, OmegaConf
@@ -30,42 +27,27 @@ from tqdm import tqdm
 import allatom_design.data.const as const
 from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data import residue_constants as rc
-from allatom_design.data.data import atom_center_random_augmentation, to
+from allatom_design.data.data import to
 from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
-from allatom_design.data.feature.feature_utils import unbatch_feats
-from allatom_design.data.preprocessing.boltz_utils.parsing_utils import (
-    load_input, mmcif_to_pdb)
 from allatom_design.data.transform.preprocess import preprocess_transform
 from allatom_design.data.transform.sd_featurizer import sd_featurizer
-from allatom_design.data.types import Structure
-from allatom_design.data.write.mmcif import (batch_write_feats_to_mmcif,
-                                             write_feats_to_mmcif)
-from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import \
-    compute_potts_energy
+from allatom_design.data.write.mmcif import batch_write_feats_to_mmcif
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 
 
-def get_seq_des_model(cfg: DictConfig, device: str) -> Dict[str, Any]:
+def get_seq_des_model(cfg: DictConfig, device: str) -> dict[str, Any]:
     """
     Load in a sequence design model. Similar to get_struct_pred_model()
     Example config:
 
     seq_des_cfg:
-    # MPNN args
-    model_name: "atom_mpnn"  # ["proteinmpnn", "atom_mpnn"]
-    proteinmpnn:
-        mpnn_cfg: allatom_design/configs/seq_des/proteinmpnn.yaml
-        mpnn_params_dir: /media/scratch/huang_lab/allatom_design/model_params/mpnn
-        overrides:
-        # num seqs per structure will be batch_size * number_of_batches
-        batch_size: 1
-        number_of_batches: 1
-        verbose: false
-    atom_mpnn:
-        # Atom MPNN args
-        atom_mpnn_cfg: allatom_design/configs/seq_des/atom_mpnn_inference.yaml
-        atom_mpnn_ckpt:
+        # MPNN args
+        model_name: "atom_mpnn"  # ["atom_mpnn"]
+            atom_mpnn:
+                # Atom MPNN args
+                atom_mpnn_cfg: allatom_design/configs/seq_des/atom_mpnn_inference.yaml
+                atom_mpnn_ckpt:
     """
     model_name = cfg.model_name
     seq_des_model = {"model_name": model_name, "cfg": cfg, "device": device}
@@ -182,61 +164,6 @@ def run_seq_des(model: SeqDenoiser,
 
             pbar.update(B)
     pbar.close()
-
-    return outputs
-
-
-def score_sequences_ensemble(model: SeqDenoiser,
-                             data_cfg: DictConfig,
-                             cfg: DictConfig,  # sampling config
-                             pdb_to_processed_conformers: dict[str, list[str]],  # maps from a given pdb name to its processed conformer structure files
-                             pdb_to_sequences: dict[str, list[str]],  # maps from a given pdb name to its sequences
-                             device: str,
-                             out_dir: Optional[str] = None,
-                             ) -> dict[str, Any]:
-    """
-    Score sequences using Potts parameters computed from input backbones.
-    """
-    # Set up output directory
-    outputs = {}
-
-    if out_dir is not None:
-        sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
-        Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
-
-    parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
-    with parallel_context as parallel_pool:
-        for pdb_name, struct_files in tqdm(pdb_to_processed_conformers.items(), desc=f"Scoring {len(pdb_to_processed_conformers)} PDBs..."):
-            # Get batch of conformers
-            batch = get_sd_batch(struct_files, device=device, data_cfg=data_cfg, parallel_pool=parallel_pool)
-
-            # Initialize seq_cond and atom_cond masks
-            batch = initialize_sampling_masks(batch)
-
-            # Get potts parameters for each conformer
-            sampling_inputs = OmegaConf.to_container(cfg, resolve=True)
-            potts_decoder_aux, batch = model.score_samples(batch, sampling_inputs=sampling_inputs)
-
-            # Get sequences
-            S = []
-            for seq in pdb_to_sequences[pdb_name]:
-                S.append(torch.tensor(const.AF3_ENCODING.encode_aa_seq(seq), device=device))
-            S = torch.stack(S, dim=0)
-
-            # Score sequences for each conformer
-            n_conformers = potts_decoder_aux["h"].shape[0]
-            U = torch.zeros(n_conformers, S.shape[0], device=device)
-            for ci in range(n_conformers):
-                potts_decoder_aux_ci = {k: v[ci] for k, v in potts_decoder_aux.items()}
-                potts_decoder_aux_ci = {k: v.expand(S.shape[0], *(v.ndim * (-1, ))) for k, v in potts_decoder_aux_ci.items()}  # expand to match S
-                U_ci, _ = compute_potts_energy(S, potts_decoder_aux_ci["h"], potts_decoder_aux_ci["J"], potts_decoder_aux_ci["edge_idx"])
-                U[ci] = U_ci
-
-            # Take minimum over conformers to get final energy
-            U = U.min(dim=0)[0]
-
-            # Store results
-            outputs[pdb_name] = U.cpu()
 
     return outputs
 
@@ -377,6 +304,7 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> dict[str, Any]:
     if "cif_parser_args" not in data_cfg:
         data_cfg.cif_parser_args = {"add_missing_atoms": True, "remove_waters": True, "remove_ccds": [], "fix_ligands_at_symmetry_centers": True, "fix_arginines": True, "convert_mse_to_met": True, "hydrogen_policy": "remove"}
 
+    # Read in the CIF data.
     transformation_id = "1"  # keep only the first assembly
     input_data = aw_parse(pdb_path, build_assembly=[transformation_id], **data_cfg.cif_parser_args)
     atom_array_from_cif = input_data["assemblies"][transformation_id][0] # (1, num_atoms) -> (num_atoms)
@@ -530,9 +458,9 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
     return batch
 
 
-def parse_pos_restrict_aatype_info(batch: Dict[str, TensorType["b ..."]],
+def parse_pos_restrict_aatype_info(batch: dict[str, TensorType["b ..."]],
                                    pos_constraint_df: Optional[pd.DataFrame],
-                                   verbose: bool = False) -> Tuple[torch.Tensor, torch.Tensor] | None:
+                                   verbose: bool = False) -> tuple[torch.Tensor, torch.Tensor] | None:
     """
     Given a pos_constraint_df containing position restrictions for each PDB, return:
     - a mask indicating which positions have restricted amino acid sampling
@@ -795,15 +723,3 @@ def visualize_sequences(atom_array: AtomArray,
 
     for asym_id, sequence in sequences.items():
         print(f"Chain {asym_id}: {sequence}")
-
-
-def get_chain_to_asym_id_mapping(example: dict[str, torch.Tensor],
-                                 use_label_asym_name: bool = False) -> dict[str, int]:
-    """
-    Map from chain name to asym_id. If use_label_asym_name is True, use label_asym_name as the chain name, otherwise use auth_asym_name.
-    We default to using auth_asym_name since we expect users to specify chain names based on auth_asym_name.
-    """
-    if use_label_asym_name:
-        return {c: i for i, c in enumerate(example["feat_metadata"]["asym_name"].tolist())}
-    else:
-        return {c: i for i, c in enumerate(example["feat_metadata"]["auth_asym_name"].tolist())}

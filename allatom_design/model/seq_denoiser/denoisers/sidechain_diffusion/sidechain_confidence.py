@@ -45,7 +45,7 @@ class SidechainConfidenceModule(nn.Module):
 
     def forward(self,
                 x1_scn_local_pred: TensorType["b n 33 3", float],  # scn pred output, local coordinates
-                mpnn_feature_dict: Dict[str, TensorType["b ..."]],
+                mpnn_feature_dict: dict[str, TensorType["b ..."]],
                 aatype: TensorType["b n", int],
                 seq_mask: TensorType["b n", float],
                 residue_index: TensorType["b n", int],
@@ -128,7 +128,7 @@ class ConfidenceEncoder(nn.Module):
 
 
     def forward(self,
-                mpnn_feature_dict: Dict[str, TensorType["b ..."]],
+                mpnn_feature_dict: dict[str, TensorType["b ..."]],
                 seq_mask: TensorType["b n", float],
                 residue_index: TensorType["b n", int],
                 chain_index: TensorType["b n", int],

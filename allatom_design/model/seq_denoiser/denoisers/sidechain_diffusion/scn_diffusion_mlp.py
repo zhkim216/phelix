@@ -53,15 +53,15 @@ class SidechainDiffusionModule(nn.Module):
 
 
     def sidechain_diffusion(self,
-                            mpnn_feature_dict: Dict[str, TensorType["b ..."]],
+                            mpnn_feature_dict: dict[str, TensorType["b ..."]],
                             aatype: TensorType["b n", int],
                             seq_mask: TensorType["b n", float],
                             residue_index: TensorType["b n", int],
                             chain_index: TensorType["b n", int],
                             aux_inputs: Optional[Dict],
                             is_sampling: bool,
-                            ) -> Tuple[TensorType["b n a 3", float],
-                                       Dict[str, TensorType["b ...", float]]]:
+                            ) -> tuple[TensorType["b n a 3", float],
+                                       dict[str, TensorType["b ...", float]]]:
         h_V = mpnn_feature_dict["h_V"]
         B, N, _ = h_V.shape
         diffusion_aux = defaultdict(lambda: None)
@@ -359,7 +359,7 @@ class SidechainMLP(nn.Module):
                 h_V: TensorType["b n h", float],  # conditioning latent
                 seq_mask: TensorType["b n", float],
                 x_scn_self_cond: Optional[TensorType["b n a_scn 3", float]] = None,  # self-conditioning input
-                ) -> Tuple[TensorType["b n a 3", float], Dict[str, TensorType["b ..."]]]:
+                ) -> tuple[TensorType["b n a 3", float], dict[str, TensorType["b ..."]]]:
         aux_preds = {}
 
         # Preconditioning

@@ -8,8 +8,8 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 
 
 def get_cfg_from_ckpt(ckpt_path: str,
-                      return_as_dict: bool = False) -> Tuple[Union[DictConfig, Dict],
-                                                             Dict[str, Any]]:
+                      return_as_dict: bool = False) -> tuple[Union[DictConfig, Dict],
+                                                             dict[str, Any]]:
     """
     Load the config directly from the cfg arg passed into the model during training.
 
@@ -62,17 +62,17 @@ def resume_ckpt_cfg(current_cfg: DictConfig) -> DictConfig:
     return cfg, lit_model_ckpt
 
 
-def repair_state_dict(state_dict: Dict[str, Any]) -> Dict[str, Any]:
+def repair_state_dict(state_dict: dict[str, Any]) -> dict[str, Any]:
     """
     Repair the state dict to avoid issues with loading the model checkpoint due to torch.compile().
 
     https://github.com/pytorch/pytorch/issues/101107
 
     Parameters:
-    - state_dict (Dict[str, Any]): The model state dict.
+    - state_dict (dict[str, Any]): The model state dict.
 
     Returns:
-    - Dict[str, Any]: The repaired state dict.
+    - dict[str, Any]: The repaired state dict.
     """
     pairings = [
         (src_key, src_key.replace("_orig_mod.", ""))

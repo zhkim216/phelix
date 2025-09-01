@@ -33,10 +33,10 @@ class MAR(SDInterpolant):
 
     @torch.compiler.disable
     def forward(self,
-                batch: Dict[str, TensorType["b ..."]],
+                batch: dict[str, TensorType["b ..."]],
                 t: Optional[TensorType["b", float]] = None,
                 x0: Optional[TensorType["b n a 3"]] = None,
-                ) -> Dict[str, Any]:
+                ) -> dict[str, Any]:
         x1 = batch["x"]
 
         # Sample time steps if not provided
@@ -110,7 +110,7 @@ class MAR(SDInterpolant):
                       aatype: TensorType["b n", int],
                       t: TensorType["b"],
                       seq_mask: TensorType["b n"],
-                      ) -> Tuple[TensorType["b n a 3", float],
+                      ) -> tuple[TensorType["b n a 3", float],
                                  TensorType["b n", int],
                                  TensorType["b n", int]]:
         """
@@ -144,7 +144,7 @@ class MAR(SDInterpolant):
     def drop_sidechains(self,
                         x: TensorType["b n a 3"],
                         seq_mlm_mask: TensorType["b n"],
-                        ) -> Tuple[TensorType["b n a 3", float],
+                        ) -> tuple[TensorType["b n a 3", float],
                                    TensorType["b n", int]]:
         """
         Randomly drop out sidechains of unmasked aatypes.

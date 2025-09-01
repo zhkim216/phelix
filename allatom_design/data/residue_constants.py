@@ -421,10 +421,10 @@ BondAngle = collections.namedtuple(
 
 @functools.lru_cache(maxsize=None)
 def load_stereo_chemical_props() -> (
-    Tuple[
-        Mapping[str, List[Bond]],
-        Mapping[str, List[Bond]],
-        Mapping[str, List[BondAngle]],
+    tuple[
+        Mapping[str, list[Bond]],
+        Mapping[str, list[Bond]],
+        Mapping[str, list[BondAngle]],
     ]
 ):
     """Load stereo_chemical_props.txt into a nice structure.

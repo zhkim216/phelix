@@ -68,12 +68,12 @@ class MotifEmbedder(nn.Module):
                 atom_encoder_heads=atom_encoder_heads,
             )
 
-    def forward(self, feats: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self, feats: dict[str, torch.Tensor]) -> torch.Tensor:
         """Perform the forward pass.
 
         Parameters
         ----------
-        feats : Dict[str, Tensor]
+        feats : dict[str, Tensor]
             Input features
 
         Returns

@@ -1,6 +1,0 @@
-pdb_path: /scratch/hielab/talal/datasets/af3_pdb
-overwrite_cache: false
-num_workers: 8
-phases:
-  - train
-  - eval
