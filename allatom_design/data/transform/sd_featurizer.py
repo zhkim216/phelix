@@ -182,7 +182,7 @@ class FeaturizeCoordsAndMasks(Transform):
         atomwise_is_prot = feats["is_protein"].gather(dim=-1, index=feats["atom_to_token_map"])
 
         atomized = torch.tensor(atom_array.atomize)
-        bb_atom_mask = torch.tensor(np.isin(atom_array.atom_name, const.PROT_BB_ATOMS))
+        bb_atom_mask = torch.tensor(atom_array.is_backbone_atom)
 
         feats["prot_bb_atom_mask"] = bb_atom_mask * ~atomized * atomwise_is_prot
         feats["prot_scn_atom_mask"] = ~bb_atom_mask * ~atomized * atomwise_is_prot
