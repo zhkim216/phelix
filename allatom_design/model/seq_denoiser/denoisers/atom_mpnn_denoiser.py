@@ -135,7 +135,9 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         return batch
 
 
-    def potts_sample(self, batch: dict[str, TensorType["b ..."]], sampling_inputs: dict[str, Any]):
+    def potts_sample(self,
+                     batch: dict[str, TensorType["b ..."]],
+                     sampling_inputs: dict[str, Any]):
         """
         Potts sampling for sequence design.
 
@@ -183,7 +185,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         # Initialize random sequence and sampling masks
         mask_sample = (1 - batch["seq_cond_mask_potts"]) * batch["token_pad_mask"]  # 1 where we can sample, 0 where we can't
         mask_sample, _, S_init = potts.init_sampling_masks(
-            logits_init, mask_sample=mask_sample, S=batch["res_type"].argmax(dim=-1), ban_S=ban_S, pos_restrict_aatype=sampling_inputs.get("pos_restrict_aatype", None)
+            logits_init, mask_sample=mask_sample, S=batch["restype"].argmax(dim=-1), ban_S=ban_S, pos_restrict_aatype=sampling_inputs.get("pos_restrict_aatype", None)
         )
 
         # Complexity regularization
@@ -219,10 +221,15 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             )
 
             # Set all tokens that don't exist in the graph to unknown
-            for chain_type, unk_token_id in const.unk_token_ids.items():
-                chain_type_id = const.chain_type_ids[chain_type]
-                unk_mask = (~batch["token_exists_mask"].bool()) & (batch["mol_type"] == chain_type_id)
-                S_sample[unk_mask] = unk_token_id
+            S_sample = torch.where(~batch["token_exists_mask"].bool() & (batch["is_protein"] | batch["is_ligand"]),
+                                   const.AF3_ENCODING.token_to_idx[const.UNKNOWN_AA],
+                                   S_sample)
+            S_sample = torch.where(~batch["token_exists_mask"].bool() & batch["is_rna"],
+                                    const.AF3_ENCODING.token_to_idx[const.UNKNOWN_RNA],
+                                    S_sample)
+            S_sample = torch.where(~batch["token_exists_mask"].bool() & batch["is_dna"],
+                                    const.AF3_ENCODING.token_to_idx[const.UNKNOWN_DNA],
+                                    S_sample)
 
             aux["U"].append(U_sample.cpu())
             S.append(S_sample.cpu())
@@ -231,18 +238,18 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         # Thread sequences onto original batch
         output_feats = []
-        aux["input_res_type"] = []  # keep track of original res_types
+        aux["input_restype"] = []  # keep track of original res_types
         for si in range(len(S)):
             feats_si = copy.deepcopy(batch)
-            feats_si["res_type"] = torch.where(feats_si["seq_cond_mask"][..., None].bool(),
-                                               feats_si["res_type"],
+            feats_si["restype"] = torch.where(feats_si["seq_cond_mask"][..., None].bool(),
+                                               feats_si["restype"],
                                                F.one_hot(S[si], num_classes=const.AF3_ENCODING.n_tokens))
             feats_si["coords"] = feats_si["coords"] * feats_si["atom_cond_mask"].unsqueeze(-1)
             feats_si["atom_resolved_mask"] = feats_si["atom_resolved_mask"] * feats_si["atom_cond_mask"]
             output_feats.append(feats_si)
 
             # Return input res_type
-            aux["input_res_type"].append(batch["res_type"].cpu())
+            aux["input_restype"].append(batch["restype"].cpu())
 
         return output_feats, aux
 

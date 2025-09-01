@@ -149,13 +149,14 @@ def run_seq_des(model: SeqDenoiser,
             # Save outputs to cif files
             if out_dir is not None:
                 for si, feats_si in enumerate(output_feats):
-                    if cfg["save_protein_only"]:
-                        # crop to protein-only features; useful for ablations to only fold with protein sequence
-                        feats_si = crop_batch_to_protein_only(feats_si)
+                    # if cfg["save_protein_only"]:
+                    #     # crop to protein-only features; useful for ablations to only fold with protein sequence
+                    #     feats_si = crop_batch_to_protein_only(feats_si)
 
-                    sample_stems = [f"{Path(pdb_file).stem}_sample{si}" for pdb_file in batch_struct_files]
+                    # TODO: atom array is *not* updated after seq design yet.
+                    sample_stems = [f"{example_id}_sample{si}" for example_id in batch["example_id"]]
                     batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
-                    batch_write_feats_to_mmcif(feats_si, input_structs=input_structs, filenames=batch_out_files)
+                    # batch_write_feats_to_mmcif(feats_si, input_structs=input_structs, filenames=batch_out_files)
                     outputs["out_pdbs"].extend(batch_out_files)
                     outputs["pdb_keys"].extend(output_feats[si]["pdb_key"])
 
