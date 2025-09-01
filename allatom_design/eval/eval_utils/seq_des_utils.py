@@ -328,9 +328,7 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> dict[str, Any]:
     auth_cif_parser_args = cif_parser_args.copy()
     auth_cif_parser_args["extra_fields"] = "all"
     auth_cif_parser_args["add_missing_atoms"] = False  # True overrides extra_fields
-    auth_data = aw_parse(pdb_path,
-                         **auth_cif_parser_args,
-                         )["assemblies"][transformation_id][0]
+    auth_data = aw_parse(pdb_path, **auth_cif_parser_args)["assemblies"][transformation_id][0]
     mapping = {}
     for atom in auth_data:
         # Create mapping of ("pn_unit_iid", "res_id") to ("auth_asym_id", "auth_seq_id").
