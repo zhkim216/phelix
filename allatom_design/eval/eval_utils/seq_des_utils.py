@@ -409,7 +409,7 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
             # parse the override string into a list of positions and aatypes
             pdb_pos, override_abs_pos, override_aatypes = parse_fixed_pos_override_seq_str(fixed_pos_override_seq, example["atom_array"], use_label_asym_name=use_label_asym_name)
             for abs_pos_i, aa in zip(override_abs_pos, override_aatypes):
-                batch["res_type"][i, abs_pos_i] = F.one_hot(torch.tensor(const.AF3_ENCODING.encode_aa_seq(aa), device=batch["res_type"].device), num_classes=len(const.tokens))
+                batch["restype"][i, abs_pos_i] = F.one_hot(torch.tensor(const.AF3_ENCODING.encode_aa_seq(aa), device=batch["restype"].device), num_classes=const.AF3_ENCODING.n_tokens)
 
             # add to fixed_pos_seq
             fixed_pos_seq = f"{fixed_pos_seq}," if not pd.isna(fixed_pos_seq) else ""
@@ -426,7 +426,7 @@ def parse_fixed_pos_info(batch: dict[str, TensorType["b ..."]],
             # print fixed sequence
             if verbose:
                 print("Fixed sequence:")
-                visualize_sequences(example["atom_array"], seq_cond_mask[i])
+                visualize_sequences(example["atom_array"], seq_cond_mask[i][example["token_pad_mask"].bool()])
         else:
             if verbose:
                 print(f"{example_id}: No fixed sequence positions specified.")
@@ -613,10 +613,8 @@ def parse_fixed_pos_str(fixed_pos_str: str,
     return fixed_indices
 
 def parse_fixed_pos_override_seq_str(override_str: str,
-                                 chain_id_mapping: dict[str, int],
-                                 residue_index: TensorType["n", int],
-                                 chain_index: TensorType["n", int]
-                                 ) -> tuple[list[str], list[int], list[str]]:
+                                     atom_array: AtomArray,
+                                     use_label_asym_name: bool = False) -> tuple[list[str], list[int], list[str]]:
     """
     Parse a fixed position sequence override string in the format "A26:A,A27:L" into three lists:
     PDB positions (e.g., ["A26", "A27"]), absolute positions in the tensor, and override amino acids (e.g., ["A", "L"]).
@@ -655,7 +653,7 @@ def parse_fixed_pos_override_seq_str(override_str: str,
         override_aatypes.append(aatype)
 
     # Get absolute positions for the given chain+residue
-    abs_pos = parse_fixed_pos_str(",".join(pdb_pos), chain_id_mapping, residue_index, chain_index)
+    abs_pos = parse_fixed_pos_str(",".join(pdb_pos), atom_array, use_label_asym_name)
 
     return pdb_pos, abs_pos, override_aatypes
 

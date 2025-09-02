@@ -245,14 +245,17 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             atom_arrays = copy.deepcopy(batch["atom_array"])
 
             for bi in range(len(atom_arrays)):  # iterate over batch size
-                new_restype = S[si][bi]
-                new_coords = batch["coords"][bi]
+                token_pad_mask = batch["token_pad_mask"][bi].bool()
+                atom_pad_mask = batch["atom_pad_mask"][bi].bool()
+
+                new_restype = S[si][bi][token_pad_mask]
+                new_coords = batch["coords"][bi][atom_pad_mask]
 
                 example_id = batch["example_id"][bi]
                 atom_array = atom_arrays[bi]
-                seq_cond_mask = batch["seq_cond_mask"][bi]
-                atom_cond_mask = batch["atom_cond_mask"][bi]
-                atom_resolved_mask = batch["atom_resolved_mask"][bi]
+                seq_cond_mask = batch["seq_cond_mask"][bi][token_pad_mask]
+                atom_cond_mask = batch["atom_cond_mask"][bi][atom_pad_mask]
+                atom_resolved_mask = batch["atom_resolved_mask"][bi][atom_pad_mask]
 
                 # Update resnames.
                 update_seq_mask = ~seq_cond_mask.numpy().astype(bool)  # update where seq_cond_mask is False
