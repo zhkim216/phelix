@@ -32,6 +32,11 @@ from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
 from allatom_design.data.transform.preprocess import preprocess_transform
 from allatom_design.data.transform.sd_featurizer import sd_featurizer
 from allatom_design.data.write.mmcif import batch_write_feats_to_mmcif
+<<<<<<< HEAD
+=======
+from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import \
+    compute_potts_energy
+>>>>>>> cfbc8033 (do some cleanup)
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 
