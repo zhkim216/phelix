@@ -12,7 +12,6 @@ from omegaconf import DictConfig, OmegaConf
 
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.eval_setup_utils import (get_pdb_files,
-                                                             process_pdb_files,
                                                              wandb_setup)
 from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import (get_seq_des_model,
@@ -40,7 +39,6 @@ def main(cfg: DictConfig):
 
     # Load in PDB file to eval on
     pdb_files = get_pdb_files(**cfg.input_cfg)
-    processed_struct_files = process_pdb_files(pdb_files, processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg)
 
     # Set up models (in eval mode)
     torch.set_grad_enabled(False)
@@ -63,12 +61,11 @@ def main(cfg: DictConfig):
 
     # Run sequence design model
     outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                         struct_file_paths=processed_struct_files, device=device, pos_constraint_df=pos_constraint_df,
-                         out_dir=log_dir)
+                          pdb_paths=pdb_files, device=device, pos_constraint_df=pos_constraint_df,
+                          out_dir=log_dir)
 
     # Save outputs to CSV
-    record_ids = [Path(x).stem.lower() for x in outputs["out_pdbs"]]
-    output_df = pd.DataFrame({"record_id": record_ids, "pdb_key": outputs["pdb_keys"], "seq": outputs["seqs"], "input_seq": outputs["input_seqs"]})
+    output_df = pd.DataFrame(outputs)
     output_df.to_csv(f"{log_dir}/seq_des_outputs.csv", index=False)
 
     if cfg.run_self_consistency_eval:

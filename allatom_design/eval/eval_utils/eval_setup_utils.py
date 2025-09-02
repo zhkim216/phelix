@@ -5,10 +5,85 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import wandb
 from natsort import natsorted
 from omegaconf import DictConfig
+
+
+def get_pdb_files(pdb_dir: str,
+                  pdb_name_list: str | None,
+                  pdb_name_ext: str | None = None,
+                  n_subsample: int | None = None,
+                  # slurm array parameters for parallelization
+                  array_id: int | None = None,
+                  num_arrays: int | None = None,
+                  skip_pdb_names: list[str] | None = None,
+                  ) -> list[str]:
+    """
+    Retrieve a list of PDB files from a directory, either by specifying a list of pdb_names or by getting all files.
+
+    Args:
+        pdb_dir: Directory containing PDB files
+        pdb_name_list: Optional path to a file containing PDB keys (one per line)
+        pdb_name_ext: Optional extension to append to each key when pdb_name_list is provided
+        array_id: Set by Slurm array job. Null means run all.
+        num_arrays: Number of total arrays. If array_id is null, this can remain 1.
+        skip_pdb_names: List of PDB names to skip
+
+        # if providing a pdb manifest, set options here
+        manifest_kwargs:
+            pdb_manifest_csv: Optional path to a CSV file containing PDB keys and other metadata
+
+
+    Returns:
+        List of PDB file paths, naturally sorted if retrieving all files
+
+    Raises:
+        ValueError: If no PDB files are found in the directory when pdb_name_list is None
+    """
+    # Read in PDB files from directory or list of PDB names
+    if pdb_name_list is not None:
+        # get PDBs with keys in the list
+        with open(pdb_name_list, "r") as f:
+            pdb_names = f.read().splitlines()
+        if pdb_name_ext:
+            # replace extension with pdb_name_ext
+            pdb_names = [f"{Path(name).with_suffix(pdb_name_ext)}" for name in pdb_names]
+        pdb_files = [f"{pdb_dir}/{name}" for name in pdb_names]
+        print(f"Found {len(pdb_files)} PDB files from key list")
+    else:
+        # get all PDBs in the directory
+        pdb_files = natsorted(list(glob.glob(f"{pdb_dir}/*")))
+        print(f"Found {len(pdb_files)} PDB files in {pdb_dir}")
+        if len(pdb_files) == 0:
+            raise ValueError(f"No PDB files found in directory {pdb_dir}")
+
+    # Skip existing PDBs
+    if skip_pdb_names is not None:
+        skip_pdb_names = set(skip_pdb_names)
+        pdb_files = [f for f in pdb_files if Path(f).name not in skip_pdb_names]
+
+    # Parallelization: split PDB files into chunks based on array id
+    if array_id is not None:
+        array_id = array_id
+        num_arrays = num_arrays
+        chunk_size = math.ceil(len(pdb_files) / num_arrays)
+
+        start_idx = array_id * chunk_size
+        end_idx = min(start_idx + chunk_size, len(pdb_files))
+        pdb_files = pdb_files[start_idx:end_idx]
+
+    # Optionally take a random subset, preserving order
+    if n_subsample is not None:
+        n_subsample = min(n_subsample, len(pdb_files))
+        chosen_indices = sorted(np.random.choice(len(pdb_files), n_subsample, replace=False))
+        pdb_files = [pdb_files[i] for i in chosen_indices]
+
+    print(f"Using {len(pdb_files)} PDB files")
+
+    return pdb_files
 
 
 def get_training_checkpoints(
