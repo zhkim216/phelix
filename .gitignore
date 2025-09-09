@@ -132,6 +132,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.venv_adad/ 
 
 # Spyder project settings
 .spyderproject
@@ -147,6 +148,9 @@ venv.bak/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# ruff
+.ruff_cache/
 
 # Pyre type checker
 .pyre/
@@ -170,4 +174,10 @@ wandb/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 
-atomworks/
+coding_practice/
+
+# AF3
+alphafold3/src/alphafold3/constants/converters/ccd.pickle
+
+# Atomworks
+/tests/data/
