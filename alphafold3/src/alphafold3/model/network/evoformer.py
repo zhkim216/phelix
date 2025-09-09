@@ -183,10 +183,20 @@ class Evoformer(hk.Module):
     )
     templates = batch.templates
     asym_id = batch.token_features.asym_id
-    # Construct a mask such that only intra-chain template features are
-    # computed, since all templates are for each chain individually.
-    multichain_mask = (asym_id[:, None] == asym_id[None, :]).astype(dtype)
-
+    
+    ligand_protein_template_conditioning = self.config.template.ligand_protein_template_conditioning_mode > 0 # (JH) ligand-protein template conditioning.
+    
+    if ligand_protein_template_conditioning: # (JH) ligand-protein template conditioning.
+        #Todo (JH) For now, we assume all conditioning options are the same for all templates.
+        # (JH) Construct a mask such that inter-chain template features are also computed
+        # (JH) This is for using AF3 as a blind-docking model where the protein predictions are almost always correct
+        template_is_protein = batch.templates.template_is_protein
+        multichain_mask = (template_is_protein.squeeze(axis=0)[:, None] == template_is_protein.squeeze(axis=0)[None, :]).astype(dtype)
+    else:
+        # Construct a mask such that only intra-chain template features are
+        # computed, since all templates are for each chain individually.
+        multichain_mask = (asym_id[:, None] == asym_id[None, :]).astype(dtype)
+        
     template_fn = functools.partial(template_module, key=subkey)
     template_act = template_fn(
         query_embedding=pair_activations,

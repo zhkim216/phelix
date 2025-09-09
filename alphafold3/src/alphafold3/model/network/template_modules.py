@@ -115,7 +115,10 @@ class TemplateEmbedding(hk.Module):
         num_layer=2,
         pair_transition=base_config.autocreate(num_intermediate_factor=2),
     )
-    dgram_features: DistogramFeaturesConfig = base_config.autocreate()
+    dgram_features: DistogramFeaturesConfig = base_config.autocreate()    
+    ligand_protein_template_conditioning_mode: int = 0 # (JH) Ligand-protein template conditioning mode: 0=off, 1=protein, 2=ligand, 3=both
+    mask_template_sidechains: bool = False # (JH) For ligand-protein template conditioning
+    mask_template_sequence: bool = False # (JH) For ligand-protein template conditioning
 
   def __init__(
       self,
@@ -241,6 +244,10 @@ class SingleTemplateEmbedding(hk.Module):
 
     Returns:
       A template embedding (num_res, num_res, num_channels).
+      
+    Todo (JH):
+    Seems like it'll be better if we can use is_protein, is_ligand tensors here as well.
+    Need to implement it if we input ligand templates later.
     """
     gc = self.global_config
     c = self.config
@@ -249,19 +256,48 @@ class SingleTemplateEmbedding(hk.Module):
     num_channels = self.config.num_channels
 
     def construct_input(
-        query_embedding, templates: features.Templates, multichain_mask_2d
+        query_embedding, templates: features.Templates, multichain_mask_2d,
     ):
+      
+      ##### (JH) ligand-protein template conditioning. #######
+      # Use template config to determine if conditioning is enabled
+            
+      ligand_protein_template_conditioning = self.config.ligand_protein_template_conditioning_mode > 0
+      ligand_protein_template_conditioning_mode = self.config.ligand_protein_template_conditioning_mode
+      
+      # Extract features regardless for JIT compatibility
+      mask_template_sidechains = self.config.mask_template_sidechains and ligand_protein_template_conditioning_mode > 0
+      mask_template_sequence = self.config.mask_template_sequence and ligand_protein_template_conditioning_mode > 0
+      template_is_protein = templates.template_is_protein
+      template_is_dna = templates.template_is_dna
+      template_is_rna = templates.template_is_rna
+      template_is_other = templates.template_is_other
+      
+      
+      if not ligand_protein_template_conditioning:
+        assert mask_template_sidechains == False and mask_template_sequence == False
+        assert template_is_protein.sum() == 0 and template_is_dna.sum() == 0 and template_is_rna.sum() == 0 and template_is_other.sum() == 0
+        # (JH) For non-conditioning, all features should be 0s.
+      
+      #####################################################
 
       # Compute distogram feature for the template.
       aatype = templates.aatype
-      dense_atom_mask = templates.atom_mask
-
-      dense_atom_positions = templates.atom_positions
+      dense_atom_mask = templates.atom_mask # (JH) zeros for ligands for now.
+          
+      dense_atom_positions = templates.atom_positions                                               
       dense_atom_positions *= dense_atom_mask[..., None]
-
+            
       pseudo_beta_positions, pseudo_beta_mask = scoring.pseudo_beta_fn(
-          templates.aatype, dense_atom_positions, dense_atom_mask
+          templates.aatype, dense_atom_positions, dense_atom_mask, 
+          mask_template_sidechains=mask_template_sidechains, mask_template_sequence=mask_template_sequence,
+          template_is_protein=template_is_protein,
+          template_is_dna=template_is_dna,
+          template_is_rna=template_is_rna,
+          template_is_other=template_is_other,
       )
+      # (JH) pseudo_beta_positions & pseudo_beta_mask are all zero for ligands for now.
+                  
       pseudo_beta_mask_2d = (
           pseudo_beta_mask[:, None] * pseudo_beta_mask[None, :]
       )
@@ -271,6 +307,8 @@ class SingleTemplateEmbedding(hk.Module):
       )
       dgram *= pseudo_beta_mask_2d[..., None]
       dgram = dgram.astype(dtype)
+      # (JH) zeroed out residues that don't have coordinates, and ligands.
+      
       pseudo_beta_mask_2d = pseudo_beta_mask_2d.astype(dtype)
       to_concat = [(dgram, 1), (pseudo_beta_mask_2d, 0)]
 
@@ -279,10 +317,8 @@ class SingleTemplateEmbedding(hk.Module):
           residue_names.POLYMER_TYPES_NUM_WITH_UNKNOWN_AND_GAP,
           axis=-1,
           dtype=dtype,
-      )
-      to_concat.append((aatype[None, :, :], 1))
-      to_concat.append((aatype[:, None, :], 1))
-
+      ) # (JH) (seq_len, num_res)
+                  
       # Compute a feature representing the normalized vector between each
       # backbone affine - i.e. in each residues local frame, what direction are
       # each of the other residues.
@@ -297,17 +333,43 @@ class SingleTemplateEmbedding(hk.Module):
           dense_atom_mask,
           template_group_indices.astype(jnp.int32),
       )
-      points = rigid.translation
+      
+      ##### (JH) ligand-protein template conditioning. #######
+      if ligand_protein_template_conditioning: 
+        if not mask_template_sequence:
+          # (JH) For ligands, set UNK (index 20) to 1 and others to 0
+          unk_one_hot = jnp.zeros_like(aatype)
+          unk_one_hot = unk_one_hot.at[:, 20].set(1.0)  # UNK index is 20
+          aatype = aatype * (1 - template_is_other[..., None]) + unk_one_hot * template_is_other[..., None]
+          # (JH) Residue type for ligands should be mapped to UNK.        
+        else:
+          # Mask all residues as UNK
+          aatype = jnp.zeros_like(aatype)
+          aatype = aatype.at[:, 20].set(1.0)  # Set UNK (index 20) to 1
+          # (JH) Masking out amino acid residue types by 20, which is UNK.
+          # (JH) Also, ligand residues are mapped to UNK.
+          #? (JH) Pad tokens don't exist
+              
+      # (JH) Moved from the right below of aatype = jax.nn.one_hot (~~) to here.
+      to_concat.append((aatype[None, :, :], 1)) 
+      to_concat.append((aatype[:, None, :], 1))
+      #####################################################
+      
+      points = rigid.translation # (JH) (seq_len,)
       rigid_vec = rigid[:, None].inverse().apply_to_point(points)
+      # (JH) rigid: (seq_len, 1) -> rigid_vec: (seq_len, seq_len)
+      # (JH) rigid_vec is the positions of all frames w/r/t to each local frame.
       unit_vector = rigid_vec.normalized()
       unit_vector = [unit_vector.x, unit_vector.y, unit_vector.z]
 
       unit_vector = [x.astype(dtype) for x in unit_vector]
-      backbone_mask = backbone_mask.astype(dtype)
+      # (JH) and unit vector is the direction of each frame w/r/t to each local frame.
+      backbone_mask = backbone_mask.astype(dtype) # (JH) backbone mask is 1s for residues with N, CA, C atoms existing, 0s for residues with at least one atom missing.
 
       backbone_mask_2d = backbone_mask[:, None] * backbone_mask[None, :]
       backbone_mask_2d *= multichain_mask_2d
       unit_vector = [x * backbone_mask_2d for x in unit_vector]
+      # (JH) non-standard protein residues, residues with no coordinates, and ligands are masked out.
 
       # Note that the backbone_mask takes into account C, CA and N (unlike
       # pseudo beta mask which just needs CB) so we add both masks as features.
@@ -317,11 +379,20 @@ class SingleTemplateEmbedding(hk.Module):
       query_embedding = hm.LayerNorm(name='query_embedding_norm')(
           query_embedding
       )
+      
       # Allow the template embedder to see the query embedding.  Note this
       # contains the position relative feature, so this is how the network knows
       # which residues are next to each other.
       to_concat.append((query_embedding, 1))
-
+      
+      # (JH) In to_concat, there are dgram, pseudo_beta_mask_2d, aatype[None, :, :], aatype[:, None, :], unit_vector, backbone_mask_2d, query_embedding.
+      # (JH) For masking sidechains,
+      # (JH) dgram is made of C-alpha coordinates, and 0s for residues with no coordinates, and ligands.
+      # (JH) pseudo_beta_mask_2d are all zero for residues with no coordinates, and ligands.
+      # (JH) aatype would be the same, and 20s for ligands.
+      # (JH) unit_vector & backbone_mask_2d would be the same (0s for residues with no coordinates, and ligands)      
+      # (JH) For masking sequences, in addition to the above, aatype[None, :, :] & aatype[:, None, :] would be 20s for all residues.                
+      
       act = 0
 
       for i, (x, n_input_dims) in enumerate(to_concat):

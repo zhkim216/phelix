@@ -147,6 +147,7 @@ class WholePdbPipeline:
     deterministic_frames: bool = True
     conformer_max_iterations: int | None = None
     resolve_msa_overlaps: bool = True
+    ligand_protein_template_conditioning_mode: int = 0 # (JH) ligand-protein template conditioning
 
   def __init__(self, *, config: Config):
     """Initializes WholePdb data pipeline.
@@ -162,6 +163,7 @@ class WholePdbPipeline:
       random_state: np.random.RandomState,
       ccd: chemical_components.Ccd,
       random_seed: int | None = None,
+      ligand_protein_template_conditioning_info: dict[str, bool] = None, # (JH) ligand-protein template conditioning
   ) -> features.BatchDict:
     """Takes requests from in_queue, adds (key, serialized ex) to out_queue."""
     if random_seed is None:
@@ -355,7 +357,8 @@ class WholePdbPipeline:
         padding_shapes=padding_shapes,
         fold_input=fold_input,
         max_templates=self._config.max_templates,
-        logging_name=logging_name,
+        logging_name=logging_name,        
+        ligand_protein_template_conditioning_mode=self._config.ligand_protein_template_conditioning_mode, # (JH) ligand-protein template conditioning
     )
 
     ref_max_modified_date = self._config.ref_max_modified_date
@@ -439,8 +442,8 @@ class WholePdbPipeline:
     np_example = batch.as_data_dict()
     if 'num_iter_recycling' in np_example:
       del np_example['num_iter_recycling']  # that does not belong here
-
-    for name, value in np_example.items():
+        
+    for name, value in np_example.items():          
       if (
           value.dtype.kind not in {'U', 'S'}
           and value.dtype.name != 'object'

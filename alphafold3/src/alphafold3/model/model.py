@@ -264,7 +264,7 @@ class Model(hk.Module):
       key = hk.next_rng_key()
 
     batch = feat_batch.Batch.from_data_dict(batch)
-
+    
     embedding_module = evoformer_network.Evoformer(
         self.config.evoformer, self.global_config
     )

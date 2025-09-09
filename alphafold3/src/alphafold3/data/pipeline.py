@@ -419,6 +419,7 @@ class DataPipeline:
     has_templates = chain.templates is not None
 
     if not has_unpaired_msa and not has_paired_msa and not chain.templates:
+      #* (JH) case where no MSA and no structure templates.
       # MSA None - search. Templates either [] - don't search, or None - search.
       unpaired_msa, paired_msa, template_hits = _get_protein_msa_and_templates(
           sequence=chain.sequence,
@@ -440,6 +441,7 @@ class DataPipeline:
           for hit, struc in template_hits.get_hits_with_structures()
       ]
     elif has_unpaired_msa and has_paired_msa and not has_templates:
+      #* (JH) case where has MSA but no structure templates.
       # Has MSA, but doesn't have templates. Search for templates only.
       empty_msa = msa.Msa.from_empty(
           query_sequence=chain.sequence,
@@ -462,6 +464,7 @@ class DataPipeline:
           for hit, struc in template_hits.get_hits_with_structures()
       ]
     else:
+      #* (JH) case where has both MSA and structure templates, or has no MSA but has structure templates.
       # Has MSA and templates, don't search for anything.
       if not has_unpaired_msa or not has_paired_msa or not has_templates:
         raise ValueError(

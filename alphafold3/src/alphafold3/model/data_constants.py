@@ -11,6 +11,7 @@
 """Constants shared across modules in the AlphaFold data pipeline."""
 
 from alphafold3.constants import residue_names
+import numpy as np
 
 MSA_GAP_IDX = residue_names.PROTEIN_TYPES_ONE_LETTER_WITH_UNKNOWN_AND_GAP.index(
     '-'
@@ -24,4 +25,13 @@ TEMPLATE_FEATURES = (
     'template_atom_positions',
     'template_atom_mask',
 )
+
 MSA_PAD_VALUES = {'msa': MSA_GAP_IDX, 'msa_mask': 1, 'deletion_matrix': 0}
+
+#* (JH) ligand-protein template conditioning
+LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES = (
+    'template_is_protein',
+    'template_is_dna', 
+    'template_is_rna',
+    'template_is_other',
+)
