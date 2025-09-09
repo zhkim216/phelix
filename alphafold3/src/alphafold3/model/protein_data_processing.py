@@ -87,6 +87,7 @@ def _make_restype_pseudobeta_idx():
       restype_pseudobeta_index[restype] = atom_names.index('CA')
     else:
       restype_pseudobeta_index[restype] = atom_names.index('CB')
+      #* UNK residues have none index for CB atom
   for nanum, resname in enumerate(residue_names.NUCLEIC_TYPES):
     atom_names = list(atom_types.DENSE_ATOM[resname])
     # 0: backbone frame only.
@@ -97,7 +98,6 @@ def _make_restype_pseudobeta_idx():
     else:
       restype_pseudobeta_index[restype] = atom_names.index('C2')
   return restype_pseudobeta_index
-
 
 RESTYPE_PSEUDOBETA_INDEX = _make_restype_pseudobeta_idx()
 

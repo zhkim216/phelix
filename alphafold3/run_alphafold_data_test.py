@@ -162,9 +162,7 @@ class DataPipelineTest(parameterized.TestCase):
             {
                 'protein': {
                     'id': 'P',
-                    'sequence': (
-                        'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN'
-                    ),
+                    'sequence': 'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN',
                     'modifications': [],
                     'unpairedMsa': None,
                     'pairedMsa': None,
@@ -207,7 +205,7 @@ class DataPipelineTest(parameterized.TestCase):
     full_fold_input = data_pipeline.process(fold_input)
     featurised_example = featurisation.featurise_input(
         full_fold_input,
-        ccd=chemical_components.Ccd(),
+        ccd=chemical_components.cached_ccd(),
         buckets=None,
     )
     del featurised_example[0]['ref_pos']  # Depends on specific RDKit version.

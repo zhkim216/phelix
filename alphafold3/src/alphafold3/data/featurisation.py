@@ -42,6 +42,8 @@ def featurise_input(
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
     resolve_msa_overlaps: bool = True,
+    max_templates: int = 4, # (JH) ligand-protein template conditioning  
+    ligand_protein_template_conditioning_mode: int = 0, # (JH) ligand-protein template conditioning
     verbose: bool = False,
 ) -> Sequence[features.BatchDict]:
   """Featurise the folding input.
@@ -66,6 +68,9 @@ def featurise_input(
       paper. Set this to false if providing custom paired MSA using the unpaired
       MSA field to keep it exactly as is as deduplication against the paired MSA
       could break the manually crafted pairing between MSA sequences.
+    do_ligand_template_conditioning: Whether to do ligand-protein template conditioning. #* (JH) ligand-protein template conditioning
+    max_templates: Maximum number of templates to use for each chain. Set to 0
+      to disable templates completely. #* (JH) ligand-protein template conditioning
     verbose: Whether to print progress messages.
 
   Returns:
@@ -80,6 +85,8 @@ def featurise_input(
           ref_max_modified_date=ref_max_modified_date,
           conformer_max_iterations=conformer_max_iterations,
           resolve_msa_overlaps=resolve_msa_overlaps,
+          max_templates=max_templates, # (JH) ligand-protein template conditioning        
+          ligand_protein_template_conditioning_mode=ligand_protein_template_conditioning_mode, # (JH) ligand-protein template conditioning
       ),
   )
 
@@ -92,7 +99,7 @@ def featurise_input(
         fold_input=fold_input,
         ccd=ccd,
         random_state=np.random.RandomState(rng_seed),
-        random_seed=rng_seed,
+        random_seed=rng_seed,      
     )
     if verbose:
       print(

@@ -62,7 +62,7 @@ _DEFAULT_DB_DIR = _HOME_DIR / 'public_databases'
 # Input and output paths.
 _JSON_PATH = flags.DEFINE_string(
     'json_path',
-    None,
+    '/home/possu/jinho/allatom-design/alphafold3/input_examples/normal/5S9U_FAD.json',  # FIXME: For debugging
     'Path to the input JSON file.',
 )
 _INPUT_DIR = flags.DEFINE_string(
@@ -72,12 +72,12 @@ _INPUT_DIR = flags.DEFINE_string(
 )
 _OUTPUT_DIR = flags.DEFINE_string(
     'output_dir',
-    None,
+    '/home/possu/jinho/allatom-design/debugging_local_output/250824_template_conditioning',  # FIXME: For debugging
     'Path to a directory where the results will be saved.',
 )
 MODEL_DIR = flags.DEFINE_string(
     'model_dir',
-    _DEFAULT_MODEL_DIR.as_posix(),
+    '/home/possu/jinho/model_params/af3',
     'Path to the model to use for inference.',
 )
 
@@ -123,7 +123,7 @@ _HMMBUILD_BINARY_PATH = flags.DEFINE_string(
 # Database paths.
 DB_DIR = flags.DEFINE_multi_string(
     'db_dir',
-    (_DEFAULT_DB_DIR.as_posix(),),
+    ('/home/possu/jinho/af3_databases',),  # FIXME: For debugging
     'Path to the directory containing the databases. Can be specified multiple'
     ' times to search multiple directories in order.',
 )
@@ -246,7 +246,7 @@ _BUCKETS = flags.DEFINE_list(
 )
 _FLASH_ATTENTION_IMPLEMENTATION = flags.DEFINE_enum(
     'flash_attention_implementation',
-    default='triton',
+    default='xla', # (JH) For debugging on lab desktop.
     enum_values=['triton', 'cudnn', 'xla'],
     help=(
         "Flash attention implementation to use. 'triton' and 'cudnn' uses a"
@@ -265,7 +265,7 @@ _NUM_RECYCLES = flags.DEFINE_integer(
 )
 _NUM_DIFFUSION_SAMPLES = flags.DEFINE_integer(
     'num_diffusion_samples',
-    5,
+    1,
     'Number of diffusion samples to generate.',
     lower_bound=1,
 )
@@ -303,6 +303,42 @@ _FORCE_OUTPUT_DIR = flags.DEFINE_bool(
     ' the inference separately, but use the same output directory.',
 )
 
+# (JH) Debugging flags
+_DEBUG = flags.DEFINE_bool(
+    'debug',
+    True,
+    'Whether to run in debug mode.',
+)
+
+# (JH) For general structure template conditioning,
+_MAX_TEMPLATES = flags.DEFINE_integer(
+    'max_templates',
+    4,
+    'Maximum number of templates to use for each chain. '
+    ' If template conditioning is used, the number should be >= 1.'
+    ' Otherwise, the number should be 0.',
+    lower_bound=0,
+)
+
+# (JH) For ligand-protein template conditioning,
+_LIGAND_PROTEIN_TEMPLATE_CONDITIONING_MODE = flags.DEFINE_integer(
+    'ligand_protein_template_conditioning',
+    0, # (JH) 0: not conditioning, 1: Conditioning on protein, 2: Conditioning on ligand, 3: Conditioning on both
+    'Options for ligand-protein template conditioning. 0: not conditioning, 1: conditioning on protein, 2: conditioning on ligand, 3: conditioning on both',
+)
+
+_MASK_TEMPLATE_SEQUENCE = flags.DEFINE_bool(
+    'mask_template_sequence',
+    False,
+    'Whether to mask the template sequence.',
+)
+_MASK_TEMPLATE_SIDECHAINS = flags.DEFINE_bool(
+    'mask_template_sidechains',
+    False,
+    'Whether to mask the template sidechains.',
+)
+
+
 
 def make_model_config(
     *,
@@ -311,12 +347,20 @@ def make_model_config(
     num_recycles: int = 10,
     return_embeddings: bool = False,
     return_distogram: bool = False,
+    ligand_protein_template_conditioning_mode: int = 0,  # (JH) for ligand-protein template conditioning
+    mask_template_sidechains: bool = False, # (JH) for ligand-protein template conditioning
+    mask_template_sequence: bool = False, # (JH) for ligand-protein template conditioning
 ) -> model.Model.Config:
   """Returns a model config with some defaults overridden."""
   config = model.Model.Config()
   config.global_config.flash_attention_implementation = (
       flash_attention_implementation
   )
+  # (JH) ligand-protein template conditioning, set ligand-protein template conditioning in template config
+  config.evoformer.template.ligand_protein_template_conditioning_mode = ligand_protein_template_conditioning_mode  
+  config.evoformer.template.mask_template_sidechains = mask_template_sidechains
+  config.evoformer.template.mask_template_sequence = mask_template_sequence
+  
   config.heads.diffusion.eval.num_samples = num_diffusion_samples
   config.num_recycles = num_recycles
   config.return_embeddings = return_embeddings
@@ -443,6 +487,8 @@ def predict_structure(
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
     resolve_msa_overlaps: bool = True,
+    max_templates: int = 4, # (JH) ligand-protein template conditioning
+    ligand_protein_template_conditioning_mode: int = 0, # (JH) ligand-protein template conditioning
 ) -> Sequence[ResultsForSeed]:
   """Runs the full inference pipeline to predict structures for each seed."""
 
@@ -457,6 +503,8 @@ def predict_structure(
       ref_max_modified_date=ref_max_modified_date,
       conformer_max_iterations=conformer_max_iterations,
       resolve_msa_overlaps=resolve_msa_overlaps,
+      max_templates=max_templates, # (JH) ligand-protein template conditioning      
+      ligand_protein_template_conditioning_mode=ligand_protein_template_conditioning_mode, # (JH) ligand-protein template conditioning
   )
   print(
       f'Featurising data with {len(fold_input.rng_seeds)} seed(s) took'
@@ -615,7 +663,9 @@ def process_fold_input(
     buckets: Sequence[int] | None = None,
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
-    resolve_msa_overlaps: bool = True,
+    resolve_msa_overlaps: bool = True,    
+    max_templates: int = 4, # (JH) for template conditioning
+    ligand_protein_template_conditioning_mode: int = 0, # (JH) for ligand-protein template conditioning
     force_output_dir: bool = False,
 ) -> folding_input.Input:
   ...
@@ -631,6 +681,8 @@ def process_fold_input(
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
     resolve_msa_overlaps: bool = True,
+    max_templates: int = 4, # (JH) for template conditioning
+    ligand_protein_template_conditioning_mode: int = 0, # (JH) for ligand-protein template conditioning
     force_output_dir: bool = False,
 ) -> Sequence[ResultsForSeed]:
   ...
@@ -645,6 +697,8 @@ def process_fold_input(
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
     resolve_msa_overlaps: bool = True,
+    max_templates: int = 4, # (JH) for template conditioning
+    ligand_protein_template_conditioning_mode: int = 0, # (JH) for ligand-protein template conditioning
     force_output_dir: bool = False,
 ) -> folding_input.Input | Sequence[ResultsForSeed]:
   """Runs data pipeline and/or inference on a single fold input.
@@ -671,7 +725,11 @@ def process_fold_input(
       MSA. The default behaviour matches the method described in the AlphaFold 3
       paper. Set this to false if providing custom paired MSA using the unpaired
       MSA field to keep it exactly as is as deduplication against the paired MSA
-      could break the manually crafted pairing between MSA sequences.
+      could break the manually crafted pairing between MSA sequences.    
+    max_templates: Maximum number of templates to use for each chain. Set to 0
+      to disable templates completely. #* (JH) ligand-protein template conditioning
+    ligand_protein_template_conditioning_mode: Mode for ligand-protein template conditioning. #* (JH) ligand-protein template conditioning      
+      0: not conditioning, 1: Conditioning on protein, 2: Conditioning on ligand, 3: Conditioning on both
     force_output_dir: If True, do not create a new output directory even if the
       existing one is non-empty. Instead use the existing output directory and
       potentially overwrite existing files. If False, create a new timestamped
@@ -726,6 +784,8 @@ def process_fold_input(
         ref_max_modified_date=ref_max_modified_date,
         conformer_max_iterations=conformer_max_iterations,
         resolve_msa_overlaps=resolve_msa_overlaps,
+        max_templates=max_templates, #* (JH) for template conditioning
+        ligand_protein_template_conditioning_mode=ligand_protein_template_conditioning_mode, #* (JH) ligand-protein template conditioning
     )
     print(f'Writing outputs with {len(fold_input.rng_seeds)} seed(s)...')
     write_outputs(
@@ -740,6 +800,11 @@ def process_fold_input(
 
 
 def main(_):
+  
+  # (JH) Disable JAX JIT compilation for debugging
+  if _DEBUG.value:
+    jax.config.update('jax_disable_jit', True)
+    
   if _JAX_COMPILATION_CACHE_DIR.value is not None:
     jax.config.update(
         'jax_compilation_cache_dir', _JAX_COMPILATION_CACHE_DIR.value
@@ -769,6 +834,25 @@ def main(_):
         'Exactly one of --json_path or --input_dir must be specified.'
     )
 
+  #* (JH) For ligadn-protein template conditioning
+  if _LIGAND_PROTEIN_TEMPLATE_CONDITIONING_MODE.value:
+    print('Ligand-protein template conditioning is enabled.')
+    if _MASK_TEMPLATE_SEQUENCE.value:
+      print('Masking template sequence is enabled.')
+    if _MASK_TEMPLATE_SIDECHAINS.value:
+      print('Masking template sidechains is enabled.')  
+    print(f"Max templates is {_MAX_TEMPLATES.value}")
+    assert _MAX_TEMPLATES.value > 0, 'max_templates must be > 0 when ligand-protein template conditioning is enabled.'    
+
+  else:
+    print(f"Masking template sequence is {_MASK_TEMPLATE_SEQUENCE.value}, forcefully set to False")
+    print(f"Masking template sidechains is {_MASK_TEMPLATE_SIDECHAINS.value}, forcefully set to False")
+    flags.FLAGS.mask_template_sequence = False
+    flags.FLAGS.mask_template_sidechains = False
+    print(f"Masking template sequence is {flags.FLAGS.mask_template_sequence}")
+    print(f"Masking template sidechains is {flags.FLAGS.mask_template_sidechains}")
+    print(f"Max templates is {_MAX_TEMPLATES.value}")
+      
   # Make sure we can create the output directory before running anything.
   try:
     os.makedirs(_OUTPUT_DIR.value, exist_ok=True)
@@ -841,6 +925,8 @@ def main(_):
         jackhmmer_n_cpu=_JACKHMMER_N_CPU.value,
         nhmmer_n_cpu=_NHMMER_N_CPU.value,
         max_template_date=max_template_date,
+        
+        
     )
   else:
     data_pipeline_config = None
@@ -862,6 +948,9 @@ def main(_):
             num_recycles=_NUM_RECYCLES.value,
             return_embeddings=_SAVE_EMBEDDINGS.value,
             return_distogram=_SAVE_DISTOGRAM.value,
+            ligand_protein_template_conditioning_mode=_LIGAND_PROTEIN_TEMPLATE_CONDITIONING_MODE.value, # (JH) for ligand-protein template conditioning
+            mask_template_sidechains=_MASK_TEMPLATE_SIDECHAINS.value, # (JH) for ligand-protein template conditioning
+            mask_template_sequence=_MASK_TEMPLATE_SEQUENCE.value, # (JH) for ligand-protein template conditioning
         ),
         device=devices[_GPU_DEVICE.value],
         model_dir=pathlib.Path(MODEL_DIR.value),
@@ -885,8 +974,10 @@ def main(_):
         buckets=tuple(int(bucket) for bucket in _BUCKETS.value),
         ref_max_modified_date=max_template_date,
         conformer_max_iterations=_CONFORMER_MAX_ITERATIONS.value,
-        resolve_msa_overlaps=_RESOLVE_MSA_OVERLAPS.value,
+        resolve_msa_overlaps=_RESOLVE_MSA_OVERLAPS.value,        
         force_output_dir=_FORCE_OUTPUT_DIR.value,
+        max_templates=_MAX_TEMPLATES.value, #* (JH) for ligand-protein template conditioning      
+        ligand_protein_template_conditioning_mode=_LIGAND_PROTEIN_TEMPLATE_CONDITIONING_MODE.value, #* (JH) for ligand-protein template conditioning
     )
     num_fold_inputs += 1
 
@@ -894,5 +985,4 @@ def main(_):
 
 
 if __name__ == '__main__':
-  flags.mark_flags_as_required(['output_dir'])
   app.run(main)

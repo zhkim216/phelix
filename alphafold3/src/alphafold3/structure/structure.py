@@ -308,7 +308,7 @@ class Structure(table.Database):
     # b/345221494 Rename this variable when structure_v1 compatibility code
     # is removed.
     self._VERSION = '2.0.0'  # pylint: disable=invalid-name
-    self._name = name or 'unset'
+    self._name = name
     self._release_date = release_date
     self._resolution = resolution
     self._structure_method = structure_method
@@ -2466,14 +2466,14 @@ class Structure(table.Database):
     atom_mask = np.zeros((num_res, atom_type_num), dtype=np.float32)
 
     all_residues = None if not include_missing_residues else self.all_residues
-    for i, atom in enumerate_residues(self.iter_atoms(), all_residues):
+    for i, atom in enumerate_residues(self.iter_atoms(), all_residues):    
       atom_idx = atom_order.get(atom['atom_name'])
       if atom_idx is not None:
         atom_positions[i, atom_idx, 0] = atom['atom_x']
         atom_positions[i, atom_idx, 1] = atom['atom_y']
         atom_positions[i, atom_idx, 2] = atom['atom_z']
-        atom_mask[i, atom_idx] = 1.0
-
+        atom_mask[i, atom_idx] = 1.0    
+    
     return atom_positions, atom_mask
 
   def to_res_atom_lists(
