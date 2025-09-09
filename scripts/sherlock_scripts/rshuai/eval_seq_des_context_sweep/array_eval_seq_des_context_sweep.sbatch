@@ -1,0 +1,75 @@
+#!/bin/bash
+#SBATCH --job-name=sd3_a9_ctx2
+#SBATCH -p bioe
+#SBATCH --array=0-4
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=96:00:00
+#
+#SBATCH --output=/scratch/users/rshuai/slurm_log_files/job_%A_%a.out
+#SBATCH --error=/scratch/users/rshuai/slurm_log_files/job_%A_%a.err
+## Write batch script to logs
+scontrol write batch_script $SLURM_JOB_ID /scratch/users/rshuai/slurm_log_files/job_$SLURM_JOB_ID.sh
+
+# Load modules and set environment variables
+ml python
+module load gcc/12.4.0
+module load cuda/12.4
+ENV_DIR=/home/groups/possu/rshuai/envs
+source ${ENV_DIR}/allatom_design/bin/activate
+
+# Define directories and paths
+BASE_DIR=/home/users/rshuai/code/allatom-design
+HYDRA_DIR=/scratch/users/rshuai/hydra_outputs
+SOFTWARE_PATH=/oak/stanford/groups/possu/rshuai/software  # e.g. for MASTER, redis
+export SOFTWARE_PATH=${SOFTWARE_PATH}  # required for mmseqs, foldseek, redis, etc.
+
+# Model params (if running self-consistency eval)
+STRUCT_PRED_MODEL=boltz1
+BOLTZ1_CKPT=/scratch/users/rshuai/model_params/boltz1/boltz1_conf.ckpt
+
+# Inputs config
+PDB_DIR=/scratch/users/rshuai/datasets/boltz_val_cifs/pdbs
+LIST_STEM=protein_monomer_32_512_no_ligand
+PDB_NAME_LIST=/scratch/users/rshuai/datasets/boltz_val_cifs/pdb_name_lists/${LIST_STEM}.txt
+FIXED_POS_SWEEP_CSV=/scratch/users/rshuai/datasets/boltz_val_cifs/fixed_pos_sweep_csvs/${LIST_STEM}/fixed_pos_sweep.csv
+
+CONFIGS=(
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt fix_scn=true"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.potts_only_cond=true"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.regularization=none"
+"ckpt_path=/scratch/users/rshuai/allatom_design/allatom_design/sd3_a9_S/checkpoints/ema/sd-step25000-epoch15-ema0.99.ckpt +sampling_cfg_overrides.potts_sampling_cfg.potts_only_cond=true  +sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=5000 +sampling_cfg_overrides.potts_sampling_cfg.regularization=none"
+)
+OVERRIDES="${CONFIGS[$SLURM_ARRAY_TASK_ID]}"
+
+# Set cache directories
+export HF_HOME=/scratch/users/rshuai/cache/huggingface
+export TORCH_HOME=/scratch/users/rshuai/cache/torch
+
+BASE_EXP_NAME=sd3_a9_ctx2
+BASE_OUT_DIR=/scratch/users/rshuai/allatom_design/allatom_design/seq_des_context_sweep/${BASE_EXP_NAME}
+
+# Wandb settings / experiment name
+WANDB_ID=richardshuai
+GROUP=seq_des
+EXP_NAME=${BASE_EXP_NAME}_idx${SLURM_ARRAY_TASK_ID}_bvc_${LIST_STEM}_${STRUCT_PRED_MODEL}
+
+# Run training script
+cd ${BASE_DIR}
+python3 allatom_design/eval/eval_seq_des_context_sweep.py \
+    wandb.no_wandb=false \
+    wandb.wandb_id=${WANDB_ID} \
+    wandb.group=${GROUP} \
+    exp_name=${EXP_NAME} \
+    base_out_dir=${BASE_OUT_DIR} \
+    input_cfg.pdb_dir=${PDB_DIR} \
+    input_cfg.pdb_name_list=${PDB_NAME_LIST} \
+    fixed_pos_sweep_csv=${FIXED_POS_SWEEP_CSV} \
+    struct_pred_cfg.boltz1.checkpoint=${BOLTZ1_CKPT} \
+    struct_pred_cfg.model_name=${STRUCT_PRED_MODEL} \
+    run_self_consistency_eval=true \
+    sampling_cfg_overrides.batch_size=16 \
+    sampling_cfg_overrides.num_seqs_per_pdb=8 \
+    ${OVERRIDES} \
+    hydra.run.dir=${HYDRA_DIR}
