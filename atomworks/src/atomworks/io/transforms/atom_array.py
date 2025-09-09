@@ -206,6 +206,7 @@ def maybe_fix_non_polymer_at_symmetry_center(
     Examples:
     — PDB ID `7mub` has a potassium ion at the symmetry center that when reflected with the symmetry operation clashes with itself.
     — PDB ID `1xan` has a ligand at a symmetry center that similarly when refelcted clashes with itself.
+    #? (JH) I've checked these pdb ids on pymol, but these don't seem the cases they described here.
 
     Args:
         atom_array (AtomArray): The atom array to be patched.
