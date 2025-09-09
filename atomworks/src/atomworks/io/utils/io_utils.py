@@ -212,6 +212,7 @@ def get_structure(
         Biotite documentation (https://www.biotite-python.org/apidoc/biotite.structure.io.pdbx.get_structure.html#biotite.structure.io.pdbx.get_structure)
     """
     tmp_altloc = altloc if altloc in {"first", "occupancy", "all"} else "all"
+    # (JH) first with current configs, 250908
 
     match type(file_obj):
         case pdbx.CIFFile | pdbx.BinaryCIFFile | pdbx.CIFBlock:
@@ -265,7 +266,7 @@ def get_structure(
             raise ValueError(f"Unsupported file type: {type(file_obj)}. Must be a CIFFile, BinaryCIFFile, or PDBFile.")
 
     # Filter down to specified altloc if requested
-    if altloc != tmp_altloc:
+    if altloc != tmp_altloc: #(JH) for now, it's not being used.
         altloc_ids = get_annotation(atom_array_stack, "altloc_id", default=[])
         existing_altloc_ids = np.unique(altloc_ids)
         if altloc not in existing_altloc_ids:
