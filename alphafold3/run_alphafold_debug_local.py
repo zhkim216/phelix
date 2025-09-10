@@ -322,7 +322,7 @@ _MAX_TEMPLATES = flags.DEFINE_integer(
 
 # (JH) For ligand-protein template conditioning,
 _LIGAND_PROTEIN_TEMPLATE_CONDITIONING_MODE = flags.DEFINE_integer(
-    'ligand_protein_template_conditioning',
+    'ligand_protein_template_conditioning_mode',
     0, # (JH) 0: not conditioning, 1: Conditioning on protein, 2: Conditioning on ligand, 3: Conditioning on both
     'Options for ligand-protein template conditioning. 0: not conditioning, 1: conditioning on protein, 2: conditioning on ligand, 3: conditioning on both',
 )
