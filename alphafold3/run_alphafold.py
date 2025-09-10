@@ -306,14 +306,14 @@ _FORCE_OUTPUT_DIR = flags.DEFINE_bool(
 # (JH) Debugging flags
 _DEBUG = flags.DEFINE_bool(
     'debug',
-    True,
+    False,
     'Whether to run in debug mode.',
 )
 
 # (JH) For general structure template conditioning,
 _MAX_TEMPLATES = flags.DEFINE_integer(
     'max_templates',
-    4,
+    1,
     'Maximum number of templates to use for each chain. '
     ' If template conditioning is used, the number should be >= 1.'
     ' Otherwise, the number should be 0.',
@@ -329,7 +329,7 @@ _LIGAND_PROTEIN_TEMPLATE_CONDITIONING_MODE = flags.DEFINE_integer(
 
 _MASK_TEMPLATE_SEQUENCE = flags.DEFINE_bool(
     'mask_template_sequence',
-    False,
+    True,
     'Whether to mask the template sequence.',
 )
 _MASK_TEMPLATE_SIDECHAINS = flags.DEFINE_bool(
@@ -337,7 +337,6 @@ _MASK_TEMPLATE_SIDECHAINS = flags.DEFINE_bool(
     False,
     'Whether to mask the template sidechains.',
 )
-
 
 def make_model_config(
     *,
@@ -851,6 +850,7 @@ def main(_):
     print(f"Masking template sequence is {flags.FLAGS.mask_template_sequence}")
     print(f"Masking template sidechains is {flags.FLAGS.mask_template_sidechains}")
     print(f"Max templates is {_MAX_TEMPLATES.value}")
+
       
   # Make sure we can create the output directory before running anything.
   try:
@@ -901,7 +901,7 @@ def main(_):
   print('\n' + '\n'.join(notice) + '\n')
 
   max_template_date = datetime.date.fromisoformat(_MAX_TEMPLATE_DATE.value)
-  if _RUN_DATA_PIPELINE.value:
+  if _RUN_DATA_PIPELINE.value:    
     expand_path = lambda x: replace_db_dir(x, DB_DIR.value)
     data_pipeline_config = pipeline.DataPipelineConfig(
         jackhmmer_binary_path=_JACKHMMER_BINARY_PATH.value,
@@ -922,9 +922,7 @@ def main(_):
         seqres_database_path=expand_path(_SEQRES_DATABASE_PATH.value),
         jackhmmer_n_cpu=_JACKHMMER_N_CPU.value,
         nhmmer_n_cpu=_NHMMER_N_CPU.value,
-        max_template_date=max_template_date,
-        
-        
+        max_template_date=max_template_date,                
     )
   else:
     data_pipeline_config = None
@@ -980,7 +978,6 @@ def main(_):
     num_fold_inputs += 1
 
   print(f'Done running {num_fold_inputs} fold jobs.')
-
 
 if __name__ == '__main__':
   app.run(main)
