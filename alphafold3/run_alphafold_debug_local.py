@@ -306,7 +306,7 @@ _FORCE_OUTPUT_DIR = flags.DEFINE_bool(
 # (JH) debugging flags
 _DEBUG = flags.DEFINE_bool(
     'debug',
-    True,
+    False,
     'Whether to run in debug mode.',
 )
 
