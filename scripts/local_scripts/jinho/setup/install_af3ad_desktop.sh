@@ -107,6 +107,28 @@ UV_CACHE_DIR="$UV_CACHE_DIR" uv pip install torchtyping einops biopython
 UV_CACHE_DIR="$UV_CACHE_DIR" uv pip install ihm modelcif
 echo "✓ All dependencies installed"
 
+# Step 7.1: Install Atomworks dependencies
+echo "Step 7.1: Installing additional visualization and utility packages..."
+UV_CACHE_DIR="$UV_CACHE_DIR" uv pip install \
+"biotite>=1.3.0,<2" \
+"hydride>=1.2.3,<2" \
+"py3Dmol>=2.2.1,<3" \
+"pymol-remote>=0.0.5" \
+"pyarrow==17.0.0" \
+"cython>=3,<4" \
+"cytoolz>=0.12.3,<1" \
+"typer>=0.12.5,<1"
+UV_CACHE_DIR="$UV_CACHE_DIR" uv pip install "openbabel-wheel==3.1.1.22"
+UV_CACHE_DIR="$UV_CACHE_DIR" uv pip install pathspec
+echo "✓ Additional visualization and utility packages installed"
+
+# Step 7.2: Install atomworks (editable, no-deps)
+echo "Step 7.2: Installing atomworks in editable mode (no-deps)..."
+cd atomworks
+UV_CACHE_DIR="$UV_CACHE_DIR" uv pip install -e . --no-deps
+cd ..
+echo "✓ atomworks installed (editable, no-deps)"
+
 # Step 8: Configure GTX1080 environment variables
 echo "Step 8: Configuring GTX1080 environment variables..."
 cat >> "$VENV_PATH/bin/activate" << 'EOF'
