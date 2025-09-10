@@ -147,6 +147,7 @@ class DataPreprocessor:
                 # ... if successful, filter and format the data
                 ligand_validity_scores = pd.DataFrame(ligand_validity_scores)
                 ligand_validity_scores = ligand_validity_scores.set_index(["asym_id", "res_name"])[ligand_scores]
+                #? (JH) there can be more than two ligands that have the same comp_id (same type of ligand)
 
                 # Ensure the index is sorted lexicographically
                 ligand_validity_scores.sort_index(inplace=True)
