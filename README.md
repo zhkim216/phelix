@@ -1,90 +1,177 @@
-# allatom-design
+# Ligand-Conditioned Inverse Folding Model
 
-## Current progress for context
+Branch for developing ligand-conditioned inverse folding model with AlphaFold3 and allatom-design.
 
-I've finished a basic pass through data processing / loading for a train loop. The data preprocessing scripts are in [here](https://github.com/ProteinDesignLab/allatom-design/tree/rshuai/atomworks/allatom_design/data/preprocessing/atomworks) (with corresponding configs in under `allatom_design/configs/data/preprocessing/atomworks`). The basic pipeline is:
+Below are the instructions for setting up the codebase, container, and environment on Sherlock.
 
-1. `build_metadata_parquet.py` - Reads in CIFs and extracts per-chain info, including contacting chains for defining interfaces later
-2. `cluster_sequences.py` - reads in a parquet file from (1) and runs mmseqs2 clustering, adding cluster IDs as a column to the parquet and saving to `metadata_clustered.parquet`
-3. `preprocess_examples.py` - using a parquet from (1), loads in cifs, preprocesses them with `allatom_design/data/transform/preprocess.py` / `preprocess_transform()`, and saves examples out to a `cached_examples` dir.
+## Environment Setup
 
-In `atomworks_sd_dataset.py` [here] (https://github.com/ProteinDesignLab/allatom-design/blob/rshuai/atomworks/allatom_design/data/datasets/atomworks_sd_dataset.py):
+### 1. Clone Repository
 
-1. We load in the chain parquet with pandas, build a df describing interfaces, and determine sampling weights based on cluster sizes and chain types.
-2. Then, we load in a preprocessed example from the cache.
-3. Run the `sd_featurizer` ([here](https://github.com/ProteinDesignLab/allatom-design/blob/rshuai/atomworks/allatom_design/data/transform/sd_featurizer.py)) transforms to handle cropping and featurization into features that look a lot like boltz feats.
-
-I haven't implemented filtering by e.g. resolution yet, but should be able to somewhat mock the `PandasDataset` class from atomworks for this (we just have to handle the interface df properly as well).  Similar to my old code, the `atomworks_sd_dataset.py` configurations can be seen in `seq_denoiser.yaml` under data: [here](https://github.com/ProteinDesignLab/allatom-design/blob/rshuai/atomworks/allatom_design/configs/seq_denoiser/seq_denoiser.yaml)
-
-
-## Environment setup
-
-### Apptainer
-See `scripts/sherlock_install.sh` for a script to install the `uv` environment into your `$SCRATCH` using the apptainer image. Then, for all future runs, just set the environment variables and launch using the apptainer, and you should be good to go.
-
-Environment variables:
-```bash
-export IMG="$GROUP_HOME/containers/pytorch_25.08.sif"
-export REPO_DIR="/home/users/rshuai/code/allatom-design"  # change this to your own repo path
-export ENV_DIR="$SCRATCH/envs"
-```
-
-To test that the environment is set up correctly, you can do:
-```bash
-apptainer exec --nv --bind $HOME,$SCRATCH,$GROUP_HOME,$REPO_DIR,$ENV_DIR \
-  $IMG \
-  bash -lc 'source '"$ENV_DIR"'/allatom_design/bin/activate && cd '"$REPO_DIR"' && python -c "import torch; print(torch.__version__, torch.cuda.is_available())"'
-```
-
-For example, to run an interactive session within the apptainer, make sure the corresponding environment variables are set, and you can do:
+Clone the repository and checkout the correct branch:
 
 ```bash
-apptainer exec --nv \
-  --bind $HOME,$SCRATCH,$GROUP_HOME,$REPO_DIR,$ENV_DIR \
-  $IMG \
-  bash -lc 'source '"$ENV_DIR"'/allatom_design/bin/activate && cd '"$REPO_DIR"' && exec bash --noprofile --norc -i'
+# Navigate to home directory
+mkdir -p $HOME/code
+cd $HOME/code
+
+# Clone the repository
+git clone https://github.com/ProteinDesignLab/allatom-design.git
+
+# Navigate to the project directory
+cd allatom-design
+
+# Checkout the jinho/af3ppg branch
+git checkout jinho/af3ppg
+```
+
+### 2. Install UV Package Manager
+
+Install UV if not already installed:
+
+```bash
+# Install UV using curl
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or using pip
+pip install uv
+
+# Verify installation
+uv --version
+```
+
+### 3. Create Virtual Environment
+
+Create a UV virtual environment in your `$SCRATCH` directory:
+
+```bash
+# Create venv directory
+mkdir -p $SCRATCH/venv
+
+# Create af3ad virtual environment
+cd $SCRATCH/venv
+uv venv af3ad --python 3.12
+
+# Activate the environment
+source $SCRATCH/venv/af3ad/bin/activate
+```
+
+### 4. Container Setup
+
+Copy the container to your `$SCRATCH/containers` directory:
+
+```bash
+mkdir -p $SCRATCH/containers
+cp /oak/stanford/groups/possu/jinho/containers/af3ad_base.sif $SCRATCH/containers
+```
+
+### 5. Update Environment Paths
+
+Modify the paths in `scripts/sherlock_scripts/jinho/setup/env_setup.sh` to match your directory structure.
+
+### 6. Update Script References
+
+In the following scripts:
+- `scripts/sherlock_scripts/jinho/setup/run_debugpy_sherlock.sh`
+- `scripts/sherlock_scripts/jinho/setup/run_in_container.sh`
+- `scripts/sherlock_scripts/jinho/setup/shell_in_container.sh`
+
+Replace:
+```bash
+source "/home/users/zhkim216/code/allatom-design/scripts/sherlock_scripts/jinho/setup/env_setup.sh"
+```
+
+With:
+```bash
+source "{YOUR_allatom-design-absolute-DIR}/scripts/sherlock_scripts/jinho/env_setup.sh"
+```
+
+### 7. Install Dependencies
+
+Start the container and install required packages:
+
+```bash
+cd $HOME/code/allatom-design
+bash ./scripts/sherlock_scripts/jinho/shell_in_container.sh
+```
+
+Inside the container shell:
+
+```bash
+cd $HOME/code/allatom-design/requirements_split
+
+# Upgrade setuptools and wheel
+uv pip install --upgrade setuptools wheel pip
+
+# Install PyTorch dependencies
+uv pip install -r uv-compatible-torch.txt --index-url https://download.pytorch.org/whl/cu126
+uv pip install -r uv-compatible-core.txt --no-deps
+
+# Install additional dependencies via pip
+python -m pip install -r pip-only-torch.txt --no-deps
+pip install -r pip-only-core.txt --no-deps
+
+# Atomworks dependencies (Todo: Integrate these into requirements.txt)
+uv pip install \
+"biotite>=1.3.0,<2" \
+"hydride>=1.2.3,<2" \
+"py3Dmol>=2.2.1,<3" \
+"pymol-remote>=0.0.5" \
+"pyarrow==17.0.0" \
+"cython>=3,<4" \
+"cytoolz>=0.12.3,<1" \
+"typer>=0.12.5,<1"
+
+uv pip install "openbabel-wheel==3.1.1.22"
+uv pip install pathspec
 ```
 
 
-If you need to submit an sbatch job, please ask GPT for help for now. I will look into writing a wrapper so you can do something like `submit_sbatch_in_apptainer.sh <sbatch_script_name>` to submit a job, but don't have time to do this right now.
+### 8. Install Editable Packages
 
-### Environment variables
-`atomworks` also requires you to set certain environment variables before running any script that imports it. Here's an example of my `launch.json` for debugging a random PDB.
+#### AlphaFold3
 
-Notice `PDB_MIRROR_PATH` and `CCD_MIRROR_PATH`. For `CCD_MIRROR_PATH`, you'll need to use `scripts/get_ccd_mirror.sh` to get that. If you want to run `cluster_sequences.py`, you'll also need mmseqs installed in `SOFTWARE_PATH`, which is called like `{os.environ['SOFTWARE_PATH']}/mmseqs/bin/mmseqs`
+Install AlphaFold3 in editable mode:
 
-```json
-      {
-        "name": "seq_des_single",
-           "type": "python",
-           "request": "launch",
-           "program": "/home/rshuai/research/huang_lab/allatom-design/allatom_design/eval/sampling/seq_des_single.py",
-           "args": [
-            "ckpt_path=/home/rshuai/research/huang_lab/allatom-design/out_dir/train_seq_denoiser/allatom_design/debug/checkpoints/ema/sd-step10-epoch00-ema0.99.ckpt",
-            "pdb_path=/home/rshuai/research/huang_lab/allatom-design/out_dir/hyejin_fix_chain_name/100_2_minimized.pdb",
-            "run_self_consistency_eval=false",
-            "sampling_cfg_overrides.batch_size=1",
-            "sampling_cfg_overrides.num_seqs_per_pdb=3",
-            "out_dir=out_dir/seq_des_single/debug_atomworks",
-            "struct_pred_cfg.model_name=boltz1",
-            "num_workers=1"
-           ],
-           "env": {
-               "SOFTWARE_PATH": "/media/scratch/software",
-               "PDB_MIRROR_PATH": "",
-               "CCD_MIRROR_PATH": "/media/scratch/datasets/ccd",
-             },
-           "console": "integratedTerminal",
-           "justMyCode": true
-      },
+```bash
+cd $HOME/code/allatom-design/alphafold3
+pip install -e . --no-deps
 ```
 
+> **Note:** Use `--unsafe-best-match` flag if needed for `cmake==4.1.0` compatibility
 
-### What I need help with (for Tianyu)
-I think the main challenge remaining is certain aspects of on-the-fly loading for sampling, and handling cif saving. I started with moving over `seq_des_single.py` for sampling on a single pdb/cif, but I haven't touched the actual `run_seq_des()` function from `seq_des_utils.py`.
+#### Atomworks
+cd $HOME/code/allatom-design/atomworks
+uv pip install -e . --no-deps
 
-I need help loading raw cifs and preprocessing them appropriately through `get_sd_batch()`, but I don't know how to with atomworks. Their dataloading at train time discards `auth_seq_id` at some deep point within their code, and I think it'd require copying over large parts of their code to modify. Alternatively I remember a recommendation in their code to use their `load_any()` in `io_utils` with `extra_fields=["all"]`, but not sure if that's the easiest way yet since it doesn't come with the necessary transforms (in training, we need `preprocess_transform()` followed by `sd_featurizer()`).
+#### Allatom Design
 
-And cif saving also seems a little tough. Their main function only takes in biotite-like atomarrays, so if you change the sequence / restype during seq design, you need to manually handle which atoms to save. Extra complicated when trying to condition on stuff, or eventually for handling residue indices for scaffolding. The simplifying assumption I've made for sequence design before is that the model only sees ground truth for tokens specified as 1 in `seq_cond_mask` and atoms specified as 1 in `atom_cond_mask` at sampling time, so that's what we use to save coordinates.
+Before installing allatom_design, clean any existing installation (if present):
 
-Maybe less important, but I also noticed that after train-time cropping, cif saving gets a little glitchy, where the SEQRES does not line up with the label seq id, so PyMOL renders it strangely by reading the first e.g. 21 unresolved residues from SEQRES, then reading the residue identities from the actual structure, causing a duplication of the first few residues.
+```bash
+# Optional: Remove existing egg-info if present
+rm -rf allatom_design.egg-info
+pip cache purge
+```
+
+Install allatom_design in editable mode:
+
+```bash
+cd $HOME/code/allatom-design
+pip install -e . --no-deps
+```
+
+## Running the Container
+
+To start an interactive shell session in the container:
+
+```bash
+cd $HOME/code/allatom-design
+bash ./scripts/sherlock_scripts/jinho/shell_in_container.sh
+```
+
+## Troubleshooting
+
+- If you encounter issues with package installations, ensure all dependency files are present in the repository
+- For container-related issues, verify that the `.sif` file was copied correctly to your `$SCRATCH/containers` directory
+- Check that all paths in the setup scripts point to your actual directory locations
