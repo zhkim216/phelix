@@ -49,7 +49,8 @@ python allatom_design/train_seq_denoiser.py --config-path configs_local/seq_deno
 - **JAX**: 0.4.34+cuda12
 - **Lightning**: Latest
 - **AlphaFold3**: Installed in editable mode
-- **Others**: mashumaro, torch-cluster, torch-geometric, nglview, biotite, etc.
+- **Allatom-design**: core dependencies (mashumaro, torch-cluster, torch-geometric, nglview, pandas, seaborn, matplotlib, torchtyping, einops, biopython, ihm, modelcif)
+- **Extras**: biotite, hydride, py3Dmol, pymol-remote, pyarrow==17.0.0, cython, cytoolz, typer, openbabel-wheel, pathspec
 
 ### System Tools
 - **HMMER**: 3.4 (with seq_limit patch applied)
@@ -67,6 +68,10 @@ export JAX_LOG_COMPILES=1
 export TORCH_COMPILE=0
 export PATH="/home/possu/jinho/hmmer/bin:$PATH"
 ```
+
+## Atomworks Installation
+
+The script `install_af3ad_desktop.sh` installs the `atomworks` package from the `atomworks` directory in editable mode (`-e .`) while skipping dependencies (`--no-deps`). This allows source changes to take effect immediately during development.
 
 ## Key Changes Made
 

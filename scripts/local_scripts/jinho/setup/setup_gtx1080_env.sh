@@ -4,7 +4,7 @@
 echo "=== GTX1080 (Pascal Architecture) Environment Setup ==="
 
 # Activate virtual environment
-source ~/venv/af3ppg_desktop/bin/activate
+source ~/venv/af3ad_desktop/bin/activate
 
 # XLA settings for GTX1080 compatibility (REQUIRED!)
 # CC 6.1 (Pascal) has similar issues to CC 7.x, so we apply the same workaround
