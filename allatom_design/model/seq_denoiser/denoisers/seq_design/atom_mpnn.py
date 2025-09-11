@@ -5,7 +5,6 @@ from typing import Optional, Union
 import numpy as np
 import torch
 import torch.nn as nn
-from boltz.model.modules.utils import LinearNoBias
 from omegaconf import DictConfig
 from torch.nn import functional as F
 from torchtyping import TensorType

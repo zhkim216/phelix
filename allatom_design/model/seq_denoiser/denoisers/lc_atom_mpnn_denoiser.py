@@ -24,7 +24,7 @@ from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn import \
 from chroma.layers import complexity
 
 
-class AtomMPNNDenoiser(BaseSeqDenoiser):
+class LCAtomMPNNDenoiser(BaseSeqDenoiser):
     def __init__(self,
                  cfg: DictConfig,
                  sigma_data: tuple[TensorType[(), float], TensorType[(), float]]):

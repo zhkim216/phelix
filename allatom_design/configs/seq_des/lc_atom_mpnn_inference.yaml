@@ -1,0 +1,48 @@
+defaults:
+  - _self_
+
+batch_size: 16
+num_seqs_per_pdb: 1
+verbose: true
+num_workers: 8  # number of workers for data loading
+
+# Sequence design options
+use_potts_sampling: true
+
+skip_sampling: false  # if true, skip sampling and just return potts parameters
+save_potts_params: false
+
+omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
+noise_labels: null  # per-residue noise labels, float for same noise for each residue  # TODO: implement user-provided per-residue noise labels
+add_noise: false  # add noise equal to noise_labels to the input backbone
+t: null  # timestep to condition on for chroma polymer diffusion
+
+# Ligand-conditioned sequence design options
+ligand_conditioning: false  # if true, also sample ligand pocket residue masks
+ligand_pocket_dist_cutoff: 5.0  # distance cutoff for the ligand pocket
+
+# Ablation options
+use_protein_only: false  # only condition on protein for sequence design
+save_protein_only: false  # save CIFs with only protein sequence
+
+potts_sampling_cfg:
+  regularization: "LCP"
+  potts_sweeps: 500
+  potts_proposal: "dlmc"
+  potts_temperature: 0.01  # this is the default in Chroma
+  rejection_step: false
+  potts_only_cond: false  # only condition on sequence in the potts model
+
+  # add gaussian noise to inputs
+  noise_std: 0.0
+
+mlm_sampling_cfg:
+  num_steps: 50
+  temperature: 0.1
+  aatype_decoding_order_mode: "random"
+
+  timestep_schedule:
+    num_steps: ${mlm_sampling_cfg.num_steps}
+    mode: "linear"
+    t_start: 0.0
+    t_end: 1.0

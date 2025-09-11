@@ -1,6 +1,7 @@
 import json
 import logging
 import random
+import time
 from pathlib import Path
 from typing import Literal, override
 
@@ -10,7 +11,7 @@ import lightning as L
 import numpy as np
 import pandas as pd
 import torch
-from atomworks.ml.common import generate_example_id
+from atomworks.ml.example_id import generate_example_id
 from atomworks.ml.datasets.datasets import BaseDataset
 from atomworks.ml.datasets.parsers import GenericDFParser
 from atomworks.ml.utils.io import read_parquet_with_metadata
@@ -134,31 +135,43 @@ class SDDataset(BaseDataset):
         """
         Processes the chain dataframe. Adds chain counts info and sampling weights, and applies filters.
         """
-        # Read in chain parquet
+        
+        # Read in chain parquet        
         chain_df = read_parquet_with_metadata(self.cfg.parquet_path)
+        
         chain_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
         chain_df["q_pn_unit_contacting_pn_unit_iids"] = chain_df["q_pn_unit_contacting_pn_unit_iids"].apply(json.loads)
-
-        # Load in validation IDs and hold out based on phase. Case insensitive, no extension.
+    
+        # Load in validation IDs and hold out based on phase. Case insensitive, no extension.    
         with open(self.cfg.validation_ids_txt, "r") as f:
             logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_txt}...")
             val_split = {x.lower() for x in f.read().splitlines()}
         chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
         chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"
         chain_df = chain_df[chain_df["phase"] == self.phase]
-
+        
+        if self.cfg.debug:
+            chain_df = chain_df.iloc[:self.cfg.debug_num_rows]
+        
         # Add chain counts info and sampling weights
+        if self.cfg.debug: 
+            t0 = time.perf_counter()
+        # Todo: faster way for add_chain_counts_info
         chain_df = add_chain_counts_info(chain_df,
                                          chain_type_cols=["q_pn_unit_type"],
-                                         seq_length_cols=["q_pn_unit_sequence_length"])
+                                         seq_length_cols=["q_pn_unit_sequence_length"])        
+        if self.cfg.debug:
+            t1 = time.perf_counter()
+            print(f"{t1-t0}s passed in add_chain_counts_info with {self.cfg.debug_num_rows} rows")
         chain_df = add_sampling_weights_info(chain_df,
                                              alphas=self.cfg.sampling_weights["alphas"],
                                              beta=self.cfg.sampling_weights["betas"]["beta_chain"],
                                              cluster_cols=["q_pn_unit_cluster_id"])
-
+        
         # Apply chain filters
         filters = self.cfg.train_filters.chain if self.phase == "train" else self.cfg.val_filters.chain
         chain_df = self._apply_filters(filters, chain_df)
+    
 
         return chain_df
 
@@ -166,16 +179,18 @@ class SDDataset(BaseDataset):
     def _process_interface_df(self) -> pd.DataFrame:
         """
         Processes the interface dataframe based on the filtered chain dataframe. Adds chain counts info and sampling weights.
-        """
+        """        
         interface_df = build_interface_df(self.chain_df, dataset_name=Path(self.cfg.parquet_path).parent.name)
+    
         interface_df = add_chain_counts_info(interface_df,
                                              chain_type_cols=["q_pn_unit_type_1", "q_pn_unit_type_2"],
                                              seq_length_cols=["q_pn_unit_sequence_length_1", "q_pn_unit_sequence_length_2"])
+                
         interface_df = add_sampling_weights_info(interface_df,
                                                  alphas=self.cfg.sampling_weights["alphas"],
                                                  beta=self.cfg.sampling_weights["betas"]["beta_interface"],
                                                  cluster_cols=["q_pn_unit_cluster_id_1", "q_pn_unit_cluster_id_2"])
-
+        
         return interface_df
 
 
@@ -431,6 +446,7 @@ def add_chain_counts_info(df: pd.DataFrame, chain_type_cols: list[str], seq_leng
     """
     Add chain type and sequence length columns to the dataframe.
     Modifies the dataframe in place and returns it.
+    # TODO (JH): faster way?
     """
     # Compute chain type counts
     chain_count_cols = ["n_prot", "n_nuc", "n_ligand", "n_peptide", "is_loi"]

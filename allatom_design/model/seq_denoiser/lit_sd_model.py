@@ -78,7 +78,7 @@ class LitSeqDenoiser(L.LightningModule):
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
 
         # eval seq design over discrete sequence noise
-        if self.model.task in ["seq_des"]:
+        if self.model.task in ["seq_des", "lc_seq_des"]:
             aux_t = defaultdict(list)
             for eval_t in self.cfg.eval.eval_timesteps:
                 B = batch["token_pad_mask"].shape[0]

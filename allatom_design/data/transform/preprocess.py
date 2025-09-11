@@ -1,5 +1,5 @@
 
-from atomworks.io.constants import (AF3_EXCLUDED_LIGANDS, STANDARD_AA,
+from atomworks.constants import (AF3_EXCLUDED_LIGANDS, STANDARD_AA,
                                     STANDARD_DNA, STANDARD_RNA)
 from atomworks.ml.transforms.atom_array import (AddGlobalAtomIdAnnotation,
                                                 AddGlobalTokenIdAnnotation,
