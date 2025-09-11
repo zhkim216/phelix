@@ -1,11 +1,12 @@
+# Wandb configuration
 wandb:
   no_wandb: false  # Disable wandb logging
-  project: "ligand_seq_des"  # Wandb project name
+  project: "debug_ligand_seq_des"  # Wandb project name
   wandb_id: "zhkim216"  # Wandb username
-  group: null # Wandb group name
+  group: "debug" # Wandb group name
 
 # Outputs
-out_dir: "/scratch/users/zhkim216/out_dir/train_seq_denoiser"  # Output path for trained models
+out_dir: "/scratch/users/zhkim216/out_dir/debug_seq_denoiser"  # Output path for trained models
 exp_name: null  # Wandb exp name
 
 # Run settings
@@ -33,7 +34,7 @@ trainer:
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
-  check_val_every_n_epoch: 50  # How often to run validation
+  check_val_every_n_epoch: 1  # How often to run validation
 
 # Resuming training options
 resume:
@@ -98,7 +99,7 @@ data:
 # Model options
 defaults:
   - _self_
-  - denoiser: lc_atom_mpnn
+  - denoiser: debug_lc_atom_mpnn
   - mask_selector: mask_selector
 
 model:

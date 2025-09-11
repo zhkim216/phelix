@@ -34,6 +34,8 @@ class SDLoss(nn.Module):
         # Define losses based on task
         if self.task == "seq_des":
             self.loss_keys = {"seq_loss", "potts_composite_loss", "potts_composite_loss_msa"}
+        elif self.task == "lc_seq_des":
+            self.loss_keys = {"seq_loss", "potts_composite_loss", "lp_seq_loss"}
         else:
             raise ValueError(f"Unrecognized task: {self.task}")
 
@@ -58,6 +60,19 @@ class SDLoss(nn.Module):
             aux["seq_loss"] = masked_cross_entropy(outputs["seq_logits"], target_restype, seq_loss_mask,
                                                    seq_loss_cfg=self.cfg.seq_loss)
             aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], target_restype, seq_loss_mask).mean().detach().clone()
+            
+            if self.task == "lc_seq_des": #! (JH) changed            
+                lp_seq_loss_mask = seq_loss_mask * outputs["ligand_pocket_token_mask"] 
+                
+                # Select only samples that have ligands
+                has_ligand = lp_seq_loss_mask.sum(dim=-1) > 0
+                
+                # if has_ligand.any():
+                #     lp_seq_acc = masked_seq_accuracy(outputs["seq_logits"], target_res_type, lp_seq_loss_mask)
+                #     lp_seq_acc = lp_seq_acc[has_ligand]                
+                #     aux_monitor["lp_seq_acc"] = lp_seq_acc.mean().detach().clone()
+                # else:
+                #     aux_monitor["lp_seq_acc"] = torch.tensor(0.0, device=lp_seq_loss_mask.device)
 
             if outputs.get("potts_decoder_aux") is not None:
                 potts_decoder_aux = outputs["potts_decoder_aux"]

@@ -1,11 +1,12 @@
+# Wandb configuration
 wandb:
   no_wandb: false  # Disable wandb logging
-  project: "ligand_seq_des"  # Wandb project name
+  project: "debug_ligand_seq_des"  # Wandb project name
   wandb_id: "zhkim216"  # Wandb username
-  group: null # Wandb group name
+  group: "debug" # Wandb group name
 
 # Outputs
-out_dir: "/scratch/users/zhkim216/out_dir/train_seq_denoiser"  # Output path for trained models
+out_dir: "/home/possu/jinho/out_dir/debug_seq_denoiser"  # Output path for trained models
 exp_name: null  # Wandb exp name
 
 # Run settings
@@ -20,9 +21,10 @@ finetuning:
 
 train:
   seed: 0
-  batch_size: 8
+  batch_size: 4
   compile_model: false  # Compile the model before running, speeds up training a lot
   compile_backend: inductor
+  debug: true
 
 # Some trainer options
 trainer:
@@ -33,7 +35,7 @@ trainer:
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
-  check_val_every_n_epoch: 50  # How often to run validation
+  check_val_every_n_epoch: 2  # How often to run validation
 
 # Resuming training options
 resume:
@@ -42,35 +44,37 @@ resume:
   # overrides: {}  # add any specific overrides to apply to the config
 
 data:
-  pdb_path: /media/scratch/datasets/atomworks_debug
+  pdb_path: /home/possu/jinho/datasets/atomworks
   parquet_path: ${data.pdb_path}/metadata_clustered.parquet
   validation_ids_txt: ${data.pdb_path}/splits/validation_ids.txt  # Boltz val set ids. Filtering is case insensitive, no extension.
+  debug: ${train.debug}
+  debug_num_rows: 10000 #! For debugging
 
   sampling_weights:
     alphas:
-      a_prot: 1.0
+      a_prot: 3.0
       a_peptide: 0.0
       a_nuc: 0.0
-      a_ligand: 0.0
+      a_ligand: 1.0
       a_loi: 0.0
     betas:
       beta_chain: 1.0
-      beta_interface: 0.0
+      beta_interface: 1.0
 
   train_filters:
     chain:
-      - "num_polymer_pn_units < 50"
+      - "num_polymer_pn_units < 4" #! DEBUG
       - "deposition_date <= '2021-09-30'"
       - "resolution < 9.0"
-      - "16 < q_pn_unit_sequence_length < 2048"
+      - "16 < q_pn_unit_sequence_length < 256" #! DEBUG
       - "n_prot > 0"
 
   val_filters:
     chain:
-      - "num_polymer_pn_units < 50"
+      - "num_polymer_pn_units < 4" #! DEBUG
       - "'2021-09-30' < deposition_date <= '2023-01-13'"  # Boltz validation set dates.
       - "resolution < 4.5"
-      - "16 < q_pn_unit_sequence_length < 2048"
+      - "16 < q_pn_unit_sequence_length < 256" #! DEBUG
       - "n_prot > 0"
 
   # CIF parser args. Not used during training since we've already cached the CIFs.
@@ -87,7 +91,7 @@ data:
     max_tokens: 512
     max_atoms: 4608
     crop_center_cutoff_distance: 15.0
-    crop_spatial_p: 0.0
+    crop_spatial_p: 0.5
 
   samples_per_epoch: 50000
   batch_size: ${train.batch_size}
@@ -98,7 +102,7 @@ data:
 # Model options
 defaults:
   - _self_
-  - denoiser: lc_atom_mpnn
+  - denoiser: debug_lc_atom_mpnn
   - mask_selector: mask_selector
 
 model:
@@ -124,7 +128,7 @@ loss:
   loss_weights:
     seq_loss: 1.0
     potts_composite_loss: 1.0
-    potts_composite_loss_msa: 0.0
+    potts_composite_loss_msa: 0.0 
 
   # loss configs
   seq_loss:
@@ -135,6 +139,8 @@ loss:
     label_smoothing: 0.1
     per_token_avg: false
     compile_msa_loss: false
+  
+  ligand_pocket_dist_cutoff: 5.0 # distance cutoff for lc_pocket_seq_loss
 
 optim:
   optimizer: "noam"
@@ -161,4 +167,4 @@ checkpointing:
 
 hydra:
   run:
-    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
+    dir: /home/possu/jinho/hydra_outputs

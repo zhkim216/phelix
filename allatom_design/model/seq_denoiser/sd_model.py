@@ -12,6 +12,8 @@ from allatom_design.data.mask_selector import MaskSelector
 from allatom_design.data.pdb_utils import *
 from allatom_design.model.seq_denoiser.denoisers.atom_mpnn_denoiser import \
     AtomMPNNDenoiser
+from allatom_design.model.seq_denoiser.denoisers.lc_atom_mpnn_denoiser import \
+    LCAtomMPNNDenoiser
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 
@@ -59,6 +61,9 @@ class SeqDenoiser(nn.Module):
             # Sample sequence and atom conditioning masks
             batch["seq_cond_mask"] = self.mask_selector.sample_seq_cond_mask(batch, t)  # 1 if we should condition on the restype, 0 otherwise
             batch["atom_cond_mask"] = self.mask_selector.sample_atom_cond_mask(batch)  # 1 if we should condition on the atom, 0 otherwise
+            
+            if self.task == "lc_seq_des": #! (JH) changed
+                batch["ligand_pocket_token_mask"] = self.mask_selector.sample_ligand_pocket_mask(batch)  # 1 for residues in ligand pocket, 0 otherwise
 
             # Ensure the conditioning masks only contain non-pad, resolved entries
             batch["seq_cond_mask"] = batch["seq_cond_mask"] * batch["token_pad_mask"] * batch["token_resolved_mask"]
@@ -137,6 +142,8 @@ def get_denoiser(cfg: DictConfig,
     """
     if cfg.name == "atom_mpnn":
         return AtomMPNNDenoiser(cfg, sigma_data)
+    elif cfg.name == "lc_atom_mpnn":
+        return LCAtomMPNNDenoiser(cfg, sigma_data)
     else:
         raise ValueError(f"Unknown denoiser: {cfg.name}")
 

@@ -1,0 +1,44 @@
+name: lc_atom_mpnn
+
+defaults:
+  - _self_
+  - interpolant: edm_interpolant
+
+task: ${model.task}
+
+# Backbone noise options
+augment_eps: 0.3
+per_residue_eps: false
+max_eps: null  # for per_residue_eps, samples from half-normal truncated to this value
+
+mpnn:
+  n_channel: 128
+  k_neighbors: 48
+  n_layers: 3
+  dropout_p: 0.1
+  use_atom_encoder: true
+
+  atom_encoder:
+    token_n_channel: ${denoiser.mpnn.n_channel}
+    atom_s: 64
+    atom_z: 16
+    atom_feature_dim: 386
+    k_atom_neighbors: 16
+    n_layers: 2
+    dropout_p: 0.1
+
+  token_features:
+    ca_only: false
+    k_neighbors: ${denoiser.mpnn.k_neighbors}
+    num_rbf: 16
+    num_positional_embeddings: 16
+    edge_n_channel: ${denoiser.mpnn.n_channel}
+    token_bonds_masking: true 
+
+  potts:
+    k_neighbors_potts: 48
+    max_dist_potts: null
+    use_potts: true
+    parameterization: "factor"
+    num_factors: null
+    symmetric_J: true
