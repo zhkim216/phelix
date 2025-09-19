@@ -1,6 +1,4 @@
-"""
-General utility functions for working with CIF files in Biotite.
-"""
+"""General utility functions for working with CIF files in Biotite."""
 
 __all__ = ["get_structure", "load_any", "read_any", "to_cif_buffer", "to_cif_file", "to_cif_string"]
 
@@ -36,8 +34,10 @@ CIF_LIKE_EXTENSIONS = {".cif", ".pdb", ".bcif", ".cif.gz", ".pdb.gz", ".bcif.gz"
 
 
 def _get_logged_in_user() -> str:
-    """
-    Get the logged in user.
+    """Get the logged in user.
+
+    Returns:
+        The username of the logged in user, or "unknown_user" if unavailable.
     """
     try:
         return os.getlogin()
@@ -57,19 +57,20 @@ def load_any(
     """Convenience function for loading a structure from a file or buffer.
 
     Args:
-        - file_or_buffer: Path to the file or buffer to load the structure from.
-        - file_type: Type of the file to load. If None, it will be inferred.
-        - extra_fields: List of extra fields to include as AtomArray annotations.
+        file_or_buffer: Path to the file or buffer to load the structure from.
+        file_type: Type of the file to load. If None, it will be inferred.
+        extra_fields: List of extra fields to include as AtomArray annotations.
             If "all", all fields in the 'atom_site' category of the file will be included.
-        - include_bonds: Whether to include bonds in the structure.
-        - model: The model number to use for loading the structure. If None, all models will be loaded.
-        - altloc: The altloc ID to use for loading the structure.
+        include_bonds: Whether to include bonds in the structure.
+        model: The model number to use for loading the structure. If None, all models will be loaded.
+        altloc: The altloc ID to use for loading the structure.
 
     Returns:
-        AtomArrayStack: The loaded structure with the specified fields and assumptions.
+        The loaded structure with the specified fields and assumptions.
 
-    Reference:
-        Biotite documentation (https://www.biotite-python.org/apidoc/biotite.structure.io.pdbx.get_structure.html#biotite.structure.io.pdbx.get_structure)
+    References:
+        `Biotite Structure I/O <https://www.biotite-python.org/apidoc/biotite.structure.io.pdbx.get_structure.html#biotite.structure.io.pdbx.get_structure>`_
+        `mmCIF Format Specification <https://mmcif.wwpdb.org/dictionaries/mmcif_pdbx_v50.dic/>`_
     """
     file_obj = read_any(file_or_buffer, file_type=file_type)
     return get_structure(
@@ -87,17 +88,17 @@ def _add_bonds(
     add_bond_types_from_struct_conn: list[str] = ["covale"],
     fix_bond_types: bool = True,
 ) -> AtomArray | AtomArrayStack:
-    """
-    Add bonds to the AtomArray and filter by a given altloc strategy.
+    """Add bonds to the AtomArray and filter by a given altloc strategy.
+
     Avoids the issue where spurious bonds are added due to uninformative label_seq_ids.
 
     Args:
-        - atom_array: The AtomArray to add bonds to. Must contain `auth_seq_id` annotation.
-        - cif_block: The CIFBlock containing the structure data.
-        - add_bond_types_from_struct_conn (list, optional): A list of bond types to add to the structure
+        atom_array: The AtomArray to add bonds to. Must contain `auth_seq_id` annotation.
+        cif_block: The CIFBlock containing the structure data.
+        add_bond_types_from_struct_conn: A list of bond types to add to the structure
             from the `struct_conn` category. Defaults to `["covale"]`. This means that we will only
             add covalent bonds to the structure (excluding metal coordination and disulfide bonds).
-        - fix_bond_types (bool, optional): Whether to correct for nucleophilic additions on atoms involved in inter-residue bonds.
+        fix_bond_types: Whether to correct for nucleophilic additions on atoms involved in inter-residue bonds.
 
     Returns:
         AtomArray | AtomArrayStack: The AtomArray or AtomArrayStack with bonds and filtered by altloc.
@@ -209,7 +210,7 @@ def get_structure(
         AtomArray | AtomArrayStack: The loaded structure with the specified fields and assumptions.
 
     Reference:
-        Biotite documentation (https://www.biotite-python.org/apidoc/biotite.structure.io.pdbx.get_structure.html#biotite.structure.io.pdbx.get_structure)
+        `Biotite documentation <https://www.biotite-python.org/apidoc/biotite.structure.io.pdbx.get_structure.html#biotite.structure.io.pdbx.get_structure>`_
     """
     tmp_altloc = altloc if altloc in {"first", "occupancy", "all"} else "all"
 
@@ -568,6 +569,12 @@ def _to_cif_or_bcif(
 
     if not include_nan_coords:
         structure = ta.remove_nan_coords(structure)
+
+    if include_bonds and structure.bonds is not None:
+        # TODO: Switch to using the `convert_bond_type` method once we upgrade to Biotite v1.4.0
+        # structure.bonds.convert_bond_type(struc.bonds.BondType.COORDINATION, struc.bonds.BondType.SINGLE)
+        mask = structure.bonds._bonds[:, 2] == struc.bonds.BondType.COORDINATION
+        structure.bonds._bonds[mask, 2] = struc.bonds.BondType.SINGLE
 
     pdbx.set_structure(cif_file, structure, data_block=id, include_bonds=include_bonds, extra_fields=extra_fields)
 
