@@ -54,7 +54,8 @@ RDKIT_HYBRIDIZATION_TO_INT: Final[dict[Chem.rdchem.HybridizationType, int]] = {
 """
 Mapping from RDKit hybridization types to integers.
 
-Reference: https://www.rdkit.org/docs/cppapi/classRDKit_1_1Atom.html#a58e40e30db6b42826243163175cac976
+Reference:
+    `RDKit Atom Documentation <https://www.rdkit.org/docs/cppapi/classRDKit_1_1Atom.html#a58e40e30db6b42826243163175cac976>`_
 """
 
 RDKIT_BOND_TYPE_TO_BIOTITE: Final[dict[tuple[Chem.BondType, bool], struc.bonds.BondType]] = {
@@ -64,6 +65,7 @@ RDKIT_BOND_TYPE_TO_BIOTITE: Final[dict[tuple[Chem.BondType, bool], struc.bonds.B
     (Chem.BondType.DOUBLE, False): struc.bonds.BondType.DOUBLE,
     (Chem.BondType.TRIPLE, False): struc.bonds.BondType.TRIPLE,
     (Chem.BondType.QUADRUPLE, False): struc.bonds.BondType.QUADRUPLE,
+    (Chem.BondType.DATIVE, False): struc.bonds.BondType.COORDINATION,
     (Chem.BondType.SINGLE, True): struc.bonds.BondType.AROMATIC_SINGLE,
     (Chem.BondType.DOUBLE, True): struc.bonds.BondType.AROMATIC_DOUBLE,
     (Chem.BondType.TRIPLE, True): struc.bonds.BondType.AROMATIC_TRIPLE,
@@ -82,6 +84,7 @@ BIOTITE_BOND_TYPE_TO_RDKIT: Final[dict[struc.bonds.BondType, tuple[Chem.BondType
     struc.bonds.BondType.DOUBLE: (Chem.BondType.DOUBLE, False),
     struc.bonds.BondType.TRIPLE: (Chem.BondType.TRIPLE, False),
     struc.bonds.BondType.QUADRUPLE: (Chem.BondType.QUADRUPLE, False),
+    struc.bonds.BondType.COORDINATION: (Chem.BondType.DATIVE, False),
     # NOTE: We map aromatics to single/double/triple instead of Chem.BondType.AROMATIC
     #       because the PDB specified bond-order (from a kekulized form of the molecule)
     #       is lost when we map to aromatic, which can lead to incorrect bond-order
@@ -108,8 +111,8 @@ class ChEMBLNormalizer:
     This is useful for `rescuing` molecules that failed to be sanitized by RDKit
     alone.
 
-    References:
-        - https://github.com/chembl/ChEMBL_Structure_Pipeline/blob/master/chembl_structure_pipeline/standardizer.py#L33C1-L73C15
+    Reference:
+        `ChEMBL Structure Pipeline <https://github.com/chembl/ChEMBL_Structure_Pipeline/blob/master/chembl_structure_pipeline/standardizer.py#L33C1-L73C15>`_
     """
 
     def __init__(self):
@@ -290,9 +293,9 @@ def fix_mol(
 
 
     References:
-        - https://www.rdkit.org/docs/RDKit_Book.html#molecular-sanitization
-        - https://github.com/chembl/ChEMBL_Structure_Pipeline/blob/master/chembl_structure_pipeline/standardizer.py
-        - https://github.com/datamol-io/datamol/blob/0312388b956e2b4eeb72d791167cfdb873c7beab/datamol/mol.py
+        `RDKit Molecular Sanitization <https://www.rdkit.org/docs/RDKit_Book.html#molecular-sanitization>`_
+        `ChEMBL Structure Pipeline <https://github.com/chembl/ChEMBL_Structure_Pipeline/blob/master/chembl_structure_pipeline/standardizer.py>`_
+        `datamol mol.py <https://github.com/datamol-io/datamol/blob/0312388b956e2b4eeb72d791167cfdb873c7beab/datamol/mol.py>`_
 
     """
     if not in_place:
@@ -379,8 +382,8 @@ def get_morgan_fingerprint_from_rdkit_mol(mol: Chem.Mol, *, radius: int = 2, n_b
         - ExplicitBitVect: The Morgan fingerprint for the input molecule.
 
     References:
-        - AF-3 Supplement
-        - https://greglandrum.github.io/rdkit-blog/posts/2023-01-18-fingerprint-generator-tutorial.html
+        AF-3 Supplement
+        `RDKit Fingerprint Generator Tutorial <https://greglandrum.github.io/rdkit-blog/posts/2023-01-18-fingerprint-generator-tutorial.html>`_
     """
     morgan_fingerprint_generator = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=n_bits)
     fingerprint = morgan_fingerprint_generator.GetFingerprint(mol)
