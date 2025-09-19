@@ -172,9 +172,6 @@ wandb/
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-/ideas/
-
-coding_practice/
 
 # AF3
 alphafold3/src/alphafold3/constants/converters/ccd.pickle
@@ -184,3 +181,7 @@ alphafold3/src/alphafold3/constants/converters/ccd.pickle
 
 # Debugging files & logs
 /debugging_local_output
+
+# Personal folders
+coding_practice/
+

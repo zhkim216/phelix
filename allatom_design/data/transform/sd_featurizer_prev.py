@@ -1,9 +1,3 @@
-"""
-(Jinho Kim) 2025-09-13
-Codes for featurizing the data for the seq denoiser.
-Adapted atomworks/src/atomworks/ml/pipelines/af3.py by Jinho Kim, for ligand-conditioned seq denoiser
-For details, see atomworks/src/atomworks/ml/pipelines/af3.py.
-"""
 
 from typing import Any, override
 
@@ -39,8 +33,6 @@ from atomworks.ml.utils.token import (apply_token_wise,
                                       get_af3_token_center_masks,
                                       get_af3_token_representative_masks,
                                       spread_token_wise)
-
-
 
 import allatom_design.data.const as const
 from allatom_design.data.transform.pad import pad_dim
@@ -102,7 +94,6 @@ def sd_featurizer(
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
     """
     # Featurization that must be done before cropping
-            
     featurization_transforms_pre_crop = [
         MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={
             aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_FRAME_ATOM_NAMES,

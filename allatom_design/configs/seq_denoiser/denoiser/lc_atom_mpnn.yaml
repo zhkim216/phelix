@@ -16,16 +16,15 @@ mpnn:
   k_neighbors: 48
   n_layers: 3
   dropout_p: 0.1
-  use_atom_encoder: true
-
-  atom_encoder:
-    token_n_channel: ${denoiser.mpnn.n_channel}
-    atom_s: 64
-    atom_z: 16
-    atom_feature_dim: 386
-    k_atom_neighbors: 16
-    n_layers: 2
-    dropout_p: 0.1
+  use_atom_encoder: false
+  # atom_encoder:
+  #   token_n_channel: ${denoiser.mpnn.n_channel}
+  #   atom_s: 64
+  #   atom_z: 16
+  #   atom_feature_dim: 386
+  #   k_atom_neighbors: 16
+  #   n_layers: 2
+  #   dropout_p: 0.1
 
   token_features:
     ca_only: false

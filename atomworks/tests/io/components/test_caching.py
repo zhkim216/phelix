@@ -4,7 +4,7 @@ import pytest
 
 from atomworks.io.parser import parse
 from atomworks.io.utils.testing import assert_same_atom_array
-from tests.io.conftest import get_pdb_path
+from atomworks.tests.io.conftest import get_pdb_path
 
 TEST_CASES = [
     "1A7J",  # Contains an unusual operation expression for assembly building
@@ -46,6 +46,7 @@ def test_caching(pdb_id: str, tmp_path):
         filename=path,
         build_assembly="all",
     )
+    print(tmp_path)
 
     # Load from the cache, and keep track of how long it takes
     def cached_parse():
