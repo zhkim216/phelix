@@ -224,7 +224,12 @@ def parse(
         assembly_info = ",".join(build_assembly) if isinstance(build_assembly, list | tuple) else build_assembly
 
         # ... construct the full cache file path
-        cache_file_path = cache_dir / args_hash / f"{Path(filename).stem}_assembly_{assembly_info}.pkl.gz"
+        _cache_filename = Path(filename).name
+        for suffix in Path(filename).suffixes: #! (JH) changed
+            _cache_filename = _cache_filename.replace(suffix, "")
+        
+        cache_file_path = cache_dir / args_hash / f"{_cache_filename}_assembly_{assembly_info}.pkl.gz"            
+        # cache_file_path = cache_dir / args_hash / f"{Path(filename).stem}_assembly_{assembly_info}.pkl.gz"
 
         # If we are loading from cache, try to load the result from the cache
         if load_from_cache:

@@ -664,6 +664,11 @@ class CropSpatialLikeAF3(CropTransformBase):
             query_pn_units = np.unique(atom_array.pn_unit_iid)
             logger.info(f"No query PN unit(s) provided for spatial crop. Randomly selecting from {query_pn_units}.")
 
+        # if data['ligand_info']['ligand_of_interest'] != []:
+        #     if data['chain_info'][data['query_pn_unit_iids'][0].split("_")[0]]['res_name'] == data['ligand_info']['ligand_of_interest']:
+        #         print(1)
+
+
         crop_info = crop_spatial_like_af3(
             atom_array=atom_array,
             query_pn_unit_iids=query_pn_units,
