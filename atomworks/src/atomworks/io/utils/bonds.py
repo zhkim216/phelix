@@ -333,8 +333,8 @@ def get_struct_conn_bonds(
         bonds (np.array[[int, int, struc.BondType]]): A List of bonds to be added to the atom array.
         leaving (np.ndarray): An array of indices of atoms that are leaving groups for bookkeeping.
 
-    References:
-        - https://mmcif.wwpdb.org/dictionaries/mmcif_pdbx_v50.dic/Items/_struct_conn.conn_type_id.html
+    Reference:
+        `struct_conn.conn_type_id <https://mmcif.wwpdb.org/dictionaries/mmcif_pdbx_v50.dic/Items/_struct_conn.conn_type_id.html>`_
     """
     # ... validate input
     invalid_bond_types = set(add_bond_types) - STRUCT_CONN_BOND_TYPES
@@ -811,6 +811,8 @@ def spoof_struct_conn_dict_from_string(bonds: list[tuple[str, str]]) -> dict[str
     would be named "C1", the second "C2", and so on.
 
     NOTE: We only support covalent bonds.
+
+    TODO: Use AtomSelection to parse the bond strings
 
     Args:
         bonds (list[tuple[str, str]]): A list of bond strings.

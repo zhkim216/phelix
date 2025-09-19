@@ -161,9 +161,8 @@ def build_af3_transform_pipeline(
         The pipeline includes steps for processing the structure, adding annotations,
         and generating features required for AF3-like predictions.
 
-    References:
-        - AlphaFold 3 Supplementary Information.
-          https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07487-w/MediaObjects/41586_2024_7487_MOESM1_ESM.pdf
+    Reference:
+        `AlphaFold 3 Supplementary Information <https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07487-w/MediaObjects/41586_2024_7487_MOESM1_ESM.pdf>`_
     """
 
     if (crop_contiguous_probability > 0 or crop_spatial_probability > 0) and not is_inference:
@@ -177,7 +176,7 @@ def build_af3_transform_pipeline(
     rf2aa_sequence_encoding = RF2AA_ATOM36_ENCODING
 
     transforms = [
-        AddData({"is_inference": is_inference, "run_confidence_head": run_confidence_head}),
+        AddData({"is_inference": is_inference, "run_confidence_head": run_confidence_head}), #! 
         RemoveHydrogens(),
         FilterToSpecifiedPNUnits(
             extra_info_key_with_pn_unit_iids_to_keep="all_pn_unit_iids_after_processing"
@@ -189,12 +188,12 @@ def build_af3_transform_pipeline(
         MaskPolymerResiduesWithUnresolvedFrameAtoms(),
         # NOTE: For inference, we must keep UNL to support ligands that are not in the CCD
         HandleUndesiredResTokens(undesired_res_tokens=undesired_res_names),  # e.g., non-standard residues
-        ConditionalRoute(
+        ConditionalRoute( #!
             condition_func=lambda data: data.get("is_inference", False),
             transform_map={
                 True: Identity(),
                 False: PadDNA(p_skip=pad_dna_p_skip) if pad_dna_p_skip > 0 else Identity(),
-            },
+            }, #? (JH) Don't understand what padDNA is for
         ),
         FlagAndReassignCovalentModifications(),
         FlagNonPolymersForAtomization(),

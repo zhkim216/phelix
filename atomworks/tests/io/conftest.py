@@ -2,7 +2,7 @@
 
 from atomworks.enums import ChainType
 from atomworks.io.utils.testing import get_pdb_path  # noqa: F401
-from tests.conftest import TEST_DATA_DIR
+from atomworks.tests.conftest import TEST_DATA_DIR
 
 TEST_DATA_IO = TEST_DATA_DIR / "io"
 

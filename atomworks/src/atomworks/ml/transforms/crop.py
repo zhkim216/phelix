@@ -99,8 +99,8 @@ def crop_contiguous_af2_multimer(iids: list[int | str], instance_lens: list[int]
             (iids) to crop masks (i.e. boolean arrays) indicating which tokens to keep.
 
     References:
-        - AF2 Multimer https://www.biorxiv.org/content/10.1101/2021.10.04.463034v2.full.pdf
-        - AF3 https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07487-w/MediaObjects/41586_2024_7487_MOESM1_ESM.pdf
+        `AF2 Multimer <https://www.biorxiv.org/content/10.1101/2021.10.04.463034v2.full.pdf>`_
+        `AF3 <https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07487-w/MediaObjects/41586_2024_7487_MOESM1_ESM.pdf>`_
 
     Example:
         >>> iids = [1, 2, 3]
@@ -185,7 +185,6 @@ def get_spatial_crop_center(
     Sample a crop center from a spatial region of the atom array.
 
     Implements the selection of a crop center as described in AF3.
-    ```
         In this procedure, polymer residues and ligand atoms are selected that
         are within close spatial distance of an interface atom. The interface
         atom is selected at random from the set of token centre atoms (defined
@@ -195,7 +194,6 @@ def get_spatial_crop_center(
         provided (subsection 2.5), the reference atom is selected at random
         from interfacial token centre atoms that exist within this chain or
         interface.
-    ```
 
     Args:
         atom_array (AtomArray): The array containing atom information.
@@ -289,8 +287,8 @@ def get_spatial_crop_mask(
         crop_mask (np.ndarray): A boolean mask of shape (N,) where True indicates that the token is within the crop.
 
     References:
-        - AF2 Multimer https://www.biorxiv.org/content/10.1101/2021.10.04.463034v2.full.pdf
-        - AF3 https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07487-w/MediaObjects/41586_2024_7487_MOESM1_ESM.pdf
+        `AF2 Multimer <https://www.biorxiv.org/content/10.1101/2021.10.04.463034v2.full.pdf>`_
+        `AF3 <https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07487-w/MediaObjects/41586_2024_7487_MOESM1_ESM.pdf>`_
 
     Example:
         >>> coord = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [2.0, 2.0, 2.0], [3.0, 3.0, 3.0]])
@@ -663,6 +661,11 @@ class CropSpatialLikeAF3(CropTransformBase):
         else:
             query_pn_units = np.unique(atom_array.pn_unit_iid)
             logger.info(f"No query PN unit(s) provided for spatial crop. Randomly selecting from {query_pn_units}.")
+
+        # if data['ligand_info']['ligand_of_interest'] != []:
+        #     if data['chain_info'][data['query_pn_unit_iids'][0].split("_")[0]]['res_name'] == data['ligand_info']['ligand_of_interest']:
+        #         print(1)
+
 
         crop_info = crop_spatial_like_af3(
             atom_array=atom_array,
