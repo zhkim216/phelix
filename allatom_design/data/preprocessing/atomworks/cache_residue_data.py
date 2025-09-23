@@ -44,7 +44,7 @@ def main(cfg: DictConfig):
     # Create dataset directory + shard dir
     out_dir = Path(cfg.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    shard_dir = out_dir / "residue_data_shards"
+    shard_dir = out_dir / "cached_residue_data"
     shard_dir.mkdir(parents=True, exist_ok=True)
     
     # Only one shard writes the canonical config.yaml to avoid races
