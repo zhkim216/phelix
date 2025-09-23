@@ -16,6 +16,12 @@ cd "$BASE_DIR"
 # The container wrapper will load env_setup.sh itself
 WRAPPER=scripts/sherlock_scripts/jinho/setup/sbatch_container.sh
 
+# Simplest: num_shards = MAX - MIN + 1
+MIN=${SLURM_ARRAY_TASK_MIN:-0}
+MAX=${SLURM_ARRAY_TASK_MAX:-0}
+NUM_SHARDS=$(( MAX - MIN + 1 ))
+echo "[sbatch] NUM_SHARDS=$NUM_SHARDS (from array [$MIN-$MAX])"
+
 # Build the python command to run inside the container
 CMD=(
   allatom_design/data/preprocessing/atomworks/cache_residue_data.py
@@ -26,7 +32,7 @@ CMD=(
   ccd_dir=/scratch/users/zhkim216/datasets/ccd_mirror
   num_workers=${SLURM_CPUS_PER_TASK}
   shard_id=${SLURM_ARRAY_TASK_ID}
-  num_shards=100
+  num_shards=${NUM_SHARDS}
   n_trials=3
   timeout_offset=3.0
   timeout_slope=1.0
