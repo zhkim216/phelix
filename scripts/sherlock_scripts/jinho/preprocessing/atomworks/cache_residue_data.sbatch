@@ -13,12 +13,18 @@
 scontrol write batch_script $SLURM_JOB_ID /scratch/users/zhkim216/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 ## Load modules and set environment variables:
-ENV_DIR=/scratch/users/zhkim216/venv
-venv af3ad
+# Note: When using wrap_sbatch_in_container.sh, this is handled by the wrapper
+# source /scratch/users/zhkim216/venv/af3ad/bin/activate
 
 BASE_DIR=/home/users/zhkim216/code/allatom-design
 
 cd ${BASE_DIR}
+
+# Simplest: num_shards = MAX - MIN + 1
+MIN=${SLURM_ARRAY_TASK_MIN:-0}
+MAX=${SLURM_ARRAY_TASK_MAX:-0}
+NUM_SHARDS=$(( MAX - MIN + 1 ))
+echo "[sbatch] NUM_SHARDS=$NUM_SHARDS (from array [$MIN-$MAX])"
 
 # Run script
 python3 allatom_design/data/preprocessing/atomworks/cache_residue_data.py \
@@ -29,7 +35,7 @@ python3 allatom_design/data/preprocessing/atomworks/cache_residue_data.py \
     ccd_dir=/scratch/users/zhkim216/datasets/ccd_mirror \
     num_workers=${SLURM_CPUS_PER_TASK} \
     shard_id=${SLURM_ARRAY_TASK_ID} \
-    num_shards=100 \
+    num_shards=${NUM_SHARDS} \
     n_trials=3 \
     timeout_offset=3.0 \
     timeout_slope=1.0 \
