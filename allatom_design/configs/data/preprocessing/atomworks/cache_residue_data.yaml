@@ -1,7 +1,7 @@
 # Basic settings
-seed: 216
-out_dir: /home/possu/jinho/allatom-design/atomworks_test/250923/residue_cache
-ccd_dir: /home/possu/jinho/datasets/ccd_mirror
+seed: 6
+out_dir: /scratch/users/zhkim216/datasets/atomworks/cached_residue_data
+ccd_dir: /scratch/users/zhkim216/datasets/ccd_mirror
 
 # Parallel processing
 num_workers: 8
@@ -15,7 +15,7 @@ num_shards: 16
 n_trials: 3
 timeout_offset: 3.0
 timeout_slope: 1.0
-num_conformers: 10
+num_conformers: 50
 
 generate_conformers_kwargs:
   optimize: true
