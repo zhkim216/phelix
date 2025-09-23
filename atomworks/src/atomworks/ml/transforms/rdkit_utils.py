@@ -176,7 +176,7 @@ def generate_conformers(
 
     if optimize:
         mol = optimize_conformers(mol, **uff_optimize_kwargs)
-
+            
     mol = remove_hydrogens(mol) if hydrogen_policy == "remove" else mol
     return mol
 
@@ -203,6 +203,10 @@ def optimize_conformers(
     Returns:
         Mol: The optimized RDKit molecule.
     """
+    
+    if not _has_explicit_hydrogen(mol):
+        mol = add_hydrogens(mol)
+        
     success = AllChem.UFFOptimizeMoleculeConfs(
         mol,
         numThreads=numThreads,
@@ -460,6 +464,7 @@ def ccd_code_to_rdkit_with_conformers(
     timeout: float | None | tuple[float, float] = (3.0, 0.15),
     timeout_strategy: Literal["signal", "subprocess"] = "subprocess",
     skip_rdkit_conformer_generation: bool = False,
+    fix_stereochemistry: bool = False, #! (JH)
     **generate_conformers_kwargs,
 ) -> Chem.Mol:
     """Generate an RDKit molecule with conformers for a given residue name.
@@ -486,7 +491,7 @@ def ccd_code_to_rdkit_with_conformers(
         An RDKit molecule with the specified number of conformers.
     """
     # ... get molecule from CCD with its idealized conformer (default conformer 0)
-    mol = ccd_code_to_rdkit(ccd_code, hydrogen_policy="remove")
+    mol = ccd_code_to_rdkit(ccd_code, hydrogen_policy="remove", fix_stereochemistry=fix_stereochemistry) #? (JH) Why hydrogen_policy="remove"?
 
     # ... get idealized conformer from CCD entry
     idealized_conformer = Chem.Conformer(mol.GetConformer(0))  # creates a copy
@@ -515,6 +520,44 @@ def ccd_code_to_rdkit_with_conformers(
 
     return mol
 
+
+#! Written by Jinho Kim
+def generate_conformers_with_timeout_from_mol(
+    mol: Chem.Mol,
+    n_conformers: int,
+    *,
+    seed: int | None = None,
+    timeout: float | None | tuple[float, float] = (3.0, 0.15),
+    timeout_strategy: Literal["signal", "subprocess"] = "subprocess",
+    skip_rdkit_conformer_generation: bool = False,
+    fix_stereochemistry: bool = False, #! (JH)
+    **generate_conformers_kwargs,
+) -> Chem.Mol:
+    """Generate conformers for a given RDKit molecule with a timeout."""
+
+    idealized_conformer = Chem.Conformer(mol.GetConformer(0))  # creates a copy
+
+    timeout = _auto_timeout_policy(n_conformers, *timeout) if isinstance(timeout, tuple) else timeout
+    generate_conformers_with_timeout = timer.timeout(timeout=timeout, strategy=timeout_strategy)(
+        generate_conformers
+    )
+    try:
+        seed = seed or _get_random_seed()
+        mol = generate_conformers_with_timeout(
+            mol, n_conformers=n_conformers, seed=seed, **generate_conformers_kwargs
+        )
+    except (TimeoutError, RuntimeError, Chem.MolSanitizeException) as e:
+        logger.warning(
+            f"Failed to generate {n_conformers} conformers for {mol.GetProp('_Name')}. Falling back to idealized conformer from the CCD. Error message: {e}"
+        )
+
+    # ... if conformer generation fails or is incomplete, return the idealized conformer (set `count` conformers)
+    missing_conformers = n_conformers - mol.GetNumConformers()
+    if missing_conformers > 0:
+        for _ in range(missing_conformers):
+            mol.AddConformer(Chem.Conformer(idealized_conformer), assignId=True)
+            
+    return mol
 
 # -------------------------------------------------------------------------------------------------
 # ---------------------  RDKit related transforms  ------------------------------------------------
