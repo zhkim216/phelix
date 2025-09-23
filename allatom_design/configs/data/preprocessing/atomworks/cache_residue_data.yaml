@@ -1,0 +1,24 @@
+# Basic settings
+seed: 216
+out_dir: /home/possu/jinho/allatom-design/atomworks_test/250923/residue_cache
+ccd_dir: /home/possu/jinho/datasets/ccd_mirror
+
+# Parallel processing
+num_workers: 8
+max_file_size: null
+
+# Sharding
+shard_id: 0
+num_shards: 16
+
+### Conformer generation ###
+n_trials: 3
+timeout_offset: 3.0
+timeout_slope: 1.0
+num_conformers: 10
+
+generate_conformers_kwargs:
+  optimize: true
+  num_threads: 2
+  hydrogen_policy: "remove"
+

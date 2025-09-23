@@ -671,10 +671,13 @@ def atom_array_to_rdkit(
     #     (implicit hydrogens)
     rdkit_atom_ids = []
 
+    # if hydrogen_policy == "keep_and_infer":
+    #     if not (mol.GetNumAtoms() > mol.GetNumHeavyAtoms(): # Where explicit hydrogens are present:
+                                
     if hydrogen_policy in ("infer", "remove"):
         atom_array = ta.remove_hydrogens(atom_array)
     elif hydrogen_policy == "keep":
-        pass
+        pass       
     else:
         raise ValueError(f"Invalid hydrogen policy: {hydrogen_policy}. Must be 'infer', 'remove', or 'keep'.")
 
@@ -781,7 +784,9 @@ def ccd_code_to_rdkit(
     ccd_code: str,
     *,
     ccd_mirror_path: PathLike | None = CCD_MIRROR_PATH,
-    hydrogen_policy: Literal["infer", "remove", "keep"] = "keep",
+    hydrogen_policy: Literal["infer", "remove", "keep"] = "remove",
+    fix_stereochemistry: bool = False,
+    return_atom_array: bool = False, #! (JH)
     **atom_array_to_rdkit_kwargs,
 ) -> Mol:
     """
@@ -811,9 +816,19 @@ def ccd_code_to_rdkit(
 
     # ... assign stereochemistry
     try:
-        Chem.AssignStereochemistryFrom3D(mol)
+        #! (JH) for accurate stereochemistry assignments    
+        if fix_stereochemistry:            
+            mol = add_hydrogens(mol)
+            Chem.AssignStereochemistryFrom3D(mol)
+            mol = remove_hydrogens(mol)
+            #!#######################################################
+        else:
+            Chem.AssignStereochemistryFrom3D(mol)
     except ValueError:
         logger.warning(f"Failed to assign stereochemistry to {ccd_code}. Returning unstereochem molecule.")
         pass
 
-    return mol
+    if return_atom_array: #! (JH)
+        return atom_array, mol
+    else:
+        return mol
