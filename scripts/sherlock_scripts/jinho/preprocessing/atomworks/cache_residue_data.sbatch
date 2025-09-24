@@ -9,8 +9,8 @@
 #SBATCH --output=/scratch/users/zhkim216/slurm_log_files/job_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/slurm_log_files/job_%A_%a.err
 #
-## Write batch script to logs
-scontrol write batch_script $SLURM_JOB_ID /scratch/users/zhkim216/slurm_log_files/job_$SLURM_JOB_ID.sh
+## Write batch script to logs (skip in container - scontrol not available)
+# scontrol write batch_script $SLURM_JOB_ID /scratch/users/zhkim216/slurm_log_files/job_$SLURM_JOB_ID.sh
 
 ## Load modules and set environment variables:
 # Note: When using wrap_sbatch_in_container.sh, this is handled by the wrapper
@@ -29,7 +29,7 @@ echo "[sbatch] NUM_SHARDS=$NUM_SHARDS (from array [$MIN-$MAX])"
 # Run script
 python3 allatom_design/data/preprocessing/atomworks/cache_residue_data.py \
     --config-dir allatom_design/configs/data/preprocessing/atomworks \
-    --config-name cache_residue_data.yaml \    
+    --config-name cache_residue_data.yaml \
     seed=6 \
     out_dir=/scratch/users/zhkim216/datasets/atomworks \
     ccd_dir=/scratch/users/zhkim216/datasets/ccd_mirror \

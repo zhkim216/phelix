@@ -61,9 +61,9 @@ source "$SCRIPT_DIR/env_setup.sh"
 $APPTAINER_BIN exec --nv \\
   --bind "$BIND" \\
   --env CUDA_HOME=$CUDA_HOME \\
-  --env PATH=$VENV/bin:$CUDA_HOME/bin:\$PATH \\
-  --env LD_LIBRARY_PATH=$CUDA_HOME/lib64:\$LD_LIBRARY_PATH \\
-  --env PYTHONPATH=$PROJECT_ROOT:\$PYTHONPATH \\
+  --env PATH=$VENV/bin:$CUDA_HOME/bin:\${PATH:-/usr/local/bin:/usr/bin:/bin} \\
+  --env LD_LIBRARY_PATH=$CUDA_HOME/lib64:\${LD_LIBRARY_PATH:-} \\
+  --env PYTHONPATH=$PROJECT_ROOT:\${PYTHONPATH:-} \\
   --env TORCH_HOME=$TORCH_HOME \\
   --env HF_HOME=$HF_HOME \\
   --env PIP_CACHE_DIR=$PIP_CACHE_DIR \\
