@@ -535,7 +535,12 @@ class AddGlobalTokenIdAnnotation(Transform):
         atom_array = data["atom_array"]
 
         # add the global token id annotation
-        data["atom_array"] = add_global_token_id_annotation(atom_array)
+        try:
+            aa = atom_array.copy()
+            data["atom_array"] = add_global_token_id_annotation(atom_array)
+        except Exception as e:
+            print(e)
+            
         return data
 
 

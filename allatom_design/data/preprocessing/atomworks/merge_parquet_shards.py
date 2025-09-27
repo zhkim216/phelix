@@ -28,6 +28,6 @@ def main(out_dir: str):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out_dir", required=True)
+    ap.add_argument("--out_dir", default="/home/possu/jinho/datasets/atomworks_debug")
     args = ap.parse_args()
     main(args.out_dir)

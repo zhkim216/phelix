@@ -1,6 +1,6 @@
 # Basic settings
 seed: 6
-out_dir: /scratch/users/zhkim216/datasets/atomworks/cached_residue_data
+out_dir: /scratch/users/zhkim216/datasets/atomworks_debug
 ccd_dir: /scratch/users/zhkim216/datasets/ccd_mirror
 
 # Parallel processing

@@ -18,7 +18,7 @@ from allatom_design.data.types import Record
 from allatom_design.data.write.mmcif import batch_write_feats_to_mmcif
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
 from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
-from allatom_design.data.feature.feature_utils import unbatch_feats
+from allatom_design.utils.feature_utils import unbatch_feats
 
 
 @hydra.main(config_path="../../../configs/data/preprocessing/boltz_test_cifs", config_name="build_dataset", version_base="1.3.2")

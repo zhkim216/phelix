@@ -50,8 +50,7 @@ class LitSeqDenoiser(L.LightningModule):
         # Initialize EMA trackers at the start of training (if using phema)
         if self.use_phema:
             self.ema_tracker.reset()
-
-
+                
     def training_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int):
         outputs = self(batch)
         loss, aux = self.loss(outputs, batch, return_aux=True)

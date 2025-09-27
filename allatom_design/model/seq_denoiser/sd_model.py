@@ -9,7 +9,7 @@ from omegaconf import DictConfig
 from torchtyping import TensorType
 
 from allatom_design.data.mask_selector import MaskSelector
-from allatom_design.data.pdb_utils import *
+from allatom_design.utils.pdb_utils import *
 from allatom_design.model.seq_denoiser.denoisers.atom_mpnn_denoiser import \
     AtomMPNNDenoiser
 from allatom_design.model.seq_denoiser.denoisers.lc_atom_mpnn_denoiser import \

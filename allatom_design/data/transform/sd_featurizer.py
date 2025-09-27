@@ -1,10 +1,3 @@
-"""
-(Jinho Kim) 2025-09-13
-Codes for featurizing the data for the seq denoiser.
-Adapted atomworks/src/atomworks/ml/pipelines/af3.py by Jinho Kim, for ligand-conditioned seq denoiser
-For details, see atomworks/src/atomworks/ml/pipelines/af3.py.
-"""
-
 from typing import Any, override
 
 import atomworks.enums as aw_enums
@@ -22,6 +15,7 @@ from atomworks.ml.transforms.base import (AddData, Compose, ConditionalRoute,
 from atomworks.ml.transforms.bonds import AddAF3TokenBondFeatures
 from atomworks.ml.transforms.crop import (CropContiguousLikeAF3,
                                           CropSpatialLikeAF3)
+from atomworks.ml.transforms.af3_reference_molecule import GetAF3ReferenceMoleculeFeatures
 from atomworks.ml.transforms.encoding import (EncodeAF3TokenLevelFeatures,
                                               EncodeAtomArray)
 from atomworks.ml.transforms.featurize_unresolved_residues import (
@@ -39,8 +33,6 @@ from atomworks.ml.utils.token import (apply_token_wise,
                                       get_af3_token_center_masks,
                                       get_af3_token_representative_masks,
                                       spread_token_wise)
-
-
 
 import allatom_design.data.const as const
 from allatom_design.data.transform.pad import pad_dim
@@ -65,6 +57,9 @@ FEAT_TO_TOKEN_DIM = {
     "token_pad_mask": [0],
     "token_resolved_mask": [0],
 
+    "token_is_polymer": [0],
+    "token_chain_type": [0],    
+    "token_is_metal": [0],
     # optional features that might not be present
     "seq_cond_mask": [0],
     "token_exists_mask": [0],
@@ -80,6 +75,11 @@ FEAT_TO_ATOM_DIM = {
 
     "prot_bb_atom_mask": [0],
     "prot_scn_atom_mask": [0],
+
+    "atomic_number": [0],
+    "atom_is_aromatic": [0],
+    "atom_is_metal": [0],
+    "token_is_metal": [0],
 
     # optional features that might not be present
     "atom_cond_mask": [0],
@@ -102,17 +102,17 @@ def sd_featurizer(
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
     """
     # Featurization that must be done before cropping
-            
     featurization_transforms_pre_crop = [
         MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={
             aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_FRAME_ATOM_NAMES,
             aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_FRAME_ATOM_NAMES,
         }),
-        FilterToProteins(),
+        # FilterToProteins(), #! (JH) changed 250926, turn it off for lc-sd
         FilterToQueryPNUnits(),
         RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
-        MaskAtomizedTokens(),
+        MaskAtomizedTokensInProtein(), #! (JH) changed 250926, only mask atomized tokens (possibly modified residues) in protein
         RemoveUnsupportedChainTypes(),
+        ErrIfAllUnresolved(), #! (JH) changed        
     ]
 
     # Cropping
@@ -134,14 +134,17 @@ def sd_featurizer(
                 ),
             ],
             probs=[crop_contiguous_p, crop_spatial_p],
-        )
-
+        )            
 
     # Featurization
     # NOTE: for now, we ignore ref pos features because they are too slow to compute
     featurization_transforms_post_crop = [
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
+        # GetAF3ReferenceMoleculeFeatures(
+        #     conformer_generation_timeout=10.0,
+        #     use_element_for_atom_names_of_atomized_tokens=False,
+        # ),
         ComputeAtomToTokenMap(),
         AddAF3TokenBondFeatures(),
         ConvertToTorch(keys=["encoded", "feats"]),
@@ -197,6 +200,16 @@ class FeaturizeCoordsAndMasks(Transform):
         feats["prot_scn_atom_mask"] = ~bb_atom_mask * ~atomized * atomwise_is_prot
         feats["token_to_center_atom"] = torch.tensor(get_af3_token_center_idxs(atom_array))
 
+        feats["token_is_polymer"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_polymer, np.any)).float()
+        feats["token_chain_type"] = torch.tensor(apply_token_wise(atom_array, atom_array.chain_type, np.any)).float()
+        feats["atomic_number"] = torch.tensor(atom_array.atomic_number).long()
+        feats["atom_is_aromatic"] = torch.tensor(atom_array.is_aromatic).float()
+        
+        feats["atom_is_metal"] = np.isin(atom_array.element, aw_const.METAL_ELEMENTS)
+        feats["token_is_metal"] = torch.tensor(apply_token_wise(atom_array, feats["atom_is_metal"], np.any)).float()
+        feats["atom_is_metal"] = torch.tensor(feats["atom_is_metal"]).float()
+        
+        
         return data
 
 
@@ -278,13 +291,23 @@ class FilterToQueryPNUnits(Transform):
         data["atom_array"] = atom_array
         return data
 
-
-class MaskAtomizedTokens(Transform):
+class MaskAtomizedTokensInProtein(Transform):
     """Mask atomized tokens from the atom array."""
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:        
+        atom_array = data["atom_array"]        
+        isin_protein = np.isin(atom_array.chain_type, aw_enums.ChainTypeInfo.PROTEINS)
+        atom_array.occupancy[atom_array.atomize & isin_protein] = 0
+        data["atom_array"] = atom_array
+        return data
+
+class ErrIfAllUnresolved(Transform):
+    """Throw an error if all atoms are unresolved."""
 
     @override
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
         atom_array = data["atom_array"]
-        atom_array.occupancy[atom_array.atomize] = 0
-        data["atom_array"] = atom_array
+        if (atom_array.occupancy == 0).all():
+            raise ValueError(f"All atoms are unresolved for {data['example_id']}")
         return data

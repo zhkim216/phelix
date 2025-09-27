@@ -7,7 +7,8 @@ import torch
 import wandb
 import yaml
 from lightning.fabric.loggers.logger import _DummyExperiment as DummyExperiment
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, Callback
+from atomworks.ml.samplers import set_sampler_epoch
 from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
@@ -120,9 +121,13 @@ def main(cfg: DictConfig):
                                                        every_n_epochs=cfg.checkpointing.save_for_resuming_every_n_epochs,
                                                        filename="sd-epoch{epoch:02d}",
                                                        auto_insert_metric_name=False)
-
+                
     callbacks += [latest_checkpoint_callback, epoch_latest_checkpoint_callback]
 
+    sampler_epoch_callback = SamplerEpochCallback()
+    callbacks.append(sampler_epoch_callback)
+
+    # EMA callbacks
     if cfg.model.ema.use_phema:
         # For post-hoc EMA, we save snapshots to an ema_tracker directory so we can reconstruct the EMA profile afterwards
         ema_checkpoint = EMATrackerCheckpoint(save_dir=f"{ckpt_dir}/ema_tracker",
@@ -167,6 +172,11 @@ def main(cfg: DictConfig):
                         )
     trainer.fit(model=lit_model, datamodule=datamodule)
 
+class SamplerEpochCallback(Callback):
+    def on_train_epoch_start(self, trainer, pl_module):
+        dm = trainer.datamodule
+        if hasattr(dm, "_train_sampler"):
+            set_sampler_epoch(dm._train_sampler, trainer.current_epoch)
 
 def update_config(cfg: DictConfig) -> None:
     """
