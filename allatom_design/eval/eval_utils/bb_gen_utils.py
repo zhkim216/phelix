@@ -27,7 +27,7 @@ from allatom_design.data.data import atom_apply_random_augmentation, to
 from allatom_design.data.datasets.boltz_ad_dataset import (
     ad_collator, add_tokenwise_atom_feats, apply_se3_augmentation,
     featurize_diffusion_inputs, featurize_motif_inputs)
-from allatom_design.data.pdb_utils import write_batched_to_pdb
+from allatom_design.utils.pdb_utils import write_batched_to_pdb
 from allatom_design.data.preprocessing.boltz_utils.parsing_utils import \
     load_input
 from allatom_design.data.types import Structure, Tokenized

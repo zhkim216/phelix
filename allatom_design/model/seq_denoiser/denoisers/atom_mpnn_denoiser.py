@@ -16,7 +16,7 @@ from tqdm import tqdm
 import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.data.data import to
-from allatom_design.data.feature.feature_utils import slice_feats
+from allatom_design.utils.feature_utils import slice_feats
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn import \

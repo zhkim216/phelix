@@ -26,7 +26,7 @@ import allatom_design.data.const as const
 import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
-from allatom_design.data.pdb_utils import write_batched_to_pdb, write_to_pdb
+from allatom_design.utils.pdb_utils import write_batched_to_pdb, write_to_pdb
 from allatom_design.data.write.mmcif import batch_write_feats_to_mmcif
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz

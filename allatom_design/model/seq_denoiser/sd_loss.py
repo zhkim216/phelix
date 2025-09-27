@@ -1,5 +1,6 @@
 import logging
 import math
+from collections import Counter
 
 import torch
 import torch.nn as nn
@@ -61,10 +62,7 @@ class SDLoss(nn.Module):
                                                    seq_loss_cfg=self.cfg.seq_loss)
             aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], target_restype, seq_loss_mask).mean().detach().clone()
             
-            if self.task == "lc_seq_des": #! (JH) changed            
-                if batch["is_ligand"].any():
-                    print(1)
-                
+            if self.task == "lc_seq_des": #! (JH) changed                                                                
                 lp_seq_loss_mask = seq_loss_mask * outputs["ligand_pocket_token_mask"] 
                                             
                 # Select only samples that have ligands

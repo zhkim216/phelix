@@ -235,13 +235,14 @@ def get_spatial_crop_center(
     if len(query_pn_unit_iids) == 1:
         # If there's only one query unit, we don't need to check for spatial proximity,
         # so we can just return the mask for the query unit.
-        can_be_crop_center = is_query_pn_unit & is_occupied
+        can_be_crop_center = is_query_pn_unit & is_occupied            
+                                                        
         assert np.any(
             can_be_crop_center
         ), f"No crop center found! It appears `query_pn_unit_iid` {query_pn_unit_iids} is not in the atom array or unresolved."
 
         return can_be_crop_center
-
+    
     # ... get mask for ligands of interest
     is_at_interface = np.zeros_like(is_query_pn_unit, dtype=bool)
     for pn_unit_1_iid, pn_unit_2_iid in itertools.combinations(query_pn_unit_iids, 2):
@@ -263,6 +264,9 @@ def get_spatial_crop_center(
 
     # ... assemble final crop mask
     can_be_crop_center = is_query_pn_unit & is_at_interface & is_occupied
+
+    if not np.any(can_be_crop_center):
+        print(1)
 
     assert np.any(can_be_crop_center), "No crop center found!"
     return can_be_crop_center
@@ -687,7 +691,7 @@ class CropSpatialLikeAF3(CropTransformBase):
         if self.keep_uncropped_atom_array:
             data["crop_info"]["atom_array"] = atom_array
 
-        # Update data with cropped atom array
+        # Update data with cropped atom array        
         data["atom_array"] = atom_array[crop_info["crop_atom_idxs"]]
 
         return data

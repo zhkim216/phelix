@@ -13,7 +13,7 @@ from omegaconf import DictConfig
 from tqdm import tqdm
 
 from allatom_design.data.data import get_seq_from_res_type
-from allatom_design.data.feature.feature_utils import unbatch_feats
+from allatom_design.utils.feature_utils import unbatch_feats
 from allatom_design.data.types import Manifest
 from allatom_design.eval.eval_utils.eval_setup_utils import process_pdb_files
 from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch

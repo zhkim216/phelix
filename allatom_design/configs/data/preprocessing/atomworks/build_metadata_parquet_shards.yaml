@@ -1,7 +1,7 @@
-mmcif_dir: /media/scratch/datasets/boltz_val_cifs/mmCIF
-out_dir: /media/scratch/datasets/atomworks_debug
+mmcif_dir: /home/possu/jinho/datasets/boltz_val_cifs/pdbs
+out_dir: /home/possu/jinho/datasets/atomworks_debug
 
-num_workers: 8
+num_workers: 0
 max_file_size: 1000000
 
 # Data preprocessor args to specify in addition to the cif parser args
@@ -14,7 +14,7 @@ data_preprocessor_cfg:
   contact_distance: 5
   clash_distance: 1.0
   # Misc
-  ignore_residues: []
+  ignore_residues: [] #! (JH) changed 250926
   # Efficiency
   polymer_pn_unit_limit: 500
 
@@ -22,7 +22,7 @@ data_preprocessor_cfg:
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: []
+  remove_ccds: ["SO4", "GOL", "EDO", "PO4", "ACT", "PEG", "DMS", "TRS", "PGE", "PG4", "FMT", "EPE", "MPD", "MES", "CD", "IOD"] #! (JH) changed 250926
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true

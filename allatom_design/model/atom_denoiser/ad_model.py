@@ -4,7 +4,7 @@ from typing import Any, Tuple
 import torch.nn as nn
 from omegaconf import DictConfig
 
-from allatom_design.data.pdb_utils import *
+from allatom_design.utils.pdb_utils import *
 from allatom_design.model.atom_denoiser.denoisers.dit_denoiser import \
     DiTDenoiser
 
