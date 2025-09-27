@@ -31,7 +31,6 @@ from allatom_design.data.preprocessing.atomworks.sharding_utils import \
 PROCESSOR = None
 TIMEOUT_SECS = 300
 
-
 def _worker_timeout_handler(signum, frame):
     """Signal handler used inside worker processes for timeouts."""
     raise TimeoutError("Processing timeout")
@@ -44,18 +43,24 @@ def _init_worker(preprocessor_args: dict, timeout: int):
     TIMEOUT_SECS = timeout
 
 
-def _process_cif_worker(cif_path: str) -> list:
-    """Worker entrypoint used in parallel mode with per-file timeout."""
-    # Setup per-call timeout in the worker process
+def _process_cif_worker(cif_path: str):
+    """Worker entrypoint used in parallel mode with per-file timeout.
+
+    Returns a tuple (status, payload):
+      - ('ok', rows)
+      - ('timeout', 'Processing timeout')
+      - ('error', repr(exception))
+    """
     old_handler = signal.signal(signal.SIGALRM, _worker_timeout_handler)
     signal.alarm(TIMEOUT_SECS)
     try:
         result = PROCESSOR.get_rows(cif_path)
         signal.alarm(0)
-        return result
-    except Exception:
-        # On timeout or any error, return empty list to skip this file
-        return []
+        return ('ok', result)
+    except TimeoutError:
+        return ('timeout', 'Processing timeout')
+    except Exception as e:
+        return ('error', repr(e))
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old_handler)
@@ -150,52 +155,41 @@ def main(cfg: DictConfig):
     # Prepare logging file path (summary of skipped files)
     log_file = shard_dir / f"metadata_shard_{cfg.shard_id:05d}.log"
     
-    # Track skipped details
-    timeout_files: list[str] = []
-    error_files: list[str] = []
+    # Track skipped details with reasons
+    skipped_with_reason: list[tuple[str, str, str]] = []  # (path, reason, message)
 
     # Process files (sequential or parallel with per-file timeouts)
     if use_parallel:
         # Build args for workers once
         preprocessor_args = {**cfg.cif_parser_args, **cfg.data_preprocessor_cfg}
         timeout = getattr(cfg, 'processing_timeout', 300)
-        results_list = []
+        # Pre-allocate results in input order to preserve deterministic ordering
+        results_list = [None] * len(cif_paths)
         # Use ProcessPoolExecutor to get true parallelism and isolate timeouts
         with ProcessPoolExecutor(max_workers=cfg.num_workers, initializer=_init_worker,
                                  initargs=(preprocessor_args, timeout)) as executor:
-            futures = {}
-            start_times = {}
-            for p in cif_paths:
-                fut = executor.submit(_process_cif_worker, p)
-                futures[fut] = p
-                start_times[fut] = time.time()
-            for fut in tqdm(as_completed(futures), total=len(futures), desc=f"Processing mmCIFs (shard {cfg.shard_id})"):
-                path = futures[fut]
-                try:
-                    res = fut.result()
-                except Exception:
-                    res = []
-                file_elapsed = time.time() - start_times[fut]
-                if not res:
-                    # Heuristically classify as timeout vs other based on elapsed time
-                    if file_elapsed >= timeout - 1:
-                        timeout_files.append(path)
-                    else:
-                        error_files.append(path)
-                results_list.append(res)
+            for idx, res in enumerate(tqdm(executor.map(_process_cif_worker, cif_paths), total=len(cif_paths), desc=f"Processing mmCIFs (shard {cfg.shard_id})")):
+                status, payload = res
+                if status == 'ok':
+                    results_list[idx] = payload
+                else:
+                    message = payload if isinstance(payload, str) else repr(payload)
+                    skipped_with_reason.append((cif_paths[idx], status, message))
+                    results_list[idx] = []
     else:
         results_list = []
-        timeout = getattr(cfg, 'processing_timeout', 300)
         for cif_path in tqdm(cif_paths, desc=f"Processing mmCIFs (shard {cfg.shard_id})"):
-            t0 = time.time()
-            res = _process_cif(cif_path)
-            elapsed = time.time() - t0
-            if not res:
-                if elapsed >= timeout - 1:
-                    timeout_files.append(cif_path)
-                else:
-                    error_files.append(cif_path)
-            results_list.append(res)
+            try:
+                res = _process_cif(cif_path)
+                if not res:
+                    skipped_with_reason.append((cif_path, 'timeout_or_error', '-'))
+                results_list.append(res)
+            except TimeoutError:
+                skipped_with_reason.append((cif_path, 'timeout', 'Processing timeout'))
+                results_list.append([])
+            except Exception as e:
+                skipped_with_reason.append((cif_path, 'error', repr(e)))
+                results_list.append([])
 
     # Flatten list of lists and create DataFrame
     df = pd.DataFrame(itertools.chain(*results_list))
@@ -204,12 +198,9 @@ def main(cfg: DictConfig):
     try:
         with open(log_file, 'w') as f:
             f.write(f"Shard {cfg.shard_id}: processed={len(results_list)}\n")
-            f.write(f"Skipped (timeout) {len(timeout_files)} files:\n")
-            for p in timeout_files:
-                f.write(f"TIMEOUT\t{p}\n")
-            f.write(f"Skipped (error/empty) {len(error_files)} files:\n")
-            for p in error_files:
-                f.write(f"ERROR\t{p}\n")
+            f.write(f"Skipped {len(skipped_with_reason)} files:\n")
+            for p, reason, message in skipped_with_reason:
+                f.write(f"SKIPPED\t{reason}\t{message}\t{p}\n")
     except Exception:
         # Logging should never crash the run
         pass
@@ -236,7 +227,7 @@ def get_cif_paths(mmcif_dir: str, max_file_size: int | None = None) -> list[str]
     Returns:
         List of CIF file paths after filtering
     """
-    cif_paths = glob.glob(f"{mmcif_dir}/**/*.cif", recursive=True)
+    cif_paths = glob.glob(f"{mmcif_dir}/**/*.cif.gz", recursive=True)
     
     # Filter by file size only
     if max_file_size is not None:
