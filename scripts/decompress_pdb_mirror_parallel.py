@@ -133,7 +133,7 @@ def estimate_disk_space(gz_files: List[str], sample_size: int = 100) -> float:
     if len(gz_files) == 0:
         return 0.0
     
-    # 샘플링으로 압축률 추정
+    # Estimate compression ratio using sampling
     sample_files = gz_files[:min(sample_size, len(gz_files))]
     total_compressed = 0
     total_uncompressed = 0
@@ -146,8 +146,8 @@ def estimate_disk_space(gz_files: List[str], sample_size: int = 100) -> float:
             total_compressed += gz_path.stat().st_size
             
             with gzip.open(gz_path, 'rb') as f:
-                # 압축 해제된 크기 계산
-                f.seek(0, 2)  # 파일 끝으로 이동
+                # Calculate decompressed size
+                f.seek(0, 2)  # Move to end of file
                 total_uncompressed += f.tell()
                 
         except Exception as e:
@@ -157,13 +157,13 @@ def estimate_disk_space(gz_files: List[str], sample_size: int = 100) -> float:
     if total_compressed == 0:
         return 0.0
     
-    # 압축률 계산
+    # Calculate compression ratio
     compression_ratio = total_uncompressed / total_compressed
     
-    # 전체 압축된 파일들의 크기 계산
+    # Calculate total size of all compressed files
     total_gz_size = sum(Path(gz_file).stat().st_size for gz_file in gz_files)
     
-    # 예상 압축 해제 크기 (GB)
+    # Estimated decompressed size (GB)
     estimated_size_gb = (total_gz_size * compression_ratio) / (1024**3)
     
     logger.info(f"Estimated compression ratio: {compression_ratio:.2f}x")
@@ -205,10 +205,10 @@ def main():
     
     args = parser.parse_args()
     
-    # 로깅 설정
+    # Setup logging
     logger = setup_logging(args.log_file)
     
-    # PDB mirror 경로 확인
+    # Check PDB mirror path
     if not os.path.exists(args.pdb_mirror_path):
         logger.error(f"PDB mirror path does not exist: {args.pdb_mirror_path}")
         return 1
@@ -220,14 +220,14 @@ def main():
     
     start_time = time.time()
     
-    # gz 파일들 찾기
+    # Find gz files
     gz_files = find_gz_files(args.pdb_mirror_path)
     
     if not gz_files:
         logger.warning("No .cif.gz files found!")
         return 0
     
-    # 디스크 공간 추정
+    # Estimate disk space
     estimated_size = estimate_disk_space(gz_files)
     logger.info(f"Estimated additional disk space needed: {estimated_size:.2f} GB")
     
@@ -235,7 +235,7 @@ def main():
         logger.info("Dry run completed. No files were decompressed.")
         return 0
     
-    # 사용자 확인
+    # User confirmation
     response = input(f"\nProceed with decompressing {len(gz_files)} files? "
                     f"(Estimated {estimated_size:.2f} GB additional space needed) [y/N]: ")
     
@@ -243,7 +243,7 @@ def main():
         logger.info("Operation cancelled by user.")
         return 0
     
-    # 배치별로 처리
+    # Process by batches
     total_success = 0
     total_errors = 0
     all_errors = []
@@ -262,7 +262,7 @@ def main():
         
         logger.info(f"Batch {batch_num} completed: {success} success, {errors} errors")
     
-    # 최종 결과
+    # Final results
     end_time = time.time()
     duration = end_time - start_time
     
@@ -275,7 +275,7 @@ def main():
     
     if all_errors:
         logger.error(f"\nErrors encountered:")
-        for error in all_errors[:10]:  # 처음 10개 에러만 표시
+        for error in all_errors[:10]:  # Show only first 10 errors
             logger.error(error)
         if len(all_errors) > 10:
             logger.error(f"... and {len(all_errors) - 10} more errors")
