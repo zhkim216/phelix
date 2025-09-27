@@ -2,22 +2,17 @@
 """
 Build metadata parquet shards from mmCIF files using AtomWorks.
 
-This script processes mmCIF files with timeout mechanisms to prevent hanging
-on problematic structures. Features:
-- Timeout mechanism to skip files that take too long to process
-- Robust error handling and progress tracking
-- Detailed logging for each shard
-- Sharding support for distributed processing
+This script adds a minimal per-file timeout to avoid hanging on
+pathological structures. Other behavior is kept identical to the
+original implementation.
 """
 
 import glob
 import itertools
-import logging
 import signal
 import time
 from pathlib import Path
-from multiprocessing import Process, Queue
-from contextlib import contextmanager
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import hydra
 import pandas as pd
@@ -27,11 +22,43 @@ from atomworks.ml.preprocessing.get_pn_unit_data_from_structure import \
     DataPreprocessor
 from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
-from p_tqdm import p_umap
 from tqdm import tqdm
 
 from allatom_design.data.preprocessing.atomworks.sharding_utils import \
     take_shard, use_sharding
+
+# Globals for worker processes (used in parallel mode)
+PROCESSOR = None
+TIMEOUT_SECS = 300
+
+
+def _worker_timeout_handler(signum, frame):
+    """Signal handler used inside worker processes for timeouts."""
+    raise TimeoutError("Processing timeout")
+
+
+def _init_worker(preprocessor_args: dict, timeout: int):
+    """Initializer for worker processes: build a DataPreprocessor once per worker."""
+    global PROCESSOR, TIMEOUT_SECS
+    PROCESSOR = DataPreprocessor(**preprocessor_args)
+    TIMEOUT_SECS = timeout
+
+
+def _process_cif_worker(cif_path: str) -> list:
+    """Worker entrypoint used in parallel mode with per-file timeout."""
+    # Setup per-call timeout in the worker process
+    old_handler = signal.signal(signal.SIGALRM, _worker_timeout_handler)
+    signal.alarm(TIMEOUT_SECS)
+    try:
+        result = PROCESSOR.get_rows(cif_path)
+        signal.alarm(0)
+        return result
+    except Exception:
+        # On timeout or any error, return empty list to skip this file
+        return []
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
 
 
 @hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="build_metadata_parquet_shards", version_base="1.3.2")
@@ -57,11 +84,6 @@ def main(cfg: DictConfig):
     use_parallel = cfg.num_workers > 1
     dataset_name = Path(cfg.out_dir).stem
 
-    # Set up logging for this shard
-    log_file = shard_dir / f"metadata_shard_{cfg.shard_id:05d}.log"
-    setup_shard_logging(log_file, cfg.shard_id)
-    logger = logging.getLogger(f"shard_{cfg.shard_id}")
-    
     # Get all CIF paths, then take this shard's slice
     cif_paths_all = get_cif_paths(cfg.mmcif_dir, cfg.max_file_size)
     cif_paths = take_shard(cif_paths_all, shard_id=cfg.shard_id, num_shards=cfg.num_shards)
@@ -73,6 +95,10 @@ def main(cfg: DictConfig):
         **cfg.data_preprocessor_cfg
     })
 
+    def _timeout_handler(signum, frame):
+        """Signal handler for timeout."""
+        raise TimeoutError("Processing timeout")
+    
     def _process_cif_with_timeout(cif_path: str, timeout: int = 300):
         """
         Process a CIF file with timeout to avoid hanging on complex structures.
@@ -84,34 +110,23 @@ def main(cfg: DictConfig):
         Returns:
             List of processed rows, or empty list if timeout/error occurs
         """
-        def _target(cif_path: str, result_queue: Queue):
-            try:
-                result = processor.get_rows(cif_path)
-                result_queue.put(('success', result))
-            except Exception as e:
-                result_queue.put(('error', str(e)))
+        # Set up signal-based timeout
+        old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(timeout)
         
-        result_queue = Queue()
-        process = Process(target=_target, args=(cif_path, result_queue))
-        process.start()
-        process.join(timeout=timeout)
-        
-        if process.is_alive():
-            # Process timed out - this will be logged by the caller
-            process.terminate()
-            process.join()
+        try:
+            result = processor.get_rows(cif_path)
+            signal.alarm(0)  # Cancel the alarm
+            return result
+        except TimeoutError:
+            # Timeout occurred - this will be logged by the caller
             return []
-        
-        if result_queue.empty():
-            # No result returned - this will be logged as an error by the caller
+        except Exception as e:
+            # Other error occurred - this will be logged by the caller
             return []
-        
-        status, result = result_queue.get()
-        if status == 'error':
-            # Error occurred - this will be logged by the caller
-            return []
-        
-        return result
+        finally:
+            signal.alarm(0)  # Make sure alarm is cancelled
+            signal.signal(signal.SIGALRM, old_handler)  # Restore old handler
 
     def _process_cif(cif_path: str):
         """
@@ -132,58 +147,72 @@ def main(cfg: DictConfig):
         print(f"Shard {cfg.shard_id}: no files to process, exiting.")
         return
 
-    logger.info(f"Starting processing of {len(cif_paths)} files...")
-    print(f"Shard {cfg.shard_id}: Starting processing of {len(cif_paths)} files...")
-    start_time = time.time()
+    # Prepare logging file path (summary of skipped files)
+    log_file = shard_dir / f"metadata_shard_{cfg.shard_id:05d}.log"
     
-    # Track processing statistics
-    timeout_files = []
-    error_files = []
-    processed_results = []
-    
-    # Note: p_umap doesn't work well with our timeout mechanism due to multiprocessing conflicts
-    # Use sequential processing with timeout for robustness
+    # Track skipped details
+    timeout_files: list[str] = []
+    error_files: list[str] = []
+
+    # Process files (sequential or parallel with per-file timeouts)
     if use_parallel:
-        logger.warning("Disabling parallel processing due to timeout mechanism compatibility")
-        print("Warning: Disabling parallel processing due to timeout mechanism compatibility")
-        use_parallel = False
-    
-    # Process files sequentially with progress tracking
-    for i, cif_path in enumerate(tqdm(cif_paths, desc=f"Processing mmCIFs (shard {cfg.shard_id})")):
-        file_start = time.time()
-        result = _process_cif(cif_path)
-        file_elapsed = time.time() - file_start
-        
-        if not result:  # Empty result (timeout or failed)
-            if file_elapsed >= getattr(cfg, 'processing_timeout', 300) - 5:  # Within 5s of timeout
-                timeout_files.append(cif_path)
-                logger.warning(f"Timeout processing {cif_path} ({file_elapsed:.1f}s)")
-            else:
-                error_files.append(cif_path)
-                logger.error(f"Error processing {cif_path} ({file_elapsed:.1f}s)")
-        else:
-            processed_results.append(result)
-            logger.debug(f"Successfully processed {cif_path} ({file_elapsed:.1f}s, {len(result)} rows)")
-        
-        # Log progress every 100 files
-        if (i + 1) % 100 == 0:
-            elapsed = time.time() - start_time
-            rate = (i + 1) / elapsed
-            status_msg = (f"Processed {i + 1}/{len(cif_paths)} files "
-                         f"({rate:.2f} files/sec, {len(timeout_files)} timeouts, {len(error_files)} errors)")
-            logger.info(status_msg)
-            print(f"Shard {cfg.shard_id}: {status_msg}")
+        # Build args for workers once
+        preprocessor_args = {**cfg.cif_parser_args, **cfg.data_preprocessor_cfg}
+        timeout = getattr(cfg, 'processing_timeout', 300)
+        results_list = []
+        # Use ProcessPoolExecutor to get true parallelism and isolate timeouts
+        with ProcessPoolExecutor(max_workers=cfg.num_workers, initializer=_init_worker,
+                                 initargs=(preprocessor_args, timeout)) as executor:
+            futures = {}
+            start_times = {}
+            for p in cif_paths:
+                fut = executor.submit(_process_cif_worker, p)
+                futures[fut] = p
+                start_times[fut] = time.time()
+            for fut in tqdm(as_completed(futures), total=len(futures), desc=f"Processing mmCIFs (shard {cfg.shard_id})"):
+                path = futures[fut]
+                try:
+                    res = fut.result()
+                except Exception:
+                    res = []
+                file_elapsed = time.time() - start_times[fut]
+                if not res:
+                    # Heuristically classify as timeout vs other based on elapsed time
+                    if file_elapsed >= timeout - 1:
+                        timeout_files.append(path)
+                    else:
+                        error_files.append(path)
+                results_list.append(res)
+    else:
+        results_list = []
+        timeout = getattr(cfg, 'processing_timeout', 300)
+        for cif_path in tqdm(cif_paths, desc=f"Processing mmCIFs (shard {cfg.shard_id})"):
+            t0 = time.time()
+            res = _process_cif(cif_path)
+            elapsed = time.time() - t0
+            if not res:
+                if elapsed >= timeout - 1:
+                    timeout_files.append(cif_path)
+                else:
+                    error_files.append(cif_path)
+            results_list.append(res)
 
     # Flatten list of lists and create DataFrame
-    df = pd.DataFrame(itertools.chain(*processed_results))
-    
-    # Report final processing statistics
-    elapsed = time.time() - start_time
-    final_msg = (f"Processing completed in {elapsed:.1f}s. "
-                f"Successfully processed {len(processed_results)} files, "
-                f"{len(timeout_files)} timeouts, {len(error_files)} errors")
-    logger.info(final_msg)
-    print(f"Shard {cfg.shard_id}: {final_msg}")
+    df = pd.DataFrame(itertools.chain(*results_list))
+
+    # Write summary log for skipped files
+    try:
+        with open(log_file, 'w') as f:
+            f.write(f"Shard {cfg.shard_id}: processed={len(results_list)}\n")
+            f.write(f"Skipped (timeout) {len(timeout_files)} files:\n")
+            for p in timeout_files:
+                f.write(f"TIMEOUT\t{p}\n")
+            f.write(f"Skipped (error/empty) {len(error_files)} files:\n")
+            for p in error_files:
+                f.write(f"ERROR\t{p}\n")
+    except Exception:
+        # Logging should never crash the run
+        pass
 
     # If nothing produced, skip writing
     if df.empty:
@@ -194,35 +223,6 @@ def main(cfg: DictConfig):
     shard_out = shard_dir / f"metadata_shard_{cfg.shard_id:05d}.parquet"
     save_to_parquet(df, dataset_name, cfg.mmcif_dir, str(shard_out))
     print(f"Shard {cfg.shard_id}: wrote {len(df)} rows to {shard_out}")
-
-
-def setup_shard_logging(log_file: Path, shard_id: int):
-    """
-    Set up logging for a specific shard.
-    
-    Args:
-        log_file: Path to the log file for this shard
-        shard_id: ID of the shard for logger naming
-    """
-    logger = logging.getLogger(f"shard_{shard_id}")
-    logger.setLevel(logging.DEBUG)
-    
-    # Create file handler
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.DEBUG)
-    
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    file_handler.setFormatter(formatter)
-    
-    # Add handler to logger
-    logger.addHandler(file_handler)
-    
-    # Prevent propagation to root logger
-    logger.propagate = False
 
 
 def get_cif_paths(mmcif_dir: str, max_file_size: int | None = None) -> list[str]:
