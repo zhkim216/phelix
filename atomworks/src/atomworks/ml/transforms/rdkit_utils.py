@@ -524,6 +524,7 @@ def ccd_code_to_rdkit_with_conformers(
 #! Written by Jinho Kim
 def generate_conformers_with_timeout_from_mol(
     mol: Chem.Mol,
+    ccd_code: str,
     n_conformers: int,
     *,
     seed: int | None = None,
@@ -548,7 +549,7 @@ def generate_conformers_with_timeout_from_mol(
         )
     except (TimeoutError, RuntimeError, Chem.MolSanitizeException) as e:
         logger.warning(
-            f"Failed to generate {n_conformers} conformers for {mol.GetProp('_Name')}. Falling back to idealized conformer from the CCD. Error message: {e}"
+            f"Failed to generate {n_conformers} conformers for ccd_code={ccd_code}. Falling back to idealized conformer from the CCD. Error message: {e}"
         )
 
     # ... if conformer generation fails or is incomplete, return the idealized conformer (set `count` conformers)
@@ -605,14 +606,14 @@ class AddRDKitMoleculesForAtomizedMolecules(Transform):
         check_does_not_contain_keys(data, ["rdkit"])
         check_atom_array_annotation(data, ["atomize", "pn_unit_iid"])
 
-    def _convert_atom_array_to_rdkit_robust(self, atom_array: AtomArray) -> Mol:
+    def _convert_atom_array_to_rdkit_robust(self, atom_array: AtomArray, conversion_kwargs: dict[str, Any] = {}) -> Mol:
         """Convert an AtomArray to RDKit molecule with error sanitization failure handling"""
 
-        conversion_kwargs = {
+        conversion_kwargs = default(conversion_kwargs, {
             "hydrogen_policy": self.hydrogen_policy,
             "annotations_to_keep": ["chain_id", "res_id", "res_name", "atom_name", "atom_id", "pn_unit_iid"],
             "sanitize": True,
-        }
+        })
 
         try:
             # First attempt: try without fixing for better performance

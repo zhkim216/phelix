@@ -10,12 +10,16 @@ import logging
 import sys
 from collections import Counter
 from rdkit import Chem
+from rdkit.Chem import Mol
 import torch
+import numpy as np
 
+from atomworks.constants import AF3_EXCLUDED_LIGANDS, GAP, STANDARD_AA, STANDARD_DNA, STANDARD_RNA, METAL_ELEMENTS
 from atomworks.ml.transforms.rdkit_utils import (sample_rdkit_conformer_for_atom_array,
                                                  atom_array_to_rdkit,
                                                  generate_conformers,
                                                  generate_conformers_with_timeout_from_mol,
+                                                 AddRDKitMoleculesForAtomizedMolecules
                                                  )
 from atomworks.io.tools.rdkit import (get_morgan_fingerprint_from_rdkit_mol,
                                       atom_array_from_ccd_code,
@@ -24,10 +28,10 @@ from atomworks.io.tools.rdkit import (get_morgan_fingerprint_from_rdkit_mol,
                                       add_hydrogens,
                                       remove_hydrogens,
                                       )
+from atomworks.ml.transforms.atomize import atomize_by_ccd_name
 
 
-
-ccd_codes = ["ALA", "HEM"]
+ccd_codes = ["HIS"]
 optimize = True
 
 generate_conformers_kwargs = {
@@ -36,18 +40,14 @@ generate_conformers_kwargs = {
     "hydrogen_policy": "remove",
 }
 
+atom_array_to_rdkit_conversion_kwargs = {
+    "hydrogen_policy": "remove",
+    "annotations_to_keep": ["chain_id", "res_id", "res_name", "atom_name", "atom_id", "pn_unit_iid"],
+    "sanitize": True,
+    "set_coord": True,
+}
+
 seed = 0
-
-def get_atom_names_from_rdkit_mol(mol):
-    element_counter = Counter()
-    atom_names = []
-    for idx, rdatom in enumerate(mol.GetAtoms()):
-        element_occurence = element_counter[rdatom.GetAtomicNum()]
-        element_counter[rdatom.GetAtomicNum()] += 1
-        atom_names.append(f"{rdatom.GetSymbol().upper()}{element_occurence}")
-    return atom_names
-
-
 
     
 parent_dir = "/home/possu/jinho/allatom-design/atomworks_test/250922/residue_cache_data"
@@ -64,6 +64,9 @@ logging.basicConfig(
 )    
 logger = logging.getLogger(__name__)
 
+res_names_to_ignore = STANDARD_AA + STANDARD_RNA + STANDARD_DNA
+add_rdkit_molecules_for_atomized_molecules = AddRDKitMoleculesForAtomizedMolecules(generate_conformers_kwargs["hydrogen_policy"])
+
 for ccd_code in ccd_codes: 
     test_dir = ccd_code[0]
     save_dir = f"{parent_dir}/{test_dir}"
@@ -77,8 +80,13 @@ for ccd_code in ccd_codes:
     path = Path(f"/home/possu/jinho/datasets/ccd_mirror/{test_dir}/{ccd_code}/{ccd_code}.cif")
     if path.exists():
         try:
-            atom_array = atom_array_from_ccd_code(ccd_code) 
-            mol = atom_array_to_rdkit(atom_array, hydrogen_policy="remove")
+            atom_array = atom_array_from_ccd_code(ccd_code)          
+            atom_array = atomize_by_ccd_name(atom_array, res_names_to_ignore=res_names_to_ignore)           
+            ### For metals and anions, coords are not provided, so we need to set them to 0s.
+            if (len(atom_array.element) == 1) and np.all(np.isnan(atom_array.coord)): #! dealing with metals, and anions
+                atom_array.coord = np.zeros_like(atom_array.coord)
+             
+            mol = add_rdkit_molecules_for_atomized_molecules._convert_atom_array_to_rdkit_robust(atom_array, conversion_kwargs=atom_array_to_rdkit_conversion_kwargs)            
             #! (JH) Need hydrogens for accurate stereochemistry assignment
             add_hydrogens(mol)
             Chem.AssignStereochemistryFrom3D(mol)
@@ -87,7 +95,7 @@ for ccd_code in ccd_codes:
             atom_array = atom_array_from_rdkit(mol) # atom_array with removed hydrogens
             residue_data["atom_names"] = atom_array.atom_name #! Only heavy atoms are kept
                         
-            mol = generate_conformers_with_timeout_from_mol(mol, n_conformers=3, seed=seed, timeout=(3.0, 1.0), timeout_strategy="subprocess", **generate_conformers_kwargs)
+            mol = generate_conformers_with_timeout_from_mol(mol, ccd_code=ccd_code, n_conformers=50, seed=seed, timeout=(3.0, 1.0), timeout_strategy="subprocess", **generate_conformers_kwargs)
                                                                                                                                 
             residue_data["mol"] = mol
             residue_data["fingerprint"] = get_morgan_fingerprint_from_rdkit_mol(mol)

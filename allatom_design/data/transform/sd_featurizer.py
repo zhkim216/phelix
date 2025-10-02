@@ -1,9 +1,10 @@
 from typing import Any, override
-
+from pathlib import Path
 import atomworks.enums as aw_enums
 import atomworks.constants as aw_const
 import numpy as np
 import torch
+import logging
 from atomworks.constants import (AF3_EXCLUDED_LIGANDS, STANDARD_AA,
                                     STANDARD_DNA, STANDARD_RNA)
 from atomworks.ml.transforms.atom_array import (AddGlobalTokenIdAnnotation,
@@ -88,6 +89,7 @@ FEAT_TO_ATOM_DIM = {
 # Keep track of data dict keys only included at inference time
 INFERENCE_ONLY_KEYS = ["crop_info", "atom_array", "feat_metadata"]
 
+logger = logging.getLogger(__name__)
 
 def sd_featurizer(
     # cropping
@@ -97,6 +99,7 @@ def sd_featurizer(
     crop_spatial_p: float = 0.0,
     remove_keys: list[str] = [],
     remove_unresolved_tokens: bool = False,
+    residue_cache_dir: str | None = None,
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
@@ -135,20 +138,22 @@ def sd_featurizer(
             ],
             probs=[crop_contiguous_p, crop_spatial_p],
         )            
-
+    
     # Featurization
     # NOTE: for now, we ignore ref pos features because they are too slow to compute
     featurization_transforms_post_crop = [
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
-        # GetAF3ReferenceMoleculeFeatures(
-        #     conformer_generation_timeout=10.0,
-        #     use_element_for_atom_names_of_atomized_tokens=False,
-        # ),
+        AddCachedResidueData(residue_cache_dir=residue_cache_dir), #! (JH) changed 251001
+        GetAF3ReferenceMoleculeFeatures(
+            save_rdkit_mols=False,
+            use_cached_conformers=True,
+            conformer_generation_timeout=5.0,
+            use_element_for_atom_names_of_atomized_tokens=False,
+        ),
         ComputeAtomToTokenMap(),
         AddAF3TokenBondFeatures(),
         ConvertToTorch(keys=["encoded", "feats"]),
-
         # Handle missing atoms and tokens
         PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
         PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"),
@@ -157,7 +162,7 @@ def sd_featurizer(
         FeaturizeCoordsAndMasks(),
         CenterRandomAugmentation(scale=1.0), #! turn on/off depending on train/eval?
     ]
-
+    
     transforms = [
         *featurization_transforms_pre_crop,
         cropping_transform,
@@ -203,7 +208,14 @@ class FeaturizeCoordsAndMasks(Transform):
         feats["token_is_polymer"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_polymer, np.any)).float()
         feats["token_chain_type"] = torch.tensor(apply_token_wise(atom_array, atom_array.chain_type, np.any)).float()
         feats["atomic_number"] = torch.tensor(atom_array.atomic_number).long()
-        feats["atom_is_aromatic"] = torch.tensor(atom_array.is_aromatic).float()
+        
+        try:
+            feats["atom_is_aromatic"] = torch.tensor(atom_array.is_aromatic).float()
+        except: 
+            # Todo: LMT & DD6 from 6a2w, no attribute error for is_aromatic.
+            # Todo: Both have hexagon rings, but no aromaticity. Maybe error in parsing?
+            feats["atom_is_aromatic"] = torch.full((len(atom_array),), False).float()
+            print(f"Atom array has no attribute 'is_aromatic' for {data['example_id']}")            
         
         feats["atom_is_metal"] = np.isin(atom_array.element, aw_const.METAL_ELEMENTS)
         feats["token_is_metal"] = torch.tensor(apply_token_wise(atom_array, feats["atom_is_metal"], np.any)).float()
@@ -310,4 +322,33 @@ class ErrIfAllUnresolved(Transform):
         atom_array = data["atom_array"]
         if (atom_array.occupancy == 0).all():
             raise ValueError(f"All atoms are unresolved for {data['example_id']}")
+        return data
+    
+class AddCachedResidueData(Transform): #! (JH) changed 251001
+    """Add cached residue data to the data dict."""
+    def __init__(self, residue_cache_dir: str):
+        self.residue_cache_dir = residue_cache_dir
+        self._residue_cache: dict[str, dict] = {}
+        
+    def _load_residue_cached_entry(self, res_name: str) -> dict | None: 
+        if res_name in self._residue_cache:
+            return self._residue_cache[res_name]
+        path = Path(self.residue_cache_dir) / res_name / f"{res_name}.pt"
+        if not path.exists():
+            return None
+        entry = torch.load(path, map_location="cpu", weights_only=False)
+        # entry example: {"mol": rdkit.Chem.Mol, "fingerprint": ..., "atom_names": ...}
+        if entry is not None:
+            self._residue_cache[res_name] = entry        
+        return
+    
+    @override
+    def forward(self, data: dict) -> dict:
+        atom_array = data["atom_array"]
+        res_names = np.unique(atom_array.res_name)
+        for rn in res_names:
+            self._load_residue_cached_entry(rn)
+            
+        if self._residue_cache:
+            data["cached_residue_level_data"] = {"residues": self._residue_cache}
         return data
