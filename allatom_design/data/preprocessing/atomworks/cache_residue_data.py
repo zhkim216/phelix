@@ -18,11 +18,15 @@ import torch
 from tqdm import tqdm
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor
+import numpy as np
+from atomworks.constants import STANDARD_AA, STANDARD_DNA, STANDARD_RNA
 
+from atomworks.ml.transforms.atomize import atomize_by_ccd_name
 from atomworks.ml.transforms.rdkit_utils import (sample_rdkit_conformer_for_atom_array,
                                                  atom_array_to_rdkit,
                                                  generate_conformers,
                                                  generate_conformers_with_timeout_from_mol,
+                                                 AddRDKitMoleculesForAtomizedMolecules
                                                  )
 from atomworks.io.tools.rdkit import (get_morgan_fingerprint_from_rdkit_mol,
                                       atom_array_from_ccd_code,
@@ -68,7 +72,7 @@ def main(cfg: DictConfig):
     if use_parallel:         
         worker = partial(
             cache_residue_data,
-            seed=cfg.seed,
+            seeds=cfg.seeds,
             out_dir=shard_dir,
             cfg=cfg,
             logger=None,
@@ -79,7 +83,7 @@ def main(cfg: DictConfig):
     else:
         worker = partial(
             cache_residue_data,
-            seed=cfg.seed,
+            seeds=cfg.seeds,
             out_dir=shard_dir,
             cfg=cfg,
             logger=None,
@@ -90,7 +94,7 @@ def main(cfg: DictConfig):
     
 
 def cache_residue_data(ccd_path: str = None,
-                       seed: int = 0,
+                       seeds: list[int] = [6, 36, 216],
                        out_dir: str = None,
                        cfg: DictConfig = None,
                        logger: logging.Logger = None,
@@ -99,6 +103,7 @@ def cache_residue_data(ccd_path: str = None,
     Cache residue-level data for AtomWorks.
     This is not the most optimal way to do this, but it works.
     """
+    res_names_to_ignore = STANDARD_AA + STANDARD_RNA + STANDARD_DNA
     
     # Paths
     ccd_path = Path(ccd_path)
@@ -112,6 +117,8 @@ def cache_residue_data(ccd_path: str = None,
     
     # Get generate conformers kwargs from cfg
     generate_conformers_kwargs = dict(getattr(cfg, "generate_conformers_kwargs", {}) or {})
+    atom_array_to_rdkit_conversion_kwargs = dict(getattr(cfg, "atom_array_to_rdkit_conversion_kwargs", {}) or {})
+    add_rdkit_molecules_for_atomized_molecules = AddRDKitMoleculesForAtomizedMolecules(generate_conformers_kwargs["hydrogen_policy"])
     
     # Initialize residue data
     residue_data = {}
@@ -119,12 +126,7 @@ def cache_residue_data(ccd_path: str = None,
     residue_data.setdefault("descriptors", None) #! (JH) Descriptors are generated from neural network potentials, not using it for now
     residue_data.setdefault("atom_names", None)    
     residue_data.setdefault("fingerprint", None)    
-    
-    # Convert CCD code to biotite atom array
-    atom_array = atom_array_from_ccd_code(ccd_code)
-    # Convert biotite atom array to rdkit molecule
-    mol = atom_array_to_rdkit(atom_array, hydrogen_policy="remove")
-
+        
     # Local logging helper must be defined before first use
     def _logger_wrapper(message: str):
         if logger is not None:
@@ -134,8 +136,16 @@ def cache_residue_data(ccd_path: str = None,
 
     if ccd_path.exists():
         try:
+            # Convert CCD code to biotite atom array
             atom_array = atom_array_from_ccd_code(ccd_code)
-            mol = atom_array_to_rdkit(atom_array, hydrogen_policy="remove")
+            atom_array = atomize_by_ccd_name(atom_array, res_names_to_ignore=res_names_to_ignore)           
+            
+            ### For metals and anions, coords are not provided, so we need to set them to 0s.
+            if (len(atom_array.element) == 1) and np.all(np.isnan(atom_array.coord)): #! dealing with metals, and anions
+                atom_array.coord = np.zeros_like(atom_array.coord)
+                                    
+            # Convert biotite atom array to rdkit molecule
+            mol = add_rdkit_molecules_for_atomized_molecules._convert_atom_array_to_rdkit_robust(atom_array, conversion_kwargs=atom_array_to_rdkit_conversion_kwargs)            
             add_hydrogens(mol)
             Chem.AssignStereochemistryFrom3D(mol)
             mol = remove_hydrogens(mol)
@@ -147,13 +157,15 @@ def cache_residue_data(ccd_path: str = None,
             n_trials = int(getattr(cfg, "n_trials", 3))
             timeout_offset = float(getattr(cfg, "timeout_offset", 3.0))
             timeout_slope = float(getattr(cfg, "timeout_slope", 1.0))
+            seeds = seeds
             
             for trial in range(n_trials):
                 try:
                     mol = generate_conformers_with_timeout_from_mol(
                         mol,
+                        ccd_code=ccd_code,
                         n_conformers=cfg.num_conformers,
-                        seed=seed,
+                        seed=seeds[trial], #! (JH) different seeds for each trial
                         timeout=(timeout_offset, timeout_slope),
                         timeout_strategy="subprocess",
                         **generate_conformers_kwargs,
