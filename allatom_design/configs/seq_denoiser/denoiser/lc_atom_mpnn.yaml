@@ -20,18 +20,7 @@ mpnn:
   num_context_encoder_layers: 2
   num_y_context_encoder_layers: 2
   num_rbf: 16
-
-  # atom_encoder:
-  #   token_n_channel: ${denoiser.mpnn.n_channel}
-  #   atom_s: 64
-  #   atom_z: 16
-  #   atom_feature_dim: 386
-  #   k_atom_neighbors: 16
-  #   n_layers: 2
-  #   dropout_p: 0.1
-
-
-
+  
   token_features:
     ca_only: false
     k_neighbors: ${denoiser.mpnn.k_neighbors}    
@@ -43,9 +32,7 @@ mpnn:
     atom_context_num: 16
     token_bonds_masking: true 
     ligand_conditioning: ${denoiser.mpnn.ligand_conditioning}
-    
-    
-
+        
   potts:
     k_neighbors_potts: 48
     max_dist_potts: null
