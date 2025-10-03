@@ -6,6 +6,7 @@ debug: ${train.debug}
 debug_num_rows: 10000 #! For debugging
 prefetch_buffer_size: 4
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
+residue_cache_dir: /home/possu/jinho/datasets/atomworks/cached_residue_data
 
 sampling_weights:
   alphas_chain:
@@ -23,7 +24,7 @@ sampling_weights:
     a_metal: 0.0 #!(JH) changed 250925
     a_loi: 0.0
   betas:
-    beta_chain: 0.0
+    beta_chain: 0.0 
     beta_interface: 1.0
 
 train_filters:
@@ -31,24 +32,24 @@ train_filters:
     - "num_polymer_pn_units < 4" #! DEBUG
     - "deposition_date <= '2021-09-30'"
     - "resolution < 9.0"
-    - "n_prot > 0 or n_small_molecule > 0 or n_metal > 0"
+    - "n_prot > 0 or n_small_molecule > 0" # "n_prot > 0 or n_small_molecule > 0 or n_metal > 0"
     - "(n_prot > 0 and 16 < q_pn_unit_sequence_length < 256) or (n_prot == 0)" #! DEBUG      
   chain_filter2:
     - "n_prot > 0"
   interface:
-    - "n_prot == 2 or (n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_metal == 1)"
+    - "n_prot == 2 or (n_prot == 1 and n_small_molecule == 1)" # "n_prot == 2 or (n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_metal == 1)"
 
 val_filters:
   chain_filter1:
     - "num_polymer_pn_units < 4" #! DEBUG
     - "'2021-09-30' < deposition_date <= '2023-01-13'"  # Boltz validation set dates.
     - "resolution < 4.5"
-    - "n_prot > 0 or n_small_molecule > 0 or n_metal > 0"
+    - "n_prot > 0 or n_small_molecule > 0" # "n_prot > 0 or n_small_molecule > 0 or n_metal > 0"
     - "(n_prot > 0 and 16 < q_pn_unit_sequence_length < 256) or (n_prot == 0)" #! DEBUG      
   chain_filter2:
     - "n_prot > 0"
   interface:
-    - "n_prot == 2 or (n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_metal == 1)"
+    - "n_prot == 2 or (n_prot == 1 and n_small_molecule == 1)" # "n_prot == 2 or (n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_metal == 1)"
 
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:
@@ -66,6 +67,7 @@ featurizer_cfg:
   crop_center_cutoff_distance: 15.0
   crop_spatial_p: 0.5
   remove_unresolved_tokens: true #! (JH) changed 250926,
+  residue_cache_dir: ${data.residue_cache_dir}
 
 samples_per_epoch: 100 #! DEBUG
 batch_size: ${train.batch_size}

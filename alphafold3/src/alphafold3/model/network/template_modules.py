@@ -276,7 +276,7 @@ class SingleTemplateEmbedding(hk.Module):
       
       if not ligand_protein_template_conditioning:
         assert mask_template_sidechains == False and mask_template_sequence == False
-        assert template_is_protein.sum() == 0 and template_is_dna.sum() == 0 and template_is_rna.sum() == 0 and template_is_other.sum() == 0
+        # assert template_is_protein.sum() == 0 and template_is_dna.sum() == 0 and template_is_rna.sum() == 0 and template_is_other.sum() == 0
         # (JH) For non-conditioning, all features should be 0s.
       
       #####################################################

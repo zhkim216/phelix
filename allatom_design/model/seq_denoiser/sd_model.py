@@ -140,10 +140,8 @@ def get_denoiser(cfg: DictConfig,
     """
     Get the denoiser specified in the config.
     """
-    if cfg.name == "atom_mpnn":
-        return AtomMPNNDenoiser(cfg, sigma_data)
-    elif cfg.name == "lc_atom_mpnn":
-        return LCAtomMPNNDenoiser(cfg, sigma_data)
+    if cfg.name == "atom_mpnn" or cfg.name == "lc_atom_mpnn":
+        return AtomMPNNDenoiser(cfg, sigma_data)    
     else:
         raise ValueError(f"Unknown denoiser: {cfg.name}")
 

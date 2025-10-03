@@ -11,17 +11,17 @@ from torchtyping import TensorType
 
 import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
-import allatom_design.data.const as const
 from allatom_design.data.data import batched_gather
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
-
+from allatom_design.data.const import PERIODIC_TABLE_FEATURES
 
 class AtomMPNN(nn.Module):
     """Modified ProteinMPNN network to predict sequence from full atom structure."""
     def __init__(self, cfg: DictConfig):
         super().__init__()
         self.cfg = cfg
+        self.ligand_conditioning = cfg.ligand_conditioning
         self.node_features = cfg.n_channel
         self.edge_features = cfg.n_channel
         self.hidden_dim = cfg.n_channel
@@ -29,7 +29,8 @@ class AtomMPNN(nn.Module):
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
         self.n_tokens = const.AF3_ENCODING.n_tokens
-
+        self.num_rbf = cfg.num_rbf
+                        
         self.token_features = TokenFeatures(cfg.token_features)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=False)
         self.W_s = nn.Linear(self.n_tokens, self.hidden_dim, bias=False)
@@ -42,7 +43,27 @@ class AtomMPNN(nn.Module):
             EncLayer(self.hidden_dim, self.hidden_dim*2, dropout=cfg.dropout_p)
             for _ in range(self.num_encoder_layers)
         ])
-
+        
+        if self.ligand_conditioning:
+            # Mostly from LigandMPNN        
+            self.num_context_encoder_layers = cfg.num_context_encoder_layers
+            self.num_y_context_encoder_layers = cfg.num_y_context_encoder_layers        
+            self.W_v = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
+            self.W_c = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)            
+            self.W_nodes_y = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
+            self.W_edges_y = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
+            self.V_C = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
+            self.V_C_norm = torch.nn.LayerNorm(self.hidden_dim)
+            self.context_encoder_layers = torch.nn.ModuleList(
+            [
+                DecLayer(self.hidden_dim, self.hidden_dim * 2, dropout=cfg.dropout_p)
+                for _ in range(self.num_context_encoder_layers)
+            ]
+        )            
+            self.y_context_encoder_layers = torch.nn.ModuleList(
+                [DecLayerJ(self.hidden_dim, self.hidden_dim, dropout=cfg.dropout_p) for _ in range(self.num_y_context_encoder_layers)]
+            )
+                        
         # Decoder layers
         self.decoder_layers = nn.ModuleList([
             DecLayer(self.hidden_dim, self.decoder_in, dropout=cfg.dropout_p)
@@ -94,8 +115,8 @@ class AtomMPNN(nn.Module):
         h_S = self.W_s(restype)
 
         # Build graph and get edge features
-        h_E, E_idx, D_neighbors = self.token_features(batch)
-
+        h_E, E_idx, D_neighbors, V, Y_nodes, Y_edges, Y_m = self.token_features(batch)        
+                            
         # Pass through encoder layers
         h_V = h_V + h_S
         h_E = self.W_e(h_E)
@@ -105,11 +126,30 @@ class AtomMPNN(nn.Module):
         for layer in self.encoder_layers:
             h_V, h_E = layer(h_V, h_E, E_idx, token_mask, token_mask_2d)
 
+        # Process ligand context features
+        if self.ligand_conditioning:
+            h_E_context = self.W_v(V)
+            h_V_C = self.W_c(h_V)
+            Y_m_edges = Y_m[:, :, :, None] * Y_m[:, :, None, :]
+            Y_nodes = self.W_nodes_y(Y_nodes)
+            Y_edges = self.W_edges_y(Y_edges)
+            for i in range(len(self.context_encoder_layers)):
+                Y_nodes, _ = self.y_context_encoder_layers[i](
+                    h_V = Y_nodes, h_E = Y_edges, mask_V = Y_m, mask_attend = Y_m_edges
+                )
+                h_E_context_cat = torch.cat([h_E_context, Y_nodes], -1)
+                h_V_C, _ = self.context_encoder_layers[i](
+                    h_V = h_V_C, h_E = h_E_context_cat, mask_V = token_mask, mask_attend = Y_m
+                )
+            
+            h_V_C = self.V_C(h_V_C)
+            h_V = h_V + self.V_C_norm(self.dropout(h_V_C))
+
         # Pass through decoder layers
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
         for layer in self.decoder_layers:
-            h_V, h_ESV = layer(h_V, h_ESV, token_mask, E_idx)
+            h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = token_mask, E_idx = E_idx, mask_attend = token_mask_2d) #! (JH) changed, token_mask_2d is newly added
 
         # Potts model
         if self.use_potts:
@@ -161,6 +201,7 @@ class TokenFeatures(nn.Module):
     def __init__(self, cfg: DictConfig):
         """
         Extract token-level edge features and build KNN graph.
+        And also extract ligand-related features if ligand_conditioning is True.
         """
         super().__init__()
         self.cfg = cfg
@@ -170,8 +211,11 @@ class TokenFeatures(nn.Module):
         self.k_neighbors = cfg.k_neighbors
         self.num_rbf = cfg.num_rbf
         self.num_positional_embeddings = cfg.num_positional_embeddings
+        self.node_n_channel = cfg.node_n_channel
         self.edge_n_channel = cfg.edge_n_channel
         self.use_multichain_encoding = cfg.get("use_multichain_encoding", False)
+        self.ligand_conditioning = cfg.ligand_conditioning
+        self.atom_context_num = cfg.atom_context_num
 
         # Layers
         self.embeddings = PositionalEncodings(self.num_positional_embeddings)
@@ -179,8 +223,20 @@ class TokenFeatures(nn.Module):
         edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists + 1
         self.edge_embedding = nn.Linear(edge_in, self.edge_n_channel, bias=False)
         self.norm_edges = nn.LayerNorm(self.edge_n_channel)
+        
+        # Ligand conditioning-related layers
+        if self.ligand_conditioning:
+            self.type_linear = torch.nn.Linear(147, 64)
+            self.node_project_down = torch.nn.Linear(
+            self.num_rbf * const.MAX_NUM_ATOMS + 64 + 4, self.node_n_channel, bias=True
+        )
+            self.norm_nodes = torch.nn.LayerNorm(self.node_n_channel)
+            self.y_nodes = torch.nn.Linear(147, self.node_n_channel, bias=False)
+            self.y_edges = torch.nn.Linear(self.num_rbf, self.edge_n_channel, bias=False)
 
-
+            self.norm_y_edges = torch.nn.LayerNorm(self.edge_n_channel)
+            self.norm_y_nodes = torch.nn.LayerNorm(self.node_n_channel)
+                                
     def forward(self, batch: dict[str, TensorType["b ..."]]):
         """
         Extract token-level edge features and build KNN graph.
@@ -191,15 +247,21 @@ class TokenFeatures(nn.Module):
         # Get RBF features
         if self.ca_only:
             RBF_all = self._rbf(D_neighbors)
-        else:
-            X_all, tokenwise_atom_cond_mask = get_tokenwise_coords(batch)
-            X_all = torch.where(tokenwise_atom_cond_mask.unsqueeze(-1).bool(), X_all, X[..., None, :])  # replace all masked atoms with center atom for the residue
+        else:            
+            X_backbone, tokenwise_backbone_mask = get_tokenwise_coords(batch, backbone_only = True, sidechain_only = False, all_atoms = False)
+            # X_all = torch.where(tokenwise_atom_cond_mask.unsqueeze(-1).bool(), X_all, X[..., None, :])  # replace all masked atoms with center atom for the residue
 
-            RBF_all = []
-            for i in range(X_all.shape[-2]):
-                for j in range(X_all.shape[-2]):
-                    RBF_all.append(self._get_rbf(X_all[..., i, :], X_all[..., j, :], E_idx))
-            RBF_all = torch.cat(RBF_all, dim=-1)
+            RBF_backbone = []
+            for i in range(X_backbone.shape[-2]):
+                for j in range(X_backbone.shape[-2]):
+                    RBF_backbone.append(self._get_rbf(X_backbone[..., i, :], X_backbone[..., j, :], E_idx))
+            RBF_backbone = torch.cat(RBF_backbone, dim=-1)
+
+            # RBF_all = []
+            # for i in range(X_all.shape[-2]):
+            #     for j in range(X_all.shape[-2]):
+            #         RBF_all.append(self._get_rbf(X_all[..., i, :], X_all[..., j, :], E_idx))
+            # RBF_all = torch.cat(RBF_all, dim=-1)
 
         # Positional encodings
         residue_index = batch["residue_index"]
@@ -225,10 +287,110 @@ class TokenFeatures(nn.Module):
         token_bonds = gather_edges(token_bonds, E_idx)
 
         # Concatenate edge features and embed
-        E = torch.cat((E_positional, RBF_all, token_bonds), -1)
+        E = torch.cat((E_positional, RBF_backbone, token_bonds), -1)
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
-        return E, E_idx, D_neighbors
+        
+        if self.ligand_conditioning:            
+            # Sidechain conditioning for ligandMPNN            
+            E_idx_sub = E_idx[:, :, :16] #! hardcoded for 16 neighbor tokens            
+            
+            # Sidechain mask
+            prot_sc_atom_cond_mask = batch["prot_scn_atom_mask"] * batch["atom_cond_mask"] * batch["atom_pad_mask"]             
+            tokenwise_sc_cond_mask = batched_gather(prot_sc_atom_cond_mask, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1) # xyz_37_m
+            R_m = gather_nodes(tokenwise_sc_cond_mask, E_idx_sub)
+            R_m = R_m.view(R_m.shape[0], R_m.shape[1], -1)
+                        
+            # Sidechain coordinates
+            X_scn, _ = get_tokenwise_coords(batch, backbone_only = False, sidechain_only = True, all_atoms = False)            
+            X_scn = X_scn * tokenwise_sc_cond_mask[..., None]                                    
+            R = gather_nodes(X_scn.view(X_scn.shape[0], X_scn.shape[1], -1), E_idx_sub).view(X_scn.shape[0], X_scn.shape[1], E_idx_sub.shape[2], -1, 3)            
+            R = R.view(X_scn.shape[0], X_scn.shape[1], -1, 3)
+                                    
+            # Sidechain atomic number
+            sc_atomic_number = batch["atomic_number"] * prot_sc_atom_cond_mask
+            tokenwise_sc_atomic_number = batched_gather(sc_atomic_number, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1)
+            R_t = gather_nodes(tokenwise_sc_atomic_number, E_idx_sub)
+            R_t = R_t.view(X_scn.shape[0], X_scn.shape[1], -1) # concat sidechain and ligand atomic numbers
+            
+            # Ligand mask
+            ligand_mask = batch["atom_is_ligand"] * batch["atom_cond_mask"] * batch["atom_pad_mask"]
+            tokenwise_ligand_mask = batched_gather(ligand_mask, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1)
+            Y_m = torch.cat((R_m, tokenwise_ligand_mask), dim=2).to(dtype=torch.long) # concat sidechain and ligand masks
+            
+            # Ligand coordinates                                                
+            ligand_coords = batch["coords"] * ligand_mask.unsqueeze(-1)
+            tokenwise_ligand_coords = batched_gather(ligand_coords, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1)
+            Y = torch.cat((R, tokenwise_ligand_coords), dim=2) # concat sidechain and ligand coordinates
+                              
+            # Ligand atomic number
+            ligand_atomic_number = batch["atomic_number"] * ligand_mask
+            tokenwise_ligand_atomic_number = batched_gather(ligand_atomic_number, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1)
+            Y_t = torch.cat((R_t, tokenwise_ligand_atomic_number), dim=2)
+            
+            # Pairwise distances between pseudo CB and ligands
+            pseudo_cb_coords = batch["pseudo_cb_coords"]
+            Cb_Y_distances = torch.sum((pseudo_cb_coords[:, :, None, :] - Y) ** 2, -1)            
+            mask_Y = batch["seq_cond_mask"][..., None] * Y_m            
+            Cb_Y_distances_adjusted = Cb_Y_distances * mask_Y + (1.0 - mask_Y) * 10000.0
+            _, E_idx_Y = torch.topk(
+                Cb_Y_distances_adjusted, self.atom_context_num, dim=-1, largest=False
+            ) # E_idx_Y is the indices of the ligand atoms that are closest to each of the pseudo CBs
+            
+            # Gather Y, Y_t, Y_m that are closest to each of the pseudo CBs
+            Y = torch.gather(Y, 2, E_idx_Y[:, :, :, None].repeat(1, 1, 1, 3))
+            Y_t = torch.gather(Y_t, 2, E_idx_Y)
+            Y_m = torch.gather(Y_m, 2, E_idx_Y)
+            
+            # Periodic table features for ligand & sidechain atoms                                     
+            Y_t = Y_t.long()
+            Y_t_g = torch.tensor(PERIODIC_TABLE_FEATURES[1], device=Y_t.device)[Y_t]  # group; 19 categories including 0
+            Y_t_p = torch.tensor(PERIODIC_TABLE_FEATURES[2], device=Y_t.device)[Y_t]  # period; 8 categories including 0
+            Y_t_g_1hot_ = torch.nn.functional.one_hot(Y_t_g, 19)  # [B, L, M, 19]
+            Y_t_p_1hot_ = torch.nn.functional.one_hot(Y_t_p, 8)  # [B, L, M, 8]
+            Y_t_1hot_ = torch.nn.functional.one_hot(Y_t, 120)  # [B, L, M, 120]
+            Y_t_1hot_ = torch.cat([Y_t_1hot_, Y_t_g_1hot_, Y_t_p_1hot_], -1)  # [B, L, M, 147]
+            Y_t_1hot = self.type_linear(Y_t_1hot_.float())
+            
+            # Generate RBF features for backbone (+ pseudo CB) and ligands
+            RBF_backbone_ligands = []
+            for i in range(X_backbone.shape[-2]):        
+                if i == 4: #! (JH) hardcoded for CB index
+                    RBF_backbone_ligands.append(self._rbf(torch.sqrt(torch.sum((pseudo_cb_coords[:, :, None, :] - Y) ** 2, -1) + 1e-6)))            
+                else:
+                    RBF_backbone_ligands.append(self._rbf(torch.sqrt(torch.sum((X_backbone[..., i, :][:, :, None, :] - Y) ** 2, -1) + 1e-6)))            
+            RBF_backbone_ligands = torch.cat(RBF_backbone_ligands, dim=-1)                                
+            
+            # Make angle features between backbone and ligand atoms
+            f_angles = self._make_angle_features(X_backbone[:, :, 0, :], X_backbone[:, :, 1, :], X_backbone[:, :, 2, :], Y) # N, Ca, C / # [B, L, M, 4]
+
+            # Concatenate RBF features, periodic table features, and angle features. 
+            #! (JH) Not sure why Y_t_1hot is concatenated here, 
+            #! (JH) maybe let the model know each of the atom types so that the model learn the "interaction" between different types of atoms?
+            D_all = torch.cat((RBF_backbone_ligands, Y_t_1hot, f_angles), dim=-1)  # [B,L,M,5*num_bins+5]
+            V = self.node_project_down(D_all)  # [B, L, M, node_features]
+            V = self.norm_nodes(V)
+
+            # Pairwise distances between ligand atoms
+            Y_edges = self._rbf(
+                torch.sqrt(
+                    torch.sum((Y[:, :, :, None, :] - Y[:, :, None, :, :]) ** 2, -1) + 1e-6
+                )
+            )  # [B, L, M, M, num_bins]
+
+            Y_edges = self.y_edges(Y_edges)
+            Y_nodes = self.y_nodes(Y_t_1hot_.float())
+
+            Y_edges = self.norm_y_edges(Y_edges)
+            Y_nodes = self.norm_y_nodes(Y_nodes)
+            
+        else:
+            V = None
+            Y_nodes = None
+            Y_edges = None
+            Y_m = None
+        
+        return E, E_idx, D_neighbors, V, Y_nodes, Y_edges, Y_m
 
 
     def _get_token_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n 3", float]:
@@ -265,6 +427,41 @@ class TokenFeatures(nn.Module):
         D_A_B_neighbors = gather_edges(D_A_B[:,:,:,None], E_idx)[:,:,:,0] #[B,L,K]
         RBF_A_B = self._rbf(D_A_B_neighbors)
         return RBF_A_B
+    
+    def _get_cb_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_res 3"]:
+        """
+        Get CB coordinates for a batch of coordinates.
+        """
+        coords = batch["coords"]
+        
+        atom_mask = batch["atom_mask"]
+        return coords
+    
+    def _make_angle_features(self, A, B, C, Y): #! from ligandMPNN
+        v1 = A - B
+        v2 = C - B
+        e1 = torch.nn.functional.normalize(v1, dim=-1)
+        e1_v2_dot = torch.einsum("bli, bli -> bl", e1, v2)[..., None]
+        u2 = v2 - e1 * e1_v2_dot
+        e2 = torch.nn.functional.normalize(u2, dim=-1)
+        e3 = torch.cross(e1, e2, dim=-1)
+        R_residue = torch.cat(
+            (e1[:, :, :, None], e2[:, :, :, None], e3[:, :, :, None]), dim=-1
+        )
+
+        local_vectors = torch.einsum(
+            "blqp, blyq -> blyp", R_residue, Y - B[:, :, None, :]
+        )
+
+        rxy = torch.sqrt(local_vectors[..., 0] ** 2 + local_vectors[..., 1] ** 2 + 1e-8)
+        f1 = local_vectors[..., 0] / rxy
+        f2 = local_vectors[..., 1] / rxy
+        rxyz = torch.norm(local_vectors, dim=-1) + 1e-8
+        f3 = rxy / rxyz
+        f4 = local_vectors[..., 2] / rxyz
+
+        f = torch.cat([f1[..., None], f2[..., None], f3[..., None], f4[..., None]], -1)
+        return f
 
 
 class PositionWiseFeedForward(torch.nn.Module):
@@ -342,14 +539,76 @@ class DecLayer(nn.Module):
             h_V = mask_V * h_V
 
         #edge updates
-        h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
-        h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
-        h_EV = torch.cat([h_V_expand, h_EV], -1)
-        h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
-        h_E = self.norm3(h_E + self.dropout3(h_message))
+        if E_idx is not None:
+            h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
+            h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
+            h_EV = torch.cat([h_V_expand, h_EV], -1)
+            h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
+            h_E = self.norm3(h_E + self.dropout3(h_message))
 
-        return h_V, h_E
+            return h_V, h_E
+        else:
+            return h_V, None
 
+class DecLayerJ(nn.Module):
+    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
+        super(DecLayerJ, self).__init__()
+        self.num_hidden = num_hidden
+        self.num_in = num_in
+        self.scale = scale
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.norm1 = nn.LayerNorm(self.num_hidden)
+        self.norm2 = nn.LayerNorm(self.num_hidden)
+
+        self.W1 = nn.Linear(self.num_hidden + self.num_in, self.num_hidden, bias=True)
+        self.W2 = nn.Linear(self.num_hidden, self.num_hidden, bias=True)
+        self.W3 = nn.Linear(self.num_hidden, self.num_hidden, bias=True)
+        self.W11 = nn.Linear(self.num_hidden * 2 + self.num_in, self.num_hidden, bias=True) # nh * 2 for vi AND vj
+        self.W12 = nn.Linear(self.num_hidden, self.num_hidden, bias=True)
+        self.W13 = nn.Linear(self.num_hidden, self.num_in, bias=True) # num_in is hidden dim of edges h_E
+        self.norm3 = nn.LayerNorm(self.num_in)
+        self.dropout3 = nn.Dropout(dropout)
+
+    
+
+        self.act = torch.nn.GELU()
+        self.dense = PositionWiseFeedForward(self.num_hidden, num_hidden * 4)
+
+    def forward(self, h_V, h_E, mask_V=None, E_idx = None, mask_attend=None):
+        """ Parallel computation of full transformer layer """
+
+        # Concatenate h_V_i to h_E_ij
+        h_V_expand = h_V.unsqueeze(-2).expand(
+            -1, -1, -1, h_E.size(-2), -1
+        )  # the only difference
+        h_EV = torch.cat([h_V_expand, h_E], -1)
+        h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
+
+        if mask_attend is not None:
+            h_message = mask_attend.unsqueeze(-1) * h_message
+
+        dh = torch.sum(h_message, -2) / self.scale
+        h_V = self.norm1(h_V + self.dropout1(dh))
+
+        # Position-wise feedforward
+        dh = self.dense(h_V)
+        h_V = self.norm2(h_V + self.dropout2(dh))
+
+        if mask_V is not None:
+            mask_V = mask_V.unsqueeze(-1)
+            h_V = mask_V * h_V        
+            
+        if E_idx is not None:
+            h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
+            h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
+            h_EV = torch.cat([h_V_expand, h_EV], -1)
+            h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
+            h_E = self.norm3(h_E + self.dropout3(h_message))
+            
+            return h_V, h_E
+        else:
+            return h_V, None    
 
 class EncLayer(nn.Module):
     def __init__(self, num_hidden, num_in, dropout=0.1, scale=30, is_last_layer=False):
@@ -409,29 +668,44 @@ class EncLayer(nn.Module):
         return h_V, h_E
 
 
-def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]]) -> tuple[TensorType["b n_tokens 23 3", float], TensorType["b n_tokens 23"]]:
+def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]],
+                         backbone_only: bool = False,
+                         sidechain_only: bool = False,
+                         all_atoms: bool = False) -> tuple[TensorType["b n_tokens 23 3", float], TensorType["b n_tokens 23"]]:
     """
     Get token-level coordinates (padded to max_num_atoms per token). Batched version of pad_atom_feats_to_tokenwise for just coords.
     """
-    # TODO: check this whole function carefully
-    B = batch["coords"].shape[0]
-    device = batch["coords"].device
+    assert (backbone_only and sidechain_only) == False, "Should use all_atoms flag for all atoms"  
+    assert (backbone_only and all_atoms) == False, "Should use sidechain_only flag for sidechain atoms"  
+    assert (sidechain_only and all_atoms) == False, "Should use backbone_only flag for backbone atoms"  
 
-    # Build padded atom idxs
-    N_tokens = batch["token_pad_mask"].shape[1]
-    n_atoms_per_token = (F.one_hot(batch["atom_to_token_map"], num_classes=N_tokens) * batch["atom_pad_mask"][..., None]).sum(dim=-2)
-    atom_idxs = torch.cat([torch.zeros((B, 1), device=device), n_atoms_per_token.cumsum(dim=-1)[:, :-1]], dim=-1).long()
-    padded_atom_idxs = atom_idxs[..., None] + torch.arange(const.MAX_NUM_ATOMS, device=device)[None, None]
-    pad_mask = torch.arange(const.MAX_NUM_ATOMS, device=device)[None, None, :] < n_atoms_per_token[..., None]
-    padded_atom_idxs = padded_atom_idxs * pad_mask  # mask out ghost atoms
+    #! (JH) changed 251002
+    tokenwise_atom_idxs = batch["tokenwise_atom_idxs"]
+    tokenwise_atom_idxs_mask = batch["tokenwise_atom_idxs_mask"]
+    
+    # Gather coords    
+    if backbone_only:
+        prot_bb_atom_mask = batch["prot_bb_atom_mask"] * batch["atom_resolved_mask"]
+        X_backbone = batch["coords"] * prot_bb_atom_mask.unsqueeze(-1)
+        X_backbone = batched_gather(X_backbone, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask[..., None]
+        tokenwise_backbone_mask = batched_gather(prot_bb_atom_mask, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask
+        return X_backbone, tokenwise_backbone_mask
+    
+    elif sidechain_only:
+        prot_scn_atom_mask = batch["prot_scn_atom_mask"] * batch["atom_resolved_mask"]
+        X_sidechain = batch["coords"] * prot_scn_atom_mask.unsqueeze(-1)
+        X_sidechain = batched_gather(X_sidechain, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask[..., None]
+        tokenwise_sidechain_mask = batched_gather(prot_scn_atom_mask, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask
+        return X_sidechain, tokenwise_sidechain_mask
+    
+    elif all_atoms:
+        X_all = batched_gather(batch["coords"], tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask[..., None]
+        tokenwise_atom_cond_mask = batched_gather(batch["atom_cond_mask"], tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask
 
-    # Gather coords
-    B, N, _ = padded_atom_idxs.shape
-    X_all = batched_gather(batch["coords"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.MAX_NUM_ATOMS, 1)
-    tokenwise_atom_cond_mask = batched_gather(batch["atom_cond_mask"], padded_atom_idxs, dim=1, no_batch_dims=1) * pad_mask.view(B, N, const.MAX_NUM_ATOMS)
-
-    X_all = X_all * tokenwise_atom_cond_mask.unsqueeze(-1)  # zero out masked atoms
-    return X_all, tokenwise_atom_cond_mask
+        X_all = X_all * tokenwise_atom_cond_mask.unsqueeze(-1)  # zero out masked atoms
+        return X_all, tokenwise_atom_cond_mask
+    else:
+        raise ValueError("Invalid flag")
 
 
 def get_atomwise_coords(

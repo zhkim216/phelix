@@ -114,7 +114,10 @@ class LitSeqDenoiser(L.LightningModule):
         for k, v in aux.items():
             log_dict[f"{phase}{phase_suffix}/{k}{key_suffix}"] = v
 
-        self.log_dict(log_dict, on_step=(phase == "train"), on_epoch=True, prog_bar=True, logger=True, sync_dist=True,
+        trainer = getattr(self, "trainer", None)
+        has_logger = bool(getattr(trainer, "logger", None))
+
+        self.log_dict(log_dict, on_step=(phase == "train"), on_epoch=True, prog_bar=True, logger=has_logger, sync_dist=True,
                       add_dataloader_idx=False, batch_size=bs)
 
 
@@ -152,10 +155,12 @@ class LitSeqDenoiser(L.LightningModule):
     def on_before_optimizer_step(self, optimizer):
         # Compute the 1-norm and 2-norm for each layer
         # If using mixed precision, the gradients are already unscaled here
+        trainer = getattr(self, "trainer", None)
+        has_logger = bool(getattr(trainer, "logger", None))
         for norm_type in [1, 2]:
             grad_norms = grad_norm(self.model, norm_type=norm_type)
 
             total_norm_key = f"grad_{float(norm_type)}_norm_total"
             if total_norm_key in grad_norms:
                 total_norm = grad_norms[total_norm_key]
-                self.log_dict({f"total_l{norm_type}_grad_norm": total_norm})
+                self.log_dict({f"total_l{norm_type}_grad_norm": total_norm}, logger=has_logger)

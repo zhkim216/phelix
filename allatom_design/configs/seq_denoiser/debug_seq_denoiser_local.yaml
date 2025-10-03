@@ -12,7 +12,7 @@ exp_name: null  # Wandb exp name
 # Run settings
 overfit: -1 # Number of examples to overfit to, -1 to disable
 cuda: True
-num_workers: 0 # Dataloader num workers
+num_workers: 23 # Dataloader num workers
 
 # Finetuning options
 finetuning:
@@ -28,7 +28,7 @@ train:
 
 # Some trainer options
 trainer:
-  strategy: ddp  # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
+  strategy: ddp_find_unused_parameters_true # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
   max_epochs: -1
   max_steps: 100000
   accumulate_grad_batches: 1
@@ -47,7 +47,7 @@ resume:
 # Model options
 defaults:
   - _self_
-  - denoiser: debug_lc_atom_mpnn
+  - denoiser: lc_atom_mpnn
   - mask_selector: mask_selector
   - data: ligand_cond #! (JH) changed 250926
 

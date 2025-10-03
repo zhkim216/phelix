@@ -738,3 +738,8 @@ def get_seq_from_res_type(res_type: TensorType["n k", int]) -> str:
     Get sequence from res_type.
     """
     return "".join([const.prot_token_to_letter[const.tokens[x]] for x in res_type.argmax(dim=-1)])
+
+##############################################
+# After moving to atomworks
+##############################################
+
