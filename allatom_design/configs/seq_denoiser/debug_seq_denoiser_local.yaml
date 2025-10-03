@@ -49,7 +49,7 @@ defaults:
   - _self_
   - denoiser: lc_atom_mpnn
   - mask_selector: mask_selector
-  - data: ligand_cond #! (JH) changed 250926
+  - data: debug_ligand_cond #! (JH) changed 250926
 
 data: ${data}
 

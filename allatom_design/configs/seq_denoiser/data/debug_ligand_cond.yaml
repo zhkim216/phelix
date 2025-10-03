@@ -24,16 +24,16 @@ sampling_weights:
     a_metal: 0.0 #!(JH) changed 250925
     a_loi: 0.0
   betas:
-    beta_chain: 1.0
+    beta_chain: 0.0 
     beta_interface: 1.0
 
 train_filters:
   chain_filter1:
-    - "num_polymer_pn_units < 50" 
+    - "num_polymer_pn_units < 4" #! DEBUG
     - "deposition_date <= '2021-09-30'"
     - "resolution < 9.0"
     - "n_prot > 0 or n_small_molecule > 0" # "n_prot > 0 or n_small_molecule > 0 or n_metal > 0"
-    - "(n_prot > 0 and 16 < q_pn_unit_sequence_length < 2048) or (n_prot == 0)" #! DEBUG      
+    - "(n_prot > 0 and 16 < q_pn_unit_sequence_length < 256) or (n_prot == 0)" #! DEBUG      
   chain_filter2:
     - "n_prot > 0"
   interface:
@@ -41,11 +41,11 @@ train_filters:
 
 val_filters:
   chain_filter1:
-    - "num_polymer_pn_units < 50" 
+    - "num_polymer_pn_units < 4" #! DEBUG
     - "'2021-09-30' < deposition_date <= '2023-01-13'"  # Boltz validation set dates.
     - "resolution < 4.5"
     - "n_prot > 0 or n_small_molecule > 0" # "n_prot > 0 or n_small_molecule > 0 or n_metal > 0"
-    - "(n_prot > 0 and 16 < q_pn_unit_sequence_length < 2048) or (n_prot == 0)" #! DEBUG      
+    - "(n_prot > 0 and 16 < q_pn_unit_sequence_length < 256) or (n_prot == 0)" #! DEBUG      
   chain_filter2:
     - "n_prot > 0"
   interface:
@@ -62,9 +62,6 @@ cif_parser_args:
   hydrogen_policy: "remove"
 
 featurizer_cfg:
-  apply_random_augmentation: true
-  translation_scale: 1.0
-  
   max_tokens: 256 #! DEBUG
   max_atoms: 2304 #! DEBUG
   crop_center_cutoff_distance: 15.0
