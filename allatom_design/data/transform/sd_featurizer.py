@@ -4,6 +4,8 @@ import atomworks.enums as aw_enums
 import atomworks.constants as aw_const
 import numpy as np
 import torch
+import torch.nn.functional as F
+from torch import Tensor as TensorType
 import logging
 from atomworks.constants import (AF3_EXCLUDED_LIGANDS, STANDARD_AA,
                                     STANDARD_DNA, STANDARD_RNA)
@@ -57,10 +59,16 @@ FEAT_TO_TOKEN_DIM = {
     "token_to_center_atom": [0],
     "token_pad_mask": [0],
     "token_resolved_mask": [0],
-
-    "token_is_polymer": [0],
-    "token_chain_type": [0],    
+    "tokenwise_atom_idxs": [0], #! (JH) changed
+    "tokenwise_atom_idxs_mask": [0], #! (JH) changed
+    "pseudo_cb_coords": [0],
+    
+    # Ligand related features    
+    "token_chain_type": [0], 
+    "token_is_small_molecule": [0],   
     "token_is_metal": [0],
+    "token_is_polymer": [0],
+    
     # optional features that might not be present
     "seq_cond_mask": [0],
     "token_exists_mask": [0],
@@ -76,14 +84,24 @@ FEAT_TO_ATOM_DIM = {
 
     "prot_bb_atom_mask": [0],
     "prot_scn_atom_mask": [0],
-
-    "atomic_number": [0],
-    "atom_is_aromatic": [0],
-    "atom_is_metal": [0],
-    "token_is_metal": [0],
-
+    
     # optional features that might not be present
     "atom_cond_mask": [0],
+    
+    # Ligand related features
+    "atomic_number": [0],
+    "atom_is_aromatic": [0],
+    "atom_is_metal": [0],    
+    "atom_is_small_molecule": [0],
+    "atom_is_ligand": [0],
+    
+    "ref_pos": [0],
+    "ref_mask": [0],
+    "ref_element": [0],
+    "ref_charge": [0],
+    "ref_atom_name_chars": [0],
+    "ref_space_uid": [0],
+    "ref_is_atomized_atom_level": [0],
 }
 
 # Keep track of data dict keys only included at inference time
@@ -150,7 +168,7 @@ def sd_featurizer(
             use_cached_conformers=True,
             conformer_generation_timeout=5.0,
             use_element_for_atom_names_of_atomized_tokens=False,
-        ),
+        ), #Todo: add automorphisms and chiral features
         ComputeAtomToTokenMap(),
         AddAF3TokenBondFeatures(),
         ConvertToTorch(keys=["encoded", "feats"]),
@@ -196,19 +214,43 @@ class FeaturizeCoordsAndMasks(Transform):
 
         # Get protein backbone and sidechain atom masks
         feats["atom_to_token_map"] = feats["atom_to_token_map"].long()
-        atomwise_is_prot = feats["is_protein"].gather(dim=-1, index=feats["atom_to_token_map"])
-
+        atom_is_prot = feats["is_protein"].gather(dim=-1, index=feats["atom_to_token_map"])
+        feats["atom_is_prot"] = atom_is_prot        
+        
         atomized = torch.tensor(atom_array.atomize)
         bb_atom_mask = torch.tensor(atom_array.is_backbone_atom)
 
-        feats["prot_bb_atom_mask"] = bb_atom_mask * ~atomized * atomwise_is_prot
-        feats["prot_scn_atom_mask"] = ~bb_atom_mask * ~atomized * atomwise_is_prot
+        feats["prot_bb_atom_mask"] = bb_atom_mask * ~atomized * atom_is_prot
+        feats["prot_scn_atom_mask"] = ~bb_atom_mask * ~atomized * atom_is_prot
         feats["token_to_center_atom"] = torch.tensor(get_af3_token_center_idxs(atom_array))
 
         feats["token_is_polymer"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_polymer, np.any)).float()
         feats["token_chain_type"] = torch.tensor(apply_token_wise(atom_array, atom_array.chain_type, np.any)).float()
         feats["atomic_number"] = torch.tensor(atom_array.atomic_number).long()
+                        
+        # Convert atomwise to tokenwise (same method as get_tokenwise_coords)        
+        # Calculate number of atoms per token
+        device = feats["coords"].device
+        N_tokens = feats["token_pad_mask"].shape[0]
+        n_atoms_per_token = (F.one_hot(feats["atom_to_token_map"], num_classes=N_tokens) * feats["atom_pad_mask"][..., None]).sum(dim=-2)
+
+        # Starting atom index for each token
+        tokenwise_atom_idxs = torch.cat([torch.zeros((1,), device=device), n_atoms_per_token.cumsum(dim=-1)[:-1]], dim=-1).long()
+        tokenwise_atom_idxs = tokenwise_atom_idxs[..., None] + torch.arange(const.MAX_NUM_ATOMS, device=device)[None, :]
+        tokenwise_atom_idxs_mask = torch.arange(const.MAX_NUM_ATOMS, device=device)[None, :] < n_atoms_per_token[..., None]
+        tokenwise_atom_idxs = tokenwise_atom_idxs * tokenwise_atom_idxs_mask
         
+        feats["tokenwise_atom_idxs"] = tokenwise_atom_idxs
+        feats["tokenwise_atom_idxs_mask"] = tokenwise_atom_idxs_mask                
+        feats["pseudo_cb_coords"] = self._get_pseudo_cb_coords(data)
+                    
+    
+        ### Ligand related features ###
+        # Get ligand atom mask
+        atom_is_ligand = feats["is_ligand"].gather(dim=-1, index=feats["atom_to_token_map"])
+        feats["atom_is_ligand"] = atom_is_ligand
+        
+        # Get ligand related features
         try:
             feats["atom_is_aromatic"] = torch.tensor(atom_array.is_aromatic).float()
         except: 
@@ -217,13 +259,60 @@ class FeaturizeCoordsAndMasks(Transform):
             feats["atom_is_aromatic"] = torch.full((len(atom_array),), False).float()
             print(f"Atom array has no attribute 'is_aromatic' for {data['example_id']}")            
         
-        feats["atom_is_metal"] = np.isin(atom_array.element, aw_const.METAL_ELEMENTS)
-        feats["token_is_metal"] = torch.tensor(apply_token_wise(atom_array, feats["atom_is_metal"], np.any)).float()
-        feats["atom_is_metal"] = torch.tensor(feats["atom_is_metal"]).float()
+        atom_is_metal = np.isin(atom_array.element, aw_const.METAL_ELEMENTS)
+        token_is_metal = torch.tensor(apply_token_wise(atom_array, atom_is_metal, np.any))
+        feats["token_is_metal"] = token_is_metal
         
+        feats["atom_is_metal"] = torch.tensor(atom_is_metal)
+        feats["atom_is_small_molecule"] = feats["atom_is_ligand"] * ~feats["atom_is_metal"]        
+        feats["atom_is_metal"] = feats["atom_is_metal"].float()
+        feats["atom_is_small_molecule"] = feats["atom_is_small_molecule"].float()
+        feats["token_is_small_molecule"] = feats["is_ligand"] * ~feats["token_is_metal"]
+        
+        # Convert to float
+        feats["token_is_metal"] = feats["token_is_metal"].float()
+        feats["token_is_small_molecule"] = feats["token_is_small_molecule"].float()        
         
         return data
+    
+    def _get_pseudo_cb_coords(self, data: dict[str, Any]):
+        """
+        Get pseudo CB coordinates for the atom array.
+        """
+        atom_array = data["atom_array"]                           
+        token_is_protein = data["feats"]["is_protein"]
+        token_len = len(token_is_protein)
+        
+        token_id = atom_array.token_id  # [n_atoms]
+        atom_name = atom_array.atom_name  # [n_atoms]
+        coords_np = atom_array.coord  # [n_atoms, 3]
+                
+        atom_is_prot = data["feats"]["atom_is_prot"].detach().to(torch.bool).cpu().numpy() #! Important to convert to numpy and bool, to use boolean mask
+        
+        ca_mask = atom_is_prot & (atom_name == "CA")
+        n_mask = atom_is_prot & (atom_name == "N")
+        c_mask = atom_is_prot & (atom_name == "C")
+        
+        # Positions and their token ids
+        pos_ca, toks_ca = np.where(ca_mask)[0], token_id[ca_mask]
+        pos_n,  toks_n  = np.where(n_mask)[0],  token_id[n_mask]
+        pos_c,  toks_c  = np.where(c_mask)[0],  token_id[c_mask]
 
+        # Allocate and scatter
+        ca_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+        n_coords  = torch.zeros((token_len, 3), dtype=torch.float32)
+        c_coords  = torch.zeros((token_len, 3), dtype=torch.float32)
+
+        ca_coords[toks_ca] = torch.from_numpy(coords_np[pos_ca]).float()
+        n_coords[toks_n]   = torch.from_numpy(coords_np[pos_n]).float()
+        c_coords[toks_c]   = torch.from_numpy(coords_np[pos_c]).float()
+        
+        b = ca_coords - n_coords
+        c = c_coords - ca_coords
+        a = torch.cross(b, c, dim=-1)
+        cb_coords = -0.58273431 * a + 0.56802827 * b - 0.54067466 * c + ca_coords
+        
+        return cb_coords                    
 
 class PadSDFeats(Transform):
     """Pad the token and atom features to the maximum number of tokens and atoms."""

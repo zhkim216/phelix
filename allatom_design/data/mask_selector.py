@@ -100,8 +100,7 @@ class MaskSelector:
         protein_token_mask = batch["is_protein"] * batch["token_resolved_mask"] * batch["token_pad_mask"] # [B, N_tokens]
         protein_atom_mask = torch.gather(protein_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]            
         protein_coords = coords * protein_atom_mask.unsqueeze(-1)
-        if batch["is_ligand"].any():
-            print(1)
+                
         # Compute distance between ligand and protein atoms
         dist_mat_mask = protein_atom_mask[:, :, None] * ligand_atom_mask[:, None, :] 
         # (JH) 1 where protein and ligand atoms are both present, 0 otherwise

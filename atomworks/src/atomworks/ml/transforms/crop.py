@@ -264,10 +264,7 @@ def get_spatial_crop_center(
 
     # ... assemble final crop mask
     can_be_crop_center = is_query_pn_unit & is_at_interface & is_occupied
-
-    if not np.any(can_be_crop_center):
-        print(1)
-
+        
     assert np.any(can_be_crop_center), "No crop center found!"
     return can_be_crop_center
 

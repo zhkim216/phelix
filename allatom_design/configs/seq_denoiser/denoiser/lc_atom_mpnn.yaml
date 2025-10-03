@@ -15,8 +15,12 @@ mpnn:
   n_channel: 128
   k_neighbors: 32
   n_layers: 3
-  dropout_p: 0.1
-  use_atom_encoder: false
+  dropout_p: 0.1  
+  ligand_conditioning: true
+  num_context_encoder_layers: 2
+  num_y_context_encoder_layers: 2
+  num_rbf: 16
+
   # atom_encoder:
   #   token_n_channel: ${denoiser.mpnn.n_channel}
   #   atom_s: 64
@@ -26,13 +30,21 @@ mpnn:
   #   n_layers: 2
   #   dropout_p: 0.1
 
+
+
   token_features:
     ca_only: false
-    k_neighbors: ${denoiser.mpnn.k_neighbors}
-    num_rbf: 8
+    k_neighbors: ${denoiser.mpnn.k_neighbors}    
     num_positional_embeddings: 16
+    node_n_channel: ${denoiser.mpnn.n_channel}
     edge_n_channel: ${denoiser.mpnn.n_channel}
+    num_rbf: ${denoiser.mpnn.num_rbf}
+    use_multichain_encoding: true
+    atom_context_num: 16
     token_bonds_masking: true 
+    ligand_conditioning: ${denoiser.mpnn.ligand_conditioning}
+    
+    
 
   potts:
     k_neighbors_potts: 48

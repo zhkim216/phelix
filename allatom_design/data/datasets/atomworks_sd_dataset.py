@@ -37,6 +37,8 @@ class AtomworksSDDataModule(L.LightningDataModule):
         self._val_set = SDDataset(cfg, phase="val")
         self.prefetch_buffer_size = cfg.prefetch_buffer_size
         
+        
+        
     def train_dataloader(self) -> DataLoader:
         weights = torch.as_tensor(self._train_set.get_sampling_weights(), dtype=torch.float32)        
         
@@ -69,6 +71,7 @@ class AtomworksSDDataModule(L.LightningDataModule):
                             pin_memory=True,
                             drop_last=True,
                             collate_fn=sd_collator,
+                            persistent_workers=(self.cfg.num_workers > 0),
                             worker_init_fn=worker_init_fn)
 
         self._train_sampler = sampler
@@ -100,7 +103,7 @@ class SDDataset(MolecularDataset):
             
         self.cfg = cfg
         self.phase = phase
-        self.save_failed_examples_to_dir = cfg.save_failed_examples_to_dir
+        self.save_failed_examples_to_dir = cfg.save_failed_examples_to_dir        
         self._rng = None # For fallback sampling
 
         # Initialize featurizer
@@ -132,8 +135,8 @@ class SDDataset(MolecularDataset):
     def __getitem__(self, idx: int):       
         self._ensure_worker_rng() # Prepare per-worker random number generator for fallback
         
-        # Load cached example.
-        example_id = self.idx_to_id(idx)
+        # Load cached example.        
+        example_id = self.idx_to_id(idx)                            
         parsed_row = self.parsed_df.loc[example_id]
                             
         try:
@@ -151,7 +154,7 @@ class SDDataset(MolecularDataset):
                 return self.__getitem__(idx)
             
         example.update(parsed_row)  # add in query_pn_unit_iids
-
+                    
         # Apply train-time transforms.
         try:
             feats = self._apply_transform(example, example_id=example_id, idx=idx)            
@@ -165,8 +168,7 @@ class SDDataset(MolecularDataset):
             else:
                 idx = idx + 1
                 # logger.warning(f"Falling back to next example {idx} in {self.phase} dataset...")                
-                return self.__getitem__(idx)
-            
+                return self.__getitem__(idx)            
 
         return feats
 
@@ -190,6 +192,7 @@ class SDDataset(MolecularDataset):
         with open(self.cfg.validation_ids_txt, "r") as f:
             logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_txt}...")
             val_split = {x.lower() for x in f.read().splitlines()}
+            
             
         chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
         chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"
@@ -390,7 +393,7 @@ class SDDataset(MolecularDataset):
                 f"  - Remaining: {filtered_num_rows:,} rows ({percent_remaining:.2f}%)\n"
                 f"+-------------------------------------------+\n"
             )
-
+    
 
 def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     """Collate sequence denoiser features into a batch.
