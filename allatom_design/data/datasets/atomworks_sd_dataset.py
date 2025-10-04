@@ -85,7 +85,7 @@ class AtomworksSDDataModule(L.LightningDataModule):
                                 num_workers=self.cfg.num_workers,
                                 shuffle=False,
                                 pin_memory=True,
-                                drop_last=True,
+                                drop_last=False, #! (JH) changed 251003
                                 collate_fn=sd_collator,
                                 worker_init_fn=worker_init_fn)
 

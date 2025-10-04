@@ -67,6 +67,7 @@ class SDLoss(nn.Module):
                                             
                 # Select only samples that have ligands
                 has_ligand = lp_seq_loss_mask.sum(dim=-1) > 0
+                num_lp_tokens = lp_seq_loss_mask.sum(dim=-1)
                 
                 if has_ligand.any():
                     lp_seq_loss = masked_cross_entropy(outputs["seq_logits"], target_restype, lp_seq_loss_mask, seq_loss_cfg=self.cfg.seq_loss)
@@ -75,10 +76,8 @@ class SDLoss(nn.Module):
                          
                     lp_seq_acc = masked_seq_accuracy(outputs["seq_logits"], target_restype, lp_seq_loss_mask)
                     lp_seq_acc = lp_seq_acc[has_ligand]                
-                    aux_monitor["lp_seq_acc"] = lp_seq_acc.mean().detach().clone()
-                else:
-                    aux_monitor["lp_seq_loss"] = torch.tensor(0.0, device=lp_seq_loss_mask.device)
-                    aux_monitor["lp_seq_acc"] = torch.tensor(0.0, device=lp_seq_loss_mask.device)
+                    aux_monitor["lp_seq_acc"] = lp_seq_acc.mean().detach().clone()                
+                                        
 
             if outputs.get("potts_decoder_aux") is not None:
                 potts_decoder_aux = outputs["potts_decoder_aux"]
