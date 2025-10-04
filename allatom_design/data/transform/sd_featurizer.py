@@ -118,6 +118,7 @@ def sd_featurizer(
     remove_keys: list[str] = [],
     remove_unresolved_tokens: bool = False,
     residue_cache_dir: str | None = None,
+    max_conformers_per_residue: int | None = None,
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
@@ -168,6 +169,7 @@ def sd_featurizer(
             use_cached_conformers=True,
             conformer_generation_timeout=5.0,
             use_element_for_atom_names_of_atomized_tokens=False,
+            max_conformers_per_residue=max_conformers_per_residue,
         ), #Todo: add automorphisms and chiral features
         ComputeAtomToTokenMap(),
         AddAF3TokenBondFeatures(),
