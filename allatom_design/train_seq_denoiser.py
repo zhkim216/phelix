@@ -10,8 +10,10 @@ from lightning.fabric.loggers.logger import _DummyExperiment as DummyExperiment
 from lightning.pytorch.callbacks import ModelCheckpoint, Callback
 from atomworks.ml.samplers import set_sampler_epoch
 from lightning.pytorch.callbacks.lr_monitor import LearningRateMonitor
+from allatom_design.callback.unusedparamdetector import UnusedParamDetector
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
+from datetime import datetime
 
 from allatom_design.data.datasets.atomworks_sd_dataset import AtomworksSDDataModule
 from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
@@ -49,39 +51,50 @@ def main(cfg: DictConfig):
     local_rank = os.environ.get("LOCAL_RANK", None)
     print(f"Local rank: {local_rank}")
 
+    # Auto-assign experiment name when missing (prefer wandb auto name on rank 0)
+    if not OmegaConf.select(cfg, "exp_name"):
+        if cfg.wandb.no_wandb:
+            cfg.exp_name = f"debug-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        else:
+            if (local_rank is None) or (str(local_rank) == "0"):
+                # Initialize a wandb run to let wandb generate a name automatically
+                wandb.init(
+                    project=cfg.wandb.project,
+                    entity=cfg.wandb.wandb_id,
+                    name=None,
+                    group=cfg.wandb.group,
+                    config=cfg_dict,
+                    dir=wandb_dir,
+                )
+                cfg.exp_name = wandb.run.name
+                os.environ["WANDB_RUN_NAME"] = cfg.exp_name
+            else:
+                # Non-zero ranks will use the name propagated from rank 0 if available
+                cfg.exp_name = os.environ.get(
+                    "WANDB_RUN_NAME", f"debug-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                )
+
     if cfg.wandb.no_wandb:
-        log_dir = Path(cfg.out_dir, cfg.wandb.project, "debug")
+        log_dir = Path(cfg.out_dir, cfg.wandb.project, cfg.exp_name)
         results_dir = Path(log_dir, "results")
         results_dir.mkdir(parents=True, exist_ok=True)
         logger = False  # disables logging
-    else:
-        if local_rank is None:
-            # If none, then we are either on node rank 0 or not using DDP
-            wandb.init(
-                project=cfg.wandb.project,
-                entity=cfg.wandb.wandb_id,
-                name=cfg.exp_name,
-                group=cfg.wandb.group,
-                config=cfg_dict,
-                dir=wandb_dir,
-            )
-            os.environ["WANDB_RUN_NAME"] = wandb.run.name
-
-        wandb_run_name = os.environ["WANDB_RUN_NAME"]
-        log_dir = Path(cfg.out_dir, cfg.wandb.project, wandb_run_name)  # base log dir
+    else:        
+        log_dir = Path(cfg.out_dir, cfg.wandb.project, cfg.exp_name)  # base log dir
 
         # path for run outputs
         results_dir = Path(log_dir, "results")
         results_dir.mkdir(parents=True, exist_ok=True)
-
+        
         logger = WandbLogger(
             name=cfg.exp_name,
             project=cfg.wandb.project,
             entity=cfg.wandb.wandb_id,
-            experiment=wandb.run if local_rank is None else DummyExperiment(),
+            experiment=wandb.run if getattr(wandb, "run", None) is not None else DummyExperiment(),
             save_dir=results_dir,
         )
-        print(f"Wandb run name: {wandb_run_name}")
+
+        print(f"Wandb run name: {cfg.exp_name}")
 
     # Set up logging
     ckpt_dir = Path(log_dir, "checkpoints")
@@ -151,6 +164,10 @@ def main(cfg: DictConfig):
             auto_insert_metric_name=False
         )
         callbacks.append(latest_ema_checkpoint_callback)
+
+    if cfg.train.debug:
+        unused_param_detector = UnusedParamDetector()
+        callbacks.append(unused_param_detector)
 
     # log learning rate
     if logger:
