@@ -71,6 +71,7 @@ featurizer_cfg:
   crop_spatial_p: 0.5
   remove_unresolved_tokens: true #! (JH) changed 250926,
   residue_cache_dir: ${data.residue_cache_dir}
+  max_conformers_per_residue: 50
 
 samples_per_epoch: 100 #! DEBUG
 batch_size: ${train.batch_size}
