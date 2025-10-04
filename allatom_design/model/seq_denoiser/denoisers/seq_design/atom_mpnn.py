@@ -1,11 +1,12 @@
 import math
 from functools import partial
 from typing import Optional, Union
+from omegaconf import DictConfig
 
 import numpy as np
 import torch
 import torch.nn as nn
-from omegaconf import DictConfig
+import torch._dynamo as dynamo
 from torch.nn import functional as F
 from torchtyping import TensorType
 
@@ -41,27 +42,23 @@ class AtomMPNN(nn.Module):
         # Encoder layers
         self.encoder_layers = nn.ModuleList([
             EncLayer(self.hidden_dim, self.hidden_dim*2, dropout=cfg.dropout_p)
-            for _ in range(self.num_encoder_layers)
+            for i in range(self.num_encoder_layers)
         ])
         
         if self.ligand_conditioning:
-            # Mostly from LigandMPNN        
+            # Mostly from LigandMPNN
             self.num_context_feature_processor_layers = cfg.ligands.get("num_context_feature_processor_layers", 2)
-            self.num_context_feature_aggregator_layers = cfg.ligands.get("num_context_feature_aggregator_layers", 2)                    
+            self.num_context_feature_aggregator_layers = cfg.ligands.get("num_context_feature_aggregator_layers", 2)
             self.edge_update = cfg.ligands.get("edge_update", False)
-            self.W_v = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
-            self.W_c = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)            
-            self.W_nodes_y = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
-            self.W_edges_y = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
-            self.V_C = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
-            self.V_C_norm = torch.nn.LayerNorm(self.hidden_dim)
-            
-            self.context_feature_processor = torch.nn.ModuleList(
-                [Contextfeatureprocessor(self.hidden_dim, self.hidden_dim, dropout=cfg.dropout_p, edge_update=self.edge_update) for _ in range(self.num_context_feature_processor_layers)]
+
+            # Encapsulate context feature processing into a separate module
+            self.context_module = ContextModule(
+                hidden_dim=self.hidden_dim,
+                dropout_p=cfg.dropout_p,
+                num_processor_layers=self.num_context_feature_processor_layers,
+                num_aggregator_layers=self.num_context_feature_aggregator_layers,
+                edge_update=self.edge_update,
             )
-            self.context_feature_aggregator = torch.nn.ModuleList(
-                [Contextfeatureaggregator(self.hidden_dim, self.hidden_dim * 2, dropout=cfg.dropout_p, edge_update=self.edge_update) for _ in range(self.num_context_feature_aggregator_layers)]
-            )            
             
                         
         # Decoder layers
@@ -128,37 +125,15 @@ class AtomMPNN(nn.Module):
 
         # Process ligand context features
         if self.ligand_conditioning:
-            h_E_context = self.W_v(V)
-            h_V_C = self.W_c(h_V)
-            Y_m_edges = Y_m[:, :, :, None] * Y_m[:, :, None, :]
-            Y_nodes = self.W_nodes_y(Y_nodes)
-            Y_edges = self.W_edges_y(Y_edges)
-            if not self.edge_update:
-                for i in range(len(self.context_feature_aggregator)):
-                    Y_nodes, _ = self.context_feature_processor[i](
-                        h_V = Y_nodes, h_E = Y_edges, mask_V = Y_m, mask_attend = Y_m_edges, 
-                        E_idx = E_idx_YY
-                    ) 
-                    # Y_nodes & Y_edges are nearest ligand & sidechain atoms features 
-                    # for each pseudo CB.
-                    h_E_context_cat = torch.cat([h_E_context, Y_nodes], -1)
-                    h_V_C, _ = self.context_feature_aggregator[i](
-                        h_V = h_V_C, h_E = h_E_context_cat, mask_V = token_mask, mask_attend = Y_m
-                        
-                    )
-            else:
-                h_E_context_cat = torch.cat([h_E_context, Y_nodes], -1)
-                for i in range(len(self.context_feature_aggregator)):
-                    Y_nodes, Y_edges = self.context_feature_processor[i](
-                        h_V = Y_nodes, h_E = Y_edges, mask_V = Y_m, mask_attend = Y_m_edges, 
-                        E_idx = E_idx_YY
-                    ) 
-                    h_V_C, h_E_context_cat = self.context_feature_aggregator[i](
-                        h_V = h_V_C, h_E = h_E_context_cat, mask_V = token_mask, mask_attend = Y_m                        
-                    )
-            
-            h_V_C = self.V_C(h_V_C)
-            h_V = h_V + self.V_C_norm(self.dropout(h_V_C))
+            h_V = self.context_module(
+                h_V=h_V,
+                V=V,
+                Y_nodes=Y_nodes,
+                Y_edges=Y_edges,
+                Y_m=Y_m,
+                E_idx_YY=E_idx_YY,
+                token_mask=token_mask,
+            )
 
         # Pass through decoder layers
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
@@ -521,7 +496,7 @@ class PositionalEncodings(torch.nn.Module):
         return E
 
 class DecLayer(nn.Module):
-    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30, aggregate_ligand_context=False):
+    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
         super(DecLayer, self).__init__()
         self.num_hidden = num_hidden
         self.num_in = num_in
@@ -600,6 +575,7 @@ class Contextfeatureprocessor(nn.Module): #! (JH) self.y_context_encoder_layers 
         
         self.edge_update = edge_update
 
+    @dynamo.disable()
     def forward(self, h_V, h_E, mask_V=None, E_idx = None, mask_attend=None):
         """ Parallel computation of full transformer layer """
 
@@ -661,6 +637,7 @@ class Contextfeatureaggregator(nn.Module): #! (JH) self.context_encoder_layers i
         
         self.edge_update = edge_update
 
+    @dynamo.disable()
     def forward(self, h_V, h_E, mask_V=None, mask_attend=None):
         """ Parallel computation of full transformer layer """
 
@@ -693,6 +670,64 @@ class Contextfeatureaggregator(nn.Module): #! (JH) self.context_encoder_layers i
         
         else:
             return h_V, None
+
+class ContextModule(nn.Module):
+    def __init__(self, hidden_dim: int, dropout_p: float, num_processor_layers: int, num_aggregator_layers: int, edge_update: bool):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.edge_update = edge_update
+
+        # Projections
+        self.W_v = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
+        self.W_c = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
+        self.W_nodes_y = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
+        self.W_edges_y = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
+        self.V_C = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
+        self.V_C_norm = torch.nn.LayerNorm(self.hidden_dim)
+        self.dropout = torch.nn.Dropout(dropout_p)
+
+        # Stacks
+        self.context_feature_processor = torch.nn.ModuleList(
+            [Contextfeatureprocessor(self.hidden_dim, self.hidden_dim, dropout=dropout_p, edge_update=self.edge_update) for _ in range(num_processor_layers)]
+        )
+        self.context_feature_aggregator = torch.nn.ModuleList(
+            [Contextfeatureaggregator(self.hidden_dim, self.hidden_dim * 2, dropout=dropout_p, edge_update=self.edge_update) for _ in range(num_aggregator_layers)]
+        )
+
+    @dynamo.disable()
+    def forward(self, h_V, V, Y_nodes, Y_edges, Y_m, E_idx_YY, token_mask):
+        # Guard: if no context, return h_V unchanged
+        if V is None or Y_nodes is None or Y_edges is None or Y_m is None:
+            return h_V
+
+        h_E_context = self.W_v(V)
+        h_V_C = self.W_c(h_V)
+        Y_m_edges = Y_m[:, :, :, None] * Y_m[:, :, None, :]
+        Y_nodes = self.W_nodes_y(Y_nodes)
+        Y_edges = self.W_edges_y(Y_edges)
+
+        if not self.edge_update:
+            for i in range(len(self.context_feature_aggregator)):
+                Y_nodes, _ = self.context_feature_processor[i](
+                    h_V=Y_nodes, h_E=Y_edges, mask_V=Y_m, mask_attend=Y_m_edges, E_idx=E_idx_YY
+                )
+                h_E_context_cat = torch.cat([h_E_context, Y_nodes], -1)
+                h_V_C, _ = self.context_feature_aggregator[i](
+                    h_V=h_V_C, h_E=h_E_context_cat, mask_V=token_mask, mask_attend=Y_m
+                )
+        else:
+            h_E_context_cat = torch.cat([h_E_context, Y_nodes], -1)
+            for i in range(len(self.context_feature_aggregator)):
+                Y_nodes, Y_edges = self.context_feature_processor[i](
+                    h_V=Y_nodes, h_E=Y_edges, mask_V=Y_m, mask_attend=Y_m_edges, E_idx=E_idx_YY
+                )
+                h_V_C, h_E_context_cat = self.context_feature_aggregator[i](
+                    h_V=h_V_C, h_E=h_E_context_cat, mask_V=token_mask, mask_attend=Y_m
+                )
+
+        h_V_C = self.V_C(h_V_C)
+        h_V = h_V + self.V_C_norm(self.dropout(h_V_C))
+        return h_V
 
 class EncLayer(nn.Module):
     def __init__(self, num_hidden, num_in, dropout=0.1, scale=30, is_last_layer=False):
@@ -740,14 +775,13 @@ class EncLayer(nn.Module):
         if mask_V is not None:
             mask_V = mask_V.unsqueeze(-1)
             h_V = mask_V * h_V
-
-        if not self.is_last_layer:
-            # Edge updates
-            h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
-            h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
-            h_EV = torch.cat([h_V_expand, h_EV], -1)
-            h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
-            h_E = self.norm3(h_E + self.dropout3(h_message))
+        
+        # Edge updates
+        h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
+        h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
+        h_EV = torch.cat([h_V_expand, h_EV], -1)
+        h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
+        h_E = self.norm3(h_E + self.dropout3(h_message))
 
         return h_V, h_E
 
