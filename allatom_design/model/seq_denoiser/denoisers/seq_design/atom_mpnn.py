@@ -46,23 +46,23 @@ class AtomMPNN(nn.Module):
         
         if self.ligand_conditioning:
             # Mostly from LigandMPNN        
-            self.num_context_encoder_layers = cfg.num_context_encoder_layers
-            self.num_y_context_encoder_layers = cfg.num_y_context_encoder_layers        
+            self.num_context_feature_processor_layers = cfg.ligands.get("num_context_feature_processor_layers", 2)
+            self.num_context_feature_aggregator_layers = cfg.ligands.get("num_context_feature_aggregator_layers", 2)                    
+            self.edge_update = cfg.ligands.get("edge_update", False)
             self.W_v = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
             self.W_c = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)            
             self.W_nodes_y = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
             self.W_edges_y = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=True)
             self.V_C = torch.nn.Linear(self.hidden_dim, self.hidden_dim, bias=False)
             self.V_C_norm = torch.nn.LayerNorm(self.hidden_dim)
-            self.context_encoder_layers = torch.nn.ModuleList(
-            [
-                DecLayer(self.hidden_dim, self.hidden_dim * 2, dropout=cfg.dropout_p)
-                for _ in range(self.num_context_encoder_layers)
-            ]
-        )            
-            self.y_context_encoder_layers = torch.nn.ModuleList(
-                [DecLayerJ(self.hidden_dim, self.hidden_dim, dropout=cfg.dropout_p) for _ in range(self.num_y_context_encoder_layers)]
+            
+            self.context_feature_processor = torch.nn.ModuleList(
+                [Contextfeatureprocessor(self.hidden_dim, self.hidden_dim, dropout=cfg.dropout_p, edge_update=self.edge_update) for _ in range(self.num_context_feature_processor_layers)]
             )
+            self.context_feature_aggregator = torch.nn.ModuleList(
+                [Contextfeatureaggregator(self.hidden_dim, self.hidden_dim * 2, dropout=cfg.dropout_p, edge_update=self.edge_update) for _ in range(self.num_context_feature_aggregator_layers)]
+            )            
+            
                         
         # Decoder layers
         self.decoder_layers = nn.ModuleList([
@@ -115,7 +115,7 @@ class AtomMPNN(nn.Module):
         h_S = self.W_s(restype)
 
         # Build graph and get edge features
-        h_E, E_idx, D_neighbors, V, Y_nodes, Y_edges, Y_m = self.token_features(batch)        
+        h_E, E_idx, D_neighbors, V, Y_nodes, Y_edges, Y_m, E_idx_Y, E_idx_YY = self.token_features(batch)        
                             
         # Pass through encoder layers
         h_V = h_V + h_S
@@ -133,13 +133,17 @@ class AtomMPNN(nn.Module):
             Y_m_edges = Y_m[:, :, :, None] * Y_m[:, :, None, :]
             Y_nodes = self.W_nodes_y(Y_nodes)
             Y_edges = self.W_edges_y(Y_edges)
-            for i in range(len(self.context_encoder_layers)):
-                Y_nodes, _ = self.y_context_encoder_layers[i](
-                    h_V = Y_nodes, h_E = Y_edges, mask_V = Y_m, mask_attend = Y_m_edges
-                )
+            for i in range(len(self.context_feature_aggregator)):
+                Y_nodes, Y_edges = self.context_feature_processor[i](
+                    h_V = Y_nodes, h_E = Y_edges, mask_V = Y_m, mask_attend = Y_m_edges, 
+                    E_idx = E_idx_YY
+                ) 
+                # Y_nodes & Y_edges are nearest ligand & sidechain atoms features 
+                # for each pseudo CB.
                 h_E_context_cat = torch.cat([h_E_context, Y_nodes], -1)
-                h_V_C, _ = self.context_encoder_layers[i](
+                h_V_C, h_E_context_cat = self.context_feature_aggregator[i](
                     h_V = h_V_C, h_E = h_E_context_cat, mask_V = token_mask, mask_attend = Y_m
+                    
                 )
             
             h_V_C = self.V_C(h_V_C)
@@ -342,6 +346,17 @@ class TokenFeatures(nn.Module):
             Y_t = torch.gather(Y_t, 2, E_idx_Y)
             Y_m = torch.gather(Y_m, 2, E_idx_Y)
             
+            #! E_idx_YY (internal knn indices between ligand (and sidechain atoms))
+            d_yy = torch.sum((Y[:, :, :, None, :] - Y[:, :, None, :, :]) ** 2, dim=-1)  # [B, L, M, M]
+            mask_yy = Y_m[:, :, :, None] * Y_m[:, :, None, :]                           # [B, L, M, M]
+            d_yy = d_yy * mask_yy + (1.0 - mask_yy) * 1e6
+            
+            eye = torch.eye(Y.shape[2], device=Y.device).view(1, 1, Y.shape[2], Y.shape[2])
+            d_yy = d_yy + eye * 1e6
+            
+            K_y = Y.shape[2]
+            _, E_idx_YY = torch.topk(d_yy, K_y, dim=-1, largest=False)
+                
             # Periodic table features for ligand & sidechain atoms                                     
             Y_t = Y_t.long()
             Y_t_g = torch.tensor(PERIODIC_TABLE_FEATURES[1], device=Y_t.device)[Y_t]  # group; 19 categories including 0
@@ -389,8 +404,10 @@ class TokenFeatures(nn.Module):
             Y_nodes = None
             Y_edges = None
             Y_m = None
-        
-        return E, E_idx, D_neighbors, V, Y_nodes, Y_edges, Y_m
+            E_idx_Y = None
+            E_idx_YY = None
+            
+        return E, E_idx, D_neighbors, V, Y_nodes, Y_edges, Y_m, E_idx_Y, E_idx_YY
 
 
     def _get_token_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n 3", float]:
@@ -492,9 +509,8 @@ class PositionalEncodings(torch.nn.Module):
         E = self.linear(d_onehot.float())
         return E
 
-
 class DecLayer(nn.Module):
-    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
+    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30, aggregate_ligand_context=False):
         super(DecLayer, self).__init__()
         self.num_hidden = num_hidden
         self.num_in = num_in
@@ -538,21 +554,19 @@ class DecLayer(nn.Module):
             mask_V = mask_V.unsqueeze(-1)
             h_V = mask_V * h_V
 
-        #edge updates
-        if E_idx is not None:
-            h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
-            h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
-            h_EV = torch.cat([h_V_expand, h_EV], -1)
-            h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
-            h_E = self.norm3(h_E + self.dropout3(h_message))
+        #edge updates        
+        h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
+        h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
+        h_EV = torch.cat([h_V_expand, h_EV], -1)
+        h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
+        h_E = self.norm3(h_E + self.dropout3(h_message))
 
-            return h_V, h_E
-        else:
-            return h_V, None
+        return h_V, h_E
 
-class DecLayerJ(nn.Module):
-    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, scale=30):
-        super(DecLayerJ, self).__init__()
+class Contextfeatureprocessor(nn.Module): #! (JH) self.y_context_encoder_layers in ligandMPNN
+    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, 
+                 scale=30, edge_update=False):
+        super(Contextfeatureprocessor, self).__init__()
         self.num_hidden = num_hidden
         self.num_in = num_in
         self.scale = scale
@@ -569,11 +583,11 @@ class DecLayerJ(nn.Module):
         self.W13 = nn.Linear(self.num_hidden, self.num_in, bias=True) # num_in is hidden dim of edges h_E
         self.norm3 = nn.LayerNorm(self.num_in)
         self.dropout3 = nn.Dropout(dropout)
-
     
-
         self.act = torch.nn.GELU()
         self.dense = PositionWiseFeedForward(self.num_hidden, num_hidden * 4)
+        
+        self.edge_update = edge_update
 
     def forward(self, h_V, h_E, mask_V=None, E_idx = None, mask_attend=None):
         """ Parallel computation of full transformer layer """
@@ -581,7 +595,7 @@ class DecLayerJ(nn.Module):
         # Concatenate h_V_i to h_E_ij
         h_V_expand = h_V.unsqueeze(-2).expand(
             -1, -1, -1, h_E.size(-2), -1
-        )  # the only difference
+        )  # the only difference, h_V: [B, L, M, C_node], h_E: [B, L, M, M, C_edge]
         h_EV = torch.cat([h_V_expand, h_E], -1)
         h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
 
@@ -599,9 +613,9 @@ class DecLayerJ(nn.Module):
             mask_V = mask_V.unsqueeze(-1)
             h_V = mask_V * h_V        
             
-        if E_idx is not None:
+        if self.edge_update:
             h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
-            h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
+            h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,-1,h_EV.size(-2),-1)
             h_EV = torch.cat([h_V_expand, h_EV], -1)
             h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
             h_E = self.norm3(h_E + self.dropout3(h_message))
@@ -609,6 +623,65 @@ class DecLayerJ(nn.Module):
             return h_V, h_E
         else:
             return h_V, None    
+
+class Contextfeatureaggregator(nn.Module): #! (JH) self.context_encoder_layers in ligandMPNN
+    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, 
+                 scale=30, edge_update=False):
+        super(Contextfeatureaggregator, self).__init__()
+        self.num_hidden = num_hidden
+        self.num_in = num_in
+        self.scale = scale
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.norm1 = nn.LayerNorm(self.num_hidden)
+        self.norm2 = nn.LayerNorm(self.num_hidden)
+
+        self.W1 = nn.Linear(self.num_hidden + num_in, self.num_hidden, bias=True)
+        self.W2 = nn.Linear(self.num_hidden, self.num_hidden, bias=True)
+        self.W3 = nn.Linear(self.num_hidden, self.num_hidden, bias=True)
+        self.W11 = nn.Linear(self.num_hidden + self.num_in, self.num_hidden, bias=True) # nh * 2 for vi AND vj
+        self.W12 = nn.Linear(self.num_hidden, self.num_hidden, bias=True)
+        self.W13 = nn.Linear(self.num_hidden, self.num_in, bias=True) # num_in is hidden dim of edges h_E
+        self.norm3 = nn.LayerNorm(self.num_in)
+        self.dropout3 = nn.Dropout(dropout)
+
+        self.act = torch.nn.GELU()
+        self.dense = PositionWiseFeedForward(self.num_hidden, num_hidden * 4)
+        
+        self.edge_update = edge_update
+
+    def forward(self, h_V, h_E, mask_V=None, mask_attend=None):
+        """ Parallel computation of full transformer layer """
+
+        # Concatenate h_V_i to h_E_ij
+        h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_E.size(-2),-1)
+        h_EV = torch.cat([h_V_expand, h_E], -1)
+        h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
+
+        if mask_attend is not None:
+            h_message = mask_attend.unsqueeze(-1) * h_message
+
+        dh = torch.sum(h_message, -2) / self.scale
+        h_V = self.norm1(h_V + self.dropout1(dh))
+
+        # Position-wise feedforward
+        dh = self.dense(h_V)
+        h_V = self.norm2(h_V + self.dropout2(dh))
+
+        if mask_V is not None:
+            mask_V = mask_V.unsqueeze(-1)
+            h_V = mask_V * h_V
+
+        # edge updates
+        if self.edge_update:
+            h_EV = torch.cat([h_V.unsqueeze(-2).expand(-1,-1,h_E.size(-2),-1), h_E], dim=-1)
+            #! (JH) already Y_nodes are concatenated to h_E
+            h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
+            h_E = self.norm3(h_E + self.dropout3(h_message))
+            return h_V, h_E
+        
+        else:
+            return h_V, None
 
 class EncLayer(nn.Module):
     def __init__(self, num_hidden, num_in, dropout=0.1, scale=30, is_last_layer=False):

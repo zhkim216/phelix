@@ -35,7 +35,7 @@ trainer:
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
-  check_val_every_n_epoch: 2  # How often to run validation
+  check_val_every_n_epoch: 5  # How often to run validation
   num_sanity_val_steps: 0 # Skip sanity check validation batches before training #! default is 2
 
 # Resuming training options
@@ -47,7 +47,7 @@ resume:
 # Model options
 defaults:
   - _self_
-  - denoiser: lc_atom_mpnn
+  - denoiser: debug_lc_atom_mpnn
   - mask_selector: mask_selector
   - data: debug_ligand_cond #! (JH) changed 250926
 
