@@ -133,18 +133,29 @@ class AtomMPNN(nn.Module):
             Y_m_edges = Y_m[:, :, :, None] * Y_m[:, :, None, :]
             Y_nodes = self.W_nodes_y(Y_nodes)
             Y_edges = self.W_edges_y(Y_edges)
-            for i in range(len(self.context_feature_aggregator)):
-                Y_nodes, Y_edges = self.context_feature_processor[i](
-                    h_V = Y_nodes, h_E = Y_edges, mask_V = Y_m, mask_attend = Y_m_edges, 
-                    E_idx = E_idx_YY
-                ) 
-                # Y_nodes & Y_edges are nearest ligand & sidechain atoms features 
-                # for each pseudo CB.
+            if not self.edge_update:
+                for i in range(len(self.context_feature_aggregator)):
+                    Y_nodes, _ = self.context_feature_processor[i](
+                        h_V = Y_nodes, h_E = Y_edges, mask_V = Y_m, mask_attend = Y_m_edges, 
+                        E_idx = E_idx_YY
+                    ) 
+                    # Y_nodes & Y_edges are nearest ligand & sidechain atoms features 
+                    # for each pseudo CB.
+                    h_E_context_cat = torch.cat([h_E_context, Y_nodes], -1)
+                    h_V_C, _ = self.context_feature_aggregator[i](
+                        h_V = h_V_C, h_E = h_E_context_cat, mask_V = token_mask, mask_attend = Y_m
+                        
+                    )
+            else:
                 h_E_context_cat = torch.cat([h_E_context, Y_nodes], -1)
-                h_V_C, h_E_context_cat = self.context_feature_aggregator[i](
-                    h_V = h_V_C, h_E = h_E_context_cat, mask_V = token_mask, mask_attend = Y_m
-                    
-                )
+                for i in range(len(self.context_feature_aggregator)):
+                    Y_nodes, Y_edges = self.context_feature_processor[i](
+                        h_V = Y_nodes, h_E = Y_edges, mask_V = Y_m, mask_attend = Y_m_edges, 
+                        E_idx = E_idx_YY
+                    ) 
+                    h_V_C, h_E_context_cat = self.context_feature_aggregator[i](
+                        h_V = h_V_C, h_E = h_E_context_cat, mask_V = token_mask, mask_attend = Y_m                        
+                    )
             
             h_V_C = self.V_C(h_V_C)
             h_V = h_V + self.V_C_norm(self.dropout(h_V_C))
@@ -639,7 +650,7 @@ class Contextfeatureaggregator(nn.Module): #! (JH) self.context_encoder_layers i
         self.W1 = nn.Linear(self.num_hidden + num_in, self.num_hidden, bias=True)
         self.W2 = nn.Linear(self.num_hidden, self.num_hidden, bias=True)
         self.W3 = nn.Linear(self.num_hidden, self.num_hidden, bias=True)
-        self.W11 = nn.Linear(self.num_hidden + self.num_in, self.num_hidden, bias=True) # nh * 2 for vi AND vj
+        self.W11 = nn.Linear(self.num_hidden + self.num_in, self.num_hidden, bias=True) # self.num_hidden for node features and self.num_in for edge features
         self.W12 = nn.Linear(self.num_hidden, self.num_hidden, bias=True)
         self.W13 = nn.Linear(self.num_hidden, self.num_in, bias=True) # num_in is hidden dim of edges h_E
         self.norm3 = nn.LayerNorm(self.num_in)

@@ -3,7 +3,7 @@ pdb_path: /home/possu/jinho/datasets/atomworks
 parquet_path: ${data.pdb_path}/metadata_clustered.parquet
 validation_ids_txt: ${data.pdb_path}/splits/validation_ids.txt  # Boltz val set ids. Filtering is case insensitive, no extension.
 debug: ${train.debug}
-debug_num_rows: 10000 #! For debugging
+debug_num_rows: 1000 #! For debugging
 prefetch_buffer_size: 4
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
 residue_cache_dir: /home/possu/jinho/datasets/atomworks/cached_residue_data

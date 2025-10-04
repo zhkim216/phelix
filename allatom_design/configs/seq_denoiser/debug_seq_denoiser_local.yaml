@@ -1,6 +1,6 @@
 # Wandb configuration
 wandb:
-  no_wandb: true  # Disable wandb logging
+  no_wandb: false  # Disable wandb logging
   project: "debug_ligand_seq_des"  # Wandb project name
   wandb_id: "zhkim216"  # Wandb username
   group: "debug" # Wandb group name

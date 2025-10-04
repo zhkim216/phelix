@@ -13,12 +13,10 @@ max_eps: null  # for per_residue_eps, samples from half-normal truncated to this
 
 mpnn:
   n_channel: 128
-  k_neighbors: 32
+  k_neighbors: 48
   n_layers: 3
-  dropout_p: 0.1  
+  dropout_p: 0.1
   ligand_conditioning: true
-  num_context_encoder_layers: 2
-  num_y_context_encoder_layers: 2
   num_rbf: 16
 
   # ligand conditioning options
