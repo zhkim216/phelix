@@ -253,13 +253,13 @@ class FeaturizeCoordsAndMasks(Transform):
         feats["atom_is_ligand"] = atom_is_ligand
         
         # Get ligand related features
-        try:
-            feats["atom_is_aromatic"] = torch.tensor(atom_array.is_aromatic).float()
-        except: 
-            # Todo: LMT & DD6 from 6a2w, no attribute error for is_aromatic.
-            # Todo: Both have hexagon rings, but no aromaticity. Maybe error in parsing?
-            feats["atom_is_aromatic"] = torch.full((len(atom_array),), False).float()
-            print(f"Atom array has no attribute 'is_aromatic' for {data['example_id']}")            
+        # try:
+        #     feats["atom_is_aromatic"] = torch.tensor(atom_array.is_aromatic).float()
+        # except: 
+        #     # Todo: LMT & DD6 from 6a2w, no attribute error for is_aromatic.
+        #     # Todo: Both have hexagon rings, but no aromaticity. Maybe error in parsing?
+        #     feats["atom_is_aromatic"] = torch.full((len(atom_array),), False).float()
+        #     print(f"Atom array has no attribute 'is_aromatic' for {data['example_id']}")            
         
         atom_is_metal = np.isin(atom_array.element, aw_const.METAL_ELEMENTS)
         token_is_metal = torch.tensor(apply_token_wise(atom_array, atom_is_metal, np.any))
