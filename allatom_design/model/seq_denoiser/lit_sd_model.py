@@ -64,7 +64,7 @@ class LitSeqDenoiser(L.LightningModule):
         self.val_lp_metrics = {"loss": [], "acc": []}
         self.val_lp_metrics_t = {t: {"loss": [], "acc": []} for t in self.cfg.eval.eval_timesteps}
         self.val_lp_metrics_avg_t = {"loss": [], "acc": []}
-
+                
     def training_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int):
         outputs = self(batch)
         loss, aux = self.loss(outputs, batch, return_aux=True)
