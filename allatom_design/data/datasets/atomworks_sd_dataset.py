@@ -199,7 +199,10 @@ class SDDataset(MolecularDataset):
         chain_df = chain_df[chain_df["phase"] == self.phase]
         
         if self.cfg.debug:
-            chain_df = chain_df.iloc[:self.cfg.debug_num_rows]
+            if self.cfg.debug_num_rows is None:
+                self.cfg.debug_num_rows = len(chain_df)
+            else:
+                chain_df = chain_df.iloc[:self.cfg.debug_num_rows]
         
         # Add chain counts info and sampling weights
         if self.cfg.debug: 
@@ -414,6 +417,16 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
 
     # Collate the data
     collated = {}
+    
+    #################! DEBUG
+    bad_keys = []
+    def _assert_finite(t: torch.Tensor, k: str):
+        if torch.is_tensor(t):
+            if not torch.isfinite(t).all():
+                bad_keys.append(k)
+    
+    #################! DEBUG
+ 
     for key in keys:
         values = [d[key] for d in data]
 
@@ -425,8 +438,16 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
             else:
                 values = torch.stack(values, dim=0)
 
+        _assert_finite(values, key) #! DEBUG
+
         # Stack the values
         collated[key] = values
+
+    if bad_keys:
+        # 어떤 키에서 NaN/Inf가 발생했는지와 배치 example_id를 같이 남김
+        ex_ids = collated.get("example_id", [])
+        logger.error(f"[sd_collator] Non-finite tensor(s) in keys={bad_keys} for batch example_ids={ex_ids}")
+
 
     return collated
 
