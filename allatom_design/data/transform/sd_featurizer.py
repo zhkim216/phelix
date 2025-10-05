@@ -119,6 +119,8 @@ def sd_featurizer(
     remove_unresolved_tokens: bool = False,
     residue_cache_dir: str | None = None,
     max_conformers_per_residue: int | None = None,
+    apply_random_augmentation: bool = True,
+    translation_scale: float = 1.0
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
@@ -180,7 +182,8 @@ def sd_featurizer(
 
         # Add features from the atom_array
         FeaturizeCoordsAndMasks(),
-        CenterRandomAugmentation(scale=1.0), #! turn on/off depending on train/eval?
+        CenterRandomAugmentation(apply_random_augmentation = apply_random_augmentation, 
+                                translation_scale=translation_scale), #! turn on/off depending on train/eval?
     ]
     
     transforms = [
@@ -365,18 +368,19 @@ class FlattenFeatsDict(Transform):
 
 class CenterRandomAugmentation(Transform):
     """Randomly augment the center of the atom array."""
-    def __init__(self, scale: float = 0.1):
-        self.scale = scale
+    def __init__(self, apply_random_augmentation: bool = True, translation_scale: float = 1.0):
+        self.apply_random_augmentation = apply_random_augmentation
+        self.translation_scale = translation_scale
 
     @override
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
-        coords = data["feats"]["coords"]
-        mask = data["feats"]["atom_resolved_mask"].bool()
-        centered_coords = coords.clone()
-        centered_coords = masked_center(centered_coords, mask)
-        centered_coords = random_rigid_augmentation(centered_coords[None], batch_size=1, s=self.scale).squeeze(0) #! dummy atom coords masked later?
-        data["feats"]["coords"] = centered_coords
-
+        if self.apply_random_augmentation:
+            coords = data["feats"]["coords"]
+            mask = data["feats"]["atom_resolved_mask"].bool()
+            centered_coords = coords.clone()
+            centered_coords = masked_center(centered_coords, mask)
+            centered_coords = random_rigid_augmentation(centered_coords[None], batch_size=1, s=self.translation_scale).squeeze(0) #! dummy atom coords masked later?
+            data["feats"]["coords"] = centered_coords    
         return data
 
 
