@@ -3,7 +3,6 @@ from typing import Dict
 
 import lightning as L
 import torch
-import torch.distributed as dist
 from lightning.pytorch.utilities import grad_norm
 from omegaconf import DictConfig
 from torch.optim import Adam, AdamW
@@ -65,10 +64,7 @@ class LitSeqDenoiser(L.LightningModule):
         self.val_lp_metrics = {"loss": [], "acc": []}
         self.val_lp_metrics_t = {t: {"loss": [], "acc": []} for t in self.cfg.eval.eval_timesteps}
         self.val_lp_metrics_avg_t = {"loss": [], "acc": []}
-        # Aggregators for distributed-safe validation logging
-        self._val_metric_sums: dict[str, torch.Tensor] = {}
-        self._val_metric_counts: dict[str, int] = {}
-                
+
     def training_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int):
         outputs = self(batch)
         loss, aux = self.loss(outputs, batch, return_aux=True)
@@ -152,25 +148,13 @@ class LitSeqDenoiser(L.LightningModule):
 
         log_dict = {}
         for k, v in aux.items():
-            log_dict[f"{phase}{phase_suffix}/{k}{key_suffix}"] = v
+            log_dict[f"{phase}{phase_suffix}/{k}{key_suffix}"] = v            
+                
+        trainer = getattr(self, "trainer", None)
+        has_logger = bool(getattr(trainer, "logger", None))
 
-        if phase == "train":
-            trainer = getattr(self, "trainer", None)
-            has_logger = bool(getattr(trainer, "logger", None))
-            self.log_dict(log_dict, on_step=True, on_epoch=True, prog_bar=True, logger=has_logger, sync_dist=True,
-                          add_dataloader_idx=False, batch_size=bs)
-            return
-
-        # Validation/Test phase: accumulate locally for distributed-safe epoch-end reduction
-        for key, val in log_dict.items():
-            val_tensor = torch.as_tensor(val, dtype=torch.float32, device=self.device)
-            sum_contribution = (val_tensor * float(bs)).detach()
-            if key in self._val_metric_sums:
-                self._val_metric_sums[key] = self._val_metric_sums[key] + sum_contribution
-                self._val_metric_counts[key] = self._val_metric_counts[key] + bs
-            else:
-                self._val_metric_sums[key] = sum_contribution
-                self._val_metric_counts[key] = bs
+        self.log_dict(log_dict, on_step=(phase == "train"), on_epoch=True, prog_bar=True, logger=has_logger, sync_dist=True,
+                      add_dataloader_idx=False, batch_size=bs)
 
 
     def configure_optimizers(self):
@@ -227,32 +211,16 @@ class LitSeqDenoiser(L.LightningModule):
             self.log("train/lp_seq_acc_epoch", avg_lp_acc, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
             
     def on_validation_epoch_end(self):
-        # Distributed-safe reduction of validation metrics accumulated in _log
-        local_keys = list(self._val_metric_sums.keys()) if hasattr(self, "_val_metric_sums") else []
+        # Log average validation lp metrics for the epoch (only from batches that had ligands)
+        if self.val_lp_metrics["loss"]:
+            self.log("val/lp_seq_loss", torch.stack(self.val_lp_metrics["loss"]).mean(), on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            self.log("val/lp_seq_acc",  torch.stack(self.val_lp_metrics["acc"]).mean(),  on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
 
-        if dist.is_available() and dist.is_initialized():
-            world_size = dist.get_world_size()
-            gathered_key_lists: list[list[str]] = [None for _ in range(world_size)]  # type: ignore
-            dist.all_gather_object(gathered_key_lists, local_keys)
+        for t in self.cfg.eval.eval_timesteps:
+            if self.val_lp_metrics_t[t]["loss"]:
+                self.log(f"val/lp_seq_loss_t{t}", torch.stack(self.val_lp_metrics_t[t]["loss"]).mean(), on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+                self.log(f"val/lp_seq_acc_t{t}",  torch.stack(self.val_lp_metrics_t[t]["acc"]).mean(),  on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
 
-            union_keys = sorted({k for kl in gathered_key_lists for k in kl})
-
-            for key in union_keys:
-                local_sum = self._val_metric_sums.get(key, torch.tensor(0.0, device=self.device, dtype=torch.float32))
-                local_cnt = torch.tensor(float(self._val_metric_counts.get(key, 0)), device=self.device, dtype=torch.float32)
-
-                sum_tensor = local_sum.clone()
-                cnt_tensor = local_cnt.clone()
-                dist.all_reduce(sum_tensor, op=dist.ReduceOp.SUM)
-                dist.all_reduce(cnt_tensor, op=dist.ReduceOp.SUM)
-
-                if self.trainer.is_global_zero and cnt_tensor.item() > 0:
-                    avg = (sum_tensor / cnt_tensor).item()
-                    self.log(key, avg, on_epoch=True, prog_bar=True, logger=True, sync_dist=False)
-        else:
-            # Single-process fallback
-            for key, sum_tensor in self._val_metric_sums.items():
-                cnt = float(self._val_metric_counts.get(key, 0))
-                if cnt > 0:
-                    avg = (sum_tensor / cnt).item()
-                    self.log(key, avg, on_epoch=True, prog_bar=True, logger=True, sync_dist=False)
+        if self.val_lp_metrics_avg_t["loss"]:
+            self.log("val/lp_seq_loss_avg_t", torch.stack(self.val_lp_metrics_avg_t["loss"]).mean(), on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            self.log("val/lp_seq_acc_avg_t",  torch.stack(self.val_lp_metrics_avg_t["acc"]).mean(),  on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
