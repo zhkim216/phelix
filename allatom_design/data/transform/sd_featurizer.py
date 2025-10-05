@@ -90,7 +90,7 @@ FEAT_TO_ATOM_DIM = {
     
     # Ligand related features
     "atomic_number": [0],
-    "atom_is_aromatic": [0],
+    # "atom_is_aromatic": [0],
     "atom_is_metal": [0],    
     "atom_is_small_molecule": [0],
     "atom_is_ligand": [0],
