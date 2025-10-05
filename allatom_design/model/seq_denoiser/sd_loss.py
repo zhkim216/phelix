@@ -66,8 +66,7 @@ class SDLoss(nn.Module):
                 lp_seq_loss_mask = seq_loss_mask * outputs["ligand_pocket_token_mask"] 
                                             
                 # Select only samples that have ligands
-                has_ligand = lp_seq_loss_mask.sum(dim=-1) > 0
-                num_lp_tokens = lp_seq_loss_mask.sum(dim=-1)
+                has_ligand = lp_seq_loss_mask.sum(dim=-1) > 0                
                 
                 if has_ligand.any():
                     lp_seq_loss = masked_cross_entropy(outputs["seq_logits"], target_restype, lp_seq_loss_mask, seq_loss_cfg=self.cfg.seq_loss)
