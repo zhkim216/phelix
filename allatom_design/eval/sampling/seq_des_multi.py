@@ -60,8 +60,7 @@ def main(cfg: DictConfig):
         pos_constraint_df = None
 
     # Run sequence design model
-    outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-                          seq_des_model["model"],
+    outputs = run_seq_des(model = seq_des_model["model"], data_cfg = seq_des_model["data_cfg"], sampling_cfg = seq_des_model["sampling_cfg"],                          
                           pdb_paths=pdb_files, device=device, pos_constraint_df=pos_constraint_df,
                           out_dir=log_dir)
 

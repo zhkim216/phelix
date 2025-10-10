@@ -68,7 +68,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             "token_exists_mask": batch["token_exists_mask"],
         }
         
-        if self.task == "lc_seq_des": #! (JH) changed
+        if self.task == "lc_seq_des": 
             aux_preds["sm_pocket_token_mask"] = batch["sm_pocket_token_mask"]        
 
         return seq_logits, aux_preds
@@ -244,6 +244,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         # Thread sequences onto atom arrays.
         id_to_atom_arrays = defaultdict(list)
+        id_to_aux = defaultdict(list)
         for si in range(len(S)):  # iterate over num_seqs_per_pdb
             atom_arrays = copy.deepcopy(batch["atom_array"])
 
@@ -277,8 +278,17 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
                 # Add to id_to_atom_arrays.
                 id_to_atom_arrays[example_id].append(atom_array)
+                
+                # Add additional auxiliary outputs.
+                id_to_aux[example_id].append(
+                    {
+                        "U": aux["U"][si][bi].cpu().item(),
+                        "S": new_restype.cpu(),
+                    }
+                )
 
-        return id_to_atom_arrays, aux
+
+        return id_to_atom_arrays, id_to_aux
 
 
     def compute_potts_params(self, batch: dict[str, TensorType["b ..."]],
