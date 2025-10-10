@@ -1,0 +1,98 @@
+# Wandb configuration
+wandb:
+  no_wandb: true  # Disable wandb logging
+  project: "allatom_design"  # Wandb project name
+  wandb_id: "richardshuai"  # Wandb username
+  group: "debug" # Wandb group name
+
+# Run settings
+seed: 0
+num_workers: 8  # for dataloading
+
+# Inputs
+ckpt_path: null
+base_out_dir: null
+exp_name: null  # experiment name; used for wandb and output directory
+
+# PDB file inputs
+input_cfg:
+  pdb_dir: null
+  pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
+  pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
+  n_subsample: null  # randomly sample this many pdb keys, null to use all
+
+ensemble_input_cfg:
+  conformer_dir: null
+  pdb_name_list: null
+  array_id: null
+  num_arrays: null
+  use_lowercase_pdb_names: true  # helpful since outputs of partial diffusion are all lowercase
+
+# Ensemble parameters
+ensemble_design: false
+ensemble_cfg:
+  max_num_conformers: 16
+  include_primary_conformer: true
+
+# PDB file processing
+pdb_processing_cfg:
+  num_workers: ${num_workers}
+
+  # if we have to convert PDBs to mmCIFs
+  pdb_to_cif_conversion_cfg:
+    assign_label_seq_id: false  # if true, automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
+
+  # CCD
+  ccd_cfg:
+    use_redis: true
+
+    # If using redis (fast)
+    ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
+
+    # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)
+    ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
+
+
+# Sampling config
+run_self_consistency_eval: false
+sampling_cfg_overrides:
+  batch_size: 4
+  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+  omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
+  noise_labels: null
+  num_workers: ${num_workers}
+
+# Sampling config
+use_proteinmpnn: false
+seq_des_cfg:
+  model_name: "atom_mpnn"
+  atom_mpnn:
+    ckpt_path: ${ckpt_path}
+    sampling_cfg: allatom_design/configs/seq_des/atom_mpnn_inference.yaml
+    overrides: ${sampling_cfg_overrides}
+
+proteinmpnn_cfg:
+  # if using proteinmpnn
+  model_path: v_48_020
+  mpnn_weights: soluble
+  backbone_noise: 0.0
+  mpnn_fix_interface: true
+  omit_AAs: null
+  sampling_temp: 0.1
+  num_seqs: 1
+
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: "af2_interface"
+  base_cfg: allatom_design/configs/struct_pred/struct_pred_base.yaml
+  # overrides to base config
+  af2_interface:
+    data_dir: /media/scratch/huang_lab/model_params/af2
+    prediction_models: [0, 1]
+    rm_target_seq: true
+    rm_target_sc: true
+
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

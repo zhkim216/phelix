@@ -105,8 +105,8 @@ optim:
 
 logging:
   log_dir: ${out_dir}
-  log_every_n_steps: 500
-  wandb_watch_freq: 5000  # Log gradients every n steps
+  log_every_n_steps: 100
+  wandb_watch_freq: 500  # Log gradients every n steps
 
 checkpointing:
   save_latest_every_n_steps: 2500  # Save the model every n steps

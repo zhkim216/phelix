@@ -191,7 +191,7 @@ class SDDataset(MolecularDataset):
         # Load in validation IDs and hold out based on phase. Case insensitive, no extension.    
         with open(self.cfg.validation_ids_txt, "r") as f:
             logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_txt}...")
-            val_split = {x.lower() for x in f.read().splitlines()}
+            val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}
             
             
         chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
@@ -417,6 +417,7 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
 
     # Collate the data
     collated = {}
+ 
     for key in keys:
         values = [d[key] for d in data]
 
@@ -427,10 +428,9 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
                 values, _ = pad_to_max(values, 0)
             else:
                 values = torch.stack(values, dim=0)
-    
+        
         # Stack the values
         collated[key] = values
-    
     return collated
 
 

@@ -160,6 +160,8 @@ def sd_featurizer(
             probs=[crop_contiguous_p, crop_spatial_p],
         )            
     
+    check_coordinates_are_nan = CheckCoordinatesAreNan()
+    
     # Featurization
     # NOTE: for now, we ignore ref pos features because they are too slow to compute
     featurization_transforms_post_crop = [
@@ -188,6 +190,7 @@ def sd_featurizer(
     
     transforms = [
         *featurization_transforms_pre_crop,
+        check_coordinates_are_nan,
         cropping_transform,
         *featurization_transforms_post_crop,
         PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
@@ -197,6 +200,16 @@ def sd_featurizer(
     ]
 
     return Compose(transforms)
+
+class CheckCoordinatesAreNan(Transform):
+    """Check if the coordinates are nan."""
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        atom_array = data["atom_array"]
+        if np.isnan(atom_array.coord).all():
+            print(1)
+        return data
 
 class FeaturizeCoordsAndMasks(Transform):
     """Add coordinates and atom masks to feats."""

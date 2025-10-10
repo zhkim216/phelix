@@ -108,21 +108,28 @@ class AtomMPNN(nn.Module):
         B, N, C = batch["restype"].shape
         masked = F.one_hot(torch.full((B, N), const.AF3_ENCODING.token_to_idx["<G>"],
                                       device=batch["restype"].device), num_classes=C).float()
+        
+        #! (JH) During sampling, seq_cond_mask is also 1 for padded tokens
+        #! (JH) So padded parts are also considered as gaps here, but I guess it's okay.
+        
         restype = torch.where(batch["seq_cond_mask"].unsqueeze(-1).bool(), batch["restype"], masked)
-        h_S = self.W_s(restype)
+        h_S = self.W_s(restype) 
+        #! (JH) different from the original LMPNN, but I think it's okay, could be better, as initiating as learnable param
 
         # Build graph and get edge features
-        h_E, E_idx, D_neighbors, V, Y_nodes, Y_edges, Y_m, E_idx_Y, E_idx_YY = self.token_features(batch)        
+        h_E, E_idx, D_neighbors, V, Y_nodes, Y_edges, Y_m, E_idx_Y, E_idx_YY = self.token_features(batch)
+        #! (JH) h_E and E_idx are also considering ligand atoms here.
+        #! (JH) but h_E and E_idx are masked out for padded tokens (token_exists_mask is 0 for padded tokens)
                             
         # Pass through encoder layers
-        h_V = h_V + h_S
+        h_V = h_V + h_S                
         h_E = self.W_e(h_E)
-        token_mask = batch["token_exists_mask"]
-        token_mask_2d = gather_nodes(token_mask.unsqueeze(-1), E_idx).squeeze(-1)
-        token_mask_2d = token_mask.unsqueeze(-1) * token_mask_2d
+        prot_token_mask = batch["token_exists_mask"] * batch["is_protein"]
+        prot_token_mask_2d = gather_nodes(prot_token_mask.unsqueeze(-1), E_idx).squeeze(-1)
+        prot_token_mask_2d = prot_token_mask.unsqueeze(-1) * prot_token_mask_2d
         for layer in self.encoder_layers:
-            h_V, h_E = layer(h_V, h_E, E_idx, token_mask, token_mask_2d)
-
+            h_V, h_E = layer(h_V, h_E, E_idx, prot_token_mask, prot_token_mask_2d)
+            
         # Process ligand context features
         if self.ligand_conditioning:
             h_V = self.context_module(
@@ -132,33 +139,33 @@ class AtomMPNN(nn.Module):
                 Y_edges=Y_edges,
                 Y_m=Y_m,
                 E_idx_YY=E_idx_YY,
-                token_mask=token_mask,
+                prot_token_mask=prot_token_mask,
             )
 
         # Pass through decoder layers
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
         for layer in self.decoder_layers:
-            h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = token_mask, E_idx = E_idx, mask_attend = token_mask_2d) #! (JH) changed, token_mask_2d is newly added
+            h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = prot_token_mask, E_idx = E_idx, mask_attend = prot_token_mask_2d) #! (JH) changed, token_mask_2d is newly added
 
         # Potts model
         if self.use_potts:
             if self.max_dist_potts is not None:
-                token_mask_2d = token_mask_2d * (D_neighbors <= self.max_dist_potts)  # mask out edges that are too far away
+                prot_token_mask_2d = prot_token_mask_2d * (D_neighbors <= self.max_dist_potts)  # mask out edges that are too far away
 
             if self.k_neighbors_potts is not None:
                 # truncate to k_neighbors_potts
                 h_ESV = h_ESV[:, :, :self.k_neighbors_potts]
                 E_idx = E_idx[:, :, :self.k_neighbors_potts]
-                token_mask_2d = token_mask_2d[:, :, :self.k_neighbors_potts]
+                prot_token_mask_2d = prot_token_mask_2d[:, :, :self.k_neighbors_potts]
 
-            h, J = self.decoder_S_potts(h_V, h_ESV, E_idx, token_mask, token_mask_2d)
+            h, J = self.decoder_S_potts(h_V, h_ESV, E_idx, prot_token_mask, prot_token_mask_2d)
             potts_decoder_aux = {
                 "h": h,
                 "J": J,
                 "edge_idx": E_idx,
-                "mask_i": token_mask,
-                "mask_ij": token_mask_2d,
+                "mask_i": prot_token_mask,
+                "mask_ij": prot_token_mask_2d,
             }
 
         logits = self.W_out(h_V)
@@ -210,7 +217,8 @@ class TokenFeatures(nn.Module):
         # Layers
         self.embeddings = PositionalEncodings(self.num_positional_embeddings)
         num_pairwise_dists = 1 if self.ca_only else const.MAX_NUM_ATOMS ** 2
-        edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists + 1
+        edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists
+        # edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists + 1 #! (JH) removed 251009, to simplify the model
         self.edge_embedding = nn.Linear(edge_in, self.edge_n_channel, bias=False)
         self.norm_edges = nn.LayerNorm(self.edge_n_channel)
         
@@ -232,7 +240,9 @@ class TokenFeatures(nn.Module):
         Extract token-level edge features and build KNN graph.
         """
         X = self._get_token_coords(batch)
-        D_neighbors, E_idx = self._dist(X, batch["token_exists_mask"].float())
+        # X is the coordinates of the center atoms of the tokens, C-alpha for standard amino acids
+        
+        D_neighbors, E_idx = self._dist(X, batch["token_exists_mask"] * batch["is_protein"].float()) #! (JH) Fixed 251009
 
         # Get RBF features
         if self.ca_only:
@@ -257,6 +267,7 @@ class TokenFeatures(nn.Module):
         residue_index = batch["residue_index"]
         offset = residue_index[:,:,None] - residue_index[:,None,:]
         offset = gather_edges(offset[:,:,:,None], E_idx)[:,:,:,0]  # [B, L, K]
+        #! (JH) fixed 251009, now gathering only edges between protein tokens
 
         chain_labels = torch.zeros_like(batch["asym_id"])
         if self.use_multichain_encoding:
@@ -264,20 +275,23 @@ class TokenFeatures(nn.Module):
             chain_labels = batch["asym_id"]
         d_chains = ((chain_labels[:, :, None] - chain_labels[:,None,:])==0).long()  # find self vs non-self interaction
         E_chains = gather_edges(d_chains[:,:,:,None], E_idx)[:,:,:,0]
+        #! (JH) fixed 251009, now gathering only edges between protein tokens
         E_positional = self.embeddings(offset.long(), E_chains)
 
-        # AF3 token_bond feature
-        token_bonds = batch["token_bonds"]
+        #! (JH) removed 251009, to simplify the model
+        # # AF3 token_bond feature
+        # token_bonds = batch["token_bonds"]
 
-        # (JH): fix to remove polymer-polymer bonds
-        token_bonds_mask = batch["is_ligand"]  # [B, L]
-        token_bonds_mask = (token_bonds_mask[:,:,None] | token_bonds_mask[:,None,:])  # [B, L, L]
-        token_bonds = (token_bonds * token_bonds_mask)[..., None]  # [B, L, L, 1]
+        # # (JH): fix to remove polymer-polymer bonds
+        # token_bonds_mask = batch["is_ligand"]  # [B, L]
+        # token_bonds_mask = (token_bonds_mask[:,:,None] | token_bonds_mask[:,None,:])  # [B, L, L]
+        # token_bonds = (token_bonds * token_bonds_mask)[..., None]  # [B, L, L, 1]
 
-        token_bonds = gather_edges(token_bonds, E_idx)
+        # token_bonds = gather_edges(token_bonds, E_idx)
 
         # Concatenate edge features and embed
-        E = torch.cat((E_positional, RBF_backbone, token_bonds), -1)
+        E = torch.cat((E_positional, RBF_backbone), -1)
+        # E = torch.cat((E_positional, RBF_backbone, token_bonds), -1)
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
         
@@ -301,7 +315,7 @@ class TokenFeatures(nn.Module):
             sc_atomic_number = batch["atomic_number"] * prot_sc_atom_cond_mask
             tokenwise_sc_atomic_number = batched_gather(sc_atomic_number, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1)
             R_t = gather_nodes(tokenwise_sc_atomic_number, E_idx_sub)
-            R_t = R_t.view(X_scn.shape[0], X_scn.shape[1], -1) # concat sidechain and ligand atomic numbers
+            R_t = R_t.view(X_scn.shape[0], X_scn.shape[1], -1) 
             
             # Ligand mask
             ligand_mask = batch["atom_is_ligand"] * batch["atom_cond_mask"] * batch["atom_pad_mask"]
@@ -403,6 +417,7 @@ class TokenFeatures(nn.Module):
         B, N, _ = batch["coords"].shape
         X = batch["coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token
         X = X * batch["token_exists_mask"].unsqueeze(-1)  # mask out padding and unresolved atoms
+        X = X * batch["is_protein"].unsqueeze(-1) #! (JH) fixed 251009, to only use protein tokens
         return X
 
 
@@ -546,6 +561,9 @@ class DecLayer(nn.Module):
         h_EV = torch.cat([h_V_expand, h_EV], -1)
         h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
         h_E = self.norm3(h_E + self.dropout3(h_message))
+        
+        # if mask_attend is not None: #! (JH) fixed 251009
+        #     h_E = mask_attend.unsqueeze(-1) * h_E
 
         return h_V, h_E
 
@@ -607,6 +625,9 @@ class Contextfeatureprocessor(nn.Module): #! (JH) self.y_context_encoder_layers 
             h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
             h_E = self.norm3(h_E + self.dropout3(h_message))
             
+            if mask_attend is not None: #! (JH) fixed 251009
+                h_E = mask_attend.unsqueeze(-1) * h_E
+                
             return h_V, h_E
         else:
             return h_V, None    
@@ -645,6 +666,7 @@ class Contextfeatureaggregator(nn.Module): #! (JH) self.context_encoder_layers i
         h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_E.size(-2),-1)
         h_EV = torch.cat([h_V_expand, h_E], -1)
         h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
+        #! h_message here is the context features for each protein node
 
         if mask_attend is not None:
             h_message = mask_attend.unsqueeze(-1) * h_message
@@ -666,6 +688,10 @@ class Contextfeatureaggregator(nn.Module): #! (JH) self.context_encoder_layers i
             #! (JH) already Y_nodes are concatenated to h_E
             h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
             h_E = self.norm3(h_E + self.dropout3(h_message))
+            
+            if mask_attend is not None: #! (JH) fixed 251009
+                h_E = mask_attend.unsqueeze(-1) * h_E
+                
             return h_V, h_E
         
         else:
@@ -695,7 +721,8 @@ class ContextModule(nn.Module):
         )
 
     @dynamo.disable()
-    def forward(self, h_V, V, Y_nodes, Y_edges, Y_m, E_idx_YY, token_mask):
+    def forward(self, h_V = None, V = None, Y_nodes = None, 
+                Y_edges = None, Y_m = None, E_idx_YY = None, prot_token_mask = None):
         # Guard: if no context, return h_V unchanged
         if V is None or Y_nodes is None or Y_edges is None or Y_m is None:
             return h_V
@@ -713,7 +740,7 @@ class ContextModule(nn.Module):
                 )
                 h_E_context_cat = torch.cat([h_E_context, Y_nodes], -1)
                 h_V_C, _ = self.context_feature_aggregator[i](
-                    h_V=h_V_C, h_E=h_E_context_cat, mask_V=token_mask, mask_attend=Y_m
+                    h_V=h_V_C, h_E=h_E_context_cat, mask_V=prot_token_mask, mask_attend=Y_m
                 )
         else:
             h_E_context_cat = torch.cat([h_E_context, Y_nodes], -1)
@@ -722,7 +749,7 @@ class ContextModule(nn.Module):
                     h_V=Y_nodes, h_E=Y_edges, mask_V=Y_m, mask_attend=Y_m_edges, E_idx=E_idx_YY
                 )
                 h_V_C, h_E_context_cat = self.context_feature_aggregator[i](
-                    h_V=h_V_C, h_E=h_E_context_cat, mask_V=token_mask, mask_attend=Y_m
+                    h_V=h_V_C, h_E=h_E_context_cat, mask_V=prot_token_mask, mask_attend=Y_m
                 )
 
         h_V_C = self.V_C(h_V_C)
@@ -782,7 +809,10 @@ class EncLayer(nn.Module):
         h_EV = torch.cat([h_V_expand, h_EV], -1)
         h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
         h_E = self.norm3(h_E + self.dropout3(h_message))
-
+        
+        if mask_attend is not None: #! (JH) fixed 251009
+            h_E = mask_attend.unsqueeze(-1) * h_E
+                
         return h_V, h_E
 
 

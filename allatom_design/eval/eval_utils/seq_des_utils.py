@@ -36,6 +36,9 @@ from allatom_design.model.seq_denoiser.denoisers.seq_design.potts import \
     compute_potts_energy
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
+from allatom_design.data.mask_selector import MaskSelector
+from allatom_design.data.const import AF3_ENCODING
+from allatom_design.model.seq_denoiser.sd_loss import masked_seq_accuracy
 
 
 def get_seq_des_model(cfg: DictConfig, device: str) -> dict[str, Any]:
@@ -69,6 +72,7 @@ def get_seq_des_model(cfg: DictConfig, device: str) -> dict[str, Any]:
 def run_seq_des(model: SeqDenoiser,
                 data_cfg: DictConfig,
                 cfg: DictConfig,  # sampling config
+                mask_selector_cfg: DictConfig,
                 pdb_paths: list[str],
                 device: str,
                 pos_constraint_df: Optional[pd.DataFrame] = None,  # optional df for specifying fixed positions for a given pdb name (including extensions)
@@ -110,13 +114,16 @@ def run_seq_des(model: SeqDenoiser,
 
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
     with parallel_context as parallel_pool:
-        for i in range(0, len(pdb_paths), cfg.batch_size):
-            batch_pdb_paths = pdb_paths[i:i+cfg.batch_size]
+        for pi in range(0, len(pdb_paths), cfg.batch_size):
+            batch_pdb_paths = pdb_paths[pi:pi+cfg.batch_size]
             B = len(batch_pdb_paths)
             batch = get_sd_batch(batch_pdb_paths, data_cfg=data_cfg, device=device, parallel_pool=parallel_pool)
 
             # Initialize seq_cond and atom_cond masks
             batch = initialize_sampling_masks(batch)
+            if cfg.ligand_conditioning:
+                batch = initialize_ligand_pocket_mask(batch, ligand_pocket_dist_cutoff=cfg.ligand_pocket_dist_cutoff,
+                                                      small_molecule_only=cfg.small_molecule_only)
 
             # Parse fixed positions
             batch = parse_fixed_pos_info(batch, pos_constraint_df, verbose=cfg.verbose)
@@ -127,41 +134,84 @@ def run_seq_des(model: SeqDenoiser,
 
             # Run sampling
             id_to_atom_arrays, aux = model.sample(batch, sampling_inputs=sampling_inputs)
-
+            
+            # Save sequence recovery metrics
+            
             # Save outputs.
             if out_dir is not None:
-                for example_id, atom_arrays in id_to_atom_arrays.items():
+                # Map example_id to batch index for safe indexing into batch tensors
+                example_id_to_batch_idx = {eid: idx for idx, eid in enumerate(batch["example_id"])}
+                for si, (example_id, atom_arrays) in enumerate(id_to_atom_arrays.items()):
                     # Save output atom arrays to cif files.
                     sample_stems = [f"{example_id}_sample{si}" for si in range(len(atom_arrays))]
                     batch_out_files = [f"{sample_out_dir}/{sample_stem}.cif" for sample_stem in sample_stems]  # output PDBs
 
-                    for si in range(len(atom_arrays)):
-                        atom_array = atom_arrays[si]
-                        with open(batch_out_files[si], "w") as f:
-                            f.write(to_cif_string(atom_array, include_entity_poly=True, include_nan_coords=False))
+                    for ai in range(len(atom_arrays)):
+                        atom_array = atom_arrays[ai]
+                        # with open(batch_out_files[ai], "w") as f:
+                        #     f.write(to_cif_string(atom_array, include_entity_poly=True, include_nan_coords=False))
                         outputs["example_ids"].append(example_id)
                     outputs["out_pdbs"].extend(batch_out_files)
 
                     # Get sampled sequences as a string, with ":" to separate chains.
-                    for si in range(len(atom_arrays)):
+                    for ai in range(len(atom_arrays)):
                         chain_seqs = []
-                        prot_atom_array = atom_arrays[si][struc.filter_amino_acids(atom_arrays[si])]
-                        prot_1to3_fn = np.vectorize(lambda x: aw_sequence.get_1_from_3_letter_code(x, aw_enums.ChainType.POLYPEPTIDE_L))
+                        prot_atom_array = atom_arrays[ai][struc.filter_amino_acids(atom_arrays[ai])]
+                        prot_3to1_fn = np.vectorize(lambda x: aw_sequence.get_1_from_3_letter_code(x, aw_enums.ChainType.POLYPEPTIDE_L))
                         for asym_id in np.unique(prot_atom_array.pn_unit_iid):
                             asym_mask = prot_atom_array.pn_unit_iid == asym_id
                             chain_atom_array = prot_atom_array[asym_mask]
                             _, resnames = struc.get_residues(chain_atom_array)
-                            chain_seq = "".join(prot_1to3_fn(resnames))
+                            chain_seq = "".join(prot_3to1_fn(resnames))
                             chain_seqs.append(chain_seq)
                         outputs["seqs"].append(":".join(chain_seqs))
+
+                    # Save sequence recovery metrics
+                    bi = example_id_to_batch_idx[example_id]
+                    orig_seq = batch["restype"][bi].argmax(dim=-1)
+                    seq_mask = (1 - batch["seq_cond_mask"][bi]) * batch["token_pad_mask"][bi] * batch["token_resolved_mask"][bi]
+                    lp_seq_mask = (1 - batch["seq_cond_mask"][bi]) * batch["token_pad_mask"][bi] * batch["sm_pocket_token_mask"][bi]
+                    
+                    total_seq_recovery = 0.0
+                    total_lp_seq_recovery = 0.0
+                    for ai in range(len(atom_arrays)):
+                        samp_atom_array = atom_arrays[ai]
+                        samp_token_starts = get_token_starts(samp_atom_array)
+                        samp_res_names = samp_atom_array.res_name[samp_token_starts]
+                        samp_res_types = AF3_ENCODING.encode(samp_res_names)
+                        samp_res_types = samp_res_types + [0] * (len(orig_seq) - len(samp_res_types))
+                        samp_res_types = torch.tensor(samp_res_types, device=device)
+                        
+                        # Compute sequence recovery
+                        seq_recovery = (samp_res_types == orig_seq).float() * seq_mask
+                        seq_recovery = seq_recovery.sum() / seq_mask.sum().clamp(min=1e-8)
+                        total_seq_recovery += seq_recovery
+                                                                        
+                        # Compute LP sequence recovery
+                        lp_seq_recovery = (samp_res_types == orig_seq).float() * lp_seq_mask
+                        lp_seq_recovery = lp_seq_recovery.sum() / lp_seq_mask.sum().clamp(min=1e-8)
+                        total_lp_seq_recovery += lp_seq_recovery
+                        
+                        print (f"sample {ai} of {example_id}: seq recovery: {seq_recovery}, lp seq recovery: {lp_seq_recovery}")
+                    
+                    avg_seq_recovery = total_seq_recovery / len(atom_arrays)
+                    avg_lp_seq_recovery = total_lp_seq_recovery / len(atom_arrays)
+                    outputs["avg_seq_recovery"].append(avg_seq_recovery)
+                    outputs["avg_lp_seq_recovery"].append(avg_lp_seq_recovery)
+                    if avg_seq_recovery > 0.9:
+                        str_samp_seq = "".join(prot_3to1_fn(AF3_ENCODING.decode(samp_res_types)))
+                        str_orig_seq = "".join(prot_3to1_fn(AF3_ENCODING.decode(orig_seq)))
+                        print(1)
+                    
+                    print (f"{example_id} avg seq recovery: {seq_recovery}, avg lp seq recovery: {lp_seq_recovery} out of {len(atom_arrays)} samples")                   
 
                     # If specified, save potts parameters
                     if cfg.get("save_potts_params", False):
                         potts_params_dir = f"{out_dir}/potts_params"
                         Path(potts_params_dir).mkdir(parents=True, exist_ok=True)
                         sample_stems = [f"{example_id}_sample{si}" for example_id in batch["example_id"] for si in range(len(atom_arrays))]
-                        for i, sample_stem in enumerate(sample_stems):
-                            potts_params = {k: v[i] for k, v in aux["potts_decoder_aux"].items()}
+                        for ai, sample_stem in enumerate(sample_stems):
+                            potts_params = {k: v[ai] for k, v in aux["potts_decoder_aux"].items()}
                             torch.save(potts_params, f"{potts_params_dir}/{sample_stem}.pt")
 
             pbar.update(B)
@@ -303,8 +353,24 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> dict[str, Any]:
     Given a pdb file path, return a dictionary of sequence design model features.
     """
     # BACKWARDS COMPATIBILITY  TODO: remove this once we've retrained the models
-    if "cif_parser_args" not in data_cfg:
-        data_cfg.cif_parser_args = {"add_missing_atoms": True, "remove_waters": True, "remove_ccds": [], "fix_ligands_at_symmetry_centers": True, "fix_arginines": True, "convert_mse_to_met": True, "hydrogen_policy": "remove"}
+    # if "cif_parser_args" not in data_cfg:
+    data_cfg.cif_parser_args = {"add_missing_atoms": True, "remove_waters": True, \
+        "remove_ccds": [
+"144", "15P", "1PE", "2F2", "2JC", "3HR", "3SY", "7N5", "7PE", "9JE",
+"AAE", "ABA", "ACE", "ACN", "ACT", "ACY", "AZI", "BAM", "BCN", "BCT",
+"BDN", "BEN", "BME", "BO3", "BTB", "BTC", "BU1", "C8E", "CAD", "CAQ",
+"CBM", "CCN", "CIT", "CL", "CLR", "CM", "CMO", "CO3", "CPT", "CXS",
+"D10", "DEP", "DIO", "DMS", "DN", "DOD", "DOX", "EDO", "EEE", "EGL",
+"EOH", "EOX", "EPE", "ETF", "FCY", "FJO", "FLC", "FMT", "FW5", "GOL",
+"GSH", "GTT", "GYF", "HED", "IHP", "IHS", "IMD", "IOD", "IPA", "IPH",
+"LDA", "MB3", "MEG", "MES", "MLA", "MLI", "MOH", "MPD", "MRD", "MSE",
+"MYR", "N", "NA", "NH2", "NH4", "NHE", "NO3", "O4B", "OHE", "OLA",
+"OLC", "OMB", "OME", "OXA", "P6G", "PE3", "PE4", "PEG", "PEO", "PEP",
+"PG0", "PG4", "PGE", "PGR", "PLM", "PO4", "POL", "POP", "PVO", "SAR",
+"SCN", "SEO", "SIN", "SO4", "SPD", "SPM", "SR", "STE", "STO", "STU",
+"TAR", "TBU", "TME", "TRS", "UNK", "UNL", "UNX", "UPL", "URE"
+], \
+        "fix_ligands_at_symmetry_centers": True, "fix_arginines": True, "convert_mse_to_met": True, "hydrogen_policy": "remove"}
     cif_parser_args = OmegaConf.to_container(data_cfg.cif_parser_args, resolve=True)
 
     # Read in the CIF data.
@@ -345,6 +411,7 @@ def get_sd_example(pdb_path: str, data_cfg: DictConfig) -> dict[str, Any]:
 
 
 def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str, torch.Tensor]:
+                              
     """
     Initialize the sampling masks for the batch. Modifies batch in place and returns it.
     """
@@ -352,14 +419,57 @@ def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str
     standard_prot_mask = batch["is_protein"] & ~batch["is_atomized"]
     batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
     batch["seq_cond_mask"] = torch.where(standard_prot_mask, torch.zeros_like(batch["seq_cond_mask"]), batch["token_resolved_mask"])
-
+    
     # Initialize atom mask: condition on backbone atoms, non-protein atoms, and non-standard residues
     batch["atom_cond_mask"] = batch["prot_bb_atom_mask"]  # condition on backbone atoms
 
     ## condition on non-protein atoms and non-standard residues
     atomwise_standard_prot_mask = torch.gather(standard_prot_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]
     batch["atom_cond_mask"] = torch.where(atomwise_standard_prot_mask.bool(), batch["atom_cond_mask"], batch["atom_resolved_mask"])
+    
+    return batch
 
+def initialize_ligand_pocket_mask(batch: dict[str, TensorType["b ..."]],
+                                  ligand_pocket_dist_cutoff: float = None,
+                                  small_molecule_only: bool = True) -> dict[str, torch.Tensor]:
+        
+    if ligand_pocket_dist_cutoff is None:
+        ligand_pocket_dist_cutoff = 5.0
+        
+    B, N, _ = batch["coords"].shape
+    coords = batch["coords"] * batch["atom_resolved_mask"].unsqueeze(-1) * batch["atom_pad_mask"].unsqueeze(-1)
+    atom_mask = batch["atom_resolved_mask"] * batch["atom_pad_mask"]
+    
+    # Compute protein coords
+    protein_token_mask = batch["is_protein"] * batch["token_resolved_mask"] * batch["token_pad_mask"] # [B, N_tokens]
+    protein_atom_mask = torch.gather(protein_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]            
+    protein_coords = coords * protein_atom_mask.unsqueeze(-1)
+    
+    # Compute ligand coords
+    if small_molecule_only:
+        sm_token_mask = batch['token_is_small_molecule'] * batch['token_resolved_mask'] * batch['token_pad_mask']
+        sm_atom_mask = torch.gather(sm_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]
+        sm_coords = coords * sm_atom_mask.unsqueeze(-1)
+    
+        # Compute distance between ligand and protein atoms
+        dist_mat_mask = protein_atom_mask[:, :, None] * sm_atom_mask[:, None, :] 
+        # (JH) 1 where protein and ligand atoms are both present, 0 otherwise
+        sm_pocket_atom_mask = torch.cdist(protein_coords, sm_coords)
+        sm_pocket_atom_mask = torch.where(dist_mat_mask.bool(), sm_pocket_atom_mask, torch.ones_like(sm_pocket_atom_mask, device=coords.device) * torch.inf)
+        sm_pocket_atom_mask = sm_pocket_atom_mask < ligand_pocket_dist_cutoff # [B, N_atoms, N_atoms]
+        
+        # Compute the mask of protein residues that contain any atoms within the distance cutoff
+        
+        sm_pocket_atom_mask = torch.any(sm_pocket_atom_mask, dim=-1) # [B, N_atoms]
+        sm_pocket_token_mask = torch.zeros_like(batch["token_pad_mask"], device=coords.device, dtype=torch.bool) # [B, N_tokens]
+        sm_pocket_token_mask.scatter_(dim=-1, index=batch["atom_to_token_map"], src=sm_pocket_atom_mask.bool()) # [B, N_tokens]                
+        # (JH) scatter_ for in-place operation, more efficient than scatter
+        
+        batch["sm_pocket_token_mask"] = sm_pocket_token_mask
+
+    else:
+        ValueError(f"mask selector not implemented for metals")                        
+    
     return batch
 
 
