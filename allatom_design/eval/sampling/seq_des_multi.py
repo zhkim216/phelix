@@ -18,7 +18,7 @@ from allatom_design.eval.eval_utils.seq_des_utils import (get_seq_des_model,
                                                           run_seq_des)
 
 
-@hydra.main(config_path="../../configs_local/eval/sampling", config_name="seq_des_multi", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/sampling", config_name="seq_des_multi", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Script for designing sequences for multiple PDBs.
@@ -97,3 +97,4 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     main()
+    

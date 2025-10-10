@@ -10,14 +10,14 @@ seed: 0
 num_workers: 8  # for dataloading
 
 # Inputs
-ckpt_path: null
-base_out_dir: null
-exp_name: null  # experiment name; used for wandb and output directory
+ckpt_path: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp2_cfg3/checkpoints/sd-step32500-epoch20.ckpt
+base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des
+exp_name: eval_exp2_cfg3  # experiment name; used for wandb and output directory
 
 # PDB file inputs
 input_cfg:
-  pdb_dir: null
-  pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
+  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/pdbs
+  pdb_name_list: /scratch/users/zhkim216/datasets/atomworks/splits/lmpnn_validation_ids.txt  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
   pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
   n_subsample: null  # randomly sample this many pdb keys, null to use all
 
@@ -28,19 +28,23 @@ pos_constraint_csv: null
 # Sampling config
 run_self_consistency_eval: false
 sampling_cfg_overrides:
-  batch_size: 16
-  num_seqs_per_pdb: 16  # number of sequences to sample per pdb
+  batch_size: 8
+  num_seqs_per_pdb: 2  # number of sequences to sample per pdb
   num_steps: 50
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
   num_workers: ${num_workers}
+  use_potts_sampling: true
+  ligand_conditioning: true
+  ligand_pocket_dist_cutoff: 5.0
+  small_molecule_only: true
 
 # Sampling config
 seq_des_cfg:
   model_name: "lc_atom_mpnn"
   atom_mpnn:
     ckpt_path: ${ckpt_path}
-    sampling_cfg: allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
+    sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides: ${sampling_cfg_overrides}
 
 # Structure prediction model args
@@ -55,4 +59,4 @@ struct_pred_cfg:
 
 hydra:
   run:
-    dir: /home/possu/jinho/allatom-design/hydra_outputs
+    dir: /scratch/users/zhkim216/allatom-design/hydra_outputs

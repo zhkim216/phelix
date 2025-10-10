@@ -52,8 +52,4 @@ cif_parser_args:
 
 # --- sharding for multi-node runs ---
 num_shards: 100      # total number of shards
-<<<<<<< HEAD
-shard_id: 0        # per-job shard id
-=======
 shard_id: 0         # per-job shard id
->>>>>>> refs/remotes/origin/jinho/AAA
