@@ -739,7 +739,18 @@ def get_seq_from_res_type(res_type: TensorType["n k", int]) -> str:
     """
     return "".join([const.prot_token_to_letter[const.tokens[x]] for x in res_type.argmax(dim=-1)])
 
-##############################################
-# After moving to atomworks
-##############################################
+
+def to(obj, device: torch.device):
+    """
+    Move object to device. Source: https://github.com/pytorch/pytorch/issues/69431
+    """
+    if torch.is_tensor(obj):
+        return obj.to(device)
+    if isinstance(obj, dict):
+        return {k: to(v, device) for k, v in obj.items()}
+    if isinstance(obj, tuple):
+        return tuple(to(v, device) for v in obj)
+    if isinstance(obj, list):
+        return [to(v, device) for v in obj]
+    return obj
 
