@@ -113,6 +113,9 @@ def run_seq_des(model: SeqDenoiser,
     pbar = tqdm(total=len(pdb_paths), desc=f"Sampling {len(pdb_paths)} PDBs, {cfg.num_seqs_per_pdb} sequences per PDB...")
 
     parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()  # for loading PDBs in parallel
+
+    total_avg_seq_recovery = 0.0
+    total_avg_lp_seq_recovery = 0.0
     with parallel_context as parallel_pool:
         for pi in range(0, len(pdb_paths), cfg.batch_size):
             batch_pdb_paths = pdb_paths[pi:pi+cfg.batch_size]
@@ -167,8 +170,14 @@ def run_seq_des(model: SeqDenoiser,
                         outputs["seqs"].append(":".join(chain_seqs))
 
                     # Save sequence recovery metrics
+                    if example_id == "1epo":
+                        print(1)
                     bi = example_id_to_batch_idx[example_id]
-                    orig_seq = batch["restype"][bi].argmax(dim=-1)
+                    orig_atom_array = batch["atom_array"][bi]
+                    orig_token_starts = get_token_starts(orig_atom_array)
+                    orig_res_names = orig_atom_array.res_name[orig_token_starts]
+                    orig_res_types = AF3_ENCODING.encode(orig_res_names)
+                    orig_res_types = torch.tensor(orig_res_types, device=device)                    
                     seq_mask = (1 - batch["seq_cond_mask"][bi]) * batch["token_pad_mask"][bi] * batch["token_resolved_mask"][bi]
                     lp_seq_mask = (1 - batch["seq_cond_mask"][bi]) * batch["token_pad_mask"][bi] * batch["sm_pocket_token_mask"][bi]
                     
@@ -203,6 +212,9 @@ def run_seq_des(model: SeqDenoiser,
                         str_orig_seq = "".join(prot_3to1_fn(AF3_ENCODING.decode(orig_seq)))
                         print(1)
                     
+                    total_avg_seq_recovery += avg_seq_recovery
+                    total_avg_lp_seq_recovery += avg_lp_seq_recovery
+
                     print (f"{example_id} avg seq recovery: {seq_recovery}, avg lp seq recovery: {lp_seq_recovery} out of {len(atom_arrays)} samples")                   
 
                     # If specified, save potts parameters
@@ -216,6 +228,10 @@ def run_seq_des(model: SeqDenoiser,
 
             pbar.update(B)
     pbar.close()
+
+    total_avg_seq_recovery /= len(pdb_paths)
+    total_avg_lp_seq_recovery /= len(pdb_paths)
+    print(f"total avg seq recovery: {total_avg_seq_recovery}, total avg lp seq recovery: {total_avg_lp_seq_recovery} out of {len(pdb_paths)} samples")
 
     return outputs
 
