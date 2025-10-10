@@ -1,8 +1,8 @@
 # Wandb configuration
 wandb:
   no_wandb: true  # Disable wandb logging
-  project: "allatom_design"  # Wandb project name
-  wandb_id: "richardshuai"  # Wandb username
+  project: "ligand_seq_des"  # Wandb project name
+  wandb_id: "zhkim216"  # Wandb username
   group: "debug" # Wandb group name
 
 # Run settings
@@ -25,25 +25,6 @@ input_cfg:
 # e.g. 2fyzA,"A1-100,B1-100","A1-100"
 pos_constraint_csv: null
 
-# PDB file processing
-pdb_processing_cfg:
-  num_workers: ${num_workers}
-
-  # if we have to convert PDBs to mmCIFs
-  pdb_to_cif_conversion_cfg:
-    assign_label_seq_id: false  # if true, automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
-
-  # CCD
-  ccd_cfg:
-    use_redis: true
-
-    # If using redis (fast)
-    ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
-
-    # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)
-    ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
-
-
 # Sampling config
 run_self_consistency_eval: false
 sampling_cfg_overrides:
@@ -56,22 +37,22 @@ sampling_cfg_overrides:
 
 # Sampling config
 seq_des_cfg:
-  model_name: "atom_mpnn"
+  model_name: "lc_atom_mpnn"
   atom_mpnn:
     ckpt_path: ${ckpt_path}
-    sampling_cfg: allatom_design/configs/seq_des/atom_mpnn_inference.yaml
+    sampling_cfg: allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides: ${sampling_cfg_overrides}
 
 # Structure prediction model args
 struct_pred_cfg:
-  model_name: "boltz1"
+  model_name: "af2"
   base_cfg: allatom_design/configs/struct_pred/struct_pred_base.yaml
   # overrides to base config
-  boltz1:
-    checkpoint: /media/scratch/huang_lab/model_params/boltz1/boltz1_conf.ckpt
+  af2:
+    data_dir: /media/scratch/huang_lab/model_params/af2
   esmfold:
     max_tokens_per_batch: 1024
 
 hydra:
   run:
-    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
+    dir: /home/possu/jinho/allatom-design/hydra_outputs

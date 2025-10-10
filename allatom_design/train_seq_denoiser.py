@@ -15,10 +15,10 @@ from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 from datetime import datetime
 
-from allatom_design.data.datasets.atomworks_sd_dataset import AtomworksSDDataModule
 from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
                                              repair_state_dict)
 from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
+from allatom_design.data.datasets.atomworks_sd_dataset import AtomworksSDDataModule    
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
 @hydra.main(config_path="configs/seq_denoiser", config_name="debug_seq_denoiser", version_base="1.3.2")

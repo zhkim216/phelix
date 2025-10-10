@@ -1,0 +1,56 @@
+# Wandb configuration
+wandb:
+  no_wandb: false  # Disable wandb logging
+  project: "allatom_design"  # Wandb project name
+  wandb_id: "richardshuai"  # Wandb username
+  group: "debug" # Wandb group name
+
+# Run settings
+seed: 0
+num_workers: 8  # for dataloading
+base_out_dir: null
+exp_name: null  # experiment name; used for wandb and output directory
+
+# Inputs
+chroma_outputs_dir: /media/scratch/huang_lab/allatom_design/allatom_design/boltz_val_cifs_evals/protein_monomer_32_512_no_ligand/chroma/designs
+max_samples_per_pdb: null  # if we don't want to run on all samples
+
+# PDB file inputs
+input_cfg:
+  pdb_dir: null
+  pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
+  pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
+  n_subsample: null  # randomly sample this many pdb keys, null to use all
+
+# PDB file processing
+pdb_processing_cfg:
+  num_workers: ${num_workers}
+
+  # if we have to convert PDBs to mmCIFs
+  pdb_to_cif_conversion_cfg:
+    assign_label_seq_id: false  # if true, automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
+
+  # CCD
+  ccd_cfg:
+    use_redis: true
+
+    # If using redis (fast)
+    ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
+
+    # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)
+    ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
+
+
+# Structure prediction model args
+struct_pred_cfg:
+  model_name: "boltz1"
+  base_cfg: allatom_design/configs/struct_pred/struct_pred_base.yaml
+  # overrides to base config
+  boltz1:
+    checkpoint: /media/scratch/huang_lab/model_params/boltz1/boltz1_conf.ckpt
+  esmfold:
+    max_tokens_per_batch: 1024
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

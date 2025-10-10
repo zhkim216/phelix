@@ -1,0 +1,7 @@
+mmcif_dir: /media/scratch/datasets/boltz_test_cases/cifs
+out_dir: /media/scratch/datasets/boltz_v2
+
+num_workers: 8
+max_file_size: 2000000
+
+ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file

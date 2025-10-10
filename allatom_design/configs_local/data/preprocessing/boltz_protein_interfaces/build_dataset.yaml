@@ -1,0 +1,11 @@
+# processed_targets_dir: /scratch/hielab/rshuai/datasets/boltz_v2/processed_targets  # pre-processed structures
+processed_targets_dir: /media/scratch/datasets/boltz_v2/processed_targets  # pre-processed structures
+pdb_path: /media/scratch/datasets/boltz_interfaces  # output dataset path
+
+num_workers: 8
+
+# Filters
+chain_min_residues: 32
+interface_max_residues: 1024
+interface_chain_type: PROTEIN
+resolution_cutoff: 4.0

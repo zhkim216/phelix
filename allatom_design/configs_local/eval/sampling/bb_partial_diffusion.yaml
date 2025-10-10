@@ -1,0 +1,52 @@
+# Outputs
+exp_name: null  # experiment name; used for wandb and output directory
+base_out_dir: test_bb_partial_diffusion  # outputs will be saved to base_out_dir/exp_name
+
+# Sampling run settings
+ckpt_path: null
+num_workers: 8
+seed: 0
+n_samples_per_pdb: 16  # number of samples to generate per PDB
+
+# PDB file inputs
+input_cfg:
+  pdb_dir: null
+  pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
+  pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
+  n_subsample: null  # randomly sample this many pdb keys, null to use all
+
+# PDB file processing
+pdb_processing_cfg:
+  num_workers: ${num_workers}
+
+  # if we have to convert PDBs to mmCIFs
+  pdb_to_cif_conversion_cfg:
+    assign_label_seq_id: false  # if true, automatically assign label_seq_id by aligning the sequence in the model with the sequence in the SEQRES
+
+  # CCD
+  ccd_cfg:
+    # If using redis
+    use_redis: true
+
+    # If using redis (fast)
+    ccd_rdb_path: allatom_design/data/ccd.rdb  # path to the chemical component dictionary rdb file
+
+    # If redis host is null, use this path instead to load the chemical component dictionary (can be much slower)
+    ccd_pkl_path: /media/scratch/datasets/boltz/ccd.pkl
+
+
+# Backbone sampling parameters
+bb_gen_cfg:
+  ckpt_path: ${ckpt_path}
+  sampling_cfg: allatom_design/configs/bb_gen/bb_sampling_base.yaml
+  overrides:
+    batch_size: 16
+    timestep_schedule:
+      t_start: 0.7
+      t_end: 1.0
+    num_steps: 200
+
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
