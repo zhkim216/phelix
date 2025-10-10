@@ -10,14 +10,14 @@ seed: 0
 num_workers: 8  # for dataloading
 
 # Inputs
-ckpt_path: /home/possu/jinho/out_dir/ligand_seq_des/exp1_cfg2/checkpoints/sd-step67500-epoch43.ckpt
+ckpt_path: /home/possu/jinho/out_dir/ligand_seq_des/exp2_cfg3/checkpoints/sd-step32500-epoch20.ckpt
 base_out_dir: /home/possu/jinho/out_dir/eval_ligand_seq_des
-exp_name: eval_exp1_cfg2  # experiment name; used for wandb and output directory
+exp_name: eval_exp2_cfg3  # experiment name; used for wandb and output directory
 
 # PDB file inputs
 input_cfg:
-  pdb_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/pdbs
-  pdb_name_list: /home/possu/jinho/datasets/atomworks/splits/lmpnn_validation_ids.txt  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
+  pdb_dir: /home/possu/jinho/datasets/val_cifs/boltz_val_cifs/pdbs
+  pdb_name_list: /home/possu/jinho/datasets/atomworks/splits/validation_ids.txt  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
   pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
   n_subsample: null  # randomly sample this many pdb keys, null to use all
 
@@ -29,7 +29,7 @@ pos_constraint_csv: null
 run_self_consistency_eval: false
 sampling_cfg_overrides:
   batch_size: 2
-  num_seqs_per_pdb: 2  # number of sequences to sample per pdb
+  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
   num_steps: 50
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
