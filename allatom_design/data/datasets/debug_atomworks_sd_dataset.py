@@ -208,6 +208,19 @@ class SDDataset(MolecularDataset):
         if self.cfg.debug: 
             t0 = time.perf_counter()
         # Todo: faster way for add_chain_counts_info
+        if self.phase == "train":
+            pdb_ids = [
+    '2pr1', '1mzp', '5d88', '3dr5', '3ofk', '4bn7', '2vno', '6mhm',
+    '1ras', '3o27', '5n5p', '3nrh', '1ka8', '4g8y', '7ep0', '6mbb',
+    '5xum', '6lnw', '3o71', '5ock', '7jxn', '7a2u', '2hl7', '6kfb',
+    '1ly1', '4bfc', '3nbm', '4c8c', '1i4f', '3oqu', '3nzb', '3gwn',
+    '4pg1', '4o4q', '3we3', '3b4d', '3fwb', '4iao', '4c4n', '2uzj',
+    '1nmx', '3jrt', '3ey7', '5x0g', '5qi2', '1icv', '4c53', '1ex2',
+    '3bwu', '5lbz', '5aba', '5mrm', '6w5h', '6qek', '3hu9', '6qgk',
+    '7loj', '1s9v', '3gw4', '3t5g', '6xws', '6mvl', '1xef', '5wi2'
+]
+            chain_df = chain_df[chain_df["pdb_id"].isin(pdb_ids)]
+        
         chain_df = add_chain_counts_info(chain_df,
                                          chain_type_cols=["q_pn_unit_type"],
                                          seq_length_cols=["q_pn_unit_sequence_length"],
@@ -417,6 +430,16 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
 
     # Collate the data
     collated = {}
+    
+    #################! DEBUG
+    bad_keys = []
+    def _assert_finite(t: torch.Tensor, k: str):
+        if torch.is_tensor(t):
+            if not torch.isfinite(t).all():
+                bad_keys.append(k)
+    
+    #################! DEBUG
+ 
     for key in keys:
         values = [d[key] for d in data]
 
@@ -427,10 +450,18 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
                 values, _ = pad_to_max(values, 0)
             else:
                 values = torch.stack(values, dim=0)
-    
+
+        _assert_finite(values, key) #! DEBUG
+
         # Stack the values
         collated[key] = values
-    
+
+    if bad_keys:
+        # 어떤 키에서 NaN/Inf가 발생했는지와 배치 example_id를 같이 남김
+        ex_ids = collated.get("example_id", [])
+        logger.error(f"[sd_collator] Non-finite tensor(s) in keys={bad_keys} for batch example_ids={ex_ids}")
+
+
     return collated
 
 
