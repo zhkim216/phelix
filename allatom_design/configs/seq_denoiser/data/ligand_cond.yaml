@@ -1,12 +1,12 @@
 task: ${model.task}
-pdb_path: /home/possu/jinho/datasets/atomworks
+pdb_path: /scratch/users/zhkim216/datasets/atomworks
 parquet_path: ${data.pdb_path}/metadata_clustered.parquet
-validation_ids_txt: ${data.pdb_path}/splits/validation_ids.txt  # Boltz val set ids. Filtering is case insensitive, no extension.
+validation_ids_txt: ${data.pdb_path}/splits/boltz_lmpnn_validation_ids.txt  # Boltz val set ids. Filtering is case insensitive, no extension.
 debug: ${train.debug}
 debug_num_rows: 10000 #! For debugging
 prefetch_buffer_size: 4
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
-residue_cache_dir: /home/possu/jinho/datasets/atomworks/cached_residue_data
+residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks/cached_residue_data
 
 sampling_weights:
   alphas_chain:
@@ -63,8 +63,7 @@ cif_parser_args:
 
 featurizer_cfg:
   apply_random_augmentation: true
-  translation_scale: 1.0
-  
+  translation_scale: 1.0  
   max_tokens: 256 #! DEBUG
   max_atoms: 2304 #! DEBUG
   crop_center_cutoff_distance: 15.0
@@ -73,7 +72,7 @@ featurizer_cfg:
   residue_cache_dir: ${data.residue_cache_dir}
   max_conformers_per_residue: 50
 
-samples_per_epoch: 100 #! DEBUG
+samples_per_epoch: 50000 
 batch_size: ${train.batch_size}
 num_workers: ${num_workers}
 random_seed: ${train.seed}

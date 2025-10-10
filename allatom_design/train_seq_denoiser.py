@@ -21,12 +21,7 @@ from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
 from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
-################! DEBUG
-from allatom_design.model.dummy_seq_denoiser.lit_dummy_sd_model import LitDummySeqDenoiser
-################! DEBUG
-
-
-@hydra.main(config_path="configs/seq_denoiser", config_name="debug_dummy_seq_denoiser_local", version_base="1.3.2")
+@hydra.main(config_path="configs/seq_denoiser", config_name="debug_seq_denoiser", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Script for training an sequence denoiser model.
@@ -98,11 +93,8 @@ def main(cfg: DictConfig):
         yaml.safe_dump(cfg_dict, f)
 
     # Set up model
-    # lit_model = LitSeqDenoiser(cfg)
-    #################! DEBUG
-    lit_model = LitDummySeqDenoiser(cfg)
-    #################! DEBUG
-
+    lit_model = LitSeqDenoiser(cfg)
+    
     # Load only model weights from the pretrained checkpoint
     if cfg.finetuning.enabled:
         print(f"Loading model weights from {cfg.finetuning.ckpt_path}")

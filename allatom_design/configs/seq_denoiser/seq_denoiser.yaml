@@ -85,6 +85,8 @@ loss:
     label_smoothing: 0.1
     per_token_avg: false
     compile_msa_loss: false
+  
+  ligand_pocket_dist_cutoff: 5.0 # distance cutoff for lc_pocket_seq_loss
 
 optim:
   optimizer: "noam"
@@ -111,4 +113,4 @@ checkpointing:
 
 hydra:
   run:
-    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs
+    dir: /scratch/users/zhkim216/hydra_outputs

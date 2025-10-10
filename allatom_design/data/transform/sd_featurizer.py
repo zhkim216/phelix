@@ -166,13 +166,13 @@ def sd_featurizer(
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
         AddCachedResidueData(residue_cache_dir=residue_cache_dir), #! (JH) changed 251001
-        # GetAF3ReferenceMoleculeFeatures(
-        #     save_rdkit_mols=False,
-        #     use_cached_conformers=True,
-        #     conformer_generation_timeout=5.0,
-        #     use_element_for_atom_names_of_atomized_tokens=False,
-        #     max_conformers_per_residue=max_conformers_per_residue,
-        # ), #Todo: add automorphisms and chiral features
+        GetAF3ReferenceMoleculeFeatures(
+            save_rdkit_mols=False,
+            use_cached_conformers=True,
+            conformer_generation_timeout=5.0,
+            use_element_for_atom_names_of_atomized_tokens=False,
+            max_conformers_per_residue=max_conformers_per_residue,
+        ), #Todo: add automorphisms and chiral features
         ComputeAtomToTokenMap(),
         AddAF3TokenBondFeatures(),
         ConvertToTorch(keys=["encoded", "feats"]),
