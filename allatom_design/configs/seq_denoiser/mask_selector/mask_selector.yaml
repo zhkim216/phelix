@@ -55,3 +55,4 @@ atom_masking_cfg:
 
 # Ligand pocket distance cutoff
 ligand_pocket_dist_cutoff: ${loss.ligand_pocket_dist_cutoff} #! (JH) changed
+small_molecule_only: true #! (JH) changed

@@ -69,6 +69,8 @@ featurizer_cfg:
   remove_unresolved_tokens: true #! (JH) changed 250926,
   residue_cache_dir: ${data.residue_cache_dir}
   max_conformers_per_residue: 50
+  apply_random_augmentation: true
+  translation_scale: 1.0
 
 samples_per_epoch: 100 #! DEBUG
 batch_size: ${train.batch_size}
