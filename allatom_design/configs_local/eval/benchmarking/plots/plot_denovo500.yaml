@@ -1,0 +1,48 @@
+# Test set configs
+base_out_dir: out_dir/benchmarking/plot_denovo500
+
+comparisons:
+  - models: ["denovo500_exp0_idx1_boltz1", "denovo500_exp0_idx0_boltz1", "chroma_boltz1", "ligandmpnn_boltz1"]
+    struct_model_name: "Boltz-1x"
+  - models: ["denovo500_exp0_idx1_esmfold", "denovo500_exp0_idx0_esmfold", "chroma_esmfold", "ligandmpnn_esmfold"]
+    struct_model_name: "ESMFold"
+
+model_csvs:
+  # ours (sd3_a10_cfg00)
+  - model_name: "denovo500_exp0_idx0_boltz1"
+    csv: "/media/scratch/huang_lab/allatom_design/allatom_design/denovo500_evals/denovo500_exp0/denovo500_exp0_idx0_boltz1/self_consistency_metrics.csv"
+    plot_name: "Ours"
+  - model_name: "denovo500_exp0_idx0_esmfold"
+    csv: "/media/scratch/huang_lab/allatom_design/allatom_design/denovo500_evals/denovo500_exp0/denovo500_exp0_idx0_esmfold/self_consistency_metrics.csv"
+    plot_name: "Ours"
+
+  # ours with ensemble
+  - model_name: "denovo500_exp0_idx1_boltz1"
+    csv: "/media/scratch/huang_lab/allatom_design/allatom_design/denovo500_evals/denovo500_exp0/denovo500_exp0_idx1_boltz1/self_consistency_metrics.csv"
+    plot_name: "Ours, ensemble"
+  - model_name: "denovo500_exp0_idx1_esmfold"
+    csv: "/media/scratch/huang_lab/allatom_design/allatom_design/denovo500_evals/denovo500_exp0/denovo500_exp0_idx1_esmfold/self_consistency_metrics.csv"
+    plot_name: "Ours, ensemble"
+
+  # ligandmpnn
+  - model_name: "ligandmpnn_boltz1"
+    csv: "/media/scratch/huang_lab/allatom_design/allatom_design/denovo500_evals/ligandmpnn/ligandmpnn_denovo500_boltz1/sc_metrics.csv"
+    plot_name: "LigandMPNN"
+
+  - model_name: "ligandmpnn_esmfold"
+    csv: "/media/scratch/huang_lab/allatom_design/allatom_design/denovo500_evals/ligandmpnn/ligandmpnn_denovo500_esmfold/sc_metrics.csv"
+    plot_name: "LigandMPNN"
+
+  # chroma
+  - model_name: "chroma_boltz1"
+    csv: "/media/scratch/huang_lab/allatom_design/allatom_design/denovo500_evals/chroma/chroma_denovo500_boltz1/sc_metrics.csv"
+    plot_name: "Chroma"
+  - model_name: "chroma_esmfold"
+    csv: "/media/scratch/huang_lab/allatom_design/allatom_design/denovo500_evals/chroma/chroma_denovo500_esmfold/sc_metrics.csv"
+    plot_name: "Chroma"
+
+# Which models that need to use subset_pdb_names
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

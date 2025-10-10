@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 import multiprocessing as mp
 import os
 from concurrent.futures import ProcessPoolExecutor
@@ -8,7 +9,7 @@ from pathlib import Path
 import hydra
 import torch
 import yaml
-from atomworks.ml.datasets.datasets import StructuralDatasetWrapper
+from atomworks.ml.datasets.datasets import PandasDataset
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
 
@@ -39,14 +40,12 @@ def main(cfg: DictConfig):
 
     # Setup
     use_parallel = cfg.num_workers > 1
-    dataset_name = Path(cfg.out_dir).stem
 
     ### Cache features ###
     cached_structure_dir = f"{cfg.out_dir}/cached_structures"
     Path(cached_structure_dir).mkdir(parents=True, exist_ok=True)
     with open_dict(cfg):
-        cfg.dataset.cif_parser_args["cache_dir"] = cached_structure_dir
-        cfg.dataset.dataset.name = dataset_name
+        cfg.dataset.loader.cif_parser_args["cache_dir"] = cached_structure_dir
 
     cached_example_dir = f"{cfg.out_dir}/cached_examples"
     Path(cached_example_dir).mkdir(parents=True, exist_ok=True)
@@ -70,7 +69,7 @@ def main(cfg: DictConfig):
 def _cache_examples(idx: int,
                     cached_example_dir: str,
                     *,
-                    dataset: StructuralDatasetWrapper | None = None) -> str:
+                    dataset: PandasDataset | None = None) -> str:
     try:
         feats = dataset[idx] if dataset is not None else _DATASET[idx]  # indexing the dataset triggers structure caching
     except Exception as e:
@@ -83,7 +82,7 @@ def _cache_examples(idx: int,
     return pdb_id
 
 # Initialize the dataset in each worker so that the dataset is not pickled
-_DATASET: StructuralDatasetWrapper | None = None
+_DATASET: PandasDataset | None = None
 
 def _init_dataset(dataset_cfg: DictConfig):
     global _DATASET

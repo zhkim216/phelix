@@ -1,0 +1,25 @@
+name: edm
+
+# Noise schedule
+rho: 7
+s_min: 0.01
+s_max: 80
+
+# Training noise distribution
+training_noise_schedule: "lognormal"
+
+training_noise_cfg:
+  lognormal:
+    psigma_mean: 1.5
+    psigma_std: 1.0
+  uniform_sigma:
+  uniform_t:
+    t_min: 0.0
+    t_max: 1.0
+  trunc_normal_t:
+    loc: 0.6
+    scale: 0.1
+    t_min: 0.0
+    t_max: 1.0
+  constant_t:
+    t: 1.0

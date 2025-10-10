@@ -1,7 +1,7 @@
 task: ${model.task}
 pdb_path: /home/possu/jinho/datasets/atomworks
 parquet_path: ${data.pdb_path}/metadata_clustered.parquet
-validation_ids_txt: ${data.pdb_path}/splits/validation_ids.txt  # Boltz val set ids. Filtering is case insensitive, no extension.
+validation_ids_txt: ${data.pdb_path}/splits/boltz_lmpnn_validation_ids.txt  # Boltz val set ids. Filtering is case insensitive, no extension.
 debug: ${train.debug}
 debug_num_rows: 1000 #! For debugging
 prefetch_buffer_size: 4
@@ -62,8 +62,8 @@ cif_parser_args:
   hydrogen_policy: "remove"
 
 featurizer_cfg:
-  max_tokens: 256 #! DEBUG
-  max_atoms: 2304 #! DEBUG
+  max_tokens: 512 #! DEBUG
+  max_atoms: 4608 #! DEBUG
   crop_center_cutoff_distance: 15.0
   crop_spatial_p: 0.5
   remove_unresolved_tokens: true #! (JH) changed 250926,

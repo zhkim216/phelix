@@ -1,0 +1,30 @@
+# Basic settings
+seeds: [6, 36, 216]
+out_dir: /home/possu/jinho/datasets/atomworks_debug
+ccd_dir: /home/possu/jinho/datasets/ccd_mirror
+
+# Parallel processing
+num_workers: 16
+max_file_size: null
+
+# Sharding
+shard_id: 0
+num_shards: 10
+
+### Conformer generation ###
+n_trials: 3
+timeout_offset: 3.0
+timeout_slope: 1.0
+num_conformers: 50
+
+atom_array_to_rdkit_conversion_kwargs:
+  hydrogen_policy: "remove"
+  annotations_to_keep: ["chain_id", "res_id", "res_name", "atom_name", "atom_id", "pn_unit_iid"]
+  sanitize: true
+  set_coord: true
+
+generate_conformers_kwargs:
+  optimize: true
+  num_threads: 2
+  hydrogen_policy: "remove"
+

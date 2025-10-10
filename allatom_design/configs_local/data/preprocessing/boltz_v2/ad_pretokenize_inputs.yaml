@@ -1,0 +1,10 @@
+pdb_path: /media/scratch/datasets/boltz_v2
+num_workers: 8
+max_residues_to_process: 4096  # to avoid caching very large files
+
+# Tokenizer and featurizer for pretokenizing inputs
+tokenizer:
+  _target_: allatom_design.data.tokenize.boltz.BoltzTokenizer
+
+featurizer:
+  _target_: allatom_design.data.feature.ad_featurizer.ADFeaturizer

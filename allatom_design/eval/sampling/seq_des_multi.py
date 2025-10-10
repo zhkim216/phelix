@@ -13,12 +13,12 @@ from omegaconf import DictConfig, OmegaConf
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.eval_setup_utils import (get_pdb_files,
                                                              wandb_setup)
-from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
+# from allatom_design.eval.eval_utils.folding_utils import get_struct_pred_model
 from allatom_design.eval.eval_utils.seq_des_utils import (get_seq_des_model,
                                                           run_seq_des)
 
 
-@hydra.main(config_path="../../configs/eval/sampling", config_name="seq_des_multi", version_base="1.3.2")
+@hydra.main(config_path="../../configs_local/eval/sampling", config_name="seq_des_multi", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Script for designing sequences for multiple PDBs.
@@ -47,11 +47,11 @@ def main(cfg: DictConfig):
     # Load in sequence design model
     seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
 
-    # # Load structure prediction model for self-consistency evaluation
-    if cfg.run_self_consistency_eval:
-        pred_out_dir = f"{log_dir}/preds"  # directory for structure predictions
-        Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
-        struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
+    # # # Load structure prediction model for self-consistency evaluation
+    # if cfg.run_self_consistency_eval:
+    #     pred_out_dir = f"{log_dir}/preds"  # directory for structure predictions
+    #     Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
+    #     struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
 
     # Read in fixed positions
     if cfg.pos_constraint_csv is not None:
@@ -61,6 +61,7 @@ def main(cfg: DictConfig):
 
     # Run sequence design model
     outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
+                          seq_des_model["model"],
                           pdb_paths=pdb_files, device=device, pos_constraint_df=pos_constraint_df,
                           out_dir=log_dir)
 
@@ -68,30 +69,30 @@ def main(cfg: DictConfig):
     output_df = pd.DataFrame(outputs)
     output_df.to_csv(f"{log_dir}/seq_des_outputs.csv", index=False)
 
-    if cfg.run_self_consistency_eval:
-        id_to_metrics = eval_metrics.run_self_consistency_eval_boltz(
-            outputs["out_pdbs"],
-            struct_pred_model,
-            cfg.pdb_processing_cfg,
-            out_dir=pred_out_dir)
+    # if cfg.run_self_consistency_eval:
+    #     id_to_metrics = eval_metrics.run_self_consistency_eval_boltz(
+    #         outputs["out_pdbs"],
+    #         struct_pred_model,
+    #         cfg.pdb_processing_cfg,
+    #         out_dir=pred_out_dir)
 
-        # Save metrics as CSV
-        metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
-        metrics_df.to_csv(f"{log_dir}/self_consistency_metrics.csv", index=False)
+    #     # Save metrics as CSV
+    #     metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
+    #     metrics_df.to_csv(f"{log_dir}/self_consistency_metrics.csv", index=False)
 
-        if not cfg.wandb.no_wandb:
-            # Aggregate results
-            sc_metrics = defaultdict(list)
-            for record_id, metrics in id_to_metrics.items():
-                for k, v in metrics.items():
-                    sc_metrics[f"{k}"].append(v)
+    #     if not cfg.wandb.no_wandb:
+    #         # Aggregate results
+    #         sc_metrics = defaultdict(list)
+    #         for record_id, metrics in id_to_metrics.items():
+    #             for k, v in metrics.items():
+    #                 sc_metrics[f"{k}"].append(v)
 
-            # Update metrics
-            out_metrics = {f"seq_des/mean/{k}": np.nanmean(v) for k, v in sc_metrics.items() if k != "record_id"}
-            out_metrics.update({f"seq_des/median/{k}": np.nanmedian(v) for k, v in sc_metrics.items() if k != "record_id"})
+    #         # Update metrics
+    #         out_metrics = {f"seq_des/mean/{k}": np.nanmean(v) for k, v in sc_metrics.items() if k != "record_id"}
+    #         out_metrics.update({f"seq_des/median/{k}": np.nanmedian(v) for k, v in sc_metrics.items() if k != "record_id"})
 
-            # Log metrics to wandb
-            wandb.log(out_metrics, step=0)
+    #         # Log metrics to wandb
+    #         wandb.log(out_metrics, step=0)
 
 
 if __name__ == "__main__":
