@@ -4,6 +4,7 @@ import os
 import re
 from collections import defaultdict
 from pathlib import Path
+import numpy as np
 
 import pandas as pd
 import wandb
@@ -11,7 +12,6 @@ from natsort import natsorted
 from omegaconf import DictConfig
 
 
-<<<<<<< HEAD
 def get_pdb_files(pdb_dir: str,
                   pdb_name_list: str | None,
                   pdb_name_ext: str | None = None,
@@ -86,8 +86,6 @@ def get_pdb_files(pdb_dir: str,
     return pdb_files
 
 
-=======
->>>>>>> cfbc8033 (do some cleanup)
 def get_training_checkpoints(
     denoiser_train_dir: str,
     model_type: str,

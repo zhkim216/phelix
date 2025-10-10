@@ -11,7 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import gemmi
+# import gemmi
 import numpy as np
 import pandas as pd
 import torch
@@ -30,13 +30,13 @@ from allatom_design.utils.pdb_utils import write_batched_to_pdb, write_to_pdb
 from allatom_design.data.write.mmcif import batch_write_feats_to_mmcif
 from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
-from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched
+# from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched
 from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
 
-try:
-    from colabdesign.shared.utils import copy_dict
-except ImportError:
-    pass
+# try:
+#     from colabdesign.shared.utils import copy_dict
+# except ImportError:
+#     pass
 
 
 def compute_per_pdb_info(pdbs: list[str],
@@ -173,48 +173,48 @@ def compute_secondary_structure_content(pdbs: list[str]) -> dict[str, dict[str, 
     return dssp_metrics
 
 
-def run_self_consistency_eval_boltz(pdbs: list[str],
-                                    struct_pred_model: dict[str, Any],
-                                    pdb_processing_cfg: DictConfig,
-                                    out_dir: str) -> dict[str, dict[str, TensorType]]:
-    """
-    Run self-consistency evaluation on a list of PDBs with designed sequences.
-    """
-    unique_id = uuid.uuid4().hex  # unique ID for temp processing dir
-    processed_dir = Path(f"{out_dir}/processed/{unique_id}")  # directory for processed structures
-    processed_dir.mkdir(parents=True, exist_ok=True)
+# def run_self_consistency_eval_boltz(pdbs: list[str],
+#                                     struct_pred_model: dict[str, Any],
+#                                     pdb_processing_cfg: DictConfig,
+#                                     out_dir: str) -> dict[str, dict[str, TensorType]]:
+#     """
+#     Run self-consistency evaluation on a list of PDBs with designed sequences.
+#     """
+#     unique_id = uuid.uuid4().hex  # unique ID for temp processing dir
+#     processed_dir = Path(f"{out_dir}/processed/{unique_id}")  # directory for processed structures
+#     processed_dir.mkdir(parents=True, exist_ok=True)
 
-    # === Process PDBs === #
-    design_struct_files = process_pdb_files(pdbs, processed_dir, **pdb_processing_cfg)
-    manifest_path = finalize(processed_dir)
+#     # === Process PDBs === #
+#     design_struct_files = process_pdb_files(pdbs, processed_dir, **pdb_processing_cfg)
+#     manifest_path = finalize(processed_dir)
 
-    # === Run structure prediction === #
-    record_ids = [Path(struct_file).stem for struct_file in design_struct_files if struct_file is not None]
-    if struct_pred_model["model_name"] == "boltz1":
-        trainer, data_module = struct_pred_model["trainer_fn"](processed_data_dir=processed_dir, out_dir=Path(out_dir))
-        preds = trainer.predict(struct_pred_model["boltz1"],
-                                datamodule=data_module,
-                                return_predictions=True)
-        id_to_preds = {record.id: pred for record, pred in zip(data_module.manifest.records, preds)}
-        pred_struct_files = [f"{out_dir}/predictions/{record_id}/{record_id}_model_0.npz" for record_id in record_ids]
-    elif struct_pred_model["model_name"] == "esmfold":
-        id_to_preds, pred_struct_files = run_esmfold_from_boltz_feats(design_struct_files, struct_pred_model, pdb_processing_cfg, processed_dir, out_dir)
-    else:
-        raise ValueError(f"Unknown structure prediction model: {struct_pred_model['model_name']}")
+#     # === Run structure prediction === #
+#     record_ids = [Path(struct_file).stem for struct_file in design_struct_files if struct_file is not None]
+#     if struct_pred_model["model_name"] == "boltz1":
+#         trainer, data_module = struct_pred_model["trainer_fn"](processed_data_dir=processed_dir, out_dir=Path(out_dir))
+#         preds = trainer.predict(struct_pred_model["boltz1"],
+#                                 datamodule=data_module,
+#                                 return_predictions=True)
+#         id_to_preds = {record.id: pred for record, pred in zip(data_module.manifest.records, preds)}
+#         pred_struct_files = [f"{out_dir}/predictions/{record_id}/{record_id}_model_0.npz" for record_id in record_ids]
+#     elif struct_pred_model["model_name"] == "esmfold":
+#         id_to_preds, pred_struct_files = run_esmfold_from_boltz_feats(design_struct_files, struct_pred_model, pdb_processing_cfg, processed_dir, out_dir)
+#     else:
+#         raise ValueError(f"Unknown structure prediction model: {struct_pred_model['model_name']}")
 
-    # === Compute metrics === #
-    id_to_metrics = {}
-    for record_id, pred_struct_file, design_struct_file in tqdm(zip(record_ids, pred_struct_files, design_struct_files), desc="Computing self-consistency metrics", total=len(design_struct_files)):
-        # TODO: can be parallelized if too slow
-        struct_pred_out = id_to_preds[record_id]
-        id_to_metrics[record_id] = compute_self_consistency_metrics_boltz(pred_struct_file, design_struct_file,
-                                                                          struct_pred_out,
-                                                                          struct_pred_model["data_cfg"], f"{out_dir}/ca_aligned_struct_preds")
+#     # === Compute metrics === #
+#     id_to_metrics = {}
+#     for record_id, pred_struct_file, design_struct_file in tqdm(zip(record_ids, pred_struct_files, design_struct_files), desc="Computing self-consistency metrics", total=len(design_struct_files)):
+#         # TODO: can be parallelized if too slow
+#         struct_pred_out = id_to_preds[record_id]
+#         id_to_metrics[record_id] = compute_self_consistency_metrics_boltz(pred_struct_file, design_struct_file,
+#                                                                           struct_pred_out,
+#                                                                           struct_pred_model["data_cfg"], f"{out_dir}/ca_aligned_struct_preds")
 
-    # === Clean up temp dir === #
-    shutil.rmtree(processed_dir)
+#     # === Clean up temp dir === #
+#     shutil.rmtree(processed_dir)
 
-    return id_to_metrics
+#     return id_to_metrics
 
 
 def run_af2_interface_eval(pdbs: list[str],
@@ -317,175 +317,175 @@ def run_af2_interface_eval(pdbs: list[str],
     return id_to_metrics
 
 
-def compute_self_consistency_metrics_boltz(pred_struct_file: str,
-                                           design_struct_file: str,  # we use the designed structure for computing atom masks e.g. for missing residues
-                                           struct_pred_out: dict[str, Any],  # output from boltz prediction, needed for pLDDT
-                                           data_cfg: DictConfig,  # holds tokenizer and featurizer
-                                           out_dir: str,
-                                           ):
-    """
-    Compute self-consistency metrics between a designed structure and its predicted structure.
-    """
-    Path(out_dir).mkdir(parents=True, exist_ok=True)
-    metrics = {}
+# def compute_self_consistency_metrics_boltz(pred_struct_file: str,
+#                                            design_struct_file: str,  # we use the designed structure for computing atom masks e.g. for missing residues
+#                                            struct_pred_out: dict[str, Any],  # output from boltz prediction, needed for pLDDT
+#                                            data_cfg: DictConfig,  # holds tokenizer and featurizer
+#                                            out_dir: str,
+#                                            ):
+#     """
+#     Compute self-consistency metrics between a designed structure and its predicted structure.
+#     """
+#     Path(out_dir).mkdir(parents=True, exist_ok=True)
+#     metrics = {}
 
-    # First, featurize each structure
-    design_example, design_structure = get_sd_batch([design_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
-    pred_example, pred_structure = get_sd_batch([pred_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
+#     # First, featurize each structure
+#     design_example, design_structure = get_sd_batch([design_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
+#     pred_example, pred_structure = get_sd_batch([pred_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
 
-    # Align on CA atoms
-    pred_coords, design_coords = pred_example["coords"], design_example["coords"]  # [1, N, 3]
+#     # Align on CA atoms
+#     pred_coords, design_coords = pred_example["coords"], design_example["coords"]  # [1, N, 3]
 
-    ## First, extract CA-only mask (protein-only center atoms)
-    ca_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
+#     ## First, extract CA-only mask (protein-only center atoms)
+#     ca_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
 
-    B = design_coords.shape[0]
-    batch_idx = torch.arange(B).unsqueeze(-1)
-    _, center_idx = torch.max(design_example["token_to_center_atom"], dim=-1)
-    ca_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["PROTEIN"])  # only protein tokens where center exists
-    ca_atom_mask[batch_idx, center_idx] = ca_token_mask
+#     B = design_coords.shape[0]
+#     batch_idx = torch.arange(B).unsqueeze(-1)
+#     _, center_idx = torch.max(design_example["token_to_center_atom"], dim=-1)
+#     ca_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["PROTEIN"])  # only protein tokens where center exists
+#     ca_atom_mask[batch_idx, center_idx] = ca_token_mask
 
-    # Compute RMSD
-    ca_rmsd, (ca_aligned_pred_coords, _) = data.torch_rmsd_weighted(pred_coords, design_coords, ca_atom_mask,
-                                                                    return_aligned=True)
+#     # Compute RMSD
+#     ca_rmsd, (ca_aligned_pred_coords, _) = data.torch_rmsd_weighted(pred_coords, design_coords, ca_atom_mask,
+#                                                                     return_aligned=True)
 
-    # Write aligned coords to mmcif
-    pred_example["coords"] = ca_aligned_pred_coords
-    batch_write_feats_to_mmcif(pred_example, pred_structure, [f"{out_dir}/{Path(pred_struct_file).stem}.cif"])
+#     # Write aligned coords to mmcif
+#     pred_example["coords"] = ca_aligned_pred_coords
+#     batch_write_feats_to_mmcif(pred_example, pred_structure, [f"{out_dir}/{Path(pred_struct_file).stem}.cif"])
 
-    # Compute metrics
-    for metric in ["sc_ca_rmsd", "sc_center_rmsd", "sc_nonpolymer_rmsd",
-                   "avg_plddt", "avg_ca_plddt", "avg_nonpolymer_plddt"]:
-        if metric == "sc_ca_rmsd":
-            # Align on CA atoms, compute CA RMSD
-            metrics[metric] = ca_rmsd.item()
+#     # Compute metrics
+#     for metric in ["sc_ca_rmsd", "sc_center_rmsd", "sc_nonpolymer_rmsd",
+#                    "avg_plddt", "avg_ca_plddt", "avg_nonpolymer_plddt"]:
+#         if metric == "sc_ca_rmsd":
+#             # Align on CA atoms, compute CA RMSD
+#             metrics[metric] = ca_rmsd.item()
 
-        elif metric == "sc_center_rmsd":
-            # Align on center atoms, compute center RMSD
-            center_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
-            center_token_mask = design_example["token_resolved_mask"]
-            center_atom_mask[batch_idx, center_idx] = center_token_mask
-            center_rmsd = data.torch_rmsd_weighted(pred_coords, design_coords, center_atom_mask)
-            metrics[metric] = center_rmsd.item()
+#         elif metric == "sc_center_rmsd":
+#             # Align on center atoms, compute center RMSD
+#             center_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
+#             center_token_mask = design_example["token_resolved_mask"]
+#             center_atom_mask[batch_idx, center_idx] = center_token_mask
+#             center_rmsd = data.torch_rmsd_weighted(pred_coords, design_coords, center_atom_mask)
+#             metrics[metric] = center_rmsd.item()
 
-        elif metric == "sc_nonpolymer_rmsd":
-            # Align on center atoms, compute non-polymer RMSD
-            center_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
-            center_token_mask = design_example["token_resolved_mask"]
-            center_atom_mask[batch_idx, center_idx] = center_token_mask
-            center_rmsd, (aligned_pred_coords, _) = data.torch_rmsd_weighted(pred_coords, design_coords, center_atom_mask, return_aligned=True)
+#         elif metric == "sc_nonpolymer_rmsd":
+#             # Align on center atoms, compute non-polymer RMSD
+#             center_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
+#             center_token_mask = design_example["token_resolved_mask"]
+#             center_atom_mask[batch_idx, center_idx] = center_token_mask
+#             center_rmsd, (aligned_pred_coords, _) = data.torch_rmsd_weighted(pred_coords, design_coords, center_atom_mask, return_aligned=True)
 
-            nonpolymer_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
-            nonpolymer_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["NONPOLYMER"])
-            nonpolymer_atom_mask[batch_idx, center_idx] = nonpolymer_token_mask
-            if nonpolymer_atom_mask.sum() == 0:
-                # nan if no non-polymer atoms
-                metrics[metric] = np.nan
-                continue
+#             nonpolymer_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
+#             nonpolymer_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["NONPOLYMER"])
+#             nonpolymer_atom_mask[batch_idx, center_idx] = nonpolymer_token_mask
+#             if nonpolymer_atom_mask.sum() == 0:
+#                 # nan if no non-polymer atoms
+#                 metrics[metric] = np.nan
+#                 continue
 
-            nonpolymer_msd = ((
-                (aligned_pred_coords - design_coords) ** 2 * nonpolymer_atom_mask[..., None]
-            ).sum(dim=(-1, -2)) / nonpolymer_atom_mask.sum(dim=-1, keepdim=True).clamp(min=1e-6))
-            nonpolymer_rmsd = torch.sqrt(nonpolymer_msd + 1e-8)
-            metrics[metric] = nonpolymer_rmsd.item()
+#             nonpolymer_msd = ((
+#                 (aligned_pred_coords - design_coords) ** 2 * nonpolymer_atom_mask[..., None]
+#             ).sum(dim=(-1, -2)) / nonpolymer_atom_mask.sum(dim=-1, keepdim=True).clamp(min=1e-6))
+#             nonpolymer_rmsd = torch.sqrt(nonpolymer_msd + 1e-8)
+#             metrics[metric] = nonpolymer_rmsd.item()
 
-        elif metric == "avg_plddt":
-            # Compute average pLDDT across all resolved tokens
-            center_token_mask = design_example["token_resolved_mask"]
-            plddt = (struct_pred_out["plddt"] * center_token_mask).sum(dim=-1) / center_token_mask.sum(dim=-1).clamp(min=1e-6)
-            metrics[metric] = plddt.item()
+#         elif metric == "avg_plddt":
+#             # Compute average pLDDT across all resolved tokens
+#             center_token_mask = design_example["token_resolved_mask"]
+#             plddt = (struct_pred_out["plddt"] * center_token_mask).sum(dim=-1) / center_token_mask.sum(dim=-1).clamp(min=1e-6)
+#             metrics[metric] = plddt.item()
 
-        elif metric == "avg_ca_plddt":
-            # Compute average pLDDT across all CA atoms
-            ca_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["PROTEIN"])  # only protein tokens where center exists
-            ca_plddt = (struct_pred_out["plddt"] * ca_token_mask).sum(dim=-1) / ca_token_mask.sum(dim=-1).clamp(min=1e-6)
-            metrics[metric] = ca_plddt.item()
+#         elif metric == "avg_ca_plddt":
+#             # Compute average pLDDT across all CA atoms
+#             ca_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["PROTEIN"])  # only protein tokens where center exists
+#             ca_plddt = (struct_pred_out["plddt"] * ca_token_mask).sum(dim=-1) / ca_token_mask.sum(dim=-1).clamp(min=1e-6)
+#             metrics[metric] = ca_plddt.item()
 
-        elif metric == "avg_nonpolymer_plddt":
-            # Compute average pLDDT across all non-polymer atoms
-            nonpolymer_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["NONPOLYMER"])
-            if nonpolymer_token_mask.sum() == 0:
-                # nan if no non-polymer tokens
-                metrics[metric] = np.nan
-                continue
+#         elif metric == "avg_nonpolymer_plddt":
+#             # Compute average pLDDT across all non-polymer atoms
+#             nonpolymer_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["NONPOLYMER"])
+#             if nonpolymer_token_mask.sum() == 0:
+#                 # nan if no non-polymer tokens
+#                 metrics[metric] = np.nan
+#                 continue
 
-            nonpolymer_plddt = (struct_pred_out["plddt"] * nonpolymer_token_mask).sum(dim=-1) / nonpolymer_token_mask.sum(dim=-1).clamp(min=1e-6)
-            metrics[metric] = nonpolymer_plddt.item()
+#             nonpolymer_plddt = (struct_pred_out["plddt"] * nonpolymer_token_mask).sum(dim=-1) / nonpolymer_token_mask.sum(dim=-1).clamp(min=1e-6)
+#             metrics[metric] = nonpolymer_plddt.item()
 
-    return metrics
+#     return metrics
 
 
-def run_esmfold_from_boltz_feats(design_struct_files: str,
-                                 struct_pred_model: dict[str, Any],  # contains struct pred model components
-                                 pdb_processing_cfg: DictConfig,
-                                 processed_dir: str,
-                                 out_dir: str) -> tuple[dict[str, dict[str, TensorType]], list[str]]:
-    id_to_preds = {}
+# def run_esmfold_from_boltz_feats(design_struct_files: str,
+#                                  struct_pred_model: dict[str, Any],  # contains struct pred model components
+#                                  pdb_processing_cfg: DictConfig,
+#                                  processed_dir: str,
+#                                  out_dir: str) -> tuple[dict[str, dict[str, TensorType]], list[str]]:
+#     id_to_preds = {}
 
-    # === Load in design structures === #
-    data_cfg = struct_pred_model["data_cfg"]  # holds boltz tokenizer/featurizer
-    pred_dir = f"{out_dir}/esmfold_preds"
-    Path(pred_dir).mkdir(parents=True, exist_ok=True)
+#     # === Load in design structures === #
+#     data_cfg = struct_pred_model["data_cfg"]  # holds boltz tokenizer/featurizer
+#     pred_dir = f"{out_dir}/esmfold_preds"
+#     Path(pred_dir).mkdir(parents=True, exist_ok=True)
 
-    out_pdbs = []
-    for design_struct_file in tqdm(design_struct_files, desc="Running ESMFold"):
-        preds = {}  # for now, this just holds plddt
+#     out_pdbs = []
+#     for design_struct_file in tqdm(design_struct_files, desc="Running ESMFold"):
+#         preds = {}  # for now, this just holds plddt
 
-        # Load in designed structure and extract standard protein-only features
-        design_example, design_structure = get_sd_batch([design_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
-        prot_example = crop_batch_to_protein_only(design_example)
+#         # Load in designed structure and extract standard protein-only features
+#         design_example, design_structure = get_sd_batch([design_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
+#         prot_example = crop_batch_to_protein_only(design_example)
 
-        # Extract sequence and residue indices
-        sequence = "".join([const.prot_token_to_letter[const.tokens[aa.item()]] for aa in prot_example["res_type"].argmax(dim=-1).squeeze(0)])
-        residue_index = prot_example["label_seq_id"].squeeze(0)
-        chain_index = prot_example["asym_id"].squeeze(0)
+#         # Extract sequence and residue indices
+#         sequence = "".join([const.prot_token_to_letter[const.tokens[aa.item()]] for aa in prot_example["res_type"].argmax(dim=-1).squeeze(0)])
+#         residue_index = prot_example["label_seq_id"].squeeze(0)
+#         chain_index = prot_example["asym_id"].squeeze(0)
 
-        # Run ESMFold prediction on this sequence
-        esm_pred = run_esmfold_batched([sequence], [residue_index], [chain_index], model=struct_pred_model["esmfold"], tokenizer=struct_pred_model["tokenizer"])
-        esm_pred = {k: v[0] for k, v in esm_pred.items()}
+#         # Run ESMFold prediction on this sequence
+#         esm_pred = run_esmfold_batched([sequence], [residue_index], [chain_index], model=struct_pred_model["esmfold"], tokenizer=struct_pred_model["tokenizer"])
+#         esm_pred = {k: v[0] for k, v in esm_pred.items()}
 
-        # Format output coordinates to match boltz coordinates. This works since atom14 representations match
-        n_atoms_per_token = prot_example["atom_to_token"].squeeze(0).sum(dim=0)
+#         # Format output coordinates to match boltz coordinates. This works since atom14 representations match
+#         n_atoms_per_token = prot_example["atom_to_token"].squeeze(0).sum(dim=0)
 
-        ## first, pack atom14 coords into atom-level representation
-        pred_atom14 = esm_pred["pred_coords_atom14"]  # shape [n_token, 14, 3]
-        mask = torch.arange(14, device=pred_atom14.device).unsqueeze(0) < n_atoms_per_token.unsqueeze(-1)
-        mask = mask.unsqueeze(-1).expand(-1, -1, 3)  # shape [n_token, 14, 3]
-        esm_coords = pred_atom14[mask].view(-1, 3).unsqueeze(0)  # shape [1, n_atoms, 3]
+#         ## first, pack atom14 coords into atom-level representation
+#         pred_atom14 = esm_pred["pred_coords_atom14"]  # shape [n_token, 14, 3]
+#         mask = torch.arange(14, device=pred_atom14.device).unsqueeze(0) < n_atoms_per_token.unsqueeze(-1)
+#         mask = mask.unsqueeze(-1).expand(-1, -1, 3)  # shape [n_token, 14, 3]
+#         esm_coords = pred_atom14[mask].view(-1, 3).unsqueeze(0)  # shape [1, n_atoms, 3]
 
-        if esm_coords.shape[1] != prot_example["atom_pad_mask"].sum().item():
-            print(f"Something went wrong with converting ESMFold coords to boltz coords for {design_struct_file}, defaulting boltz coords to 0")
-            esm_coords = torch.zeros_like(prot_example["coords"])[prot_example["atom_pad_mask"].bool()]
+#         if esm_coords.shape[1] != prot_example["atom_pad_mask"].sum().item():
+#             print(f"Something went wrong with converting ESMFold coords to boltz coords for {design_struct_file}, defaulting boltz coords to 0")
+#             esm_coords = torch.zeros_like(prot_example["coords"])[prot_example["atom_pad_mask"].bool()]
 
-        ## next, put protein-only coordinates back into design example to make our predicted example
-        ## note: we do not update non-protein atoms (but keep these in the cif for shape convenience)
-        _, atomwise_token_idx = torch.max(design_example["atom_to_token"], dim=-1)  # [b, n_atoms]
-        atomwise_moltype = design_example["mol_type"].gather(dim=-1, index=atomwise_token_idx)  # [b, n_atoms]
-        atomwise_is_standard = design_example["is_standard"].gather(dim=-1, index=atomwise_token_idx)  # [b, n_atoms]
-        atomwise_protein_mask = (atomwise_moltype == const.chain_type_ids["PROTEIN"]) & atomwise_is_standard & design_example["atom_pad_mask"].bool()
-        design_example["coords"][atomwise_protein_mask] = esm_coords
+#         ## next, put protein-only coordinates back into design example to make our predicted example
+#         ## note: we do not update non-protein atoms (but keep these in the cif for shape convenience)
+#         _, atomwise_token_idx = torch.max(design_example["atom_to_token"], dim=-1)  # [b, n_atoms]
+#         atomwise_moltype = design_example["mol_type"].gather(dim=-1, index=atomwise_token_idx)  # [b, n_atoms]
+#         atomwise_is_standard = design_example["is_standard"].gather(dim=-1, index=atomwise_token_idx)  # [b, n_atoms]
+#         atomwise_protein_mask = (atomwise_moltype == const.chain_type_ids["PROTEIN"]) & atomwise_is_standard & design_example["atom_pad_mask"].bool()
+#         design_example["coords"][atomwise_protein_mask] = esm_coords
 
-        # Write to mmcif
-        out_pdb = f"{pred_dir}/esmfold_{Path(design_struct_file).stem}.cif"
-        batch_write_feats_to_mmcif(design_example, design_structure, [out_pdb])
-        out_pdbs.append(out_pdb)
+#         # Write to mmcif
+#         out_pdb = f"{pred_dir}/esmfold_{Path(design_struct_file).stem}.cif"
+#         batch_write_feats_to_mmcif(design_example, design_structure, [out_pdb])
+#         out_pdbs.append(out_pdb)
 
-        # Format plddt to match boltz format
-        protein_mask = (design_example["mol_type"] == const.chain_type_ids["PROTEIN"]) & design_example["is_standard"]
-        plddt = torch.zeros_like(protein_mask, dtype=torch.float32)
-        plddt[protein_mask] = esm_pred["ca_plddt"]
-        preds["plddt"] = plddt / 100.0
-        id_to_preds[Path(design_struct_file).stem] = preds
+#         # Format plddt to match boltz format
+#         protein_mask = (design_example["mol_type"] == const.chain_type_ids["PROTEIN"]) & design_example["is_standard"]
+#         plddt = torch.zeros_like(protein_mask, dtype=torch.float32)
+#         plddt[protein_mask] = esm_pred["ca_plddt"]
+#         preds["plddt"] = plddt / 100.0
+#         id_to_preds[Path(design_struct_file).stem] = preds
 
-    # Re-process to get processed struct files
-    esmfold_processed_dir = Path(f"{processed_dir}/esmfold")
-    esmfold_processed_dir.mkdir(parents=True, exist_ok=True)
-    _ = process_pdb_files(out_pdbs, esmfold_processed_dir, **pdb_processing_cfg)
+#     # Re-process to get processed struct files
+#     esmfold_processed_dir = Path(f"{processed_dir}/esmfold")
+#     esmfold_processed_dir.mkdir(parents=True, exist_ok=True)
+#     _ = process_pdb_files(out_pdbs, esmfold_processed_dir, **pdb_processing_cfg)
 
-    # reorder processed struct files to match design_struct_files ordering
-    processed_struct_files = [f"{esmfold_processed_dir}/structures/esmfold_{Path(x).stem}.npz" for x in design_struct_files]
+#     # reorder processed struct files to match design_struct_files ordering
+#     processed_struct_files = [f"{esmfold_processed_dir}/structures/esmfold_{Path(x).stem}.npz" for x in design_struct_files]
 
-    return id_to_preds, processed_struct_files
+#     return id_to_preds, processed_struct_files
 
 
 

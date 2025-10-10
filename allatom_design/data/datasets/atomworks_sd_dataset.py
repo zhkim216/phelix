@@ -191,7 +191,7 @@ class SDDataset(MolecularDataset):
         # Load in validation IDs and hold out based on phase. Case insensitive, no extension.    
         with open(self.cfg.validation_ids_txt, "r") as f:
             logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_txt}...")
-            val_split = {x.lower() for x in f.read().splitlines()}
+            val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}
             
             
         chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
@@ -417,15 +417,6 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
 
     # Collate the data
     collated = {}
-    
-    #################! DEBUG
-    bad_keys = []
-    def _assert_finite(t: torch.Tensor, k: str):
-        if torch.is_tensor(t):
-            if not torch.isfinite(t).all():
-                bad_keys.append(k)
-    
-    #################! DEBUG
  
     for key in keys:
         values = [d[key] for d in data]
@@ -437,18 +428,9 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
                 values, _ = pad_to_max(values, 0)
             else:
                 values = torch.stack(values, dim=0)
-
-        _assert_finite(values, key) #! DEBUG
-
+        
         # Stack the values
         collated[key] = values
-
-    if bad_keys:
-        # 어떤 키에서 NaN/Inf가 발생했는지와 배치 example_id를 같이 남김
-        ex_ids = collated.get("example_id", [])
-        logger.error(f"[sd_collator] Non-finite tensor(s) in keys={bad_keys} for batch example_ids={ex_ids}")
-
-
     return collated
 
 

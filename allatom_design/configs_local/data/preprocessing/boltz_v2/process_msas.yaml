@@ -1,0 +1,7 @@
+out_dir: /media/scratch/datasets/boltz_v2  # reads manifest and structures from this directory
+raw_msa_dir: /media/scratch/datasets/rcsb_raw_msa  # reads raw MSAs from this directory
+
+max_seqs: 16384  # max number of sequences to keep in each MSA
+num_workers: 8
+
+taxonomy_rdb_path: /media/scratch/datasets/boltz_v2/taxonomy.rdb  # path to the taxonomy rdb file

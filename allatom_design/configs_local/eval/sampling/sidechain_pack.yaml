@@ -1,0 +1,36 @@
+seed: 0
+
+# Inputs
+checkpoint_path: null  # path to the checkpoint to use for sampling
+out_dir: null  # null to save in the model run directory
+
+input_cfg:
+  pdb_dir: null
+  pdb_name_list: null  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
+  pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
+  subset_length_range: null # only evaluate on sequences within this length range
+  presort_by_length: false  # sort pdb keys by sequence length, potentially for efficiency
+  n_subsample: null  # randomly sample this many pdb keys, null to use all
+
+# Sidechain packing run parameters
+sampling_cfg_overrides:
+  batch_size: 16
+  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+  noise_labels: 0.0
+  scn_diffusion:
+    num_steps: 50
+    noise_schedule:
+      name: "step_scale"
+      c: 1.5
+
+# Sampling config
+seq_des_cfg:
+  model_name: "fampnn"
+  fampnn:
+    fampnn_cfg: allatom_design/configs/seq_des/fampnn_inference.yaml
+    fampnn_ckpt: ${checkpoint_path}
+    overrides: ${sampling_cfg_overrides}
+
+hydra:
+  run:
+    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

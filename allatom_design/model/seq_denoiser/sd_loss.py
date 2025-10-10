@@ -63,19 +63,19 @@ class SDLoss(nn.Module):
             aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], target_restype, seq_loss_mask).mean().detach().clone()
             
             if self.task == "lc_seq_des": #! (JH) changed                                                                
-                lp_seq_loss_mask = seq_loss_mask * outputs["ligand_pocket_token_mask"] 
+                sp_seq_loss_mask = seq_loss_mask * outputs["sm_pocket_token_mask"] 
                                             
                 # Select only samples that have ligands
-                has_ligand = lp_seq_loss_mask.sum(dim=-1) > 0                
+                has_ligand = sp_seq_loss_mask.sum(dim=-1) > 0                
                 
                 if has_ligand.any():
-                    lp_seq_loss = masked_cross_entropy(outputs["seq_logits"], target_restype, lp_seq_loss_mask, seq_loss_cfg=self.cfg.seq_loss)
-                    lp_seq_loss = lp_seq_loss[has_ligand]
-                    aux_monitor["lp_seq_loss"] = lp_seq_loss.mean().detach().clone()
+                    sp_seq_loss = masked_cross_entropy(outputs["seq_logits"], target_restype, sp_seq_loss_mask, seq_loss_cfg=self.cfg.seq_loss)
+                    sp_seq_loss = sp_seq_loss[has_ligand]
+                    aux_monitor["sp_seq_loss"] = sp_seq_loss.mean().detach().clone()
                          
-                    lp_seq_acc = masked_seq_accuracy(outputs["seq_logits"], target_restype, lp_seq_loss_mask)
-                    lp_seq_acc = lp_seq_acc[has_ligand]                
-                    aux_monitor["lp_seq_acc"] = lp_seq_acc.mean().detach().clone()                
+                    sp_seq_acc = masked_seq_accuracy(outputs["seq_logits"], target_restype, sp_seq_loss_mask)
+                    sp_seq_acc = sp_seq_acc[has_ligand]                
+                    aux_monitor["sp_seq_acc"] = sp_seq_acc.mean().detach().clone()                
                                         
 
             if outputs.get("potts_decoder_aux") is not None:

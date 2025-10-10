@@ -1,0 +1,58 @@
+name: mask_selector
+
+# Masking schedules
+restype_masking_schedule: "uniform_t"
+
+# Configs
+restype_masking_cfg:
+  uniform_t:
+    t_min: 0.0
+    t_max: 1.0
+  constant_t:
+    t: 0.0
+  uniform_squared_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_cubed_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_cosine_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_sqrt_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_cbrt_t:
+    t_min: 0.0
+    t_max: 1.0
+
+#! (JH) below are added. masking schedules for sidechains
+# Atom masking schedules
+atom_masking_schedule: null #! (JH) Now only None & uniform_t are implemented in the code
+
+# Atom masking configs
+atom_masking_cfg:
+  uniform_t:
+    t_min: 0.0
+    t_max: 1.0
+  constant_t:
+    t: 0.0
+  uniform_squared_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_cubed_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_cosine_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_sqrt_t:
+    t_min: 0.0
+    t_max: 1.0
+  uniform_cbrt_t:
+    t_min: 0.0
+    t_max: 1.0
+
+# Ligand pocket distance cutoff
+ligand_pocket_dist_cutoff: ${loss.ligand_pocket_dist_cutoff} #! (JH) changed
+small_molecule_only: true #! (JH) changed
