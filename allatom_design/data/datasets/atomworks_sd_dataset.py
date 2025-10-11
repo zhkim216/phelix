@@ -35,9 +35,7 @@ class AtomworksSDDataModule(L.LightningDataModule):
         self.pdb_path = cfg.pdb_path
         self._train_set = SDDataset(cfg, phase="train")
         self._val_set = SDDataset(cfg, phase="val")
-        self.prefetch_buffer_size = cfg.prefetch_buffer_size
-        
-        
+        self.prefetch_buffer_size = cfg.prefetch_buffer_size                
         
     def train_dataloader(self) -> DataLoader:
         weights = torch.as_tensor(self._train_set.get_sampling_weights(), dtype=torch.float32)        
@@ -192,12 +190,18 @@ class SDDataset(MolecularDataset):
         with open(self.cfg.validation_ids_txt, "r") as f:
             logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_txt}...")
             val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}
-            
-            
+                                            
         chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
         chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"
+        
+        if self.cfg.exclude_val_cluster:
+            val_cluster_ids = list(chain_df[chain_df["phase"] == "val"]["q_pn_unit_cluster_id"])
+            
         chain_df = chain_df[chain_df["phase"] == self.phase]
         
+        if self.cfg.exclude_val_cluster and self.phase == "train":
+            chain_df = chain_df[~chain_df["q_pn_unit_cluster_id"].isin(val_cluster_ids)]
+                
         if self.cfg.debug:
             if self.cfg.debug_num_rows is None:
                 self.cfg.debug_num_rows = len(chain_df)
