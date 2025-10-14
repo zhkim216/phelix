@@ -1,0 +1,139 @@
+[project]
+name = "plinder"
+dynamic = ["version"]
+dependencies = [
+    "biotite >= 1.0",
+    "numpy<2",
+    "pandas",
+    "typing_extensions",
+    "pydantic",
+    "tqdm",
+    "plotly",
+    "nbformat",
+    "google-cloud-storage",
+    "gcsfs",
+    "gemmi",
+    "rdkit>=2024.03.6",
+    "pyarrow",
+    "omegaconf",
+    "mmcif",
+    "eval_type_backport",
+    "posebusters",
+    "duckdb",
+    "cloudpathlib",
+    "mols2grid",
+    "six",
+]
+description = "PLINDER: The Protein-Ligand INteraction Dataset and Evaluation Resource"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/plinder-org/plinder"
+Issues = "https://github.com/plinder-org/plinder/issues"
+
+[project.scripts]
+plinder_download = "plinder.core.index.utils:download_plinder_cmd"
+plinder_eval = "plinder.eval.docking.write_scores:evaluate_cmd"
+plinder_stratify = "plinder.eval.docking.stratify_test_set:stratify_cmd"
+plinder_plot = "plinder.eval.docking.make_plots:plot_cmd"
+
+[project.optional-dependencies]
+lint = [
+    "ruff == 0.1.2",
+    "pre-commit == 2.21.0",
+]
+test = [
+    "tox >= 4",
+    "pytest == 7.2.0",
+    "pytest-cov == 4.0.0",
+    "pytest-xdist == 3.6.1",
+    "build == 0.9.0",
+    "setuptools_scm[toml] == 7.0.5",
+]
+type = [
+    "mypy==1.2.0",
+    "types-PyYAML",
+    "types-requests",
+]
+dev = [
+    "plinder[lint,test,type]",
+]
+loader = [
+    "torch",
+]
+plots = [
+    "matplotlib",
+    "seaborn",
+    "mols2grid",
+    "matplotlib_venn",
+    "scipy",
+]
+docs = [
+    "itables",
+    "jupyter-sphinx",
+    "jupyterlab_myst",
+    "jupytext",
+    "myst-nb",
+    "myst-parser[linkify]",
+    "numpydoc",
+    "pydata-sphinx-theme == 0.15.4",
+    "sphinx",
+    "sphinx-copybutton",
+    "sphinx-design",
+    "sphinx-gallery",
+    "mols2grid",
+    "matplotlib",
+]
+
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = [
+    "build == 0.9.0",
+    "setuptools == 65.4.0",
+    "setuptools_scm[toml] == 7.0.5",
+]
+
+[tool.setuptools_scm]
+root = "."
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["plinder*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+plinder = [
+    "**.yaml",
+    "**.tsv",
+    "plinder/data/utils/annotations/static_files/artifacts_badlist.csv",
+]
+
+[tool.ruff]
+line-length = 88
+select = [
+    "F",
+    "I",
+]
+ignore = [
+    "E",
+    "W",
+]
+preview = true
+
+[tool.ruff.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.mypy]
+ignore_missing_imports = true
+strict = true
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = "plinder._version"
+ignore_errors = true

@@ -1,0 +1,9 @@
+[run]
+branch = true
+parallel = true
+relative_files = true
+source = plinder
+
+[report]
+show_missing = true
+precision = 4
