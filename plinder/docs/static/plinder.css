@@ -1,0 +1,69 @@
+html {
+    --pst-font-family-base: "Geologica", "Sans-Serif";
+    --pst-font-family-heading: "Montserrat", "Sans-Serif";
+    --pst-font-weight-heading: 700;
+}
+
+html[data-theme="light"] {
+    --pst-color-primary: #da5da4;
+    --pst-color-primary-highlight: #da5da4;
+    --pst-color-secondary: #5c7ec0;
+    --pst-color-secondary-highlight: #5c7ec0;
+    --pst-color-accent: #a05ba4;
+    --pst-color-inline-code: #a05ba4;
+    --pst-color-inline-code-links: #a05ba4;
+    --pst-color-table-row-hover-bg: #dddad7;
+}
+
+html[data-theme="dark"] {
+    --pst-color-primary: #da5da4;
+    --pst-color-primary-highlight: #da5da4;
+    --pst-color-secondary: #5c7ec0;
+    --pst-color-secondary-highlight: #5c7ec0;
+    --pst-color-accent: #a05ba4;
+    --pst-color-inline-code: #a05ba4;
+    --pst-color-inline-code-links: #a05ba4;
+    --pst-color-table-row-hover-bg: #dddad7;
+}
+
+
+/* Separation between methods in the API reference */
+.py.method, .py.attribute{
+    border-top: 1px solid #cccccc;
+    padding-top: 30px;
+    padding-bottom: 30px;
+}
+
+/* The tutorial buttons on the home page */
+.main-button {
+    padding-right: 20px;
+    align-self: center;
+}
+
+/* The tutorial button icons on the home page */
+svg.main-button-icon path {
+    fill: var(--pst-color-primary);
+}
+
+/* The cross/check marks in the annotation table*/
+svg.marks {
+    height: 32px;
+}
+
+.dt-container table,.pst-scrollable-table-container table {
+    font-size: small;
+}
+
+/* The annotation table column containing the cross/check marks */
+table.dataTable td.dt-type-numeric {
+    text-align: center !important;
+}
+
+
+/* The `Example` column in the annotation table */
+.example {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 150px;
+}
