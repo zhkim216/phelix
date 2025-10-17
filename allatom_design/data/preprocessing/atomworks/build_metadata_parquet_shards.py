@@ -227,7 +227,7 @@ def get_cif_paths(mmcif_dir: str, max_file_size: int | None = None) -> list[str]
     Returns:
         List of CIF file paths after filtering
     """
-    cif_paths = glob.glob(f"{mmcif_dir}/**/*.cif.gz", recursive=True)
+    cif_paths = glob.glob(f"{mmcif_dir}/**/*.cif", recursive=True)
     
     # Filter by file size only
     if max_file_size is not None:
@@ -251,13 +251,17 @@ def save_to_parquet(df: pd.DataFrame,
     for col in df.columns:
         if df[col].dtype == 'object':
             df[col] = df[col].astype(str)
-
+    
     # Add example_id based on the name of this dataset
-    df["example_id"] = df.apply(lambda x: generate_example_id(
-        [dataset_name],
-        x["pdb_id"],
-        x["assembly_id"],
-        [x["q_pn_unit_iid"]]), axis=1)
+    df["example_id"] = df.apply(
+            lambda x: generate_example_id(
+                [str(dataset_name)],
+                str(x["pdb_id"]),
+                str(x["assembly_id"]),
+                [str(x["q_pn_unit_iid"])],
+            ),
+            axis=1,
+        )
 
     # Add in relative path
     df["rel_path"] = df["path"].apply(lambda x: str(Path(x).relative_to(pdb_in_dir)))

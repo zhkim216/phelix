@@ -25,7 +25,11 @@ def main(cfg: DictConfig) -> None:
     Cluster the sequences in the metadata parquet file.
     """
     df = pd.read_parquet(f"{cfg.pdb_path}/metadata.parquet")
-    clustering_dir = Path(cfg.pdb_path) / "clustering"
+
+    seq_id_threshold = cfg.seq_id_threshold
+    subdir_name = f"clustering_thres_{str(seq_id_threshold).replace(".", "")}"
+
+    clustering_dir = Path(cfg.pdb_path) / subdir_name
     clustering_dir.mkdir(parents=True, exist_ok=True)
 
     # Get all polymer sequences from metadata df
@@ -55,8 +59,10 @@ def main(cfg: DictConfig) -> None:
     with (clustering_dir / "proteins.fasta").open("w") as f:
         f.write("\n".join(proteins))
 
+    
+
     subprocess.run(
-        f"{os.environ['SOFTWARE_PATH']}/mmseqs/bin/mmseqs easy-cluster {clustering_dir / 'proteins.fasta'} {clustering_dir / 'clust_prot'} {clustering_dir / 'tmp'} --min-seq-id 0.4",
+        f"{os.environ['SOFTWARE_PATH']}/mmseqs/bin/mmseqs easy-cluster {clustering_dir / 'proteins.fasta'} {clustering_dir / 'clust_prot'} {clustering_dir / 'tmp'} --min-seq-id {seq_id_threshold}",
         shell=True,
         check=True,
     )
@@ -102,8 +108,8 @@ def main(cfg: DictConfig) -> None:
         print(f"WARNING: {df['q_pn_unit_cluster_id'].isna().sum()} missing values in q_pn_unit_cluster_id")
 
     df["q_pn_unit_cluster_id"] = df["q_pn_unit_cluster_id"].fillna(-1).astype(np.int32)  # fill missing cluster IDs with -1
-    df.to_parquet(f"{cfg.pdb_path}/metadata_clustered.parquet")
-    print(f"Saved clustered metadata to {cfg.pdb_path}/metadata_clustered.parquet")
+    df.to_parquet(f"{cfg.pdb_path}/metadata_clustered_{str(seq_id_threshold).replace(".", "")}.parquet")
+    print(f"Saved clustered metadata to {cfg.pdb_path}/metadata_clustered_{str(seq_id_threshold).replace(".", "")}.parquet")
 
 
 if __name__ == "__main__":
