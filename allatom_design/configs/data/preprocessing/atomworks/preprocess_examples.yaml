@@ -49,11 +49,8 @@ cif_parser_args:
   fix_arginines: true
   convert_mse_to_met: true
   hydrogen_policy: "remove"
+  add_bond_types_from_struct_conn: ["covale", "metalc"]
 
 # --- sharding for multi-node runs ---
 num_shards: 100      # total number of shards
-<<<<<<< HEAD
-shard_id: 0        # per-job shard id
-=======
 shard_id: 0         # per-job shard id
->>>>>>> refs/remotes/origin/jinho/AAA
