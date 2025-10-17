@@ -1,8 +1,9 @@
-mmcif_dir: /home/possu/jinho/datasets/boltz_val_cifs/pdbs
-out_dir: /home/possu/jinho/datasets/atomworks_debug
+mmcif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/pdbs
+out_dir: /home/possu/jinho/datasets/atomworks_debug_lmpnn
 
-num_workers: 0
+num_workers: 23
 max_file_size: 1000000
+save_imd: false
 
 # Data preprocessor args to specify in addition to the cif parser args
 data_preprocessor_cfg:
