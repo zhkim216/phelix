@@ -1,5 +1,5 @@
-mmcif_dir: /home/possu/jinho/datasets/boltz_val_cifs/pdbs
-out_dir: /home/possu/jinho/datasets/atomworks_debug
+mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
+out_dir: /scratch/users/zhkim216/datasets/atomworks_re
 
 num_workers: 0
 max_file_size: 1000000
@@ -43,5 +43,5 @@ cif_parser_args:
   hydrogen_policy: "remove"
 
 # --- sharding for multi-node runs ---
-num_shards: 1       # total number of shards
+num_shards: 10000      # total number of shards
 shard_id: 0         # per-job shard id
