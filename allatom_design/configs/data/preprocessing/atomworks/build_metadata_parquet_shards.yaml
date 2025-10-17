@@ -1,8 +1,9 @@
 mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
 out_dir: /scratch/users/zhkim216/datasets/atomworks_re
 
-num_workers: 0
+num_workers: 23
 max_file_size: 1000000
+save_imd: false
 
 # Data preprocessor args to specify in addition to the cif parser args
 data_preprocessor_cfg:

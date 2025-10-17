@@ -30,17 +30,19 @@ from allatom_design.data.preprocessing.atomworks.sharding_utils import \
 # Globals for worker processes (used in parallel mode)
 PROCESSOR = None
 TIMEOUT_SECS = 300
+RETURN_IMD = False
 
 def _worker_timeout_handler(signum, frame):
     """Signal handler used inside worker processes for timeouts."""
     raise TimeoutError("Processing timeout")
 
 
-def _init_worker(preprocessor_args: dict, timeout: int):
+def _init_worker(preprocessor_args: dict, timeout: int, return_id_map_dict: bool):
     """Initializer for worker processes: build a DataPreprocessor once per worker."""
-    global PROCESSOR, TIMEOUT_SECS
+    global PROCESSOR, TIMEOUT_SECS, RETURN_IMD
     PROCESSOR = DataPreprocessor(**preprocessor_args)
     TIMEOUT_SECS = timeout
+    RETURN_IMD = return_id_map_dict
 
 
 def _process_cif_worker(cif_path: str):
@@ -54,7 +56,7 @@ def _process_cif_worker(cif_path: str):
     old_handler = signal.signal(signal.SIGALRM, _worker_timeout_handler)
     signal.alarm(TIMEOUT_SECS)
     try:
-        result = PROCESSOR.get_rows(cif_path)
+        result = PROCESSOR.get_rows(cif_path, return_id_map_dict=RETURN_IMD)
         signal.alarm(0)
         return ('ok', result)
     except TimeoutError:
@@ -76,7 +78,9 @@ def main(cfg: DictConfig):
     # Create dataset directory + shard dir
     out_dir = Path(cfg.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    shard_dir = out_dir / "shards"
+    save_imd = getattr(cfg, 'save_imd', False)
+    shard_dir_name = "shards_with_imd" if save_imd else "shards"
+    shard_dir = out_dir / shard_dir_name
     shard_dir.mkdir(parents=True, exist_ok=True)
 
     # Only one shard writes the canonical config.yaml to avoid races
@@ -120,7 +124,7 @@ def main(cfg: DictConfig):
         signal.alarm(timeout)
         
         try:
-            result = processor.get_rows(cif_path)
+            result = processor.get_rows(cif_path, return_id_map_dict=getattr(cfg, 'save_imd', False))
             signal.alarm(0)  # Cancel the alarm
             return result
         except TimeoutError:
@@ -153,7 +157,8 @@ def main(cfg: DictConfig):
         return
 
     # Prepare logging file path (summary of skipped files)
-    log_file = shard_dir / f"metadata_shard_{cfg.shard_id:05d}.log"
+    suffix = "_with_imd" if save_imd else ""
+    log_file = shard_dir / f"metadata_shard_{cfg.shard_id:05d}{suffix}.log"
     
     # Track skipped details with reasons
     skipped_with_reason: list[tuple[str, str, str]] = []  # (path, reason, message)
@@ -167,7 +172,7 @@ def main(cfg: DictConfig):
         results_list = [None] * len(cif_paths)
         # Use ProcessPoolExecutor to get true parallelism and isolate timeouts
         with ProcessPoolExecutor(max_workers=cfg.num_workers, initializer=_init_worker,
-                                 initargs=(preprocessor_args, timeout)) as executor:
+                                 initargs=(preprocessor_args, timeout, getattr(cfg, 'save_imd', False))) as executor:
             for idx, res in enumerate(tqdm(executor.map(_process_cif_worker, cif_paths), total=len(cif_paths), desc=f"Processing mmCIFs (shard {cfg.shard_id})")):
                 status, payload = res
                 if status == 'ok':
@@ -211,7 +216,7 @@ def main(cfg: DictConfig):
         return
 
     # Write one parquet per shard
-    shard_out = shard_dir / f"metadata_shard_{cfg.shard_id:05d}.parquet"
+    shard_out = shard_dir / f"metadata_shard_{cfg.shard_id:05d}{suffix}.parquet"
     save_to_parquet(df, dataset_name, cfg.mmcif_dir, str(shard_out))
     print(f"Shard {cfg.shard_id}: wrote {len(df)} rows to {shard_out}")
 

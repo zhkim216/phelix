@@ -49,7 +49,8 @@ class DataPreprocessor:
     build_assembly: str = "all"
     fix_arginines: bool = True
     convert_mse_to_met: bool = True
-    hydrogen_policy: Literal["remove", "infer", "keep"] = "remove"
+    hydrogen_policy: Literal["remove", "infer", "keep"] = "remove",
+    add_bond_types_from_struct_conn: list[str] = field(default_factory=lambda: ["covale"]) #! (JH) changed 251016
 
     def __post_init__(self):
         logger.info(f"Initialized DataPreprocessor with the following parameters: {self.__dict__}")
@@ -72,7 +73,8 @@ class DataPreprocessor:
             fix_ligands_at_symmetry_centers=self.fix_ligands_at_symmetry_centers,
             fix_arginines=self.fix_arginines,
             convert_mse_to_met=self.convert_mse_to_met,
-            hydrogen_policy=self.hydrogen_policy,
+            hydrogen_policy=self.hydrogen_policy,            
+            add_bond_types_from_struct_conn=self.add_bond_types_from_struct_conn, #! (JH0 changed 251016)
         )
 
     def _apply_filters(self, atom_array: AtomArray) -> AtomArray:
@@ -119,6 +121,7 @@ class DataPreprocessor:
             "ranking_model_fit",
             "ranking_model_geometry",
         ],
+        return_id_map_dict: bool = False,
     ) -> list[dict[str, Any]]:
         """Processes a structure file, applies filters, and generates a list of records to be loaded at train-time.
 
@@ -161,7 +164,12 @@ class DataPreprocessor:
         # Process each assembly
         records = []
         for assembly_id in result_dict["assemblies"]:
-            result = self._generate_pn_unit_metadata_for_assembly(result_dict, assembly_id, ligand_validity_scores)
+            result = self._generate_pn_unit_metadata_for_assembly(
+                result_dict,
+                assembly_id,
+                ligand_validity_scores,
+                return_id_map_dict=return_id_map_dict,
+            )
             if result is not None:
                 # The path info should be saved as well
                 for row in result:
@@ -174,6 +182,7 @@ class DataPreprocessor:
         result_dict: dict,
         assembly_id: str,
         ligand_validity_scores: pd.DataFrame | None = None,
+        return_id_map_dict: bool = False,
     ) -> list[dict[str, Any]]:
         """Processes an atom array that represents a single assembly and generate a list of metadata records for each PN unit.
 
@@ -468,4 +477,15 @@ class DataPreprocessor:
             # fmt: on
 
             assembly_records.append(pn_unit_record)
+        # Optionally embed id_map_dict into every record
+        if return_id_map_dict and len(assembly_records):
+            try:
+                id_map_json_pn_unit_id = json.dumps(id_map_dict["pn_unit_id"])  # type: ignore[index]
+                id_map_json_pn_unit_iid = json.dumps(id_map_dict["pn_unit_iid"])  # type: ignore[index]
+                for rec in assembly_records:
+                    rec["pn_unit_id_map"] = id_map_json_pn_unit_id
+                    rec["pn_unit_iid_map"] = id_map_json_pn_unit_iid
+            except Exception:
+                # Best-effort embedding; if missing, skip embedding without failing
+                pass
         return assembly_records
