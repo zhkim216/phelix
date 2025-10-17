@@ -185,3 +185,5 @@ alphafold3/src/alphafold3/constants/converters/ccd.pickle
 # Personal folders
 coding_practice/
 
+# Jupyter notebooks
+/allatom-design/allatom_design/jupyter_notebook
