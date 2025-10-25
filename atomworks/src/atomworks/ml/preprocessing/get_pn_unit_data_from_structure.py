@@ -74,7 +74,7 @@ class DataPreprocessor:
             fix_arginines=self.fix_arginines,
             convert_mse_to_met=self.convert_mse_to_met,
             hydrogen_policy=self.hydrogen_policy,            
-            add_bond_types_from_struct_conn=self.add_bond_types_from_struct_conn, #! (JH0 changed 251016)
+            add_bond_types_from_struct_conn=self.add_bond_types_from_struct_conn, #! (JH) changed 251016
         )
 
     def _apply_filters(self, atom_array: AtomArray) -> AtomArray:
