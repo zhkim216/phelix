@@ -97,7 +97,8 @@ def mask_polymer_residues_with_unresolved_frame_atoms(
     try:
         return mask_residues_with_specific_unresolved_atoms(atom_array, occupancy_threshold=occupancy_threshold)
     except:
-        print(1)
+        print(f"Error masking polymer residues with unresolved frame atoms: {e}")
+        return atom_array
 
 
 class MaskResiduesWithSpecificUnresolvedAtoms(Transform):
