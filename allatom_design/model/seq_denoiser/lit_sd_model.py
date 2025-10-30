@@ -21,9 +21,13 @@ class LitSeqDenoiser(L.LightningModule):
         self.cfg = cfg
         self.model = SeqDenoiser(cfg.model)
 
-        if cfg.train.compile_model:
-            print(f"Using torch.compile to optimize model performance...")
-            self.model = torch.compile(self.model)
+        if cfg.train.compile.compile_model:
+            print(f"Using torch.compile to optimize model performance...")            
+            self.model = torch.compile(self.model,
+                                        backend=cfg.train.compile.compile_backend,
+                                        mode=cfg.train.compile.mode,
+                                        fullgraph=cfg.train.compile.fullgraph,
+                                        dynamic=cfg.train.compile.dynamic)
 
         self.use_phema = cfg.model.get("ema", {}).get("use_phema", True)
         if self.use_phema:
@@ -45,10 +49,13 @@ class LitSeqDenoiser(L.LightningModule):
             if self.cfg.resume.ckpt_path is None:
                 self.model.setup()
 
+    @staticmethod
+    def _tensor_only(batch):
+        # Filtering tensor only
+        return {k: v for k, v in batch.items() if torch.is_tensor(v)}
 
     def forward(self, batch, **kwargs):
-        return self.model(batch, **kwargs)
-
+        return self.model(self._tensor_only(batch), **kwargs)
 
     def on_train_start(self):
         # Initialize EMA trackers at the start of training (if using phema)
@@ -66,7 +73,8 @@ class LitSeqDenoiser(L.LightningModule):
         self.val_lp_metrics_avg_t = {"loss": [], "acc": []}
                 
     def training_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int):
-        outputs = self(batch)
+        
+        outputs = self(batch)        
         loss, aux = self.loss(outputs, batch, return_aux=True)
 
         # Logging
