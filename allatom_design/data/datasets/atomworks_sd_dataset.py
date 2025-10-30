@@ -188,7 +188,10 @@ class SDDataset(MolecularDataset):
     
         # Load in validation IDs and hold out based on phase. Case insensitive, no extension.    
         if self.cfg.validation_ids_file.endswith(".csv"):
-            val_split = pd.read_csv(self.cfg.validation_ids_file)["pdb_id"].str.lower().tolist()
+            if self.cfg.debug:
+                val_split = pd.read_csv(self.cfg.validation_ids_file)["pdb_id"].str.lower().tolist()[:self.cfg.debug_num_ids]
+            else:
+                val_split = pd.read_csv(self.cfg.validation_ids_file)["pdb_id"].str.lower().tolist()
             logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_file}...")
         else:
             with open(self.cfg.validation_ids_file, "r") as f:                
@@ -196,6 +199,7 @@ class SDDataset(MolecularDataset):
             logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_file}...")
             
         if self.cfg.debug: #! FIXME
+            chain_df = chain_df[chain_df["pdb_id"].isin(val_split)]
             phases = np.array(['train'] * (len(chain_df)//2) + ['val'] * (len(chain_df) - len(chain_df)//2))
             chain_df['phase'] = phases
         else:                                            
@@ -209,13 +213,7 @@ class SDDataset(MolecularDataset):
         
         if self.cfg.exclude_val_cluster and self.phase == "train":
             chain_df = chain_df[~chain_df["q_pn_unit_cluster_id"].isin(val_cluster_ids)]
-                
-        if self.cfg.debug:
-            if self.cfg.debug_num_rows is None:
-                self.cfg.debug_num_rows = len(chain_df)
-            else:
-                chain_df = chain_df.iloc[:self.cfg.debug_num_rows]
-        
+                                
         # Add chain counts info and sampling weights
         if self.cfg.debug: 
             t0 = time.perf_counter()
@@ -227,7 +225,7 @@ class SDDataset(MolecularDataset):
         
         if self.cfg.debug:
             t1 = time.perf_counter()
-            print(f"{t1-t0}s passed in add_chain_counts_info with {self.cfg.debug_num_rows} rows")
+            print(f"{t1-t0}s passed in add_chain_counts_info with {self.cfg.debug_num_ids} rows")
             
         
         alphas = self.cfg.sampling_weights["alphas_chain"] #! (JH) changed 250925
