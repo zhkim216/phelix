@@ -83,7 +83,7 @@ class AtomworksSDDataModule(L.LightningDataModule):
                                 num_workers=self.cfg.num_workers,
                                 shuffle=False,
                                 pin_memory=True,
-                                drop_last=False, #! (JH) changed 251003
+                                drop_last=True, #! (JH) changed 251029
                                 collate_fn=sd_collator,
                                 worker_init_fn=worker_init_fn)
 
@@ -134,8 +134,9 @@ class SDDataset(MolecularDataset):
         self._ensure_worker_rng() # Prepare per-worker random number generator for fallback
         
         # Load cached example.        
-        example_id = self.idx_to_id(idx)                            
+        example_id = self.idx_to_id(idx)                                    
         parsed_row = self.parsed_df.loc[example_id]
+        
                             
         try:
             example = self._load_cached_example(parsed_row["extra_info"]["pdb_id"])
