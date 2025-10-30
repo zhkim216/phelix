@@ -30,7 +30,7 @@ from atomworks.ml.transforms.filters import (
 
 def preprocess_transform(
     # Preprocessing
-    undesired_res_names: list[str] = AF3_EXCLUDED_LIGANDS,
+    undesired_res_names: list[str] = [], #! fixed
     b_factor_min: float | None = None,
     b_factor_max: float | None = None,
 ) -> Transform:
