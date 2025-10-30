@@ -64,7 +64,7 @@ def _process_cif_worker(cif_path: str):
         signal.signal(signal.SIGALRM, old_handler)
 
 
-@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="build_metadata_parquet_shards", version_base="1.3.2")
+@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="build_metadata_parquet_shards_debug", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Process a set of mmCIFs using AtomWorks.
@@ -89,7 +89,6 @@ def main(cfg: DictConfig):
 
     # Get all CIF paths, then take this shard's slice
     cif_paths_all = get_cif_paths(cfg.mmcif_dir, cfg.max_file_size)
-    cif_paths_all = cif_paths_all[:50]
     cif_paths = take_shard(cif_paths_all, shard_id=cfg.shard_id, num_shards=cfg.num_shards)
     print(f"Shard {cfg.shard_id}/{cfg.num_shards}: {len(cif_paths)} mmCIFs.")
 
