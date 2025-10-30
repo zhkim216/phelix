@@ -39,7 +39,7 @@ cif_parser_args:
     "EOH", "EOX", "EPE", "ETF", "FCY", "FJO", "FLC", "FMT", "FW5", "GOL",
     "GSH", "GTT", "GYF", "HED", "IHP", "IHS", "IMD", "IOD", "IPA", "IPH",
     "LDA", "MB3", "MEG", "MES", "MLA", "MLI", "MOH", "MPD", "MRD", "MSE",
-    "MYR", "N", "NA", "NH2", "NH4", "NHE", "NO3", "O4B", "OHE", "OLA",
+    "MYR", "N", "NA", "NAG", "NH2", "NH4", "NHE", "NO3", "O4B", "OHE", "OLA",
     "OLC", "OMB", "OME", "OXA", "P6G", "PE3", "PE4", "PEG", "PEO", "PEP",
     "PG0", "PG4", "PGE", "PGR", "PLM", "PO4", "POL", "POP", "PVO", "SAR",
     "SCN", "SEO", "SIN", "SO4", "SPD", "SPM", "SR", "STE", "STO", "STU",

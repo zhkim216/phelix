@@ -1,0 +1,42 @@
+mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
+out_dir: /scratch/users/zhkim216/datasets/atomworks_lmpnn
+
+num_workers: 8
+
+dataset:
+  _target_: atomworks.ml.datasets.datasets.PandasDataset
+  data: ${out_dir}/metadata_for_caching.parquet
+  name: pdb
+  id_column: example_id
+  filters: null
+  columns_to_load: null
+  loader:
+      _target_: atomworks.ml.datasets.parsers.base.load_example_from_metadata_row
+      _partial_: true
+      metadata_row_parser:
+        _target_: atomworks.ml.datasets.parsers.default_metadata_row_parsers.GenericDFParser
+        example_id_colname: example_id
+        path_colname: path
+        pn_unit_iid_colnames: null
+        assembly_id_colname: null
+        base_path: null
+        extension: null
+        attrs: null
+      cif_parser_args: ${cif_parser_args}  
+  save_failed_examples_to_dir: ${out_dir}/failed_cached_examples
+  load_kwargs: null
+
+# CIF parser args
+cif_parser_args:
+  add_missing_atoms: true
+  remove_waters: true
+  remove_ccds: ['NA', 'CL', 'K', 'BR'] # SEP, TPO are excluded in this list, check atomworks/constants.py
+  fix_ligands_at_symmetry_centers: true
+  fix_arginines: true
+  convert_mse_to_met: true
+  hydrogen_policy: "remove"
+  add_bond_types_from_struct_conn: ["covale"]
+
+# --- sharding for multi-node runs ---
+num_shards: 1      # total number of shards
+shard_id: 0         # per-job shard id

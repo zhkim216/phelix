@@ -1,2 +1,2 @@
-pdb_path: /scratch/users/zhkim216/datasets/atomworks_re
+pdb_path: /scratch/users/zhkim216/datasets/debug_atomworks_lmpnn
 seq_id_threshold: 0.3 #! same as LMPNN
