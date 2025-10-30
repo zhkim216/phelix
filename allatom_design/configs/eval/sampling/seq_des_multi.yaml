@@ -16,8 +16,8 @@ exp_name: eval_exp2_cfg3  # experiment name; used for wandb and output directory
 
 # PDB file inputs
 input_cfg:
-  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/pdbs
-  pdb_name_list: /scratch/users/zhkim216/datasets/atomworks/splits/lmpnn_validation_ids.txt  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
+  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/boltz_val_cifs/pdbs
+  pdb_name_list: /scratch/users/zhkim216/datasets/atomworks/splits/boltz_validation_ids.txt  # list of pdb_names to use from the pdb_dir, null to use all .pdb files
   pdb_name_ext: ""  # if pdb_name_list does not have extensions, add this extension
   n_subsample: null  # randomly sample this many pdb keys, null to use all
 

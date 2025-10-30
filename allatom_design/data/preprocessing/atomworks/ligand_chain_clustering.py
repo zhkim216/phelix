@@ -4,8 +4,7 @@ from atomworks.constants import METAL_ELEMENTS
 import json, ast, re
 from collections import defaultdict, deque
 
-atomworks_parquet = pd.read_parquet("/home/possu/jinho/datasets/atomworks_lmpnn/metadata.parquet")
-atomworks_parquet = atomworks_parquet.iloc[:10000]
+atomworks_parquet = pd.read_parquet("/scratch/users/zhkim216/datasets/atomworks_lmpnn/metadata.parquet")
 
 ### Proteins
 protein_chain_types = ChainTypeInfo.PROTEINS
@@ -38,7 +37,6 @@ atomworks_parquet["q_pn_unit_is_RNA_DNA_hybrid_ligand"] = atomworks_parquet["q_p
 
 # Small molecule ligands & small molecule - metal complexes
 atomworks_parquet["q_pn_unit_is_small_molecule"] = (atomworks_parquet["q_pn_unit_type"].isin(ligand_chain_type_values)) & (atomworks_parquet["q_pn_unit_is_metal"] == False)
-
 
 # Take only pdb_id with at least one protein chain
 mask = atomworks_parquet.groupby('pdb_id')['q_pn_unit_is_protein'].transform('any')
@@ -347,4 +345,5 @@ atomworks_parquet['num_contacting_ligand_clusters'] = tmp2['num_contacting_ligan
 
 # 3) Recompute second-shell cluster group labels
 atomworks_parquet['second_shell_ligand_cluster'] = atomworks_parquet.groupby('pdb_id', group_keys=False).apply(_assign_second_shell_clusters_per_pdb)
-atomworks_parquet.to_parquet("/home/possu/jinho/datasets/atomworks_lmpnn/metadata_ligand_clustered.parquet")
+atomworks_parquet.to_parquet("/scratch/users/zhkim216/datasets/atomworks_lmpnn/metadata_ligand_clustered.parquet")
+print("ligand chain clustering is done, saved at /scratch/users/zhkim216/datasets/atomworks_lmpnn/metadata_ligand_clustered.parquet")

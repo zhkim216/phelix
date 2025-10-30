@@ -1,5 +1,5 @@
 mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
-out_dir: /scratch/users/zhkim216/datasets/atomworks_251025/iter1
+out_dir: /scratch/users/zhkim216/datasets/atomworks_lmpnn
 
 num_workers: 31
 max_file_size: 1000000
@@ -29,7 +29,8 @@ cif_parser_args:
   fix_arginines: true
   convert_mse_to_met: true
   hydrogen_policy: "remove"
+  add_bond_types_from_struct_conn: ["covale"]
 
 # --- sharding for multi-node runs ---
-num_shards: 10000     # total number of shards
-shard_id: 0    # per-job shard id
+num_shards: 100     # total number of shards
+shard_id: 97        # per-job shard id

@@ -24,7 +24,7 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 
-@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="preprocess_examples", version_base="1.3.2")
+@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="preprocess_examples_for_debug", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Process a set of mmCIFs using AtomWorks.
