@@ -1,5 +1,5 @@
 mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
-out_dir: /scratch/users/zhkim216/datasets/atomworks_re
+out_dir: /scratch/users/zhkim216/datasets/atomworks_plinder
 
 num_workers: 8
 
@@ -39,12 +39,12 @@ cif_parser_args:
     "EOH", "EOX", "EPE", "ETF", "FCY", "FJO", "FLC", "FMT", "FW5", "GOL",
     "GSH", "GTT", "GYF", "HED", "IHP", "IHS", "IMD", "IOD", "IPA", "IPH",
     "LDA", "MB3", "MEG", "MES", "MLA", "MLI", "MOH", "MPD", "MRD", "MSE",
-    "MYR", "N", "NA", "NH2", "NH4", "NHE", "NO3", "O4B", "OHE", "OLA",
+    "MYR", "N", "NA", "NAG", "NH2", "NH4", "NHE", "NO3", "O4B", "OHE", "OLA",
     "OLC", "OMB", "OME", "OXA", "P6G", "PE3", "PE4", "PEG", "PEO", "PEP",
     "PG0", "PG4", "PGE", "PGR", "PLM", "PO4", "POL", "POP", "PVO", "SAR",
     "SCN", "SEO", "SIN", "SO4", "SPD", "SPM", "SR", "STE", "STO", "STU",
     "TAR", "TBU", "TME", "TRS", "UNK", "UNL", "UNX", "UPL", "URE"
-  ]
+  ] # SEP, TPO are excluded in this list, check atomworks/constants.py
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
@@ -52,5 +52,5 @@ cif_parser_args:
   add_bond_types_from_struct_conn: ["covale", "metalc"]
 
 # --- sharding for multi-node runs ---
-num_shards: 100      # total number of shards
+num_shards: 1      # total number of shards
 shard_id: 0         # per-job shard id

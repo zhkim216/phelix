@@ -1,7 +1,7 @@
 mmcif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/pdbs
 out_dir: /home/possu/jinho/datasets/atomworks_debug_lmpnn_2
 
-num_workers: 23
+num_workers: 0
 max_file_size: 1000000
 return_filtered_atom_array: false
 
@@ -19,15 +19,12 @@ data_preprocessor_cfg:
   ignore_residues: [] #! (JH) changed 250926
   # Efficiency
   polymer_pn_unit_limit: 500
-  min_contacts_required: 2
-  min_contacts_required_for_metals: 3
 
 # CIF parser args
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: [    
-  ] # SEP, TPO are excluded in this list, check atomworks/constants.py
+  remove_ccds: [] # SEP, TPO are excluded in this list, check atomworks/constants.py
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
