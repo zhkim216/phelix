@@ -187,12 +187,20 @@ class SDDataset(MolecularDataset):
         chain_df["q_pn_unit_contacting_pn_unit_iids"] = chain_df["q_pn_unit_contacting_pn_unit_iids"].apply(json.loads)
     
         # Load in validation IDs and hold out based on phase. Case insensitive, no extension.    
-        with open(self.cfg.validation_ids_txt, "r") as f:
-            logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_txt}...")
-            val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}
-                                                
-        chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
-        chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"
+        if self.cfg.validation_ids_file.endswith(".csv"):
+            val_split = pd.read_csv(self.cfg.validation_ids_file)["pdb_id"].str.lower().tolist()
+            logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_file}...")
+        else:
+            with open(self.cfg.validation_ids_file, "r") as f:                
+                val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}
+            logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_file}...")
+            
+        if self.cfg.debug: #! FIXME
+            phases = np.array(['train'] * (len(chain_df)//2) + ['val'] * (len(chain_df) - len(chain_df)//2))
+            chain_df['phase'] = phases
+        else:                                            
+            chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
+            chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"
         
         if self.cfg.exclude_val_cluster:
             val_cluster_ids = list(chain_df[chain_df["phase"] == "val"]["q_pn_unit_cluster_id"])
@@ -221,10 +229,8 @@ class SDDataset(MolecularDataset):
             t1 = time.perf_counter()
             print(f"{t1-t0}s passed in add_chain_counts_info with {self.cfg.debug_num_rows} rows")
             
-        if not self.cfg.task == "lc_seq_des":
-            alphas = self.cfg.sampling_weights["alphas"]
-        else:
-            alphas = self.cfg.sampling_weights["alphas_chain"] #! (JH) changed 250925
+        
+        alphas = self.cfg.sampling_weights["alphas_chain"] #! (JH) changed 250925
         
         chain_df = add_sampling_weights_info(chain_df,
                                              alphas=alphas,
@@ -232,45 +238,33 @@ class SDDataset(MolecularDataset):
                                              cluster_cols=["q_pn_unit_cluster_id"])
         
         # Apply chain filters
-        if not self.cfg.task == "lc_seq_des":
-            filters = self.cfg.train_filters.chain if self.phase == "train" else self.cfg.val_filters.chain
-            chain_df = self._apply_filters(filters, chain_df)    
-            return chain_df, None
-
-        else: # ligand-cond
-            chain_filter1 = self.cfg.train_filters.chain_filter1 if self.phase == "train" else self.cfg.val_filters.chain_filter1
-            dummy_chain_df = self._apply_filters(chain_filter1, chain_df)
-            chain_filter2 = self.cfg.train_filters.chain_filter2 if self.phase == "train" else self.cfg.val_filters.chain_filter2
-            chain_df = self._apply_filters(chain_filter2, dummy_chain_df)
-            return chain_df, dummy_chain_df
+        chain_filter1 = self.cfg.train_filters.chain_filter1 if self.phase == "train" else self.cfg.val_filters.chain_filter1
+        dummy_chain_df = self._apply_filters(chain_filter1, chain_df)
+        chain_filter2 = self.cfg.train_filters.chain_filter2 if self.phase == "train" else self.cfg.val_filters.chain_filter2
+        chain_df = self._apply_filters(chain_filter2, dummy_chain_df)
+        return chain_df, dummy_chain_df
         
 
     def _process_interface_df(self) -> pd.DataFrame:
         """
         Processes the interface dataframe based on the filtered chain dataframe. Adds chain counts info and sampling weights.
-        """        
-        if not self.cfg.task == "lc_seq_des":
-            interface_df = build_interface_df(self.chain_df, dataset_name=Path(self.cfg.parquet_path).parent.name)
-        else:
-            interface_df = build_interface_df(self.dummy_chain_df, dataset_name=Path(self.cfg.parquet_path).parent.name)
+        """                
+        interface_df = build_interface_df(self.dummy_chain_df, dataset_name=Path(self.cfg.parquet_path).parent.name)
                     
         interface_df = add_chain_counts_info(interface_df,
                                              chain_type_cols=["q_pn_unit_type_1", "q_pn_unit_type_2"],
                                              seq_length_cols=["q_pn_unit_sequence_length_1", "q_pn_unit_sequence_length_2"],
                                              is_metal_cols=["q_pn_unit_is_metal_1", "q_pn_unit_is_metal_2"]) #! (JH) changed 250925
         
-        if not self.cfg.task == "lc_seq_des":
-            alphas = self.cfg.sampling_weights["alphas"]
-        else:
-            alphas = self.cfg.sampling_weights["alphas_interface"] #! (JH) changed 250925
+        
+        alphas = self.cfg.sampling_weights["alphas_interface"] #! (JH) changed 250925
             
         interface_df = add_sampling_weights_info(interface_df,
                                                  alphas=alphas,
                                                  beta=self.cfg.sampling_weights["betas"]["beta_interface"],
                                                  cluster_cols=["q_pn_unit_cluster_id_1", "q_pn_unit_cluster_id_2"])
-
-        if self.cfg.task == "lc_seq_des":
-            interface_df = self._apply_filters(self.cfg.train_filters.interface if self.phase == "train" else self.cfg.val_filters.interface, interface_df)            
+        
+        interface_df = self._apply_filters(self.cfg.train_filters.interface if self.phase == "train" else self.cfg.val_filters.interface, interface_df)            
         
         return interface_df
             
@@ -535,7 +529,7 @@ def add_chain_counts_info(df: pd.DataFrame, chain_type_cols: list[str], \
     chain_count_cols = ["n_prot", "n_nuc", "n_peptide", "n_small_molecule", "n_metal", "n_loi"]
     df["chain_types"] = df[chain_type_cols].apply(lambda x: tuple(x), axis=1)
     df["seq_lengths"] = df[seq_length_cols].apply(lambda x: tuple(x), axis=1)
-    df["is_metal"] = df[is_metal_cols].apply(lambda x: tuple(x), axis=1) #! (JH) changed 250925
+    df["is_metal"] = df[is_metal_cols].apply(lambda x: tuple(x), axis=1) 
 
     def _get_chain_type_counts(row) -> dict[str, int]:
         chain_types: tuple[str] = row["chain_types"]

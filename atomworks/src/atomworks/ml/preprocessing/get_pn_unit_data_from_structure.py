@@ -25,6 +25,7 @@ from atomworks.enums import ChainType
 from atomworks.io import parse
 from atomworks.ml.preprocessing.constants import CELL_SIZE, ClashSeverity
 from atomworks.ml.utils.misc import hash_sequence
+from allatom_design.data.const import VDW_DICT
 
 logger = logging.getLogger("preprocess")
 
@@ -52,6 +53,8 @@ class DataPreprocessor:
     convert_mse_to_met: bool = True
     hydrogen_policy: Literal["remove", "infer", "keep"] = "remove",
     add_bond_types_from_struct_conn: list[str] = field(default_factory=lambda: ["covale"]) #! (JH) changed 251016
+    min_contacts_required: int = 2
+    min_contacts_required_for_metals: int = 3
 
     def __post_init__(self):
         logger.info(f"Initialized DataPreprocessor with the following parameters: {self.__dict__}")
@@ -280,10 +283,14 @@ class DataPreprocessor:
             for pn_unit_iid in pn_unit_iids_to_consider
             if len(filtered_atom_array[filtered_atom_array.pn_unit_iid == pn_unit_iid]) > 0
         ]
-
+        
         for query_pn_unit_iid in pn_unit_iids_to_consider:
             query_pn_unit_atom_array = filtered_atom_array[filtered_atom_array.pn_unit_iid == query_pn_unit_iid]
-
+            
+            elements = np.char.upper(np.char.strip(query_pn_unit_atom_array.element.astype(str)))
+            vdw_radius = np.round(np.array([VDW_DICT.get(el, 1.75) for el in elements], dtype=np.float32), 2)
+            query_pn_unit_atom_array.set_annotation("vdw_radius", vdw_radius)
+            
             assert len(query_pn_unit_atom_array) > 0, f"Query PN unit {query_pn_unit_iid} has zero atoms"
 
             query_pn_unit_type = ChainType(
@@ -296,8 +303,10 @@ class DataPreprocessor:
                 filtered_atom_array=filtered_atom_array,
                 cell_list=cell_list,
                 contact_distance=self.contact_distance,
-                min_contacts_required=1,
+                min_contacts_required=self.min_contacts_required,
+                min_contacts_required_for_metals=self.min_contacts_required_for_metals,
                 calculate_min_distance=True,
+                second_shell=False,
             )
             
             #! (JH) Find second-shell contacting PN units, which will be used to construct ligand clusters 
@@ -308,6 +317,7 @@ class DataPreprocessor:
                 contact_distance=self.second_shell_distance,
                 min_contacts_required=1,
                 calculate_min_distance=True,
+                second_shell=True,
             )
             
             #! (JH) Remove contacting PN units from second-shell contacting PN units

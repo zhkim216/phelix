@@ -224,8 +224,10 @@ def get_contacting_pn_units(
     cell_list: CellList,
     contact_distance: float = 4.5,
     min_contacts_required: float = 1,
+    min_contacts_required_for_metals: float = 3,
     mask: np.ndarray = None,
     calculate_min_distance: bool = False,
+    second_shell: bool = False,
 ) -> list[dict[str, str]]:
     """
     Finds PN units (proteins, nucleic acids, or small molecules) with a minimum number of atoms within a given distance of the query PN unit.
