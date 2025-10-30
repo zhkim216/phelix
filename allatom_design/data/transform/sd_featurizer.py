@@ -115,7 +115,7 @@ def sd_featurizer(
     max_atoms: int | None = None,
     crop_center_cutoff_distance: float = 15.0,
     crop_spatial_p: float = 0.0,
-    remove_keys: list[str] = [],
+    remove_keys: list[str] = [], #! 251030 changed (JH)
     remove_unresolved_tokens: bool = False,
     residue_cache_dir: str | None = "/scratch/users/zhkim216/datasets/atomworks/cached_residue_data",
     max_conformers_per_residue: int | None = 50,
