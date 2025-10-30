@@ -1,9 +1,9 @@
 mmcif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/pdbs
-out_dir: /home/possu/jinho/datasets/atomworks_debug_lmpnn
+out_dir: /home/possu/jinho/datasets/atomworks_debug_lmpnn_2
 
 num_workers: 23
 max_file_size: 1000000
-save_imd: false
+return_filtered_atom_array: false
 
 # Data preprocessor args to specify in addition to the cif parser args
 data_preprocessor_cfg:
@@ -13,30 +13,20 @@ data_preprocessor_cfg:
   # Cutoff distances
   close_distance: 30.0
   contact_distance: 5
+  second_shell_distance: 8
   clash_distance: 1.0
   # Misc
   ignore_residues: [] #! (JH) changed 250926
   # Efficiency
   polymer_pn_unit_limit: 500
+  min_contacts_required: 2
+  min_contacts_required_for_metals: 3
 
 # CIF parser args
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: [
-    "144", "15P", "1PE", "2F2", "2JC", "3HR", "3SY", "7N5", "7PE", "9JE",
-    "AAE", "ABA", "ACE", "ACN", "ACT", "ACY", "AZI", "BAM", "BCN", "BCT",
-    "BDN", "BEN", "BME", "BO3", "BTB", "BTC", "BU1", "C8E", "CAD", "CAQ",
-    "CBM", "CCN", "CIT", "CL", "CLR", "CM", "CMO", "CO3", "CPT", "CXS",
-    "D10", "DEP", "DIO", "DMS", "DN", "DOD", "DOX", "EDO", "EEE", "EGL",
-    "EOH", "EOX", "EPE", "ETF", "FCY", "FJO", "FLC", "FMT", "FW5", "GOL",
-    "GSH", "GTT", "GYF", "HED", "IHP", "IHS", "IMD", "IOD", "IPA", "IPH",
-    "LDA", "MB3", "MEG", "MES", "MLA", "MLI", "MOH", "MPD", "MRD", "MSE",
-    "MYR", "N", "NA", "NH2", "NH4", "NHE", "NO3", "O4B", "OHE", "OLA",
-    "OLC", "OMB", "OME", "OXA", "P6G", "PE3", "PE4", "PEG", "PEO", "PEP",
-    "PG0", "PG4", "PGE", "PGR", "PLM", "PO4", "POL", "POP", "PVO", "SAR",
-    "SCN", "SEO", "SIN", "SO4", "SPD", "SPM", "SR", "STE", "STO", "STU",
-    "TAR", "TBU", "TME", "TRS", "UNK", "UNL", "UNX", "UPL", "URE"
+  remove_ccds: [    
   ] # SEP, TPO are excluded in this list, check atomworks/constants.py
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
@@ -44,5 +34,5 @@ cif_parser_args:
   hydrogen_policy: "remove"
 
 # --- sharding for multi-node runs ---
-num_shards: 1       # total number of shards
+num_shards: 200       # total number of shards
 shard_id: 0         # per-job shard id
