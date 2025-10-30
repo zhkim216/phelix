@@ -49,12 +49,12 @@ defaults:
   - _self_
   - denoiser: debug_lc_atom_mpnn
   - mask_selector: mask_selector
-  - data: debug_ligand_cond #! (JH) changed 250926
+  - data: debug_ligand_cond
 
 data: ${data}
 
 model:
-  task: "lc_seq_des"  # "seq_des"
+  task: "seq_des"  # "seq_des"
   sigma_data: [9.6, 0.64]  # sigma data for [backbone, local sidechain]
   eps: 1.0e-8
   inf: 1.0e9

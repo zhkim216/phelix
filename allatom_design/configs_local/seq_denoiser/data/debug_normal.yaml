@@ -6,7 +6,7 @@ debug: ${train.debug}
 debug_num_rows: 2500 #! For debugging
 prefetch_buffer_size: 4
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
-residue_cache_dir: /home/possu/jinho/datasets/atomworks_cached_residue_data
+residue_cache_dir: /home/possu/jinho/datasets/atomworks/cached_residue_data
 exclude_val_cluster: false
 
 sampling_weights:
@@ -21,11 +21,11 @@ sampling_weights:
     a_prot: 1.0
     a_peptide: 0.0
     a_nuc: 0.0
-    a_small_molecule: 0.0 #!(JH) changed 250925
+    a_small_molecule: 1.0 #!(JH) changed 250925
     a_metal: 0.0 #!(JH) changed 250925
     a_loi: 0.0
   betas:
-    beta_chain: 1.0 
+    beta_chain: 0.0 
     beta_interface: 1.0
 
 train_filters:
