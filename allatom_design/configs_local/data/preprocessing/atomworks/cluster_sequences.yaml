@@ -1,1 +1,3 @@
-pdb_path: /media/scratch/datasets/atomworks_debug
+pdb_path: /home/possu/jinho/datasets/debug_atomworks_lmpnn
+parquet_path: /home/possu/jinho/datasets/debug_atomworks_lmpnn/metadata_ligand_clustered.parquet
+seq_id_threshold: 0.3 #! same as LMPNN
