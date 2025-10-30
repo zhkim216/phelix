@@ -190,7 +190,7 @@ class SDDataset(MolecularDataset):
         with open(self.cfg.validation_ids_txt, "r") as f:
             logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_txt}...")
             val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}
-                                            
+                                                
         chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
         chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"
         
