@@ -18,13 +18,12 @@ import atomworks.ml.preprocessing.constants as aw_const
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-
-@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="cluster_sequences", version_base="1.3.2",)
+@hydra.main(config_path="../../../configs_local/data/preprocessing/atomworks", config_name="cluster_sequences", version_base="1.3.2",)
 def main(cfg: DictConfig) -> None:
     """
     Cluster the sequences in the metadata parquet file.
     """
-    df = pd.read_parquet(f"{cfg.pdb_path}/metadata.parquet")
+    df = pd.read_parquet(cfg.parquet_path)
 
     seq_id_threshold = cfg.seq_id_threshold
     subdir_name = f"clustering_thres_{str(seq_id_threshold).replace(".", "")}"
@@ -58,9 +57,7 @@ def main(cfg: DictConfig) -> None:
     proteins = [f">{hash_sequence(seq)}\n{seq}" for seq in proteins]
     with (clustering_dir / "proteins.fasta").open("w") as f:
         f.write("\n".join(proteins))
-
     
-
     subprocess.run(
         f"{os.environ['SOFTWARE_PATH']}/mmseqs/bin/mmseqs easy-cluster {clustering_dir / 'proteins.fasta'} {clustering_dir / 'clust_prot'} {clustering_dir / 'tmp'} --min-seq-id {seq_id_threshold}",
         shell=True,
@@ -108,9 +105,8 @@ def main(cfg: DictConfig) -> None:
         print(f"WARNING: {df['q_pn_unit_cluster_id'].isna().sum()} missing values in q_pn_unit_cluster_id")
 
     df["q_pn_unit_cluster_id"] = df["q_pn_unit_cluster_id"].fillna(-1).astype(np.int32)  # fill missing cluster IDs with -1
-    df.to_parquet(f"{cfg.pdb_path}/metadata_clustered_{str(seq_id_threshold).replace(".", "")}.parquet")
-    print(f"Saved clustered metadata to {cfg.pdb_path}/metadata_clustered_{str(seq_id_threshold).replace(".", "")}.parquet")
-
+    df.to_parquet(cfg.parquet_path.replace(".parquet", f"_seq_clustered_{str(seq_id_threshold).replace(".", "")}.parquet"))
+    print(f"Saved clustered metadata to {cfg.parquet_path.replace('.parquet', f'_seq_clustered_{str(seq_id_threshold).replace(".", "")}.parquet')}")
 
 if __name__ == "__main__":
     main()
