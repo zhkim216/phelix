@@ -1,9 +1,8 @@
-mmcif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/pdbs
-out_dir: /home/possu/jinho/datasets/atomworks_debug_lmpnn_2
+mmcif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/pdbs
+out_dir: /scratch/users/zhkim216/datasets/debug_atomworks_lmpnn
 
 num_workers: 23
-max_file_size: 1000000
-return_filtered_atom_array: false
+max_file_size: 5000000
 
 # Data preprocessor args to specify in addition to the cif parser args
 data_preprocessor_cfg:
@@ -13,26 +12,22 @@ data_preprocessor_cfg:
   # Cutoff distances
   close_distance: 30.0
   contact_distance: 5
-  second_shell_distance: 8
   clash_distance: 1.0
   # Misc
   ignore_residues: [] #! (JH) changed 250926
   # Efficiency
   polymer_pn_unit_limit: 500
-  min_contacts_required: 2
-  min_contacts_required_for_metals: 3
 
 # CIF parser args
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: [    
-  ] # SEP, TPO are excluded in this list, check atomworks/constants.py
+  remove_ccds: ['NA', 'CL', 'K', 'BR'] # SEP, TPO are excluded in this list, check atomworks/constants.py
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
   hydrogen_policy: "remove"
 
 # --- sharding for multi-node runs ---
-num_shards: 200       # total number of shards
+num_shards: 1       # total number of shards
 shard_id: 0         # per-job shard id

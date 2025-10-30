@@ -1,7 +1,12 @@
+<<<<<<< HEAD
 mmcif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/pdbs
 out_dir: /home/possu/jinho/datasets/atomworks_debug_lmpnn_2
+=======
+mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
+out_dir: /scratch/users/zhkim216/datasets/atomworks_251025/iter1
+>>>>>>> refs/remotes/origin/jinho/AAA
 
-num_workers: 23
+num_workers: 31
 max_file_size: 1000000
 return_filtered_atom_array: false
 
@@ -26,13 +31,22 @@ data_preprocessor_cfg:
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
+<<<<<<< HEAD
   remove_ccds: [    
   ] # SEP, TPO are excluded in this list, check atomworks/constants.py
+=======
+  remove_ccds: ['NA', 'CL', 'K', 'BR']
+>>>>>>> refs/remotes/origin/jinho/AAA
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
   hydrogen_policy: "remove"
 
 # --- sharding for multi-node runs ---
+<<<<<<< HEAD
 num_shards: 200       # total number of shards
 shard_id: 0         # per-job shard id
+=======
+num_shards: 10000     # total number of shards
+shard_id: 0    # per-job shard id
+>>>>>>> refs/remotes/origin/jinho/AAA

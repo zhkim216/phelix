@@ -117,7 +117,7 @@ def sd_featurizer(
     crop_spatial_p: float = 0.0,
     remove_keys: list[str] = [],
     remove_unresolved_tokens: bool = False,
-    residue_cache_dir: str | None = "/home/possu/jinho/datasets/atomworks/cached_residue_data",
+    residue_cache_dir: str | None = "/scratch/users/zhkim216/datasets/atomworks/cached_residue_data",
     max_conformers_per_residue: int | None = 50,
     apply_random_augmentation: bool = True,
     translation_scale: float = 1.0

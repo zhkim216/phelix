@@ -64,10 +64,11 @@ def _process_cif_worker(cif_path: str):
         signal.signal(signal.SIGALRM, old_handler)
 
 
-@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="build_metadata_parquet_shards_debug", version_base="1.3.2")
+@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="build_metadata_parquet_shards_for_debug", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Process a set of mmCIFs using AtomWorks.
+    
     This script supports sharding by setting:
       - num_shards (int) and shard_id (int)
     """
@@ -249,7 +250,7 @@ def save_to_parquet(df: pd.DataFrame,
     for col in df.columns:
         if df[col].dtype == 'object':
             df[col] = df[col].astype(str)
-
+    
     # Add example_id based on the name of this dataset
     df["example_id"] = df.apply(
             lambda x: generate_example_id(

@@ -16,7 +16,7 @@ mpnn:
   k_neighbors: 48
   n_layers: 3
   dropout_p: 0.1
-  ligand_conditioning: false
+  ligand_conditioning: true
   num_rbf: 16
 
   # ligand conditioning options
