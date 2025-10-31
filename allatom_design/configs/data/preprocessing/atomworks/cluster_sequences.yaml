@@ -1,3 +1,3 @@
-pdb_path: /scratch/users/zhkim216/datasets/debug_atomworks_lmpnn
-parquet_path: /scratch/users/zhkim216/datasets/debug_atomworks_lmpnn/metadata_ligand_clustered.parquet
+pdb_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn
+parquet_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn/metadata_ligand_clustered.parquet
 seq_id_threshold: 0.3 #! same as LMPNN

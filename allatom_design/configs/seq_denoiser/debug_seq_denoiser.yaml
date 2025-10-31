@@ -1,6 +1,6 @@
 # Wandb configuration
 wandb:
-  no_wandb: false  # Disable wandb logging
+  no_wandb: true  # Disable wandb logging
   project: "debug_ligand_seq_des"  # Wandb project name
   wandb_id: "zhkim216"  # Wandb username
   group: "debug" # Wandb group name
@@ -12,7 +12,7 @@ exp_name: null  # Wandb exp name
 # Run settings
 overfit: -1 # Number of examples to overfit to, -1 to disable
 cuda: True
-num_workers: 8 # Dataloader num workers
+num_workers: 0 # Dataloader num workers
 
 # Finetuning options
 finetuning:
@@ -21,17 +21,21 @@ finetuning:
 
 train:
   seed: 0
-  batch_size: 8
-  compile_model: true  # Compile the model before running, speeds up training a lot
-  compile_backend: inductor
+  batch_size: 8  
   debug: true
+  compile:
+    compile_model: true  # Compile the model before running, speeds up training a lot
+    compile_backend: inductor #! default: inductor
+    mode: "default" #! default: default
+    fullgraph: false #! default: false
+    dynamic: false #! default: false
 
 # Some trainer options
 trainer:
   strategy: ddp_find_unused_parameters_true  # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
   max_epochs: -1
   max_steps: 100000
-  accumulate_grad_batches: 1
+  accumulate_grad_batches: 4
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline

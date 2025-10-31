@@ -36,6 +36,8 @@ cif_parser_args:
   convert_mse_to_met: true
   hydrogen_policy: "remove"
   add_bond_types_from_struct_conn: ["covale"]
+  load_from_cache: false
+  save_to_cache: true
 
 # --- sharding for multi-node runs ---
 num_shards: 1      # total number of shards
