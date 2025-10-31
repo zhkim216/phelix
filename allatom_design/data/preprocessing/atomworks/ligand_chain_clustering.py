@@ -32,7 +32,7 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
     ligand_chain_type_values = [chain_type.value for chain_type in ligand_chain_types]
 
     # add "is_protein" & "is_peptide" column, following the definition in Atomworks
-    atomworks_parquet["q_pn_unit_is_protein"] = (atomworks_parquet["q_pn_unit_type"].isin(protein_chain_type)) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] >= 20)
+    atomworks_parquet["q_pn_unit_is_protein"] = (atomworks_parquet["q_pn_unit_type"] == protein_chain_type) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] >= 20)
     atomworks_parquet["q_pn_unit_is_peptide"] = (atomworks_parquet["q_pn_unit_type"].isin(peptide_chain_type)) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] < 20)
 
     # DNA polymer & ligand columns, following the definition in Plinder
@@ -364,8 +364,8 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input_parquet_path", default="/scratch/users/zhkim216/datasets/atomworks_lmpnn/metadata.parquet")
-    ap.add_argument("--output_dir_path", default="/scratch/users/zhkim216/datasets/atomworks_lmpnn")
+    ap.add_argument("--input_parquet_path", default="/scratch/users/zhkim216/datasets/atomworks_af3/metadata.parquet")
+    ap.add_argument("--output_dir_path", default="/scratch/users/zhkim216/datasets/atomworks_af3")
     args = ap.parse_args()
     metadata_ligand_chain_clustering(input_parquet_path = args.input_parquet_path, output_dir_path = args.output_dir_path)
 
