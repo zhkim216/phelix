@@ -8,13 +8,20 @@ import argparse
 def metadata_ligand_chain_clustering(input_parquet_path: str=None,
                                     output_dir_path: str=None):
 
+    '''
+    Note: 
+    Didn't consider ChainType.OTHER_POLYMER. There are only 3ok2, 3ok4 in pdb dataset.
+    '''
+
     # Load the original metadata parquet
     atomworks_parquet = pd.read_parquet(input_parquet_path)
 
-    ### Proteins
-    protein_chain_types = ChainTypeInfo.PROTEINS
-    protein_chain_type_values = [chain_type.value for chain_type in protein_chain_types]
-
+    ### Proteins, only consider polypeptide-L chain as a protein
+    protein_chain_type = ChainType.POLYPEPTIDE_L
+    
+    ### Peptide-like short-polymer ligands
+    peptide_chain_type = [ChainType.POLYPEPTIDE_D, ChainType.POLYPEPTIDE_L, ChainType.CYCLIC_PSEUDO_PEPTIDE, ChainType.PEPTIDE_NUCLEIC_ACID]
+        
     ### Nucleic acids
     DNA_chain_type_values = [ChainType.DNA.value]
     RNA_chain_type_values = [ChainType.RNA.value]
@@ -25,8 +32,8 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
     ligand_chain_type_values = [chain_type.value for chain_type in ligand_chain_types]
 
     # add "is_protein" & "is_peptide" column, following the definition in Atomworks
-    atomworks_parquet["q_pn_unit_is_protein"] = (atomworks_parquet["q_pn_unit_type"].isin(protein_chain_type_values)) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] >= 20)
-    atomworks_parquet["q_pn_unit_is_peptide"] = (atomworks_parquet["q_pn_unit_type"].isin(protein_chain_type_values)) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] < 20)
+    atomworks_parquet["q_pn_unit_is_protein"] = (atomworks_parquet["q_pn_unit_type"].isin(protein_chain_type)) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] >= 20)
+    atomworks_parquet["q_pn_unit_is_peptide"] = (atomworks_parquet["q_pn_unit_type"].isin(peptide_chain_type)) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] < 20)
 
     # DNA polymer & ligand columns, following the definition in Plinder
     atomworks_parquet["q_pn_unit_is_DNA_polymer"] = atomworks_parquet["q_pn_unit_type"].isin(DNA_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] > 10)
@@ -357,8 +364,8 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input_parquet_path", default="/scratch/users/zhkim216/datasets/atomworks_af3/metadata.parquet")
-    ap.add_argument("--output_dir_path", default="/scratch/users/zhkim216/datasets/atomworks_af3")
+    ap.add_argument("--input_parquet_path", default="/home/possu/jinho/datasets/atomworks_lmpnn/metadata.parquet")
+    ap.add_argument("--output_dir_path", default="/home/possu/jinho/datasets/atomworks_lmpnn")
     args = ap.parse_args()
     metadata_ligand_chain_clustering(input_parquet_path = args.input_parquet_path, output_dir_path = args.output_dir_path)
 
