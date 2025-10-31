@@ -1,6 +1,7 @@
 import pandas as pd
 from atomworks.enums import ChainTypeInfo, ChainType
 from atomworks.constants import METAL_ELEMENTS
+from atomworks.ml.preprocessing.constants import PEPTIDE_MAX_RESIDUES, NUCLEIC_ACID_LIGANDS_MAX_RESIDUES
 import json, ast, re
 from collections import defaultdict, deque
 import argparse
@@ -9,7 +10,9 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
                                     output_dir_path: str=None):
 
     '''
+    Followed the definition of ChainTypeInfo in atomworks/src/atomworks/enums.py 
     Note: 
+    
     Didn't consider ChainType.OTHER_POLYMER. There are only 3ok2, 3ok4 in pdb dataset.
     '''
 
@@ -32,20 +35,20 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
     ligand_chain_type_values = [chain_type.value for chain_type in ligand_chain_types]
 
     # add "is_protein" & "is_peptide" column, following the definition in Atomworks
-    atomworks_parquet["q_pn_unit_is_protein"] = (atomworks_parquet["q_pn_unit_type"] == protein_chain_type) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] >= 20)
-    atomworks_parquet["q_pn_unit_is_peptide"] = (atomworks_parquet["q_pn_unit_type"].isin(peptide_chain_type)) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] < 20)
+    atomworks_parquet["q_pn_unit_is_protein"] = (atomworks_parquet["q_pn_unit_type"] == protein_chain_type) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] >= PEPTIDE_MAX_RESIDUES)
+    atomworks_parquet["q_pn_unit_is_peptide"] = (atomworks_parquet["q_pn_unit_type"].isin(peptide_chain_type)) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] < PEPTIDE_MAX_RESIDUES)
 
     # DNA polymer & ligand columns, following the definition in Plinder
-    atomworks_parquet["q_pn_unit_is_DNA_polymer"] = atomworks_parquet["q_pn_unit_type"].isin(DNA_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] > 10)
-    atomworks_parquet["q_pn_unit_is_DNA_ligand"] = atomworks_parquet["q_pn_unit_type"].isin(DNA_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] <= 10)
+    atomworks_parquet["q_pn_unit_is_DNA_polymer"] = atomworks_parquet["q_pn_unit_type"].isin(DNA_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] >= NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
+    atomworks_parquet["q_pn_unit_is_DNA_ligand"] = atomworks_parquet["q_pn_unit_type"].isin(DNA_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] < NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
 
     # RNA polymer & ligand columns, following the definition in Plinder
-    atomworks_parquet["q_pn_unit_is_RNA_polymer"] = atomworks_parquet["q_pn_unit_type"].isin(RNA_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] > 10)
-    atomworks_parquet["q_pn_unit_is_RNA_ligand"] = atomworks_parquet["q_pn_unit_type"].isin(RNA_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] <= 10)
+    atomworks_parquet["q_pn_unit_is_RNA_polymer"] = atomworks_parquet["q_pn_unit_type"].isin(RNA_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] >= NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
+    atomworks_parquet["q_pn_unit_is_RNA_ligand"] = atomworks_parquet["q_pn_unit_type"].isin(RNA_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] < NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
 
     # RNA-DNA hybrid polymer & ligand columns, following the definition in Plinder
-    atomworks_parquet["q_pn_unit_is_RNA_DNA_hybrid_polymer"] = atomworks_parquet["q_pn_unit_type"].isin(RNA_DNA_hybrid_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] > 10)
-    atomworks_parquet["q_pn_unit_is_RNA_DNA_hybrid_ligand"] = atomworks_parquet["q_pn_unit_type"].isin(RNA_DNA_hybrid_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] <= 10)
+    atomworks_parquet["q_pn_unit_is_RNA_DNA_hybrid_polymer"] = atomworks_parquet["q_pn_unit_type"].isin(RNA_DNA_hybrid_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] >= NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
+    atomworks_parquet["q_pn_unit_is_RNA_DNA_hybrid_ligand"] = atomworks_parquet["q_pn_unit_type"].isin(RNA_DNA_hybrid_chain_type_values) & (atomworks_parquet["q_pn_unit_num_resolved_residues"] < NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
 
     # Small molecule ligands & small molecule - metal complexes
     atomworks_parquet["q_pn_unit_is_small_molecule"] = (atomworks_parquet["q_pn_unit_type"].isin(ligand_chain_type_values)) & (atomworks_parquet["q_pn_unit_is_metal"] == False)
