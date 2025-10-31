@@ -357,8 +357,8 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input_parquet_path", default="/scratch/users/zhkim216/datasets/atomworks_af3/metadata.parquet")
-    ap.add_argument("--output_dir_path", default="/scratch/users/zhkim216/datasets/atomworks_af3")
+    ap.add_argument("--input_parquet_path", default="/scratch/users/zhkim216/datasets/atomworks_lmpnn/metadata.parquet")
+    ap.add_argument("--output_dir_path", default="/scratch/users/zhkim216/datasets/atomworks_lmpnn")
     args = ap.parse_args()
     metadata_ligand_chain_clustering(input_parquet_path = args.input_parquet_path, output_dir_path = args.output_dir_path)
 
