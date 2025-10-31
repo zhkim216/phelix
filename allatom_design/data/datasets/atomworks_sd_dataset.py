@@ -199,14 +199,15 @@ class SDDataset(MolecularDataset):
                 val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}
             logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_file}...")
             
-        if self.cfg.debug: #! FIXME
+        if self.cfg.debug:
             chain_df = chain_df[chain_df["pdb_id"].isin(val_split)]
-            phases = np.array(['train'] * (len(chain_df)//2) + ['val'] * (len(chain_df) - len(chain_df)//2))
-            chain_df['phase'] = phases
+            train_pdb_ids = val_split[:len(val_split)//2]
+            val_pdb_ids = val_split[len(val_split)//2:]
+            chain_df.loc[chain_df["pdb_id"].isin(train_pdb_ids), "phase"] = "train"
+            chain_df.loc[chain_df["pdb_id"].isin(val_pdb_ids), "phase"] = "val"
         else:                                            
             chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
-            chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"
-        
+            chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"        
         if self.cfg.exclude_val_cluster:
             val_cluster_ids = list(chain_df[chain_df["phase"] == "val"]["q_pn_unit_cluster_id"])
             
