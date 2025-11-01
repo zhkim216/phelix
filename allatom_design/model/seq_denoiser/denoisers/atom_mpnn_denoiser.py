@@ -69,7 +69,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         }
         
         if self.task == "lc_seq_des": 
-            aux_preds["sm_pocket_token_mask"] = batch["sm_pocket_token_mask"]        
+            aux_preds["pocket_token_mask"] = batch["pocket_token_mask"]        
 
         return seq_logits, aux_preds
 

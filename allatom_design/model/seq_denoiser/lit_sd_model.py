@@ -38,9 +38,9 @@ class LitSeqDenoiser(L.LightningModule):
         self.loss = SDLoss(cfg.loss)
         self.save_hyperparameters()
         
-        # For tracking lp metrics across epoch
-        self.lp_metrics = {"loss": [], "acc": []}
-        self.val_lp_metrics = {"loss": [], "acc": []}
+        # For tracking pocket metrics across epoch
+        self.pocket_metrics = {"loss": [], "acc": []}
+        self.val_pocket_metrics = {"loss": [], "acc": []}
 
 
     def setup(self, stage: str):
@@ -63,14 +63,14 @@ class LitSeqDenoiser(L.LightningModule):
             self.ema_tracker.reset()
             
     def on_train_epoch_start(self):
-        # Reset lp metrics at the start of each epoch
-        self.lp_metrics = {"loss": [], "acc": []}
+        # Reset pocket metrics at the start of each epoch
+        self.pocket_metrics = {"loss": [], "acc": []}
         
     def on_validation_epoch_start(self):
-        # Reset validation lp metrics at the start of each epoch
-        self.val_lp_metrics = {"loss": [], "acc": []}
-        self.val_lp_metrics_t = {t: {"loss": [], "acc": []} for t in self.cfg.eval.eval_timesteps}
-        self.val_lp_metrics_avg_t = {"loss": [], "acc": []}
+        # Reset validation pocket metrics at the start of each epoch
+        self.val_pocket_metrics = {"loss": [], "acc": []}
+        self.val_pocket_metrics_t = {t: {"loss": [], "acc": []} for t in self.cfg.eval.eval_timesteps}
+        self.val_pocket_metrics_avg_t = {"loss": [], "acc": []}
                 
     def training_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int):
         
@@ -80,10 +80,10 @@ class LitSeqDenoiser(L.LightningModule):
         # Logging
         self._log(batch, outputs, aux, batch_idx, phase="train")
         
-        # Collect lp metrics if available (only for samples with ligands)
-        if "lp_seq_loss" in aux:
-            self.lp_metrics["loss"].append(aux["lp_seq_loss"])
-            self.lp_metrics["acc"].append(aux["lp_seq_acc"])
+        # Collect pocket metrics if available (only for samples with non-protein holding pocket residues)
+        if "pocket_seq_loss" in aux:
+            self.pocket_metrics["loss"].append(aux["pocket_seq_loss"])
+            self.pocket_metrics["acc"].append(aux["pocket_seq_acc"])
 
         return loss
 
@@ -103,14 +103,14 @@ class LitSeqDenoiser(L.LightningModule):
         _, aux = self.loss(outputs, batch, return_aux=True)
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
         
-        if "lp_seq_loss" in aux:
-            self.val_lp_metrics["loss"].append(aux["lp_seq_loss"])
-            self.val_lp_metrics["acc"].append(aux["lp_seq_acc"])
+        if "pocket_seq_loss" in aux:
+            self.val_pocket_metrics["loss"].append(aux["pocket_seq_loss"])
+            self.val_pocket_metrics["acc"].append(aux["pocket_seq_acc"])
 
         # eval seq design over discrete sequence noise
         if self.model.task in ["seq_des", "lc_seq_des"]:
             aux_t = defaultdict(list)            
-            lp_loss_t_vals, lp_acc_t_vals = [], []
+            pocket_loss_t_vals, pocket_acc_t_vals = [], []
             
             for eval_t in self.cfg.eval.eval_timesteps:
                 B = batch["token_pad_mask"].shape[0]
@@ -120,20 +120,20 @@ class LitSeqDenoiser(L.LightningModule):
                 aux = {k: v for k, v in aux.items() if ("seq" in k) or ("potts" in k)}  # trim aux to sequence metrics
                 self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_t{eval_t}")
 
-                # Collect validation lp metrics for this timestep if available
-                if "lp_seq_loss" in aux:
-                    self.val_lp_metrics_t[eval_t]["loss"].append(aux["lp_seq_loss"])
-                    self.val_lp_metrics_t[eval_t]["acc"].append(aux["lp_seq_acc"])
-                    lp_loss_t_vals.append(aux["lp_seq_loss"])
-                    lp_acc_t_vals.append(aux["lp_seq_acc"])
+                # Collect validation pocket metrics for this timestep if available
+                if "pocket_seq_loss" in aux:
+                    self.val_pocket_metrics_t[eval_t]["loss"].append(aux["pocket_seq_loss"])
+                    self.val_pocket_metrics_t[eval_t]["acc"].append(aux["pocket_seq_acc"])
+                    pocket_loss_t_vals.append(aux["pocket_seq_loss"])
+                    pocket_acc_t_vals.append(aux["pocket_seq_acc"])
 
                 # aggregate across timesteps
                 for k, v in aux.items():
                     aux_t[k].append(v)
 
-            if lp_loss_t_vals:
-                self.val_lp_metrics_avg_t["loss"].append(torch.stack(lp_loss_t_vals).mean())
-                self.val_lp_metrics_avg_t["acc"].append(torch.stack(lp_acc_t_vals).mean())
+            if pocket_loss_t_vals:
+                self.val_pocket_metrics_avg_t["loss"].append(torch.stack(pocket_loss_t_vals).mean())
+                self.val_pocket_metrics_avg_t["acc"].append(torch.stack(pocket_acc_t_vals).mean())
 
             # average across timesteps and log
             aux_t = {k: torch.stack(v).mean().item() for k, v in aux_t.items()}            
@@ -210,25 +210,25 @@ class LitSeqDenoiser(L.LightningModule):
                 self.log_dict({f"total_l{norm_type}_grad_norm": total_norm}, logger=has_logger)
     
     def on_train_epoch_end(self):
-        # Log average lp metrics for the epoch (only from batches that had ligands)
-        if self.lp_metrics["loss"]:
-            avg_lp_loss = torch.stack(self.lp_metrics["loss"]).mean()
-            avg_lp_acc = torch.stack(self.lp_metrics["acc"]).mean()
+        # Log average pocket metrics for the epoch (only from batches that had non-protein holding pocket residues)
+        if self.pocket_metrics["loss"]:
+            avg_pocket_loss = torch.stack(self.pocket_metrics["loss"]).mean()
+            avg_pocket_acc = torch.stack(self.pocket_metrics["acc"]).mean()
             
-            self.log("train/lp_seq_loss_epoch", avg_lp_loss, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-            self.log("train/lp_seq_acc_epoch", avg_lp_acc, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            self.log("train/pocket_seq_loss_epoch", avg_pocket_loss, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            self.log("train/pocket_seq_acc_epoch", avg_pocket_acc, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
             
     def on_validation_epoch_end(self):
-        # Log average validation lp metrics for the epoch (only from batches that had ligands)
-        if self.val_lp_metrics["loss"]:
-            self.log("val/lp_seq_loss", torch.stack(self.val_lp_metrics["loss"]).mean(), on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-            self.log("val/lp_seq_acc",  torch.stack(self.val_lp_metrics["acc"]).mean(),  on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        # Log average validation pocket metrics for the epoch (only from batches that had non-protein holding pocket residues)
+        if self.val_pocket_metrics["loss"]:
+            self.log("val/pocket_seq_loss", torch.stack(self.val_pocket_metrics["loss"]).mean(), on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            self.log("val/pocket_seq_acc",  torch.stack(self.val_pocket_metrics["acc"]).mean(),  on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
 
         for t in self.cfg.eval.eval_timesteps:
-            if self.val_lp_metrics_t[t]["loss"]:
-                self.log(f"val/lp_seq_loss_t{t}", torch.stack(self.val_lp_metrics_t[t]["loss"]).mean(), on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-                self.log(f"val/lp_seq_acc_t{t}",  torch.stack(self.val_lp_metrics_t[t]["acc"]).mean(),  on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            if self.val_pocket_metrics_t[t]["loss"]:
+                self.log(f"val/pocket_seq_loss_t{t}", torch.stack(self.val_pocket_metrics_t[t]["loss"]).mean(), on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+                self.log(f"val/pocket_seq_acc_t{t}",  torch.stack(self.val_pocket_metrics_t[t]["acc"]).mean(),  on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
 
-        if self.val_lp_metrics_avg_t["loss"]:
-            self.log("val/lp_seq_loss_avg_t", torch.stack(self.val_lp_metrics_avg_t["loss"]).mean(), on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-            self.log("val/lp_seq_acc_avg_t",  torch.stack(self.val_lp_metrics_avg_t["acc"]).mean(),  on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        if self.val_pocket_metrics_avg_t["loss"]:
+            self.log("val/pocket_seq_loss_avg_t", torch.stack(self.val_pocket_metrics_avg_t["loss"]).mean(), on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            self.log("val/pocket_seq_acc_avg_t",  torch.stack(self.val_pocket_metrics_avg_t["acc"]).mean(),  on_epoch=True, prog_bar=True, logger=True, sync_dist=True)

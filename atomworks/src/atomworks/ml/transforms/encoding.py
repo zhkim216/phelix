@@ -16,6 +16,7 @@ from torch.nn import functional as F  # noqa: N812
 
 from atomworks.common import KeyToIntMapper, exists
 from atomworks.constants import ELEMENT_NAME_TO_ATOMIC_NUMBER
+from atomworks.ml.preprocessing.constants import PEPTIDE_MAX_RESIDUES, NUCLEIC_ACID_LIGANDS_MAX_RESIDUES
 from atomworks.io.utils.ccd import get_std_to_alt_atom_name_map
 from atomworks.ml.encoding_definitions import AF3SequenceEncoding, TokenEncoding
 from atomworks.ml.transforms._checks import (
@@ -495,7 +496,8 @@ class EncodeAF3TokenLevelFeatures(Transform):
         # ...one-hot encode the restype (NOTE: We one-hot encode here, since we have access to the sequence encoding object)
         restype = F.one_hot(torch.tensor(restype), num_classes=self.sequence_encoding.n_tokens).numpy()
 
-        # ... molecule type
+        # ... molecule type #! (JH) changed to use information from metadata        
+                    
         _aa_like_res_names = self.sequence_encoding.all_res_names[self.sequence_encoding.is_aa_like]
         is_protein = np.isin(token_level_array.res_name, _aa_like_res_names)
 
@@ -504,9 +506,11 @@ class EncodeAF3TokenLevelFeatures(Transform):
 
         _dna_like_res_names = self.sequence_encoding.all_res_names[self.sequence_encoding.is_dna_like]
         is_dna = np.isin(token_level_array.res_name, _dna_like_res_names)
-
+        
+        is_nuc = is_dna | is_rna
+                    
         is_ligand = ~(is_protein | is_rna | is_dna)
-
+                
         # ... add to data dict
         if "feats" not in data:
             data["feats"] = {}
@@ -524,6 +528,7 @@ class EncodeAF3TokenLevelFeatures(Transform):
             "is_protein": is_protein,  # (N_tokens) (bool)
             "is_rna": is_rna,  # (N_tokens) (bool)
             "is_dna": is_dna,  # (N_tokens) (bool)
+            "is_nuc": is_nuc,  # (N_tokens) (bool)
             "is_ligand": is_ligand,  # (N_tokens) (bool)
             "is_atomized": token_level_array.atomize,  # (N_tokens) (bool)
         }
