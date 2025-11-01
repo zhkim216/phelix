@@ -100,7 +100,7 @@ def main(cfg: DictConfig):
         print(f"Loading model weights from {cfg.finetuning.ckpt_path}")
         checkpoint = torch.load(cfg.finetuning.ckpt_path, map_location="cpu")
         state_dict = checkpoint["state_dict"]
-        if not cfg.train.compile_model:
+        if not cfg.train.compile.compile_model:
             state_dict = repair_state_dict(state_dict)
         lit_model.load_state_dict(state_dict, strict=True)
 

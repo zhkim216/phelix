@@ -66,7 +66,7 @@ class AtomworksSDDataModule(L.LightningDataModule):
                             batch_size=self.cfg.batch_size,
                             num_workers=self.cfg.num_workers,
                             shuffle=False,
-                            pin_memory=True,
+                            pin_memory=False,
                             drop_last=True,
                             collate_fn=sd_collator,
                             persistent_workers=(self.cfg.num_workers > 0),
@@ -82,7 +82,7 @@ class AtomworksSDDataModule(L.LightningDataModule):
                                 batch_size=self.cfg.batch_size,
                                 num_workers=self.cfg.num_workers,
                                 shuffle=False,
-                                pin_memory=True,
+                                pin_memory=False,
                                 drop_last=True, #! (JH) changed 251029
                                 collate_fn=sd_collator,
                                 worker_init_fn=worker_init_fn)
