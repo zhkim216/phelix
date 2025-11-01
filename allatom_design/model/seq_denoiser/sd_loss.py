@@ -36,7 +36,7 @@ class SDLoss(nn.Module):
         if self.task == "seq_des":
             self.loss_keys = {"seq_loss", "potts_composite_loss", "potts_composite_loss_msa"}
         elif self.task == "lc_seq_des":
-            self.loss_keys = {"seq_loss", "potts_composite_loss", "lp_seq_acc"}
+            self.loss_keys = {"seq_loss", "potts_composite_loss", "pocket_seq_loss", "pocket_seq_acc"}
         else:
             raise ValueError(f"Unrecognized task: {self.task}")
 
@@ -63,19 +63,19 @@ class SDLoss(nn.Module):
             aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], target_restype, seq_loss_mask).mean().detach().clone()
             
             if self.task == "lc_seq_des": #! (JH) changed                                                                
-                sp_seq_loss_mask = seq_loss_mask * outputs["sm_pocket_token_mask"] 
+                pocket_seq_loss_mask = seq_loss_mask * outputs["pocket_token_mask"]            
                                             
-                # Select only samples that have ligands
-                has_ligand = sp_seq_loss_mask.sum(dim=-1) > 0                
-                
-                if has_ligand.any():
-                    sp_seq_loss = masked_cross_entropy(outputs["seq_logits"], target_restype, sp_seq_loss_mask, seq_loss_cfg=self.cfg.seq_loss)
-                    sp_seq_loss = sp_seq_loss[has_ligand]
-                    aux_monitor["sp_seq_loss"] = sp_seq_loss.mean().detach().clone()
+                # Select only samples that have non-protein holding pocket residues and tokens where the loss will be computed
+                has_close_ligands = pocket_seq_loss_mask.sum(dim=-1) > 0     
+                                                            
+                if has_close_ligands.any():
+                    pocket_seq_loss = masked_cross_entropy(outputs["seq_logits"], target_restype, pocket_seq_loss_mask, seq_loss_cfg=self.cfg.seq_loss)
+                    pocket_seq_loss = pocket_seq_loss[has_close_ligands]
+                    aux_monitor["pocket_seq_loss"] = pocket_seq_loss.mean().detach().clone()
                          
-                    sp_seq_acc = masked_seq_accuracy(outputs["seq_logits"], target_restype, sp_seq_loss_mask)
-                    sp_seq_acc = sp_seq_acc[has_ligand]                
-                    aux_monitor["sp_seq_acc"] = sp_seq_acc.mean().detach().clone()                
+                    pocket_seq_acc = masked_seq_accuracy(outputs["seq_logits"], target_restype, pocket_seq_loss_mask)
+                    pocket_seq_acc = pocket_seq_acc[has_close_ligands]                
+                    aux_monitor["pocket_seq_acc"] = pocket_seq_acc.mean().detach().clone()                
                                         
 
             if outputs.get("potts_decoder_aux") is not None:

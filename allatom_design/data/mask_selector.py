@@ -80,12 +80,12 @@ class MaskSelector:
 
         return atom_cond_mask    
     
-    def sample_ligand_pocket_mask(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_atoms", float]:
+    def sample_pocket_mask(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_atoms", float]:
         """
-        (JH) Create a mask denoting which protein residues are in the ligand pocket.
-        1 if the residues are in the ligand pocket, 0 otherwise.
+        (JH) Create a mask denoting which protein residues are in the non-protein holding pocket.
+        1 if the residues are in the non-protein holding pocket, 0 otherwise.
         self.ligand_pocket_dist_cutoff: the distance cutoff for the ligand pocket.
-        Used for sequence accuracy calculation for ligand pocket residues.
+        Used for sequence accuracy calculation for non-protein holding pocket residues.
         """
         
         B, N, _ = batch["coords"].shape
@@ -93,33 +93,29 @@ class MaskSelector:
         atom_mask = batch["atom_resolved_mask"] * batch["atom_pad_mask"]
         
         # Compute protein coords
-        protein_token_mask = batch["is_protein"] * batch["token_resolved_mask"] * batch["token_pad_mask"] # [B, N_tokens]
+        protein_token_mask = batch["chain_is_protein"] * batch["is_protein"] * batch["token_resolved_mask"] * batch["token_pad_mask"] # [B, N_tokens]
+        #! (JH) chain_is_protein is True if the entire chain is regarded as "protein", but is_protein can be False for some residues within the chain
+        
         protein_atom_mask = torch.gather(protein_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]            
         protein_coords = coords * protein_atom_mask.unsqueeze(-1)
         
         # Compute ligand coords
-        if self.small_molecule_only:
-            sm_token_mask = batch['token_is_small_molecule'] * batch['token_resolved_mask'] * batch['token_pad_mask']
-            sm_atom_mask = torch.gather(sm_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]
-            sm_coords = coords * sm_atom_mask.unsqueeze(-1)
-            # Compute distance between ligand and protein atoms
-            dist_mat_mask = protein_atom_mask[:, :, None] * sm_atom_mask[:, None, :] 
-            
-            # (JH) 1 where protein and small molecule atoms are both present, 0 otherwise
-            sm_pocket_atom_mask = torch.cdist(protein_coords, sm_coords)
-            sm_pocket_atom_mask = torch.where(dist_mat_mask.bool(), sm_pocket_atom_mask, torch.ones_like(sm_pocket_atom_mask, device=coords.device) * torch.inf)
-            sm_pocket_atom_mask = sm_pocket_atom_mask < self.ligand_pocket_dist_cutoff # [B, N_atoms, N_atoms]
-            
-            # Compute the mask of protein residues that contain any atoms within the distance cutoff
-            
-            sm_pocket_atom_mask = torch.any(sm_pocket_atom_mask, dim=-1) # [B, N_atoms]
-            sm_pocket_token_mask = torch.zeros_like(batch["token_pad_mask"], device=coords.device, dtype=torch.bool) # [B, N_tokens]
-            sm_pocket_token_mask.scatter_(dim=-1, index=batch["atom_to_token_map"], src=sm_pocket_atom_mask.bool()) # [B, N_tokens]                
-            # (JH) scatter_ for in-place operation, more efficient than scatter
-            
-            return sm_pocket_token_mask
-        else:
-            ValueError(f"mask selector not implemented for metals")
+        non_protein_token_mask = ~batch["chain_is_protein"] * batch["token_resolved_mask"] * batch["token_pad_mask"]
+        non_protein_atom_mask = torch.gather(non_protein_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]
+        non_protein_coords = coords * non_protein_atom_mask.unsqueeze(-1)
+        dist_mat_mask = protein_atom_mask[:, :, None] * non_protein_atom_mask[:, None, :] 
+        
+        pocket_atom_mask = torch.cdist(protein_coords, non_protein_coords) 
+        pocket_atom_mask = torch.where(dist_mat_mask.bool(), pocket_atom_mask, torch.ones_like(pocket_atom_mask, device=coords.device) * torch.inf)
+        pocket_atom_mask = pocket_atom_mask < self.ligand_pocket_dist_cutoff # [B, N_atoms, N_atoms]
+        
+        pocket_atom_mask = torch.any(pocket_atom_mask, dim=-1) # [B, N_atoms]
+        pocket_token_mask = torch.zeros_like(batch["token_pad_mask"], device=coords.device, dtype=torch.bool) # [B, N_tokens]
+        pocket_token_mask.scatter_(dim=-1, index=batch["atom_to_token_map"], src=pocket_atom_mask.bool()) # [B, N_tokens]
+        
+        return pocket_token_mask
+        
+                        
         
         
                 
