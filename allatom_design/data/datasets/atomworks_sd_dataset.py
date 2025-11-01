@@ -135,8 +135,7 @@ class SDDataset(MolecularDataset):
         
         # Load cached example.        
         example_id = self.idx_to_id(idx)                                    
-        parsed_row = self.parsed_df.loc[example_id]
-        
+        parsed_row = self.parsed_df.loc[example_id]        
                             
         try:
             example = self._load_cached_example(parsed_row["extra_info"]["pdb_id"])
