@@ -68,9 +68,10 @@ FEAT_TO_TOKEN_DIM = {
     
     # Ligand related features    
     "token_chain_type": [0], 
-    "token_is_small_molecule": [0],   
-    "token_is_metal": [0],
-    "token_is_polymer": [0],
+    "chain_is_protein": [0],
+    "chain_is_small_molecule": [0],   
+    "chain_is_metal": [0],
+    "chain_is_nuc": [0],
     
     # optional features that might not be present
     "seq_cond_mask": [0],
@@ -554,7 +555,7 @@ class AddChainTypeFeatrues(Transform):
             chain_is_metal[asym_id == asym_name_to_id[q_pn_unit_iid]] = is_metal
             chain_is_small_molecule[asym_id == asym_name_to_id[q_pn_unit_iid]] = is_small
             chain_is_nuc[asym_id == asym_name_to_id[q_pn_unit_iid]] = is_nuc            
-                                                                                
+                                                                                        
         data["feats"] |= {
             "chain_is_protein": chain_is_protein,
             "chain_is_nuc": chain_is_nuc,
