@@ -112,7 +112,9 @@ class SDDataset(MolecularDataset):
                             
         # Link featurizer to transform
         self.transform = self.featurizer
-    
+        
+        # #* 251030 (JH) lp0_exp0, ligand clustering
+        # if not self.cfg.ligand_clustered:      
         # Read in chain metadata parquet        
         self.chain_df, self.dummy_chain_df = self._process_chain_df()
 
@@ -122,7 +124,9 @@ class SDDataset(MolecularDataset):
         # Parse dfs into a common format and concatenate
         self.parsed_df = self._parse_dfs()
         self.data = self.parsed_df
-
+        
+        # else: self.cfg.ligand_clustered:
+                    
         # Prepare fallback probabilities
         # Todo: Change to FallbackDatasetWrapper + FallbackSamplerWrapper, when using DDP
         self._fallback_probs = self.get_sampling_weights().astype(np.float64)
@@ -219,29 +223,30 @@ class SDDataset(MolecularDataset):
         # Add chain counts info and sampling weights
         if self.cfg.debug: 
             t0 = time.perf_counter()
-        # Todo: faster way for add_chain_counts_info
-        chain_df = add_chain_counts_info(chain_df,
-                                         chain_type_cols=["q_pn_unit_type"],
-                                         seq_length_cols=["q_pn_unit_sequence_length"],
-                                         is_metal_cols=["q_pn_unit_is_metal"]) #! (JH) changed 250925
+                
+        # Copy chain_df to dummy_chain_df to construct interface df later
+        dummy_chain_df = chain_df.copy()
+                
+        # Take only protein chains                                          
+        chain_df = chain_df[chain_df["q_pn_unit_is_protein"]]                          
         
-        if self.cfg.debug:
-            t1 = time.perf_counter()
-            print(f"{t1-t0}s passed in add_chain_counts_info with {self.cfg.debug_num_ids} rows")
-            
+        #* FIX: Apply chain filters first before adding sampling_weights info
+        chain_filter_protein = self.cfg.train_filters.chain_filter_protein if self.phase == "train" else self.cfg.val_filters.chain_filter_protein
+        chain_df = self._apply_filters(chain_filter_protein, chain_df)
         
+        # Add chain counts info
+        chain_df = add_chain_counts_info(chain_df)
+        
+        # Add sampling weights
         alphas = self.cfg.sampling_weights["alphas_chain"] #! (JH) changed 250925
-        
         chain_df = add_sampling_weights_info(chain_df,
                                              alphas=alphas,
                                              beta=self.cfg.sampling_weights["betas"]["beta_chain"],
                                              cluster_cols=["q_pn_unit_cluster_id"])
+                        
         
-        # Apply chain filters
-        chain_filter1 = self.cfg.train_filters.chain_filter1 if self.phase == "train" else self.cfg.val_filters.chain_filter1
-        dummy_chain_df = self._apply_filters(chain_filter1, chain_df)
-        chain_filter2 = self.cfg.train_filters.chain_filter2 if self.phase == "train" else self.cfg.val_filters.chain_filter2
-        chain_df = self._apply_filters(chain_filter2, dummy_chain_df)
+        chain_filter_protein_ligand = self.cfg.train_filters.chain_filter_protein_ligand if self.phase == "train" else self.cfg.val_filters.chain_filter_protein_ligand
+        dummy_chain_df = self._apply_filters(chain_filter_protein_ligand, dummy_chain_df)
         return chain_df, dummy_chain_df
         
 
@@ -251,12 +256,8 @@ class SDDataset(MolecularDataset):
         """                
         interface_df = build_interface_df(self.dummy_chain_df, dataset_name=Path(self.cfg.parquet_path).parent.name)
                     
-        interface_df = add_chain_counts_info(interface_df,
-                                             chain_type_cols=["q_pn_unit_type_1", "q_pn_unit_type_2"],
-                                             seq_length_cols=["q_pn_unit_sequence_length_1", "q_pn_unit_sequence_length_2"],
-                                             is_metal_cols=["q_pn_unit_is_metal_1", "q_pn_unit_is_metal_2"]) #! (JH) changed 250925
-        
-        
+        interface_df = add_chain_counts_info(interface_df)
+                
         alphas = self.cfg.sampling_weights["alphas_interface"] #! (JH) changed 250925
             
         interface_df = add_sampling_weights_info(interface_df,
@@ -272,8 +273,11 @@ class SDDataset(MolecularDataset):
         """
         Parses the chain and interface dataframes into a common format and concatenates them.
         """
-        chain_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid"])
-        interface_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid_1", "q_pn_unit_iid_2"])
+        
+        keep_iids = getattr(self.cfg, "keep_pn_unit_iids_in_extra_info", False)
+        
+        chain_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid"], keep_pn_unit_iids_in_extra_info=keep_iids)
+        interface_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid_1", "q_pn_unit_iid_2"], keep_pn_unit_iids_in_extra_info=keep_iids)
 
         logger.info(f"Final {self.phase} dataset contains {len(self.chain_df)} chains and {len(self.interface_df)} interfaces")
         
@@ -437,7 +441,10 @@ def build_interface_df(chain_df: pd.DataFrame, dataset_name: str) -> pd.DataFram
     chain_df = chain_df.reset_index(drop=True)
 
     # Get columns we'll need from the source df
-    chain_specific_cols = ["q_pn_unit_iid", "q_pn_unit_type", "q_pn_unit_sequence_length", "q_pn_unit_cluster_id", "q_pn_unit_is_metal"]  #! columns we need for each chain (JH) changed 250925    
+    chain_specific_cols = ["q_pn_unit_iid", "q_pn_unit_type", "q_pn_unit_sequence_length", "q_pn_unit_cluster_id", \
+                           'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_DNA_polymer', 'q_pn_unit_is_DNA_ligand', \
+                            'q_pn_unit_is_RNA_polymer', 'q_pn_unit_is_RNA_ligand', 'q_pn_unit_is_RNA_DNA_hybrid_polymer', \
+                            'q_pn_unit_is_RNA_DNA_hybrid_ligand', 'q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal']  #! columns we need for each chain (JH) changed 250925    
     base_cols = [
         "example_id", "pdb_id", "assembly_id", "path", "q_pn_unit_contacting_pn_unit_iids",
         *chain_specific_cols,
@@ -485,7 +492,6 @@ def build_interface_df(chain_df: pd.DataFrame, dataset_name: str) -> pd.DataFram
 
 # Todo (JH): Exclude the pockets with both small molecules and metals. Need to consider three chains at once.
 
-
 def _canonicalize_pair_columns(
     df: pd.DataFrame,
     order_by: str = "q_pn_unit_iid",
@@ -518,47 +524,51 @@ def _canonicalize_pair_columns(
     return out
 
 
-def add_chain_counts_info(df: pd.DataFrame, chain_type_cols: list[str], \
-                        seq_length_cols: list[str], is_metal_cols: list[str]) -> pd.DataFrame:
+def add_chain_counts_info(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add chain type and sequence length columns to the dataframe.
     Modifies the dataframe in place and returns it.
-    # TODO (JH): faster way?
     """
-    # Compute chain type counts
-    chain_count_cols = ["n_prot", "n_nuc", "n_peptide", "n_small_molecule", "n_metal", "n_loi"]
-    df["chain_types"] = df[chain_type_cols].apply(lambda x: tuple(x), axis=1)
-    df["seq_lengths"] = df[seq_length_cols].apply(lambda x: tuple(x), axis=1)
-    df["is_metal"] = df[is_metal_cols].apply(lambda x: tuple(x), axis=1) 
-
-    def _get_chain_type_counts(row) -> dict[str, int]:
-        chain_types: tuple[str] = row["chain_types"]
-        seq_lengths: tuple[int] = row["seq_lengths"]        
-        is_metal: tuple[bool] = row["is_metal"]
-        chain_type_counts = {c: 0 for c in chain_count_cols}
-
-        for t, l, m in zip(chain_types, seq_lengths, is_metal):
-            if t in aw_enums.ChainTypeInfo.PROTEINS:
-                if l < aw_const.PEPTIDE_MAX_RESIDUES:
-                    chain_type_counts["n_peptide"] += 1
-                else:
-                    chain_type_counts["n_prot"] += 1
-            elif t in aw_enums.ChainTypeInfo.NUCLEIC_ACIDS:
-                chain_type_counts["n_nuc"] += 1
-            else:
-                if m:
-                    chain_type_counts["n_metal"] += 1
-                else:
-                    chain_type_counts["n_small_molecule"] += 1
-                        
-        return pd.Series(chain_type_counts)
     
-    df[chain_count_cols] = df.apply(_get_chain_type_counts, axis=1)    
-
-    # Delete intermediate columns
-    del df["chain_types"]
-    del df["seq_lengths"]
-    del df["is_metal"] #! (JH) changed 250925
+    # Compute chain type counts        
+    prot_col = "q_pn_unit_is_protein"    
+    small_molecule_cols = [
+        "q_pn_unit_is_small_molecule",
+        "q_pn_unit_is_peptide",
+        "q_pn_unit_is_DNA_ligand",
+        "q_pn_unit_is_RNA_ligand",
+        "q_pn_unit_is_RNA_DNA_hybrid_ligand",
+    ]
+    nuc_cols = [
+        "q_pn_unit_is_DNA_polymer",
+        "q_pn_unit_is_RNA_polymer",
+        "q_pn_unit_is_RNA_DNA_hybrid_polymer",
+    ]
+    metal_col = "q_pn_unit_is_metal"
+    
+    all_chain_type_cols = [prot_col, *small_molecule_cols, *nuc_cols, metal_col]
+    
+    def _detect_suffixes(df):
+        suffixes = []
+        for col in df.columns:
+            for chain_type_col in all_chain_type_cols:
+                if col.startswith(chain_type_col):
+                    suffixes.append(col[len(chain_type_col):])                    
+        return sorted(set(suffixes))
+    
+    suffixes = _detect_suffixes(df)
+    
+    df['n_prot'] = 0
+    df['n_nuc'] = 0
+    df['n_small_molecule'] = 0
+    df['n_metal'] = 0
+    
+    for suffix in suffixes:
+        df['n_prot'] += df.apply(lambda x: 1 if x[f'q_pn_unit_is_protein{suffix}'] else 0, axis=1)
+        df['n_nuc'] += df.apply(lambda x: 1 if any(x[f"{col}{suffix}"] for col in nuc_cols) else 0, axis=1)        
+        df['n_small_molecule'] += df.apply(lambda x: 1 if any(x[f"{col}{suffix}"] for col in small_molecule_cols) else 0, axis=1)
+        df['n_metal'] += df.apply(lambda x: 1 if x[f'q_pn_unit_is_metal{suffix}'] else 0, axis=1)
+    
     return df
 
 
@@ -570,16 +580,14 @@ def add_sampling_weights_info(df: pd.DataFrame,
     Based on the cluster ID in cluster_col and chain counts info, add a sampling weights column to the dataframe.
     Modifies the dataframe in place and returns it.
     """
-    assert all(col in df.columns for col in ["n_prot", "n_peptide", "n_nuc", "n_small_molecule", "n_metal", "n_loi"]), "Need to add chain counts info before computing sampling weights"
-
     # Get cluster size
     df["clusters"] = df[cluster_cols].apply(lambda x: tuple(sorted(tuple(x))), axis=1)  # sort cluster ids to dedupe
     cluster_id_to_size = df["clusters"].value_counts()
     df["cluster_size"] = df["clusters"].map(cluster_id_to_size)
 
     # Compute weights
-    missing_alphas = set(alphas.keys()) - {"a_prot", "a_peptide", "a_nuc", "a_small_molecule", "a_metal", "a_loi"}
-    missing_counts = {"n_prot", "n_peptide", "n_nuc", "n_small_molecule", "n_metal", "n_loi"} - set(df.columns)
+    missing_alphas = set(alphas.keys()) - {"a_prot", "a_nuc", "a_small_molecule", "a_metal"}
+    missing_counts = {"n_prot", "n_nuc", "n_small_molecule", "n_metal"} - set(df.columns)
 
     if missing_alphas:
         logger.warning(f"Missing alphas from configuration file: {missing_alphas}; defaulting to 0")
@@ -590,13 +598,56 @@ def add_sampling_weights_info(df: pd.DataFrame,
     logger.info(f"Calculating weights for AF-3 examples using alphas={alphas}, beta={beta}")
 
     weights = (beta / df["cluster_size"]) * (
-        alphas.get("a_prot", 0) * df["n_prot"]
-        + alphas.get("a_peptide", 0) * df["n_peptide"]
-        + alphas.get("a_nuc", 0) * df["n_nuc"]
+        alphas.get("a_prot", 0) * df["n_prot"]        
         + alphas.get("a_small_molecule", 0) * df["n_small_molecule"]
+        + alphas.get("a_nuc", 0) * df["n_nuc"]
         + alphas.get("a_metal", 0) * df["n_metal"]
-        + alphas.get("a_loi", 0) * df["n_loi"]  # always 0 for now
+        # + alphas.get("a_loi", 0) * df["n_loi"]  # always 0 for now
     )
 
     df["sampling_weight"] = weights
     return df
+
+
+# def add_chain_counts_info(df: pd.DataFrame, chain_type_cols: list[str], \
+#                         seq_length_cols: list[str], is_metal_cols: list[str]) -> pd.DataFrame:
+#     """
+#     Add chain type and sequence length columns to the dataframe.
+#     Modifies the dataframe in place and returns it.
+#     # TODO (JH): faster way?
+#     """
+#     # Compute chain type counts
+#     chain_count_cols = ["n_prot", "n_nuc", "n_peptide", "n_small_molecule", "n_metal", "n_loi"]
+#     df["chain_types"] = df[chain_type_cols].apply(lambda x: tuple(x), axis=1)
+#     df["seq_lengths"] = df[seq_length_cols].apply(lambda x: tuple(x), axis=1)
+#     df["is_metal"] = df[is_metal_cols].apply(lambda x: tuple(x), axis=1) 
+
+#     def _get_chain_type_counts(row) -> dict[str, int]:
+#         chain_types: tuple[str] = row["chain_types"]
+#         seq_lengths: tuple[int] = row["seq_lengths"]        
+#         is_metal: tuple[bool] = row["is_metal"]
+#         chain_type_counts = {c: 0 for c in chain_count_cols}
+
+#         for t, l, m in zip(chain_types, seq_lengths, is_metal):
+#             if t in aw_enums.ChainTypeInfo.PROTEINS:
+#                 if l < aw_const.PEPTIDE_MAX_RESIDUES:
+#                     chain_type_counts["n_peptide"] += 1
+#                 else:
+#                     chain_type_counts["n_prot"] += 1
+#             elif t in aw_enums.ChainTypeInfo.NUCLEIC_ACIDS:
+#                 chain_type_counts["n_nuc"] += 1
+#             else:
+#                 if m:
+#                     chain_type_counts["n_metal"] += 1
+#                 else:
+#                     chain_type_counts["n_small_molecule"] += 1
+                        
+#         return pd.Series(chain_type_counts)
+    
+#     df[chain_count_cols] = df.apply(_get_chain_type_counts, axis=1)    
+
+#     # Delete intermediate columns
+#     del df["chain_types"]
+#     del df["seq_lengths"]
+#     del df["is_metal"] #! (JH) changed 250925
+#     return df

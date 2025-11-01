@@ -45,7 +45,7 @@ class ChainType(IntEnum):
     MACROLIDE = 11  # macrolide, from `entity.type`
     NON_POLYMER = 8  # non-polymer, from `entity.type`
     WATER = 9  # water, from `entity.type`
-
+        
     @classmethod
     def from_string(cls, str_value: str) -> "ChainType":
         """Convert a string to a ChainType enum.
@@ -263,9 +263,11 @@ class ChainTypeInfo:
         ChainType.POLYPEPTIDE_L,
         ChainType.CYCLIC_PSEUDO_PEPTIDE,
     )
+    
+    
 
     NUCLEIC_ACIDS: Final[tuple[ChainType, ...]] = (ChainType.DNA, ChainType.RNA, ChainType.DNA_RNA_HYBRID)
-
+        
     STRING_TO_ENUM: Final[MappingProxyType[str, ChainType]] = MappingProxyType(
         keymap(
             str.upper,
