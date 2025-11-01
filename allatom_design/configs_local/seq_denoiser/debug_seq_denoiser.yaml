@@ -21,10 +21,14 @@ finetuning:
 
 train:
   seed: 0
-  batch_size: 2
-  compile_model: false  # Compile the model before running, speeds up training a lot
-  compile_backend: inductor
+  batch_size: 4
   debug: true
+  compile:
+    compile_model: false  # Compile the model before running, speeds up training a lot
+    compile_backend: inductor #! default: inductor
+    mode: "default" #! default: default
+    fullgraph: false #! default: false
+    dynamic: false #! default: false
 
 # Some trainer options
 trainer:
@@ -54,7 +58,7 @@ defaults:
 data: ${data}
 
 model:
-  task: "seq_des"  # "seq_des"
+  task: "lc_seq_des"  # "seq_des"
   sigma_data: [9.6, 0.64]  # sigma data for [backbone, local sidechain]
   eps: 1.0e-8
   inf: 1.0e9
