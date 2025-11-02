@@ -25,6 +25,7 @@ dataset:
       cif_parser_args: ${cif_parser_args}  
   save_failed_examples_to_dir: ${out_dir}/failed_cached_examples
   load_kwargs: null
+  min_residues_for_polymers: 1 #! 251102 (JH) fixed
 
 # CIF parser args
 cif_parser_args:

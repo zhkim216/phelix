@@ -33,6 +33,7 @@ def preprocess_transform(
     undesired_res_names: list[str] = [], #! fixed
     b_factor_min: float | None = None,
     b_factor_max: float | None = None,
+    min_residues_for_polymers: int = 0, 
 ) -> Transform:
     """
     Build a transform pipeline for featurizing a structure parsed by the AtomWorks CIF parser.
@@ -45,7 +46,7 @@ def preprocess_transform(
         RemoveTerminalOxygen(),
         SetOccToZeroOnBfactor(b_factor_min, b_factor_max),
         RemoveUnresolvedPNUnits(),
-        RemovePolymersWithTooFewResolvedResidues(min_residues=4),
+        RemovePolymersWithTooFewResolvedResidues(min_residues=min_residues_for_polymers),
         MaskPolymerResiduesWithUnresolvedFrameAtoms(),
         # NOTE: For inference, we must keep UNL to support ligands that are not in the CCD
         HandleUndesiredResTokens(undesired_res_tokens=undesired_res_names),  # e.g., non-standard residues
