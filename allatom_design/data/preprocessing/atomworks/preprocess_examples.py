@@ -86,7 +86,7 @@ _DATASET: PandasDataset | None = None
 
 def _init_dataset(dataset_cfg: DictConfig):
     global _DATASET
-    _DATASET = hydra.utils.instantiate(dataset_cfg, transform=preprocess_transform())
+    _DATASET = hydra.utils.instantiate(dataset_cfg, transform=preprocess_transform(min_residues_for_polymers=dataset_cfg.min_residues_for_polymers))
 
 
 if __name__ == "__main__":
