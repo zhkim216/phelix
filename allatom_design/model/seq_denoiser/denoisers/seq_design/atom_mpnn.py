@@ -250,7 +250,7 @@ class TokenFeatures(nn.Module):
         else:            
             X_backbone, tokenwise_backbone_mask = get_tokenwise_coords(batch, backbone_only = True, sidechain_only = False, all_atoms = False)
             # X_all = torch.where(tokenwise_atom_cond_mask.unsqueeze(-1).bool(), X_all, X[..., None, :])  # replace all masked atoms with center atom for the residue
-
+            
             RBF_backbone = []
             for i in range(X_backbone.shape[-2]):
                 for j in range(X_backbone.shape[-2]):
@@ -426,8 +426,9 @@ class TokenFeatures(nn.Module):
         dX = torch.unsqueeze(X,1) - torch.unsqueeze(X,2)
         D = mask_2D * torch.sqrt(torch.sum(dX**2, 3) + eps)
         D_max, _ = torch.max(D, -1, keepdim=True)
-        D_adjust = D + (1. - mask_2D) * D_max
-        D_neighbors, E_idx = torch.topk(D_adjust, np.minimum(self.k_neighbors, X.shape[1]), dim=-1, sorted=True, largest=False)
+        D_adjust = D + (1. - mask_2D) * D_max        
+        D_neighbors, E_idx = torch.topk(D_adjust, self.k_neighbors, dim=-1, sorted=True, largest=False)
+        #! 251030 (JH) fixed, np.minimum(self.k_neighbors, X.shape[1]) => self.k_neighbors
         return D_neighbors, E_idx
 
     def _rbf(self, D):
@@ -593,7 +594,7 @@ class Contextfeatureprocessor(nn.Module): #! (JH) self.y_context_encoder_layers 
         
         self.edge_update = edge_update
 
-    @dynamo.disable()
+    # @dynamo.disable()
     def forward(self, h_V, h_E, mask_V=None, E_idx = None, mask_attend=None):
         """ Parallel computation of full transformer layer """
 
@@ -658,7 +659,7 @@ class Contextfeatureaggregator(nn.Module): #! (JH) self.context_encoder_layers i
         
         self.edge_update = edge_update
 
-    @dynamo.disable()
+    # @dynamo.disable()
     def forward(self, h_V, h_E, mask_V=None, mask_attend=None):
         """ Parallel computation of full transformer layer """
 
@@ -720,7 +721,7 @@ class ContextModule(nn.Module):
             [Contextfeatureaggregator(self.hidden_dim, self.hidden_dim * 2, dropout=dropout_p, edge_update=self.edge_update) for _ in range(num_aggregator_layers)]
         )
 
-    @dynamo.disable()
+    # @dynamo.disable()
     def forward(self, h_V = None, V = None, Y_nodes = None, 
                 Y_edges = None, Y_m = None, E_idx_YY = None, prot_token_mask = None):
         # Guard: if no context, return h_V unchanged
