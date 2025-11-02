@@ -63,10 +63,6 @@ class SeqDenoiser(nn.Module):
             if self.task == "lc_seq_des": #! (JH) changed
                 batch["pocket_token_mask"] = self.mask_selector.sample_pocket_mask(batch)  # 1 for residues in non-protein holding pocket, 0 otherwise
 
-            # Ensure the conditioning masks only contain non-pad, resolved entries
-            batch["seq_cond_mask"] = batch["seq_cond_mask"] * batch["token_pad_mask"] * batch["token_resolved_mask"]
-            batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
-
         # Denoise sequence
         _, aux_preds = self.denoiser(batch)
 
