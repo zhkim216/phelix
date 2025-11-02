@@ -84,12 +84,10 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         - atomwise_seq_cond_mask: Tensor["b n_atoms", float]: 1 if the atom is part of an unmasked residue type, or 0 otherwise
         - token_exists_mask: Tensor["b n_tokens", float]: 1 if there exists any unmasked atom in the token, or 0 otherwise
         """
-        # Ensure the conditioning masks only contain non-pad, resolved entries
-        batch["seq_cond_mask"] = batch["seq_cond_mask"] * batch["token_pad_mask"] * batch["token_resolved_mask"]
-        batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
-
+    
         # Create atom-level mask which is 1 if the atom is part of an unmasked residue type, or 0 otherwise
         batch["atomwise_seq_cond_mask"] = batch["seq_cond_mask"].gather(dim=-1, index=batch["atom_to_token_map"])  # [b, n_atoms]
+        #! seq_cond_mask already contains only non-pad, resolved entries        
         batch["atomwise_seq_cond_mask"] = batch["atomwise_seq_cond_mask"] * batch["atom_pad_mask"]  # re-mask out pad atoms, since atom_to_token_map is 0 for pad atoms
 
         # Build mask for which tokens to include in the token-level grpah
