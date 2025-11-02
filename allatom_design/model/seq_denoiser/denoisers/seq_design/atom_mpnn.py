@@ -341,7 +341,7 @@ class TokenFeatures(nn.Module):
             # Pairwise distances between pseudo CB and ligands
             pseudo_cb_coords = batch["pseudo_cb_coords"]
             Cb_Y_distances = torch.sum((pseudo_cb_coords[:, :, None, :] - Y) ** 2, -1)            
-            mask_Y = batch["seq_cond_mask"][..., None] * Y_m #! (JH) actually, don't need to multiply batch["seq_cond_mask"] here again, but just in case.
+            mask_Y = batch["seq_cond_mask"][..., None] * Y_m #Todo: Need to revisit
             Cb_Y_distances_adjusted = Cb_Y_distances * mask_Y + (1.0 - mask_Y) * 10000.0
             _, E_idx_Y = torch.topk(
                 Cb_Y_distances_adjusted, self.atom_context_num, dim=-1, largest=False
