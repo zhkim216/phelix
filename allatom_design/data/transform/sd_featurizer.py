@@ -235,11 +235,11 @@ class FeaturizeCoordsAndMasks(Transform):
 
         # Get protein backbone and sidechain atom masks
         feats["atom_to_token_map"] = feats["atom_to_token_map"].long()
-        atom_is_prot = feats["is_protein"].gather(dim=-1, index=feats["atom_to_token_map"])
+        atom_is_prot = feats["is_protein"].gather(dim=-1, index=feats["atom_to_token_map"]) #! changed 251101 (JH)
         feats["atom_is_prot"] = atom_is_prot        
         
         atomized = torch.tensor(atom_array.atomize)
-        bb_atom_mask = torch.tensor(atom_array.is_backbone_atom)
+        bb_atom_mask = torch.tensor(atom_array.is_backbone_atom) #! changed 251101 (JH)
 
         feats["prot_bb_atom_mask"] = bb_atom_mask * ~atomized * atom_is_prot
         feats["prot_scn_atom_mask"] = ~bb_atom_mask * ~atomized * atom_is_prot
@@ -253,7 +253,7 @@ class FeaturizeCoordsAndMasks(Transform):
         # Calculate number of atoms per token
         device = feats["coords"].device
         N_tokens = feats["token_pad_mask"].shape[0]
-        n_atoms_per_token = (F.one_hot(feats["atom_to_token_map"], num_classes=N_tokens) * feats["atom_pad_mask"][..., None]).sum(dim=-2)
+        n_atoms_per_token = (F.one_hot(feats["atom_to_token_map"], num_classes=N_tokens)).sum(dim=-2)
 
         # Starting atom index for each token
         tokenwise_atom_idxs = torch.cat([torch.zeros((1,), device=device), n_atoms_per_token.cumsum(dim=-1)[:-1]], dim=-1).long()
@@ -294,7 +294,7 @@ class FeaturizeCoordsAndMasks(Transform):
         Get pseudo CB coordinates for the atom array.
         """
         atom_array = data["atom_array"]                           
-        token_is_protein = data["feats"]["is_protein"]
+        token_is_protein = data["feats"]["is_protein"] * data["feats"]["chain_is_protein"]
         token_len = len(token_is_protein)
         
         token_id = atom_array.token_id  # [n_atoms]
