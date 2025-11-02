@@ -42,12 +42,15 @@ class MaskSelector:
         seq_cond_mask = torch.rand(B, N, device=device) < rearrange(t, "b -> b 1")
 
         # Non-protein and non-standard restypes are always kept
-        standard_prot_mask = batch["is_protein"] & ~batch["is_atomized"]
+        standard_prot_mask = batch["chain_is_protein"] & batch["is_protein"] & ~batch["is_atomized"] & batch["token_resolved_mask"].bool() & batch["token_pad_mask"].bool()        
+        #! changed (JH) 251101        
         seq_cond_mask = torch.where(~standard_prot_mask,
                                     torch.ones_like(seq_cond_mask),
                                     seq_cond_mask)
 
-        seq_cond_mask = seq_cond_mask * batch["token_pad_mask"]  # mask out padding
+        seq_cond_mask = seq_cond_mask * batch["token_pad_mask"] * batch["token_resolved_mask"]  # mask out padding,
+        #! seq_cond_mask should only contain non-pad, resolved entries
+        
         return seq_cond_mask
 
 
@@ -60,16 +63,22 @@ class MaskSelector:
         device = batch["atom_resolved_mask"].device
 
         atom_cond_mask = batch["atom_resolved_mask"].clone()  # [n_atoms]
-        prot_bb_atom_mask = batch["prot_bb_atom_mask"] * atom_cond_mask
+        atomwise_chain_is_protein = batch["chain_is_protein"].gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] # re-mask out pad atoms
+        prot_bb_atom_mask = batch["prot_bb_atom_mask"] * atom_cond_mask * atomwise_chain_is_protein 
 
         # Mask out the sidechain of a token with probability p in U[0, 1]  # TODO: try different masking schemes
         tok_keep_scn_p = torch.rand(B, device=device)
         tok_keep_scn_mask = torch.rand_like(batch["seq_cond_mask"]) < rearrange(tok_keep_scn_p, "b -> b 1")
         tok_keep_scn_mask = tok_keep_scn_mask * batch["seq_cond_mask"]  # sidechains should be masked where seq is masked
-        standard_prot_mask = batch["is_protein"] & ~batch["is_atomized"]
+        
+        standard_prot_mask = batch["chain_is_protein"] & batch["is_protein"] & ~batch["is_atomized"] & batch["token_resolved_mask"].bool() & batch["token_pad_mask"].bool() #! changed (JH) 251101        
+        
         tok_keep_scn_mask = torch.where(~standard_prot_mask,  # non-protein tokens should be kept
                                         torch.ones_like(tok_keep_scn_mask),
                                         tok_keep_scn_mask)
+
+        tok_keep_scn_mask = tok_keep_scn_mask * batch["token_pad_mask"] * batch["token_resolved_mask"]  
+        #! mask out padding & tok_keep_scn_mask should only contain non-pad, resolved entries
 
         ## convert to atomwise mask
         atomwise_tok_keep_scn_mask = tok_keep_scn_mask.gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]  # [b, n_atoms]
@@ -77,6 +86,10 @@ class MaskSelector:
         atom_cond_mask = torch.where(atomwise_tok_keep_scn_mask.bool(),
                                      atom_cond_mask,
                                      prot_bb_atom_mask)
+
+        #! Just to ensure that atom_cond_mask only contains non-pad, resolved entries. 
+        #! atom_cond_mask is already a mask for resolved atoms, and prot_bb_atom_mask already contains only the resolved entries. But just to be safe.
+        atom_cond_mask = atom_cond_mask * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
 
         return atom_cond_mask    
     
@@ -111,16 +124,11 @@ class MaskSelector:
         
         pocket_atom_mask = torch.any(pocket_atom_mask, dim=-1) # [B, N_atoms]
         pocket_token_mask = torch.zeros_like(batch["token_pad_mask"], device=coords.device, dtype=torch.bool) # [B, N_tokens]
-        pocket_token_mask.scatter_(dim=-1, index=batch["atom_to_token_map"], src=pocket_atom_mask.bool()) # [B, N_tokens]
+        pocket_token_mask.scatter_(dim=-1, index=batch["atom_to_token_map"], src=pocket_atom_mask.bool()) # [B, N_tokens]        
+        pocket_token_mask = pocket_token_mask * batch["token_pad_mask"].bool() * batch["token_resolved_mask"].bool() #! changed (JH) 251101
         
         return pocket_token_mask
         
-                        
-        
-        
-                
-        
-
     def _sample_t(self, B: int, device: torch.device) -> TensorType["b", float]:
         """
         Sample a timestep from the masking schedule.

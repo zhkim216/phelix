@@ -65,7 +65,7 @@ featurizer_cfg:
   max_atoms: 2304 #! DEBUG
   crop_center_cutoff_distance: 15.0
   crop_spatial_p: 0.5
-  remove_unresolved_tokens: true #! (JH) changed 250926,
+  remove_unresolved_tokens: false #! (JH) changed 250926,
   residue_cache_dir: ${data.residue_cache_dir}
   max_conformers_per_residue: 50
   apply_random_augmentation: true

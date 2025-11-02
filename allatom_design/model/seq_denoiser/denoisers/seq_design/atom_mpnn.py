@@ -124,7 +124,7 @@ class AtomMPNN(nn.Module):
         # Pass through encoder layers
         h_V = h_V + h_S                
         h_E = self.W_e(h_E)
-        prot_token_mask = batch["token_exists_mask"] * batch["is_protein"]
+        prot_token_mask =  batch["chain_is_protein"] * batch["is_protein"] * batch["token_pad_mask"] * batch["token_exists_mask"]
         prot_token_mask_2d = gather_nodes(prot_token_mask.unsqueeze(-1), E_idx).squeeze(-1)
         prot_token_mask_2d = prot_token_mask.unsqueeze(-1) * prot_token_mask_2d
         for layer in self.encoder_layers:
@@ -240,9 +240,9 @@ class TokenFeatures(nn.Module):
         Extract token-level edge features and build KNN graph.
         """
         X = self._get_token_coords(batch)
-        # X is the coordinates of the center atoms of the tokens, C-alpha for standard amino acids
+        #! For now, only protein C-alpha coordinates are sampled from _get_token_coords.
         
-        D_neighbors, E_idx = self._dist(X, batch["token_exists_mask"] * batch["is_protein"].float()) #! (JH) Fixed 251009
+        D_neighbors, E_idx = self._dist(X, batch["token_exists_mask"] * batch["is_protein"].float() * batch["chain_is_protein"].float()) #! (JH) Fixed 251009
 
         # Get RBF features
         if self.ca_only:
@@ -299,43 +299,49 @@ class TokenFeatures(nn.Module):
             # Sidechain conditioning for ligandMPNN            
             E_idx_sub = E_idx[:, :, :16] #! hardcoded for 16 neighbor tokens            
             
+            atomwise_chain_is_protein = batch["chain_is_protein"].gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] # re-mask out pad atoms
+            atomwise_chain_is_not_protein = (~batch["chain_is_protein"] * batch["token_pad_mask"]).gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] # re-mask out pad atoms
+            
             # Sidechain mask
-            prot_sc_atom_cond_mask = batch["prot_scn_atom_mask"] * batch["atom_cond_mask"] * batch["atom_pad_mask"]             
+            prot_sc_atom_cond_mask = batch["prot_scn_atom_mask"] * atomwise_chain_is_protein * batch["atom_cond_mask"]
             tokenwise_sc_cond_mask = batched_gather(prot_sc_atom_cond_mask, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1) # xyz_37_m
+            tokenwise_sc_cond_mask = tokenwise_sc_cond_mask * batch["tokenwise_atom_idxs_mask"]
             R_m = gather_nodes(tokenwise_sc_cond_mask, E_idx_sub)
             R_m = R_m.view(R_m.shape[0], R_m.shape[1], -1)
                         
             # Sidechain coordinates
             X_scn, _ = get_tokenwise_coords(batch, backbone_only = False, sidechain_only = True, all_atoms = False)            
-            X_scn = X_scn * tokenwise_sc_cond_mask[..., None]                                    
+            X_scn = X_scn * tokenwise_sc_cond_mask[..., None] * batch["tokenwise_atom_idxs_mask"][..., None]                                    
             R = gather_nodes(X_scn.view(X_scn.shape[0], X_scn.shape[1], -1), E_idx_sub).view(X_scn.shape[0], X_scn.shape[1], E_idx_sub.shape[2], -1, 3)            
+            #! all masked atoms' coordinates are set to 0.
+            # Todo: set to center atom coordinates maybe?
             R = R.view(X_scn.shape[0], X_scn.shape[1], -1, 3)
                                     
             # Sidechain atomic number
-            sc_atomic_number = batch["atomic_number"] * prot_sc_atom_cond_mask
-            tokenwise_sc_atomic_number = batched_gather(sc_atomic_number, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1)
+            sc_atomic_number = batch["atomic_number"] * prot_sc_atom_cond_mask #! masked atoms' atomic number are set to 0.
+            tokenwise_sc_atomic_number = batched_gather(sc_atomic_number, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1) * batch["tokenwise_atom_idxs_mask"]
             R_t = gather_nodes(tokenwise_sc_atomic_number, E_idx_sub)
             R_t = R_t.view(X_scn.shape[0], X_scn.shape[1], -1) 
             
             # Ligand mask
-            ligand_mask = batch["atom_is_ligand"] * batch["atom_cond_mask"] * batch["atom_pad_mask"]
-            tokenwise_ligand_mask = batched_gather(ligand_mask, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1)
+            ligand_mask = atomwise_chain_is_not_protein * batch["atom_cond_mask"]
+            tokenwise_ligand_mask = batched_gather(ligand_mask, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1) * batch["tokenwise_atom_idxs_mask"]
             Y_m = torch.cat((R_m, tokenwise_ligand_mask), dim=2).to(dtype=torch.long) # concat sidechain and ligand masks
             
             # Ligand coordinates                                                
             ligand_coords = batch["coords"] * ligand_mask.unsqueeze(-1)
-            tokenwise_ligand_coords = batched_gather(ligand_coords, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1)
+            tokenwise_ligand_coords = batched_gather(ligand_coords, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1) * batch["tokenwise_atom_idxs_mask"][..., None]
             Y = torch.cat((R, tokenwise_ligand_coords), dim=2) # concat sidechain and ligand coordinates
                               
             # Ligand atomic number
             ligand_atomic_number = batch["atomic_number"] * ligand_mask
-            tokenwise_ligand_atomic_number = batched_gather(ligand_atomic_number, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1)
+            tokenwise_ligand_atomic_number = batched_gather(ligand_atomic_number, batch["tokenwise_atom_idxs"], dim=1, no_batch_dims=1) * batch["tokenwise_atom_idxs_mask"]
             Y_t = torch.cat((R_t, tokenwise_ligand_atomic_number), dim=2)
             
             # Pairwise distances between pseudo CB and ligands
             pseudo_cb_coords = batch["pseudo_cb_coords"]
             Cb_Y_distances = torch.sum((pseudo_cb_coords[:, :, None, :] - Y) ** 2, -1)            
-            mask_Y = batch["seq_cond_mask"][..., None] * Y_m            
+            mask_Y = batch["seq_cond_mask"][..., None] * Y_m #! (JH) actually, don't need to multiply batch["seq_cond_mask"] here again, but just in case.
             Cb_Y_distances_adjusted = Cb_Y_distances * mask_Y + (1.0 - mask_Y) * 10000.0
             _, E_idx_Y = torch.topk(
                 Cb_Y_distances_adjusted, self.atom_context_num, dim=-1, largest=False
@@ -823,6 +829,7 @@ def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]],
                          all_atoms: bool = False) -> tuple[TensorType["b n_tokens 23 3", float], TensorType["b n_tokens 23"]]:
     """
     Get token-level coordinates (padded to max_num_atoms per token). Batched version of pad_atom_feats_to_tokenwise for just coords.
+    tokenwise_atom_idxs_mask is basically token_pad_mask for 23 atoms per token.
     """
     assert (backbone_only and sidechain_only) == False, "Should use all_atoms flag for all atoms"  
     assert (backbone_only and all_atoms) == False, "Should use sidechain_only flag for sidechain atoms"  
@@ -832,19 +839,23 @@ def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]],
     tokenwise_atom_idxs = batch["tokenwise_atom_idxs"]
     tokenwise_atom_idxs_mask = batch["tokenwise_atom_idxs_mask"]
     
+    atomwise_chain_is_protein = batch["chain_is_protein"].gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] # re-mask out pad atoms
+    
     # Gather coords    
     if backbone_only:
-        prot_bb_atom_mask = batch["prot_bb_atom_mask"] * batch["atom_resolved_mask"]
+        prot_bb_atom_mask = batch["prot_bb_atom_mask"] * batch["atom_resolved_mask"] * atomwise_chain_is_protein #! changed 251101 (JH)
         X_backbone = batch["coords"] * prot_bb_atom_mask.unsqueeze(-1)
         X_backbone = batched_gather(X_backbone, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask[..., None]
-        tokenwise_backbone_mask = batched_gather(prot_bb_atom_mask, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask
+        tokenwise_backbone_mask = batched_gather(prot_bb_atom_mask, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask        
+        
         return X_backbone, tokenwise_backbone_mask
     
     elif sidechain_only:
-        prot_scn_atom_mask = batch["prot_scn_atom_mask"] * batch["atom_resolved_mask"]
+        prot_scn_atom_mask = batch["prot_scn_atom_mask"] * batch["atom_resolved_mask"] * atomwise_chain_is_protein #! changed 251101 (JH)
         X_sidechain = batch["coords"] * prot_scn_atom_mask.unsqueeze(-1)
         X_sidechain = batched_gather(X_sidechain, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask[..., None]
         tokenwise_sidechain_mask = batched_gather(prot_scn_atom_mask, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask
+                
         return X_sidechain, tokenwise_sidechain_mask
     
     elif all_atoms:
@@ -852,6 +863,7 @@ def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]],
         tokenwise_atom_cond_mask = batched_gather(batch["atom_cond_mask"], tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask
 
         X_all = X_all * tokenwise_atom_cond_mask.unsqueeze(-1)  # zero out masked atoms
+        
         return X_all, tokenwise_atom_cond_mask
     else:
         raise ValueError("Invalid flag")

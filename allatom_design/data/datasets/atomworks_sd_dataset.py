@@ -204,8 +204,8 @@ class SDDataset(MolecularDataset):
             
         if self.cfg.debug:
             chain_df = chain_df[chain_df["pdb_id"].isin(val_split)]
-            train_pdb_ids = val_split[:len(val_split)//2]
-            val_pdb_ids = val_split[len(val_split)//2:]
+            train_pdb_ids = val_split[:3*len(val_split)//4]
+            val_pdb_ids = val_split[3*len(val_split)//4:]
             chain_df.loc[chain_df["pdb_id"].isin(train_pdb_ids), "phase"] = "train"
             chain_df.loc[chain_df["pdb_id"].isin(val_pdb_ids), "phase"] = "val"
         else:                                            
