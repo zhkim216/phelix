@@ -208,17 +208,17 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
         return out
     
     def _sum_nucleic_acid_cluster_residues_per_pdb(g):
-        mask = g['q_pn_unit_isin_nucleic_acid_chain_cluster'].notna()
+        mask = g['q_pn_unit_nucleic_acid_chain_cluster'].notna()
         if not mask.any():
             return pd.Series(0, index=g.index, dtype='int64')
 
-        tmp = g.loc[mask, ['q_pn_unit_isin_nucleic_acid_chain_cluster','q_pn_unit_iid','q_pn_unit_num_resolved_residues']].copy()
-        tmp = tmp.drop_duplicates(subset=['q_pn_unit_isin_nucleic_acid_chain_cluster','q_pn_unit_iid'])
+        tmp = g.loc[mask, ['q_pn_unit_nucleic_acid_chain_cluster','q_pn_unit_iid','q_pn_unit_num_resolved_residues']].copy()
+        tmp = tmp.drop_duplicates(subset=['q_pn_unit_nucleic_acid_chain_cluster','q_pn_unit_iid'])
 
-        sums = tmp.groupby('q_pn_unit_isin_nucleic_acid_chain_cluster')['q_pn_unit_num_resolved_residues'].sum()
+        sums = tmp.groupby('q_pn_unit_nucleic_acid_chain_cluster')['q_pn_unit_num_resolved_residues'].sum()
 
         out = pd.Series(index=g.index, dtype='float')
-        out.loc[mask] = g.loc[mask, 'q_pn_unit_isin_nucleic_acid_chain_cluster'].map(sums)
+        out.loc[mask] = g.loc[mask, 'q_pn_unit_nucleic_acid_chain_cluster'].map(sums)
         out = out.fillna(0)
         return out
 
@@ -443,22 +443,22 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
         return result
 
     # cluster nucleotides where they are near each other
-    atomworks_parquet['q_pn_unit_isin_nucleic_acid_chain_cluster'] = atomworks_parquet.groupby('pdb_id', group_keys=False).apply(_assign_nucleic_acid_chain_clusters_per_pdb)
+    atomworks_parquet['q_pn_unit_nucleic_acid_chain_cluster'] = atomworks_parquet.groupby('pdb_id', group_keys=False).apply(_assign_nucleic_acid_chain_clusters_per_pdb)
     atomworks_parquet['q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster'] = (atomworks_parquet.groupby('pdb_id', group_keys=False)
                                                                             .apply(_sum_nucleic_acid_cluster_residues_per_pdb)
                                                                             .astype('int64')
                                                                             )
     
     
-    atomworks_parquet["q_pn_unit_is_nuc_polymer"] = atomworks_parquet["q_pn_unit_isin_nucleic_acid_chain_cluster"].notna() & (atomworks_parquet["q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster"] >= 2 * NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
-    atomworks_parquet["q_pn_unit_is_nuc_ligand"] = atomworks_parquet["q_pn_unit_isin_nucleic_acid_chain_cluster"].notna() & (atomworks_parquet["q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster"] < 2 * NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
+    atomworks_parquet["q_pn_unit_is_nuc_polymer"] = atomworks_parquet["q_pn_unit_nucleic_acid_chain_cluster"].notna() & (atomworks_parquet["q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster"] >= 2 * NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
+    atomworks_parquet["q_pn_unit_is_nuc_ligand"] = atomworks_parquet["q_pn_unit_nucleic_acid_chain_cluster"].notna() & (atomworks_parquet["q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster"] < 2 * NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
     
     atomworks_parquet.to_parquet(f"{output_dir_path}/metadata_nuc_clustered.parquet")
             
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input_parquet_path", default="/scratch/users/zhkim216/datasets/atomworks_af3/metadata.parquet")
-    ap.add_argument("--output_dir_path", default="/scratch/users/zhkim216/datasets/atomworks_af3")
+    ap.add_argument("--input_parquet_path", default="/home/possu/jinho/datasets/debug_atomworks_lmpnn/metadata.parquet")
+    ap.add_argument("--output_dir_path", default="/home/possu/jinho/datasets/debug_atomworks_lmpnn")
     args = ap.parse_args()
     metadata_ligand_chain_clustering(input_parquet_path = args.input_parquet_path, output_dir_path = args.output_dir_path)
 
