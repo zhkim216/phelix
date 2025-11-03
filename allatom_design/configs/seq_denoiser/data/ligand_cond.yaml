@@ -1,13 +1,13 @@
 task: ${model.task}
-pdb_path: /scratch/users/zhkim216/datasets
-parquet_path: ${data.pdb_path}/metadata_clustered_03.parquet
+pdb_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn
+parquet_path: ${data.pdb_path}/metadata_ligand_clustered_seq_clustered_03.parquet
 validation_ids_file: /scratch/users/zhkim216/datasets/splits/lmpnn_val_list.csv
 debug: ${train.debug}
 debug_num_ids: 10000 #! For debugging
 prefetch_buffer_size: 4
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
 residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
-exclude_val_cluster: false
+exclude_val_cluster: true
 ligand_clustered: false
 keep_pn_unit_iids_in_extra_info: true #! (JH) changed 251031
 
@@ -23,30 +23,30 @@ sampling_weights:
     a_nuc: 1.0
     a_metal: 1.0
   betas:
-    beta_chain: 0.0
+    beta_chain: 1.0
     beta_interface: 1.0
 
 train_filters:
   chain_filter_protein:
-    - "num_polymer_pn_units < 4" #! DEBUG, to exclude big examples
-    # - "deposition_date <= '2021-09-30'"
+    - "num_polymer_pn_units < 50" 
+    - "deposition_date <= '2022-12-12'" #! LMPNN training data cutoff
     - "resolution < 9.0"
-    - "16 < q_pn_unit_sequence_length < 512" #! DEBUG      
+    - "16 < q_pn_unit_sequence_length < 2048" #! DEBUG      
   chain_filter_protein_ligand:
-    - "num_polymer_pn_units < 4"
     - "resolution < 3.5"
+    - "num_polymer_pn_units < 50" 
   interface:
     - "(n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_nuc == 1) or (n_prot == 1 and n_metal == 1)"
 
 val_filters:
   chain_filter_protein:
-    - "num_polymer_pn_units < 4" #! DEBUG, to exclude big examples
-    # - "deposition_date <= '2021-09-30'"
+    - "num_polymer_pn_units < 50" 
+    - "deposition_date <= '2022-12-12'" #! LMPNN training data cutoff
     - "resolution < 9.0"
-    - "16 < q_pn_unit_sequence_length < 512" #! DEBUG      
+    - "16 < q_pn_unit_sequence_length < 2048" #! DEBUG      
   chain_filter_protein_ligand:
-    - "num_polymer_pn_units < 4"
     - "resolution < 3.5"
+    - "num_polymer_pn_units < 50" 
   interface:
     - "(n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_nuc == 1) or (n_prot == 1 and n_metal == 1)"
 
@@ -71,7 +71,7 @@ featurizer_cfg:
   apply_random_augmentation: true
   translation_scale: 1.0
 
-samples_per_epoch: 50000 
+samples_per_epoch: 100
 batch_size: ${train.batch_size}
 num_workers: ${num_workers}
 random_seed: ${train.seed}
