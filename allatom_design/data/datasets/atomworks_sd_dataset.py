@@ -138,7 +138,7 @@ class SDDataset(MolecularDataset):
         self._ensure_worker_rng() # Prepare per-worker random number generator for fallback
         
         # Load cached example.        
-        example_id = self.idx_to_id(idx)                                    
+        example_id = self.idx_to_id(idx)                                            
         parsed_row = self.parsed_df.loc[example_id]        
                             
         try:
@@ -211,14 +211,12 @@ class SDDataset(MolecularDataset):
         else:                                            
             chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
             chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"        
-        if self.cfg.exclude_val_cluster:
-            val_cluster_ids = list(chain_df[chain_df["phase"] == "val"]["q_pn_unit_cluster_id"])
+            
+        if self.cfg.exclude_val_cluster: #Todo: This is a strategy used in ligandmpnn, need to be revisited later (JH)
+            self.val_cluster_ids = list(set(chain_df[(chain_df['q_pn_unit_is_protein'] == True) & (chain_df['phase'] == 'val')]['q_pn_unit_cluster_id']))
             
         chain_df = chain_df[chain_df["phase"] == self.phase]
-        
-        if self.cfg.exclude_val_cluster and self.phase == "train":
-            chain_df = chain_df[~chain_df["q_pn_unit_cluster_id"].isin(val_cluster_ids)]
-                                
+                                                
         # Add chain counts info and sampling weights
         if self.cfg.debug: 
             t0 = time.perf_counter()
@@ -280,6 +278,11 @@ class SDDataset(MolecularDataset):
 
         logger.info(f"Final {self.phase} dataset contains {len(self.chain_df)} chains and {len(self.interface_df)} interfaces")
         
+        if self.cfg.exclude_val_cluster and self.phase == "train":
+            self.chain_df = self.chain_df[~self.chain_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids)]
+            self.interface_df = self.interface_df[~self.interface_df['q_pn_unit_cluster_id_1'].isin(self.val_cluster_ids)]            
+            self.interface_df = self.interface_df[~self.interface_df['q_pn_unit_cluster_id_2'].isin(self.val_cluster_ids)]            
+
         parsed_df = pd.concat([
             self.chain_df.apply(chain_parser.parse, axis=1),
             self.interface_df.apply(interface_parser.parse, axis=1)
