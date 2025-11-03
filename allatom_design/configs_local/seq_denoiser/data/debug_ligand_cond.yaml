@@ -3,13 +3,22 @@ pdb_path: /home/possu/jinho/datasets/debug_atomworks_lmpnn
 parquet_path: /home/possu/jinho/datasets/debug_atomworks_lmpnn/metadata_nuc_clustered_seq_clustered_03.parquet
 validation_ids_file: /home/possu/jinho/datasets/splits/lmpnn_val_list.csv  # Boltz val set ids. Filtering is case insensitive, no extension.
 debug: ${train.debug}
-debug_num_ids: 1000 #! For debugging
-prefetch_buffer_size: 4
+debug_num_ids: 80 #! For debugging
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
 residue_cache_dir: /home/possu/jinho/datasets/atomworks_cached_residue_data
 exclude_val_cluster: false
 ligand_clustered: false
 keep_pn_unit_iids_in_extra_info: true #! (JH) changed 251031
+
+data_loader_cfg:
+  prefetch_factor: 1
+  prefetch_buffer_size: 1
+  train_pin_memory: true
+  train_persistent_workers: true
+  val_pin_memory: false
+  val_persistent_workers: false
+  
+
 
 sampling_weights:
   alphas_chain:
