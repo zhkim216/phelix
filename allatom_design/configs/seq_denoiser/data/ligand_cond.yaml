@@ -1,10 +1,10 @@
 task: ${model.task}
-pdb_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn
-parquet_path: ${data.pdb_path}/metadata_ligand_clustered_seq_clustered_03.parquet
+pdb_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_re
+parquet_path: ${data.pdb_path}/metadata_nuc_clustered_seq_clustered_03.parquet
 validation_ids_file: /scratch/users/zhkim216/datasets/splits/lmpnn_val_list.csv
 debug: ${train.debug}
 debug_num_ids: 10000 #! For debugging
-prefetch_buffer_size: 4
+prefetch_buffer_size: 1
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
 residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 exclude_val_cluster: true
@@ -24,15 +24,16 @@ sampling_weights:
     a_metal: 1.0
   betas:
     beta_chain: 1.0
-    beta_interface: 1.0
+    beta_interface: 3.0
 
 train_filters:
   chain_filter_protein:
-    - "num_polymer_pn_units < 50" 
+    - "num_polymer_pn_units < 50" #! DEBUG      
     - "deposition_date <= '2022-12-12'" #! LMPNN training data cutoff
     - "resolution < 9.0"
-    - "16 < q_pn_unit_sequence_length < 2048" #! DEBUG      
+    - "16 < q_pn_unit_sequence_length < 2048" 
   chain_filter_protein_ligand:
+    - "num_polymer_pn_units < 50" #! DEBUG      
     - "resolution < 3.5"
     - "not (q_pn_unit_is_nuc_ligand and q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster <= 3)"
     - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
@@ -41,11 +42,12 @@ train_filters:
 
 val_filters:
   chain_filter_protein:
-    - "num_polymer_pn_units < 50" 
+    - "num_polymer_pn_units < 50" #! DEBUG      
     - "deposition_date <= '2022-12-12'" #! LMPNN training data cutoff
     - "resolution < 9.0"
-    - "16 < q_pn_unit_sequence_length < 2048" #! DEBUG      
+    - "16 < q_pn_unit_sequence_length < 2048" 
   chain_filter_protein_ligand:
+    - "num_polymer_pn_units < 50" #! DEBUG      
     - "resolution < 3.5"
     - "not (q_pn_unit_is_nuc_ligand and q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster <= 3)"
     - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
@@ -56,7 +58,7 @@ val_filters:
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: ['NA', 'CL', 'K', 'BR'] # SEP, TPO are excluded in this list, check atomworks/constants.py
+  remove_ccds: ['NA', 'CL', 'K', 'BR', 'UNL', 'UNX', 'UNL'] # SEP, TPO are excluded in this list, check atomworks/constants.py
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
@@ -67,13 +69,13 @@ featurizer_cfg:
   max_atoms: 4608 #! DEBUG
   crop_center_cutoff_distance: 15.0
   crop_spatial_p: 0.5
-  remove_unresolved_tokens: true #! (JH) changed 250926,
+  remove_unresolved_tokens: false #! (JH) changed 250926,
   residue_cache_dir: ${data.residue_cache_dir}
   max_conformers_per_residue: 50
   apply_random_augmentation: true
   translation_scale: 1.0
 
-samples_per_epoch: 100
+samples_per_epoch: 1000
 batch_size: ${train.batch_size}
 num_workers: ${num_workers}
 random_seed: ${train.seed}
