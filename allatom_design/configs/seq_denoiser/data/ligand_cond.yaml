@@ -4,12 +4,19 @@ parquet_path: ${data.pdb_path}/metadata_clustered_03.parquet
 validation_ids_file: /scratch/users/zhkim216/datasets/splits/lmpnn_val_list.csv
 debug: ${train.debug}
 debug_num_ids: 10000 #! For debugging
-prefetch_buffer_size: 4
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
 residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 exclude_val_cluster: false
 ligand_clustered: false
 keep_pn_unit_iids_in_extra_info: true #! (JH) changed 251031
+
+data_loader_cfg:
+  prefetch_factor: 1
+  prefetch_buffer_size: 1
+  train_pin_memory: true
+  train_persistent_workers: true
+  val_pin_memory: false
+  val_persistent_workers: false
 
 sampling_weights:
   alphas_chain:
