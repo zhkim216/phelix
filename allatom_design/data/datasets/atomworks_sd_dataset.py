@@ -35,7 +35,13 @@ class AtomworksSDDataModule(L.LightningDataModule):
         self.pdb_path = cfg.pdb_path
         self._train_set = SDDataset(cfg, phase="train")
         self._val_set = SDDataset(cfg, phase="val")
-        self.prefetch_buffer_size = cfg.prefetch_buffer_size                
+        
+        self.prefetch_factor = cfg.data_loader_cfg.prefetch_factor
+        self.prefetch_buffer_size = cfg.data_loader_cfg.prefetch_buffer_size                
+        self.train_pin_memory = cfg.data_loader_cfg.train_pin_memory
+        self.train_persistent_workers = cfg.data_loader_cfg.train_persistent_workers
+        self.val_pin_memory = cfg.data_loader_cfg.val_pin_memory
+        self.val_persistent_workers = cfg.data_loader_cfg.val_persistent_workers
         
     def train_dataloader(self) -> DataLoader:
         weights = torch.as_tensor(self._train_set.get_sampling_weights(), dtype=torch.float32)        
@@ -66,11 +72,12 @@ class AtomworksSDDataModule(L.LightningDataModule):
                             batch_size=self.cfg.batch_size,
                             num_workers=self.cfg.num_workers,
                             shuffle=False,
-                            pin_memory=True,
+                            pin_memory=self.train_pin_memory,
                             drop_last=True,
                             collate_fn=sd_collator,
-                            persistent_workers=(self.cfg.num_workers > 0),
-                            worker_init_fn=worker_init_fn)
+                            persistent_workers=self.train_persistent_workers,
+                            worker_init_fn=worker_init_fn,
+                            prefetch_factor=self.prefetch_factor)
 
         self._train_sampler = sampler
 
@@ -82,7 +89,9 @@ class AtomworksSDDataModule(L.LightningDataModule):
                                 batch_size=self.cfg.batch_size,
                                 num_workers=self.cfg.num_workers,
                                 shuffle=False,
-                                pin_memory=False,
+                                pin_memory=self.val_pin_memory,
+                                persistent_workers=self.val_persistent_workers,
+                                prefetch_factor=self.prefetch_factor,
                                 drop_last=True, #! (JH) changed 251029
                                 collate_fn=sd_collator,
                                 worker_init_fn=worker_init_fn)
