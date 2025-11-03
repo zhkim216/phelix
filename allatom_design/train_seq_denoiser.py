@@ -21,7 +21,7 @@ from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
 from allatom_design.data.datasets.atomworks_sd_dataset import AtomworksSDDataModule    
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
-@hydra.main(config_path="configs_local/seq_denoiser", config_name="debug_seq_denoiser", version_base="1.3.2")
+@hydra.main(config_path="configs/seq_denoiser", config_name="seq_denoiser", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Script for training an sequence denoiser model.
@@ -100,7 +100,7 @@ def main(cfg: DictConfig):
         print(f"Loading model weights from {cfg.finetuning.ckpt_path}")
         checkpoint = torch.load(cfg.finetuning.ckpt_path, map_location="cpu")
         state_dict = checkpoint["state_dict"]
-        if not cfg.train.compile_model:
+        if not cfg.train.compile.compile_model:
             state_dict = repair_state_dict(state_dict)
         lit_model.load_state_dict(state_dict, strict=True)
 
