@@ -34,7 +34,8 @@ train_filters:
     - "16 < q_pn_unit_sequence_length < 2048" #! DEBUG      
   chain_filter_protein_ligand:
     - "resolution < 3.5"
-    - "num_polymer_pn_units < 50" 
+    - "not (q_pn_unit_is_nuc_ligand and q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster <= 3)"
+    - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
   interface:
     - "(n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_nuc == 1) or (n_prot == 1 and n_metal == 1)"
 
@@ -46,7 +47,8 @@ val_filters:
     - "16 < q_pn_unit_sequence_length < 2048" #! DEBUG      
   chain_filter_protein_ligand:
     - "resolution < 3.5"
-    - "num_polymer_pn_units < 50" 
+    - "not (q_pn_unit_is_nuc_ligand and q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster <= 3)"
+    - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
   interface:
     - "(n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_nuc == 1) or (n_prot == 1 and n_metal == 1)"
 
