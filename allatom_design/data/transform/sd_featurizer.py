@@ -473,22 +473,33 @@ class AtomizeShortPolymers(Transform):
         if "atomize" not in aa.get_annotation_categories():
             aa.set_annotation("atomize", np.zeros(len(aa), dtype=bool))
 
-        pn = aa.pn_unit_iid
-        res_id = aa.res_id
-        ct = aa.chain_type
-
-        for pn_iid in np.unique(pn):
-            sel = pn == pn_iid
-            ct0 = ct[sel][0]
-            n_res = len(np.unique(res_id[sel]))
-            is_prot = ct0 in (aw_enums.ChainTypeInfo.PROTEINS + (ChainType.PEPTIDE_NUCLEIC_ACID,))
-            is_na = ct0 in aw_enums.ChainTypeInfo.NUCLEIC_ACIDS
-
-            if (is_prot and n_res <= self.peptide_max_res) or (is_na and n_res <= self.na_max_res):
+        # Use flags from extra_info (supports '', _1, _2, ...)
+        extra = data.get("extra_info", {})
+        pn_raw = aa.pn_unit_iid
+        pn_str = pn_raw.astype(str)  # match by string
+        
+        # Detect suffixes like AddChainTypeFeatrues
+        suffixes = []
+        for k in extra.keys():
+            if k.startswith("q_pn_unit_iid"):
+                suffixes.append(k[len("q_pn_unit_iid"):])
+        suffixes = sorted(set(suffixes))
+                
+        for sfx in suffixes:
+            qid = extra.get(f"q_pn_unit_iid{sfx}", None)
+            if qid is None:
+                continue
+            is_pep = bool(extra.get(f"q_pn_unit_is_peptide{sfx}", False))
+            is_nuc_lig = bool(extra.get(f"q_pn_unit_is_nuc_ligand{sfx}", False))
+            if not (is_pep or is_nuc_lig):
+                continue
+            
+            sel = pn_str == str(qid).strip()
+            if sel.any():
                 aa.atomize[sel] = True
                 aa.is_polymer[sel] = False
                 aa.chain_type[sel] = aw_enums.ChainType.NON_POLYMER
-
+                                
         data["atom_array"] = aa
         return data
     
@@ -503,14 +514,10 @@ class AddChainTypeFeatrues(Transform):
         small_molecule_cols = [
         "q_pn_unit_is_small_molecule",
         "q_pn_unit_is_peptide",
-        "q_pn_unit_is_DNA_ligand",
-        "q_pn_unit_is_RNA_ligand",
-        "q_pn_unit_is_RNA_DNA_hybrid_ligand",
+        "q_pn_unit_is_nuc_ligand",
         ]
         nuc_cols = [
-        "q_pn_unit_is_DNA_ligand",
-        "q_pn_unit_is_RNA_ligand",
-        "q_pn_unit_is_RNA_DNA_hybrid_ligand",
+        "q_pn_unit_is_nuc_polymer",
         ]
     
         metal_col = "q_pn_unit_is_metal"
