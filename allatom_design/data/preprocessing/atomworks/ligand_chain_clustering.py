@@ -7,15 +7,19 @@ from collections import defaultdict, deque
 import argparse
 from multiprocessing import Pool, cpu_count
 
-def metadata_ligand_chain_clustering(input_parquet_path: str=None,
-                                    output_dir_path: str=None):
-
+def metadata_ligand_chain_clustering(args: argparse.Namespace):
     '''
     Followed the definition of ChainTypeInfo in atomworks/src/atomworks/enums.py 
     Note: 
     
     Didn't consider ChainType.OTHER_POLYMER. There are only 3ok2, 3ok4 in pdb dataset.
     '''
+
+    input_parquet_path = args.input_parquet_path
+    output_dir_path = args.output_dir_path
+    debug = args.debug
+    debug_num_pdb_ids = args.debug_num_pdb_ids
+    nucleic_acid_dist_threshold = args.nucleic_acid_dist_threshold
 
     # Load the original metadata parquet
     atomworks_parquet = pd.read_parquet(input_parquet_path)
@@ -51,9 +55,9 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
     atomworks_parquet["q_pn_unit_is_RNA"] = atomworks_parquet["q_pn_unit_type"].isin(RNA_chain_type_values)
     atomworks_parquet["q_pn_unit_is_RNA_DNA_hybrid"] = atomworks_parquet["q_pn_unit_type"].isin(RNA_DNA_hybrid_chain_type_values)
     
-    #! FIXME
-    # debug_pdb_ids = atomworks_parquet['pdb_id'].unique()
-    # atomworks_parquet = atomworks_parquet[atomworks_parquet['pdb_id'].isin(debug_pdb_ids)]                
+    if debug:
+        debug_pdb_ids = atomworks_parquet['pdb_id'].unique()[:debug_num_pdb_ids]
+        atomworks_parquet = atomworks_parquet[atomworks_parquet['pdb_id'].isin(debug_pdb_ids)]                
 
     ### Clustering non-protein chains
     def _split_components(iid):
@@ -124,18 +128,18 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
         return ", ".join(sorted(ids, key=_natural_key))
         
     def _assign_nucleic_acid_chain_clusters_per_pdb(g):
-        # DNA/RNA/RNA-DNA hybrid 체인만 대상
+        # Only DNA/RNA/RNA-DNA hybrid chains are considered
         na_mask = (g['q_pn_unit_is_DNA'] | g['q_pn_unit_is_RNA'] | g['q_pn_unit_is_RNA_DNA_hybrid'])
         if not na_mask.any():
             return pd.Series(index=g.index, dtype=object)
 
         sub = g.loc[na_mask, ['q_pn_unit_iid', 'q_pn_unit_contacting_pn_unit_iids']].copy()
 
-        # 체인 id -> 원자적 구성요소(콤마 분리) 매핑
+        # Map chain id to atomic components (comma-separated)
         rid_to_comps = {str(rid): tuple(_split_components(str(rid))) for rid in sub['q_pn_unit_iid'].astype(str)}
         atomic_nodes = set(c for comps in rid_to_comps.values() for c in comps)
 
-        # 각 체인이 보고한 (상대 체인, min_distance) 목록 수집
+        # Collect list of (target chain, min_distance) reported by each chain
         rid_contacts_pairs = {}
         for rid_raw, ssub in sub.groupby('q_pn_unit_iid'):
             rid = str(rid_raw)
@@ -144,9 +148,9 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
                 pairs.extend(_parse_contacts_with_distance(val))
             rid_contacts_pairs[rid] = pairs
 
-        dist_threshold = 4.0
+        dist_threshold = args.nucleic_acid_dist_threshold
 
-        # 방향 그래프(u -> v): min_distance ≤ 4.0 인 경우만, 대상/상대 모두 뉴클레오타이드여야 함
+        # Directed graph (u -> v): keep only when min_distance ≤ dist_threshold; both source and target must be nucleotides
         comp_dir_adj = {u: set() for u in atomic_nodes}
         for rid, comps in rid_to_comps.items():
             pairs = rid_contacts_pairs.get(rid, ())
@@ -158,14 +162,14 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
                         if v in atomic_nodes and v != u:
                             comp_dir_adj[u].add(v)
 
-        # OR semantics로 무방향 인접 리스트 구성
+        # Build undirected adjacency using OR semantics
         comp_adj = {u: set() for u in atomic_nodes}
         for u, vs in comp_dir_adj.items():
             for v in vs:
                 comp_adj[u].add(v)
                 comp_adj[v].add(u)
 
-        # 연결 요소 계산
+        # Compute connected components
         visited, components = set(), []
         for u in sorted(atomic_nodes, key=_natural_key):
             if u in visited:
@@ -182,7 +186,7 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
                         dq.append(y)
             components.append(comp_set)
 
-        # 컴포넌트 라벨: "(B_1, C_1, D_1)" 형태
+        # Component label format: "(B_1, C_1, D_1)"
         label_to_nodes = {}
         comp_label_of_node = {}
         for comp_set in components:
@@ -191,7 +195,7 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
             for node in comp_set:
                 comp_label_of_node[node] = label
 
-        # 각 rid(콤포지트 포함)에 라벨 할당
+        # Assign labels to each rid (including composite rids)
         rid_to_label = {}
         for rid, comps in rid_to_comps.items():
             nodes = set()
@@ -453,14 +457,103 @@ def metadata_ligand_chain_clustering(input_parquet_path: str=None,
     atomworks_parquet["q_pn_unit_is_nuc_polymer"] = atomworks_parquet["q_pn_unit_nucleic_acid_chain_cluster"].notna() & (atomworks_parquet["q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster"] >= 2 * NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
     atomworks_parquet["q_pn_unit_is_nuc_ligand"] = atomworks_parquet["q_pn_unit_nucleic_acid_chain_cluster"].notna() & (atomworks_parquet["q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster"] < 2 * NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
     
+    # -------------------------------------------------------------------------
+    # i) small molecule, metal, peptide: record per-row protein contact count/list
+    #    Columns: num_contacting_protein, contacting_protein_chains (e.g., "(A_1, B_1)")
+    # -------------------------------------------------------------------------
+    def _compute_contacts_to_proteins_per_pdb(g: pd.DataFrame) -> pd.DataFrame:
+        # Set of protein atomic chain ids
+        prot_atomic = set()
+        for iid in g.loc[g['q_pn_unit_is_protein'], 'q_pn_unit_iid'].astype(str):
+            prot_atomic.update(_split_components(iid))
+
+        def _prot_contacts_from_val(val):
+            # Parse contact list and intersect with protein atomic ids
+            atomic = set()
+            for cid in _parse_contacts(val):
+                atomic.update(_split_components(cid))
+            return atomic & prot_atomic
+
+        out = pd.DataFrame(index=g.index, columns=['num_contacting_protein', 'contacting_protein_chains'])
+        out['num_contacting_protein'] = 0
+        out['contacting_protein_chains'] = ""
+
+        sm_pep_metal_mask = (g['q_pn_unit_is_small_molecule'] | g['q_pn_unit_is_metal'] | g['q_pn_unit_is_peptide'])
+        for idx, row in g.loc[sm_pep_metal_mask, ['q_pn_unit_contacting_pn_unit_iids']].iterrows():
+            pcs = _prot_contacts_from_val(row['q_pn_unit_contacting_pn_unit_iids'])
+            out.at[idx, 'num_contacting_protein'] = int(len(pcs))
+            out.at[idx, 'contacting_protein_chains'] = ("(" + _join_sorted(pcs) + ")") if pcs else ""
+
+        out['num_contacting_protein'] = out['num_contacting_protein'].fillna(0).astype('int64')
+        out['contacting_protein_chains'] = out['contacting_protein_chains'].fillna("")
+        return out
+
+    tmp_sm = atomworks_parquet.groupby('pdb_id', group_keys=False).apply(_compute_contacts_to_proteins_per_pdb)
+    atomworks_parquet['num_contacting_protein'] = tmp_sm['num_contacting_protein']
+    atomworks_parquet['contacting_protein_chains'] = tmp_sm['contacting_protein_chains']
+
+    # --- ii) For nucleic_acid_chain_cluster, fill the same columns ---
+    # Union contacts across all chains in the cluster to get cluster-level
+    # protein contact count/list, then write them to each row's columns
+    def _compute_nuc_cluster_contacts_to_proteins_per_pdb(g: pd.DataFrame) -> pd.DataFrame:
+        # Set of protein atomic chain ids
+        prot_atomic = set()
+        for iid in g.loc[g['q_pn_unit_is_protein'], 'q_pn_unit_iid'].astype(str):
+            prot_atomic.update(_split_components(iid))
+
+        out = pd.DataFrame(index=g.index, columns=['num_contacting_protein', 'contacting_protein_chains'])
+        out['num_contacting_protein'] = pd.NA
+        out['contacting_protein_chains'] = pd.NA
+
+        mask = g['q_pn_unit_nucleic_acid_chain_cluster'].notna()
+        if not mask.any():
+            return out
+
+        # For each cluster, union contacts of all chains in the cluster
+        for cl, ssub in g.loc[mask].groupby('q_pn_unit_nucleic_acid_chain_cluster'):
+            prot_contacts = set()
+            for val in ssub['q_pn_unit_contacting_pn_unit_iids']:
+                for cid in _parse_contacts(val):
+                    prot_contacts.update(_split_components(cid))
+            prot_contacts &= prot_atomic
+
+            cnt = int(len(prot_contacts))
+            label = ("(" + _join_sorted(prot_contacts) + ")") if prot_contacts else ""
+
+            idx_mask = mask & (g['q_pn_unit_nucleic_acid_chain_cluster'] == cl)
+            out.loc[idx_mask, 'num_contacting_protein'] = cnt
+            out.loc[idx_mask, 'contacting_protein_chains'] = label
+
+        return out
+
+    # Initialize columns if missing
+    if 'num_contacting_protein' not in atomworks_parquet.columns:
+        atomworks_parquet['num_contacting_protein'] = 0
+    if 'contacting_protein_chains' not in atomworks_parquet.columns:
+        atomworks_parquet['contacting_protein_chains'] = ""
+
+    tmp_nc = atomworks_parquet.groupby('pdb_id', group_keys=False).apply(_compute_nuc_cluster_contacts_to_proteins_per_pdb)
+
+    # Overwrite only rows that belong to nucleic acid clusters
+    na_mask = atomworks_parquet['q_pn_unit_nucleic_acid_chain_cluster'].notna()
+    atomworks_parquet.loc[na_mask, 'num_contacting_protein'] = (
+        tmp_nc.loc[na_mask, 'num_contacting_protein'].fillna(0).astype('int64')
+    )
+    atomworks_parquet.loc[na_mask, 'contacting_protein_chains'] = (
+        tmp_nc.loc[na_mask, 'contacting_protein_chains'].fillna("")
+    )
+            
     atomworks_parquet.to_parquet(f"{output_dir_path}/metadata_nuc_clustered.parquet")
             
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input_parquet_path", default="/scratch/users/zhkim216/datasets/atomworks_af3_re/metadata.parquet")
-    ap.add_argument("--output_dir_path", default="/scratch/users/zhkim216/datasets/atomworks_af3_re")
+    ap.add_argument("--input_parquet_path", default="/scratch/users/zhkim216/atomworks_lmpnn_re/metadata.parquet")
+    ap.add_argument("--output_dir_path", default="/scratch/users/zhkim216/atomworks_lmpnn_re")
+    ap.add_argument("--debug", default = True)
+    ap.add_argument("--debug_num_pdb_ids", default = 1000)
+    ap.add_argument("--nucleic_acid_dist_threshold", default = 4.0)
     args = ap.parse_args()
-    metadata_ligand_chain_clustering(input_parquet_path = args.input_parquet_path, output_dir_path = args.output_dir_path)
+    metadata_ligand_chain_clustering(args)
 
     
     
