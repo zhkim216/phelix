@@ -16,6 +16,7 @@ from allatom_design.data.data import batched_gather
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
 from allatom_design.data.const import PERIODIC_TABLE_FEATURES
+# from allatom_design.utils.memscope import cuda_mem_scope #! For debugging memory usage
 
 class AtomMPNN(nn.Module):
     """Modified ProteinMPNN network to predict sequence from full atom structure."""
@@ -447,11 +448,29 @@ class TokenFeatures(nn.Module):
         RBF = torch.exp(-((D_expand - D_mu) / D_sigma)**2)
         return RBF
 
-    def _get_rbf(self, A, B, E_idx):
-        D_A_B = torch.sqrt(torch.sum((A[:,:,None,:] - B[:,None,:,:])**2,-1) + 1e-6) #[B, L, L]
-        D_A_B_neighbors = gather_edges(D_A_B[:,:,:,None], E_idx)[:,:,:,0] #[B,L,K]
-        RBF_A_B = self._rbf(D_A_B_neighbors)
+    def _get_rbf(self, A, B, E_idx): #! Assuming A and B are the coordinates of the single type atom (e.g. CA or CB)
+        """
+        (JH) Memory efficient version of _get_rbf. O(N^2) -> O(NK).
+        """
+                
+        K, C = E_idx.size(-1), A.size(-1)
+        
+        B_neighbors = torch.gather(
+            B.unsqueeze(2).expand(-1, -1, K, -1),
+            dim=1,
+            index=E_idx.unsqueeze(-1).expand(-1, -1, -1, C)
+        )
+        
+        diff = A.unsqueeze(2) - B_neighbors
+        D = torch.sqrt((diff*diff).sum(-1) + 1e-6)
+        RBF_A_B = self._rbf(D)
+            
         return RBF_A_B
+        
+        # D_A_B = torch.sqrt(torch.sum((A[:,:,None,:] - B[:,None,:,:])**2,-1) + 1e-6) #[B, L, L]
+        # D_A_B_neighbors = gather_edges(D_A_B[:,:,:,None], E_idx)[:,:,:,0] #[B,L,K]
+        # RBF_A_B = self._rbf(D_A_B_neighbors)
+        # return RBF_A_B
     
     def _get_cb_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_res 3"]:
         """

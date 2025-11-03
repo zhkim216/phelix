@@ -204,8 +204,8 @@ class SDDataset(MolecularDataset):
             
         if self.cfg.debug:
             chain_df = chain_df[chain_df["pdb_id"].isin(val_split)]
-            train_pdb_ids = val_split[:3*len(val_split)//4]
-            val_pdb_ids = val_split[3*len(val_split)//4:]
+            train_pdb_ids = val_split[:8*len(val_split)//9]
+            val_pdb_ids = val_split[8*len(val_split)//9:]
             chain_df.loc[chain_df["pdb_id"].isin(train_pdb_ids), "phase"] = "train"
             chain_df.loc[chain_df["pdb_id"].isin(val_pdb_ids), "phase"] = "val"
         else:                                            
@@ -244,6 +244,7 @@ class SDDataset(MolecularDataset):
         
         chain_filter_protein_ligand = self.cfg.train_filters.chain_filter_protein_ligand if self.phase == "train" else self.cfg.val_filters.chain_filter_protein_ligand
         dummy_chain_df = self._apply_filters(chain_filter_protein_ligand, dummy_chain_df)
+                        
         return chain_df, dummy_chain_df
         
 
@@ -444,9 +445,11 @@ def build_interface_df(chain_df: pd.DataFrame, dataset_name: str) -> pd.DataFram
 
     # Get columns we'll need from the source df
     chain_specific_cols = ["q_pn_unit_iid", "q_pn_unit_type", "q_pn_unit_sequence_length", "q_pn_unit_cluster_id", \
-                           'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_DNA_polymer', 'q_pn_unit_is_DNA_ligand', \
-                            'q_pn_unit_is_RNA_polymer', 'q_pn_unit_is_RNA_ligand', 'q_pn_unit_is_RNA_DNA_hybrid_polymer', \
-                            'q_pn_unit_is_RNA_DNA_hybrid_ligand', 'q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal']  #! columns we need for each chain (JH) changed 250925    
+                           'q_pn_unit_nucleic_acid_chain_cluster', \
+                           'q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster', \
+                           'q_pn_unit_is_RNA', 'q_pn_unit_is_DNA', 'q_pn_unit_is_RNA_DNA_hybrid', \
+                           'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_nuc_polymer', 'q_pn_unit_is_nuc_ligand', \
+                            'q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal']  #! columns we need for each chain 
     base_cols = [
         "example_id", "pdb_id", "assembly_id", "path", "q_pn_unit_contacting_pn_unit_iids",
         *chain_specific_cols,
@@ -492,8 +495,6 @@ def build_interface_df(chain_df: pd.DataFrame, dataset_name: str) -> pd.DataFram
 
     return interface_df
 
-# Todo (JH): Exclude the pockets with both small molecules and metals. Need to consider three chains at once.
-
 def _canonicalize_pair_columns(
     df: pd.DataFrame,
     order_by: str = "q_pn_unit_iid",
@@ -537,14 +538,10 @@ def add_chain_counts_info(df: pd.DataFrame) -> pd.DataFrame:
     small_molecule_cols = [
         "q_pn_unit_is_small_molecule",
         "q_pn_unit_is_peptide",
-        "q_pn_unit_is_DNA_ligand",
-        "q_pn_unit_is_RNA_ligand",
-        "q_pn_unit_is_RNA_DNA_hybrid_ligand",
+        "q_pn_unit_is_nuc_ligand",
     ]
     nuc_cols = [
-        "q_pn_unit_is_DNA_polymer",
-        "q_pn_unit_is_RNA_polymer",
-        "q_pn_unit_is_RNA_DNA_hybrid_polymer",
+        "q_pn_unit_is_nuc_polymer",
     ]
     metal_col = "q_pn_unit_is_metal"
     

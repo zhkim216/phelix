@@ -100,7 +100,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         return batch
 
-
     def get_training_random_noise(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
         """
         During training, adds random noise and noise labels for input coordinates.
