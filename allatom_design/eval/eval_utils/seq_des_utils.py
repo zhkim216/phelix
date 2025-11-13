@@ -166,8 +166,6 @@ def run_seq_des(
                     )
                     
                 # Compute sequence recovery metrics
-                if example_id == "1epo":
-                    print(1)
                 bi = example_id_to_batch_idx[example_id]
                 orig_res_types = batch["restype"][bi].argmax(dim=-1)          
                 seq_mask = (1 - batch["seq_cond_mask"][bi]) * batch["token_pad_mask"][bi] * batch["token_resolved_mask"][bi]
@@ -421,6 +419,22 @@ def get_sd_batch(
 
     If data_cfg is None, use default cif parser args.
     """
+
+    def _normalize_to_cif(p: str) -> str:
+        q = Path(p)
+        name = q.name.lower()
+        
+        if name.endswith(".cif") or name.endswith(".cif.gz"):
+            return str(q.with_name(name))
+
+        if name.endswith(".pdb"):
+            name = name[:-4] + ".cif"
+            return str(q.with_name(name))
+
+        return str(q.with_name(name + ".cif"))
+
+    pdb_paths = [_normalize_to_cif(p) for p in pdb_paths]
+
     if parallel_pool is None:
         # Load PDBs sequentially.
         batch_examples = [get_sd_example(pdb_path, data_cfg) for pdb_path in pdb_paths]

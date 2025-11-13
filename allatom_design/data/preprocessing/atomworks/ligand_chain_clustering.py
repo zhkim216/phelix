@@ -547,9 +547,9 @@ def metadata_ligand_chain_clustering(args: argparse.Namespace):
             
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input_parquet_path", default="/scratch/users/zhkim216/atomworks_lmpnn_re/metadata.parquet")
-    ap.add_argument("--output_dir_path", default="/scratch/users/zhkim216/atomworks_lmpnn_re")
-    ap.add_argument("--debug", default = True)
+    ap.add_argument("--input_parquet_path", default="/scratch/users/zhkim216/datasets/atomworks_af3_re/metadata.parquet")
+    ap.add_argument("--output_dir_path", default="/scratch/users/zhkim216/datasets/atomworks_af3_re")
+    ap.add_argument("--debug", default = False)
     ap.add_argument("--debug_num_pdb_ids", default = 1000)
     ap.add_argument("--nucleic_acid_dist_threshold", default = 4.0)
     args = ap.parse_args()
