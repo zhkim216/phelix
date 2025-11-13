@@ -21,7 +21,7 @@ from allatom_design.eval.eval_utils.seq_des_utils import (get_seq_des_model,
                                                           run_lc_seq_des)
 
 
-@hydra.main(config_path="../../configs/eval/sampling", config_name="lc_seq_des_multi", version_base="1.3.2")
+@hydra.main(config_path="../../configs_local/eval/sampling", config_name="lc_seq_des_multi", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Script for designing sequences for multiple PDBs.
@@ -89,9 +89,37 @@ def main(cfg: DictConfig):
                                  pos_constraint_df=pos_constraint_df,
                                  out_dir=log_dir)
 
-        # Save outputs to CSV
-        output_df = pd.DataFrame(outputs)
-        output_df.to_csv(f"{log_dir}/seq_des_outputs.csv", index=False)
+        # Save outputs to CSV (split per-sample vs per-PDB)
+        sample_len = len(outputs["example_id"])
+        sample_cols = {
+            "example_id": outputs["example_id"],
+            "seq": outputs["seq"],
+            "U": outputs["U"],
+        }
+        # add per-sample metrics if lengths match
+        for k in ("sample_seq_recovery", "sample_sp_seq_recovery"):
+            if k in outputs and isinstance(outputs[k], list) and len(outputs[k]) == sample_len:
+                sample_cols[k] = outputs[k]
+        sample_df = pd.DataFrame(sample_cols)
+        sample_df.to_csv(f"{log_dir}/seq_des_outputs_samples.csv", index=False)
+
+        # per-PDB averages
+        ex_ids = list(dict.fromkeys(outputs["example_id"]))
+        if "sample_avg_seq_recovery" in outputs and "sample_avg_sp_seq_recovery" in outputs:
+            per_pdb_df = pd.DataFrame({
+                "example_id": ex_ids,
+                "sample_avg_seq_recovery": outputs["sample_avg_seq_recovery"],
+                "sample_avg_sp_seq_recovery": outputs["sample_avg_sp_seq_recovery"],
+            })
+            per_pdb_df.to_csv(f"{log_dir}/seq_des_outputs_per_pdb.csv", index=False)
+
+        # summary (scalars)
+        summary = {
+            "total_avg_seq_recovery": outputs.get("total_avg_seq_recovery", None),
+            "total_avg_sp_seq_recovery": outputs.get("total_avg_sp_seq_recovery", None),
+        }
+        with open(Path(log_dir, "summary.yaml"), "w") as f:
+            yaml.safe_dump(summary, f)
     else:
         # Sweep over checkpoints in the specified directory
         ckpt_dir = Path(cfg.sweep_cfg.ckpt_dir)
@@ -119,13 +147,41 @@ def main(cfg: DictConfig):
                                      pos_constraint_df=pos_constraint_df,
                                      out_dir=log_dir)
 
-            # Save outputs to CSV with checkpoint-specific name
-            output_df = pd.DataFrame(outputs)
-            if step_val is not None and epoch_val is not None:
-                out_csv = Path(log_dir, f"seq_des_outputs_step{step_val}-epoch{epoch_val}.csv")
-            else:
-                out_csv = Path(log_dir, f"seq_des_outputs_{ckpt_path.stem}.csv")
-            output_df.to_csv(out_csv, index=False)
+            # Save outputs to CSV with checkpoint-specific name (split)
+            base_stem = (
+                f"seq_des_outputs_step{step_val}-epoch{epoch_val}"
+                if (step_val is not None and epoch_val is not None)
+                else f"seq_des_outputs_{ckpt_path.stem}"
+            )
+
+            sample_len = len(outputs["example_id"])
+            sample_cols = {
+                "example_id": outputs["example_id"],
+                "seq": outputs["seq"],
+                "U": outputs["U"],
+            }
+            for k in ("sample_seq_recovery", "sample_sp_seq_recovery"):
+                if k in outputs and isinstance(outputs[k], list) and len(outputs[k]) == sample_len:
+                    sample_cols[k] = outputs[k]
+            sample_df = pd.DataFrame(sample_cols)
+            sample_df.to_csv(Path(log_dir, f"{base_stem}_samples.csv"), index=False)
+
+            if "sample_avg_seq_recovery" in outputs and "sample_avg_sp_seq_recovery" in outputs:
+                ex_ids = list(dict.fromkeys(outputs["example_id"]))
+                per_pdb_df = pd.DataFrame({
+                    "example_id": ex_ids,
+                    "sample_avg_seq_recovery": outputs["sample_avg_seq_recovery"],
+                    "sample_avg_sp_seq_recovery": outputs["sample_avg_sp_seq_recovery"],
+                })
+                per_pdb_df.to_csv(Path(log_dir, f"{base_stem}_per_pdb.csv"), index=False)
+
+            # summary (scalars) per checkpoint
+            summary = {
+                "total_avg_seq_recovery": outputs.get("total_avg_seq_recovery", None),
+                "total_avg_sp_seq_recovery": outputs.get("total_avg_sp_seq_recovery", None),
+            }
+            with open(Path(log_dir, f"{base_stem}_summary.yaml"), "w") as f:
+                yaml.safe_dump(summary, f)
 
             # Wandb logging per checkpoint in sweep
             if not wandb_kwargs.get("no_wandb", True):
