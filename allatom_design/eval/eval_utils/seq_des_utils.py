@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
+from atomworks.ml.preprocessing.get_pn_unit_data_from_structure import DataPreprocessor
 from atomworks.io.parser import parse as aw_parse
 from atomworks.io.utils import non_rcsb
 from atomworks.io.utils.io_utils import to_cif_string
@@ -319,6 +320,166 @@ def run_seq_des_ensemble(
 
     return outputs
 
+def run_lc_seq_des(
+    *,
+    model: SeqDenoiser = None,
+    load_from_cache: bool = True,
+    featurizer_cfg: DictConfig = None,
+    sampling_cfg: DictConfig = None,
+    metadata: pd.DataFrame = None,
+    pdb_paths: list[str] = None,
+    device: str = None,
+    out_dir: str = None,
+    pos_constraint_df: pd.DataFrame | None = None,
+) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
+    """
+    Given a list of processed structure files, run sequence design on them.
+
+    If out_dir is not None, PDBs with sampled sequences will be saved to the provided directory. In this case, run_aux
+    will be a dictionary with the following keys:
+        - "out_pdb": list of output PDB paths
+        - "pred_seqs": list of predicted sequences as a string for each sample
+    """
+    # Set up outputs.
+    outputs = defaultdict(list)
+    sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
+    Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
+
+    # Validate pos_constraint_df.
+    if pos_constraint_df is not None:
+        valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype"]
+        if not set(pos_constraint_df.columns).issubset(valid_columns):
+            # Columns in input df must be a subset of valid columns.
+            raise ValueError(
+                f"Invalid columns in pos_constraint_df. Expected subset of {valid_columns}. "
+                f"Found: {pos_constraint_df.columns}"
+            )
+        # Set index to pdb name.
+        pos_constraint_df = pos_constraint_df.set_index("pdb_key")
+
+        # Set empty string to NaN for easier parsing.
+        pos_constraint_df = pos_constraint_df.replace("", np.nan)
+
+    # Print omitted amino acids.
+    if sampling_cfg.verbose and sampling_cfg.omit_aas is not None:
+        print(f"Omitting aatype sampling for: {sampling_cfg.omit_aas}")
+
+    # Process PDBs in parallel.
+    parallel_context = Parallel(n_jobs=sampling_cfg.num_workers) if sampling_cfg.num_workers > 1 else nullcontext()
+
+    # Begin sampling.
+    pbar = tqdm(
+        total=len(pdb_paths),
+        desc=f"Sampling {len(pdb_paths)} PDBs, {sampling_cfg.num_seqs_per_pdb} sequences per PDB...",
+    )
+    
+    total_avg_seq_recovery = 0.0
+    total_avg_sp_seq_recovery = 0.0 #! small molecule pocket
+    # total_avg_mp_seq_recovery = 0.0 #! metal pocket
+    # total_avg_np_seq_recovery = 0.0 #! nucleotide pocket
+    with parallel_context as parallel_pool:
+        for pi in range(0, len(pdb_paths), sampling_cfg.batch_size):
+            batch_pdb_paths = pdb_paths[pi : pi + sampling_cfg.batch_size]
+            B = len(batch_pdb_paths)
+            batch = get_sd_batch(batch_pdb_paths, featurizer_cfg=featurizer_cfg, device=device, parallel_pool=parallel_pool, 
+                                 load_from_cache=load_from_cache, metadata=metadata)
+
+            # Initialize seq_cond and atom_cond masks.
+            batch = initialize_sampling_masks(batch)
+            
+            # Initialize ligand pocket mask if ligand conditioning is enabled.
+            if sampling_cfg.ligand_conditioning:
+                batch = initialize_pocket_mask(batch, ligand_pocket_dist_cutoff=sampling_cfg.ligand_pocket_dist_cutoff,
+                                                      small_molecule_only=sampling_cfg.small_molecule_only)
+
+            # Parse fixed positions.
+            batch = parse_fixed_pos_info(batch, pos_constraint_df, verbose=sampling_cfg.verbose)
+
+            # Restrict aatype sampling at certain positions.
+            sampling_inputs = OmegaConf.to_container(sampling_cfg, resolve=True)
+            sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(
+                batch, pos_constraint_df, verbose=sampling_cfg.verbose
+            )
+
+            # Run sampling.
+            id_to_atom_arrays, id_to_aux = model.sample(batch, sampling_inputs=sampling_inputs)
+
+            # Save outputs.
+            example_id_to_batch_idx = {eid: idx for idx, eid in enumerate(batch["example_id"])}
+            for si, (example_id, atom_arrays) in enumerate(id_to_atom_arrays.items()):
+                aux = id_to_aux[example_id]
+                sample_stems = [f"{example_id}_sample{si}" for si in range(len(atom_arrays))]
+
+                # Save output atom arrays to cif files.
+                for ai, sample_stem in enumerate(sample_stems):
+                    # out_file = f"{sample_out_dir}/{sample_stem}.cif"
+                    # atom_array = atom_arrays[ai]
+                    # with open(out_file, "w") as f:
+                    #     f.write(to_cif_string(atom_array, include_nan_coords=False))
+
+                    outputs["example_id"].append(example_id)
+                    # outputs["out_pdb"].append(out_file)
+                    outputs["U"].append(aux[ai]["U"])
+
+                # Get sampled sequences as a string, with ":" to separate chains.
+                for ai in range(len(atom_arrays)):
+                    chain_info = non_rcsb.initialize_chain_info_from_atom_array(atom_arrays[ai])
+                    outputs["seq"].append(
+                        ":".join(info["processed_entity_canonical_sequence"] for info in chain_info.values())
+                    )
+                    
+                # Compute sequence recovery metrics            
+                bi = example_id_to_batch_idx[example_id]
+                orig_res_types = batch["restype"][bi].argmax(dim=-1)          
+                seq_mask = (1 - batch["seq_cond_mask"][bi]) * batch["token_pad_mask"][bi] * batch["token_resolved_mask"][bi]
+                lp_seq_mask = (1 - batch["seq_cond_mask"][bi]) * batch["token_pad_mask"][bi] * batch["pocket_token_mask"][bi]
+                
+                total_seq_recovery = 0.0
+                total_sp_seq_recovery = 0.0
+                # total_mp_seq_recovery = 0.0
+                # total_np_seq_recovery = 0.0
+                for ai in range(len(atom_arrays)):
+                    samp_atom_array = atom_arrays[ai]
+                    samp_token_starts = get_token_starts(samp_atom_array)
+                    samp_res_names = samp_atom_array.res_name[samp_token_starts]
+                    samp_res_types = AF3_ENCODING.encode(samp_res_names)                    
+                    samp_res_types = torch.tensor(samp_res_types, device=device)
+                    samp_res_types = pad_dim(samp_res_types, 0, len(orig_res_types) - len(samp_res_types))
+                    
+                    # Compute sequence recovery
+                    seq_recovery = (samp_res_types == orig_res_types).float() * seq_mask
+                    seq_recovery = seq_recovery.sum() / seq_mask.sum().clamp(min=1e-8)
+                    total_seq_recovery += seq_recovery
+                                                                    
+                    # Compute sp sequence recovery
+                    sp_seq_recovery = (samp_res_types == orig_res_types).float() * lp_seq_mask
+                    sp_seq_recovery = sp_seq_recovery.sum() / lp_seq_mask.sum().clamp(min=1e-8)
+                    total_sp_seq_recovery += sp_seq_recovery
+                    
+                    # Todo: Compute mp and np sequence recovery
+                    
+                    print (f"sample {ai} of {example_id}: seq recovery: {seq_recovery}, sp seq recovery: {sp_seq_recovery}")                                        
+                                        
+                avg_seq_recovery = total_seq_recovery / len(atom_arrays)
+                avg_sp_seq_recovery = total_sp_seq_recovery / len(atom_arrays)
+                outputs["avg_seq_recovery"].append(avg_seq_recovery)
+                outputs["avg_sp_seq_recovery"].append(avg_sp_seq_recovery)
+                                
+                total_avg_seq_recovery += avg_seq_recovery
+                total_avg_sp_seq_recovery += avg_sp_seq_recovery
+
+                print (f"{example_id} avg seq recovery: {seq_recovery}, avg sp seq recovery: {sp_seq_recovery} out of {len(atom_arrays)} samples")                   
+
+            pbar.update(B)
+    pbar.close()
+    total_avg_seq_recovery /= len(pdb_paths)
+    total_avg_sp_seq_recovery /= len(pdb_paths)
+    outputs["total_avg_seq_recovery"] = total_avg_seq_recovery
+    outputs["total_avg_sp_seq_recovery"] = total_avg_sp_seq_recovery
+    print (f"Total avg seq recovery: {total_avg_seq_recovery}, Total avg sp seq recovery: {total_avg_sp_seq_recovery}")
+
+    return outputs
+
 
 def score_samples(
     *,
@@ -414,7 +575,11 @@ def score_samples_ensemble(
 
 
 def get_sd_batch(
-    pdb_paths: list[str], *, data_cfg: DictConfig | None, device: str, parallel_pool: Parallel | None
+    pdb_paths: list[str], *, 
+    featurizer_cfg: DictConfig | None, 
+    device: str, parallel_pool: Parallel | None, 
+    load_from_cache: bool = True,
+    metadata: pd.DataFrame = None,
 ) -> dict[str, Any]:
     """
     Given a list of pdb file paths, return a batch of sequence design model features.
@@ -423,10 +588,10 @@ def get_sd_batch(
     """
     if parallel_pool is None:
         # Load PDBs sequentially.
-        batch_examples = [get_sd_example(pdb_path, data_cfg) for pdb_path in pdb_paths]
+        batch_examples = [get_sd_example(pdb_path, featurizer_cfg, load_from_cache=load_from_cache, metadata=metadata) for pdb_path in pdb_paths]
     else:
         # Load PDBs in parallel.
-        batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path, data_cfg) for pdb_path in pdb_paths)
+        batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path, featurizer_cfg, load_from_cache=load_from_cache, metadata=metadata) for pdb_path in pdb_paths)
 
     # Collate examples.
     batch = sd_collator(batch_examples)
@@ -435,21 +600,47 @@ def get_sd_batch(
     return batch
 
 
-def get_sd_example(pdb_path: str, data_cfg: DictConfig | None) -> dict[str, Any]:
+def get_sd_example(pdb_path: str, featurizer_cfg: DictConfig | None, load_from_cache: bool = True, metadata: pd.DataFrame = None) -> dict[str, Any]:
     """
     Given a pdb file path, return a dictionary of sequence design model features.
 
     If data_cfg is None, use default cif parser args.
     """
-    # Preprocess the PDB file.
-    example = preprocess_pdb(pdb_path, data_cfg)
+    
+    # Load the cache example if it exists.
+    if load_from_cache:
+        # Todo: Right now, only one ligand is supported. Need to modify this to support
+        # Todo: i) Single protein chain with multiple ligands at different pocket sites
+        # Todo: ii) Single protein chain with multiple ligands at the same pocket site
+        example = load_cached_example(pdb_path)
+        pdb_id = Path(pdb_path).stem
+        metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)
+        
+        #! Replace information in the example with the information from the metadata
+        #! Since when caching, it doesn't really care about the metadata as it's just caching the whole structure        
+        example['example_id'] = metadata_example["example_id"].iloc[0]
+        query_pn_unit_iids = metadata_example["q_pn_unit_iid_1"].tolist() + metadata_example["q_pn_unit_iid_2"].tolist()
+        example["query_pn_unit_iids"] = query_pn_unit_iids
+        
+        example['extra_info'] = {} #! delete all the information preexisting in the example
+        row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
+        example['extra_info'] = row_dict
+                                
+    else:
+        print(f"Loading PDB file {pdb_path} from cache is not implemented yet.")
+        # Todo: implement this
+        # Preprocess the PDB file.
+        # example = preprocess_pdb(pdb_path, data_cfg)
 
     # Featurize the example.
-    featurizer = sd_featurizer()
+    featurizer = sd_featurizer(**featurizer_cfg)
     example = featurizer(example)
 
     return example
 
+def load_cached_example(pdb_path: str) -> dict[str, torch.Tensor]:
+    cached_example_path = f"{pdb_path}"
+    return torch.load(cached_example_path, map_location="cpu", weights_only=False)
 
 def preprocess_pdb(pdb_path: str, data_cfg: DictConfig | None) -> dict[str, Any]:
     """
@@ -470,6 +661,8 @@ def preprocess_pdb(pdb_path: str, data_cfg: DictConfig | None) -> dict[str, Any]
     else:
         cif_parser_args = OmegaConf.to_container(data_cfg.cif_parser_args, resolve=True)
 
+
+
     # Read in the CIF data.
     transformation_id = "1"  # Leep only the first assembly.
     cif_parser_args["build_assembly"] = [transformation_id]
@@ -487,31 +680,32 @@ def preprocess_pdb(pdb_path: str, data_cfg: DictConfig | None) -> dict[str, Any]
     )
 
 
+
 def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str, torch.Tensor]:
     """
     Initialize the sampling masks for the batch. Modifies batch in place and returns it.
     """
     # Initialize sequence mask: always condition on non-protein or non-standard residues.
-    standard_prot_mask = batch["is_protein"] & ~batch["is_atomized"]
+    standard_prot_mask = batch["chain_is_protein"] & ~batch["is_atomized"]
+    
     batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
     batch["seq_cond_mask"] = torch.where(
         standard_prot_mask, torch.zeros_like(batch["seq_cond_mask"]), batch["token_resolved_mask"]
     )
+    batch["seq_cond_mask"] *= batch["token_pad_mask"]
 
-    # Initialize atom mask: condition on backbone atoms, non-protein atoms, and non-standard residues.
-    batch["atom_cond_mask"] = batch["prot_bb_atom_mask"]  # condition on backbone atoms
+    # Initialize atom mask: 
+    # masks for protein backbone atoms
+    atomwise_chain_is_protein = batch["chain_is_protein"].gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] # re-mask out pad atoms
+    prot_bb_atom_mask = batch["prot_bb_atom_mask"] * batch["atom_resolved_mask"] * atomwise_chain_is_protein 
 
-    # Condition on non-protein atoms and non-standard residues.
-    atomwise_standard_prot_mask = (
-        torch.gather(standard_prot_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]
-    )
-    batch["atom_cond_mask"] = torch.where(
-        atomwise_standard_prot_mask.bool(), batch["atom_cond_mask"], batch["atom_resolved_mask"]
-    )
+    # atom_cond_mask
+    batch["atom_cond_mask"] = torch.where(atomwise_chain_is_protein.bool(), prot_bb_atom_mask.bool(), batch["atom_resolved_mask"].bool())
+    batch["atom_cond_mask"] = batch["atom_cond_mask"] & batch["atom_pad_mask"].bool()
 
     return batch
 
-def initialize_ligand_pocket_mask(batch: dict[str, TensorType["b ..."]],
+def initialize_pocket_mask(batch: dict[str, TensorType["b ..."]],
                                   ligand_pocket_dist_cutoff: float = None,
                                   small_molecule_only: bool = True) -> dict[str, torch.Tensor]:
         
@@ -523,34 +717,26 @@ def initialize_ligand_pocket_mask(batch: dict[str, TensorType["b ..."]],
     atom_mask = batch["atom_resolved_mask"] * batch["atom_pad_mask"]
     
     # Compute protein coords
-    protein_token_mask = batch["is_protein"] * batch["token_resolved_mask"] * batch["token_pad_mask"] # [B, N_tokens]
-    protein_atom_mask = torch.gather(protein_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]            
+    protein_token_mask = batch["chain_is_protein"] * batch["is_protein"] * batch["token_resolved_mask"] * batch["token_pad_mask"] # [B, N_tokens]
+    protein_atom_mask = torch.gather(protein_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]                
     protein_coords = coords * protein_atom_mask.unsqueeze(-1)
     
     # Compute ligand coords
-    if small_molecule_only:
-        sm_token_mask = batch['token_is_small_molecule'] * batch['token_resolved_mask'] * batch['token_pad_mask']
-        sm_atom_mask = torch.gather(sm_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]
-        sm_coords = coords * sm_atom_mask.unsqueeze(-1)
+    non_protein_token_mask = ~batch["chain_is_protein"] * batch["token_resolved_mask"] * batch["token_pad_mask"]
+    non_protein_atom_mask = torch.gather(non_protein_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]
+    non_protein_coords = coords * non_protein_atom_mask.unsqueeze(-1)
+    dist_mat_mask = protein_atom_mask[:, :, None] * non_protein_atom_mask[:, None, :] 
     
-        # Compute distance between ligand and protein atoms
-        dist_mat_mask = protein_atom_mask[:, :, None] * sm_atom_mask[:, None, :] 
-        # (JH) 1 where protein and ligand atoms are both present, 0 otherwise
-        sm_pocket_atom_mask = torch.cdist(protein_coords, sm_coords)
-        sm_pocket_atom_mask = torch.where(dist_mat_mask.bool(), sm_pocket_atom_mask, torch.ones_like(sm_pocket_atom_mask, device=coords.device) * torch.inf)
-        sm_pocket_atom_mask = sm_pocket_atom_mask < ligand_pocket_dist_cutoff # [B, N_atoms, N_atoms]
-        
-        # Compute the mask of protein residues that contain any atoms within the distance cutoff
-        
-        sm_pocket_atom_mask = torch.any(sm_pocket_atom_mask, dim=-1) # [B, N_atoms]
-        sm_pocket_token_mask = torch.zeros_like(batch["token_pad_mask"], device=coords.device, dtype=torch.bool) # [B, N_tokens]
-        sm_pocket_token_mask.scatter_(dim=-1, index=batch["atom_to_token_map"], src=sm_pocket_atom_mask.bool()) # [B, N_tokens]                
-        # (JH) scatter_ for in-place operation, more efficient than scatter
-        
-        batch["sm_pocket_token_mask"] = sm_pocket_token_mask
-
-    else:
-        ValueError(f"mask selector not implemented for metals")                        
+    pocket_atom_mask = torch.cdist(protein_coords, non_protein_coords) 
+    pocket_atom_mask = torch.where(dist_mat_mask.bool(), pocket_atom_mask, torch.ones_like(pocket_atom_mask, device=coords.device) * torch.inf)
+    pocket_atom_mask = pocket_atom_mask < ligand_pocket_dist_cutoff # [B, N_atoms, N_atoms]
+    
+    pocket_atom_mask = torch.any(pocket_atom_mask, dim=-1) # [B, N_atoms]
+    pocket_token_mask = torch.zeros_like(batch["token_pad_mask"], device=coords.device, dtype=torch.bool) # [B, N_tokens]
+    pocket_token_mask.scatter_(dim=-1, index=batch["atom_to_token_map"], src=pocket_atom_mask.bool()) # [B, N_tokens]        
+    pocket_token_mask = pocket_token_mask * batch["token_pad_mask"].bool() * batch["token_resolved_mask"].bool()
+    
+    batch["pocket_token_mask"] = pocket_token_mask
     
     return batch
 
@@ -966,3 +1152,7 @@ def _validate_ensemble_alignment(batch: dict[str, TensorType["b ..."]]):
             "parameters will be incorrect and will yield nonsensical results. If this was intentional, "
             "set ensemble_ignore_res_idx_mismatch=True."
         )
+        
+    
+
+    

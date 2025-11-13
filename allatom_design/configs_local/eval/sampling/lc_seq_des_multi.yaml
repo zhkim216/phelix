@@ -1,0 +1,101 @@
+# Wandb configuration
+wandb:
+  no_wandb: false  # Disable wandb logging
+  project: "ligand_seq_des"  # Wandb project name
+  wandb_id: "zhkim216"  # Wandb username
+  group: "debug" # Wandb group name
+
+# Run settings
+seed: 0
+num_workers: 8  # for dataloading
+debug: true
+num_sample_debug: 4
+
+# Metadata
+metadata_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1.parquet
+
+# Inputs
+ckpt_path: /home/possu/jinho/out_dir/ligand_seq_des/exp1_cfg0/checkpoints/sd-step25000-epoch15.ckpt
+base_out_dir: /home/possu/jinho/out_dir/eval_lc_seq_des
+exp_name: eval_seq_acc_exp1_cfg0  # experiment name; used for wandb and output directory
+
+# input_cfg
+# PDB file inputs
+input_cfg:
+  load_from_cache: true
+  load_cache_cfg:
+    cached_example_path: "/home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/cached_examples"
+    pdb_name_ext: ".pt"
+    n_subsample: null
+  pdb_cfg:
+    pdb_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/pdbs
+    pdb_name_ext: ".cif"  # if pdb_name_list does not have extensions, add this extension
+    n_subsample: null  # randomly sample this many pdb keys, null to use all
+  
+featurizer_cfg:
+  max_tokens: null
+  max_atoms: null
+  crop_center_cutoff_distance: 15.0
+  crop_spatial_p: 0.5
+  remove_keys: []
+  remove_unresolved_tokens: true
+  residue_cache_dir: /home/possu/jinho/datasets/atomworks_cached_residue_data
+  max_conformers_per_residue: 50
+  apply_random_augmentation: false
+  translation_scale: 1.0
+
+# Positional constraints: supports columns in [pdb_key,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
+# e.g. 2fyzA,"A1-100,B1-100","A1-100"
+pos_constraint_csv: null
+
+# Sampling config
+run_self_consistency_eval: false
+sampling_cfg_overrides:
+  batch_size: 2
+  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+  omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
+  noise_labels: null
+  num_workers: ${num_workers}
+  use_potts_sampling: true
+  ligand_conditioning: true
+  ligand_pocket_dist_cutoff: 5.0
+  small_molecule_only: true
+  potts_sampling_cfg:
+    potts_sweeps: 50
+    lcp_expand_edge_idx_fix: false
+
+# Checkpoint sweep control
+sweep_cfg:
+  enabled: true  # true로 하면 ckpt 디렉토리 스윕 실행
+  ckpt_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp1_cfg0/checkpoints
+  ckpt_glob: "sd-step*-epoch*.ckpt"  # 스윕 대상 패턴
+  max_ckpts: null  # 스윕할 최대 개수 제한 (null이면 전부)
+  wandb_log: true  # 스윕 시 wandb 로깅 활성화 (no_wandb를 오버라이드)
+
+# Sampling config
+seq_des_cfg:
+  model_name: "lc_atom_mpnn"
+  atom_mpnn:
+    ckpt_path: ${ckpt_path}
+    sampling_cfg: /home/possu/jinho/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
+    overrides: ${sampling_cfg_overrides}
+
+
+
+
+
+
+
+# # Structure prediction model args
+# struct_pred_cfg:
+#   model_name: "af2"
+#   base_cfg: allatom_design/configs/struct_pred/struct_pred_base.yaml
+#   # overrides to base config
+#   af2:
+#     data_dir: /media/scratch/huang_lab/model_params/af2
+#   esmfold:
+#     max_tokens_per_batch: 1024
+
+hydra:
+  run:
+    dir: /home/possu/jinho/hydra_outputs
