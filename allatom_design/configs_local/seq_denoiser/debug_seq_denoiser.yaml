@@ -55,7 +55,14 @@ defaults:
   - mask_selector: mask_selector
   - data: debug_ligand_cond
 
-data: ${data}
+data: 
+  data_loader_cfg:
+    prefetch_factor: 1
+    prefetch_buffer_size: 1
+    train_pin_memory: true
+    train_persistent_workers: true
+    val_pin_memory: false
+    val_persistent_workers: false
 
 model:
   task: "lc_seq_des"  # "seq_des"
