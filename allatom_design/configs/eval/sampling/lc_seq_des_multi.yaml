@@ -50,8 +50,8 @@ pos_constraint_csv: null
 
 # Sampling config
 sampling_cfg_overrides:
-  batch_size: 2
-  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+  batch_size: 8
+  num_seqs_per_pdb: 8  # number of sequences to sample per pdb
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
   num_workers: ${num_workers}
@@ -76,7 +76,7 @@ seq_des_cfg:
   model_name: "lc_atom_mpnn"
   atom_mpnn:
     ckpt_path: ${ckpt_path}
-    sampling_cfg: /scratch/users/zhkim216/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
+    sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides: ${sampling_cfg_overrides}
 
 hydra:

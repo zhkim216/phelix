@@ -21,12 +21,12 @@ from allatom_design.eval.eval_utils.seq_des_utils import (get_seq_des_model,
                                                           run_lc_seq_des)
 
 
-@hydra.main(config_path="../../configs_local/eval/sampling", config_name="lc_seq_des_multi", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/sampling", config_name="lc_seq_des_multi", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Script for designing sequences for multiple PDBs.
-    - Single checkpoint: 기존 동작과 동일하게 한 번 실행하고 단일 CSV 저장
-    - Sweep mode: 지정된 디렉토리의 여러 체크포인트에 대해 반복 실행, 체크포인트별 CSV 저장 및 (옵션) W&B 로깅
+    - Single checkpoint: Run evaluation on only the single checkpoint
+    - Sweep mode: Run evaluations on the checkpoints in the checkpoint directory
     """
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
@@ -41,6 +41,8 @@ def main(cfg: DictConfig):
     if sweep_enabled and getattr(cfg.sweep_cfg, "wandb_log", False):
         wandb_kwargs["no_wandb"] = False
     exp_name = cfg.exp_name if not sweep_enabled else f"{cfg.exp_name}_sweep"
+    if cfg.debug:
+        exp_name = f"debug_{exp_name}"
     log_dir = wandb_setup(base_out_dir=cfg.base_out_dir, exp_name=exp_name, cfg_dict=cfg_dict, **wandb_kwargs)
 
     # Load in metadata
@@ -69,13 +71,7 @@ def main(cfg: DictConfig):
     # Load in sequence design model
     if not sweep_enabled:
         seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
-
-    # # # Load structure prediction model for self-consistency evaluation
-    # if cfg.run_self_consistency_eval:
-    #     pred_out_dir = f"{log_dir}/preds"  # directory for structure predictions
-    #     Path(pred_out_dir).mkdir(parents=True, exist_ok=True)
-    #     struct_pred_model = get_struct_pred_model(cfg.struct_pred_cfg, device=device)
-
+    
     # Read in fixed positions
     if cfg.pos_constraint_csv is not None:
         pos_constraint_df = pd.read_csv(cfg.pos_constraint_csv)
@@ -144,32 +140,6 @@ def main(cfg: DictConfig):
             del seq_des_model
             if device == "cuda":
                 torch.cuda.empty_cache()
-
-    # if cfg.run_self_consistency_eval:
-    #     id_to_metrics = eval_metrics.run_self_consistency_eval_boltz(
-    #         outputs["out_pdbs"],
-    #         struct_pred_model,
-    #         cfg.pdb_processing_cfg,
-    #         out_dir=pred_out_dir)
-
-    #     # Save metrics as CSV
-    #     metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
-    #     metrics_df.to_csv(f"{log_dir}/self_consistency_metrics.csv", index=False)
-
-    #     if not cfg.wandb.no_wandb:
-    #         # Aggregate results
-    #         sc_metrics = defaultdict(list)
-    #         for record_id, metrics in id_to_metrics.items():
-    #             for k, v in metrics.items():
-    #                 sc_metrics[f"{k}"].append(v)
-
-    #         # Update metrics
-    #         out_metrics = {f"seq_des/mean/{k}": np.nanmean(v) for k, v in sc_metrics.items() if k != "record_id"}
-    #         out_metrics.update({f"seq_des/median/{k}": np.nanmedian(v) for k, v in sc_metrics.items() if k != "record_id"})
-
-    #         # Log metrics to wandb
-    #         wandb.log(out_metrics, step=0)
-
 
 if __name__ == "__main__":
     main()
