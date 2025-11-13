@@ -475,6 +475,14 @@ def run_lc_seq_des(
     outputs["total_avg_seq_recovery"] = total_avg_seq_recovery
     outputs["total_avg_sp_seq_recovery"] = total_avg_sp_seq_recovery
     print (f"Total avg seq recovery: {total_avg_seq_recovery}, Total avg sp seq recovery: {total_avg_sp_seq_recovery}")
+    
+    for k, v in outputs.items():
+        if isinstance(v, list) and len(v) > 0 and isinstance(v[0], torch.Tensor):
+            outputs[k] = [t.detach().cpu().item() for t in v]
+        elif isinstance(v, torch.Tensor):
+            outputs[k] = v.detach().cpu().item()
+        else:
+            outputs[k] = v
 
     return outputs
 
@@ -584,22 +592,6 @@ def get_sd_batch(
 
     If data_cfg is None, use default cif parser args.
     """
-
-    def _normalize_to_cif(p: str) -> str:
-        q = Path(p)
-        name = q.name.lower()
-        
-        if name.endswith(".cif") or name.endswith(".cif.gz"):
-            return str(q.with_name(name))
-
-        if name.endswith(".pdb"):
-            name = name[:-4] + ".cif"
-            return str(q.with_name(name))
-
-        return str(q.with_name(name + ".cif"))
-
-    pdb_paths = [_normalize_to_cif(p) for p in pdb_paths]
-
     if parallel_pool is None:
         # Load PDBs sequentially.
         batch_examples = [get_sd_example(pdb_path, featurizer_cfg, load_from_cache=load_from_cache, metadata=metadata) for pdb_path in pdb_paths]
