@@ -198,8 +198,12 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         edge_idx_coloring = None
         if regularization == "LCP":
             C_complexity = batch["asym_id"] - torch.min(batch["asym_id"]) + 1  # renumber asym_id to have min value of 1
-            C_complexity = C_complexity * batch["token_pad_mask"] * batch["token_exists_mask"]  # mask out pad tokens and tokens that don't exist in the graph
-            penalty_func = lambda _S: complexity.complexity_lcp(_S, C_complexity)
+            C_complexity = C_complexity * batch["chain_is_protein"] * batch["token_exists_mask"] * batch["token_pad_mask"]
+            #! fixed, 251110
+            # mask out i) non-protein chains, ii) pad tokens, iii) tokens that don't exist in the graph            
+            # complexity is only calculated for the residues where C_complexity > 0
+            lcp_expand_fix = sampling_inputs.get("potts_sampling_cfg", {}).get("lcp_expand_edge_idx_fix", True)
+            penalty_func = lambda _S, _flag=lcp_expand_fix: complexity.complexity_lcp(_S, C_complexity, expand_edge_idx_fix=_flag)
 
         S = []  # keep track of sequences for each sample
         aux["U"] = []  # keep track of energies for each sample
