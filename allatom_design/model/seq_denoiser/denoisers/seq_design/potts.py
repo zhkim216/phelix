@@ -159,6 +159,9 @@ class GraphPotts(nn.Module):
         mask_i: torch.Tensor,
         mask_ij: torch.Tensor,
     ):
+        #! (JH) 251110 Note
+        # edge_idx: E_idx between only protein tokens in protein chains, 
+        # mask_i: prot_token_mask, mask_ij: prot_token_mask_2d
         mask_J = _mask_J(edge_idx, mask_i, mask_ij)
 
         if self.parameterization == "linear":
@@ -541,19 +544,24 @@ def compute_potts_energy(
         U_i (torch.Tensor): Potts local conditional energies with shape
             `(num_batch, num_nodes, num_states)`.
     """
-    S_j = graph.collect_neighbors(S.unsqueeze(-1), edge_idx)
+    S_j = graph.collect_neighbors(S.unsqueeze(-1), edge_idx) # S: [b, n] / S_j: [b, n, k, 1]
+    # S_j: neighbor's state
     S_j = S_j.unsqueeze(-1).expand(-1, -1, -1, h.shape[-1], -1)
+    # S_j: [b, n, k, num_states, 1]. but the second last dimension is just copied num_states times
     J_ij = torch.gather(J, -1, S_j).squeeze(-1)
+    # J: [b, n, k, num_states, num_states]
+    # J_ij: Along the last axis, select only the column indicated by S_j at each position i, 
+    # yielding a tensor of shape (B, N, K, Q, 1) -> (B, N, K, Q)
 
     # Sum out J contributions to yield local conditionals
-    J_i = J_ij.sum(2)
-    U_i = h + J_i
+    J_i = J_ij.sum(2) # sum over neighbors, J_i: [b, n, num_states]
+    U_i = h + J_i # U_i: [b, n, num_states]
 
-    # Correct for double counting in total energy
-    S_expand = S[..., None]
+    # Correct for double counting in pairwise energy, in total energy, because we count each edge twice.
+    S_expand = S[..., None] # S_expand: [b, n, 1]
     U = (
         torch.gather(U_i, -1, S[..., None]) - 0.5 * torch.gather(J_i, -1, S[..., None])
-    ).sum((1, 2))
+    ).sum((1, 2)) # [b]
     return U, U_i
 
 
@@ -759,15 +767,15 @@ def sample_potts(
         S (torch.LongTensor): Sampled sequences with
             shape `(num_batch, num_nodes)`.
         U (torch.Tensor): Sampled energies with shape `(num_batch)`. Lower is more
-            favorable.
+            favorable.atb
         S_trajectory (list[torch.LongTensor]): List of sampled sequences through
             time each with shape `(num_batch, num_nodes)`.
         U_trajectory (list[torch.Tensor]): List of sampled energies through time
             each with shape `(num_batch)`.
     """
     # Initialize masked proposals and mask h
-    mask_S, mask_mutatable, S = init_sampling_masks(-h, mask_sample, S)
-    h_numerical_zero = h.max() + 1e3 * max(1.0, temperature)
+    mask_S, mask_mutatable, S = init_sampling_masks(-h, mask_sample, S) # mask_mutatable is mask_S_1D
+    h_numerical_zero = h.max() + 1e3 * max(1.0, temperature) # Prohibit sampling tokens where mask_S > 0
     h = torch.where(mask_S > 0, h, h_numerical_zero * torch.ones_like(h))
 
     # Block update schedule
@@ -829,6 +837,7 @@ def sample_potts(
         # Propose
         S_new = torch.distributions.categorical.Categorical(logits=logp).sample()
         S_new = torch.where(mask_update, S_new, S)
+        #* As padded positions only have 1 at index 0, they will be always alanine anyway
 
         # Metropolis-Hastings adjusment
         if rejection_step:
@@ -912,14 +921,24 @@ def init_sampling_masks(
         mask_S = torch.ones_like(logits_init)
     elif mask_sample.dim() == 2:
         # Position-restricted sampling
-        mask_sample_expand = mask_sample[..., None].expand(logits_init.shape)
-        O_init = F.one_hot(S, logits_init.shape[-1]).float()
+        # Used for generating initial mask for potts sampling
+        # mask_sample: mask for positions that are free to sample
+        # mask_sample: (B, N), logits_init: (B, N, const.AF3_ENCODING.n_tokens)
+        # S: (B, N). Initial sequence.
+        mask_sample_expand = mask_sample[..., None].expand(logits_init.shape) # (B, N, const.AF3_ENCODING.n_tokens)
+        # mask_sample is 1 for positions that are free to sample, 0 for positions that are not free to sample
+        O_init = F.one_hot(S, logits_init.shape[-1]).float() # (B, N, const.AF3_ENCODING.n_tokens)
         mask_S = mask_sample_expand + (1 - mask_sample_expand) * O_init
+        # Since O_init is 0 for padded positions, mask_S[b, padded_positions, 0] = 1
+        # mask_S is 0 for non-padded positions, and 1 for padded positions.
     elif mask_sample.dim() == 3:
         O_init = F.one_hot(S, logits_init.shape[-1]).float()
         # Mutation-restricted sampling
         mask_zero = (mask_sample.sum(-1, keepdim=True) == 0).float()
+        # for padded_positions, mask_sample[b, padded_positions, 0] = 1
+        # So mask_zero is 0 for padded positions
         mask_S = ((mask_zero * O_init + mask_sample) > 0).float()
+        # And thus mask_S[b, padded_positions, 0] = 1
     else:
         raise NotImplementedError
 
@@ -927,6 +946,8 @@ def init_sampling_masks(
     if ban_S is not None:
         # ban certain aatypes
         mask_S[:, :, ban_S] = 0.0
+        # ban_S = {"X"} + const.AF3_ENCODING.encode(const.AF3_ENCODING.non_protein_tokens)
+        # (251109) mask_S is 0.0 for all non-protein tokens for now.
 
     if pos_restrict_aatype is not None:
         # restrict to certain aatypes at certain positions
@@ -934,11 +955,16 @@ def init_sampling_masks(
         mask_S[restrict_pos_mask.bool()] = allowed_aatype_mask[restrict_pos_mask.bool()]
 
     mask_S_1D = (mask_S.sum(-1) > 1).float()  # check where we can sample
+    # For initial mask generation, 
+    # padded positions are 0, as mask_S.sum(-1) = 1 for padded positions
+    # For the second mask generation, also the same
 
     logits_init_masked = 1000 * mask_S + logits_init
+    #! 1000 where we can sample, 0 where we can't (or don't want to) sample
     S_init = torch.distributions.categorical.Categorical(logits=logits_init_masked).sample()
     S = torch.where(mask_S_1D.bool(), S_init, S)  # where we can sample, set S to S_init
     S = torch.where(mask_S.sum(-1) == 1, mask_S.argmax(-1), S)  # where there is only one possible aatype, set S to the aatype
+    # This is why [b, padded_positions, 0] = 1 for S.
     return mask_S, mask_S_1D, S
 
 
@@ -992,9 +1018,11 @@ def _potts_proposal_dlmc(
                 U_penalty = U_penalty.detach()
                 U_i_adjustment = U_i_adjustment - torch.gather(
                     U_i_adjustment, -1, S[..., None]
-                )
-
+                ) 
+                # Base-off the values by subtracting the U_i_adjustment of the current state
             U_i_mutate = U_i - torch.gather(U_i, -1, S[..., None])
+            # Base-off, but it's not used anywhere, why?
+            
             U_i = U_i + U_i_adjustment
         else:
             U_penalty = penalty_func(O)
@@ -1006,6 +1034,7 @@ def _potts_proposal_dlmc(
     # Compute transition log probabilities
     O = F.one_hot(S, h.shape[0 - 1]).float()
     logP_i = torch.gather(logP_j, -1, S[..., None])
+    # log probability of the current state
     if balancing_func == "sqrt":
         log_Q_ij = 0.5 * (logP_j - logP_i)
     elif balancing_func == "sigmoid":

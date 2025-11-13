@@ -1,5 +1,5 @@
 mmcif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/pdbs
-out_dir: /home/possu/jinho/datasets/debug_atomworks_lmpnn_re
+out_dir: /home/possu/jinho/datasets/debug_atomworks_lmpnn
 
 num_workers: 8
 
@@ -25,8 +25,7 @@ dataset:
       cif_parser_args: ${cif_parser_args}  
   save_failed_examples_to_dir: ${out_dir}/failed_cached_examples
   load_kwargs: null
-  min_residues_for_polymers: 1 #! 251102 (JH) fixed
-
+  
 # CIF parser args
 cif_parser_args:
   add_missing_atoms: true
@@ -36,6 +35,9 @@ cif_parser_args:
   fix_arginines: true
   convert_mse_to_met: true
   hydrogen_policy: "remove"
+
+preprocess:
+  min_residues_for_polymers: 1 #! 251102 (JH) fixed
 
 # --- sharding for multi-node runs ---
 num_shards: 1   # total number of shards

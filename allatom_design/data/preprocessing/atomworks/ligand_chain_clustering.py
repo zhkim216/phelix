@@ -18,8 +18,19 @@ def metadata_ligand_chain_clustering(args: argparse.Namespace):
     input_parquet_path = args.input_parquet_path
     output_dir_path = args.output_dir_path
     debug = args.debug
-    debug_num_pdb_ids = args.debug_num_pdb_ids
-    nucleic_acid_dist_threshold = args.nucleic_acid_dist_threshold
+    # ensure proper types for CLI-provided strings
+    try:
+        debug_num_pdb_ids = int(args.debug_num_pdb_ids)
+    except Exception:
+        debug_num_pdb_ids = 1000
+    try:
+        args.nucleic_acid_dist_threshold = float(args.nucleic_acid_dist_threshold)
+    except Exception:
+        args.nucleic_acid_dist_threshold = 4.0
+    try:
+        args.ligand_cluster_dist_threshold = float(getattr(args, 'ligand_cluster_dist_threshold', 5.0))
+    except Exception:
+        args.ligand_cluster_dist_threshold = 5.0
 
     # Load the original metadata parquet
     atomworks_parquet = pd.read_parquet(input_parquet_path)
@@ -227,19 +238,50 @@ def metadata_ligand_chain_clustering(args: argparse.Namespace):
         return out
 
     def _assign_ligand_clusters_per_pdb(g):
-        # Non-protein (including metals): build an undirected ligand graph where an edge exists
-        # if the minimum heavy-atom distance between two ligand chains is <= 5.0 Å.
-        # Use OR semantics (edge kept even if reported only by one side). Clusters are connected components.
+        # 비단백질 전체(소분자, 금속, 펩타이드, 핵산 포함)를 대상으로
+        # 원자 체인 노드 + 핵산 클러스터 노드를 함께 사용하는 5Å 그래프를 구성한다.
         nonprot_mask = ~g['q_pn_unit_is_protein']
         if not nonprot_mask.any():
             return pd.Series(index=g.index, dtype=object)
 
-        sub = g.loc[nonprot_mask, ['q_pn_unit_iid', 'q_pn_unit_contacting_pn_unit_iids']].copy()
-        # rid -> atomic components
-        rid_to_comps = {str(rid): tuple(_split_components(str(rid))) for rid in sub['q_pn_unit_iid'].astype(str)}
-        atomic_nodes = set(c for comps in rid_to_comps.values() for c in comps)
+        sub = g.loc[nonprot_mask, [
+            'q_pn_unit_iid',
+            'q_pn_unit_contacting_pn_unit_iids',
+            'q_pn_unit_nucleic_acid_chain_cluster'
+        ]].copy()
 
-        # Collect (contact_iid, min_distance) pairs per rid
+        # rid -> 원자 체인 컴포넌트
+        rid_to_comps = {str(rid): tuple(_split_components(str(rid)))
+                        for rid in sub['q_pn_unit_iid'].astype(str)}
+        atomic_ids = set(c for comps in rid_to_comps.values() for c in comps)
+
+        def _strip_parens(s: str) -> str:
+            s = str(s).strip()
+            if s.startswith("(") and s.endswith(")"):
+                return s[1:-1].strip()
+            return s
+
+        # 정렬: 일반 원자 체인 먼저, 괄호형 그룹(핵산 클러스터)은 뒤로
+        def _sort_key_for_items(s: str):
+            s = str(s)
+            is_group = s.startswith("(") and s.endswith(")")
+            return (1 if is_group else 0, _natural_key(s))
+
+        # 원자 체인 -> 소속 그룹 노드 매핑
+        # - 핵산 체인은 해당 클러스터 라벨(예: "(C_1, D_1)")로 매핑
+        # - 그 외는 자기 자신
+        atomic_to_group = {a: a for a in atomic_ids}
+        nuc_labels = sub.loc[sub['q_pn_unit_nucleic_acid_chain_cluster'].notna(),
+                             'q_pn_unit_nucleic_acid_chain_cluster'].astype(str).unique()
+        for cl in nuc_labels:
+            for a in _split_components(_strip_parens(cl)):
+                if a in atomic_ids:
+                    atomic_to_group[a] = cl
+
+        # 노드 집합: 모든 원자 체인을 그룹 노드로 사상한 결과
+        nodes = set(atomic_to_group[a] for a in atomic_ids)
+
+        # 체인별 (대상 chain_iid, min_distance) 목록 수집
         rid_contacts_pairs = {}
         for rid_raw, ssub in sub.groupby('q_pn_unit_iid'):
             rid = str(rid_raw)
@@ -248,302 +290,203 @@ def metadata_ligand_chain_clustering(args: argparse.Namespace):
                 pairs.extend(_parse_contacts_with_distance(val))
             rid_contacts_pairs[rid] = pairs
 
-        dist_threshold = 5.0
-
-        # Directed edges (u -> v): u is an atomic component of rid; v is a non-protein atomic id in the same pdb
-        # Keep only contacts with min_distance <= 5.0 Å
-        comp_dir_adj = {u: set() for u in atomic_nodes}
+        # 설정 임계값 Å 이하만 간선으로 유지(OR semantics), 노드는 그룹 기준
+        dist_threshold = float(args.ligand_cluster_dist_threshold)
+        adj = {n: set() for n in nodes}
         for rid, comps in rid_to_comps.items():
             pairs = rid_contacts_pairs.get(rid, ())
             for u in comps:
+                if u not in atomic_ids:
+                    continue
+                nu = atomic_to_group[u]
                 for target_iid, md in pairs:
                     if md is None or md > dist_threshold:
                         continue
                     for v in _split_components(target_iid):
-                        if v in atomic_nodes and v != u:
-                            comp_dir_adj[u].add(v)
+                        if v in atomic_ids:
+                            nv = atomic_to_group[v]
+                            if nv != nu:
+                                adj[nu].add(nv)
+                                adj[nv].add(nu)
 
-        # Undirected adjacency under OR semantics
-        comp_adj = {u: set() for u in atomic_nodes}
-        for u, vs in comp_dir_adj.items():
-            for v in vs:
-                comp_adj[u].add(v)
-                comp_adj[v].add(u)
-
-        # Connected components over atomic nodes
+        # 그룹 노드 그래프의 연결 요소 계산
         visited, components = set(), []
-        for u in sorted(atomic_nodes, key=_natural_key):
-            if u in visited:
+        for n in sorted(nodes, key=_natural_key):
+            if n in visited:
                 continue
-            comp_set = set([u])
-            dq = deque([u])
-            visited.add(u)
+            comp = set([n])
+            dq = deque([n])
+            visited.add(n)
             while dq:
                 x = dq.popleft()
-                for y in comp_adj.get(x, ( )):
-                    if y not in visited:
-                        visited.add(y)
-                        comp_set.add(y)
-                        dq.append(y)
-            components.append(comp_set)
-
-        # Component labels
-        label_to_nodes = {}
-        comp_label_of_node = {}
-        for comp_set in components:
-            label = ", ".join(sorted(comp_set, key=_natural_key))
-            label_to_nodes[label] = comp_set
-            for node in comp_set:
-                comp_label_of_node[node] = label
-
-        # Assign labels per rid by union of its atomic components' component nodes
-        rid_to_label = {}
-        for rid, comps in rid_to_comps.items():
-            nodes = set()
-            for u in comps:
-                label = comp_label_of_node.get(u)
-                if label:
-                    nodes |= label_to_nodes[label]
-                else:
-                    nodes.add(u)
-            rid_to_label[rid] = ", ".join(sorted(nodes, key=_natural_key))
-
-        out = pd.Series(index=g.index, dtype=object)
-        out.loc[nonprot_mask] = g.loc[nonprot_mask, 'q_pn_unit_iid'].astype(str).map(rid_to_label)
-        return out
-
-    def _mark_cluster_contacts_to_proteins_per_pdb(g):
-        prot_mask = g['q_pn_unit_is_protein']
-
-        prot_atomic = set()
-        for iid in g.loc[prot_mask, 'q_pn_unit_iid'].astype(str):
-            prot_atomic.update(_split_components(iid))
-
-        cluster_to_prot = defaultdict(set)
-        sub = g.loc[(~g['q_pn_unit_is_protein']) & g['ligand_cluster'].notna(),
-                    ['ligand_cluster', 'q_pn_unit_contacting_pn_unit_iids']]
-        for _, row in sub.iterrows():
-            contacts = set(_parse_contacts(row['q_pn_unit_contacting_pn_unit_iids']))
-            cluster_to_prot[row['ligand_cluster']].update(contacts & prot_atomic)
-
-        out = pd.DataFrame(index=g.index, columns=[
-            'contact_to_protein',
-            'num_contacting_protein_chains',
-            'contacting_protein_chains'
-        ])
-        mask = (~g['q_pn_unit_is_protein']) & g['ligand_cluster'].notna()
-        out.loc[mask, 'contact_to_protein'] = g.loc[mask, 'ligand_cluster'] \
-            .map(lambda c: len(cluster_to_prot.get(c, set())) > 0)
-        out.loc[mask, 'num_contacting_protein_chains'] = g.loc[mask, 'ligand_cluster'] \
-            .map(lambda c: len(cluster_to_prot.get(c, set())))
-        out.loc[mask, 'contacting_protein_chains'] = g.loc[mask, 'ligand_cluster'] \
-            .map(lambda c: _join_sorted(cluster_to_prot.get(c, set())))
-        return out
-
-    def _mark_protein_contacts_to_ligand_clusters_per_pdb(g):
-        prot_mask = g['q_pn_unit_is_protein']
-
-        prot_atomic = set()
-        for iid in g.loc[prot_mask, 'q_pn_unit_iid'].astype(str):
-            prot_atomic.update(_split_components(iid))
-
-        ligand_mask = (~g['q_pn_unit_is_protein']) & g['ligand_cluster'].notna()
-        cluster_to_prot_atomic = defaultdict(set)
-        for _, row in g.loc[ligand_mask, ['ligand_cluster','q_pn_unit_contacting_pn_unit_iids']].iterrows():
-            contacts = set(_parse_contacts(row['q_pn_unit_contacting_pn_unit_iids']))
-            cluster_to_prot_atomic[row['ligand_cluster']].update(contacts & prot_atomic)
-
-        prot_atomic_to_clusters = defaultdict(set)
-        for cl, ps in cluster_to_prot_atomic.items():
-            for p in ps:
-                prot_atomic_to_clusters[p].add(cl)
-
-        out = pd.DataFrame(index=g.index, columns=['contact_to_ligand_cluster','num_contacting_ligand_clusters'])
-        for idx, rid in g.loc[prot_mask, 'q_pn_unit_iid'].astype(str).items():
-            comps = _split_components(rid)
-            touching = set()
-            for comp in comps:
-                touching |= prot_atomic_to_clusters.get(comp, set())
-            out.at[idx, 'contact_to_ligand_cluster'] = len(touching) > 0
-            out.at[idx, 'num_contacting_ligand_clusters'] = len(touching)
-        return out
-
-    def _assign_second_shell_clusters_per_pdb(g):
-        # Build cluster-level second-shell groups among ligand_clusters (including metals).
-        # Two clusters are grouped if any member of one is in the second shell of any member of the other (OR semantics).
-        mask = (~g['q_pn_unit_is_protein']) & g['ligand_cluster'].notna()
-        if not mask.any():
-            return pd.Series(index=g.index, dtype=object)
-
-        result = pd.Series(index=g.index, dtype=object)
-        df = g.loc[mask, ['ligand_cluster', 'q_pn_unit_iid', 'q_pn_unit_second_shell_pn_unit_iids']].copy()
-
-        # cluster -> set of member atomic chain ids (parsed from the label string)
-        cluster_to_members = {}
-        for cl in df['ligand_cluster'].astype(str).unique():
-            members = set(_split_components(cl))
-            cluster_to_members[cl] = members
-        atom_to_cluster = {}
-        for cl, members in cluster_to_members.items():
-            for a in members:
-                atom_to_cluster[a] = cl
-
-        # Chain-level second-shell map across all non-protein chains
-        rid_to_second_shell = {}
-        for rid_raw, ssub in g.loc[~g['q_pn_unit_is_protein'], ['q_pn_unit_iid','q_pn_unit_second_shell_pn_unit_iids']].groupby('q_pn_unit_iid'):
-            rid = str(rid_raw)
-            neigh = set()
-            for val in ssub['q_pn_unit_second_shell_pn_unit_iids']:
-                neigh.update(_parse_contacts(val))
-            rid_to_second_shell[rid] = neigh
-
-        # Cluster-level graph under OR semantics (edge if either side reports second-shell contact)
-        clusters = list(cluster_to_members.keys())
-        cl_adj = {cl: set() for cl in clusters}
-        for cl1, members in cluster_to_members.items():
-            for a in members:
-                for v in rid_to_second_shell.get(a, set()):
-                    cl2 = atom_to_cluster.get(v)
-                    if cl2 and cl2 != cl1:
-                        cl_adj[cl1].add(cl2)
-                        cl_adj[cl2].add(cl1)
-
-        # Connected components over clusters; each component is rendered as "(members), (members), ..."
-        visited = set()
-        comp_of_cluster = {}
-        comps = []
-        for cl in sorted(clusters, key=_natural_key):
-            if cl in visited:
-                continue
-            comp = set([cl])
-            dq = deque([cl])
-            visited.add(cl)
-            while dq:
-                x = dq.popleft()
-                for y in cl_adj.get(x, set()):
+                for y in adj.get(x, ()):
                     if y not in visited:
                         visited.add(y)
                         comp.add(y)
                         dq.append(y)
-            comps.append(comp)
-            for c in comp:
-                comp_of_cluster[c] = comp
+            components.append(comp)
 
-        # Build label string per connected component
-        def _cluster_group_label(comp):
-            group_labels = []
-            for c in sorted(comp, key=_natural_key):
-                members = cluster_to_members[c]
-                group_labels.append("(" + ", ".join(sorted(members, key=_natural_key)) + ")")
-            group_labels = sorted(group_labels, key=lambda s: re.split(r'(\d+)', s))
-            return ", ".join(group_labels)
+        # 컴포넌트 라벨: 원자 체인은 그대로, 핵산 클러스터 노드는 "(C_1, D_1)" 그대로 하나의 아이템으로 유지
+        label_to_nodes = {}
+        comp_label_of_node = {}
+        for comp in components:
+            items = sorted(comp, key=_sort_key_for_items)
+            label = "(" + ", ".join(items) + ")"
+            label_to_nodes[label] = comp
+            for n in comp:
+                comp_label_of_node[n] = label
 
-        # Map the component label back to all rows belonging to clusters in that component
-        for cl in clusters:
-            label_string = _cluster_group_label(comp_of_cluster[cl])
-            idx_mask = mask & (g['ligand_cluster'] == cl)
-            result.loc[idx_mask] = label_string
+        # 각 rid에 동일한 클러스터 라벨 부여
+        rid_to_label = {}
+        for rid, comps in rid_to_comps.items():
+            member_nodes = set(atomic_to_group.get(u, u) for u in comps)
+            comp_nodes = set()
+            for n in member_nodes:
+                comp_nodes |= label_to_nodes[comp_label_of_node[n]]
+            items = sorted(comp_nodes, key=_sort_key_for_items)
+            rid_to_label[rid] = "(" + ", ".join(items) + ")"
 
-        return result
-
-    # cluster nucleotides where they are near each other
-    atomworks_parquet['q_pn_unit_nucleic_acid_chain_cluster'] = atomworks_parquet.groupby('pdb_id', group_keys=False).apply(_assign_nucleic_acid_chain_clusters_per_pdb)
-    atomworks_parquet['q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster'] = (atomworks_parquet.groupby('pdb_id', group_keys=False)
-                                                                            .apply(_sum_nucleic_acid_cluster_residues_per_pdb)
-                                                                            .astype('int64')
-                                                                            )
-    
-    
-    atomworks_parquet["q_pn_unit_is_nuc_polymer"] = atomworks_parquet["q_pn_unit_nucleic_acid_chain_cluster"].notna() & (atomworks_parquet["q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster"] >= 2 * NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
-    atomworks_parquet["q_pn_unit_is_nuc_ligand"] = atomworks_parquet["q_pn_unit_nucleic_acid_chain_cluster"].notna() & (atomworks_parquet["q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster"] < 2 * NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
-    
-    # -------------------------------------------------------------------------
-    # i) small molecule, metal, peptide: record per-row protein contact count/list
-    #    Columns: num_contacting_protein, contacting_protein_chains (e.g., "(A_1, B_1)")
-    # -------------------------------------------------------------------------
-    def _compute_contacts_to_proteins_per_pdb(g: pd.DataFrame) -> pd.DataFrame:
-        # Set of protein atomic chain ids
-        prot_atomic = set()
-        for iid in g.loc[g['q_pn_unit_is_protein'], 'q_pn_unit_iid'].astype(str):
-            prot_atomic.update(_split_components(iid))
-
-        def _prot_contacts_from_val(val):
-            # Parse contact list and intersect with protein atomic ids
-            atomic = set()
-            for cid in _parse_contacts(val):
-                atomic.update(_split_components(cid))
-            return atomic & prot_atomic
-
-        out = pd.DataFrame(index=g.index, columns=['num_contacting_protein', 'contacting_protein_chains'])
-        out['num_contacting_protein'] = 0
-        out['contacting_protein_chains'] = ""
-
-        sm_pep_metal_mask = (g['q_pn_unit_is_small_molecule'] | g['q_pn_unit_is_metal'] | g['q_pn_unit_is_peptide'])
-        for idx, row in g.loc[sm_pep_metal_mask, ['q_pn_unit_contacting_pn_unit_iids']].iterrows():
-            pcs = _prot_contacts_from_val(row['q_pn_unit_contacting_pn_unit_iids'])
-            out.at[idx, 'num_contacting_protein'] = int(len(pcs))
-            out.at[idx, 'contacting_protein_chains'] = ("(" + _join_sorted(pcs) + ")") if pcs else ""
-
-        out['num_contacting_protein'] = out['num_contacting_protein'].fillna(0).astype('int64')
-        out['contacting_protein_chains'] = out['contacting_protein_chains'].fillna("")
+        out = pd.Series(index=g.index, dtype=object)
+        out.loc[nonprot_mask] = g.loc[nonprot_mask, 'q_pn_unit_iid'].astype(str).map(rid_to_label)
         return out
-
-    tmp_sm = atomworks_parquet.groupby('pdb_id', group_keys=False).apply(_compute_contacts_to_proteins_per_pdb)
-    atomworks_parquet['num_contacting_protein'] = tmp_sm['num_contacting_protein']
-    atomworks_parquet['contacting_protein_chains'] = tmp_sm['contacting_protein_chains']
-
-    # --- ii) For nucleic_acid_chain_cluster, fill the same columns ---
-    # Union contacts across all chains in the cluster to get cluster-level
-    # protein contact count/list, then write them to each row's columns
-    def _compute_nuc_cluster_contacts_to_proteins_per_pdb(g: pd.DataFrame) -> pd.DataFrame:
-        # Set of protein atomic chain ids
+    
+    def _count_atomic_members_in_ligand_cluster_label(label: str) -> int:
+        # "(A_1, B_1, (C_1, D_1))" 형태의 문자열에서 원자 체인 개수를 센다.
+        if label is None or (isinstance(label, float) and pd.isna(label)):
+            return 0
+        s = str(label).strip()
+        if not s:
+            return 0
+        if not (s.startswith("(") and s.endswith(")")):
+            return 1
+        content = s[1:-1]
+        items, buf, depth = [], [], 0
+        for ch in content:
+            if ch == '(':
+                depth += 1
+                buf.append(ch)
+            elif ch == ')':
+                depth -= 1
+                buf.append(ch)
+            elif ch == ',' and depth == 0:
+                tok = ''.join(buf).strip()
+                if tok:
+                    items.append(tok)
+                buf = []
+            else:
+                buf.append(ch)
+        tok = ''.join(buf).strip()
+        if tok:
+            items.append(tok)
+        count = 0
+        for tok in items:
+            tok = tok.strip()
+            if not tok:
+                continue
+            if tok.startswith("(") and tok.endswith(")"):
+                inner = tok[1:-1].strip()
+                if not inner:
+                    continue
+                parts = [p.strip() for p in inner.split(',') if p.strip()]
+                count += len(parts)
+            else:
+                count += 1
+        return count
+    
+    def _compute_num_ligand_chain_in_cluster_per_pdb(g: pd.DataFrame) -> pd.Series:
+        out = pd.Series(index=g.index, dtype='float')
+        mask = (~g['q_pn_unit_is_protein']) & g['ligand_cluster'].notna()
+        if not mask.any():
+            return out
+        label_to_count = {}
+        for lab in g.loc[mask, 'ligand_cluster'].astype(str).unique():
+            label_to_count[lab] = _count_atomic_members_in_ligand_cluster_label(lab)
+        out.loc[mask] = g.loc[mask, 'ligand_cluster'].map(label_to_count).astype('float')
+        return out
+    
+    def _compute_ligand_cluster_contacts_to_proteins_per_pdb(g: pd.DataFrame) -> pd.DataFrame:
+        # 각 ligand_cluster에 대해 5Å 이내로 접촉하는 protein atomic chain들을 요약한다.
         prot_atomic = set()
         for iid in g.loc[g['q_pn_unit_is_protein'], 'q_pn_unit_iid'].astype(str):
             prot_atomic.update(_split_components(iid))
 
-        out = pd.DataFrame(index=g.index, columns=['num_contacting_protein', 'contacting_protein_chains'])
-        out['num_contacting_protein'] = pd.NA
-        out['contacting_protein_chains'] = pd.NA
+        out = pd.DataFrame(index=g.index, columns=[
+            'ligand_cluster_contacting_protein_chains',
+            'ligand_cluster_num_contacting_protein_chains'
+        ])
+        out['ligand_cluster_contacting_protein_chains'] = pd.NA
+        out['ligand_cluster_num_contacting_protein_chains'] = pd.NA
 
-        mask = g['q_pn_unit_nucleic_acid_chain_cluster'].notna()
+        mask = (~g['q_pn_unit_is_protein']) & g['ligand_cluster'].notna()
         if not mask.any():
             return out
 
-        # For each cluster, union contacts of all chains in the cluster
-        for cl, ssub in g.loc[mask].groupby('q_pn_unit_nucleic_acid_chain_cluster'):
-            prot_contacts = set()
+        # cluster -> set of contacting protein atomic chain ids within 5.0 Å
+        cluster_to_prot = defaultdict(set)
+        for cl, ssub in g.loc[mask, ['ligand_cluster','q_pn_unit_contacting_pn_unit_iids']].groupby('ligand_cluster'):
+            acc = set()
             for val in ssub['q_pn_unit_contacting_pn_unit_iids']:
-                for cid in _parse_contacts(val):
-                    prot_contacts.update(_split_components(cid))
-            prot_contacts &= prot_atomic
+                for target_iid, md in _parse_contacts_with_distance(val):
+                    if md is None or md > 5.0:
+                        continue
+                    for a in _split_components(target_iid):
+                        if a in prot_atomic:
+                            acc.add(a)
+            cluster_to_prot[cl] = acc
 
-            cnt = int(len(prot_contacts))
-            label = ("(" + _join_sorted(prot_contacts) + ")") if prot_contacts else ""
-
-            idx_mask = mask & (g['q_pn_unit_nucleic_acid_chain_cluster'] == cl)
-            out.loc[idx_mask, 'num_contacting_protein'] = cnt
-            out.loc[idx_mask, 'contacting_protein_chains'] = label
+        for cl, prot_set in cluster_to_prot.items():
+            label = ("(" + _join_sorted(prot_set) + ")") if prot_set else ""
+            cnt = int(len(prot_set))
+            idx_mask = mask & (g['ligand_cluster'] == cl)
+            out.loc[idx_mask, 'ligand_cluster_contacting_protein_chains'] = label
+            out.loc[idx_mask, 'ligand_cluster_num_contacting_protein_chains'] = cnt
 
         return out
-
-    # Initialize columns if missing
-    if 'num_contacting_protein' not in atomworks_parquet.columns:
-        atomworks_parquet['num_contacting_protein'] = 0
-    if 'contacting_protein_chains' not in atomworks_parquet.columns:
-        atomworks_parquet['contacting_protein_chains'] = ""
-
-    tmp_nc = atomworks_parquet.groupby('pdb_id', group_keys=False).apply(_compute_nuc_cluster_contacts_to_proteins_per_pdb)
-
-    # Overwrite only rows that belong to nucleic acid clusters
-    na_mask = atomworks_parquet['q_pn_unit_nucleic_acid_chain_cluster'].notna()
-    atomworks_parquet.loc[na_mask, 'num_contacting_protein'] = (
-        tmp_nc.loc[na_mask, 'num_contacting_protein'].fillna(0).astype('int64')
-    )
-    atomworks_parquet.loc[na_mask, 'contacting_protein_chains'] = (
-        tmp_nc.loc[na_mask, 'contacting_protein_chains'].fillna("")
-    )
-            
+    
+    # cluster nucleotides where they are near each other
+    atomworks_parquet['q_pn_unit_nucleic_acid_chain_cluster'] = (
+    atomworks_parquet.groupby('pdb_id', group_keys=False)
+    .apply(_assign_nucleic_acid_chain_clusters_per_pdb, include_groups=False)
+)
+    atomworks_parquet['q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster'] = (
+    atomworks_parquet.groupby('pdb_id', group_keys=False)
+    .apply(_sum_nucleic_acid_cluster_residues_per_pdb, include_groups=False)
+    .astype('int64')
+)    
+    atomworks_parquet["q_pn_unit_is_nuc_polymer"] = atomworks_parquet["q_pn_unit_nucleic_acid_chain_cluster"].notna() & (atomworks_parquet["q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster"] >= 2 * NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
+    atomworks_parquet["q_pn_unit_is_nuc_ligand"] = atomworks_parquet["q_pn_unit_nucleic_acid_chain_cluster"].notna() & (atomworks_parquet["q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster"] < 2 * NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
+   
     atomworks_parquet.to_parquet(f"{output_dir_path}/metadata_nuc_clustered.parquet")
+    
+    # 2) Recompute ligand_cluster
+    atomworks_parquet['ligand_cluster'] = (
+    atomworks_parquet.groupby('pdb_id', group_keys=False)
+    .apply(_assign_ligand_clusters_per_pdb, include_groups=False)
+)
+    
+    # 3) For each ligand_cluster, compute contacting protein chains (within 5.0 Å)
+    tmp_lc = (
+    atomworks_parquet.groupby('pdb_id', group_keys=False)
+    .apply(_compute_ligand_cluster_contacts_to_proteins_per_pdb, include_groups=False)
+    )
+    mask_lig = (~atomworks_parquet['q_pn_unit_is_protein']) & atomworks_parquet['ligand_cluster'].notna()
+    atomworks_parquet.loc[mask_lig, 'ligand_cluster_contacting_protein_chains'] = (
+        tmp_lc.loc[mask_lig, 'ligand_cluster_contacting_protein_chains'].fillna("")
+    )
+    atomworks_parquet.loc[mask_lig, 'ligand_cluster_num_contacting_protein_chains'] = (
+        tmp_lc.loc[mask_lig, 'ligand_cluster_num_contacting_protein_chains'].fillna(0).astype('int64')
+    )
+    # 4) Count ligand chains per ligand_cluster (expand nucleic clusters)
+    tmp_num = (
+    atomworks_parquet.groupby('pdb_id', group_keys=False)
+    .apply(_compute_num_ligand_chain_in_cluster_per_pdb, include_groups=False)
+    )
+    atomworks_parquet.loc[mask_lig, 'num_ligand_chain_in_ligand_cluster'] = (
+        tmp_num.loc[mask_lig].fillna(0).astype('int64')
+    )
+    
+    atomworks_parquet.to_parquet(f"{output_dir_path}/metadata_nuc_ligand_clustered.parquet")
+    
             
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
@@ -552,13 +495,13 @@ if __name__ == "__main__":
     ap.add_argument("--debug", default = False)
     ap.add_argument("--debug_num_pdb_ids", default = 1000)
     ap.add_argument("--nucleic_acid_dist_threshold", default = 4.0)
+    ap.add_argument("--ligand_cluster_dist_threshold", default = 4.5)
     args = ap.parse_args()
     metadata_ligand_chain_clustering(args)
 
     
     
-# # 1) Recompute ligand_cluster
-#     atomworks_parquet['ligand_cluster'] = atomworks_parquet.groupby('pdb_id', group_keys=False).apply(_assign_ligand_clusters_per_pdb)
+
 
 #     # 2) Recompute ligand-to-protein and protein-to-ligand summary columns
 #     tmp = atomworks_parquet.groupby('pdb_id', group_keys=False).apply(_mark_cluster_contacts_to_proteins_per_pdb)
@@ -576,3 +519,81 @@ if __name__ == "__main__":
 #     # Save processed metadata parquet
 #     atomworks_parquet.to_parquet(f"{output_dir_path}/metadata_ligand_clustered.parquet")
 #     print(f"ligand chain clustering is done, saved at {output_dir_path}/metadata_ligand_clustered.parquet")
+
+# def _assign_second_shell_clusters_per_pdb(g):
+#     # Build cluster-level second-shell groups among ligand_clusters (including metals).
+#     # Two clusters are grouped if any member of one is in the second shell of any member of the other (OR semantics).
+#     mask = (~g['q_pn_unit_is_protein']) & g['ligand_cluster'].notna()
+#     if not mask.any():
+#         return pd.Series(index=g.index, dtype=object)
+
+#     result = pd.Series(index=g.index, dtype=object)
+#     df = g.loc[mask, ['ligand_cluster', 'q_pn_unit_iid', 'q_pn_unit_second_shell_pn_unit_iids']].copy()
+
+#     # cluster -> set of member atomic chain ids (parsed from the label string)
+#     cluster_to_members = {}
+#     for cl in df['ligand_cluster'].astype(str).unique():
+#         members = set(_split_components(cl))
+#         cluster_to_members[cl] = members
+#     atom_to_cluster = {}
+#     for cl, members in cluster_to_members.items():
+#         for a in members:
+#             atom_to_cluster[a] = cl
+
+#     # Chain-level second-shell map across all non-protein chains
+#     rid_to_second_shell = {}
+#     for rid_raw, ssub in g.loc[~g['q_pn_unit_is_protein'], ['q_pn_unit_iid','q_pn_unit_second_shell_pn_unit_iids']].groupby('q_pn_unit_iid'):
+#         rid = str(rid_raw)
+#         neigh = set()
+#         for val in ssub['q_pn_unit_second_shell_pn_unit_iids']:
+#             neigh.update(_parse_contacts(val))
+#         rid_to_second_shell[rid] = neigh
+
+#     # Cluster-level graph under OR semantics (edge if either side reports second-shell contact)
+#     clusters = list(cluster_to_members.keys())
+#     cl_adj = {cl: set() for cl in clusters}
+#     for cl1, members in cluster_to_members.items():
+#         for a in members:
+#             for v in rid_to_second_shell.get(a, set()):
+#                 cl2 = atom_to_cluster.get(v)
+#                 if cl2 and cl2 != cl1:
+#                     cl_adj[cl1].add(cl2)
+#                     cl_adj[cl2].add(cl1)
+
+#     # Connected components over clusters; each component is rendered as "(members), (members), ..."
+#     visited = set()
+#     comp_of_cluster = {}
+#     comps = []
+#     for cl in sorted(clusters, key=_natural_key):
+#         if cl in visited:
+#             continue
+#         comp = set([cl])
+#         dq = deque([cl])
+#         visited.add(cl)
+#         while dq:
+#             x = dq.popleft()
+#             for y in cl_adj.get(x, set()):
+#                 if y not in visited:
+#                     visited.add(y)
+#                     comp.add(y)
+#                     dq.append(y)
+#         comps.append(comp)
+#         for c in comp:
+#             comp_of_cluster[c] = comp
+
+#     # Build label string per connected component
+#     def _cluster_group_label(comp):
+#         group_labels = []
+#         for c in sorted(comp, key=_natural_key):
+#             members = cluster_to_members[c]
+#             group_labels.append("(" + ", ".join(sorted(members, key=_natural_key)) + ")")
+#         group_labels = sorted(group_labels, key=lambda s: re.split(r'(\d+)', s))
+#         return ", ".join(group_labels)
+
+#     # Map the component label back to all rows belonging to clusters in that component
+#     for cl in clusters:
+#         label_string = _cluster_group_label(comp_of_cluster[cl])
+#         idx_mask = mask & (g['ligand_cluster'] == cl)
+#         result.loc[idx_mask] = label_string
+
+#     return result
