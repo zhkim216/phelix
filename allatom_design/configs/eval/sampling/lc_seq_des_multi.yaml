@@ -50,8 +50,8 @@ pos_constraint_csv: null
 
 # Sampling config
 sampling_cfg_overrides:
-  batch_size: 8
-  num_seqs_per_pdb: 8  # number of sequences to sample per pdb
+  batch_size: 2
+  num_seqs_per_pdb: 2  # number of sequences to sample per pdb
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
   num_workers: ${num_workers}

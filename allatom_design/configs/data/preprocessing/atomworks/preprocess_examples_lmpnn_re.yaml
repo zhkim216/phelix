@@ -1,7 +1,7 @@
-mmcif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/pdbs
-out_dir: /scratch/users/zhkim216/datasets/debug_atomworks_lmpnn
+mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
+out_dir: /scratch/users/zhkim216/datasets/atomworks_lmpnn_re
 
-num_workers: 23
+num_workers: 8
 
 dataset:
   _target_: atomworks.ml.datasets.datasets.PandasDataset
@@ -45,4 +45,3 @@ preprocess:
 # --- sharding for multi-node runs ---
 num_shards: 1      # total number of shards
 shard_id: 0         # per-job shard id
-

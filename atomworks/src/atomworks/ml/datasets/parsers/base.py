@@ -116,11 +116,11 @@ def load_example_from_metadata_row(
     if cif_parser_args is None:
         cif_parser_args = {}
 
-    # Convenience utilities to default to loading from and saving to cache if a cache_dir is provided, unless explicitly overridden
-    # TODO: Move to DEFAULT_CIF_PARSER_ARGS, but set to False by default not True
-    if cif_parser_args.get("cache_dir"):
-        cif_parser_args.setdefault("load_from_cache", True)
-        cif_parser_args.setdefault("save_to_cache", True)
+    # # Convenience utilities to default to loading from and saving to cache if a cache_dir is provided, unless explicitly overridden
+    # # TODO: Move to DEFAULT_CIF_PARSER_ARGS, but set to False by default not True
+    # if cif_parser_args.get("cache_dir"):
+    #     cif_parser_args.setdefault("load_from_cache", True)
+    #     cif_parser_args.setdefault("save_to_cache", True)
 
     # Merge DEFAULT_CIF_PARSER_ARGS with cif_parser_args, overriding with the keys present in cif_parser_args
     merged_cif_parser_args = {**DEFAULT_PARSER_ARGS, **cif_parser_args}
