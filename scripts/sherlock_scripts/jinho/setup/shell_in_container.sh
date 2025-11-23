@@ -15,17 +15,17 @@ echo "=========================================="
 # Clear VSCode-specific environment variables
 unset PROMPT_COMMAND
 
+# For torch.compile
+CUDA_BIND_OPT="--bind ${CUDA_HOST}:${CUDA_HOME}:ro"
+
 # Start interactive shell
 /bin/singularity shell --nv \
+    $CUDA_BIND_OPT \
     --bind "$SCRATCH" \
     --bind "$PROJECT_ROOT" \
     --bind "$UV_CACHE_DIR:/uv/cache" \
     --bind "$UV_PYTHON_INSTALL_DIR:/uv/python" \
-    --bind "$CUDA_HOME:$CUDA_HOME" \
-    --bind "$CUDA_HOME:/usr/local/cuda" \
-    --env CUDA_HOME=$CUDA_HOME \
-    --env PATH=$VENV/bin:$CUDA_HOME/bin:$PATH \
-    --env LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH \
+    --env PATH=$VENV/bin:$PATH \
     --env PYTHONPATH=$PROJECT_ROOT:$PYTHONPATH \
     --env PS1="\[\033[01;35m\][singularity]\[\033[00m\] \[\033[01;34m\]\w\[\033[00m\] $ " \
     --env TORCH_HOME=$TORCH_HOME \
@@ -45,4 +45,7 @@ unset PROMPT_COMMAND
     --env VENV=$VENV \
     --env SCRATCH=$SCRATCH \
     --env PROJECT_ROOT=$PROJECT_ROOT \
+    --env CUDA_HOME=$CUDA_HOME \
+    --env TRITON_LIBCUDA_PATH=$TRITON_LIBCUDA_PATH \
+    --env LIBRARY_PATH=$TRITON_LIBCUDA_PATH:$LIBRARY_PATH \
     "$SIF"

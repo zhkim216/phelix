@@ -18,7 +18,7 @@ import atomworks.ml.preprocessing.constants as aw_const
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-@hydra.main(config_path="../../../configs_local/data/preprocessing/atomworks", config_name="cluster_sequences", version_base="1.3.2",)
+@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="cluster_sequences", version_base="1.3.2",)
 def main(cfg: DictConfig) -> None:
     """
     Cluster the sequences in the metadata parquet file.

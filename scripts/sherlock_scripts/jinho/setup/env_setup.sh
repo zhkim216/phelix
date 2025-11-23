@@ -1,5 +1,4 @@
 #!/bin/bash
-# scripts for setup environment for AF3ppg container
 
 # Load cuda module
 module load cuda/12.6.1
@@ -17,10 +16,15 @@ export UV_CACHE_DIR=/scratch/users/zhkim216/uv/cache
 export UV_PYTHON_INSTALL_DIR=/scratch/users/zhkim216/uv/python
 export JAX_COMPILATION_CACHE_DIR=/scratch/users/zhkim216/cache/jax_compilation_cache
 
-# CUDA setups
-export CUDA_HOME=/share/software/user/open/cuda/12.6.1
-export PATH=$CUDA_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+# CUDA setups, for torch.compile
+export CUDA_HOST="$(dirname "$(dirname "$(which nvcc)")")"
+export CUDA_HOME="/usr/local/cuda"
+if [ -f "$CUDA_HOME/targets/x86_64-linux/lib/stubs/libcuda.so" ]; then
+  export TRITON_LIBCUDA_PATH="$CUDA_HOME/targets/x86_64-linux/lib/stubs"
+else
+  export TRITON_LIBCUDA_PATH="$CUDA_HOME/lib64/stubs"
+fi
+
 
 # XLA/JAX setups (AF3 recommendation)
 export XLA_FLAGS="--xla_gpu_enable_triton_gemm=false"
@@ -33,7 +37,7 @@ export VENV=/scratch/users/zhkim216/venv/af3ad
 export SCRATCH=/scratch/users/zhkim216
 
 # Project root (Parent directory of the scripts)
-export PROJECT_ROOT="$(dirname $(dirname $(readlink -f ${BASH_SOURCE[0]})))"
+export PROJECT_ROOT="/home/users/zhkim216/code/allatom-design"
 
 echo "Environment loaded:"
 echo "  PROJECT_ROOT: $PROJECT_ROOT"
