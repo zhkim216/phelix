@@ -63,6 +63,8 @@ sampling_cfg_overrides:
     potts_sweeps: 50
     lcp_expand_edge_idx_fix: false
 
+
+
 # Checkpoint sweep control
 sweep_cfg:
   enabled: true  # true로 하면 ckpt 디렉토리 스윕 실행

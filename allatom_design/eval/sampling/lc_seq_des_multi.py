@@ -87,7 +87,8 @@ def main(cfg: DictConfig):
                                  metadata = metadata,
                                  pdb_paths=pdb_files, device=device, 
                                  pos_constraint_df=pos_constraint_df,
-                                 out_dir=log_dir)
+                                 out_dir=log_dir,
+                                 io_cfg=cfg.io_cfg)
 
         # Save outputs to CSV (split per-sample vs per-PDB)
         sample_len = len(outputs["example_id"])
@@ -145,7 +146,8 @@ def main(cfg: DictConfig):
                                      metadata = metadata,
                                      pdb_paths=pdb_files, device=device, 
                                      pos_constraint_df=pos_constraint_df,
-                                     out_dir=log_dir)
+                                     out_dir=log_dir,
+                                     io_cfg=cfg.io_cfg)
 
             # Save outputs to CSV with checkpoint-specific name (split)
             base_stem = (
