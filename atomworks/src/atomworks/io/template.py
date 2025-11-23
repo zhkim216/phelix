@@ -376,7 +376,7 @@ def build_template_atom_array(
             )
             # ... to make caching efficient, add the res_id annotation separately,
             #     since this will differ between residues of the same chain
-            tmpl.res_id = np.full(len(tmpl), res_id_original if chain_is_polymer else res_id)
+            tmpl.res_id = np.full(len(tmpl), res_id_original if chain_is_polymer else res_id)            
 
             # ... copy over the annotations & coordinates from the atom_array if the residue exists
             if res_mask.any():
@@ -507,7 +507,7 @@ def add_missing_atoms(
         ValueError: If chain_info_dict is inconsistent with atom_array chains.
     """
     # ... match all residues to a CCD template
-    #     (unless no CCD template esits, in which case we copy over)
+    #     (unless no CCD template exists, in which case we copy over)
     #     this also creates the intra-residue bonds from the CCD
     atoms = build_template_atom_array(
         chain_info_dict=chain_info_dict,

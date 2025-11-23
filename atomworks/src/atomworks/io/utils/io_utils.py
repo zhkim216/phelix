@@ -21,7 +21,7 @@ from biotite.structure.io import mol, pdbx
 import atomworks.io.transforms.atom_array as ta  # to avoid circular import
 from atomworks.common import exists
 from atomworks.constants import ATOMIC_NUMBER_TO_ELEMENT, STANDARD_AA, STANDARD_DNA, STANDARD_RNA
-from atomworks.enums import ChainType
+from atomworks.enums import ChainType, ChainTypeInfo #! (JH) 251121 fixed
 from atomworks.io.template import add_inter_residue_bonds
 from atomworks.io.transforms.categories import category_to_dict
 from atomworks.io.utils.selection import get_annotation
@@ -446,7 +446,13 @@ def _build_entity_poly(
 
         # ... add to entity_poly
         entity_poly["entity_id"].append(entity_id)
-        entity_poly["type"].append(chain_type.to_string().lower())
+        #! 251121 fixed, to run AF3 template-conditioning
+        if chain_type.to_string() == "POLYPEPTIDE(L)":
+            entity_poly["type"].append("polypeptide(L)")
+        elif chain_type.to_string() == "POLYPEPTIDE(D)":
+            entity_poly["type"].append("polypeptide(D)")
+        else:
+            entity_poly["type"].append(chain_type.to_string().lower())
         entity_poly["nstd_linkage"].append("no")
         entity_poly["nstd_monomer"].append("yes" if has_non_standard_monomer else "no")
         entity_poly["pdbx_seq_one_letter_code"].append(processed_entity_non_canonical_sequence)
@@ -572,9 +578,9 @@ def _to_cif_or_bcif(
 
     if include_bonds and structure.bonds is not None:
         # TODO: Switch to using the `convert_bond_type` method once we upgrade to Biotite v1.4.0
-        # structure.bonds.convert_bond_type(struc.bonds.BondType.COORDINATION, struc.bonds.BondType.SINGLE)
-        mask = structure.bonds._bonds[:, 2] == struc.bonds.BondType.COORDINATION
-        structure.bonds._bonds[mask, 2] = struc.bonds.BondType.SINGLE
+        structure.bonds.convert_bond_type(struc.bonds.BondType.COORDINATION, struc.bonds.BondType.SINGLE)
+        # mask = structure.bonds._bonds[:, 2] == struc.bonds.BondType.COORDINATION
+        # structure.bonds._bonds[mask, 2] = struc.bonds.BondType.SINGLE
 
     pdbx.set_structure(cif_file, structure, data_block=id, include_bonds=include_bonds, extra_fields=extra_fields)
 
