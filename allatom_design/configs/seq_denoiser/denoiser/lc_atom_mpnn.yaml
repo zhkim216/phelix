@@ -24,7 +24,7 @@ mpnn:
     num_context_feature_processor_layers: 2
     num_context_feature_aggregator_layers: 2
     atom_context_num: 16  
-    edge_update: true
+    edge_update: false
 
   token_features:
     ca_only: false
