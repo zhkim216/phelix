@@ -64,7 +64,7 @@ def compositions(S: torch.Tensor, C: torch.LongTensor, w: int = 30, expand_edge_
     edge_idx = edge_idx.clamp(min=0, max=S.shape[1] - 1)
     C_i = C[..., None]
     C_j = collect_neighbors(C_i, edge_idx)[..., 0]
-    #* C_j for the other samples in the batch have been disarded before fix
+    #* C_j for the other samples in the batch have been discarded before fix
     
     mask_ij = (mask_ij & C_j.eq(C_i) & (C_i > 0) & (C_j > 0)).float()
     # select only the neighbors that are on the same chain
