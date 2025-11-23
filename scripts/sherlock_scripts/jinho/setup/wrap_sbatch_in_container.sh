@@ -6,9 +6,9 @@ SCRIPT_DIR="/home/users/zhkim216/code/allatom-design/scripts/sherlock_scripts/ji
 source "${SCRIPT_DIR}/env_setup.sh"
 
 # --- EDIT THESE THREE (cluster-specific) ---
-IMG="${SIF:-/scratch/users/zhkim216/containers/af3ad_base.sif}"       # 컨테이너 이미지(.sif)
+IMG="${SIF:-/scratch/users/zhkim216/containers/lullaby.sif}"       # 컨테이너 이미지(.sif)
 REPO_DIR="${PROJECT_ROOT:-/home/users/zhkim216/code/allatom-design}"  # 저장소 루트
-ENV_DIR="${VENV:-/scratch/users/zhkim216/venv/af3ad}"                 # venv 디렉토리
+ENV_DIR="${VENV:-/opt/lullaby}"                 # venv 디렉토리
 # ------------------------------------------
 
 # Pick runner (apptainer or singularity)
