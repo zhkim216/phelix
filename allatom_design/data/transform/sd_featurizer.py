@@ -189,6 +189,7 @@ def sd_featurizer(
 
         # Add features from the atom_array
         FeaturizeCoordsAndMasks(),
+        # AddChainTypeAnnotationsToAtomArray(), #! (JH) added 251117
         CenterRandomAugmentation(apply_random_augmentation = apply_random_augmentation, 
                                 translation_scale=translation_scale), #! turn on/off depending on train/eval?
     ]
@@ -562,6 +563,8 @@ class AddChainTypeFeatrues(Transform):
             chain_is_metal[asym_id == asym_name_to_id[q_pn_unit_iid]] = is_metal
             chain_is_small_molecule[asym_id == asym_name_to_id[q_pn_unit_iid]] = is_small
             chain_is_nuc[asym_id == asym_name_to_id[q_pn_unit_iid]] = is_nuc            
+              
+        
                                                                                         
         data["feats"] |= {
             "chain_is_protein": chain_is_protein,
@@ -571,3 +574,27 @@ class AddChainTypeFeatrues(Transform):
         }
         
         return data
+    
+# class AddChainTypeAnnotationsToAtomArray(Transform):
+#     """Copy chain_is_x (token-wise) to atom_array annotation"""
+#     @override
+#     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+#         atom_array = data["atom_array"]
+#         feats = data["feats"]
+
+#         # (1) atom_to_token_map : [n_atoms]  (already created in ComputeAtomToTokenMap)
+#         atom_to_token = feats["atom_to_token_map"].detach().cpu().numpy()
+
+#         # (2) Each chain_is_x (token-wise → atom-wise broadcast)
+#         for name in ["chain_is_protein",
+#                      "chain_is_small_molecule",
+#                      "chain_is_metal",
+#                      "chain_is_nuc"]:
+#             token_feat = np.asarray(feats[name], dtype=bool)        # [n_tokens]
+#             atom_feat = token_feat[atom_to_token]                   # [n_atoms]
+
+#             # (3) Set AtomArray annotation
+#             atom_array.set_annotation(name, atom_feat)
+
+#         data["atom_array"] = atom_array
+#         return data

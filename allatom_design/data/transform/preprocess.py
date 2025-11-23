@@ -34,6 +34,8 @@ def preprocess_transform(
     b_factor_min: float | None = None,
     b_factor_max: float | None = None,
     min_residues_for_polymers: int = 0, 
+    remove_terminal_oxygen_protein: bool = True,
+    remove_terminal_oxygen_nucleic_acid: bool = True,
 ) -> Transform:
     """
     Build a transform pipeline for featurizing a structure parsed by the AtomWorks CIF parser.
@@ -43,7 +45,7 @@ def preprocess_transform(
         RemoveHydrogens(),
         # filter to non-clashing PN units
         FilterToSpecifiedPNUnits(extra_info_key_with_pn_unit_iids_to_keep="all_pn_unit_iids_after_processing"),
-        RemoveTerminalOxygen(),
+        RemoveTerminalOxygen() if remove_terminal_oxygen_protein else Identity(),
         SetOccToZeroOnBfactor(b_factor_min, b_factor_max),
         RemoveUnresolvedPNUnits(),
         RemovePolymersWithTooFewResolvedResidues(min_residues=min_residues_for_polymers),
@@ -59,7 +61,7 @@ def preprocess_transform(
             move_atomized_part_to_end=False,
             validate_atomize=False,
         ),
-        RemoveNucleicAcidTerminalOxygen(),
+        RemoveNucleicAcidTerminalOxygen() if remove_terminal_oxygen_nucleic_acid else Identity(),
         AddWithinChainInstanceResIdx(),
         AddWithinPolyResIdxAnnotation(),
     ]

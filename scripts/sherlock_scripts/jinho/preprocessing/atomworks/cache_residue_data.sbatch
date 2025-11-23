@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=cache_residue_data
 #SBATCH -p possu,normal,owners
-#SBATCH --array=0-8
+#SBATCH --array=0-19
 #SBATCH --cpus-per-task=8
-#SBATCH --time=24:00:00
+#SBATCH --time=6:00:00
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/users/zhkim216/slurm_log_files/job_%A_%a.out
@@ -30,8 +30,7 @@ echo "[sbatch] NUM_SHARDS=$NUM_SHARDS (from array [$MIN-$MAX])"
 python3 allatom_design/data/preprocessing/atomworks/cache_residue_data.py \
     --config-dir allatom_design/configs/data/preprocessing/atomworks \
     --config-name cache_residue_data.yaml \
-    seed=6 \
-    out_dir=/scratch/users/zhkim216/datasets/atomworks \
+    out_dir=/scratch/users/zhkim216/datasets \
     ccd_dir=/scratch/users/zhkim216/datasets/ccd_mirror \
     num_workers=${SLURM_CPUS_PER_TASK} \
     shard_id=${SLURM_ARRAY_TASK_ID} \
@@ -39,7 +38,7 @@ python3 allatom_design/data/preprocessing/atomworks/cache_residue_data.py \
     n_trials=3 \
     timeout_offset=3.0 \
     timeout_slope=1.0 \
-    num_conformers=50 \
+    num_conformers=100 \
     generate_conformers_kwargs.optimize=true \
     generate_conformers_kwargs.num_threads=2 \
     generate_conformers_kwargs.hydrogen_policy=remove

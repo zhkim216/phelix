@@ -38,7 +38,7 @@ def main(out_dir: str, save_imd: bool | None = None):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out_dir", default="/scratch/users/zhkim216/datasets/debug_atomworks_lmpnn")
+    ap.add_argument("--out_dir", default="/home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered")
     ap.add_argument("--save_imd", default=False)
     args = ap.parse_args()
     main(args.out_dir, args.save_imd)

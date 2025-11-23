@@ -410,7 +410,13 @@ class SDDataset(MolecularDataset):
                 f"  - Remaining: {filtered_num_rows:,} rows ({percent_remaining:.2f}%)\n"
                 f"+-------------------------------------------+\n"
             )
-    
+
+def _approx_bytes(d):
+    tot = 0
+    for v in d.values():
+        if torch.is_tensor(v):
+            tot += v.nelement()*v.element_size()
+    return tot
 
 def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     """Collate sequence denoiser features into a batch.
@@ -445,6 +451,10 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
         
         # Stack the values
         collated[key] = values
+        
+    # mb = _approx_bytes(collated) / (1024**2)
+    # logging.info(f"[DBG] batch_cpu_mem≈{mb:.1f} MB")
+
     return collated
 
 

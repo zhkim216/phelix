@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Load environment setup first
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="/home/users/zhkim216/code/allatom-design/scripts/sherlock_scripts/jinho/setup"
 source "${SCRIPT_DIR}/env_setup.sh"
 
 # --- EDIT THESE THREE (cluster-specific) ---
@@ -33,7 +33,7 @@ mkdir -p "$WRAP_DIR"
 STAMP="$(date +%Y%m%d_%H%M%S)_$$"
 WRAP="$WRAP_DIR/${JOB_BASE%.sbatch}.container.${STAMP}.sbatch"
 
-# Binds (캐시 디렉토리들 포함)
+# Binds
 BIND="$HOME"
 [[ -n "${SCRATCH:-}"    ]] && BIND="$BIND,$SCRATCH"
 [[ -n "${GROUP_HOME:-}" ]] && BIND="$BIND,$GROUP_HOME"
@@ -43,8 +43,9 @@ BIND="$BIND,$TORCH_HOME,$HF_HOME,$PIP_CACHE_DIR,$XDG_CACHE_HOME"
 BIND="$BIND,$PYTHONPYCACHEPREFIX,$TORCHINDUCTOR_CACHE_DIR,$TRITON_CACHE_DIR"
 BIND="$BIND,$TORCH_EXTENSIONS_DIR,$UV_CACHE_DIR,$UV_PYTHON_INSTALL_DIR"
 BIND="$BIND,$JAX_COMPILATION_CACHE_DIR"
-# CUDA bind
-BIND="$BIND,$CUDA_HOME"
+
+# CUDA bind, important for torch.compile
+BIND="$BIND,${CUDA_HOST}:${CUDA_HOME}:ro"
 
 {
   echo '#!/usr/bin/env bash'
@@ -63,6 +64,8 @@ $APPTAINER_BIN exec --nv \\
   --env CUDA_HOME=$CUDA_HOME \\
   --env PATH=$VENV/bin:$CUDA_HOME/bin:\${PATH:-/usr/local/bin:/usr/bin:/bin} \\
   --env LD_LIBRARY_PATH=$CUDA_HOME/lib64:\${LD_LIBRARY_PATH:-} \\
+  --env TRITON_LIBCUDA_PATH=$TRITON_LIBCUDA_PATH \
+  --env LIBRARY_PATH=$TRITON_LIBCUDA_PATH:$LIBRARY_PATH \
   --env PYTHONPATH=$PROJECT_ROOT:\${PYTHONPATH:-} \\
   --env TORCH_HOME=$TORCH_HOME \\
   --env HF_HOME=$HF_HOME \\
