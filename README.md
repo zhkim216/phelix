@@ -2,9 +2,7 @@
 
 Branch for developing Lullaby with alphafold3 and openstructure.
 
-Below are the instructions for setting up the codebase, container, and environment on Sherlock.
-
-## Environment Setup
+## Environment setup on Sherlock
 
 ### 1. Clone Repository
 
@@ -138,8 +136,10 @@ pip install -e . --no-deps
 ```
 
 #### Atomworks
+```bash
 cd $HOME/code/allatom-design/atomworks
 uv pip install -e . --no-deps
+```
 
 #### Allatom Design
 
@@ -158,7 +158,7 @@ cd $HOME/code/allatom-design
 pip install -e . --no-deps
 ```
 
-## Running the Container
+### Running the Container
 
 To start an interactive shell session in the container:
 
@@ -167,8 +167,41 @@ cd $HOME/code/allatom-design
 bash ./scripts/sherlock_scripts/jinho/shell_in_container.sh
 ```
 
-## Troubleshooting
+### Troubleshooting
 
 - If you encounter issues with package installations, ensure all dependency files are present in the repository
 - For container-related issues, verify that the `.sif` file was copied correctly to your `$SCRATCH/containers` directory
 - Check that all paths in the setup scripts point to your actual directory locations
+
+
+## Environment setup on the lab desktop  
+
+### Installing the environment
+- Check allatom-design/scripts/local_scripts/jinho/setup/README.md
+
+### Installing the openstructure
+
+```bash
+sudo apt-get install cmake g++ libboost-all-dev libfftw3-dev libeigen3-dev libsqlite3-dev libpng-dev zlib1g-dev
+
+git clone https://git.scicore.unibas.ch/schwede/openstructure.git
+cd openstructure
+mkdir build
+cd build
+
+source /your/uv/env
+cmake .. \
+-DOPTIMIZE=ON \
+-DENABLE_GUI=OFF \
+-DENABLE_GFX=OFF \
+-DPYTHON_ROOT_DIR=$(dirname $(dirname $(which python))) \
+-DCMAKE_INSTALL_PREFIX=$(dirname $(dirname $(which python)))
+
+make -j$(nproc)
+make install
+
+wget https://files.wwpdb.org/pub/pdb/data/monomers/components.cif.gz
+stage/bin/chemdict_tool create components.cif.gz compounds.chemlib -i
+cmake .. -DCOMPOUND_LIB=compounds.chemlib
+make install
+```
