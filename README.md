@@ -38,7 +38,21 @@ pip install uv
 uv --version
 ```
 
-### 3. Create Virtual Environment
+### 3. Container Setup
+
+Copy the container to your `$SCRATCH/containers` directory:
+
+```bash
+mkdir -p $SCRATCH/containers
+cp /oak/stanford/groups/possu/jinho/containers/lullaby.sif $SCRATCH/containers
+```
+
+### 4. Create Virtual Environment
+
+```bash
+cd $HOME/code/allatom-design
+bash scripts/sherlock_scripts/jinho/setup/shell_in_container.sh
+```
 
 Create a UV virtual environment in your `$SCRATCH` directory:
 
@@ -46,21 +60,12 @@ Create a UV virtual environment in your `$SCRATCH` directory:
 # Create venv directory
 mkdir -p $SCRATCH/venv
 
-# Create af3ad virtual environment
+# Create lullaby virtual environment inheriting the mamba environment of the container
 cd $SCRATCH/venv
-uv venv lullaby --python 3.12
+uv venv lullaby --python=/opt/conda/envs/lullaby/bin/python --system-site-packages
 
 # Activate the environment
 source $SCRATCH/venv/lullaby/bin/activate
-```
-
-### 4. Container Setup
-
-Copy the container to your `$SCRATCH/containers` directory:
-
-```bash
-mkdir -p $SCRATCH/containers
-cp /oak/stanford/groups/possu/jinho/containers/lullaby.sif $SCRATCH/containers
 ```
 
 ### 5. Update Environment Paths
@@ -109,6 +114,13 @@ uv pip install -r uv-compatible-core.txt --no-deps
 python -m pip install -r pip-only-torch.txt --no-deps
 pip install -r pip-only-core.txt --no-deps
 
+# Install lightning and downgrade networkx to avoid conflicts in openstructure
+uv pip install lightning --no-deps
+uv pip install networkx==2.8.8
+
+# Install python-dotenv
+uv pip install python-dotenv
+
 # Atomworks dependencies (Todo: Integrate these into requirements.txt)
 uv pip install \
 "biotite>=1.3.0,<2" \
@@ -147,6 +159,7 @@ Before installing allatom_design, clean any existing installation (if present):
 
 ```bash
 # Optional: Remove existing egg-info if present
+cd $HOME/code/allatom-design
 rm -rf allatom_design.egg-info
 pip cache purge
 ```
@@ -177,31 +190,32 @@ bash ./scripts/sherlock_scripts/jinho/shell_in_container.sh
 ## Environment setup on the lab desktop  
 
 ### Installing the environment
-- Check allatom-design/scripts/local_scripts/jinho/setup/README.md
-
-### Installing the openstructure
-
 ```bash
-sudo apt-get install cmake g++ libboost-all-dev libfftw3-dev libeigen3-dev libsqlite3-dev libpng-dev zlib1g-dev
+mamba create -n lullaby_local python=3.12
+mamba activate lullaby_local
+mamba install openstructure=2.10.0 -c conda-forge -c bioconda -y
 
-git clone https://git.scicore.unibas.ch/schwede/openstructure.git
-cd openstructure
-mkdir build
-cd build
+mamba activate lullaby_local
+cd ${PATH_TO_allatom-design}
+bash scripts/local_scripts/jinho/setup/install_lullaby_local.sh
+uv pip install python-dotenv
+```
 
-source /your/uv/env
-cmake .. \
--DOPTIMIZE=ON \
--DENABLE_GUI=OFF \
--DENABLE_GFX=OFF \
--DPYTHON_ROOT_DIR=$(dirname $(dirname $(which python))) \
--DCMAKE_INSTALL_PREFIX=$(dirname $(dirname $(which python)))
+If you encounter the error below,
+```bash
+can't find file to patch at input line 3
+...
+|--- hmmer-3.4/src/jackhmmer.c
+|+++ hmmer-3.4/src/jackhmmer.c
+```
 
-make -j$(nproc)
-make install
+Then you can do 
+```bash
+File to patch: src/jackhmmer.c
+```
 
-wget https://files.wwpdb.org/pub/pdb/data/monomers/components.cif.gz
-stage/bin/chemdict_tool create components.cif.gz compounds.chemlib -i
-cmake .. -DCOMPOUND_LIB=compounds.chemlib
-make install
+When you use the environment,
+```bash
+mamba activate lullaby_local
+source scripts/local_scripts/jinho/setup/activate_lullaby_local.sh
 ```
