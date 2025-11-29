@@ -62,6 +62,8 @@ def make_af3_json(af3_ss_input_dir: str = None,
     nonpolymer_ligand_columns = ['q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal']
     polymer_ligand_columns = ['q_pn_unit_is_peptide', 'q_pn_unit_is_nuc_ligand', 'q_pn_unit_is_nuc_polymer']
 
+    pdb_chain_info = {}
+    
     expanded_protein_columns = []
     expanded_nonpolymer_ligand_columns = []
     expanded_polymer_ligand_columns = []
@@ -71,8 +73,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
         expanded_nonpolymer_ligand_columns.extend([f'{column}_{i}' for i in [1,2]])
     for column in polymer_ligand_columns:
         expanded_polymer_ligand_columns.extend([f'{column}_{i}' for i in [1,2]])
-        
-        pdb_chain_info = {}
+                
         for _, row in metadata.iterrows():
             pdb_key = row["pdb_id"]            
             pdb_chain_info[pdb_key] = {}
