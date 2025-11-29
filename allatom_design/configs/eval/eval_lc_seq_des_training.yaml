@@ -3,13 +3,13 @@ wandb:
   no_wandb: false  # Disable wandb logging
   project: "ligand_seq_des"  # Wandb project name
   wandb_id: "zhkim216"  # Wandb username
-  group: "debug" # Wandb group name
+  group: "debug_eval" # Wandb group name
 
 # Run settings
 seed: 0
 num_workers: 1  # for dataloading
 debug: true
-num_sample_debug: 15
+num_sample_debug: 2
 start_step: 62500  # start evaluation after this step, 0 or null to start from the beginning
 end_step: 62500  # end evaluation after this step (inclusive), null to evaluate until the end
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
@@ -93,14 +93,14 @@ seq_des_cfg:
   model_name: "lc_atom_mpnn"
   atom_mpnn:
     ckpt_path: null
-    sampling_cfg: /scratch/users/zhkim216/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
+    sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides: ${sampling_cfg_overrides}
 
 # Structure prediction model args
 struct_pred_cfg:
   model_name: "af3"
   af3:
-    runner_path: /scratch/users/zhkim216/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
+    runner_path: /home/users/zhkim216/code/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
     json_config:      
       model_seeds: [42]
       version: 2
