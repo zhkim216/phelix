@@ -104,7 +104,7 @@ cd $HOME/code/allatom-design/requirements_split
 uv pip install --upgrade setuptools wheel pip
 
 # Install PyTorch dependencies
-uv pip install -r uv-compatible-torch.txt --index-url https://download.pytorch.org/whl/cu126
+uv pip install -r uv-compatible-torch.txt --extra-index-url https://download.pytorch.org/whl/cu126
 uv pip install -r uv-compatible-core.txt --no-deps
 
 # Install additional dependencies via pip
