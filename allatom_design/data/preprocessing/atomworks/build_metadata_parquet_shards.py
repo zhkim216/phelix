@@ -16,6 +16,7 @@ from concurrent.futures import ProcessPoolExecutor
 import hydra
 import pandas as pd
 import yaml
+from atomworks.ml.preprocessing.constants import ENTRIES_TO_EXCLUDE_FOR_PRE_PROCESSING
 from atomworks.ml.example_id import generate_example_id
 from atomworks.ml.preprocessing.get_pn_unit_data_from_structure import \
     DataPreprocessor
@@ -90,6 +91,7 @@ def main(cfg: DictConfig):
 
     # Get all CIF paths, then take this shard's slice
     cif_paths_all = get_cif_paths(cfg.mmcif_dir, cfg.max_file_size)
+    cif_paths_all = [path for path in cif_paths_all if Path(path).stem not in ENTRIES_TO_EXCLUDE_FOR_PRE_PROCESSING] # exclude entries to exclude for preprocessing
     cif_paths = take_shard(cif_paths_all, shard_id=cfg.shard_id, num_shards=cfg.num_shards)
     print(f"Shard {cfg.shard_id}/{cfg.num_shards}: {len(cif_paths)} mmCIFs.")
 

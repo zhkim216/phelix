@@ -41,6 +41,8 @@ class DataPreprocessor:
     clash_distance: float = 1.0
     # (Misc)
     ignore_residues: list[str] = field(default_factory=list)
+    apply_biolip2_contact_criteria: bool = True
+    apply_rigorous_contact_criteria_for_metals: bool = True
     # (Efficiency)
     polymer_pn_unit_limit: int = 1000
     # (CIFUtils defaults)
@@ -309,20 +311,20 @@ class DataPreprocessor:
                 second_shell=False,
             )
             
-            #! (JH) Find second-shell contacting PN units, which will be used to construct ligand clusters 
-            second_shell_pn_unit_iids = dp.get_contacting_pn_units(
-                query_pn_unit=query_pn_unit_atom_array,
-                filtered_atom_array=filtered_atom_array,
-                cell_list=cell_list,
-                contact_distance=self.second_shell_distance,
-                min_contacts_required=1,
-                calculate_min_distance=True,
-                second_shell=True,
-            )
+            # #! (JH) Find second-shell contacting PN units, which will be used to construct ligand clusters 
+            # second_shell_pn_unit_iids = dp.get_contacting_pn_units(
+            #     query_pn_unit=query_pn_unit_atom_array,
+            #     filtered_atom_array=filtered_atom_array,
+            #     cell_list=cell_list,
+            #     contact_distance=self.second_shell_distance,
+            #     min_contacts_required=1,
+            #     calculate_min_distance=True,
+            #     second_shell=True,
+            # )
             
-            #! (JH) Remove contacting PN units from second-shell contacting PN units
-            contacting_iids = {item["pn_unit_iid"] for item in contacting_pn_unit_iids}
-            second_shell_pn_unit_iids = [item for item in second_shell_pn_unit_iids if item["pn_unit_iid"] not in contacting_iids]                        
+            # #! (JH) Remove contacting PN units from second-shell contacting PN units
+            # contacting_iids = {item["pn_unit_iid"] for item in contacting_pn_unit_iids}
+            # second_shell_pn_unit_iids = [item for item in second_shell_pn_unit_iids if item["pn_unit_iid"] not in contacting_iids]                        
 
             # Find close PN units, which will be used to determine which PN units to load at train-time
             close_pn_unit_iids = dp.get_contacting_pn_units(
@@ -342,12 +344,12 @@ class DataPreprocessor:
                 reverse=True,
             )
 
-            #! (JH) Sort second-shell contacting PN units by number of contacting atoms and then by minimum distance
-            second_shell_pn_unit_iids = sorted(
-                second_shell_pn_unit_iids,
-                key=lambda x: (x["num_contacts"], -x["min_distance"]),
-                reverse=True,
-            )
+            # #! (JH) Sort second-shell contacting PN units by number of contacting atoms and then by minimum distance
+            # second_shell_pn_unit_iids = sorted(
+            #     second_shell_pn_unit_iids,
+            #     key=lambda x: (x["num_contacts"], -x["min_distance"]),
+            #     reverse=True,
+            # )
 
             # Determine the primary polymer chain, which is the first partner polymer PN unit for non-polymers, or the query PN unit itself for polymers
             if not query_pn_unit_type.is_non_polymer():
@@ -512,16 +514,16 @@ class DataPreprocessor:
                         for partner in contacting_pn_unit_iids
                     ]
                 ),
-                #! (JH) Add second-shell contacting PN units
-                "q_pn_unit_second_shell_pn_unit_iids": json.dumps(
-                    [
-                        {
-                            "pn_unit_iid": id_map_dict["pn_unit_iid"][partner["pn_unit_iid"]],
-                            **{k: v for k, v in partner.items() if k != "pn_unit_iid"},
-                        }
-                        for partner in second_shell_pn_unit_iids
-                    ]
-                ),
+                # #! (JH) Add second-shell contacting PN units
+                # "q_pn_unit_second_shell_pn_unit_iids": json.dumps(
+                #     [
+                #         {
+                #             "pn_unit_iid": id_map_dict["pn_unit_iid"][partner["pn_unit_iid"]],
+                #             **{k: v for k, v in partner.items() if k != "pn_unit_iid"},
+                #         }
+                #         for partner in second_shell_pn_unit_iids
+                #     ]
+                # ),
                 "q_pn_unit_close_pn_unit_iids": json.dumps(close_pn_unit_iids),
             }
             # fmt: on

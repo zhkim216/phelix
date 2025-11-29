@@ -1,6 +1,3 @@
-import json
-import os
-import re
 import shutil
 import subprocess
 from collections import defaultdict
@@ -13,124 +10,21 @@ import pandas as pd
 import torch
 import wandb
 import yaml
-from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
 from tqdm import tqdm
 
-from allatom_design.data import data as data_utils
 from allatom_design.eval.eval_utils.eval_setup_utils import (
-    get_pdb_files, get_training_checkpoints, process_pdb_files, wandb_setup)
+    get_cached_example_files, get_pdb_files, get_training_checkpoints, wandb_setup)
 from allatom_design.eval.eval_utils.seq_des_utils import (
-    get_seq_des_model, run_seq_des)
-
-
-def _chain_letters(n: int) -> list[str]:
-    letters = []
-    base = [chr(i) for i in range(ord('A'), ord('Z') + 1)]
-    if n <= 26:
-        return base[:n]
-    # Extend like A, B, ..., Z, AA, BA, CA, ... (reverse spreadsheet style used in AF3 docs)
-    letters.extend(base)
-    idx = 0
-    while len(letters) < n:
-        letters.extend([f"{base[i]}{base[idx]}" for i in range(26)])
-        idx += 1
-    return letters[:n]
-
-
-def _make_af3_single_json(job_name: str,
-                          chain_seqs: list[str],
-                          model_seeds: list[int]) -> dict:
-    sequences = []
-    chain_ids = _chain_letters(len(chain_seqs))
-    for cid, seq in zip(chain_ids, chain_seqs):
-        sequences.append({
-            "protein": {
-                "id": cid,
-                "sequence": seq,
-                "unpairedMsa": "",
-                "pairedMsa": ""
-            }
-        })
-    return {
-        "name": job_name,
-        "sequences": sequences,
-        "modelSeeds": model_seeds,
-        "dialect": "alphafold3",
-        "version": 1,
-    }
-
-
-def _run_af3(json_path: str,
-             out_dir: str,
-             runner_path: str,
-             extra_args: list[str] | None = None) -> None:
-    cmd = [
-        "python",
-        runner_path,
-        f"--json_path={json_path}",
-        f"--output_dir={out_dir}",
-        "--run_data_pipeline=True",
-        "--run_inference=True",
-    ]
-    if extra_args:
-        cmd.extend(extra_args)
-    subprocess.run(cmd, check=True)
-
-
-def _find_best_pred_path(out_dir: str, job_name: str) -> str | None:
-    # Prefer top-level best-ranking output written with name=job_name
-    candidates = list(Path(out_dir).glob(f"{job_name}*.cif")) + list(Path(out_dir).glob(f"{job_name}*.pdb"))
-    if candidates:
-        # Prefer .cif if present
-        cif_candidates = [p for p in candidates if p.suffix.lower() == ".cif"]
-        return str(sorted(cif_candidates or candidates)[0])
-
-    # Otherwise, look into seed-sample subdirectories for any cif/pdb
-    pattern_dirs = sorted(Path(out_dir).glob("seed-*_*"))
-    for d in pattern_dirs:
-        files = list(d.glob("*.cif")) + list(d.glob("*.pdb"))
-        if files:
-            cif_files = [p for p in files if p.suffix.lower() == ".cif"]
-            return str(sorted(cif_files or files)[0])
-    return None
-
-
-def _compute_sc_metrics(sample_cif: str,
-                        pred_struct_path: str,
-                        temp_dir: str) -> dict[str, float]:
-    sample_feats = data_utils.load_feats_from_pdb(sample_cif)
-    pred_feats = data_utils.load_feats_from_pdb(pred_struct_path)
-
-    # Both tensors to shape [1, N, 37, 3] etc.
-    coords1 = pred_feats["all_atom_positions"][None]
-    coords2 = sample_feats["all_atom_positions"][None]
-    # Use sample mask for metrics; shapes must match
-    atom_mask = sample_feats["all_atom_mask"][None]
-
-    metrics_to_compute = ["sc_ca_rmsd", "sc_ca_tm", "sc_aa_rmsd"]
-    metrics, _ = eval_compute_structure_metrics(coords1, coords2, atom_mask, metrics_to_compute, temp_dir)
-    # Convert tensor values to float
-    out = {}
-    for k, v in metrics.items():
-        try:
-            out[k] = float(v.item())
-        except Exception:
-            # Some metrics like sc_ca_tm may be tensors already shaped [B]
-            try:
-                out[k] = float(v.squeeze().item())
-            except Exception:
-                out[k] = np.nan
-    return out
-
-
-def eval_compute_structure_metrics(coords1: torch.Tensor,
-                                   coords2: torch.Tensor,
-                                   atom_mask: torch.Tensor,
-                                   metrics_to_compute: list[str],
-                                   temp_dir: str) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
-    from allatom_design.eval.eval_utils import eval_metrics as em
-    return em.compute_structure_metrics(coords1, coords2, atom_mask, metrics_to_compute=metrics_to_compute, temp_dir=temp_dir)
+    get_seq_des_model, run_lc_seq_des)
+from allatom_design.eval.eval_utils.eval_metrics import (
+    compute_self_consistency_metrics_atomworks,
+    compute_template_conditioned_docking_metrics,
+)
+from allatom_design.eval.eval_utils.folding_utils import (
+    _chain_letters, make_af3_json, run_af3_single_sequence, 
+    run_af3_template_conditioned, find_pred_sample_path_af3
+)
 
 
 @hydra.main(config_path="../configs_local/eval", config_name="eval_lc_seq_des_training", version_base="1.3.2")
@@ -151,144 +45,283 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+    if cfg.debug:
+        cfg.exp_name = f"debug_{cfg.exp_name}"
+
     # Logging / output root
     log_dir = wandb_setup(base_out_dir=cfg.base_out_dir, exp_name=cfg.exp_name, cfg_dict=cfg_dict, **cfg.wandb)
+
+    # Load in metadata
+    metadata = pd.read_parquet(cfg.metadata_path)
+    pdb_keys = metadata['pdb_id'].tolist()
+    if cfg.debug:
+        pdb_keys = pdb_keys[:cfg.num_sample_debug]
 
     # Preserve config
     with open(Path(log_dir, "config.yaml"), "w") as f:
         yaml.safe_dump(cfg_dict, f)
+    
+    # Load in PDB file to eval on
+    if cfg.input_cfg.load_from_cache:
+        pdb_files = get_cached_example_files(cached_example_path=cfg.input_cfg.load_cache_cfg.cached_example_path, pdb_name_list=pdb_keys, \
+                                             pdb_name_ext=cfg.input_cfg.load_cache_cfg.pdb_name_ext, n_subsample=cfg.input_cfg.load_cache_cfg.n_subsample)
+    else:
+        pdb_files = get_pdb_files(pdb_dir=cfg.input_cfg.pdb_cfg.pdb_dir, pdb_name_list=pdb_keys, \
+                              pdb_name_ext=cfg.input_cfg.pdb_cfg.pdb_name_ext, n_subsample=cfg.input_cfg.pdb_cfg.n_subsample)
 
     # Device
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Inputs -> processed
-    pdb_files = get_pdb_files(**cfg.input_cfg)
-    processed_struct_files = process_pdb_files(pdb_files, processed_struct_dir=f"{log_dir}/processed_structures", **cfg.pdb_processing_cfg)
-    processed_struct_files = natsorted(processed_struct_files)
+    # Denoiser checkpoints
+    sd_ckpts, pattern = get_training_checkpoints(cfg.denoiser_train_dir, "seq_denoiser",
+                                                 cfg.eval_every_n_ckpts, cfg.start_step, cfg.end_step, cfg.use_ema)
 
-    # # Denoiser checkpoints
-    # sd_ckpts, pattern = get_training_checkpoints(cfg.denoiser_train_dir, "seq_denoiser",
-    #                                              cfg.eval_every_n_ckpts, cfg.start_step, cfg.end_step)
+    # AF3 config defaults
+    af3_runner_path = cfg.struct_pred_cfg.af3.get("runner_path", None)
+    if af3_runner_path is None:
+        raise ValueError("af3_runner_path is not set")
+    af3_model_seeds = list(cfg.struct_pred_cfg.af3.json_config.get("model_seeds", [42]))
 
-    # # AF3 config defaults
-    # af3_runner_path = cfg.af3.get("runner_path", "/home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py")
-    # af3_model_seeds = list(cfg.af3.get("model_seeds", [42]))
-    # af3_extra_args = list(cfg.af3.get("extra_args", []))
+    pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints (seq_recovery & AF3 metrics)...")
+    for sd_ckpt in pbar:
+        match = pattern.search(Path(sd_ckpt).name)
+        global_step, epoch = int(match.group(1)), int(match.group(2))
+        pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
 
-    # pbar = tqdm(sd_ckpts, desc="Evaluating checkpoints (AF3 self-consistency)...")
-    # for sd_ckpt in pbar:
-    #     match = pattern.search(Path(sd_ckpt).name)
-    #     global_step, epoch = int(match.group(1)), int(match.group(2))
-    #     pbar.set_postfix_str(f"Step: {global_step}, Epoch: {epoch}")
+        # Per-ckpt out dir
+        log_dir_i = f"{log_dir}/step_{global_step}_epoch_{epoch}"
+        Path(log_dir_i).mkdir(parents=True, exist_ok=True)
 
-    #     # Per-ckpt out dir
-    #     log_dir_i = f"{log_dir}/step_{global_step}_epoch_{epoch}"
-    #     Path(log_dir_i).mkdir(parents=True, exist_ok=True)
+        # Load sequence design model
+        cfg.seq_des_cfg.atom_mpnn.ckpt_path = sd_ckpt
+        seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
+        seq_des_model["sampling_cfg"].num_workers = cfg.num_workers #! To avoid memory issues
 
-    #     # Load sequence design model
-    #     cfg.seq_des_cfg.atom_mpnn.ckpt_path = sd_ckpt
-    #     seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
+        # Reset seed per checkpoint
+        L.seed_everything(cfg.seed)
 
-    #     # Reset seed per checkpoint
-    #     L.seed_everything(cfg.seed)
+        # Run sequence design
+        outputs = run_lc_seq_des(model = seq_des_model["model"], 
+                                     load_from_cache = cfg.input_cfg.load_from_cache,
+                                     featurizer_cfg = cfg.featurizer_cfg, 
+                                     sampling_cfg = seq_des_model["sampling_cfg"],                          
+                                     metadata = metadata,
+                                     pdb_paths = pdb_files, device=device, 
+                                     pos_constraint_df = None,
+                                     out_dir = log_dir_i)
+        
+        # === Save sequence recovery metrics and log to wandb (before AF3 prediction) ===
+        # Build per-sample dataframe
+        sample_len = len(outputs["example_id"])
+        seq_recovery_rows = []
+        for idx in range(sample_len):
+            row = {
+                "example_id": outputs["example_id"][idx],
+                "sample_id": Path(outputs["out_pdb"][idx]).stem,
+            }
+            # Add per-sample seq recovery if available
+            if "sample_seq_recovery" in outputs and len(outputs["sample_seq_recovery"]) == sample_len:
+                row["sample_seq_recovery"] = outputs["sample_seq_recovery"][idx]
+            if "sample_sp_seq_recovery" in outputs and len(outputs["sample_sp_seq_recovery"]) == sample_len:
+                row["sample_sp_seq_recovery"] = outputs["sample_sp_seq_recovery"][idx]
+            seq_recovery_rows.append(row)
+        
+        seq_recovery_df = pd.DataFrame(seq_recovery_rows)
+        seq_recovery_df.to_csv(f"{log_dir_i}/seq_recovery_metrics.csv", index=False)
+        
+        # Log sequence recovery metrics to wandb (before AF3 prediction)
+        seq_recovery_wandb_metrics = {}
+        if "total_avg_seq_recovery" in outputs and outputs["total_avg_seq_recovery"] is not None:
+            seq_recovery_wandb_metrics["eval/total_avg_seq_recovery"] = outputs["total_avg_seq_recovery"]
+        if "total_avg_sp_seq_recovery" in outputs and outputs["total_avg_sp_seq_recovery"] is not None:
+            seq_recovery_wandb_metrics["eval/total_avg_sp_seq_recovery"] = outputs["total_avg_sp_seq_recovery"]
+        
+        if not cfg.wandb.no_wandb and seq_recovery_wandb_metrics:
+            seq_recovery_wandb_metrics["trainer/global_step"] = global_step
+            seq_recovery_wandb_metrics["trainer/epoch"] = epoch
+            wandb.log(seq_recovery_wandb_metrics, step=global_step)
+        
+        # AF3 input/output dirs
+        af3_ss_input_dir = Path(log_dir_i, "af3_ss_inputs")
+        af3_ss_pred_dir = Path(log_dir_i, "af3_ss_preds")
+        af3_tc_input_dir = Path(log_dir_i, "af3_tc_inputs")
+        af3_tc_pred_dir = Path(log_dir_i, "af3_tc_preds")
+        af3_ss_input_dir.mkdir(parents=True, exist_ok=True)
+        af3_ss_pred_dir.mkdir(parents=True, exist_ok=True)
+        af3_tc_input_dir.mkdir(parents=True, exist_ok=True)
+        af3_tc_pred_dir.mkdir(parents=True, exist_ok=True)
 
-    #     # Run sequence design
-    #     outputs = run_seq_des(seq_des_model["model"], seq_des_model["data_cfg"], seq_des_model["sampling_cfg"],
-    #                           pdb_paths=processed_struct_files, device=device, out_dir=log_dir_i)
-    #     sampled_cifs = outputs["out_pdbs"]
-    #     sampled_seqs = outputs.get("seqs", [])
+        # Make AF3 JSON for self-consistency evaluation
+        af3_ss_json_paths, af3_tc_json_paths, pdb_chain_info = make_af3_json(af3_ss_input_dir=af3_ss_input_dir,
+                                                            af3_tc_input_dir=af3_tc_input_dir,                                                            
+                                                            outputs=outputs, metadata=metadata,\
+                                                            pdb_chain_info = None,                
+                                                            json_config=cfg.struct_pred_cfg.af3.json_config
+                                                            )   
+                                    
 
-    #     # AF3 input/output dirs
-    #     af3_input_dir = Path(log_dir_i, "af3_inputs")
-    #     af3_pred_dir = Path(log_dir_i, "af3_preds")
-    #     af3_input_dir.mkdir(parents=True, exist_ok=True)
-    #     af3_pred_dir.mkdir(parents=True, exist_ok=True)
+        # AF3 self-consistency and docking metrics per sample
+        # Structure: {sample_id: {metric_name: [values per diffusion_id]}}
+        id_to_per_pred_metrics = {}                
 
-    #     # Self-consistency metrics per sample
-    #     id_to_metrics = {}
+        # Output directory for AF3 predictions
+        af3_ss_pred_dir = Path(af3_ss_pred_dir)                
+        
+        for i in tqdm(range(len(outputs["atom_array"])), desc="AF3 single sequence self-consistency and docking scoring", leave=False):
+            sample_id = Path(outputs["out_pdb"][i]).stem
+            sample_path = outputs["out_pdb"][i] 
+            job_name = sample_id
 
-    #     # Pair samples and sequences if available
-    #     if sampled_seqs and len(sampled_seqs) == len(sampled_cifs):
-    #         pair_iter = zip(sampled_cifs, sampled_seqs)
-    #     else:
-    #         # Derive sequence from CIF if not present (fallback: parse sequence from PDB features)
-    #         pair_iter = []
-    #         for cif_path in sampled_cifs:
-    #             feats = data_utils.load_feats_from_pdb(cif_path)
-    #             aatypes = feats["aatype"]
-    #             # Convert to single chain string; if multiple chains, split by chain_index boundaries
-    #             chain_index = feats["chain_index"] if "chain_index" in feats else torch.zeros_like(aatypes)
-    #             chain_ids = chain_index.unique(sorted=True).tolist()
-    #             chain_seqs = []
-    #             for cid in chain_ids:
-    #                 mask = (chain_index == cid)
-    #                 aatype_chain = aatypes[mask]
-    #                 from allatom_design.data import residue_constants as rc
-    #                 seq = "".join([rc.restypes_with_x[x] for x in aatype_chain])
-    #                 chain_seqs.append(seq)
-    #             pair_iter.append((cif_path, ":".join(chain_seqs)))
+            # Get AF3 JSON paths
+            json_path_ss = af3_ss_json_paths[i]
+            json_path_tc = af3_tc_json_paths[i]
+            
+            ## Self-consistency evaluation ###         
+            per_pred_sc_metrics = {}                           
+            if cfg.evaluate_self_consistency:
+                try:
+                    run_af3_single_sequence(str(json_path_ss), str(af3_ss_pred_dir), runner_path=af3_runner_path, inference_config=cfg.struct_pred_cfg.af3.inference_config)
+                except subprocess.CalledProcessError as e:
+                    print(f"AF3 failed for {job_name}: {e}")
+                    continue
 
-    #     # Run AF3 per sample and compute metrics
-    #     for cif_path, seq_str in tqdm(list(pair_iter), desc="AF3 predicting & scoring", leave=False):
-    #         sample_id = Path(cif_path).stem
-    #         job_name = sample_id
+                # Find predicted structure file
+                _, pred_ss_sample_paths = find_pred_sample_path_af3(out_dir = str(af3_ss_pred_dir), job_name = job_name)        
+                                                                                                    
+                                                        
+                if len(pred_ss_sample_paths) == 0:
+                    print(f"No AF3 predicted structure found for {job_name}")
+                    continue
 
-    #         chain_seqs = seq_str.split(":") if seq_str else []
-    #         af3_json = _make_af3_single_json(job_name=job_name, chain_seqs=chain_seqs, model_seeds=af3_model_seeds)
-    #         json_path = Path(af3_input_dir, f"{job_name}.json")
-    #         with open(json_path, "w") as f:
-    #             json.dump(af3_json, f)
+                # Compute self-consistency metrics
+                try:
+                    per_pred_sc_metrics = compute_self_consistency_metrics_atomworks(sample_path = sample_path, 
+                                                            pred_sample_paths = pred_ss_sample_paths,
+                                                            num_diffusion_samples = cfg.struct_pred_cfg.af3.inference_config.ss.num_diffusion_samples,                                                        
+                                                            data_cfg = cfg.data_cfg,
+                                                            preprocess_transform_cfg = cfg.preprocess_transform_cfg,                                                                                                                
+                                                            featurizer_cfg = cfg.featurizer_cfg,
+                                                            struct_pred_cfg = cfg.struct_pred_cfg,
+                                                            metadata = metadata,
+                                                            pdb_chain_info = pdb_chain_info)
+                except Exception as e:
+                    print(f"Self-consistency metrics computation failed for {job_name}: {e}")
+                    continue
+            
+            ### AF3 docking evaluation ###
+            per_pred_docking_metrics = {}
+            if cfg.evaluate_template_conditioned_docking:
+                # Run template-conditioned AF3
+                try:
+                    run_af3_template_conditioned(str(json_path_tc), str(af3_tc_pred_dir), runner_path=af3_runner_path, inference_config=cfg.struct_pred_cfg.af3.inference_config)
+                except subprocess.CalledProcessError as e:
+                    print(f"AF3 failed for {job_name}: {e}")
+                    continue
+                
+                # Find predicted structure file
+                _, pred_tc_sample_paths = find_pred_sample_path_af3(out_dir = str(af3_tc_pred_dir), job_name = job_name)        
+                
+                if len(pred_tc_sample_paths) == 0:
+                    print(f"No AF3 predicted structure found for {job_name}")
+                    continue
 
-    #         out_dir = Path(af3_pred_dir, job_name)
-    #         out_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    #! (JH) 251129 added: pass cif_parser_args to docking metrics
+                    parser_kwargs = dict(cfg.docking_metrics_cfg.get("cif_parser_args", {})) if cfg.docking_metrics_cfg.get("cif_parser_args") else None
+                    per_pred_docking_metrics = compute_template_conditioned_docking_metrics(
+                        sample_path=sample_path, 
+                        pred_sample_paths=pred_tc_sample_paths,
+                        pdb_chain_info=pdb_chain_info,
+                        binding_site_radius=cfg.docking_metrics_cfg.binding_site_radius,
+                        save_aligned=cfg.docking_metrics_cfg.get("save_aligned", True),
+                        parser_kwargs=parser_kwargs,  #! (JH) 251129 added
+                    )
+                except Exception as e:
+                    print(f"AF3 docking metrics computation failed for {job_name}: {e}")
+                    continue
+                
+            # Store per-prediction metrics for this sample
+            # per_pred_sc_metrics is {metric_name: [val_0, val_1, ...]} where each val corresponds to a diffusion_id
+            combined_metrics = {}
+            if per_pred_sc_metrics:
+                combined_metrics.update(per_pred_sc_metrics)
+            if per_pred_docking_metrics:
+                combined_metrics.update(per_pred_docking_metrics)
+            
+            if combined_metrics:
+                id_to_per_pred_metrics[sample_id] = combined_metrics
+            else:
+                print(f"No metrics computed for {job_name}")
+                continue
 
-    #         # Run AF3
-    #         try:
-    #             _run_af3(str(json_path), str(out_dir), runner_path=af3_runner_path, extra_args=af3_extra_args)
-    #         except subprocess.CalledProcessError as e:
-    #             print(f"AF3 failed for {job_name}: {e}")
-    #             continue
+        # Save metrics CSV with record_id / sample_id / diffusion_id structure
+        if id_to_per_pred_metrics:
+            rows = []
+            for sample_id, metrics_dict in id_to_per_pred_metrics.items():
+                # Skip empty metrics_dict
+                if not metrics_dict:
+                    continue
+                    
+                # Extract record_id from sample_id (e.g., "1a28_A1_C1_sample0" -> "1a28")
+                record_id = sample_id.split("_")[0]
+                
+                # Get number of diffusion samples from any metric
+                num_diffusion = len(next(iter(metrics_dict.values())))
+                
+                for diffusion_id in range(num_diffusion):
+                    row = {
+                        "record_id": record_id,
+                        "sample_id": sample_id,
+                        "diffusion_id": diffusion_id,
+                    }
+                    for metric_name, values in metrics_dict.items():
+                        row[metric_name] = values[diffusion_id]
+                    rows.append(row)
+            
+            metrics_df = pd.DataFrame(rows)
+            metrics_df.to_csv(f"{log_dir_i}/lc_seq_des_metrics_{cfg.struct_pred_cfg.model_name}.csv", index=False)
 
-    #         # Find predicted structure file
-    #         pred_struct_path = _find_best_pred_path(str(out_dir), job_name)
-    #         if pred_struct_path is None:
-    #             print(f"No AF3 predicted structure found for {job_name}")
-    #             continue
+            # Aggregate metrics for wandb logging
+            # Skip ligand_rmsd and sym_ligand_rmsd, only log best_ligand_rmsd
+            skip_metrics = {"ligand_rmsd", "sym_ligand_rmsd", "num_matched_atoms", "aligned_path"}
+            
+            # 1. All diffusion samples (flatten all predictions)
+            all_metrics = defaultdict(list)
+            for sample_id, metrics_dict in id_to_per_pred_metrics.items():
+                for metric_name, values in metrics_dict.items():
+                    if metric_name not in skip_metrics:
+                        all_metrics[metric_name].extend(values)
+            
+            out_metrics = {f"eval/mean/{k}": np.nanmean(v) for k, v in all_metrics.items()}
+            out_metrics.update({f"eval/median/{k}": np.nanmedian(v) for k, v in all_metrics.items() if k != "num_bs_residues"})
+            
+            # 2. Ranked metrics: best pLDDT sample per sample_id
+            # For each sample_id, find the diffusion_id with highest avg_ca_plddt, then use those metrics
+            ranked_metrics = defaultdict(list)
+            for sample_id, metrics_dict in id_to_per_pred_metrics.items():
+                if "avg_ca_plddt" not in metrics_dict:
+                    continue
+                
+                plddt_values = metrics_dict["avg_ca_plddt"]
+                best_diffusion_id = int(np.argmax(plddt_values))
+                
+                for metric_name, values in metrics_dict.items():
+                    if metric_name not in skip_metrics:
+                        ranked_metrics[metric_name].append(values[best_diffusion_id])
+            
+            out_metrics.update({f"eval/ranked/mean_{k}": np.nanmean(v) for k, v in ranked_metrics.items()})
+            out_metrics.update({f"eval/ranked/median_{k}": np.nanmedian(v) for k, v in ranked_metrics.items()})
 
-    #         # Compute self-consistency metrics
-    #         temp_dir = str(Path(log_dir_i, "tmp"))
-    #         try:
-    #             metrics = _compute_sc_metrics(cif_path, pred_struct_path, temp_dir)
-    #         except Exception as e:
-    #             print(f"Metric computation failed for {job_name}: {e}")
-    #             continue
+            if not cfg.wandb.no_wandb:
+                out_metrics["trainer/global_step"] = global_step
+                out_metrics["trainer/epoch"] = epoch
+                wandb.log(out_metrics, step=global_step)
 
-    #         id_to_metrics[sample_id] = metrics
-
-    #     # Save metrics CSV
-    #     if id_to_metrics:
-    #         metrics_df = pd.DataFrame([{"record_id": rid, **m} for rid, m in id_to_metrics.items()])
-    #         metrics_df.to_csv(f"{log_dir_i}/sc_metrics_af3.csv", index=False)
-
-    #         # Aggregate
-    #         sc_metrics = defaultdict(list)
-    #         for _, metrics in id_to_metrics.items():
-    #             for k, v in metrics.items():
-    #                 sc_metrics[k].append(v)
-
-    #         out_metrics = {f"seq_des/mean/{k}": np.nanmean(v) for k, v in sc_metrics.items() if k != "record_id"}
-    #         out_metrics.update({f"seq_des/median/{k}": np.nanmedian(v) for k, v in sc_metrics.items() if k != "record_id"})
-
-    #         if not cfg.wandb.no_wandb:
-    #             out_metrics["trainer/global_step"] = global_step
-    #             out_metrics["trainer/epoch"] = epoch
-    #             wandb.log(out_metrics, step=global_step)
-
-    #     # Cleanup temp dirs to save space
-    #     for d in [Path(log_dir_i, "tmp")]:
-    #         if Path(d).exists():
-    #             shutil.rmtree(d, ignore_errors=True)
+        # Cleanup temp dirs to save space
+        for d in [Path(log_dir_i, "tmp")]:
+            if Path(d).exists():
+                shutil.rmtree(d, ignore_errors=True)
 
 
 if __name__ == "__main__":

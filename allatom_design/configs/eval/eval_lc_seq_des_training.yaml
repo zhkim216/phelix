@@ -18,21 +18,21 @@ evaluate_self_consistency: true
 evaluate_template_conditioned_docking: true
 
 # Metadata
-metadata_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1.parquet
+metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1.parquet
 
 # Outputs
 exp_name: eval_af3_exp1_cfg0 # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/out_dir/eval_ligand_seq_des  # outputs will be saved to base_out_dir/exp_name
+base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des  # outputs will be saved to base_out_dir/exp_name
 
 # input_cfg
 input_cfg:
   load_from_cache: true
   load_cache_cfg:
-    cached_example_path: "/home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/cached_examples"
+    cached_example_path: "/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples"
     pdb_name_ext: ".pt"
     n_subsample: null
   pdb_cfg:
-    pdb_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/pdbs
+    pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/pdbs
     pdb_name_ext: ".cif"  # if pdb_name_list does not have extensions, add this extension
     n_subsample: null  # randomly sample this many pdb keys, null to use all
 
@@ -63,13 +63,13 @@ featurizer_cfg:
   crop_spatial_p: 0.5
   remove_keys: []
   remove_unresolved_tokens: true
-  residue_cache_dir: /home/possu/jinho/datasets/atomworks_cached_residue_data
+  residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
   max_conformers_per_residue: 50
   apply_random_augmentation: false
   translation_scale: 1.0
 
 # Denoiser options
-denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp1_cfg0
+denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp1_cfg0
 sampling_cfg_overrides:
   batch_size: 1
   num_seqs_per_pdb: 2  # number of sequences to sample per pdb
@@ -93,22 +93,22 @@ seq_des_cfg:
   model_name: "lc_atom_mpnn"
   atom_mpnn:
     ckpt_path: null
-    sampling_cfg: /home/possu/jinho/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
+    sampling_cfg: /scratch/users/zhkim216/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides: ${sampling_cfg_overrides}
 
 # Structure prediction model args
 struct_pred_cfg:
   model_name: "af3"
   af3:
-    runner_path: /home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py
+    runner_path: /scratch/users/zhkim216/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
     json_config:      
       model_seeds: [42]
       version: 2
     inference_config:
       base:
-        model_dir: /home/possu/jinho/model_params/af3
-        db_dir: /home/possu/jinho/af3_databases
-        flash_attention_implementation: "xla"
+        model_dir: /scratch/users/zhkim216/model_params/af3
+        db_dir: /scratch/users/zhkim216/af3_databases
+        flash_attention_implementation: "triton"
       ss:
         num_recycles: 1
         num_diffusion_samples: 2
@@ -140,4 +140,4 @@ docking_metrics_cfg:
   
 hydra:
   run:
-    dir: /home/possu/jinho/hydra_outputs
+    dir: /scratch/users/zhkim216/hydra_outputs

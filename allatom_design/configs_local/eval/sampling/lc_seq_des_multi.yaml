@@ -9,18 +9,17 @@ wandb:
 seed: 0
 num_workers: 8  # for dataloading
 debug: true
-num_sample_debug: 4
+num_sample_debug: 100
 
 # Metadata
 metadata_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1.parquet
 
 # Inputs
 ckpt_path: /home/possu/jinho/out_dir/ligand_seq_des/exp1_cfg0/checkpoints/sd-step25000-epoch15.ckpt
-base_out_dir: /home/possu/jinho/out_dir/eval_lc_seq_des
+base_out_dir: /home/possu/jinho/out_dir/eval_ligand_seq_des
 exp_name: eval_seq_acc_exp1_cfg0  # experiment name; used for wandb and output directory
 
 # input_cfg
-# PDB file inputs
 input_cfg:
   load_from_cache: true
   load_cache_cfg:
@@ -52,7 +51,7 @@ pos_constraint_csv: null
 run_self_consistency_eval: false
 sampling_cfg_overrides:
   batch_size: 2
-  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+  num_seqs_per_pdb: 2  # number of sequences to sample per pdb
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
   num_workers: ${num_workers}
@@ -61,8 +60,11 @@ sampling_cfg_overrides:
   ligand_pocket_dist_cutoff: 5.0
   small_molecule_only: true
   potts_sampling_cfg:
-    potts_sweeps: 50
+    potts_sweeps: 10
     lcp_expand_edge_idx_fix: false
+
+io_cfg:
+  include_nan_coords: true
 
 # Checkpoint sweep control
 sweep_cfg:
@@ -79,22 +81,6 @@ seq_des_cfg:
     ckpt_path: ${ckpt_path}
     sampling_cfg: /home/possu/jinho/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
     overrides: ${sampling_cfg_overrides}
-
-
-
-
-
-
-
-# # Structure prediction model args
-# struct_pred_cfg:
-#   model_name: "af2"
-#   base_cfg: allatom_design/configs/struct_pred/struct_pred_base.yaml
-#   # overrides to base config
-#   af2:
-#     data_dir: /media/scratch/huang_lab/model_params/af2
-#   esmfold:
-#     max_tokens_per_batch: 1024
 
 hydra:
   run:
