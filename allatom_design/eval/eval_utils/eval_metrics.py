@@ -5,6 +5,7 @@ import pickle
 import shutil
 import subprocess
 import uuid
+import json
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -26,18 +27,209 @@ import allatom_design.data.const as const
 import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
-from allatom_design.utils.pdb_utils import write_batched_to_pdb, write_to_pdb
-from allatom_design.data.write.mmcif import batch_write_feats_to_mmcif
-from allatom_design.eval.eval_utils import eval_metrics
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
-# from allatom_design.eval.eval_utils.folding_utils import run_esmfold_batched
-from allatom_design.eval.eval_utils.seq_des_utils import get_sd_batch
+from allatom_design.eval.eval_utils.seq_des_utils import get_sd_example
+from atomworks.io.utils.io_utils import to_cif_string
 
-# try:
-#     from colabdesign.shared.utils import copy_dict
-# except ImportError:
-#     pass
+from biotite.structure import AtomArray
+from ost import io, mol
+from ost.mol.alg.ligand_scoring_scrmsd import SCRMSDScorer
+from rdkit import Chem
+from rdkit.Chem import AllChem, rdMolAlign
 
+def compute_self_consistency_metrics_atomworks(sample_path: str = None,
+                        pred_sample_paths: list[str] = None,
+                        num_diffusion_samples: int = 1,                         
+                        data_cfg: DictConfig | None = None,
+                        featurizer_cfg: DictConfig = None,
+                        preprocess_transform_cfg: DictConfig | None = None,
+                        struct_pred_cfg: DictConfig = None,
+                        metadata: pd.DataFrame = None,
+                        pdb_chain_info: dict = None) -> dict[str, float]:
+    """
+    Compute self-consistency metrics using atomworks framework for AF3 predictions.
+    
+    Args:
+        sample_path: Path to the designed sample structure.
+        pred_sample_paths: List of paths to AF3 predicted structures.
+        num_diffusion_samples: Number of diffusion samples (should match len(pred_sample_paths)).
+        data_cfg: Data configuration.
+        featurizer_cfg: Featurizer configuration.
+        preprocess_transform_cfg: Preprocess transform configuration.
+        metadata: Metadata DataFrame.
+        pdb_chain_info: PDB chain info dictionary.
+        
+    Returns:
+        Dictionary of metrics aggregated across all predicted samples.
+    """
+    sample_example = get_sd_example(pdb_path=sample_path,
+                                    load_from_cache=False,
+                                    data_cfg=data_cfg,
+                                    preprocess_transform_cfg=preprocess_transform_cfg,
+                                    featurizer_cfg=featurizer_cfg,
+                                    metadata=metadata)
+                                       
+    assert len(pred_sample_paths) == num_diffusion_samples, "Number of predicted structures must match number of diffusion samples"
+    
+    per_pred_metrics = {}
+    for pred_sample_path in pred_sample_paths:
+        pred_example = get_sd_example(pdb_path=pred_sample_path,
+                                      load_from_cache=False,
+                                      data_cfg=data_cfg,
+                                      preprocess_transform_cfg=preprocess_transform_cfg,
+                                      featurizer_cfg=featurizer_cfg,
+                                      metadata=metadata)
+        
+        if struct_pred_cfg.model_name == "af3":
+            metrics = _compute_self_consistency_metrics_atomworks_af3(pred_example=pred_example,
+                                                                     sample_example=sample_example,                                         
+                                                                     pred_sample_path=pred_sample_path)            
+        else:
+            raise ValueError(f"Unknown structure prediction model: {struct_pred_cfg.model_name}")
+        
+        for k, v in metrics.items():
+            # Handle both tensor and float values
+            val = v.item() if hasattr(v, 'item') else v
+            per_pred_metrics.setdefault(k, []).append(val)
+        
+    return per_pred_metrics
+
+
+
+def _compute_self_consistency_metrics_atomworks_af3(*, pred_example: dict[str, Any], 
+                                                   sample_example: dict[str, Any],                                                 
+                                                   pred_sample_path: str = None) -> dict[str, float]:
+    """
+    Compute self-consistency metrics between a designed structure and its predicted structure.
+    """    
+    metrics = {}
+
+    # Align on CA atoms.
+    pred_coords, sample_coords = pred_example["coords"], sample_example["coords"]  # [N, 3]
+
+    # First, extract CA-only mask (protein-only center atoms).
+    ca_atom_mask = torch.zeros_like(sample_example["atom_pad_mask"])
+    ca_token_mask = (sample_example["chain_is_protein"] * sample_example["is_protein"] * sample_example["token_resolved_mask"] * sample_example["token_pad_mask"])
+    ca_atom_mask[sample_example["token_to_center_atom"]] = ca_token_mask
+
+    # Compute RMSD.
+    ca_rmsd, (ca_aligned_pred_coords, _) = data.torch_rmsd_weighted(
+        pred_coords.unsqueeze(0), sample_coords.unsqueeze(0), ca_atom_mask.unsqueeze(0), return_aligned=True
+    )
+
+    # Write aligned coords to mmcif.
+    pred_example["atom_array"].coord = ca_aligned_pred_coords.squeeze(0).numpy()
+    with open(f"{Path(pred_sample_path).parent}/{Path(pred_sample_path).stem}_ca_aligned.cif", "w") as f:
+        f.write(to_cif_string(pred_example["atom_array"]))
+
+    # Compute metrics.
+    # for metric in ["sc_ca_rmsd", "avg_ca_plddt", "tmalign_score"]:
+    for metric in ["sc_ca_rmsd", "avg_ca_plddt"]:
+        if metric == "sc_ca_rmsd":
+            # Align on CA atoms, compute CA RMSD.
+            metrics[metric] = ca_rmsd.item()
+
+        elif metric == "avg_ca_plddt":
+            # Compute average pLDDT across all CA atoms.
+            confidence_dir = str(pred_sample_path.parent)
+            confidence_file_name = str(pred_sample_path.stem).replace("model", "confidences.json")
+            avg_ca_plddt = _extract_af3_confidence_metrics(confidence_file_path=f"{confidence_dir}/{confidence_file_name}",
+                                                           atom_array=pred_example["atom_array"],
+                                                           mask=ca_atom_mask,
+                                                           metrics_to_extract=["atom_plddts"],
+                                                           return_mean=True)
+            metrics[metric] = avg_ca_plddt
+
+        # elif metric == "tmalign_score":
+        #     # Compute TM-score using TM-align.
+        #     tmalign_score, _ = _compute_tmalign_score(pred_pdb, design_pdb)
+        #     metrics[metric] = tmalign_score
+
+    return metrics
+
+def _extract_af3_confidence_metrics(confidence_file_path: str = None,
+                                    atom_array: AtomArray = None,
+                                    mask: TensorType["n", bool] = None,
+                                    metrics_to_extract: str | list[str] = "atom_plddts",
+                                    return_mean: bool = True):
+    """
+    Extract confidence metrics from an AF3 confidence file.
+    
+    Note: aw_parse adds unresolved residues with NaN coordinates, so atom_array may have
+    more atoms than the confidence file. We filter to only valid (non-NaN) coordinates.
+    """
+    with open(confidence_file_path, "r") as f:
+        confidence_data = json.load(f)    
+    
+    #! (JH) 251129 fixed: handle both string and list inputs for metrics_to_extract
+    metric_name = metrics_to_extract[0] if isinstance(metrics_to_extract, list) else metrics_to_extract
+    
+    if metric_name == "atom_plddts":        
+        metric = torch.tensor(confidence_data["atom_plddts"], dtype=torch.float16)
+                
+        # pLDDT is only for resolved atoms (non-NaN coords)
+        valid_coord_mask = ~np.isnan(atom_array.coord).any(axis=1)
+        num_valid_atoms = np.sum(valid_coord_mask)
+        
+        if len(metric) != num_valid_atoms:
+            raise ValueError(f"Number of pLDDTs ({len(metric)}) != valid atoms ({num_valid_atoms})")
+        
+        #! (JH) 251129 fixed: handle both torch tensor and numpy array masks
+        if isinstance(mask, torch.Tensor):
+            mask_np = mask.cpu().numpy()
+        else:
+            mask_np = np.array(mask)
+        
+        # Apply mask only to valid atoms
+        # mask is for all atoms, we need to filter it to valid atoms only
+        mask_valid = mask_np[valid_coord_mask]
+        metric = metric[torch.tensor(mask_valid).bool()]
+        
+        if return_mean:
+            if len(metric) == 0:
+                return None
+            return metric.mean().item()
+        else:
+            return metric
+    else:
+        raise ValueError(f"Invalid metric to extract: {metric_name}")        
+
+
+def _compute_tmalign_score(pdb_1: str, pdb_2: str) -> tuple[float, float]:
+    """
+    Compute TM-score between two PDBs. This uses TM-align, so
+    we don't need to check if the residue indices are aligned.
+
+    Returns:
+        - tmalign_score_1: TM-align score normalized by length of pdb_1
+        - tmalign_score_2: TM-align score normalized by length of pdb_2
+    """
+    try:
+        cmd = [f"{os.environ['SOFTWARE_PATH']}/tmalign/TMalign", pdb_1, pdb_2]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        output = result.stdout
+
+        tmalign_score_1 = None
+        tmalign_score_2 = None
+
+        # Parse TM-align output
+        for line in output.splitlines():
+            if line.startswith("TM-score="):
+                parts = line.strip().split()
+                score = float(parts[1])
+                if "Chain_1" in line:
+                    tmalign_score_1 = score
+                elif "Chain_2" in line:
+                    tmalign_score_2 = score
+
+        tmalign_score_1 = tmalign_score_1 if tmalign_score_1 is not None else np.nan
+        tmalign_score_2 = tmalign_score_2 if tmalign_score_2 is not None else np.nan
+    except Exception as e:
+        print(f"Error computing TM-align score: {e}")
+        tmalign_score_1 = np.nan
+        tmalign_score_2 = np.nan
+
+    return tmalign_score_1, tmalign_score_2
 
 def compute_per_pdb_info(pdbs: list[str],
                          seq_des_model: dict[str, Any] | None,
@@ -173,50 +365,6 @@ def compute_secondary_structure_content(pdbs: list[str]) -> dict[str, dict[str, 
     return dssp_metrics
 
 
-# def run_self_consistency_eval_boltz(pdbs: list[str],
-#                                     struct_pred_model: dict[str, Any],
-#                                     pdb_processing_cfg: DictConfig,
-#                                     out_dir: str) -> dict[str, dict[str, TensorType]]:
-#     """
-#     Run self-consistency evaluation on a list of PDBs with designed sequences.
-#     """
-#     unique_id = uuid.uuid4().hex  # unique ID for temp processing dir
-#     processed_dir = Path(f"{out_dir}/processed/{unique_id}")  # directory for processed structures
-#     processed_dir.mkdir(parents=True, exist_ok=True)
-
-#     # === Process PDBs === #
-#     design_struct_files = process_pdb_files(pdbs, processed_dir, **pdb_processing_cfg)
-#     manifest_path = finalize(processed_dir)
-
-#     # === Run structure prediction === #
-#     record_ids = [Path(struct_file).stem for struct_file in design_struct_files if struct_file is not None]
-#     if struct_pred_model["model_name"] == "boltz1":
-#         trainer, data_module = struct_pred_model["trainer_fn"](processed_data_dir=processed_dir, out_dir=Path(out_dir))
-#         preds = trainer.predict(struct_pred_model["boltz1"],
-#                                 datamodule=data_module,
-#                                 return_predictions=True)
-#         id_to_preds = {record.id: pred for record, pred in zip(data_module.manifest.records, preds)}
-#         pred_struct_files = [f"{out_dir}/predictions/{record_id}/{record_id}_model_0.npz" for record_id in record_ids]
-#     elif struct_pred_model["model_name"] == "esmfold":
-#         id_to_preds, pred_struct_files = run_esmfold_from_boltz_feats(design_struct_files, struct_pred_model, pdb_processing_cfg, processed_dir, out_dir)
-#     else:
-#         raise ValueError(f"Unknown structure prediction model: {struct_pred_model['model_name']}")
-
-#     # === Compute metrics === #
-#     id_to_metrics = {}
-#     for record_id, pred_struct_file, design_struct_file in tqdm(zip(record_ids, pred_struct_files, design_struct_files), desc="Computing self-consistency metrics", total=len(design_struct_files)):
-#         # TODO: can be parallelized if too slow
-#         struct_pred_out = id_to_preds[record_id]
-#         id_to_metrics[record_id] = compute_self_consistency_metrics_boltz(pred_struct_file, design_struct_file,
-#                                                                           struct_pred_out,
-#                                                                           struct_pred_model["data_cfg"], f"{out_dir}/ca_aligned_struct_preds")
-
-#     # === Clean up temp dir === #
-#     shutil.rmtree(processed_dir)
-
-#     return id_to_metrics
-
-
 def run_af2_interface_eval(pdbs: list[str],
                            binder_chain_ids: list[str],
                            struct_pred_model: dict[str, Any],  # must be AF2
@@ -315,178 +463,6 @@ def run_af2_interface_eval(pdbs: list[str],
     shutil.rmtree(temp_dir)
 
     return id_to_metrics
-
-
-# def compute_self_consistency_metrics_boltz(pred_struct_file: str,
-#                                            design_struct_file: str,  # we use the designed structure for computing atom masks e.g. for missing residues
-#                                            struct_pred_out: dict[str, Any],  # output from boltz prediction, needed for pLDDT
-#                                            data_cfg: DictConfig,  # holds tokenizer and featurizer
-#                                            out_dir: str,
-#                                            ):
-#     """
-#     Compute self-consistency metrics between a designed structure and its predicted structure.
-#     """
-#     Path(out_dir).mkdir(parents=True, exist_ok=True)
-#     metrics = {}
-
-#     # First, featurize each structure
-#     design_example, design_structure = get_sd_batch([design_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
-#     pred_example, pred_structure = get_sd_batch([pred_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
-
-#     # Align on CA atoms
-#     pred_coords, design_coords = pred_example["coords"], design_example["coords"]  # [1, N, 3]
-
-#     ## First, extract CA-only mask (protein-only center atoms)
-#     ca_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
-
-#     B = design_coords.shape[0]
-#     batch_idx = torch.arange(B).unsqueeze(-1)
-#     _, center_idx = torch.max(design_example["token_to_center_atom"], dim=-1)
-#     ca_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["PROTEIN"])  # only protein tokens where center exists
-#     ca_atom_mask[batch_idx, center_idx] = ca_token_mask
-
-#     # Compute RMSD
-#     ca_rmsd, (ca_aligned_pred_coords, _) = data.torch_rmsd_weighted(pred_coords, design_coords, ca_atom_mask,
-#                                                                     return_aligned=True)
-
-#     # Write aligned coords to mmcif
-#     pred_example["coords"] = ca_aligned_pred_coords
-#     batch_write_feats_to_mmcif(pred_example, pred_structure, [f"{out_dir}/{Path(pred_struct_file).stem}.cif"])
-
-#     # Compute metrics
-#     for metric in ["sc_ca_rmsd", "sc_center_rmsd", "sc_nonpolymer_rmsd",
-#                    "avg_plddt", "avg_ca_plddt", "avg_nonpolymer_plddt"]:
-#         if metric == "sc_ca_rmsd":
-#             # Align on CA atoms, compute CA RMSD
-#             metrics[metric] = ca_rmsd.item()
-
-#         elif metric == "sc_center_rmsd":
-#             # Align on center atoms, compute center RMSD
-#             center_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
-#             center_token_mask = design_example["token_resolved_mask"]
-#             center_atom_mask[batch_idx, center_idx] = center_token_mask
-#             center_rmsd = data.torch_rmsd_weighted(pred_coords, design_coords, center_atom_mask)
-#             metrics[metric] = center_rmsd.item()
-
-#         elif metric == "sc_nonpolymer_rmsd":
-#             # Align on center atoms, compute non-polymer RMSD
-#             center_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
-#             center_token_mask = design_example["token_resolved_mask"]
-#             center_atom_mask[batch_idx, center_idx] = center_token_mask
-#             center_rmsd, (aligned_pred_coords, _) = data.torch_rmsd_weighted(pred_coords, design_coords, center_atom_mask, return_aligned=True)
-
-#             nonpolymer_atom_mask = torch.zeros_like(design_example["atom_pad_mask"])
-#             nonpolymer_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["NONPOLYMER"])
-#             nonpolymer_atom_mask[batch_idx, center_idx] = nonpolymer_token_mask
-#             if nonpolymer_atom_mask.sum() == 0:
-#                 # nan if no non-polymer atoms
-#                 metrics[metric] = np.nan
-#                 continue
-
-#             nonpolymer_msd = ((
-#                 (aligned_pred_coords - design_coords) ** 2 * nonpolymer_atom_mask[..., None]
-#             ).sum(dim=(-1, -2)) / nonpolymer_atom_mask.sum(dim=-1, keepdim=True).clamp(min=1e-6))
-#             nonpolymer_rmsd = torch.sqrt(nonpolymer_msd + 1e-8)
-#             metrics[metric] = nonpolymer_rmsd.item()
-
-#         elif metric == "avg_plddt":
-#             # Compute average pLDDT across all resolved tokens
-#             center_token_mask = design_example["token_resolved_mask"]
-#             plddt = (struct_pred_out["plddt"] * center_token_mask).sum(dim=-1) / center_token_mask.sum(dim=-1).clamp(min=1e-6)
-#             metrics[metric] = plddt.item()
-
-#         elif metric == "avg_ca_plddt":
-#             # Compute average pLDDT across all CA atoms
-#             ca_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["PROTEIN"])  # only protein tokens where center exists
-#             ca_plddt = (struct_pred_out["plddt"] * ca_token_mask).sum(dim=-1) / ca_token_mask.sum(dim=-1).clamp(min=1e-6)
-#             metrics[metric] = ca_plddt.item()
-
-#         elif metric == "avg_nonpolymer_plddt":
-#             # Compute average pLDDT across all non-polymer atoms
-#             nonpolymer_token_mask = design_example["token_resolved_mask"] * (design_example["mol_type"] == const.chain_type_ids["NONPOLYMER"])
-#             if nonpolymer_token_mask.sum() == 0:
-#                 # nan if no non-polymer tokens
-#                 metrics[metric] = np.nan
-#                 continue
-
-#             nonpolymer_plddt = (struct_pred_out["plddt"] * nonpolymer_token_mask).sum(dim=-1) / nonpolymer_token_mask.sum(dim=-1).clamp(min=1e-6)
-#             metrics[metric] = nonpolymer_plddt.item()
-
-#     return metrics
-
-
-# def run_esmfold_from_boltz_feats(design_struct_files: str,
-#                                  struct_pred_model: dict[str, Any],  # contains struct pred model components
-#                                  pdb_processing_cfg: DictConfig,
-#                                  processed_dir: str,
-#                                  out_dir: str) -> tuple[dict[str, dict[str, TensorType]], list[str]]:
-#     id_to_preds = {}
-
-#     # === Load in design structures === #
-#     data_cfg = struct_pred_model["data_cfg"]  # holds boltz tokenizer/featurizer
-#     pred_dir = f"{out_dir}/esmfold_preds"
-#     Path(pred_dir).mkdir(parents=True, exist_ok=True)
-
-#     out_pdbs = []
-#     for design_struct_file in tqdm(design_struct_files, desc="Running ESMFold"):
-#         preds = {}  # for now, this just holds plddt
-
-#         # Load in designed structure and extract standard protein-only features
-#         design_example, design_structure = get_sd_batch([design_struct_file], device="cpu", data_cfg=data_cfg, parallel_pool=None)
-#         prot_example = crop_batch_to_protein_only(design_example)
-
-#         # Extract sequence and residue indices
-#         sequence = "".join([const.prot_token_to_letter[const.tokens[aa.item()]] for aa in prot_example["res_type"].argmax(dim=-1).squeeze(0)])
-#         residue_index = prot_example["label_seq_id"].squeeze(0)
-#         chain_index = prot_example["asym_id"].squeeze(0)
-
-#         # Run ESMFold prediction on this sequence
-#         esm_pred = run_esmfold_batched([sequence], [residue_index], [chain_index], model=struct_pred_model["esmfold"], tokenizer=struct_pred_model["tokenizer"])
-#         esm_pred = {k: v[0] for k, v in esm_pred.items()}
-
-#         # Format output coordinates to match boltz coordinates. This works since atom14 representations match
-#         n_atoms_per_token = prot_example["atom_to_token"].squeeze(0).sum(dim=0)
-
-#         ## first, pack atom14 coords into atom-level representation
-#         pred_atom14 = esm_pred["pred_coords_atom14"]  # shape [n_token, 14, 3]
-#         mask = torch.arange(14, device=pred_atom14.device).unsqueeze(0) < n_atoms_per_token.unsqueeze(-1)
-#         mask = mask.unsqueeze(-1).expand(-1, -1, 3)  # shape [n_token, 14, 3]
-#         esm_coords = pred_atom14[mask].view(-1, 3).unsqueeze(0)  # shape [1, n_atoms, 3]
-
-#         if esm_coords.shape[1] != prot_example["atom_pad_mask"].sum().item():
-#             print(f"Something went wrong with converting ESMFold coords to boltz coords for {design_struct_file}, defaulting boltz coords to 0")
-#             esm_coords = torch.zeros_like(prot_example["coords"])[prot_example["atom_pad_mask"].bool()]
-
-#         ## next, put protein-only coordinates back into design example to make our predicted example
-#         ## note: we do not update non-protein atoms (but keep these in the cif for shape convenience)
-#         _, atomwise_token_idx = torch.max(design_example["atom_to_token"], dim=-1)  # [b, n_atoms]
-#         atomwise_moltype = design_example["mol_type"].gather(dim=-1, index=atomwise_token_idx)  # [b, n_atoms]
-#         atomwise_is_standard = design_example["is_standard"].gather(dim=-1, index=atomwise_token_idx)  # [b, n_atoms]
-#         atomwise_protein_mask = (atomwise_moltype == const.chain_type_ids["PROTEIN"]) & atomwise_is_standard & design_example["atom_pad_mask"].bool()
-#         design_example["coords"][atomwise_protein_mask] = esm_coords
-
-#         # Write to mmcif
-#         out_pdb = f"{pred_dir}/esmfold_{Path(design_struct_file).stem}.cif"
-#         batch_write_feats_to_mmcif(design_example, design_structure, [out_pdb])
-#         out_pdbs.append(out_pdb)
-
-#         # Format plddt to match boltz format
-#         protein_mask = (design_example["mol_type"] == const.chain_type_ids["PROTEIN"]) & design_example["is_standard"]
-#         plddt = torch.zeros_like(protein_mask, dtype=torch.float32)
-#         plddt[protein_mask] = esm_pred["ca_plddt"]
-#         preds["plddt"] = plddt / 100.0
-#         id_to_preds[Path(design_struct_file).stem] = preds
-
-#     # Re-process to get processed struct files
-#     esmfold_processed_dir = Path(f"{processed_dir}/esmfold")
-#     esmfold_processed_dir.mkdir(parents=True, exist_ok=True)
-#     _ = process_pdb_files(out_pdbs, esmfold_processed_dir, **pdb_processing_cfg)
-
-#     # reorder processed struct files to match design_struct_files ordering
-#     processed_struct_files = [f"{esmfold_processed_dir}/structures/esmfold_{Path(x).stem}.npz" for x in design_struct_files]
-
-#     return id_to_preds, processed_struct_files
-
 
 
 def run_self_consistency_eval(pdbs: list[str],
@@ -1330,3 +1306,444 @@ def compute_seq_recovery(native_seq: str, sampled_seq: str,
     sampled_seq = sampled_seq[~unk_mask]
 
     return np.mean(native_seq == sampled_seq)
+
+###############################################
+# Docking metrics
+###############################################
+
+def load_structure_ost(file_path: str | Path) -> mol.EntityHandle:
+    """Load a structure file (CIF or PDB) using OpenStructure."""
+    file_path = Path(file_path)
+    if file_path.suffix == ".cif":
+        return io.LoadMMCIF(str(file_path), fault_tolerant=True)
+    else:
+        return io.LoadPDB(str(file_path), fault_tolerant=True)
+
+
+#! (JH) 251128 added for sym_ligand_rmsd calculation
+def extract_ligand_to_sdf(
+    entity: mol.EntityHandle,
+    ligand_chain: str,
+    output_dir: Path,
+    file_stem: str,
+) -> Path:
+    """
+    Extract ligand from entity and save as SDF file.
+    
+    Parameters
+    ----------
+    entity : mol.EntityHandle
+        The entity containing the ligand.
+    ligand_chain : str
+        The chain name of the ligand to extract.
+    output_dir : Path
+        Directory to save the SDF file.
+    file_stem : str
+        Base name for the SDF file.
+    
+    Returns
+    -------
+    Path
+        Path to the SDF file.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Select ligand chain
+    ligand_view = entity.Select(f"cname={ligand_chain}")
+    
+    # Save as SDF
+    sdf_path = output_dir / f"{file_stem}_lig_{ligand_chain}.sdf"
+    io.SaveEntity(ligand_view, str(sdf_path), format="sdf")
+    
+    return sdf_path
+
+
+def get_binding_site_residues(
+    entity: mol.EntityHandle,
+    ligand_chain: str,
+    receptor_chain: str,
+    radius: float = 8.0,
+) -> list[int]:
+    """
+    Get residue numbers of receptor residues within radius of the ligand.
+    
+    Parameters
+    ----------
+    entity : mol.EntityHandle
+        The entity containing receptor and ligand.
+    ligand_chain : str
+        Chain ID of the ligand.
+    receptor_chain : str
+        Chain ID of the receptor.
+    radius : float
+        Distance cutoff in Angstroms.
+    
+    Returns
+    -------
+    list[int]
+        List of residue numbers within the binding site.
+    """
+    ligand = entity.Select(f"cname={ligand_chain}")
+    receptor = entity.Select(f"cname={receptor_chain}")
+    
+    binding_site_residues = set()
+    
+    # Get all ligand atom positions
+    for lig_atom in ligand.atoms:
+        lig_pos = lig_atom.pos
+        
+        # Check distance to receptor atoms
+        for rec_atom in receptor.atoms:
+            rec_pos = rec_atom.pos
+            dist = np.sqrt(sum((lig_pos[i] - rec_pos[i])**2 for i in range(3)))
+            
+            if dist <= radius:
+                binding_site_residues.add(rec_atom.residue.number.num)
+    
+    return sorted(binding_site_residues)
+
+#! (JH) 251128 added: Atomworks-based implementation
+def calculate_ligand_rmsd_with_binding_site_superposition(
+    ref_cif_path: Path,
+    pred_cif_path: Path,
+    receptor_chain: str = "A",
+    ligand_chain: str = "C",
+    binding_site_radius: float = 8.0,
+    save_aligned: bool = True,
+    parser_kwargs: dict | None = None,  #! (JH) 251129 added: configurable parser kwargs
+) -> dict[str, float]:
+    """
+    Calculate ligand RMSD after superimposing structures based on binding site residues.
+    Uses Atomworks framework for loading and processing.
+    
+    Parameters
+    ----------
+    ref_cif_path : Path
+        Path to reference CIF file.
+    pred_cif_path : Path
+        Path to predicted CIF file.
+    receptor_chain : str
+        Chain ID for receptor.
+    ligand_chain : str
+        Chain ID for ligand.
+    binding_site_radius : float
+        Radius for defining binding site residues.
+    save_aligned : bool
+        If True, save the pocket-aligned predicted structure to the same directory
+        with "_pocket_aligned" suffix.
+    parser_kwargs : dict | None
+        Additional keyword arguments to pass to atomworks.io.parser.parse.
+        Useful for controlling hydrogen_policy, add_missing_atoms, etc.
+    
+    Returns
+    -------
+    dict
+        Dictionary with RMSD values and other metrics.
+    """
+    from atomworks.io.parser import parse as aw_parse
+    from atomworks.io.tools.rdkit import atom_array_to_rdkit
+    from atomworks.ml.utils.geometry import align_atom_arrays
+    from allatom_design.data.transform.sd_featurizer import annotate_ligand_pockets
+    
+    ref_cif_path = Path(ref_cif_path)
+    pred_cif_path = Path(pred_cif_path)
+    
+    #! (JH) 251129 added: use parser_kwargs if provided
+    if parser_kwargs is None:
+        parser_kwargs = {}
+    
+    # Load structures using atomworks parse (includes chain_entity annotation)
+    try:
+        ref_parsed = aw_parse(ref_cif_path, **parser_kwargs)
+        pred_parsed = aw_parse(pred_cif_path, **parser_kwargs)
+        
+        ref_array = ref_parsed['asym_unit'][0]
+        pred_array = pred_parsed['asym_unit'][0]
+    except Exception as e:
+        return {"error": f"Failed to load structures: {e}", "ligand_rmsd": None}
+    
+    # Annotate ligand pockets (binding site residues)
+    ref_array = annotate_ligand_pockets(ref_array, pocket_distance=binding_site_radius)
+    pred_array = annotate_ligand_pockets(pred_array, pocket_distance=binding_site_radius)
+    
+    # Get binding site CA atoms for superposition
+    # Use sequential residue index (order in chain) instead of res_id for matching
+    # because res_id may differ between structures (ref vs AF3 prediction)
+    ref_receptor_mask = ref_array.chain_id == receptor_chain
+    pred_receptor_mask = pred_array.chain_id == receptor_chain
+    
+    # Get all CA atoms from receptor chain
+    ref_ca_mask = ref_receptor_mask & (ref_array.atom_name == "CA")
+    pred_ca_mask = pred_receptor_mask & (pred_array.atom_name == "CA")
+    
+    ref_ca = ref_array[ref_ca_mask]
+    pred_ca = pred_array[pred_ca_mask]
+    
+    if len(ref_ca) == 0 or len(pred_ca) == 0:
+        return {"error": "No CA atoms found", "ligand_rmsd": None}
+    
+    # Get binding site mask for CA atoms
+    ref_bs_ca_mask = ref_array.is_ligand_pocket[ref_ca_mask]
+    
+    # Use minimum length (in case sequences differ slightly)
+    min_len = min(len(ref_ca), len(pred_ca))
+    ref_ca = ref_ca[:min_len]
+    pred_ca = pred_ca[:min_len]
+    ref_bs_ca_mask = ref_bs_ca_mask[:min_len]
+    
+    # Get binding site CA atoms by sequential index
+    ref_bs_sorted = ref_ca[ref_bs_ca_mask]
+    pred_bs_sorted = pred_ca[ref_bs_ca_mask]  # Use ref's BS mask for both
+    
+    num_bs_residues = np.sum(ref_bs_ca_mask)
+    
+    if len(ref_bs_sorted) == 0:
+        return {"error": "No binding site CA atoms found", "ligand_rmsd": None}
+    
+    # Align pred onto ref using binding site CA atoms
+    # align_atom_arrays: aligns mbl_sele to tgt_sele, applies transform to mbl_full
+    pred_aligned, bs_rmsd = align_atom_arrays(
+        mbl_sele=pred_bs_sorted,  # pred binding site (to be aligned)
+        tgt_sele=ref_bs_sorted,   # ref binding site (target)
+        mbl_full=pred_array       # full pred structure (to be transformed)
+    )
+    
+    # Get ligand atoms
+    ref_lig_mask = (ref_array.chain_id == ligand_chain) & (ref_array.element != "H")
+    pred_lig_mask = (pred_aligned.chain_id == ligand_chain) & (pred_aligned.element != "H")
+    
+    ref_lig = ref_array[ref_lig_mask]
+    pred_lig = pred_aligned[pred_lig_mask]
+    
+    if len(ref_lig) == 0 or len(pred_lig) == 0:
+        return {"error": "No ligand atoms found", "ligand_rmsd": None}
+    
+    # Match ligand atoms by name
+    ref_atom_names = ref_lig.atom_name
+    pred_atom_names = pred_lig.atom_name
+    common_atom_names = np.intersect1d(ref_atom_names, pred_atom_names)
+    
+    if len(common_atom_names) == 0:
+        return {"error": "No common ligand atoms", "ligand_rmsd": None}
+    
+    # Get coordinates for common atoms (sorted by name)
+    ref_lig_common = ref_lig[np.isin(ref_atom_names, common_atom_names)]
+    pred_lig_common = pred_lig[np.isin(pred_atom_names, common_atom_names)]
+    
+    ref_lig_order = np.argsort(ref_lig_common.atom_name)
+    pred_lig_order = np.argsort(pred_lig_common.atom_name)
+    
+    ref_coords = ref_lig_common.coord[ref_lig_order]
+    pred_coords = pred_lig_common.coord[pred_lig_order]
+    
+    # Calculate ligand RMSD
+    diff = ref_coords - pred_coords
+    ligand_rmsd = np.sqrt(np.mean(np.sum(diff**2, axis=1)))
+    
+    # Calculate symmetry-corrected RMSD using RDKit
+    sym_rmsd = None
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem, rdMolAlign
+        
+        # Convert ligand atom arrays to RDKit molecules
+        ref_lig_full = ref_array[ref_array.chain_id == ligand_chain]
+        pred_lig_full = pred_aligned[pred_aligned.chain_id == ligand_chain]
+        
+        # Use atom_array_to_rdkit with sanitize fallback
+        try:
+            ref_mol = atom_array_to_rdkit(ref_lig_full, sanitize=True)
+        except Exception:
+            ref_mol = atom_array_to_rdkit(ref_lig_full, sanitize=False)
+        
+        try:
+            pred_mol = atom_array_to_rdkit(pred_lig_full, sanitize=True)
+        except Exception:
+            pred_mol = atom_array_to_rdkit(pred_lig_full, sanitize=False)
+        
+        if ref_mol and pred_mol:
+            # Remove hydrogens for RMSD calculation
+            ref_mol = Chem.RemoveHs(ref_mol)
+            pred_mol = Chem.RemoveHs(pred_mol)
+            
+            try:
+                # Try substructure match first
+                match = ref_mol.GetSubstructMatch(pred_mol)
+                if match:
+                    sym_rmsd = rdMolAlign.CalcRMS(ref_mol, pred_mol)
+                else:
+                    sym_rmsd = AllChem.GetBestRMS(ref_mol, pred_mol)
+            except Exception:
+                # Fallback to coordinate-based RMSD
+                sym_rmsd = ligand_rmsd
+    except Exception:
+        pass
+    
+    # Calculate best ligand RMSD
+    if sym_rmsd is not None:
+        best_ligand_rmsd = min(ligand_rmsd, sym_rmsd)
+    else:
+        best_ligand_rmsd = ligand_rmsd
+    
+    # Save pocket-aligned structure if requested
+    aligned_path = None
+    if save_aligned:
+        from atomworks.io.utils.io_utils import to_cif_file
+        
+        # Create output path with "_pocket_aligned" suffix
+        aligned_path = pred_cif_path.parent / f"{pred_cif_path.stem}_pocket_aligned.cif"
+        try:
+            to_cif_file(
+                pred_aligned,
+                aligned_path,
+                include_entity_poly=True,
+                include_entity_nonpoly=True,
+                include_nan_coords=False,
+                include_bonds=True,
+            )
+        except Exception as e:
+            print(f"Warning: Failed to save aligned structure: {e}")
+            aligned_path = None
+    
+    #! (JH) 251129 added: also return pred_array and masks for pLDDT extraction
+    # Create ligand and binding site masks for the aligned pred structure
+    pred_ligand_mask = pred_aligned.chain_id == ligand_chain
+    pred_binding_site_mask = pred_aligned.is_ligand_pocket
+    
+    return {
+        "ligand_rmsd": ligand_rmsd,
+        "sym_ligand_rmsd": sym_rmsd,
+        "best_ligand_rmsd": best_ligand_rmsd,
+        "binding_site_rmsd": bs_rmsd,
+        "num_bs_residues": int(num_bs_residues),
+        "num_matched_atoms": len(common_atom_names),
+        "aligned_path": str(aligned_path) if aligned_path else None,
+        #! (JH) 251129 added: for pLDDT extraction
+        "pred_array": pred_aligned,
+        "pred_ligand_mask": pred_ligand_mask,
+        "pred_binding_site_mask": pred_binding_site_mask,
+    }
+
+
+def compute_template_conditioned_docking_metrics(
+    sample_path: str | Path,
+    pred_sample_paths: list[str | Path],
+    pdb_chain_info: dict,
+    binding_site_radius: float = 8.0,
+    save_aligned: bool = True,
+    parser_kwargs: dict | None = None,  #! (JH) 251129 added: configurable parser kwargs
+) -> dict[str, float]:
+    """
+    Compute AF3 docking metrics for template-conditioned predictions.
+    
+    Parameters
+    ----------
+    sample_path : str | Path
+        Path to the designed sample CIF file (reference).
+    pred_sample_paths : list[str | Path]
+        List of paths to AF3 predicted CIF files (models).
+    pdb_chain_info : dict
+        Dictionary containing chain information for each PDB ID.
+        Expected structure: {pdb_id: {'protein_chains': [...], 'ligand_chains': [...]}}
+    binding_site_radius : float
+        Radius for defining binding site residues.
+    save_aligned : bool
+        If True, save the pocket-aligned predicted structure.
+    parser_kwargs : dict | None
+        Additional keyword arguments to pass to atomworks.io.parser.parse.
+        Useful for controlling hydrogen_policy, add_missing_atoms, etc.
+        
+    Returns
+    -------
+    dict
+        Dictionary containing docking metrics.
+    """
+    sample_path = Path(sample_path)
+    
+    # Extract PDB ID from sample path (e.g., "1a28_1_A1_C1_sample0.cif" -> "1a28")
+    sample_stem = sample_path.stem
+    pdb_id = sample_stem.split("_")[0]
+    
+    # Get chain info
+    if pdb_id not in pdb_chain_info:
+        return {"error": f"PDB ID {pdb_id} not found in pdb_chain_info"}
+    
+    chain_info = pdb_chain_info[pdb_id]
+    
+    # Extract receptor and ligand chains (remove suffix like "_1")
+    receptor_chains = [ch.split("_")[0] for ch in chain_info.get('protein_chains', [])]
+    ligand_chains = [ch.split("_")[0] for ch in chain_info.get('ligand_chains', [])]
+    
+    if not receptor_chains or not ligand_chains:
+        return {"error": "No receptor or ligand chains found"}
+    
+    # Use first receptor and ligand chain for now
+    receptor_chain = receptor_chains[0]
+    ligand_chain = ligand_chains[0]
+    
+    per_sample_metrics = {}
+    for pred_path in pred_sample_paths:
+        pred_path = Path(pred_path)
+        
+        result = calculate_ligand_rmsd_with_binding_site_superposition(
+            ref_cif_path=sample_path,
+            pred_cif_path=pred_path,
+            receptor_chain=receptor_chain,
+            ligand_chain=ligand_chain,
+            binding_site_radius=binding_site_radius,
+            save_aligned=save_aligned,
+            parser_kwargs=parser_kwargs,  #! (JH) 251129 added
+        )
+        
+        if result.get("error"):
+            for key in ["ligand_rmsd", "sym_ligand_rmsd", "best_ligand_rmsd", 
+                        "binding_site_rmsd", "num_bs_residues", "num_matched_atoms",
+                        "ligand_plddt", "binding_site_plddt"]:
+                per_sample_metrics.setdefault(key, []).append(None)
+        else:
+            #! (JH) 251129 fixed: use result's pred_array and masks for pLDDT extraction
+            # Extract pLDDT metrics using the pred_array from calculate_ligand_rmsd_with_binding_site_superposition
+            pred_array = result.get("pred_array")
+            pred_ligand_mask = result.get("pred_ligand_mask")
+            pred_binding_site_mask = result.get("pred_binding_site_mask")
+            
+            # Build confidence file path (pred stem has "_model" suffix, confidence file doesn't)
+            confidence_stem = pred_path.stem.replace("_model", "")
+            confidence_file_path = f"{pred_path.parent}/{confidence_stem}_confidences.json"
+            
+            ligand_plddt = None
+            binding_site_plddt = None
+            
+            if pred_array is not None and Path(confidence_file_path).exists():
+                try:
+                    ligand_plddt = _extract_af3_confidence_metrics(
+                        confidence_file_path=confidence_file_path,
+                        atom_array=pred_array,
+                        mask=pred_ligand_mask,
+                        metrics_to_extract=["atom_plddts"],
+                        return_mean=True
+                    )
+                except Exception as e:
+                    print(f"Warning: Failed to extract ligand pLDDT: {e}")
+                
+                try:
+                    binding_site_plddt = _extract_af3_confidence_metrics(
+                        confidence_file_path=confidence_file_path,
+                        atom_array=pred_array,
+                        mask=pred_binding_site_mask,
+                        metrics_to_extract=["atom_plddts"],
+                        return_mean=True
+                    )
+                except Exception as e:
+                    print(f"Warning: Failed to extract binding site pLDDT: {e}")
+            
+            # Append scalar metrics (skip pred_array and mask fields)
+            for key, value in result.items():
+                if key not in ("error", "aligned_path", "pred_array", "pred_ligand_mask", "pred_binding_site_mask"):
+                    per_sample_metrics.setdefault(key, []).append(value)
+            
+            # Append pLDDT metrics
+            per_sample_metrics.setdefault("ligand_plddt", []).append(ligand_plddt)
+            per_sample_metrics.setdefault("binding_site_plddt", []).append(binding_site_plddt)
+        
+    return per_sample_metrics

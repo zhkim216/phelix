@@ -1,5 +1,6 @@
 import pandas as pd
 from atomworks.enums import ChainTypeInfo, ChainType
+from atomworks.ml.preprocessing.constants import ENTRIES_TO_EXCLUDE_FOR_PRE_PROCESSING
 from atomworks.constants import METAL_ELEMENTS
 from atomworks.ml.preprocessing.constants import PEPTIDE_MAX_RESIDUES, NUCLEIC_ACID_LIGANDS_MAX_RESIDUES
 import json, ast, re
@@ -13,6 +14,9 @@ def metadata_ligand_chain_clustering(args: argparse.Namespace):
     Note: 
     
     Didn't consider ChainType.OTHER_POLYMER. There are only 3ok2, 3ok4 in pdb dataset.
+    Consider only polypeptide-L chain as a protein
+    
+    
     '''
 
     input_parquet_path = args.input_parquet_path

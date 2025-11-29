@@ -408,12 +408,48 @@ def _build_entity_poly(
     # ... get index of the first atom of each chain
     chain_starts = struc.get_chain_starts(atom_array)
 
-    # ... get chain ids, iids, entity ids, and chain types
+    #! (JH) 251127 added, originally it was not in the original Atomworks codebase
+    # Check which annotations are available for fallback logic
+    annotations = atom_array.get_annotation_categories()
+    has_chain_iid = "chain_iid" in annotations
+    has_chain_entity = "chain_entity" in annotations
+    has_is_polymer = "is_polymer" in annotations
+    has_chain_type = "chain_type" in annotations
+
+    # ... get chain ids
     chain_ids = atom_array.chain_id[chain_starts]
-    chain_iids = atom_array.chain_iid[chain_starts]
-    entity_ids = atom_array.chain_entity[chain_starts]
-    is_polymer = atom_array.is_polymer[chain_starts]
-    chain_types = atom_array.chain_type[chain_starts]
+    
+    # Use chain_iid if available, otherwise fall back to chain_id
+    if has_chain_iid:
+        chain_identifiers = atom_array.chain_iid[chain_starts]
+    else:
+        chain_identifiers = chain_ids
+    
+    # Use chain_entity if available, otherwise assign based on unique chain_ids
+    if has_chain_entity:
+        entity_ids = atom_array.chain_entity[chain_starts]
+    else:
+        unique_chains = list(dict.fromkeys(chain_ids))
+        chain_to_entity = {ch: i for i, ch in enumerate(unique_chains)}
+        entity_ids = np.array([chain_to_entity[ch] for ch in chain_ids])
+    
+    # Use is_polymer if available, otherwise infer from hetero flag
+    if has_is_polymer:
+        is_polymer = atom_array.is_polymer[chain_starts]
+    else:
+        is_polymer = np.array([
+            not np.all(atom_array.hetero[atom_array.chain_id == cid])
+            for cid in chain_ids
+        ])
+    
+    # Use chain_type if available, otherwise infer as POLYPEPTIDE(L)
+    if has_chain_type:
+        chain_types = atom_array.chain_type[chain_starts]
+    else:
+        # Default to polypeptide(L) for polymers - this is a simplification
+        chain_types = np.array(["POLYPEPTIDE(L)" if is_poly else "NON-POLYMER" 
+                                for is_poly in is_polymer])
+    #! End of (JH) 251127 added
 
     if not np.any(is_polymer):
         return {}
@@ -425,12 +461,17 @@ def _build_entity_poly(
         example_chain_ids = np.unique(chain_ids[entity_ids == entity_id])
 
         # ... get chain type
-        chain_type = ChainType.as_enum(chain_types[entity_ids == entity_id][0])
+        chain_type_val = chain_types[entity_ids == entity_id][0]
+        chain_type = ChainType.as_enum(chain_type_val) if has_chain_type else ChainType.POLYPEPTIDE_L
 
-        # ... get sequence
-        example_chain_iid = chain_iids[entity_ids == entity_id][0]
-        res_starts = struc.get_residue_starts(atom_array[atom_array.chain_iid == example_chain_iid])
-        seq = atom_array.res_name[res_starts]
+        #! (JH) 251127 added: get sequence using chain_iid or chain_id
+        example_chain_identifier = chain_identifiers[entity_ids == entity_id][0]
+        if has_chain_iid:
+            chain_atoms = atom_array[atom_array.chain_iid == example_chain_identifier]
+        else:
+            chain_atoms = atom_array[atom_array.chain_id == example_chain_identifier]
+        res_starts = struc.get_residue_starts(chain_atoms)
+        seq = chain_atoms.res_name[res_starts]
         wrap_every_n = lambda text, n: "\n".join(text[i : i + n] for i in range(0, len(text), n))  # noqa: E731
         processed_entity_non_canonical_sequence = "".join(
             get_1_from_3_letter_code(ccd_code, chain_type, use_closest_canonical=False) for ccd_code in seq
@@ -446,13 +487,14 @@ def _build_entity_poly(
 
         # ... add to entity_poly
         entity_poly["entity_id"].append(entity_id)
-        #! 251121 fixed, to run AF3 template-conditioning
-        if chain_type.to_string() == "POLYPEPTIDE(L)":
+        
+        if chain_type.to_string() == "POLYPEPTIDE(L)": #! 251121 fixed, to run AF3 template-conditioning
             entity_poly["type"].append("polypeptide(L)")
         elif chain_type.to_string() == "POLYPEPTIDE(D)":
             entity_poly["type"].append("polypeptide(D)")
         else:
             entity_poly["type"].append(chain_type.to_string().lower())
+            
         entity_poly["nstd_linkage"].append("no")
         entity_poly["nstd_monomer"].append("yes" if has_non_standard_monomer else "no")
         entity_poly["pdbx_seq_one_letter_code"].append(processed_entity_non_canonical_sequence)
@@ -460,6 +502,437 @@ def _build_entity_poly(
         entity_poly["pdbx_strand_id"].append(",".join(example_chain_ids))
         entity_poly["pdbx_target_identifier"].append("?")
     return {"entity_poly": entity_poly}
+
+
+def _build_entity_poly_seq(
+    atom_array: struc.AtomArray | struc.AtomArrayStack,
+) -> dict[str, dict[str, float | int | str | list | np.ndarray]]:
+    """
+    Build the entity_poly_seq category for a CIF file from an AtomArray.
+
+    This function generates per-residue sequence information for polymer entities,
+    which is required by some parsers (e.g., atomworks) to correctly extract res_id information.
+
+    Args:
+        - atom_array: AtomArray containing the structure data with polymer chain information.
+
+    Returns:
+        A dictionary containing the entity_poly_seq category with the following fields:
+        - entity_id: Entity identifier for each residue
+        - num: Residue number (position in sequence, 1-indexed)
+        - mon_id: Three-letter residue code
+        - hetero: 'n' for standard residues, 'y' for non-standard (HETATM) residues
+    #! (JH) 251127 added, originally it was not in the original Atomworks codebase
+    """
+    _entity_poly_seq_categories = (
+        "entity_id",
+        "num",
+        "mon_id",
+        "hetero",
+    )
+
+    if isinstance(atom_array, struc.AtomArrayStack):
+        atom_array = atom_array[0]  # Choose any model
+
+    annotations = atom_array.get_annotation_categories()
+    
+    # Check if we have the required annotations
+    has_chain_iid = "chain_iid" in annotations
+    has_chain_entity = "chain_entity" in annotations
+    has_is_polymer = "is_polymer" in annotations
+
+    # ... get index of the first atom of each chain
+    chain_starts = struc.get_chain_starts(atom_array)
+    chain_ids = atom_array.chain_id[chain_starts]
+
+    # Use chain_iid if available, otherwise fall back to chain_id
+    if has_chain_iid:
+        chain_identifiers = atom_array.chain_iid[chain_starts]
+    else:
+        chain_identifiers = chain_ids
+
+    # Use chain_entity if available, otherwise assign entity_id based on unique chain_ids
+    if has_chain_entity:
+        entity_ids = atom_array.chain_entity[chain_starts]
+    else:
+        # Assign entity_id based on unique chain identifiers
+        unique_chains = list(dict.fromkeys(chain_identifiers))  # preserve order
+        chain_to_entity = {ch: i for i, ch in enumerate(unique_chains)}
+        entity_ids = np.array([chain_to_entity[ch] for ch in chain_identifiers])
+
+    # Determine which chains are polymers
+    if has_is_polymer:
+        is_polymer = atom_array.is_polymer[chain_starts]
+    else:
+        # Infer from hetero flag - assume chains with any non-hetero atoms are polymers
+        is_polymer = np.array([
+            not np.all(atom_array.hetero[atom_array.chain_id == cid])
+            for cid in chain_ids
+        ])
+
+    if not np.any(is_polymer):
+        return {}
+
+    unique_polymer_entity_ids = np.unique(entity_ids[is_polymer])
+    entity_poly_seq = {cat: [] for cat in _entity_poly_seq_categories}
+    
+    for entity_id in unique_polymer_entity_ids:
+        # ... get an example chain identifier for this entity
+        example_chain_identifier = chain_identifiers[entity_ids == entity_id][0]
+        
+        if has_chain_iid:
+            chain_atoms = atom_array[atom_array.chain_iid == example_chain_identifier]
+        else:
+            chain_atoms = atom_array[atom_array.chain_id == example_chain_identifier]
+        
+        # ... get residue information
+        res_starts = struc.get_residue_starts(chain_atoms)
+        res_ids = chain_atoms.res_id[res_starts]
+        res_names = chain_atoms.res_name[res_starts]
+        hetero_flags = chain_atoms.hetero[res_starts]
+        
+        # ... add each residue to entity_poly_seq
+        for i, (res_id, res_name, is_hetero) in enumerate(zip(res_ids, res_names, hetero_flags)):
+            entity_poly_seq["entity_id"].append(int(entity_id))
+            entity_poly_seq["num"].append(int(res_id))
+            entity_poly_seq["mon_id"].append(res_name)
+            entity_poly_seq["hetero"].append("y" if is_hetero else "n")
+    
+    return {"entity_poly_seq": entity_poly_seq}
+
+
+def _build_entity_nonpoly(
+    atom_array: struc.AtomArray | struc.AtomArrayStack,
+) -> dict[str, dict[str, float | int | str | list | np.ndarray]]:
+    """
+    Build the _entity, _pdbx_entity_nonpoly, and _chem_comp categories
+    for non-polymer entities present in AtomArray.
+    #! (JH) 251126 added, originally it was not in the original Atomworks codebase
+    """
+    
+    if isinstance(atom_array, struc.AtomArrayStack):
+        atom_array = atom_array[0]
+        
+    # Masks
+    is_poly_atom = atom_array.is_polymer
+    nonpoly_mask = ~is_poly_atom
+    
+    # Collect entity ids
+    if atom_array.array_length() == 0:
+        return {}
+    all_eids = np.unique(atom_array.chain_entity).tolist()
+    nonpoly_eids = np.unique(atom_array.chain_entity[nonpoly_mask]).tolist()
+    
+    # _entity: polymer/non-polymer rows all written
+    entity_types = []
+    for eid in all_eids:
+        eid_is_poly = np.any((atom_array.chain_entity == eid) & is_poly_atom)
+        entity_types.append("polymer" if eid_is_poly else "non-polymer")
+    entity = {
+        "id": all_eids,
+        "pdbx_description": ["." for _ in all_eids],
+        "type": entity_types,
+    }
+    
+    # _pdbx_entity_nonpoly: non-polymer entity -> comp_id
+    eid_to_comp = []
+    for eid in nonpoly_eids:
+        resnames = np.unique(
+            atom_array.res_name[(atom_array.chain_entity == eid) & nonpoly_mask]
+        )
+        comp_id = str(resnames[0]) if len(resnames) else "LIG"
+        eid_to_comp.append(comp_id)
+    pdbx_entity_nonpoly = {
+        "entity_id": nonpoly_eids,
+        "comp_id": eid_to_comp,
+    }
+    
+    # _chem_comp: minimum definition (only necessary columns)
+    unique_comp_ids = sorted(set(eid_to_comp))
+    chem_comp = {
+        "id": unique_comp_ids,
+        "type": ["NON-POLYMER"] * len(unique_comp_ids),
+        "name": unique_comp_ids,
+    }
+    
+    out = {"entity": entity}
+    if nonpoly_eids:
+        out["pdbx_entity_nonpoly"] = pdbx_entity_nonpoly
+    if unique_comp_ids:
+        out["chem_comp"] = chem_comp
+    return out
+
+
+#! (JH) 251127 added, originally it was not in the original Atomworks codebase
+def _build_struct_asym(
+    atom_array: struc.AtomArray | struc.AtomArrayStack,
+) -> dict[str, dict[str, float | int | str | list | np.ndarray]]:
+    """
+    Build the _struct_asym category for a CIF file from an AtomArray.
+    This category provides the mapping between chain_id (asym_id) and entity_id.
+    """
+    if isinstance(atom_array, struc.AtomArrayStack):
+        atom_array = atom_array[0]
+    
+    annotations = atom_array.get_annotation_categories()
+    has_chain_entity = "chain_entity" in annotations
+    
+    chain_starts = struc.get_chain_starts(atom_array)
+    chain_ids = atom_array.chain_id[chain_starts]
+    
+    # Get unique chain_ids while preserving order
+    unique_chain_ids = list(dict.fromkeys(chain_ids))
+    
+    if has_chain_entity:
+        entity_ids = atom_array.chain_entity[chain_starts]
+        chain_to_entity = {chain_ids[i]: entity_ids[i] for i in range(len(chain_ids))}
+    else:
+        # Assign entity_id based on unique chain_ids
+        chain_to_entity = {ch: i for i, ch in enumerate(unique_chain_ids)}
+    
+    struct_asym = {
+        "id": unique_chain_ids,
+        "entity_id": [chain_to_entity[ch] for ch in unique_chain_ids],
+        "pdbx_blank_PDB_chainid_flag": ["N"] * len(unique_chain_ids),
+        "pdbx_modified": ["N"] * len(unique_chain_ids),
+    }
+    
+    return {"struct_asym": struct_asym}
+
+
+#! (JH) 251127 added, originally it was not in the original Atomworks codebase
+def _build_entity(
+    atom_array: struc.AtomArray | struc.AtomArrayStack,
+) -> dict[str, dict[str, float | int | str | list | np.ndarray]]:
+    """
+    Build the _entity category for a CIF file from an AtomArray.
+    This category provides entity-level information (polymer/non-polymer type).
+    """
+    if isinstance(atom_array, struc.AtomArrayStack):
+        atom_array = atom_array[0]
+    
+    annotations = atom_array.get_annotation_categories()
+    has_chain_entity = "chain_entity" in annotations
+    has_is_polymer = "is_polymer" in annotations
+    
+    chain_starts = struc.get_chain_starts(atom_array)
+    chain_ids = atom_array.chain_id[chain_starts]
+    
+    if has_chain_entity:
+        entity_ids = atom_array.chain_entity[chain_starts]
+    else:
+        unique_chains = list(dict.fromkeys(chain_ids))
+        chain_to_entity = {ch: i for i, ch in enumerate(unique_chains)}
+        entity_ids = np.array([chain_to_entity[ch] for ch in chain_ids])
+    
+    if has_is_polymer:
+        is_polymer = atom_array.is_polymer[chain_starts]
+    else:
+        is_polymer = np.array([
+            not np.all(atom_array.hetero[atom_array.chain_id == cid])
+            for cid in chain_ids
+        ])
+    
+    # Get unique entity_ids and their types
+    unique_entity_ids = sorted(set(entity_ids))
+    entity_types = []
+    for eid in unique_entity_ids:
+        mask = entity_ids == eid
+        if np.any(is_polymer[mask]):
+            entity_types.append("polymer")
+        else:
+            entity_types.append("non-polymer")
+    
+    entity = {
+        "id": unique_entity_ids,
+        "type": entity_types,
+        "pdbx_description": ["." for _ in unique_entity_ids],
+    }
+    
+    return {"entity": entity}
+
+
+#! (JH) 251127 added, originally it was not in the original Atomworks codebase
+def _build_pdbx_poly_seq_scheme(
+    atom_array: struc.AtomArray | struc.AtomArrayStack,
+) -> dict[str, dict[str, float | int | str | list | np.ndarray]]:
+    """
+    Build the _pdbx_poly_seq_scheme category for a CIF file from an AtomArray.
+    This category provides per-residue sequence information for polymer entities.
+    """
+    if isinstance(atom_array, struc.AtomArrayStack):
+        atom_array = atom_array[0]
+    
+    annotations = atom_array.get_annotation_categories()
+    has_chain_entity = "chain_entity" in annotations
+    has_is_polymer = "is_polymer" in annotations
+    
+    chain_starts = struc.get_chain_starts(atom_array)
+    chain_ids = atom_array.chain_id[chain_starts]
+    
+    if has_chain_entity:
+        entity_ids_per_chain = atom_array.chain_entity[chain_starts]
+    else:
+        unique_chains = list(dict.fromkeys(chain_ids))
+        chain_to_entity = {ch: i for i, ch in enumerate(unique_chains)}
+        entity_ids_per_chain = np.array([chain_to_entity[ch] for ch in chain_ids])
+    
+    if has_is_polymer:
+        is_polymer_per_chain = atom_array.is_polymer[chain_starts]
+    else:
+        is_polymer_per_chain = np.array([
+            not np.all(atom_array.hetero[atom_array.chain_id == cid])
+            for cid in chain_ids
+        ])
+    
+    pdbx_poly_seq_scheme = {
+        "asym_id": [],
+        "entity_id": [],
+        "seq_id": [],
+        "mon_id": [],
+        "pdb_seq_num": [],
+        "auth_seq_num": [],
+        "pdb_mon_id": [],
+        "auth_mon_id": [],
+        "pdb_strand_id": [],
+        "pdb_ins_code": [],
+        "hetero": [],
+    }
+    
+    for i, chain_id in enumerate(chain_ids):
+        if not is_polymer_per_chain[i]:
+            continue
+        
+        entity_id = entity_ids_per_chain[i]
+        chain_mask = atom_array.chain_id == chain_id
+        chain_atoms = atom_array[chain_mask]
+        res_starts = struc.get_residue_starts(chain_atoms)
+        
+        res_ids = chain_atoms.res_id[res_starts]
+        res_names = chain_atoms.res_name[res_starts]
+        hetero_flags = chain_atoms.hetero[res_starts]
+        
+        # Get auth_seq_id if available
+        if "auth_seq_id" in annotations:
+            auth_seq_ids = chain_atoms.auth_seq_id[res_starts]
+        else:
+            auth_seq_ids = res_ids.astype(str)
+        
+        # Get insertion codes if available
+        if "ins_code" in annotations:
+            ins_codes = chain_atoms.ins_code[res_starts]
+        else:
+            ins_codes = ["." for _ in res_ids]
+        
+        for j, (res_id, res_name, auth_seq, ins_code, hetero) in enumerate(
+            zip(res_ids, res_names, auth_seq_ids, ins_codes, hetero_flags)
+        ):
+            pdbx_poly_seq_scheme["asym_id"].append(chain_id)
+            pdbx_poly_seq_scheme["entity_id"].append(int(entity_id))
+            pdbx_poly_seq_scheme["seq_id"].append(int(res_id))
+            pdbx_poly_seq_scheme["mon_id"].append(res_name)
+            pdbx_poly_seq_scheme["pdb_seq_num"].append(str(auth_seq))
+            pdbx_poly_seq_scheme["auth_seq_num"].append(str(auth_seq))
+            pdbx_poly_seq_scheme["pdb_mon_id"].append(res_name)
+            pdbx_poly_seq_scheme["auth_mon_id"].append(res_name)
+            pdbx_poly_seq_scheme["pdb_strand_id"].append(chain_id)
+            pdbx_poly_seq_scheme["pdb_ins_code"].append(ins_code if ins_code.strip() else ".")
+            pdbx_poly_seq_scheme["hetero"].append("y" if hetero else "n")
+    
+    if not pdbx_poly_seq_scheme["asym_id"]:
+        return {}
+    
+    return {"pdbx_poly_seq_scheme": pdbx_poly_seq_scheme}
+
+
+#! (JH) 251127 added, originally it was not in the original Atomworks codebase
+def _build_pdbx_nonpoly_scheme(
+    atom_array: struc.AtomArray | struc.AtomArrayStack,
+) -> dict[str, dict[str, float | int | str | list | np.ndarray]]:
+    """
+    Build the _pdbx_nonpoly_scheme category for a CIF file from an AtomArray.
+    This category provides per-residue information for non-polymer entities.
+    """
+    if isinstance(atom_array, struc.AtomArrayStack):
+        atom_array = atom_array[0]
+    
+    annotations = atom_array.get_annotation_categories()
+    has_chain_entity = "chain_entity" in annotations
+    has_is_polymer = "is_polymer" in annotations
+    
+    chain_starts = struc.get_chain_starts(atom_array)
+    chain_ids = atom_array.chain_id[chain_starts]
+    
+    if has_chain_entity:
+        entity_ids_per_chain = atom_array.chain_entity[chain_starts]
+    else:
+        unique_chains = list(dict.fromkeys(chain_ids))
+        chain_to_entity = {ch: i for i, ch in enumerate(unique_chains)}
+        entity_ids_per_chain = np.array([chain_to_entity[ch] for ch in chain_ids])
+    
+    if has_is_polymer:
+        is_polymer_per_chain = atom_array.is_polymer[chain_starts]
+    else:
+        is_polymer_per_chain = np.array([
+            not np.all(atom_array.hetero[atom_array.chain_id == cid])
+            for cid in chain_ids
+        ])
+    
+    pdbx_nonpoly_scheme = {
+        "asym_id": [],
+        "entity_id": [],
+        "mon_id": [],
+        "ndb_seq_num": [],
+        "pdb_seq_num": [],
+        "auth_seq_num": [],
+        "pdb_mon_id": [],
+        "auth_mon_id": [],
+        "pdb_strand_id": [],
+        "pdb_ins_code": [],
+    }
+    
+    for i, chain_id in enumerate(chain_ids):
+        if is_polymer_per_chain[i]:
+            continue
+        
+        entity_id = entity_ids_per_chain[i]
+        chain_mask = atom_array.chain_id == chain_id
+        chain_atoms = atom_array[chain_mask]
+        res_starts = struc.get_residue_starts(chain_atoms)
+        
+        res_ids = chain_atoms.res_id[res_starts]
+        res_names = chain_atoms.res_name[res_starts]
+        
+        # Get auth_seq_id if available
+        if "auth_seq_id" in annotations:
+            auth_seq_ids = chain_atoms.auth_seq_id[res_starts]
+        else:
+            auth_seq_ids = res_ids.astype(str)
+        
+        # Get insertion codes if available
+        if "ins_code" in annotations:
+            ins_codes = chain_atoms.ins_code[res_starts]
+        else:
+            ins_codes = ["." for _ in res_ids]
+        
+        for j, (res_id, res_name, auth_seq, ins_code) in enumerate(
+            zip(res_ids, res_names, auth_seq_ids, ins_codes)
+        ):
+            pdbx_nonpoly_scheme["asym_id"].append(chain_id)
+            pdbx_nonpoly_scheme["entity_id"].append(int(entity_id))
+            pdbx_nonpoly_scheme["mon_id"].append(res_name)
+            pdbx_nonpoly_scheme["ndb_seq_num"].append(j + 1)
+            pdbx_nonpoly_scheme["pdb_seq_num"].append(str(auth_seq))
+            pdbx_nonpoly_scheme["auth_seq_num"].append(str(auth_seq))
+            pdbx_nonpoly_scheme["pdb_mon_id"].append(res_name)
+            pdbx_nonpoly_scheme["auth_mon_id"].append(res_name)
+            pdbx_nonpoly_scheme["pdb_strand_id"].append(chain_id)
+            pdbx_nonpoly_scheme["pdb_ins_code"].append(ins_code if ins_code.strip() else ".")
+    
+    if not pdbx_nonpoly_scheme["asym_id"]:
+        return {}
+    
+    return {"pdbx_nonpoly_scheme": pdbx_nonpoly_scheme}
 
 
 def _write_categories_to_block(
@@ -507,6 +980,7 @@ def _to_cif_or_bcif(
     date: str | None = None,
     time: str | None = None,
     include_entity_poly: bool = False,
+    include_entity_nonpoly: bool = False, #! (JH) 251126 added
     include_nan_coords: bool = True,
     include_bonds: bool = True,
     extra_fields: list[str] | Literal["all"] = [],
@@ -538,12 +1012,27 @@ def _to_cif_or_bcif(
     if "altloc_id" in structure.get_annotation_categories() and structure.altloc_id[0].strip() == "":
         structure.altloc_id = ["."] * structure.array_length()
 
+    #! (JH) added: Copy B_iso_or_equiv to b_factor if b_factor is missing
+    # This is needed because load_any stores b_factor as B_iso_or_equiv (original CIF column name),
+    # but biotite's pdbx.set_structure expects b_factor annotation.
+    if "b_factor" not in structure.get_annotation_categories():
+        if "B_iso_or_equiv" in structure.get_annotation_categories():
+            structure.set_annotation("b_factor", structure.B_iso_or_equiv)
+
     block = pdbx.convert._get_or_create_block(cif_file, block_name=id)
 
     # Build metadata
     metadata = {"entry": {"id": id, "author": author, "date": date, "time": time}}
+    #! (JH) 251127 added: include additional CIF categories for AF3 compatibility
+    include_additional_categories = include_entity_poly or include_entity_nonpoly
     for flag, build_func in [
         (include_entity_poly, _build_entity_poly),
+        (include_entity_poly, _build_entity_poly_seq),  # Also build entity_poly_seq when include_entity_poly=True
+        (include_entity_nonpoly, _build_entity_nonpoly),
+        (include_additional_categories, _build_struct_asym),  #! (JH) 251127 added
+        (include_additional_categories, _build_entity),  #! (JH) 251127 added
+        (include_entity_poly, _build_pdbx_poly_seq_scheme),  #! (JH) 251127 added
+        (include_entity_nonpoly, _build_pdbx_nonpoly_scheme),  #! (JH) 251127 added
     ]:
         if flag:
             try:
@@ -602,6 +1091,7 @@ def to_cif_buffer(
     date: str | None = None,
     time: str | None = None,
     include_entity_poly: bool = False,
+    include_entity_nonpoly: bool = False, #! (JH) 251126 added
     include_nan_coords: bool = True,
     include_bonds: bool = True,
     extra_fields: list[str] | Literal["all"] = [],
@@ -637,6 +1127,7 @@ def to_cif_buffer(
         date=date,
         time=time,
         include_entity_poly=include_entity_poly,
+        include_entity_nonpoly=include_entity_nonpoly,
         include_nan_coords=include_nan_coords,
         include_bonds=include_bonds,
         extra_fields=extra_fields,
@@ -750,6 +1241,7 @@ def to_cif_file(
     date: str | None = None,
     time: str | None = None,
     include_entity_poly: bool = True,
+    include_entity_nonpoly: bool = True, #! (JH) 251126 added
     include_nan_coords: bool = True,
     include_bonds: bool = True,
     extra_fields: list[str] | Literal["all"] = [],
@@ -805,6 +1297,7 @@ def to_cif_file(
         date=date,
         time=time,
         include_entity_poly=include_entity_poly,
+        include_entity_nonpoly=include_entity_nonpoly,
         include_nan_coords=include_nan_coords,
         include_bonds=include_bonds,
         extra_fields=extra_fields,
