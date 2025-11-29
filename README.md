@@ -1,10 +1,8 @@
-# Ligand-Conditioned Inverse Folding Model
+# Lullaby (Ligand-conditioned Caliby)
 
-Branch for developing ligand-conditioned inverse folding model with AlphaFold3 and allatom-design.
+Branch for developing Lullaby with alphafold3 and openstructure.
 
-Below are the instructions for setting up the codebase, container, and environment on Sherlock.
-
-## Environment Setup
+## Environment setup on Sherlock
 
 ### 1. Clone Repository
 
@@ -22,7 +20,7 @@ git clone https://github.com/ProteinDesignLab/allatom-design.git
 cd allatom-design
 
 # Checkout the jinho/af3ppg branch
-git checkout jinho/af3ppg
+git checkout jinho/AAA
 ```
 
 ### 2. Install UV Package Manager
@@ -40,7 +38,21 @@ pip install uv
 uv --version
 ```
 
-### 3. Create Virtual Environment
+### 3. Container Setup
+
+Copy the container to your `$SCRATCH/containers` directory:
+
+```bash
+mkdir -p $SCRATCH/containers
+cp /oak/stanford/groups/possu/jinho/containers/lullaby.sif $SCRATCH/containers
+```
+
+### 4. Create Virtual Environment
+
+```bash
+cd $HOME/code/allatom-design
+bash scripts/sherlock_scripts/jinho/setup/shell_in_container.sh
+```
 
 Create a UV virtual environment in your `$SCRATCH` directory:
 
@@ -48,21 +60,12 @@ Create a UV virtual environment in your `$SCRATCH` directory:
 # Create venv directory
 mkdir -p $SCRATCH/venv
 
-# Create af3ad virtual environment
+# Create lullaby virtual environment inheriting the mamba environment of the container
 cd $SCRATCH/venv
-uv venv af3ad --python 3.12
+uv venv lullaby --python=/opt/conda/envs/lullaby/bin/python --system-site-packages
 
 # Activate the environment
-source $SCRATCH/venv/af3ad/bin/activate
-```
-
-### 4. Container Setup
-
-Copy the container to your `$SCRATCH/containers` directory:
-
-```bash
-mkdir -p $SCRATCH/containers
-cp /oak/stanford/groups/possu/jinho/containers/af3ad_base.sif $SCRATCH/containers
+source $SCRATCH/venv/lullaby/bin/activate
 ```
 
 ### 5. Update Environment Paths
@@ -111,6 +114,13 @@ uv pip install -r uv-compatible-core.txt --no-deps
 python -m pip install -r pip-only-torch.txt --no-deps
 pip install -r pip-only-core.txt --no-deps
 
+# Install lightning and downgrade networkx to avoid conflicts in openstructure
+uv pip install lightning --no-deps
+uv pip install networkx==2.8.8
+
+# Install python-dotenv
+uv pip install python-dotenv
+
 # Atomworks dependencies (Todo: Integrate these into requirements.txt)
 uv pip install \
 "biotite>=1.3.0,<2" \
@@ -126,7 +136,6 @@ uv pip install "openbabel-wheel==3.1.1.22"
 uv pip install pathspec
 ```
 
-
 ### 8. Install Editable Packages
 
 #### AlphaFold3
@@ -138,11 +147,11 @@ cd $HOME/code/allatom-design/alphafold3
 pip install -e . --no-deps
 ```
 
-> **Note:** Use `--unsafe-best-match` flag if needed for `cmake==4.1.0` compatibility
-
 #### Atomworks
+```bash
 cd $HOME/code/allatom-design/atomworks
 uv pip install -e . --no-deps
+```
 
 #### Allatom Design
 
@@ -150,6 +159,7 @@ Before installing allatom_design, clean any existing installation (if present):
 
 ```bash
 # Optional: Remove existing egg-info if present
+cd $HOME/code/allatom-design
 rm -rf allatom_design.egg-info
 pip cache purge
 ```
@@ -161,7 +171,7 @@ cd $HOME/code/allatom-design
 pip install -e . --no-deps
 ```
 
-## Running the Container
+### Running the Container
 
 To start an interactive shell session in the container:
 
@@ -170,8 +180,42 @@ cd $HOME/code/allatom-design
 bash ./scripts/sherlock_scripts/jinho/shell_in_container.sh
 ```
 
-## Troubleshooting
+### Troubleshooting
 
 - If you encounter issues with package installations, ensure all dependency files are present in the repository
 - For container-related issues, verify that the `.sif` file was copied correctly to your `$SCRATCH/containers` directory
 - Check that all paths in the setup scripts point to your actual directory locations
+
+
+## Environment setup on the lab desktop  
+
+### Installing the environment
+```bash
+mamba create -n lullaby_local python=3.12
+mamba activate lullaby_local
+mamba install openstructure=2.10.0 -c conda-forge -c bioconda -y
+
+mamba activate lullaby_local
+cd ${PATH_TO_allatom-design}
+bash scripts/local_scripts/jinho/setup/install_lullaby_local.sh
+uv pip install python-dotenv
+```
+
+If you encounter the error below,
+```bash
+can't find file to patch at input line 3
+...
+|--- hmmer-3.4/src/jackhmmer.c
+|+++ hmmer-3.4/src/jackhmmer.c
+```
+
+Then you can do 
+```bash
+File to patch: src/jackhmmer.c
+```
+
+When you use the environment,
+```bash
+mamba activate lullaby_local
+source scripts/local_scripts/jinho/setup/activate_lullaby_local.sh
+```

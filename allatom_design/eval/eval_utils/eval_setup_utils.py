@@ -143,7 +143,8 @@ def get_training_checkpoints(
     model_type: str,
     eval_every_n_ckpts: int = 1,
     start_step: int | None = None,
-    end_step: int | None = None
+    end_step: int | None = None,
+    use_ema: bool = False,
 ) -> list[str]:
     """
     Get model checkpoints from a training directory, preferring EMA checkpoints if available.
@@ -166,15 +167,20 @@ def get_training_checkpoints(
 
     # Check for EMA checkpoints
     ema_ckpt_dir = f"{denoiser_train_dir}/checkpoints/ema"
-    if Path(ema_ckpt_dir).exists():
-        # Use EMA checkpoints if they exist
-        print(f"Using EMA checkpoints from {ema_ckpt_dir}")
-        pattern = re.compile(f"{prefix}-step(\\d+)-epoch(\\d+)-ema(\\d+\\.\\d+)\\.ckpt$")
-        ckpts = glob.glob(f"{ema_ckpt_dir}/*.ckpt")
+    non_ema_ckpt_dir = f"{denoiser_train_dir}/checkpoints"
+    if use_ema:
+        if Path(ema_ckpt_dir).exists():
+            print(f"Using EMA checkpoints from {ema_ckpt_dir}")
+            pattern = re.compile(f"{prefix}-step(\\d+)-epoch(\\d+)-ema(\\d+\\.\\d+)\\.ckpt$")
+            ckpts = glob.glob(f"{ema_ckpt_dir}/*.ckpt")
+        else:
+            print(f"Warning: No EMA checkpoints found in {ema_ckpt_dir}, using non-EMA checkpoints")
+            pattern = re.compile(f"{prefix}-step(\\d+)-epoch(\\d+)\\.ckpt$")
+            ckpts = glob.glob(f"{non_ema_ckpt_dir}/*.ckpt")
     else:
-        print(f"Using non-EMA checkpoints from {denoiser_train_dir}/checkpoints")
+        print(f"Using non-EMA checkpoints from {non_ema_ckpt_dir}")
         pattern = re.compile(f"{prefix}-step(\\d+)-epoch(\\d+)\\.ckpt$")
-        ckpts = glob.glob(f"{denoiser_train_dir}/checkpoints/*.ckpt")
+        ckpts = glob.glob(f"{non_ema_ckpt_dir}/*.ckpt")
 
     # Filter and sort checkpoints
     ckpts = natsorted([ckpt for ckpt in ckpts if pattern.search(Path(ckpt).name)])[::eval_every_n_ckpts]

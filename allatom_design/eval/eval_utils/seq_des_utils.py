@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from atomworks.ml.preprocessing.get_pn_unit_data_from_structure import DataPreprocessor
 from atomworks.io.parser import parse as aw_parse
 from atomworks.io.utils import non_rcsb
-from atomworks.io.utils.io_utils import to_cif_string
+from atomworks.io.utils.io_utils import to_cif_string, to_cif_file
 from atomworks.ml.utils.token import apply_token_wise, get_token_starts, spread_token_wise
 from biotite.structure import AtomArray
 from joblib import Parallel, delayed
@@ -34,7 +34,6 @@ from allatom_design.data.transform.sd_featurizer import sd_featurizer
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 from allatom_design.data.transform.pad import pad_dim
-
 
 def get_seq_des_model(cfg: DictConfig, device: str) -> dict[str, Any]:
     """
@@ -150,11 +149,11 @@ def run_seq_des(
 
                 # Save output atom arrays to cif files.
                 for ai, sample_stem in enumerate(sample_stems):
-                    # out_file = f"{sample_out_dir}/{sample_stem}.cif"
-                    # atom_array = atom_arrays[ai]
-                    # with open(out_file, "w") as f:
-                    #     f.write(to_cif_string(atom_array, include_nan_coords=False))
-
+                    out_file = f"{sample_out_dir}/{sample_stem}.cif"
+                    atom_array = atom_arrays[ai]
+                    with open(out_file, "w") as f:
+                        f.write(to_cif_string(atom_array, include_nan_coords=False))
+                    
                     outputs["example_id"].append(example_id)
                     # outputs["out_pdb"].append(out_file)
                     outputs["U"].append(aux[ai]["U"])
@@ -329,6 +328,7 @@ def run_lc_seq_des(
     device: str = None,
     out_dir: str = None,
     pos_constraint_df: pd.DataFrame | None = None,
+    io_cfg: DictConfig = None,
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
     """
     Given a list of processed structure files, run sequence design on them.
@@ -406,17 +406,44 @@ def run_lc_seq_des(
             example_id_to_batch_idx = {eid: idx for idx, eid in enumerate(batch["example_id"])}
             for si, (example_id, atom_arrays) in enumerate(id_to_atom_arrays.items()):
                 aux = id_to_aux[example_id]
-                sample_stems = [f"{example_id}_sample{si}" for si in range(len(atom_arrays))]
+                
+                sample_stems = [convert_stem(f"{example_id}_sample{si}") for si in range(len(atom_arrays))]
+                
+                DUMMY_DATE = "1959-01-08" 
+                extra_categories = {
+                    "pdbx_audit_revision_history": {
+                        "ordinal": [1],
+                        "revision_id": [1], 
+                        "revision_date": [DUMMY_DATE],
+                        "major_revision": [1],
+                        "minor_revision": [0],
+                        "revision_description": ["Dummy date for template-conditioning AF3"]
+                    }
+                }
 
                 # Save output atom arrays to cif files.
                 for ai, sample_stem in enumerate(sample_stems):
-                    # out_file = f"{sample_out_dir}/{sample_stem}.cif"
-                    # atom_array = atom_arrays[ai]
+                    out_file = f"{sample_out_dir}/{sample_stem}.cif"
+                    atom_array = atom_arrays[ai]
+                    
                     # with open(out_file, "w") as f:
                     #     f.write(to_cif_string(atom_array, include_nan_coords=False))
+                    out_file = to_cif_file(atom_arrays[ai], 
+                                           out_file,
+                                           file_type="cif",
+                                           date = DUMMY_DATE,
+                                           include_entity_poly=True,
+                                           include_entity_nonpoly=True,
+                                           include_nan_coords=False,
+                                           include_bonds=True,
+                                           extra_categories=extra_categories)
+                    
+                    # Fix pdbx_formal_charge format for OpenStructure compatibility
+                    # OpenStructure expects integer (e.g., "1") not signed (e.g., "+1")
+                    _fix_cif_formal_charge(out_file)
 
                     outputs["example_id"].append(example_id)
-                    # outputs["out_pdb"].append(out_file)
+                    outputs["out_pdb"].append(out_file)
                     outputs["U"].append(aux[ai]["U"])
 
                 # Get sampled sequences as a string, with ":" to separate chains.
@@ -425,6 +452,8 @@ def run_lc_seq_des(
                     outputs["seq"].append(
                         ":".join(info["processed_entity_canonical_sequence"] for info in chain_info.values())
                     )
+                    outputs["atom_array"].append(atom_arrays[ai])
+                    
                     
                 # Compute sequence recovery metrics            
                 bi = example_id_to_batch_idx[example_id]
@@ -447,11 +476,14 @@ def run_lc_seq_des(
                     # Compute sequence recovery
                     seq_recovery = (samp_res_types == orig_res_types).float() * seq_mask
                     seq_recovery = seq_recovery.sum() / seq_mask.sum().clamp(min=1e-8)
+                    outputs["sample_seq_recovery"].append(seq_recovery)
+                    
                     total_seq_recovery += seq_recovery
                                                                     
                     # Compute sp sequence recovery
                     sp_seq_recovery = (samp_res_types == orig_res_types).float() * lp_seq_mask
                     sp_seq_recovery = sp_seq_recovery.sum() / lp_seq_mask.sum().clamp(min=1e-8)
+                    outputs["sample_sp_seq_recovery"].append(sp_seq_recovery)
                     total_sp_seq_recovery += sp_seq_recovery
                     
                     # Todo: Compute mp and np sequence recovery
@@ -460,8 +492,8 @@ def run_lc_seq_des(
                                         
                 avg_seq_recovery = total_seq_recovery / len(atom_arrays)
                 avg_sp_seq_recovery = total_sp_seq_recovery / len(atom_arrays)
-                outputs["avg_seq_recovery"].append(avg_seq_recovery)
-                outputs["avg_sp_seq_recovery"].append(avg_sp_seq_recovery)
+                outputs["sample_avg_seq_recovery"].append(avg_seq_recovery)
+                outputs["sample_avg_sp_seq_recovery"].append(avg_sp_seq_recovery)
                                 
                 total_avg_seq_recovery += avg_seq_recovery
                 total_avg_sp_seq_recovery += avg_sp_seq_recovery
@@ -606,7 +638,13 @@ def get_sd_batch(
     return batch
 
 
-def get_sd_example(pdb_path: str, featurizer_cfg: DictConfig | None, load_from_cache: bool = True, metadata: pd.DataFrame = None) -> dict[str, Any]:
+def get_sd_example(pdb_path: str = None,
+                   featurizer_cfg: DictConfig = None, 
+                   load_from_cache: bool = True, 
+                   metadata: pd.DataFrame = None,
+                   data_cfg: DictConfig = None,
+                   preprocess_transform_cfg: DictConfig = None,
+                   ) -> dict[str, Any]:
     """
     Given a pdb file path, return a dictionary of sequence design model features.
 
@@ -620,24 +658,22 @@ def get_sd_example(pdb_path: str, featurizer_cfg: DictConfig | None, load_from_c
         # Todo: ii) Single protein chain with multiple ligands at the same pocket site
         example = load_cached_example(pdb_path)
         pdb_id = Path(pdb_path).stem
-        metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)
-        
-        #! Replace information in the example with the information from the metadata
-        #! Since when caching, it doesn't really care about the metadata as it's just caching the whole structure        
-        example['example_id'] = metadata_example["example_id"].iloc[0]
-        query_pn_unit_iids = metadata_example["q_pn_unit_iid_1"].tolist() + metadata_example["q_pn_unit_iid_2"].tolist()
-        example["query_pn_unit_iids"] = query_pn_unit_iids
-        
-        example['extra_info'] = {} #! delete all the information preexisting in the example
-        row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
-        example['extra_info'] = row_dict
-                                
     else:
-        print(f"Loading PDB file {pdb_path} from cache is not implemented yet.")
-        # Todo: implement this
-        # Preprocess the PDB file.
-        # example = preprocess_pdb(pdb_path, data_cfg)
-
+        example = preprocess_pdb(pdb_path, data_cfg = data_cfg, preprocess_transform_cfg = preprocess_transform_cfg)
+        pdb_id = (Path(pdb_path).stem).split("_")[0]
+        
+    metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)
+    
+    #! Replace information in the example with the information from the metadata
+    #! Since when caching, it doesn't really care about the metadata as it's just caching the whole structure        
+    example['example_id'] = metadata_example["example_id"].iloc[0]
+    query_pn_unit_iids = metadata_example["q_pn_unit_iid_1"].tolist() + metadata_example["q_pn_unit_iid_2"].tolist()
+    example["query_pn_unit_iids"] = query_pn_unit_iids
+    
+    example['extra_info'] = {} #! delete all the information preexisting in the example
+    row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
+    example['extra_info'] = row_dict
+                                                                
     # Featurize the example.
     featurizer = sd_featurizer(**featurizer_cfg)
     example = featurizer(example)
@@ -648,7 +684,8 @@ def load_cached_example(pdb_path: str) -> dict[str, torch.Tensor]:
     cached_example_path = f"{pdb_path}"
     return torch.load(cached_example_path, map_location="cpu", weights_only=False)
 
-def preprocess_pdb(pdb_path: str, data_cfg: DictConfig | None) -> dict[str, Any]:
+def preprocess_pdb(pdb_path: str, data_cfg: DictConfig | None, 
+                   preprocess_transform_cfg: DictConfig | None) -> dict[str, Any]:
     """
     Preprocess a PDB file using the preprocessing pipeline.
     """
@@ -662,12 +699,11 @@ def preprocess_pdb(pdb_path: str, data_cfg: DictConfig | None) -> dict[str, Any]
             "fix_arginines": True,
             "convert_mse_to_met": True,
             "hydrogen_policy": "remove",
+            "extra_fields": "all",
         }
         cif_parser_args = default_cif_parser_args
     else:
         cif_parser_args = OmegaConf.to_container(data_cfg.cif_parser_args, resolve=True)
-
-
 
     # Read in the CIF data.
     transformation_id = "1"  # Leep only the first assembly.
@@ -676,7 +712,7 @@ def preprocess_pdb(pdb_path: str, data_cfg: DictConfig | None) -> dict[str, Any]
     atom_array_from_cif = input_data["assemblies"][transformation_id][0]  # (1, num_atoms) -> (num_atoms)
 
     # Run the preprocessing pipeline on the CIF data.
-    pipeline = preprocess_transform()
+    pipeline = preprocess_transform(**dict(preprocess_transform_cfg))
     return pipeline(
         data={
             "example_id": Path(pdb_path).stem,
@@ -684,7 +720,6 @@ def preprocess_pdb(pdb_path: str, data_cfg: DictConfig | None) -> dict[str, Any]
             "chain_info": input_data["chain_info"],
         }
     )
-
 
 
 def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str, torch.Tensor]:
@@ -1159,6 +1194,48 @@ def _validate_ensemble_alignment(batch: dict[str, TensorType["b ..."]]):
             "set ensemble_ignore_res_idx_mismatch=True."
         )
         
-    
+def convert_stem(stem: str) -> str:
+    # {example_id}{1a28}{1}{['A_1', 'C_1']}_sample0
+    m = re.search(r"\{[^}]*\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}_sample(\d+)", stem)
+    if not m:
+        return stem  # no match
 
+    id1, id2, list_str, idx = m.groups()  # '1a28', '1', "['A_1', 'C_1']", '0'
+
+    # extract elements from the list: 'A_1', 'C_1' → ["A_1", "C_1"]
+    items = re.findall(r"'([^']+)'", list_str)
+
+    # remove underscore from each element: "A_1" → "A1"
+    items = [x.replace("_", "") for x in items]
+
+    # recombine to the desired format
+    return f"{id1}_{id2}_{'_'.join(items)}_sample{idx}"
+        
+    
+def _fix_cif_formal_charge(cif_path: str | Path) -> None:
+    """
+    Fix pdbx_formal_charge format in CIF files for OpenStructure compatibility.
+    
+    OpenStructure expects integer values (e.g., "1", "-1") for pdbx_formal_charge,
+    but biotite may write signed format (e.g., "+1"). This function converts
+    "+N" to "N" in the CIF file.
+    
+    Args:
+        cif_path: Path to the CIF file to fix.
+    """
+    cif_path = Path(cif_path)
+    if not cif_path.exists():
+        return
+    
+    with open(cif_path, 'r') as f:
+        content = f.read()
+    
+    # Replace +N with N in the pdbx_formal_charge field
+    # This regex matches space/tab followed by +digit(s) followed by space/newline
+    # Only replace positive charges (+1, +2, etc.) since -1, -2 are already valid
+    fixed_content = re.sub(r'(\s)\+(\d+)(\s)', r'\1\2\3', content)
+    
+    if content != fixed_content:
+        with open(cif_path, 'w') as f:
+            f.write(fixed_content)
     

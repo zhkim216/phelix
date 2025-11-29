@@ -124,7 +124,7 @@ PROT_TOKEN_TO_LETTER: Final[dict[str, str]] = {v: k for k, v in PROT_LETTER_TO_T
 
 DUMMY_SEQ_ID: Final[int] = -1  # dummy sequence id to use for auth_seq_id when not present
 
-# Adapted from BioLip2, by JH
+# Adapted from BioLip2
 VDW_DICT = {
     "AC": 2.00, "AG": 1.72, "AL": 2.00, "AM": 2.00, "AR": 1.88, "AS": 1.85, "AT": 2.00, "AU": 1.66,
     "B": 2.00, "BA": 2.00, "BE": 2.00, "BH": 2.00, "BI": 2.00, "BK": 2.00, "BR": 1.85, "C": 1.70,
