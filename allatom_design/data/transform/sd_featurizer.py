@@ -598,3 +598,109 @@ class AddChainTypeFeatrues(Transform):
 
 #         data["atom_array"] = atom_array
 #         return data
+
+
+#! (JH) 251128 added: Binding site annotation for docking metrics
+import biotite.structure as struc
+
+def annotate_ligand_pockets(
+    atom_array: AtomArray,
+    pocket_distance: float = 8.0,
+    n_min_ligand_atoms: int = 1,
+    annotation_name: str = "is_ligand_pocket",
+) -> AtomArray:
+    """
+    Identify atoms near ligands of sufficient size.
+    
+    Adapted from atomworks/docs/examples/pocket_conditioning_transform.py
+    
+    Args:
+        atom_array: Input structure
+        pocket_distance: Distance threshold for pocket identification (Angstroms)
+        n_min_ligand_atoms: Minimum atoms required for a ligand to define pockets
+        annotation_name: Name for the boolean annotation
+
+    Returns:
+        AtomArray with ligand pocket annotation added
+    """
+    atom_array = atom_array.copy()
+
+    # Find all ligand pn_unit_iids within our structure and their atom counts
+    if not hasattr(atom_array, 'pn_unit_iid'):
+        # Fallback: use chain_id for non-polymer atoms
+        non_polymer_mask = ~atom_array.is_polymer if hasattr(atom_array, 'is_polymer') else atom_array.hetero
+        ligand_chains = np.unique(atom_array.chain_id[non_polymer_mask])
+        ligand_counts = np.array([np.sum(atom_array.chain_id[non_polymer_mask] == ch) for ch in ligand_chains])
+        valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
+        valid_ligand_chains = ligand_chains[valid_ligand_mask]
+        all_valid_ligands_mask = np.isin(atom_array.chain_id, valid_ligand_chains) & non_polymer_mask
+    else:
+        ligand_pn_unit_iids, ligand_counts = np.unique(
+            atom_array.pn_unit_iid[~atom_array.is_polymer], return_counts=True
+        )
+        valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
+        valid_ligand_pn_unit_iids = ligand_pn_unit_iids[valid_ligand_mask]
+        all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_pn_unit_iids)
+
+    # Initialize pocket annotation
+    pocket_annotation = np.zeros(len(atom_array), dtype=bool)
+
+    if not np.any(all_valid_ligands_mask):
+        atom_array.set_annotation(annotation_name, pocket_annotation)
+        return atom_array
+
+    # Build CellList for efficient distance computations
+    valid_coords_mask = ~np.isnan(atom_array.coord).any(axis=1)
+    if not np.any(valid_coords_mask):
+        atom_array.set_annotation(annotation_name, pocket_annotation)
+        return atom_array
+
+    valid_coords = atom_array.coord[valid_coords_mask]
+    cell_list = struc.CellList(valid_coords, cell_size=pocket_distance)
+
+    # Get coordinates of all valid ligands
+    all_ligand_coords = atom_array.coord[all_valid_ligands_mask]
+
+    # Find atoms within distance of any ligand coordinates
+    distance_mask = cell_list.get_atoms(all_ligand_coords, pocket_distance, as_mask=True)
+    near_ligand_valid = np.any(distance_mask, axis=0)
+
+    # Map back to full atom array
+    near_ligand_full = np.zeros(len(atom_array), dtype=bool)
+    near_ligand_full[valid_coords_mask] = near_ligand_valid
+
+    # Only polymer atoms can be pocket atoms
+    is_polymer = atom_array.is_polymer if hasattr(atom_array, 'is_polymer') else ~atom_array.hetero
+    pocket_annotation = is_polymer & near_ligand_full
+
+    atom_array.set_annotation(annotation_name, pocket_annotation)
+    return atom_array
+
+
+class AnnotateLigandPockets(Transform):
+    """Identify atoms near ligands of sufficient size."""
+
+    def __init__(
+        self, 
+        pocket_distance: float = 8.0, 
+        n_min_ligand_atoms: int = 1, 
+        annotation_name: str = "is_ligand_pocket"
+    ):
+        self.pocket_distance = pocket_distance
+        self.n_min_ligand_atoms = n_min_ligand_atoms
+        self.annotation_name = annotation_name
+
+    @override
+    def check_input(self, data: dict) -> None:
+        check_contains_keys(data, ["atom_array"])
+        check_is_instance(data, "atom_array", AtomArray)
+
+    @override
+    def forward(self, data: dict) -> dict:
+        data["atom_array"] = annotate_ligand_pockets(
+            data["atom_array"],
+            pocket_distance=self.pocket_distance,
+            n_min_ligand_atoms=self.n_min_ligand_atoms,
+            annotation_name=self.annotation_name,
+        )
+        return data

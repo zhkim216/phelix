@@ -1,3 +1,6 @@
+import json
+import subprocess
+import sys
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from functools import partial
@@ -5,6 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, Generator, List, Tuple
 
 import hydra
+import numpy as np
+import pandas as pd
 import torch
 
 from omegaconf import DictConfig, OmegaConf
@@ -15,6 +20,241 @@ from tqdm import tqdm
 
 from allatom_design.data import data
 from allatom_design.data.residue_constants import STANDARD_ATOM_MASK
+from atomworks.io.utils.selection import get_residue_starts
+from atomworks.io.utils.sequence import aa_chem_comp_3to1
+
+
+# ============================================================================
+# AF3 Utils
+# ============================================================================
+
+def _chain_letters(n: int) -> list[str]:
+    """Generate chain letters like A, B, ..., Z, AA, BA, CA, ..."""
+    letters = []
+    base = [chr(i) for i in range(ord('A'), ord('Z') + 1)]
+    if n <= 26:
+        return base[:n]
+    # Extend like A, B, ..., Z, AA, BA, CA, ... (reverse spreadsheet style used in AF3 docs)
+    letters.extend(base)
+    idx = 0
+    while len(letters) < n:
+        letters.extend([f"{base[i]}{base[idx]}" for i in range(26)])
+        idx += 1
+    return letters[:n]
+
+
+def make_af3_json(af3_ss_input_dir: str = None,
+                    af3_tc_input_dir: str = None,                    
+                    outputs: dict = None,
+                    metadata: pd.DataFrame = None,
+                    pdb_chain_info: dict = None,                        
+                    json_config: dict = None,
+                    ) -> None:
+    """
+    Create AF3 JSON input files for single-sequence and template-conditioned inference.
+    """                           
+    model_seeds = list(json_config.get('model_seeds', [42]))
+    version = int(json_config.get('version', 2))
+    
+    assert pdb_chain_info is not None or metadata is not None, "either of metadata or pdb_chain_info must be provided"
+        
+    protein_columns = ['q_pn_unit_is_protein']
+    nonpolymer_ligand_columns = ['q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal']
+    polymer_ligand_columns = ['q_pn_unit_is_peptide', 'q_pn_unit_is_nuc_ligand', 'q_pn_unit_is_nuc_polymer']
+
+    expanded_protein_columns = []
+    expanded_nonpolymer_ligand_columns = []
+    expanded_polymer_ligand_columns = []
+    for column in protein_columns:
+        expanded_protein_columns.extend([f'{column}_{i}' for i in [1,2]])
+    for column in nonpolymer_ligand_columns:
+        expanded_nonpolymer_ligand_columns.extend([f'{column}_{i}' for i in [1,2]])
+    for column in polymer_ligand_columns:
+        expanded_polymer_ligand_columns.extend([f'{column}_{i}' for i in [1,2]])
+        
+        pdb_chain_info = {}
+        for _, row in metadata.iterrows():
+            pdb_key = row["pdb_id"]            
+            pdb_chain_info[pdb_key] = {}
+            pdb_chain_info[pdb_key]['protein_chains'] = []
+            pdb_chain_info[pdb_key]['ligand_chains'] = []            
+            for column in expanded_protein_columns:
+                if row[column]:
+                    suffix = column.split("_")[-1]
+                    pdb_chain_info[pdb_key]['protein_chains'].append(row[f'q_pn_unit_iid_{suffix}'])
+            for column in expanded_nonpolymer_ligand_columns:
+                if row[column]:
+                    suffix = column.split("_")[-1]
+                    pdb_chain_info[pdb_key]['ligand_chains'].append(row[f'q_pn_unit_iid_{suffix}'])
+                         
+    
+    af3_ss_json_paths = []        
+    af3_tc_json_paths = []
+    for i in range(len(outputs["atom_array"])):
+        atom_array = outputs["atom_array"][i]
+        pdb_path = outputs["out_pdb"][i]
+        job_name = Path(pdb_path).stem
+        pdb_name = job_name.split("_")[0]
+        protein_chains = pdb_chain_info[pdb_name]['protein_chains']        
+        ligand_chains = pdb_chain_info[pdb_name]['ligand_chains']
+        
+        ss_sequences = []
+        tc_sequences = []
+        for protein_chain in protein_chains:
+            _res_starts = get_residue_starts(atom_array[atom_array.pn_unit_iid == protein_chain])
+            _res_ids = atom_array[atom_array.pn_unit_iid == protein_chain].res_id[_res_starts]
+            _res_ids = _res_ids - min(_res_ids)
+            _res_ids = [int(x) for x in _res_ids] # For json serialization
+            chain_seq = atom_array[atom_array.pn_unit_iid == protein_chain].res_name[_res_starts]
+            processed_entity_canonical_sequence = "".join(aa_chem_comp_3to1(standard_only=False).get(res_name, "X") for res_name in chain_seq)
+        
+            ss_sequences.append({
+                "protein": {
+                    "id": protein_chain.split("_")[0],
+                    "sequence": processed_entity_canonical_sequence,
+                    "unpairedMsa": "",
+                    "pairedMsa": ""
+                    }
+                }                
+            )
+            tc_sequences.append({
+                "protein": {
+                    "id": protein_chain.split("_")[0],
+                    "sequence": processed_entity_canonical_sequence,
+                    "unpairedMsa": "",
+                    "pairedMsa": "",
+                    "templates": [
+                        {
+                            "mmcifPath": pdb_path,
+                            "queryIndices": _res_ids,
+                            "templateIndices": _res_ids,
+                            "templateChainId": protein_chain.split("_")[0],
+                        }
+                    ]
+                }
+            })                
+        
+        
+        for ligand_chain in ligand_chains:
+            _res_starts = get_residue_starts(atom_array[atom_array.pn_unit_iid == ligand_chain])
+            chain_seq = atom_array[atom_array.pn_unit_iid == ligand_chain].res_name[_res_starts]
+            ligand_ccd_code = "".join(chain_seq)
+            ss_sequences.append({
+                "ligand": {
+                    "id": ligand_chain.split("_")[0],
+                    "ccdCodes": [ligand_ccd_code]
+                }
+            })
+            
+            tc_sequences.append({
+                "ligand": {
+                    "id": ligand_chain.split("_")[0],
+                    "ccdCodes": [ligand_ccd_code]
+                }
+            })
+        
+        sample_af3_ss_json = {
+            "name": job_name,
+            "sequences": ss_sequences,
+            "modelSeeds": model_seeds,
+            "dialect": "alphafold3",
+            "version": version,
+        }
+        
+        sample_af3_tc_json = {
+            "name": job_name,
+            "sequences": tc_sequences,
+            "modelSeeds": model_seeds,
+            "dialect": "alphafold3",
+            "version": version,
+        }
+        
+        json_path_ss = Path(af3_ss_input_dir, f"{job_name}.json")
+        json_path_tc = Path(af3_tc_input_dir, f"{job_name}.json")
+        with open(json_path_ss, "w") as f:
+            json.dump(sample_af3_ss_json, f)
+        with open(json_path_tc, "w") as f:
+            json.dump(sample_af3_tc_json, f)
+        af3_ss_json_paths.append(json_path_ss)
+        af3_tc_json_paths.append(json_path_tc)
+        
+    return af3_ss_json_paths, af3_tc_json_paths, pdb_chain_info    
+
+
+def run_af3_single_sequence(json_path: str,
+                            out_dir: str,
+                            runner_path: str,                            
+                            inference_config: dict = None,
+                            ) -> None:
+    """Run AF3 single-sequence inference."""
+    sample_dir = out_dir + "/" + Path(json_path).stem
+    sample_cif_files = list(Path(sample_dir).rglob("*.cif"))
+    if sample_cif_files:
+        print(f"AF3 prediction already exists for {Path(json_path).stem}")
+        return
+    else:    
+        cmd = [
+            sys.executable,
+            runner_path,
+            f"--json_path={json_path}",
+            f"--output_dir={out_dir}",
+            f"--model_dir={inference_config.base.get('model_dir', None)}",
+            "--run_data_pipeline=True",
+            "--run_inference=True",
+            f"--db_dir={inference_config.base.get('db_dir', None)}",
+            f"--flash_attention_implementation={inference_config.base.get('flash_attention_implementation', 'triton')}",
+            f"--num_recycles={inference_config.ss.get('num_recycles', 3)}",
+            f"--num_diffusion_samples={inference_config.ss.get('num_diffusion_samples', 5)}",
+            f"--max_templates={inference_config.ss.get('max_templates', 0)}",
+            f"--ligand_protein_template_conditioning_mode={inference_config.ss.get('ligand_protein_template_conditioning_mode', 0)}",
+        ]    
+        subprocess.run(cmd, check=True)
+
+
+def run_af3_template_conditioned(json_path: str,
+                            out_dir: str,
+                            runner_path: str,
+                            inference_config: dict = None,
+                            ) -> None:
+    """Run AF3 template-conditioned inference."""
+    sample_dir = out_dir + "/" + Path(json_path).stem
+    sample_cif_files = list(Path(sample_dir).rglob("*.cif"))
+    if sample_cif_files:
+        print(f"AF3 prediction already exists for {Path(json_path).stem}")
+        return
+    else:    
+        cmd = [
+            sys.executable,
+            runner_path,
+            f"--json_path={json_path}",
+            f"--output_dir={out_dir}",
+            f"--model_dir={inference_config.base.get('model_dir', None)}",
+            "--run_data_pipeline=True",
+            "--run_inference=True",
+            f"--db_dir={inference_config.base.get('db_dir', None)}",
+            f"--flash_attention_implementation={inference_config.base.get('flash_attention_implementation', 'xla')}",
+            f"--num_recycles={inference_config.tc.get('num_recycles', 3)}",
+            f"--num_diffusion_samples={inference_config.tc.get('num_diffusion_samples', 5)}",
+            f"--max_templates={inference_config.tc.get('max_templates', 1)}",
+            f"--ligand_protein_template_conditioning_mode={inference_config.tc.get('ligand_protein_template_conditioning_mode', 1)}",
+            f"--max_template_date={inference_config.tc.get('max_template_date', '2025-11-21')}",  # Dummy date to run template-conditioning AF3
+        ]    
+        subprocess.run(cmd, check=True)
+
+
+def find_pred_sample_path_af3(out_dir: str = None,
+                           job_name: str = None) -> tuple[list[Path], list[Path]]:
+    """Find AF3 prediction sample paths for a given job name."""
+    dir = Path(out_dir, job_name)
+    sample_dirs = []
+    sample_cif_paths = []
+    for d in dir.iterdir():
+        if d.is_dir():
+            sample_dirs.append(d)
+            cif_path = [p for p in d.glob("*.cif") if p.stem.endswith("model")][0]
+            sample_cif_paths.append(cif_path)
+            
+    return sample_dirs, sample_cif_paths
 
 # try:
 #     from colabdesign import clear_mem, mk_afdesign_model

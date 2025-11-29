@@ -15,7 +15,10 @@ data_preprocessor_cfg:
   contact_distance: 5
   second_shell_distance: 8
   clash_distance: 1.0
+
   # Misc
+  apply_biolip2_contact_criteria: true
+  apply_rigorous_contact_criteria_for_metals: false
   ignore_residues: [] #! (JH) changed 250926
   # Efficiency
   polymer_pn_unit_limit: 500
