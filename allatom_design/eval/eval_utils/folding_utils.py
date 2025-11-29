@@ -29,10 +29,6 @@ from atomworks.io.utils.sequence import aa_chem_comp_3to1
 # AF3 Utils
 # ============================================================================
 
-CONTAINER_PYTHON = "/scratch/users/zhkim216/venv/lullaby/bin/python"
-PROJECT_ROOT = "/home/users/zhkim216/code/allatom-design"
-
-
 def _chain_letters(n: int) -> list[str]:
     """Generate chain letters like A, B, ..., Z, AA, BA, CA, ..."""
     letters = []
@@ -61,7 +57,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
     model_seeds = list(json_config.get('model_seeds', [42]))
     version = int(json_config.get('version', 2))
     
-    assert pdb_chgain_info is not None or metadata is not None, "either of metadata or pdb_chain_info must be provided"
+    assert pdb_chain_info is not None or metadata is not None, "either of metadata or pdb_chain_info must be provided"
         
     protein_columns = ['q_pn_unit_is_protein']
     nonpolymer_ligand_columns = ['q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal']
@@ -215,16 +211,7 @@ def run_af3_single_sequence(json_path: str,
             f"--ligand_protein_template_conditioning_mode={inference_config.ss.get('ligand_protein_template_conditioning_mode', 0)}",
         ]    
         env = os.environ.copy()
-        # repo 루트를 최우선으로
-        env["PYTHONPATH"] = f"{PROJECT_ROOT}:" + env.get("PYTHONPATH", "")
-        # venv 표시와 PATH 보정(선택, 안전장치)
-        env["VIRTUAL_ENV"] = "/scratch/users/zhkim216/venv/lullaby"
-        env["PATH"] = f"/scratch/users/zhkim216/venv/lullaby/bin:" + env.get("PATH", "")
-
-        print("[DEBUG] AF3 cmd:", " ".join(cmd))
-        print("[DEBUG] AF3 cwd:", PROJECT_ROOT)
-        print("[DEBUG] AF3 PYTHONPATH:", env["PYTHONPATH"])
-        subprocess.run(cmd, check=True, env=env, cwd=PROJECT_ROOT)
+        subprocess.run(cmd, check=True, env=env)  
 
 def run_af3_template_conditioned(json_path: str,
                             out_dir: str,
@@ -255,17 +242,8 @@ def run_af3_template_conditioned(json_path: str,
             f"--max_template_date={inference_config.tc.get('max_template_date', '2025-11-21')}",  # Dummy date to run template-conditioning AF3
         ]    
 
-        env = os.environ.copy()
-        # repo 루트를 최우선으로
-        env["PYTHONPATH"] = f"{PROJECT_ROOT}:" + env.get("PYTHONPATH", "")
-        # venv 표시와 PATH 보정(선택, 안전장치)
-        env["VIRTUAL_ENV"] = "/scratch/users/zhkim216/venv/lullaby"
-        env["PATH"] = f"/scratch/users/zhkim216/venv/lullaby/bin:" + env.get("PATH", "")
-
-        print("[DEBUG] AF3 cmd:", " ".join(cmd))
-        print("[DEBUG] AF3 cwd:", PROJECT_ROOT)
-        print("[DEBUG] AF3 PYTHONPATH:", env["PYTHONPATH"])
-        subprocess.run(cmd, check=True, env=env, cwd=PROJECT_ROOT)
+        env = os.environ.copy()       
+        subprocess.run(cmd, check=True, env=env) 
 
 
 def find_pred_sample_path_af3(out_dir: str = None,

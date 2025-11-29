@@ -1,3 +1,4 @@
+import os
 import shutil
 import subprocess
 from collections import defaultdict
@@ -27,7 +28,7 @@ from allatom_design.eval.eval_utils.folding_utils import (
 )
 
 
-@hydra.main(config_path="../configs_local/eval", config_name="eval_lc_seq_des_training", version_base="1.3.2")
+@hydra.main(config_path="../configs/eval", config_name="eval_lc_seq_des_training", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Sequence denoiser training eval with AF3 self-consistency.
@@ -159,14 +160,13 @@ def main(cfg: DictConfig):
                                                             pdb_chain_info = None,                
                                                             json_config=cfg.struct_pred_cfg.af3.json_config
                                                             )   
-                                    
-
+    
         # AF3 self-consistency and docking metrics per sample
         # Structure: {sample_id: {metric_name: [values per diffusion_id]}}
         id_to_per_pred_metrics = {}                
 
         # Output directory for AF3 predictions
-        af3_ss_pred_dir = Path(af3_ss_pred_dir)                
+        af3_ss_pred_dir = Path(af3_ss_pred_dir)                               
         
         for i in tqdm(range(len(outputs["atom_array"])), desc="AF3 single sequence self-consistency and docking scoring", leave=False):
             sample_id = Path(outputs["out_pdb"][i]).stem
@@ -175,8 +175,8 @@ def main(cfg: DictConfig):
 
             # Get AF3 JSON paths
             json_path_ss = af3_ss_json_paths[i]
-            json_path_tc = af3_tc_json_paths[i]
-            
+            json_path_tc = af3_tc_json_paths[i]            
+
             ## Self-consistency evaluation ###         
             per_pred_sc_metrics = {}                           
             if cfg.evaluate_self_consistency:
