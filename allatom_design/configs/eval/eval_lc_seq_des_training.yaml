@@ -3,16 +3,17 @@ wandb:
   no_wandb: false  # Disable wandb logging
   project: "ligand_seq_des"  # Wandb project name
   wandb_id: "zhkim216"  # Wandb username
-  group: "debug_eval" # Wandb group name
+  group: "eval" # Wandb group name
 
 # Run settings
 seed: 0
 num_workers: 1  # for dataloading
-debug: true
+debug: false
 num_sample_debug: 2
 start_step: 62500  # start evaluation after this step, 0 or null to start from the beginning
 end_step: 62500  # end evaluation after this step (inclusive), null to evaluate until the end
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
+eval_last_ckpt: true  # always include the last checkpoint even if not selected by eval_every_n_ckpts
 use_ema: false
 evaluate_self_consistency: true
 evaluate_template_conditioned_docking: true
@@ -129,7 +130,7 @@ docking_metrics_cfg:
   binding_site_radius: 8.0  # Radius for binding site superposition in docking metrics
   save_aligned: true
   cif_parser_args:  # Parser arguments for loading structures (same as data_cfg.cif_parser_args)
-    add_missing_atoms: false  # AF3 predictions don't have missing atoms to add
+    add_missing_atoms: true  # AF3 predictions don't have missing atoms to add
     remove_waters: true
     remove_ccds: []
     fix_ligands_at_symmetry_centers: true
