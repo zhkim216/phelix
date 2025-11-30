@@ -33,17 +33,15 @@ export XLA_CLIENT_MEM_FRACTION=0.95
 
 # Paths
 export SIF=/scratch/users/zhkim216/containers/lullaby.sif
-export VENV=/scratch/users/zhkim216/venv/lullaby
 export SCRATCH=/scratch/users/zhkim216
 
 # Project root (Parent directory of the scripts)
 export PROJECT_ROOT="/home/users/zhkim216/code/allatom-design"
 
-# OpenStructure (OST) path in container
-export PYTHONPATH=$PYTHONPATH:/usr/lib/python3/dist-packages
+# OpenStructure Compound Library
+export OST_COMPOUND_LIB=/scratch/users/zhkim216/datasets/compounds.chemlib
 
 echo "Environment loaded:"
 echo "  PROJECT_ROOT: $PROJECT_ROOT"
 echo "  CUDA_HOME: $CUDA_HOME"
 echo "  SIF: $SIF"
-echo "  VENV: $VENV"
