@@ -145,6 +145,7 @@ def get_training_checkpoints(
     start_step: int | None = None,
     end_step: int | None = None,
     use_ema: bool = False,
+    eval_last_ckpt: bool = True,
 ) -> list[str]:
     """
     Get model checkpoints from a training directory, preferring EMA checkpoints if available.
@@ -155,6 +156,8 @@ def get_training_checkpoints(
         eval_every_n_ckpts: Only evaluate every nth checkpoint
         start_step: Optional starting step to filter checkpoints (skip checkpoints before this step)
         end_step: Optional ending step to filter checkpoints (skip checkpoints after this step)
+        use_ema: Whether to use EMA checkpoints
+        eval_last_ckpt: Always include the last checkpoint even if not selected by eval_every_n_ckpts
 
     Returns:
         List of checkpoint paths, sorted by step/epoch
@@ -183,7 +186,12 @@ def get_training_checkpoints(
         ckpts = glob.glob(f"{non_ema_ckpt_dir}/*.ckpt")
 
     # Filter and sort checkpoints
-    ckpts = natsorted([ckpt for ckpt in ckpts if pattern.search(Path(ckpt).name)])[::eval_every_n_ckpts]
+    all_ckpts = natsorted([ckpt for ckpt in ckpts if pattern.search(Path(ckpt).name)])
+    ckpts = all_ckpts[::eval_every_n_ckpts]
+    
+    # Include the last checkpoint if eval_last_ckpt is True and it's not already included
+    if eval_last_ckpt and all_ckpts and all_ckpts[-1] not in ckpts:
+        ckpts.append(all_ckpts[-1])
 
     # Filter by start_step and end_step if provided
     if start_step is not None or end_step is not None:
