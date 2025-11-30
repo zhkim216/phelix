@@ -62,7 +62,7 @@ _DEFAULT_DB_DIR = _HOME_DIR / 'public_databases'
 # Input and output paths.
 _JSON_PATH = flags.DEFINE_string(
     'json_path',
-    '/home/possu/jinho/allatom-design/alphafold3/input_examples/json_examples_lab_desktop/GFP/P42212_F64L_ss.json',  # FIXME: For debugging
+    '/home/possu/jinho/out_dir/eval_ligand_seq_des/debug_eval_af3_exp1_cfg0/step_62500_epoch_39/af3_tc_inputs/1a28_1_A1_C1_sample0.json',  # FIXME: For debugging
     'Path to the input JSON file.',
 )
 _INPUT_DIR = flags.DEFINE_string(
@@ -72,7 +72,7 @@ _INPUT_DIR = flags.DEFINE_string(
 )
 _OUTPUT_DIR = flags.DEFINE_string(
     'output_dir',
-    '/home/possu/jinho/allatom-design/debugging_local_output/250929_template_conditioning',  # FIXME: For debugging
+    '/home/possu/jinho/allatom-design/debugging_local_output/251121_template_conditioning',  # FIXME: For debugging
     'Path to a directory where the results will be saved.',
 )
 MODEL_DIR = flags.DEFINE_string(
@@ -259,13 +259,13 @@ _FLASH_ATTENTION_IMPLEMENTATION = flags.DEFINE_enum(
 )
 _NUM_RECYCLES = flags.DEFINE_integer(
     'num_recycles',
-    10,
+    1,
     'Number of recycles to use during inference.',
     lower_bound=1,
 )
 _NUM_DIFFUSION_SAMPLES = flags.DEFINE_integer(
     'num_diffusion_samples',
-    4,
+    1,
     'Number of diffusion samples to generate.',
     lower_bound=1,
 )
@@ -323,18 +323,18 @@ _MAX_TEMPLATES = flags.DEFINE_integer(
 # (JH) For ligand-protein template conditioning,
 _LIGAND_PROTEIN_TEMPLATE_CONDITIONING_MODE = flags.DEFINE_integer(
     'ligand_protein_template_conditioning_mode',
-    0, # (JH) 0: not conditioning, 1: Conditioning on protein, 2: Conditioning on ligand, 3: Conditioning on both
+    1, # (JH) 0: not conditioning, 1: Conditioning on protein, 2: Conditioning on ligand, 3: Conditioning on both
     'Options for ligand-protein template conditioning. 0: not conditioning, 1: conditioning on protein, 2: conditioning on ligand, 3: conditioning on both',
 )
 
 _MASK_TEMPLATE_SEQUENCE = flags.DEFINE_bool(
     'mask_template_sequence',
-    False,
+    True,
     'Whether to mask the template sequence.',
 )
 _MASK_TEMPLATE_SIDECHAINS = flags.DEFINE_bool(
     'mask_template_sidechains',
-    False,
+    True,
     'Whether to mask the template sidechains.',
 )
 
