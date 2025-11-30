@@ -10,9 +10,9 @@ seed: 0
 num_workers: 1  # for dataloading
 debug: true
 num_sample_debug: 2
-start_step: 62500  # start evaluation after this step, 0 or null to start from the beginning
-end_step: 62500  # end evaluation after this step (inclusive), null to evaluate until the end
-eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
+start_step: 40000  # start evaluation after this step, 0 or null to start from the beginning
+end_step: null  # end evaluation after this step (inclusive), null to evaluate until the end
+eval_every_n_ckpts: 4  # evaluate every n checkpoints, for speed
 use_ema: false
 evaluate_self_consistency: true
 evaluate_template_conditioned_docking: true
@@ -71,8 +71,8 @@ featurizer_cfg:
 # Denoiser options
 denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp1_cfg0
 sampling_cfg_overrides:
-  batch_size: 1
-  num_seqs_per_pdb: 2  # number of sequences to sample per pdb
+  batch_size: 4
+  num_seqs_per_pdb: 2 # number of sequences to sample per pdb
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
   num_workers: ${num_workers}
@@ -110,15 +110,15 @@ struct_pred_cfg:
         db_dir: /scratch/users/zhkim216/af3_databases
         flash_attention_implementation: "triton"
       ss:
-        num_recycles: 1
-        num_diffusion_samples: 2
+        num_recycles: 3
+        num_diffusion_samples: 5
         max_templates: 0
         ligand_protein_template_conditioning_mode: 0
         mask_template_sidechains: true
         mask_template_sequence: true            
       tc:
-        num_recycles: 1
-        num_diffusion_samples: 2
+        num_recycles: 3
+        num_diffusion_samples: 5
         max_templates: 1
         ligand_protein_template_conditioning_mode: 1
         mask_template_sidechains: true
@@ -129,7 +129,7 @@ docking_metrics_cfg:
   binding_site_radius: 8.0  # Radius for binding site superposition in docking metrics
   save_aligned: true
   cif_parser_args:  # Parser arguments for loading structures (same as data_cfg.cif_parser_args)
-    add_missing_atoms: false  # AF3 predictions don't have missing atoms to add
+    add_missing_atoms: true  # AF3 predictions don't have missing atoms to add
     remove_waters: true
     remove_ccds: []
     fix_ligands_at_symmetry_centers: true
