@@ -28,6 +28,7 @@ from allatom_design.eval.eval_utils.folding_utils import (
 )
 
 
+
 @hydra.main(config_path="../configs/eval", config_name="eval_lc_seq_des_training", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
