@@ -9,7 +9,7 @@ wandb:
 seed: 0
 num_workers: 1  # for dataloading
 debug: true
-num_sample_debug: 15
+num_sample_debug: 2
 start_step: 62500  # start evaluation after this step, 0 or null to start from the beginning
 end_step: 62500  # end evaluation after this step (inclusive), null to evaluate until the end
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed

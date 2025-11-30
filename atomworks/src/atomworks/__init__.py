@@ -5,6 +5,12 @@ This package combines functionality from :mod:`atomworks.io` (I/O operations) an
 processing and machine learning.
 """
 
+import sys
+if sys.version_info < (3, 11):
+    import builtins
+    from exceptiongroup import ExceptionGroup
+    builtins.ExceptionGroup = ExceptionGroup
+
 import importlib
 import importlib.metadata
 import logging

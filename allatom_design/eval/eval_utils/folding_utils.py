@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 import os
+import importlib.util
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from functools import partial
@@ -23,6 +24,143 @@ from allatom_design.data import data
 from allatom_design.data.residue_constants import STANDARD_ATOM_MASK
 from atomworks.io.utils.selection import get_residue_starts
 from atomworks.io.utils.sequence import aa_chem_comp_3to1
+
+
+# ============================================================================
+# AF3 In-Process Runner Utils
+# ============================================================================
+
+# Global cache for AF3 runner module
+_AF3_RUNNER_MOD = None
+_AF3_FLAGS_INITIALIZED = False
+
+def _load_af3_runner(runner_path: str):
+    """
+    Load run_alphafold_debug_local.py as a module dynamically.
+    Cached after first load.
+    
+    Args:
+        runner_path: Path to the AF3 runner script (e.g., run_alphafold_debug_local.py)
+    
+    Returns:
+        The loaded module
+    """
+    global _AF3_RUNNER_MOD
+    if _AF3_RUNNER_MOD is not None:
+        return _AF3_RUNNER_MOD
+    
+    spec = importlib.util.spec_from_file_location("af3_runner", runner_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _AF3_RUNNER_MOD = mod
+    return mod
+
+
+def _run_af3_inprocess(
+    json_path: str,
+    out_dir: str,
+    runner_path: str,
+    inference_config: dict,
+    mode: str = "ss",  # "ss" for single-sequence, "tc" for template-conditioned
+) -> None:
+    """
+    Run AF3 in-process without subprocess.
+    This avoids GPU exclusive mode issues on HPC clusters.
+    
+    Args:
+        json_path: Path to the input JSON file
+        out_dir: Output directory for predictions
+        runner_path: Path to the AF3 runner script
+        inference_config: Configuration dict containing base, ss, tc settings
+        mode: "ss" for single-sequence, "tc" for template-conditioned
+    """
+    from absl import flags
+    
+    global _AF3_FLAGS_INITIALIZED
+    
+    # Check if prediction already exists
+    sample_dir = Path(out_dir) / Path(json_path).stem
+    sample_cif_files = list(sample_dir.rglob("*.cif"))
+    if sample_cif_files:
+        print(f"AF3 prediction already exists for {Path(json_path).stem}")
+        return
+    
+    # Clear PyTorch GPU memory before running JAX
+    torch.cuda.empty_cache()
+    
+    # Load AF3 runner module
+    runner = _load_af3_runner(runner_path)
+    FLAGS = flags.FLAGS
+    
+    # Get mode-specific config
+    mode_config = inference_config.get(mode, {})
+    base_config = inference_config.get('base', {})
+    
+    # Build argv for AF3
+    argv = [
+        "run_af3",  # program name (placeholder)
+        f"--json_path={json_path}",
+        f"--output_dir={out_dir}",
+        f"--model_dir={base_config.get('model_dir', '')}",
+        "--run_data_pipeline=True",
+        "--run_inference=True",
+        f"--db_dir={base_config.get('db_dir', '')}",
+        f"--flash_attention_implementation={base_config.get('flash_attention_implementation', 'xla')}",
+        f"--num_recycles={mode_config.get('num_recycles', 3)}",
+        f"--num_diffusion_samples={mode_config.get('num_diffusion_samples', 5)}",
+        f"--max_templates={mode_config.get('max_templates', 0)}",
+        f"--ligand_protein_template_conditioning_mode={mode_config.get('ligand_protein_template_conditioning_mode', 0)}",
+        f"--mask_template_sidechains={mode_config.get('mask_template_sidechains', True)}",
+        f"--mask_template_sequence={mode_config.get('mask_template_sequence', True)}",
+        "--force_output_dir=True",
+    ]
+    
+    # Add max_template_date for template-conditioned mode
+    if mode == "tc" and 'max_template_date' in mode_config:
+        argv.append(f"--max_template_date={mode_config['max_template_date']}")
+    
+    # Reset flags for multiple calls
+    # Use mark_as_parsed to allow re-parsing
+    try:
+        FLAGS.unparse_flags()
+    except Exception:
+        # If unparse_flags fails, try alternative approach
+        pass
+    
+    # Parse the new argv
+    try:
+        FLAGS(argv)
+    except flags.Error as e:
+        # Flags already defined - need to just update values
+        print(f"Warning: Flag parsing issue (likely already parsed): {e}")
+        # Try to set values directly
+        FLAGS.json_path = json_path
+        FLAGS.output_dir = out_dir
+        FLAGS.model_dir = base_config.get('model_dir', '')
+        FLAGS.run_data_pipeline = True
+        FLAGS.run_inference = True
+        FLAGS.db_dir = [base_config.get('db_dir', '')]
+        FLAGS.flash_attention_implementation = base_config.get('flash_attention_implementation', 'xla')
+        FLAGS.num_recycles = mode_config.get('num_recycles', 3)
+        FLAGS.num_diffusion_samples = mode_config.get('num_diffusion_samples', 5)
+        FLAGS.max_templates = mode_config.get('max_templates', 0)
+        FLAGS.ligand_protein_template_conditioning_mode = mode_config.get('ligand_protein_template_conditioning_mode', 0)
+        FLAGS.mask_template_sidechains = mode_config.get('mask_template_sidechains', True)
+        FLAGS.mask_template_sequence = mode_config.get('mask_template_sequence', True)
+        FLAGS.force_output_dir = True
+        if mode == "tc" and 'max_template_date' in mode_config:
+            FLAGS.max_template_date = mode_config['max_template_date']
+    
+    _AF3_FLAGS_INITIALIZED = True
+    
+    # Run AF3 main function
+    try:
+        runner.main(None)
+    except SystemExit as e:
+        # Catch sys.exit() calls from AF3 and don't let them kill our process
+        if e.code != 0 and e.code is not None:
+            raise RuntimeError(f"AF3 main() exited with code {e.code}")
+        # Exit code 0 or None is fine
 
 
 # ============================================================================
@@ -187,63 +325,104 @@ def run_af3_single_sequence(json_path: str,
                             out_dir: str,
                             runner_path: str,                            
                             inference_config: dict = None,
+                            use_subprocess: bool = False,
                             ) -> None:
-    """Run AF3 single-sequence inference."""
-    sample_dir = out_dir + "/" + Path(json_path).stem
-    sample_cif_files = list(Path(sample_dir).rglob("*.cif"))
-    if sample_cif_files:
-        print(f"AF3 prediction already exists for {Path(json_path).stem}")
-        return
-    else:    
-        cmd = [
-            CONTAINER_PYTHON,
-            runner_path,
-            f"--json_path={json_path}",
-            f"--output_dir={out_dir}",
-            f"--model_dir={inference_config.base.get('model_dir', None)}",
-            "--run_data_pipeline=True",
-            "--run_inference=True",
-            f"--db_dir={inference_config.base.get('db_dir', None)}",
-            f"--flash_attention_implementation={inference_config.base.get('flash_attention_implementation', 'triton')}",
-            f"--num_recycles={inference_config.ss.get('num_recycles', 3)}",
-            f"--num_diffusion_samples={inference_config.ss.get('num_diffusion_samples', 5)}",
-            f"--max_templates={inference_config.ss.get('max_templates', 0)}",
-            f"--ligand_protein_template_conditioning_mode={inference_config.ss.get('ligand_protein_template_conditioning_mode', 0)}",
-        ]    
-        env = os.environ.copy()
-        subprocess.run(cmd, check=True, env=env)  
+    """Run AF3 single-sequence inference.
+    
+    Args:
+        json_path: Path to the input JSON file
+        out_dir: Output directory for predictions
+        runner_path: Path to the AF3 runner script
+        inference_config: Configuration dict containing base, ss, tc settings
+        use_subprocess: If True, use subprocess (old behavior). 
+                       If False, run in-process (avoids GPU exclusive mode issues)
+    """
+    if use_subprocess:
+        # Legacy subprocess approach (may fail on GPU exclusive mode)
+        sample_dir = out_dir + "/" + Path(json_path).stem
+        sample_cif_files = list(Path(sample_dir).rglob("*.cif"))
+        if sample_cif_files:
+            print(f"AF3 prediction already exists for {Path(json_path).stem}")
+            return
+        else:    
+            cmd = [
+                sys.executable,  # Use current Python interpreter
+                runner_path,
+                f"--json_path={json_path}",
+                f"--output_dir={out_dir}",
+                f"--model_dir={inference_config.base.get('model_dir', None)}",
+                "--run_data_pipeline=True",
+                "--run_inference=True",
+                f"--db_dir={inference_config.base.get('db_dir', None)}",
+                f"--flash_attention_implementation={inference_config.base.get('flash_attention_implementation', 'triton')}",
+                f"--num_recycles={inference_config.ss.get('num_recycles', 3)}",
+                f"--num_diffusion_samples={inference_config.ss.get('num_diffusion_samples', 5)}",
+                f"--max_templates={inference_config.ss.get('max_templates', 0)}",
+                f"--ligand_protein_template_conditioning_mode={inference_config.ss.get('ligand_protein_template_conditioning_mode', 0)}",
+            ]    
+            env = os.environ.copy()
+            subprocess.run(cmd, check=True, env=env)
+    else:
+        # In-process approach (avoids GPU exclusive mode issues)
+        _run_af3_inprocess(
+            json_path=json_path,
+            out_dir=out_dir,
+            runner_path=runner_path,
+            inference_config=inference_config,
+            mode="ss",
+        )  
 
 def run_af3_template_conditioned(json_path: str,
                             out_dir: str,
                             runner_path: str,
                             inference_config: dict = None,
+                            use_subprocess: bool = False,
                             ) -> None:
-    """Run AF3 template-conditioned inference."""
-    sample_dir = out_dir + "/" + Path(json_path).stem
-    sample_cif_files = list(Path(sample_dir).rglob("*.cif"))
-    if sample_cif_files:
-        print(f"AF3 prediction already exists for {Path(json_path).stem}")
-        return
-    else:    
-        cmd = [
-            CONTAINER_PYTHON,
-            runner_path,
-            f"--json_path={json_path}",
-            f"--output_dir={out_dir}",
-            f"--model_dir={inference_config.base.get('model_dir', None)}",
-            "--run_data_pipeline=True",
-            "--run_inference=True",
-            f"--db_dir={inference_config.base.get('db_dir', None)}",
-            f"--flash_attention_implementation={inference_config.base.get('flash_attention_implementation', 'xla')}",
-            f"--num_recycles={inference_config.tc.get('num_recycles', 3)}",
-            f"--num_diffusion_samples={inference_config.tc.get('num_diffusion_samples', 5)}",
-            f"--max_templates={inference_config.tc.get('max_templates', 1)}",
-            f"--ligand_protein_template_conditioning_mode={inference_config.tc.get('ligand_protein_template_conditioning_mode', 1)}",
-            f"--max_template_date={inference_config.tc.get('max_template_date', '2025-11-21')}",  # Dummy date to run template-conditioning AF3
-        ]    
-
-        env = os.environ.copy()       
-        subprocess.run(cmd, check=True, env=env) 
+    """Run AF3 template-conditioned inference.
+    
+    Args:
+        json_path: Path to the input JSON file
+        out_dir: Output directory for predictions
+        runner_path: Path to the AF3 runner script
+        inference_config: Configuration dict containing base, ss, tc settings
+        use_subprocess: If True, use subprocess (old behavior). 
+                       If False, run in-process (avoids GPU exclusive mode issues)
+    """
+    if use_subprocess:
+        # Legacy subprocess approach (may fail on GPU exclusive mode)
+        sample_dir = out_dir + "/" + Path(json_path).stem
+        sample_cif_files = list(Path(sample_dir).rglob("*.cif"))
+        if sample_cif_files:
+            print(f"AF3 prediction already exists for {Path(json_path).stem}")
+            return
+        else:    
+            cmd = [
+                sys.executable,  # Use current Python interpreter
+                runner_path,
+                f"--json_path={json_path}",
+                f"--output_dir={out_dir}",
+                f"--model_dir={inference_config.base.get('model_dir', None)}",
+                "--run_data_pipeline=True",
+                "--run_inference=True",
+                f"--db_dir={inference_config.base.get('db_dir', None)}",
+                f"--flash_attention_implementation={inference_config.base.get('flash_attention_implementation', 'xla')}",
+                f"--num_recycles={inference_config.tc.get('num_recycles', 3)}",
+                f"--num_diffusion_samples={inference_config.tc.get('num_diffusion_samples', 5)}",
+                f"--max_templates={inference_config.tc.get('max_templates', 1)}",
+                f"--ligand_protein_template_conditioning_mode={inference_config.tc.get('ligand_protein_template_conditioning_mode', 1)}",
+                f"--max_template_date={inference_config.tc.get('max_template_date', '2025-11-21')}",  # Dummy date to run template-conditioning AF3
+            ]    
+            env = os.environ.copy()       
+            subprocess.run(cmd, check=True, env=env)
+    else:
+        # In-process approach (avoids GPU exclusive mode issues)
+        _run_af3_inprocess(
+            json_path=json_path,
+            out_dir=out_dir,
+            runner_path=runner_path,
+            inference_config=inference_config,
+            mode="tc",
+        ) 
 
 
 def find_pred_sample_path_af3(out_dir: str = None,
