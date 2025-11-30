@@ -76,7 +76,8 @@ def main(cfg: DictConfig):
 
     # Denoiser checkpoints
     sd_ckpts, pattern = get_training_checkpoints(cfg.denoiser_train_dir, "seq_denoiser",
-                                                 cfg.eval_every_n_ckpts, cfg.start_step, cfg.end_step, cfg.use_ema)
+                                                 cfg.eval_every_n_ckpts, cfg.start_step, cfg.end_step, cfg.use_ema,
+                                                 cfg.get("eval_last_ckpt", True))
 
     # AF3 config defaults
     af3_runner_path = cfg.struct_pred_cfg.af3.get("runner_path", None)
