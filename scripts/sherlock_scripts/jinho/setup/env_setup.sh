@@ -39,8 +39,8 @@ export SCRATCH=/scratch/users/zhkim216
 # Project root (Parent directory of the scripts)
 export PROJECT_ROOT="/home/users/zhkim216/code/allatom-design"
 
-# OpenStructure (OST) path in container
-export PYTHONPATH=$PYTHONPATH:/usr/lib/python3/dist-packages
+# OpenStructure Compound Library
+export OST_COMPOUND_LIB=/scratch/users/zhkim216/datasets/compounds.chemlib
 
 echo "Environment loaded:"
 echo "  PROJECT_ROOT: $PROJECT_ROOT"
