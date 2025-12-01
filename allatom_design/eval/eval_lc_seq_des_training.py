@@ -100,7 +100,7 @@ def load_outputs_from_samples_dir(samples_dir: str, metadata: pd.DataFrame = Non
     return outputs
 
 
-@hydra.main(config_path="../configs_local/eval", config_name="eval_lc_seq_des_training", version_base="1.3.2")
+@hydra.main(config_path="../configs/eval", config_name="eval_lc_seq_des_training", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Sequence denoiser training eval with AF3 self-consistency.
@@ -119,13 +119,17 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.benchmark = False
 
     if cfg.debug:
+        cfg.wandb.project = f"debug_{cfg.wandb.project}"
         cfg.exp_name = f"debug_{cfg.exp_name}"
+        path_base_out_dir = Path(cfg.base_out_dir)
+        cfg.base_out_dir = str(path_base_out_dir.parent) + "/debug_" + str(path_base_out_dir.stem)
 
     # Logging / output root
     log_dir = wandb_setup(base_out_dir=cfg.base_out_dir, exp_name=cfg.exp_name, cfg_dict=cfg_dict, **cfg.wandb)
 
     # Load in metadata
     metadata = pd.read_parquet(cfg.metadata_path)    
+    metadata = metadata.iloc[8:9] #! FIXME
     pdb_keys = metadata['pdb_id'].tolist()
     if cfg.debug:
         pdb_keys = pdb_keys[:cfg.num_sample_debug]
@@ -240,11 +244,10 @@ def main(cfg: DictConfig):
         
         # AF3 input/output dirs
         # When skip_sampling is True, use temporary directories to avoid conflicts with existing predictions
-        suffix = "_skip_test" if skip_sampling else ""
-        af3_ss_input_dir = Path(log_dir_i, f"af3_ss_inputs{suffix}")
-        af3_ss_pred_dir = Path(log_dir_i, f"af3_ss_preds{suffix}")
-        af3_tc_input_dir = Path(log_dir_i, f"af3_tc_inputs{suffix}")
-        af3_tc_pred_dir = Path(log_dir_i, f"af3_tc_preds{suffix}")
+        af3_ss_input_dir = Path(log_dir_i, f"af3_ss_input")
+        af3_ss_pred_dir = Path(log_dir_i, f"af3_ss_preds")
+        af3_tc_input_dir = Path(log_dir_i, f"af3_tc_inputs")
+        af3_tc_pred_dir = Path(log_dir_i, f"af3_tc_preds")
         af3_ss_input_dir.mkdir(parents=True, exist_ok=True)
         af3_ss_pred_dir.mkdir(parents=True, exist_ok=True)
         af3_tc_input_dir.mkdir(parents=True, exist_ok=True)
