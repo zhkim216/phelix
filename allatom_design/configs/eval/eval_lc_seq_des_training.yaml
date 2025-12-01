@@ -1,6 +1,6 @@
 # Wandb configuration
 wandb:
-  no_wandb: false  # Disable wandb logging
+  no_wandb: true  # Disable wandb logging
   project: "ligand_seq_des"  # Wandb project name
   wandb_id: "zhkim216"  # Wandb username
   group: "eval" # Wandb group name
@@ -10,17 +10,17 @@ seed: 0
 num_workers: 1  # for dataloading
 debug: true
 num_sample_debug: 2
-start_step: 75000  # start evaluation after this step, 0 or null to start from the beginning
-end_step: 75000  # end evaluation after this step (inclusive), null to evaluate until the end
-eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
+start_step: 55000  # start evaluation after this step, 0 or null to start from the beginning
+end_step: null  # end evaluation after this step (inclusive), null to evaluate until the end
+eval_every_n_ckpts: 4  # evaluate every n checkpoints, for speed
 eval_last_ckpt: true  # always include the last checkpoint even if not selected by eval_every_n_ckpts
 use_ema: false
 evaluate_self_consistency: true
-evaluate_template_conditioned_docking: true
+evaluate_template_conditioned_docking: false
 
 # Skip sampling options (use when sampling is already done)
 skip_sampling: false  # if true, skip sampling and load from skip_sampling_dir
-skip_sampling_dir: null  # directory containing samples/ folder from previous run (e.g., /path/to/exp_name/step_75000_epoch_47)
+skip_sampling_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des/debug_eval_af3_exp1_cfg0/step_55000_epoch_35  # directory containing samples/ folder from previous run (e.g., /path/to/exp_name/step_75000_epoch_47)
 
 # Metadata
 metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1_subset_n70_rs42.parquet
@@ -57,8 +57,8 @@ preprocess_transform_cfg:
   b_factor_min: null
   b_factor_max: null
   min_residues_for_polymers: 0
-  remove_terminal_oxygen_protein: false #! To match the length of codfidence data to the loaded atom array
-  remove_terminal_oxygen_nucleic_acid: false #! To match the length of codfidence data to the loaded atom array
+  remove_terminal_oxygen_protein: false #! To match the length of confidence data to the loaded atom array
+  remove_terminal_oxygen_nucleic_acid: false #! To match the length of confidence data to the loaded atom array
 
 # Featurizer_cfg
 featurizer_cfg:
@@ -116,7 +116,7 @@ struct_pred_cfg:
         flash_attention_implementation: "triton"
       ss:
         num_recycles: 1
-        num_diffusion_samples: 1
+        num_diffusion_samples: 5
         max_templates: 0
         ligand_protein_template_conditioning_mode: 0
         mask_template_sidechains: true
@@ -133,14 +133,14 @@ struct_pred_cfg:
 docking_metrics_cfg:
   binding_site_radius: 8.0  # Radius for binding site superposition in docking metrics
   save_aligned: true
-  cif_parser_args:  # Parser arguments for loading structures (same as data_cfg.cif_parser_args)
-    add_missing_atoms: true  # AF3 predictions don't have missing atoms to add
-    remove_waters: true
+  cif_parser_args:
+    add_missing_atoms: False #! To avoid atom_array length mismatch due to terminal oxygens at gap points
+    remove_waters: True
     remove_ccds: []
-    fix_ligands_at_symmetry_centers: true
-    fix_arginines: true
-    convert_mse_to_met: true
-    hydrogen_policy: "remove"  # Remove hydrogens to avoid NaN coordinates
+    fix_ligands_at_symmetry_centers: True
+    fix_arginines: True
+    convert_mse_to_met: True
+    hydrogen_policy: "remove"
     extra_fields: "all"
   
 hydra:
