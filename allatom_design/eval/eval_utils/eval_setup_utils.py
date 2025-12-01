@@ -186,17 +186,12 @@ def get_training_checkpoints(
         ckpts = glob.glob(f"{non_ema_ckpt_dir}/*.ckpt")
 
     # Filter and sort checkpoints
-    all_ckpts = natsorted([ckpt for ckpt in ckpts if pattern.search(Path(ckpt).name)])
-    ckpts = all_ckpts[::eval_every_n_ckpts]
-    
-    # Include the last checkpoint if eval_last_ckpt is True and it's not already included
-    if eval_last_ckpt and all_ckpts and all_ckpts[-1] not in ckpts:
-        ckpts.append(all_ckpts[-1])
+    all_ckpts = natsorted([ckpt for ckpt in ckpts if pattern.search(Path(ckpt).name)])    
 
     # Filter by start_step and end_step if provided
     if start_step is not None or end_step is not None:
         filtered_ckpts = []
-        for ckpt in ckpts:
+        for ckpt in all_ckpts:
             match = pattern.search(Path(ckpt).name)
             if match:
                 global_step = int(match.group(1))
@@ -204,7 +199,12 @@ def get_training_checkpoints(
                     filtered_ckpts.append(ckpt)
             else:
                 raise ValueError(f"Unexpected checkpoint filename: {Path(ckpt).name}")
-        ckpts = filtered_ckpts
+
+    ckpts = filtered_ckpts[::eval_every_n_ckpts]
+    
+    # Include the last checkpoint if eval_last_ckpt is True and it's not already included
+    if eval_last_ckpt and all_ckpts and all_ckpts[-1] not in ckpts:
+        ckpts.append(all_ckpts[-1])
 
     return ckpts, pattern
 
