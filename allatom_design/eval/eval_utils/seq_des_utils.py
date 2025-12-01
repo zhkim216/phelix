@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from atomworks.ml.preprocessing.get_pn_unit_data_from_structure import DataPreprocessor
 from atomworks.io.parser import parse as aw_parse
 from atomworks.io.utils import non_rcsb
-from atomworks.io.utils.io_utils import to_cif_string, to_cif_file
+from atomworks.io.utils.io_utils import to_cif_string, to_cif_file, load_any
 from atomworks.ml.utils.token import apply_token_wise, get_token_starts, spread_token_wise
 from biotite.structure import AtomArray
 from joblib import Parallel, delayed
@@ -34,6 +34,52 @@ from allatom_design.data.transform.sd_featurizer import sd_featurizer
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 from allatom_design.data.transform.pad import pad_dim
+
+
+def compute_sequence_recovery(
+    sampled_atom_array: AtomArray,
+    orig_res_types: torch.Tensor,
+    seq_mask: torch.Tensor,
+    pocket_mask: torch.Tensor = None,
+    device: str = "cpu",
+) -> dict[str, float]:
+    """
+    Compute sequence recovery metrics for a sampled atom array.
+    
+    Args:
+        sampled_atom_array: AtomArray with sampled sequence
+        orig_res_types: Original residue types as tensor (token-level, argmax of one-hot)
+        seq_mask: Mask for valid sequence positions (1 = compute recovery, 0 = ignore)
+        pocket_mask: Optional mask for pocket positions (1 = pocket, 0 = non-pocket)
+        device: Device for tensor operations
+        
+    Returns:
+        dict with keys:
+            - seq_recovery: Overall sequence recovery
+            - pocket_seq_recovery: Pocket sequence recovery (if pocket_mask provided)
+    """
+    # Get sampled residue types from atom array
+    samp_token_starts = get_token_starts(sampled_atom_array)
+    samp_res_names = sampled_atom_array.res_name[samp_token_starts]
+    samp_res_types = AF3_ENCODING.encode(samp_res_names)
+    samp_res_types = torch.tensor(samp_res_types, device=device)
+    samp_res_types = pad_dim(samp_res_types, 0, len(orig_res_types) - len(samp_res_types))
+    
+    results = {}
+    
+    # Compute overall sequence recovery
+    seq_recovery = (samp_res_types == orig_res_types).float() * seq_mask
+    seq_recovery = seq_recovery.sum() / seq_mask.sum().clamp(min=1e-8)
+    results["seq_recovery"] = seq_recovery
+    
+    # Compute pocket sequence recovery (optional)
+    if pocket_mask is not None:
+        pocket_seq_recovery = (samp_res_types == orig_res_types).float() * pocket_mask
+        pocket_seq_recovery = pocket_seq_recovery.sum() / pocket_mask.sum().clamp(min=1e-8)
+        results["pocket_seq_recovery"] = pocket_seq_recovery
+    
+    return results
+
 
 def get_seq_des_model(cfg: DictConfig, device: str) -> dict[str, Any]:
     """
@@ -190,8 +236,6 @@ def run_seq_des(
                     lp_seq_recovery = (samp_res_types == orig_res_types).float() * lp_seq_mask
                     lp_seq_recovery = lp_seq_recovery.sum() / lp_seq_mask.sum().clamp(min=1e-8)
                     total_lp_seq_recovery += lp_seq_recovery
-                    
-                    print (f"sample {ai} of {example_id}: seq recovery: {seq_recovery}, lp seq recovery: {lp_seq_recovery}")                                        
                                         
                 avg_seq_recovery = total_seq_recovery / len(atom_arrays)
                 avg_lp_seq_recovery = total_lp_seq_recovery / len(atom_arrays)
@@ -441,6 +485,10 @@ def run_lc_seq_des(
                     # Fix pdbx_formal_charge format for OpenStructure compatibility
                     # OpenStructure expects integer (e.g., "1") not signed (e.g., "+1")
                     _fix_cif_formal_charge(out_file)
+                    
+                    # Also save atom_array as .pt file for direct loading
+                    pt_file = f"{sample_out_dir}/{sample_stem}.pt"
+                    torch.save(atom_array, pt_file)
 
                     outputs["example_id"].append(example_id)
                     outputs["out_pdb"].append(out_file)
@@ -466,23 +514,19 @@ def run_lc_seq_des(
                 # total_mp_seq_recovery = 0.0
                 # total_np_seq_recovery = 0.0
                 for ai in range(len(atom_arrays)):
-                    samp_atom_array = atom_arrays[ai]
-                    samp_token_starts = get_token_starts(samp_atom_array)
-                    samp_res_names = samp_atom_array.res_name[samp_token_starts]
-                    samp_res_types = AF3_ENCODING.encode(samp_res_names)                    
-                    samp_res_types = torch.tensor(samp_res_types, device=device)
-                    samp_res_types = pad_dim(samp_res_types, 0, len(orig_res_types) - len(samp_res_types))
+                    recovery_metrics = compute_sequence_recovery(
+                        sampled_atom_array=atom_arrays[ai],
+                        orig_res_types=orig_res_types,
+                        seq_mask=seq_mask,
+                        pocket_mask=lp_seq_mask,
+                        device=device,
+                    )
+                    seq_recovery = recovery_metrics["seq_recovery"]
+                    sp_seq_recovery = recovery_metrics["pocket_seq_recovery"]
                     
-                    # Compute sequence recovery
-                    seq_recovery = (samp_res_types == orig_res_types).float() * seq_mask
-                    seq_recovery = seq_recovery.sum() / seq_mask.sum().clamp(min=1e-8)
                     outputs["sample_seq_recovery"].append(seq_recovery)
-                    
                     total_seq_recovery += seq_recovery
                                                                     
-                    # Compute sp sequence recovery
-                    sp_seq_recovery = (samp_res_types == orig_res_types).float() * lp_seq_mask
-                    sp_seq_recovery = sp_seq_recovery.sum() / lp_seq_mask.sum().clamp(min=1e-8)
                     outputs["sample_sp_seq_recovery"].append(sp_seq_recovery)
                     total_sp_seq_recovery += sp_seq_recovery
                     
@@ -515,6 +559,20 @@ def run_lc_seq_des(
             outputs[k] = v.detach().cpu().item()
         else:
             outputs[k] = v
+
+    # Save sample_metadata.pt for later use (e.g., skip_sampling mode)
+    sample_metadata = {}
+    for idx in range(len(outputs["out_pdb"])):
+        sample_stem = Path(outputs["out_pdb"][idx]).stem
+        sample_metadata[sample_stem] = {
+            "example_id": outputs["example_id"][idx],
+            "out_pdb": outputs["out_pdb"][idx],
+            "U": outputs["U"][idx],
+            "sample_seq_recovery": outputs["sample_seq_recovery"][idx] if "sample_seq_recovery" in outputs else None,
+            "sample_sp_seq_recovery": outputs["sample_sp_seq_recovery"][idx] if "sample_sp_seq_recovery" in outputs else None,
+        }
+    torch.save(sample_metadata, f"{sample_out_dir}/sample_metadata.pt")
+    print(f"Saved sample_metadata.pt with {len(sample_metadata)} samples to {sample_out_dir}")
 
     return outputs
 
