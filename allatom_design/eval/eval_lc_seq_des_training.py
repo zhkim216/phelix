@@ -304,7 +304,7 @@ def main(cfg: DictConfig):
                             per_pred_sc_metrics = compute_self_consistency_metrics_atomworks(sample_path = sample_path, 
                                                                     pred_sample_paths = pred_ss_sample_paths,
                                                                     num_diffusion_samples = cfg.struct_pred_cfg.af3.inference_config.ss.num_diffusion_samples,                                                        
-                                                                    data_cfg = cfg.data_cfg,
+                                                                    data_cfg = cfg.data_cfg_for_metrics,
                                                                     preprocess_transform_cfg = cfg.preprocess_transform_cfg,                                                                                                                
                                                                     featurizer_cfg = cfg.featurizer_cfg,
                                                                     struct_pred_cfg = cfg.struct_pred_cfg,
@@ -337,7 +337,7 @@ def main(cfg: DictConfig):
                     else:
                         try:
                             #! (JH) 251129 added: pass cif_parser_args to docking metrics
-                            parser_kwargs = dict(cfg.docking_metrics_cfg.get("cif_parser_args", {})) if cfg.docking_metrics_cfg.get("cif_parser_args") else None
+                            parser_kwargs = dict(cfg.data_cfg_for_metrics.cif_parser_args)
                             per_pred_docking_metrics = compute_template_conditioned_docking_metrics(
                                 sample_path=sample_path, 
                                 pred_sample_paths=pred_tc_sample_paths,
