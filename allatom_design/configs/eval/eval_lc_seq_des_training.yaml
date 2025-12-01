@@ -52,6 +52,17 @@ data_cfg:
     hydrogen_policy: "remove"
     extra_fields: "all"
 
+data_cfg_for_metrics:
+  cif_parser_args:
+    add_missing_atoms: false
+    remove_waters: false
+    remove_ccds: []
+    fix_ligands_at_symmetry_centers: false
+    fix_arginines: false
+    convert_mse_to_met: false
+    hydrogen_policy: "remove"
+    extra_fields: "all"
+
 preprocess_transform_cfg:
   undesired_res_names: []
   b_factor_min: null
@@ -133,15 +144,6 @@ struct_pred_cfg:
 docking_metrics_cfg:
   binding_site_radius: 8.0  # Radius for binding site superposition in docking metrics
   save_aligned: true
-  cif_parser_args:  # Parser arguments for loading structures (same as data_cfg.cif_parser_args)
-    add_missing_atoms: true  # AF3 predictions don't have missing atoms to add
-    remove_waters: true
-    remove_ccds: []
-    fix_ligands_at_symmetry_centers: true
-    fix_arginines: true
-    convert_mse_to_met: true
-    hydrogen_policy: "remove"  # Remove hydrogens to avoid NaN coordinates
-    extra_fields: "all"
   
 hydra:
   run:
