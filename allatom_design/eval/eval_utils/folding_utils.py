@@ -105,7 +105,7 @@ def _run_af3_inprocess(
         "--run_data_pipeline=True",
         "--run_inference=True",
         f"--db_dir={base_config.get('db_dir', '')}",
-        f"--flash_attention_implementation={base_config.get('flash_attention_implementation', 'xla')}",
+        f"--flash_attention_implementation={base_config.get('flash_attention_implementation', 'triton')}",
         f"--num_recycles={mode_config.get('num_recycles', 3)}",
         f"--num_diffusion_samples={mode_config.get('num_diffusion_samples', 5)}",
         f"--max_templates={mode_config.get('max_templates', 0)}",
@@ -140,7 +140,7 @@ def _run_af3_inprocess(
         FLAGS.run_data_pipeline = True
         FLAGS.run_inference = True
         FLAGS.db_dir = [base_config.get('db_dir', '')]
-        FLAGS.flash_attention_implementation = base_config.get('flash_attention_implementation', 'xla')
+        FLAGS.flash_attention_implementation = base_config.get('flash_attention_implementation', 'triton')
         FLAGS.num_recycles = mode_config.get('num_recycles', 3)
         FLAGS.num_diffusion_samples = mode_config.get('num_diffusion_samples', 5)
         FLAGS.max_templates = mode_config.get('max_templates', 0)
@@ -405,7 +405,7 @@ def run_af3_template_conditioned(json_path: str,
                 "--run_data_pipeline=True",
                 "--run_inference=True",
                 f"--db_dir={inference_config.base.get('db_dir', None)}",
-                f"--flash_attention_implementation={inference_config.base.get('flash_attention_implementation', 'xla')}",
+                f"--flash_attention_implementation={inference_config.base.get('flash_attention_implementation', 'triton')}",
                 f"--num_recycles={inference_config.tc.get('num_recycles', 3)}",
                 f"--num_diffusion_samples={inference_config.tc.get('num_diffusion_samples', 5)}",
                 f"--max_templates={inference_config.tc.get('max_templates', 1)}",
