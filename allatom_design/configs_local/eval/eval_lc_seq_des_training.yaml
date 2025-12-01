@@ -10,9 +10,9 @@ seed: 0
 num_workers: 1  # for dataloading
 debug: true
 num_sample_debug: 2
-start_step: 62500  # start evaluation after this step, 0 or null to start from the beginning
-end_step: 62500  # end evaluation after this step (inclusive), null to evaluate until the end
-eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
+start_step: 55000  # start evaluation after this step, 0 or null to start from the beginning
+end_step: null  # end evaluation after this step (inclusive), null to evaluate until the end
+eval_every_n_ckpts: 4  # evaluate every n checkpoints, for speed
 eval_last_ckpt: true
 use_ema: false
 evaluate_self_consistency: true
@@ -49,6 +49,17 @@ data_cfg:
     fix_ligands_at_symmetry_centers: True
     fix_arginines: True
     convert_mse_to_met: True
+    hydrogen_policy: "remove"
+    extra_fields: "all"
+
+data_cfg_for_metrics:
+  cif_parser_args:
+    add_missing_atoms: false
+    remove_waters: false
+    remove_ccds: []
+    fix_ligands_at_symmetry_centers: false
+    fix_arginines: false
+    convert_mse_to_met: false
     hydrogen_policy: "remove"
     extra_fields: "all"
 
@@ -130,10 +141,11 @@ struct_pred_cfg:
         mask_template_sequence: true
         max_template_date: "2021-09-30"
 
+
+
 docking_metrics_cfg:
   binding_site_radius: 8.0  # Radius for binding site superposition in docking metrics
   save_aligned: true
-  cif_parser_args: ${data_cfg.cif_parser_args}
   
 hydra:
   run:
