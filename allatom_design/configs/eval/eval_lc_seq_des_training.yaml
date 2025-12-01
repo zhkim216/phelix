@@ -8,7 +8,7 @@ wandb:
 # Run settings
 seed: 0
 num_workers: 1  # for dataloading
-debug: false
+debug: true
 num_sample_debug: 2
 start_step: 62500  # start evaluation after this step, 0 or null to start from the beginning
 end_step: 62500  # end evaluation after this step (inclusive), null to evaluate until the end
@@ -19,7 +19,7 @@ evaluate_self_consistency: true
 evaluate_template_conditioned_docking: true
 
 # Metadata
-metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1.parquet
+metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1_subset_n70_rs42.parquet
 
 # Outputs
 exp_name: eval_af3_exp1_cfg0 # experiment name; used for wandb and output directory
@@ -112,14 +112,14 @@ struct_pred_cfg:
         flash_attention_implementation: "triton"
       ss:
         num_recycles: 3
-        num_diffusion_samples: 5
+        num_diffusion_samples: 3
         max_templates: 0
         ligand_protein_template_conditioning_mode: 0
         mask_template_sidechains: true
         mask_template_sequence: true            
       tc:
-        num_recycles: 3
-        num_diffusion_samples: 5
+        num_recycles: 1
+        num_diffusion_samples: 3
         max_templates: 1
         ligand_protein_template_conditioning_mode: 1
         mask_template_sidechains: true
