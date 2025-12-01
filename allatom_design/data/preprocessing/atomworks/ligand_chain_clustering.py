@@ -462,13 +462,56 @@ def metadata_ligand_chain_clustering(args: argparse.Namespace):
    
     atomworks_parquet.to_parquet(f"{output_dir_path}/metadata_nuc_clustered.parquet")
     
-    # 2) Recompute ligand_cluster
+    # 2) Delete small molecules that are covalently bonded to a protein
+    # pdb_id별 protein chain iid 집합 구하기
+    protein_iids_per_pdb = (
+        atomworks_parquet[atomworks_parquet['q_pn_unit_is_protein']]
+        .groupby('pdb_id')['q_pn_unit_iid']
+        .apply(set)
+        .to_dict()
+    )
+
+    # 문자열로 저장된 set을 파싱하는 함수
+    def _parse_bonded_polymer_set(val):
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return set()
+        if isinstance(val, set):
+            return val
+        s = str(val).strip()
+        if not s or s == 'set()':
+            return set()
+        try:
+            parsed = ast.literal_eval(s)
+            return set(parsed) if isinstance(parsed, (set, list, tuple)) else set()
+        except Exception:
+            return set()
+
+    # 각 행의 bonded_polymer가 protein chain과 교집합이 있는지 확인
+    def _has_bonded_protein(row):
+        bonded = _parse_bonded_polymer_set(row['q_pn_unit_bonded_polymer_pn_units'])
+        # 빈 set 체크
+        if len(bonded) == 0:
+            return False
+        pdb_id = row['pdb_id']
+        protein_iids = protein_iids_per_pdb.get(pdb_id, set())
+        # bonded polymer 중 protein chain이 있으면 True
+        return len(bonded & protein_iids) > 0
+
+    # small molecule이면서 protein에 covalently bonded된 것 제외
+    exclude_mask = (
+        atomworks_parquet['q_pn_unit_is_small_molecule'] & 
+        atomworks_parquet.apply(_has_bonded_protein, axis=1)
+    )
+    print(f"Excluding {exclude_mask.sum()} small molecules covalently bonded to proteins")
+    atomworks_parquet = atomworks_parquet[~exclude_mask].reset_index(drop=True)
+    
+    # 3) Recompute ligand_cluster
     atomworks_parquet['ligand_cluster'] = (
     atomworks_parquet.groupby('pdb_id', group_keys=False)
     .apply(_assign_ligand_clusters_per_pdb, include_groups=False)
 )
     
-    # 3) For each ligand_cluster, compute contacting protein chains (within 5.0 Å)
+    # 3) For each ligand_cluster, compute contacting protein chains 
     tmp_lc = (
     atomworks_parquet.groupby('pdb_id', group_keys=False)
     .apply(_compute_ligand_cluster_contacts_to_proteins_per_pdb, include_groups=False)
@@ -494,8 +537,8 @@ def metadata_ligand_chain_clustering(args: argparse.Namespace):
             
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input_parquet_path", default="/scratch/users/zhkim216/datasets/atomworks_af3_re/metadata.parquet")
-    ap.add_argument("--output_dir_path", default="/scratch/users/zhkim216/datasets/atomworks_af3_re")
+    ap.add_argument("--input_parquet_path", default="/home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/metadata.parquet")
+    ap.add_argument("--output_dir_path", default="/home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered_re")
     ap.add_argument("--debug", default = False)
     ap.add_argument("--debug_num_pdb_ids", default = 1000)
     ap.add_argument("--nucleic_acid_dist_threshold", default = 4.0)
