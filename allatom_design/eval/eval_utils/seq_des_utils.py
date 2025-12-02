@@ -30,7 +30,7 @@ from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data.data import to
 from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
 from allatom_design.data.transform.preprocess import preprocess_transform
-from allatom_design.data.transform.sd_featurizer import sd_featurizer
+from allatom_design.data.transform.sd_featurizer import sd_featurizer, sd_featurizer_with_load_any
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 from allatom_design.data.transform.pad import pad_dim
@@ -364,15 +364,14 @@ def run_seq_des_ensemble(
 def run_lc_seq_des(
     *,
     model: SeqDenoiser = None,
-    load_from_cache: bool = True,
-    featurizer_cfg: DictConfig = None,
+    data_cfg: DictConfig = None,
+    transform_cfg: DictConfig = None,    
     sampling_cfg: DictConfig = None,
     metadata: pd.DataFrame = None,
     pdb_paths: list[str] = None,
     device: str = None,
     out_dir: str = None,
-    pos_constraint_df: pd.DataFrame | None = None,
-    io_cfg: DictConfig = None,
+    pos_constraint_df: pd.DataFrame | None = None,    
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
     """
     Given a list of processed structure files, run sequence design on them.
@@ -423,8 +422,11 @@ def run_lc_seq_des(
         for pi in range(0, len(pdb_paths), sampling_cfg.batch_size):
             batch_pdb_paths = pdb_paths[pi : pi + sampling_cfg.batch_size]
             B = len(batch_pdb_paths)
-            batch = get_sd_batch(batch_pdb_paths, featurizer_cfg=featurizer_cfg, device=device, parallel_pool=parallel_pool, 
-                                 load_from_cache=load_from_cache, metadata=metadata)
+                                    
+            batch = get_sd_batch(batch_pdb_paths,  data_cfg=data_cfg, transform_cfg=transform_cfg, 
+                                 device=device, parallel_pool=parallel_pool, metadata=metadata)
+                                 
+                                 
 
             # Initialize seq_cond and atom_cond masks.
             batch = initialize_sampling_masks(batch)
@@ -448,47 +450,28 @@ def run_lc_seq_des(
 
             # Save outputs.
             example_id_to_batch_idx = {eid: idx for idx, eid in enumerate(batch["example_id"])}
+            
+            # Get designed_cif_save_args from data_cfg_for_design
+            cif_save_args = OmegaConf.to_container(data_cfg.cif_save_args, resolve=True) if data_cfg and data_cfg.get("cif_save_args") else {}
+            
             for si, (example_id, atom_arrays) in enumerate(id_to_atom_arrays.items()):
                 aux = id_to_aux[example_id]
                 
                 sample_stems = [convert_stem(f"{example_id}_sample{si}") for si in range(len(atom_arrays))]
-                
-                DUMMY_DATE = "1959-01-08" 
-                extra_categories = {
-                    "pdbx_audit_revision_history": {
-                        "ordinal": [1],
-                        "revision_id": [1], 
-                        "revision_date": [DUMMY_DATE],
-                        "major_revision": [1],
-                        "minor_revision": [0],
-                        "revision_description": ["Dummy date for template-conditioning AF3"]
-                    }
-                }
 
                 # Save output atom arrays to cif files.
                 for ai, sample_stem in enumerate(sample_stems):
                     out_file = f"{sample_out_dir}/{sample_stem}.cif"
                     atom_array = atom_arrays[ai]
                     
-                    # with open(out_file, "w") as f:
-                    #     f.write(to_cif_string(atom_array, include_nan_coords=False))
                     out_file = to_cif_file(atom_arrays[ai], 
                                            out_file,
                                            file_type="cif",
-                                           date = DUMMY_DATE,
-                                           include_entity_poly=True,
-                                           include_entity_nonpoly=True,
-                                           include_nan_coords=False,
-                                           include_bonds=True,
-                                           extra_categories=extra_categories)
+                                           **cif_save_args)
                     
                     # Fix pdbx_formal_charge format for OpenStructure compatibility
                     # OpenStructure expects integer (e.g., "1") not signed (e.g., "+1")
                     _fix_cif_formal_charge(out_file)
-                    
-                    # Also save atom_array as .pt file for direct loading
-                    pt_file = f"{sample_out_dir}/{sample_stem}.pt"
-                    torch.save(atom_array, pt_file)
 
                     outputs["example_id"].append(example_id)
                     outputs["out_pdb"].append(out_file)
@@ -672,10 +655,11 @@ def score_samples_ensemble(
 
 def get_sd_batch(
     pdb_paths: list[str], *, 
-    featurizer_cfg: DictConfig | None, 
-    device: str, parallel_pool: Parallel | None, 
-    load_from_cache: bool = True,
-    metadata: pd.DataFrame = None,
+    data_cfg: DictConfig = None,    
+    transform_cfg: DictConfig | None = None, 
+    device: str = None, 
+    parallel_pool: Parallel | None = None, 
+    metadata: pd.DataFrame = None,    
 ) -> dict[str, Any]:
     """
     Given a list of pdb file paths, return a batch of sequence design model features.
@@ -684,10 +668,16 @@ def get_sd_batch(
     """
     if parallel_pool is None:
         # Load PDBs sequentially.
-        batch_examples = [get_sd_example(pdb_path, featurizer_cfg, load_from_cache=load_from_cache, metadata=metadata) for pdb_path in pdb_paths]
+        batch_examples = [get_sd_example(pdb_path = pdb_path, data_cfg=data_cfg,
+                                         transform_cfg = transform_cfg,  
+                                         metadata=metadata) for pdb_path in pdb_paths]                                        
+                                         
+                                         
+                                         
     else:
         # Load PDBs in parallel.
-        batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path, featurizer_cfg, load_from_cache=load_from_cache, metadata=metadata) for pdb_path in pdb_paths)
+        batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path = pdb_path, data_cfg=data_cfg, transform_cfg = transform_cfg,                                         
+                                                               metadata=metadata) for pdb_path in pdb_paths)
 
     # Collate examples.
     batch = sd_collator(batch_examples)
@@ -697,17 +687,28 @@ def get_sd_batch(
 
 
 def get_sd_example(pdb_path: str = None,
-                   featurizer_cfg: DictConfig = None, 
-                   load_from_cache: bool = True, 
-                   metadata: pd.DataFrame = None,
                    data_cfg: DictConfig = None,
-                   preprocess_transform_cfg: DictConfig = None,
+                   transform_cfg: DictConfig = None, 
+                   metadata: pd.DataFrame = None,       
+                   load_from_cache: bool = False,  
+                   use_load_any: bool = False,                             
                    ) -> dict[str, Any]:
     """
     Given a pdb file path, return a dictionary of sequence design model features.
 
     If data_cfg is None, use default cif parser args.
+    
+    Args:
+        load_from_cache: If True, load from cached .pt file
+        use_load_any: If True, use load_any to load atom_array from cif file (preserves pn_unit_iid)
+        load_from_pdb: If both load_from_cache and use_load_any are False, use preprocess_pdb
     """
+    if transform_cfg is not None:
+        featurizer_cfg = transform_cfg.featurizer_cfg
+        preprocess_cfg = transform_cfg.preprocess_cfg
+    if data_cfg is not None:
+        load_from_cache = data_cfg.load_from_cache        
+        use_load_any = data_cfg.use_load_any
     
     # Load the cache example if it exists.
     if load_from_cache:
@@ -716,10 +717,15 @@ def get_sd_example(pdb_path: str = None,
         # Todo: ii) Single protein chain with multiple ligands at the same pocket site
         example = load_cached_example(pdb_path)
         pdb_id = Path(pdb_path).stem
-    else:
-        example = preprocess_pdb(pdb_path, data_cfg = data_cfg, preprocess_transform_cfg = preprocess_transform_cfg)
+    elif use_load_any:
+        # Load atom_array from cif using load_any (preserves pn_unit_iid annotation)
+        example = load_example_with_load_any(pdb_path)
         pdb_id = (Path(pdb_path).stem).split("_")[0]
-        
+    else:
+        # load_from_pdb: Use preprocess_pdb pipeline
+        example = preprocess_pdb(pdb_path, data_cfg = data_cfg, preprocess_transform_cfg = preprocess_cfg)
+        pdb_id = (Path(pdb_path).stem).split("_")[0]
+    
     metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)
     
     #! Replace information in the example with the information from the metadata
@@ -731,16 +737,121 @@ def get_sd_example(pdb_path: str = None,
     example['extra_info'] = {} #! delete all the information preexisting in the example
     row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
     example['extra_info'] = row_dict
-                                                                
+    
     # Featurize the example.
-    featurizer = sd_featurizer(**featurizer_cfg)
+    if not use_load_any:                
+        featurizer = sd_featurizer(**featurizer_cfg)                                                                
+    else:
+        featurizer = sd_featurizer_with_load_any()
+        
     example = featurizer(example)
 
-    return example
+    return example    
+
+def get_sd_example_from_af3_prediction(pdb_path: str = None,
+                   data_cfg: DictConfig = None,
+                   transform_cfg: DictConfig = None, 
+                   metadata: pd.DataFrame = None,
+                   ) -> dict[str, Any]:
+    """
+    Given a pdb file path from AF3 prediction, return a dictionary of sequence design model features.     
+    Args:
+        data_cfg: Configuration for loading the cif file
+        transform_cfg: Configuration for transforming the cif file
+        metadata: Metadata for the pdb file
+    """
+    
+    preprocess_transform_cfg = transform_cfg.preprocess_cfg
+    featurizer_cfg = transform_cfg.featurizer_cfg
+            
+    # load_from_pdb: Use preprocess_pdb pipeline
+    example = preprocess_pdb(pdb_path, data_cfg = data_cfg, preprocess_transform_cfg = preprocess_transform_cfg)
+    pdb_id = (Path(pdb_path).stem).split("_")[0]
+    
+    metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)
+    
+    #! Replace information in the example with the information from the metadata
+    #! Since when caching, it doesn't really care about the metadata as it's just caching the whole structure        
+    example['example_id'] = metadata_example["example_id"].iloc[0]
+    query_pn_unit_iids = metadata_example["q_pn_unit_iid_1"].tolist() + metadata_example["q_pn_unit_iid_2"].tolist()
+    example["query_pn_unit_iids"] = query_pn_unit_iids
+    
+    example['extra_info'] = {} #! delete all the information preexisting in the example
+    row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
+    example['extra_info'] = row_dict
+    
+    # Featurize the example.    
+    featurizer = sd_featurizer(**featurizer_cfg)                                                                            
+    example = featurizer(example)
+
+    return example    
 
 def load_cached_example(pdb_path: str) -> dict[str, torch.Tensor]:
     cached_example_path = f"{pdb_path}"
     return torch.load(cached_example_path, map_location="cpu", weights_only=False)
+
+def load_example_with_load_any(pdb_path: str) -> dict[str, Any]:
+    """
+    Load atom_array from cif file using load_any.
+    Designed samples are already preprocessed, so we just need to fix annotation types.
+    """
+    from biotite.structure import AtomArrayStack
+    
+    # Load with all extra_fields
+    atom_array = load_any(pdb_path, extra_fields="all")
+    # load_any may return AtomArrayStack, extract first array if so
+    if isinstance(atom_array, AtomArrayStack):
+        atom_array = atom_array[0]
+    
+    # Fix annotation types (CIF stores everything as strings)
+    atom_array = _fix_cif_annotation_types(atom_array)
+    
+    # Create example dict with atom_array
+    example = {"atom_array": atom_array}
+    return example
+
+def _fix_cif_annotation_types(atom_array) -> "AtomArray":
+    """
+    Fix annotation types for atom_array loaded from CIF.
+    CIF format stores all values as strings, so we need to convert back to proper types.
+    Uses del_annotation + set_annotation pattern from atomworks examples.
+    """
+    # Boolean annotations
+    bool_annotations = ['atomize', 'is_polymer', 'is_aromatic', 'is_covalent_modification', 
+                        'is_backbone_atom', 'hetero', 'is_leaving_atom', 'is_n_terminal_atom', 'is_c_terminal_atom']
+    for ann in bool_annotations:
+        if ann in atom_array.get_annotation_categories():
+            val = getattr(atom_array, ann)
+            if val.dtype.kind in ('U', 'S', 'O'):  # String types
+                new_val = (val == "True")
+                atom_array.del_annotation(ann)
+                atom_array.set_annotation(ann, new_val)
+    
+    # Integer annotations
+    int_annotations = ['chain_type', 'atomic_number', 'within_chain_res_idx', 'within_poly_res_idx', 
+                       'chain_entity', 'molecule_entity', 'pn_unit_entity', 'token_id', 'transformation_id',
+                       'pdbx_PDB_model_num', 'label_entity_id', 'label_seq_id', 'auth_seq_id', 'molecule_id',
+                       'molecule_iid', 'charge', 'pdbx_formal_charge']
+    for ann in int_annotations:
+        if ann in atom_array.get_annotation_categories():
+            val = getattr(atom_array, ann)
+            if val.dtype.kind in ('U', 'S', 'O'):  # String types
+                # Handle '?' or empty values
+                new_val = np.array([int(v) if str(v).lstrip('-').isdigit() else 0 for v in val])
+                atom_array.del_annotation(ann)
+                atom_array.set_annotation(ann, new_val)
+    
+    # Float annotations
+    float_annotations = ['B_iso_or_equiv', 'Cartn_x', 'Cartn_y', 'Cartn_z', 'occupancy', 'b_factor']
+    for ann in float_annotations:
+        if ann in atom_array.get_annotation_categories():
+            val = getattr(atom_array, ann)
+            if val.dtype.kind in ('U', 'S', 'O'):  # String types
+                new_val = np.array([float(v) if v not in ('?', '.', '') else np.nan for v in val])
+                atom_array.del_annotation(ann)
+                atom_array.set_annotation(ann, new_val)
+    
+    return atom_array
 
 def preprocess_pdb(pdb_path: str, data_cfg: DictConfig | None, 
                    preprocess_transform_cfg: DictConfig | None) -> dict[str, Any]:
