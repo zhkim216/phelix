@@ -59,6 +59,10 @@ class ChainType(IntEnum):
         Raises:
             ValueError: If the string value is not a valid chain type.
         """
+        # Handle numeric string (e.g., '6' from saved cif files) #! (JH) 251201 fixed
+        if str_value.isdigit():
+            return cls(int(str_value))
+        
         try:
             return ChainTypeInfo.STRING_TO_ENUM[str_value.upper()]
         except KeyError:
