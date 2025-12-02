@@ -758,7 +758,7 @@ def compute_atom_to_token_map(atom_array: AtomArray) -> dict:
 class ComputeAtomToTokenMap(Transform):
     """Add length `[n_atom]` array to the `feats` dictionary that indicates the `token_id` for each atom."""
 
-    requires_previous_transforms: ClassVar[list[str | Transform]] = ["AddGlobalTokenIdAnnotation"]
+    # requires_previous_transforms: ClassVar[list[str | Transform]] = ["AddGlobalTokenIdAnnotation"] #! (JH) 251201 removed
 
     def check_input(self, data: dict[str, Any]) -> None:
         check_atom_array_annotation(data, ["token_id"])

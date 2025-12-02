@@ -116,17 +116,25 @@ def remove_unsupported_chain_types(
     Returns:
         AtomArray: The filtered AtomArray.
     """
+    # Convert chain_type to int if stored as string (e.g., from saved cif files) #! (JH) 251201 fixed
+    chain_types = atom_array.chain_type
+    if chain_types.dtype.kind in ('U', 'S', 'O'):  # Unicode, byte string, or object
+        chain_types = np.array([int(ct) if str(ct).isdigit() else ct for ct in chain_types])
+    
+    # Convert supported_chain_types to int values for comparison
+    supported_chain_type_values = [int(ct) for ct in supported_chain_types]
+    
     # We first assert that none of the query pn_units are of an unsupported chain type, which means the example should have been filtered out upstream
     if exists(query_pn_unit_iids):
         query_pn_unit_chain_types = np.unique(
-            atom_array.chain_type[np.isin(atom_array.pn_unit_iid, query_pn_unit_iids)]
+            chain_types[np.isin(atom_array.pn_unit_iid, query_pn_unit_iids)]
         )
         assert np.all(
-            np.isin(query_pn_unit_chain_types, supported_chain_types)
+            np.isin(query_pn_unit_chain_types, supported_chain_type_values)
         ), f"Query PN unit has an unsupported chain type: {query_pn_unit_chain_types}"
 
     # Then, we filter out chains with unsupported chain types
-    is_supported_chain_type = np.isin(atom_array.chain_type, supported_chain_types)
+    is_supported_chain_type = np.isin(chain_types, supported_chain_type_values)
     return atom_array[is_supported_chain_type]
 
 

@@ -28,8 +28,15 @@ import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
-from allatom_design.eval.eval_utils.seq_des_utils import get_sd_example
+from allatom_design.eval.eval_utils.seq_des_utils import get_sd_example, get_sd_example_from_af3_prediction
+
+# Atomworks imports
 from atomworks.io.utils.io_utils import to_cif_string
+from atomworks.io.parser import parse as aw_parse
+from atomworks.io.tools.rdkit import atom_array_to_rdkit
+from atomworks.ml.utils.geometry import align_atom_arrays
+from allatom_design.data.transform.sd_featurizer import annotate_ligand_pockets
+from atomworks.io.utils.io_utils import to_cif_file
 
 from biotite.structure import AtomArray
 from ost import io, mol
@@ -39,46 +46,40 @@ from rdkit.Chem import AllChem, rdMolAlign
 
 def compute_self_consistency_metrics_atomworks(sample_path: str = None,
                         pred_sample_paths: list[str] = None,
-                        num_diffusion_samples: int = 1,                         
-                        data_cfg: DictConfig | None = None,
-                        featurizer_cfg: DictConfig = None,
-                        preprocess_transform_cfg: DictConfig | None = None,
+                        data_cfg_for_af3_prediction: DictConfig = None,
+                        transform_cfg_for_af3_prediction: DictConfig = None,
+                        num_diffusion_samples: int = 1,                                                 
                         struct_pred_cfg: DictConfig = None,
                         metadata: pd.DataFrame = None,
                         pdb_chain_info: dict = None) -> dict[str, float]:
     """
     Compute self-consistency metrics using atomworks framework for AF3 predictions.
+    Uses load_any to load structures from cif files (preserves pn_unit_iid annotation).
     
     Args:
         sample_path: Path to the designed sample structure.
         pred_sample_paths: List of paths to AF3 predicted structures.
         num_diffusion_samples: Number of diffusion samples (should match len(pred_sample_paths)).
-        data_cfg: Data configuration.
         featurizer_cfg: Featurizer configuration.
-        preprocess_transform_cfg: Preprocess transform configuration.
+        struct_pred_cfg: Structure prediction configuration.
         metadata: Metadata DataFrame.
         pdb_chain_info: PDB chain info dictionary.
         
     Returns:
         Dictionary of metrics aggregated across all predicted samples.
     """
-    sample_example = get_sd_example(pdb_path=sample_path,
-                                    load_from_cache=False,
-                                    data_cfg=data_cfg,
-                                    preprocess_transform_cfg=preprocess_transform_cfg,
-                                    featurizer_cfg=featurizer_cfg,
+    sample_example = get_sd_example(pdb_path=sample_path,                                    
+                                    use_load_any=True,                                
                                     metadata=metadata)
                                        
     assert len(pred_sample_paths) == num_diffusion_samples, "Number of predicted structures must match number of diffusion samples"
     
     per_pred_metrics = {}
     for pred_sample_path in pred_sample_paths:
-        pred_example = get_sd_example(pdb_path=pred_sample_path,
-                                      load_from_cache=False,
-                                      data_cfg=data_cfg,
-                                      preprocess_transform_cfg=preprocess_transform_cfg,
-                                      featurizer_cfg=featurizer_cfg,
-                                      metadata=metadata)
+        pred_example = get_sd_example_from_af3_prediction(pdb_path=pred_sample_path,
+                                                        data_cfg=data_cfg_for_af3_prediction,
+                                                        transform_cfg=transform_cfg_for_af3_prediction,
+                                                        metadata=metadata)
         
         if struct_pred_cfg.model_name == "af3":
             metrics = _compute_self_consistency_metrics_atomworks_af3(pred_example=pred_example,
@@ -101,33 +102,48 @@ def _compute_self_consistency_metrics_atomworks_af3(*, pred_example: dict[str, A
                                                    pred_sample_path: str = None) -> dict[str, float]:
     """
     Compute self-consistency metrics between a designed structure and its predicted structure.
+    
+    Uses atomworks align_atom_arrays to handle structures with different atom sets
+    (e.g., sample with backbone only vs pred with full sidechain atoms).
     """    
     metrics = {}
 
-    # Align on CA atoms.
-    pred_coords, sample_coords = pred_example["coords"], sample_example["coords"]  # [N, 3]
-
-    # First, extract CA-only mask (protein-only center atoms).
-    ca_atom_mask = torch.zeros_like(sample_example["atom_pad_mask"])
-    ca_token_mask = (sample_example["chain_is_protein"] * sample_example["is_protein"] * sample_example["token_resolved_mask"] * sample_example["token_pad_mask"])
-    ca_atom_mask[sample_example["token_to_center_atom"]] = ca_token_mask
-
-    # Compute RMSD.
-    ca_rmsd, (ca_aligned_pred_coords, _) = data.torch_rmsd_weighted(
-        pred_coords.unsqueeze(0), sample_coords.unsqueeze(0), ca_atom_mask.unsqueeze(0), return_aligned=True
+    # Get atom arrays
+    pred_atom_array = pred_example["atom_array"]
+    sample_atom_array = sample_example["atom_array"]
+    
+    # Extract CA atoms from both structures (handles different atom counts)
+    # For proteins, select CA atoms; for other chain types, this will be empty
+    pred_ca_mask = (pred_atom_array.atom_name == "CA")
+    sample_ca_mask = (sample_atom_array.atom_name == "CA")
+    
+    pred_ca = pred_atom_array[pred_ca_mask]
+    sample_ca = sample_atom_array[sample_ca_mask]
+    
+    # Align pred CA to sample CA using atomworks align_atom_arrays
+    # This aligns pred_ca to sample_ca and applies the transformation to the full pred_atom_array
+    aligned_pred_atom_array, ca_rmsd = align_atom_arrays(
+        mbl_sele=pred_ca,           # CA atoms from pred to align
+        tgt_sele=sample_ca,         # CA atoms from sample as target
+        mbl_full=pred_atom_array    # Full pred structure to transform
     )
-
-    # Write aligned coords to mmcif.
-    pred_example["atom_array"].coord = ca_aligned_pred_coords.squeeze(0).numpy()
+    
+    # Update pred_example with aligned coordinates
+    pred_example["atom_array"] = aligned_pred_atom_array
+    
+    # Write aligned coords to mmcif
     with open(f"{Path(pred_sample_path).parent}/{Path(pred_sample_path).stem}_ca_aligned.cif", "w") as f:
-        f.write(to_cif_string(pred_example["atom_array"]))
+        f.write(to_cif_string(aligned_pred_atom_array))
+    
+    # Create CA atom mask for pLDDT extraction (matching aligned structure)
+    ca_atom_mask = torch.tensor(aligned_pred_atom_array.atom_name == "CA", dtype=torch.bool)
 
     # Compute metrics.
     # for metric in ["sc_ca_rmsd", "avg_ca_plddt", "tmalign_score"]:
     for metric in ["sc_ca_rmsd", "avg_ca_plddt"]:
         if metric == "sc_ca_rmsd":
-            # Align on CA atoms, compute CA RMSD.
-            metrics[metric] = ca_rmsd.item()
+            # CA RMSD computed via align_atom_arrays (already a float)
+            metrics[metric] = ca_rmsd
 
         elif metric == "avg_ca_plddt":
             # Compute average pLDDT across all CA atoms.
@@ -160,8 +176,7 @@ def _extract_af3_confidence_metrics(confidence_file_path: str = None,
     """
     with open(confidence_file_path, "r") as f:
         confidence_data = json.load(f)    
-    
-    #! (JH) 251129 fixed: handle both string and list inputs for metrics_to_extract
+
     metric_name = metrics_to_extract[0] if isinstance(metrics_to_extract, list) else metrics_to_extract
     
     if metric_name == "atom_plddts":        
@@ -1410,7 +1425,7 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     ligand_chain: str = "C",
     binding_site_radius: float = 8.0,
     save_aligned: bool = True,
-    parser_kwargs: dict | None = None,  #! (JH) 251129 added: configurable parser kwargs
+    cif_parser_args: DictConfig = None, 
 ) -> dict[str, float]:
     """
     Calculate ligand RMSD after superimposing structures based on binding site residues.
@@ -1431,7 +1446,7 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     save_aligned : bool
         If True, save the pocket-aligned predicted structure to the same directory
         with "_pocket_aligned" suffix.
-    parser_kwargs : dict | None
+    cif_parser_args: DictConfig = None,
         Additional keyword arguments to pass to atomworks.io.parser.parse.
         Useful for controlling hydrogen_policy, add_missing_atoms, etc.
     
@@ -1439,23 +1454,15 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     -------
     dict
         Dictionary with RMSD values and other metrics.
-    """
-    from atomworks.io.parser import parse as aw_parse
-    from atomworks.io.tools.rdkit import atom_array_to_rdkit
-    from atomworks.ml.utils.geometry import align_atom_arrays
-    from allatom_design.data.transform.sd_featurizer import annotate_ligand_pockets
+    """    
     
     ref_cif_path = Path(ref_cif_path)
     pred_cif_path = Path(pred_cif_path)
-    
-    #! (JH) 251129 added: use parser_kwargs if provided
-    if parser_kwargs is None:
-        parser_kwargs = {}
-    
+            
     # Load structures using atomworks parse (includes chain_entity annotation)
     try:
-        ref_parsed = aw_parse(ref_cif_path, **parser_kwargs)
-        pred_parsed = aw_parse(pred_cif_path, **parser_kwargs)
+        ref_parsed = aw_parse(ref_cif_path, **cif_parser_args)
+        pred_parsed = aw_parse(pred_cif_path, **cif_parser_args)
         
         ref_array = ref_parsed['asym_unit'][0]
         pred_array = pred_parsed['asym_unit'][0]
@@ -1587,9 +1594,7 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     
     # Save pocket-aligned structure if requested
     aligned_path = None
-    if save_aligned:
-        from atomworks.io.utils.io_utils import to_cif_file
-        
+    if save_aligned:                
         # Create output path with "_pocket_aligned" suffix
         aligned_path = pred_cif_path.parent / f"{pred_cif_path.stem}_pocket_aligned.cif"
         try:
@@ -1631,7 +1636,7 @@ def compute_template_conditioned_docking_metrics(
     pdb_chain_info: dict,
     binding_site_radius: float = 8.0,
     save_aligned: bool = True,
-    parser_kwargs: dict | None = None,  #! (JH) 251129 added: configurable parser kwargs
+    cif_parser_args: DictConfig = None, 
 ) -> dict[str, float]:
     """
     Compute AF3 docking metrics for template-conditioned predictions.
@@ -1692,16 +1697,16 @@ def compute_template_conditioned_docking_metrics(
             ligand_chain=ligand_chain,
             binding_site_radius=binding_site_radius,
             save_aligned=save_aligned,
-            parser_kwargs=parser_kwargs,  #! (JH) 251129 added
+            cif_parser_args=cif_parser_args,  
         )
         
         if result.get("error"):
+            print(f"Docking metric error for {pred_path}: {result.get('error')}")
             for key in ["ligand_rmsd", "sym_ligand_rmsd", "best_ligand_rmsd", 
                         "binding_site_rmsd", "num_bs_residues", "num_matched_atoms",
                         "ligand_plddt", "binding_site_plddt"]:
-                per_sample_metrics.setdefault(key, []).append(None)
-        else:
-            #! (JH) 251129 fixed: use result's pred_array and masks for pLDDT extraction
+                per_sample_metrics.setdefault(key, []).append(np.nan)
+        else:            
             # Extract pLDDT metrics using the pred_array from calculate_ligand_rmsd_with_binding_site_superposition
             pred_array = result.get("pred_array")
             pred_ligand_mask = result.get("pred_ligand_mask")
@@ -1711,8 +1716,8 @@ def compute_template_conditioned_docking_metrics(
             confidence_stem = pred_path.stem.replace("_model", "")
             confidence_file_path = f"{pred_path.parent}/{confidence_stem}_confidences.json"
             
-            ligand_plddt = None
-            binding_site_plddt = None
+            ligand_plddt = np.nan
+            binding_site_plddt = np.nan
             
             if pred_array is not None and Path(confidence_file_path).exists():
                 try:
