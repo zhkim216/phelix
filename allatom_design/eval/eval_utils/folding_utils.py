@@ -243,9 +243,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
         tc_sequences = []
         for protein_chain in protein_chains:
             _res_starts = get_residue_starts(atom_array[atom_array.pn_unit_iid == protein_chain])
-            _res_ids = atom_array[atom_array.pn_unit_iid == protein_chain].res_id[_res_starts]
-            _res_ids = _res_ids - min(_res_ids)
-            _res_ids = [int(x) for x in _res_ids] # For json serialization
+            query_indices = template_indices = list(range(len(_res_starts)))
             chain_seq = atom_array[atom_array.pn_unit_iid == protein_chain].res_name[_res_starts]
             processed_entity_canonical_sequence = "".join(aa_chem_comp_3to1(standard_only=False).get(res_name, "X") for res_name in chain_seq)
         
@@ -267,8 +265,8 @@ def make_af3_json(af3_ss_input_dir: str = None,
                     "templates": [
                         {
                             "mmcifPath": pdb_path,
-                            "queryIndices": _res_ids,
-                            "templateIndices": _res_ids,
+                            "queryIndices": query_indices,
+                            "templateIndices": template_indices,
                             "templateChainId": protein_chain.split("_")[0],
                         }
                     ]
