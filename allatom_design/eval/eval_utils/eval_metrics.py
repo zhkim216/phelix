@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from natsort import natsorted
 
 # import gemmi
 import numpy as np
@@ -29,11 +30,16 @@ from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.seq_des_utils import get_sd_example
+
 from atomworks.io.utils.io_utils import to_cif_string
+from atomworks.io.parser import parse as aw_parse
+from atomworks.io.tools.rdkit import atom_array_to_rdkit
+from atomworks.ml.utils.geometry import align_atom_arrays
+from allatom_design.data.transform.sd_featurizer import annotate_ligand_pockets
 
 from biotite.structure import AtomArray
-from ost import io, mol
-from ost.mol.alg.ligand_scoring_scrmsd import SCRMSDScorer
+# from ost import io, mol
+# from ost.mol.alg.ligand_scoring_scrmsd import SCRMSDScorer
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdMolAlign
 
@@ -70,7 +76,8 @@ def compute_self_consistency_metrics_atomworks(sample_path: str = None,
                                     metadata=metadata)
                                        
     assert len(pred_sample_paths) == num_diffusion_samples, "Number of predicted structures must match number of diffusion samples"
-    
+        
+    pred_sample_paths = natsorted(pred_sample_paths)
     per_pred_metrics = {}
     for pred_sample_path in pred_sample_paths:
         pred_example = get_sd_example(pdb_path=pred_sample_path,
@@ -1311,96 +1318,96 @@ def compute_seq_recovery(native_seq: str, sampled_seq: str,
 # Docking metrics
 ###############################################
 
-def load_structure_ost(file_path: str | Path) -> mol.EntityHandle:
-    """Load a structure file (CIF or PDB) using OpenStructure."""
-    file_path = Path(file_path)
-    if file_path.suffix == ".cif":
-        return io.LoadMMCIF(str(file_path), fault_tolerant=True)
-    else:
-        return io.LoadPDB(str(file_path), fault_tolerant=True)
+# def load_structure_ost(file_path: str | Path) -> mol.EntityHandle:
+#     """Load a structure file (CIF or PDB) using OpenStructure."""
+#     file_path = Path(file_path)
+#     if file_path.suffix == ".cif":
+#         return io.LoadMMCIF(str(file_path), fault_tolerant=True)
+#     else:
+#         return io.LoadPDB(str(file_path), fault_tolerant=True)
 
 
-#! (JH) 251128 added for sym_ligand_rmsd calculation
-def extract_ligand_to_sdf(
-    entity: mol.EntityHandle,
-    ligand_chain: str,
-    output_dir: Path,
-    file_stem: str,
-) -> Path:
-    """
-    Extract ligand from entity and save as SDF file.
+# #! (JH) 251128 added for sym_ligand_rmsd calculation
+# def extract_ligand_to_sdf(
+#     entity: mol.EntityHandle,
+#     ligand_chain: str,
+#     output_dir: Path,
+#     file_stem: str,
+# ) -> Path:
+#     """
+#     Extract ligand from entity and save as SDF file.
     
-    Parameters
-    ----------
-    entity : mol.EntityHandle
-        The entity containing the ligand.
-    ligand_chain : str
-        The chain name of the ligand to extract.
-    output_dir : Path
-        Directory to save the SDF file.
-    file_stem : str
-        Base name for the SDF file.
+#     Parameters
+#     ----------
+#     entity : mol.EntityHandle
+#         The entity containing the ligand.
+#     ligand_chain : str
+#         The chain name of the ligand to extract.
+#     output_dir : Path
+#         Directory to save the SDF file.
+#     file_stem : str
+#         Base name for the SDF file.
     
-    Returns
-    -------
-    Path
-        Path to the SDF file.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
+#     Returns
+#     -------
+#     Path
+#         Path to the SDF file.
+#     """
+#     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Select ligand chain
-    ligand_view = entity.Select(f"cname={ligand_chain}")
+#     # Select ligand chain
+#     ligand_view = entity.Select(f"cname={ligand_chain}")
     
-    # Save as SDF
-    sdf_path = output_dir / f"{file_stem}_lig_{ligand_chain}.sdf"
-    io.SaveEntity(ligand_view, str(sdf_path), format="sdf")
+#     # Save as SDF
+#     sdf_path = output_dir / f"{file_stem}_lig_{ligand_chain}.sdf"
+#     io.SaveEntity(ligand_view, str(sdf_path), format="sdf")
     
-    return sdf_path
+#     return sdf_path
 
 
-def get_binding_site_residues(
-    entity: mol.EntityHandle,
-    ligand_chain: str,
-    receptor_chain: str,
-    radius: float = 8.0,
-) -> list[int]:
-    """
-    Get residue numbers of receptor residues within radius of the ligand.
+# def get_binding_site_residues(
+#     entity: mol.EntityHandle,
+#     ligand_chain: str,
+#     receptor_chain: str,
+#     radius: float = 8.0,
+# ) -> list[int]:
+#     """
+#     Get residue numbers of receptor residues within radius of the ligand.
     
-    Parameters
-    ----------
-    entity : mol.EntityHandle
-        The entity containing receptor and ligand.
-    ligand_chain : str
-        Chain ID of the ligand.
-    receptor_chain : str
-        Chain ID of the receptor.
-    radius : float
-        Distance cutoff in Angstroms.
+#     Parameters
+#     ----------
+#     entity : mol.EntityHandle
+#         The entity containing receptor and ligand.
+#     ligand_chain : str
+#         Chain ID of the ligand.
+#     receptor_chain : str
+#         Chain ID of the receptor.
+#     radius : float
+#         Distance cutoff in Angstroms.
     
-    Returns
-    -------
-    list[int]
-        List of residue numbers within the binding site.
-    """
-    ligand = entity.Select(f"cname={ligand_chain}")
-    receptor = entity.Select(f"cname={receptor_chain}")
+#     Returns
+#     -------
+#     list[int]
+#         List of residue numbers within the binding site.
+#     """
+#     ligand = entity.Select(f"cname={ligand_chain}")
+#     receptor = entity.Select(f"cname={receptor_chain}")
     
-    binding_site_residues = set()
+#     binding_site_residues = set()
     
-    # Get all ligand atom positions
-    for lig_atom in ligand.atoms:
-        lig_pos = lig_atom.pos
+#     # Get all ligand atom positions
+#     for lig_atom in ligand.atoms:
+#         lig_pos = lig_atom.pos
         
-        # Check distance to receptor atoms
-        for rec_atom in receptor.atoms:
-            rec_pos = rec_atom.pos
-            dist = np.sqrt(sum((lig_pos[i] - rec_pos[i])**2 for i in range(3)))
+#         # Check distance to receptor atoms
+#         for rec_atom in receptor.atoms:
+#             rec_pos = rec_atom.pos
+#             dist = np.sqrt(sum((lig_pos[i] - rec_pos[i])**2 for i in range(3)))
             
-            if dist <= radius:
-                binding_site_residues.add(rec_atom.residue.number.num)
+#             if dist <= radius:
+#                 binding_site_residues.add(rec_atom.residue.number.num)
     
-    return sorted(binding_site_residues)
+#     return sorted(binding_site_residues)
 
 #! (JH) 251128 added: Atomworks-based implementation
 def calculate_ligand_rmsd_with_binding_site_superposition(
@@ -1440,10 +1447,7 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     dict
         Dictionary with RMSD values and other metrics.
     """
-    from atomworks.io.parser import parse as aw_parse
-    from atomworks.io.tools.rdkit import atom_array_to_rdkit
-    from atomworks.ml.utils.geometry import align_atom_arrays
-    from allatom_design.data.transform.sd_featurizer import annotate_ligand_pockets
+    
     
     ref_cif_path = Path(ref_cif_path)
     pred_cif_path = Path(pred_cif_path)
@@ -1542,10 +1546,7 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     
     # Calculate symmetry-corrected RMSD using RDKit
     sym_rmsd = None
-    try:
-        from rdkit import Chem
-        from rdkit.Chem import AllChem, rdMolAlign
-        
+    try:        
         # Convert ligand atom arrays to RDKit molecules
         ref_lig_full = ref_array[ref_array.chain_id == ligand_chain]
         pred_lig_full = pred_aligned[pred_aligned.chain_id == ligand_chain]
