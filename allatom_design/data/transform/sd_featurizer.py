@@ -207,6 +207,28 @@ def sd_featurizer(
 
     return Compose(transforms)
 
+def sd_featurizer_with_load_any(
+    max_tokens: int | None = None,
+    max_atoms: int | None = None,
+    remove_keys: list[str] = [], 
+) -> Transform:
+    """
+    Build a transform pipeline that transforms a featurized structure from cif files of designed structures loaded with load_any.
+    Assume necessary preprocessing has already been done during the design process.
+    """
+    
+    transforms = [EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
+                  ComputeAtomToTokenMap(),
+                  AddChainTypeFeatrues(), 
+                  ConvertToTorch(keys=["feats"]),                  
+                  FeaturizeCoordsAndMasks(),
+                  PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
+                  FlattenFeatsDict(),
+                  RemoveKeys(keys=remove_keys),
+    ]
+    
+    return Compose(transforms)
+        
 class CheckCoordinatesAreNan(Transform):
     """Check if the coordinates are nan."""
 
