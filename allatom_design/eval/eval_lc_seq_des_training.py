@@ -1,11 +1,17 @@
 import gc
 import glob
+import logging
 import os
 import shutil
 import subprocess
 import traceback
+import warnings
 from collections import defaultdict
 from pathlib import Path
+
+# Suppress DeprecationWarning from google.protobuf and jax
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="google.protobuf")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="jax")
 
 import hydra
 import lightning as L
@@ -134,6 +140,7 @@ def main(cfg: DictConfig):
 
     # Load in metadata
     metadata = pd.read_parquet(cfg.metadata_path)    
+    metadata = metadata[metadata['pdb_id'] == '6n7a'] #! FIXME
     pdb_keys = metadata['pdb_id'].tolist()
     if cfg.debug:
         pdb_keys = pdb_keys[:cfg.num_sample_debug]
@@ -247,16 +254,29 @@ def main(cfg: DictConfig):
             seq_recovery_df.to_csv(f"{log_dir_i}/seq_recovery_metrics.csv", index=False)
             
             # Log sequence recovery metrics to wandb
-            seq_recovery_wandb_metrics = {}
+            seq_recovery_wandb_metrics = {
+                "trainer/global_step": global_step,
+                "trainer/epoch": epoch,
+            }
             if "total_avg_seq_recovery" in outputs and outputs["total_avg_seq_recovery"] is not None:
                 seq_recovery_wandb_metrics["eval/total_avg_seq_recovery"] = outputs["total_avg_seq_recovery"]
             if "total_avg_sp_seq_recovery" in outputs and outputs["total_avg_sp_seq_recovery"] is not None:
                 seq_recovery_wandb_metrics["eval/total_avg_sp_seq_recovery"] = outputs["total_avg_sp_seq_recovery"]
             
-            if not cfg.wandb.no_wandb and seq_recovery_wandb_metrics:
-                seq_recovery_wandb_metrics["trainer/global_step"] = global_step
-                seq_recovery_wandb_metrics["trainer/epoch"] = epoch
-                wandb.log(seq_recovery_wandb_metrics, step=global_step)
+            # Also log per-sample mean seq recovery from the DataFrame
+            if len(seq_recovery_df) > 0:
+                if "sample_seq_recovery" in seq_recovery_df.columns:
+                    mean_sr = seq_recovery_df["sample_seq_recovery"].mean()
+                    if pd.notna(mean_sr):
+                        seq_recovery_wandb_metrics["eval/mean_sample_seq_recovery"] = mean_sr
+                if "sample_sp_seq_recovery" in seq_recovery_df.columns:
+                    mean_sp_sr = seq_recovery_df["sample_sp_seq_recovery"].mean()
+                    if pd.notna(mean_sp_sr):
+                        seq_recovery_wandb_metrics["eval/mean_sample_sp_seq_recovery"] = mean_sp_sr
+            
+            if not cfg.wandb.no_wandb:
+                wandb.log(seq_recovery_wandb_metrics, step=global_step, commit=True)
+                print(f"Logged Phase 1 metrics to wandb for step {global_step}")
             
             # === Free PyTorch memory before next checkpoint ===
             del seq_des_model
@@ -420,7 +440,12 @@ def main(cfg: DictConfig):
             else:
                 print(f"No metrics computed for {job_name} (skipping this sample)")
 
-        # Save metrics CSV
+        # Save metrics CSV and log to wandb
+        out_metrics = {
+            "trainer/global_step": global_step,
+            "trainer/epoch": epoch,
+        }
+        
         if id_to_per_pred_metrics:
             rows = []
             for sample_id, metrics_dict in id_to_per_pred_metrics.items():
@@ -457,7 +482,7 @@ def main(cfg: DictConfig):
             def filter_none(values):
                 return [v for v in values if v is not None]
             
-            out_metrics = {f"eval/mean/{k}": np.nanmean(filter_none(v)) for k, v in all_metrics.items() if filter_none(v)}
+            out_metrics.update({f"eval/mean/{k}": np.nanmean(filter_none(v)) for k, v in all_metrics.items() if filter_none(v)})
             out_metrics.update({f"eval/median/{k}": np.nanmedian(filter_none(v)) for k, v in all_metrics.items() if k != "num_bs_residues" and filter_none(v)})
             
             # Ranked metrics: best pLDDT sample per sample_id
@@ -475,11 +500,13 @@ def main(cfg: DictConfig):
             
             out_metrics.update({f"eval/ranked/mean_{k}": np.nanmean(v) for k, v in ranked_metrics.items()})
             out_metrics.update({f"eval/ranked/median_{k}": np.nanmedian(v) for k, v in ranked_metrics.items()})
+        else:
+            print(f"No metrics computed for step {global_step} (id_to_per_pred_metrics is empty)")
 
-            if not cfg.wandb.no_wandb:
-                out_metrics["trainer/global_step"] = global_step
-                out_metrics["trainer/epoch"] = epoch
-                wandb.log(out_metrics, step=global_step)
+        # Always log to wandb at end of each checkpoint (even if metrics are empty)
+        if not cfg.wandb.no_wandb:
+            wandb.log(out_metrics, step=global_step, commit=True)
+            print(f"Logged Phase 2 metrics to wandb for step {global_step}")
 
         # Cleanup temp dirs
         for d in [Path(log_dir_i, "tmp")]:
