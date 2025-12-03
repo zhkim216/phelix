@@ -133,8 +133,7 @@ def main(cfg: DictConfig):
     log_dir = wandb_setup(base_out_dir=cfg.base_out_dir, exp_name=cfg.exp_name, cfg_dict=cfg_dict, **cfg.wandb)
 
     # Load in metadata
-    metadata = pd.read_parquet(cfg.metadata_path)    
-    metadata = metadata.iloc[8:9] #! FIXME
+    metadata = pd.read_parquet(cfg.metadata_path)        
     pdb_keys = metadata['pdb_id'].tolist()
     if cfg.debug:
         pdb_keys = pdb_keys[:cfg.num_sample_debug]
