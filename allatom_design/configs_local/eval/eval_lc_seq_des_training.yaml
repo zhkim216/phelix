@@ -1,6 +1,6 @@
 # Wandb configuration
 wandb:
-  no_wandb: false  # Disable wandb logging
+  no_wandb: true  # Disable wandb logging
   project: "ligand_seq_des"  # Wandb project name
   wandb_id: "zhkim216"  # Wandb username
   group: "debug" # Wandb group name
@@ -16,11 +16,11 @@ eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 eval_last_ckpt: true
 use_ema: false
 evaluate_self_consistency: true
-evaluate_template_conditioned_docking: true
+evaluate_template_conditioned_docking: false
 
 # Skip sampling options (use when sampling is already done)
 skip_sampling: false  # if true, skip sampling and load from skip_sampling_dir
-skip_sampling_dir: /home/possu/jinho/out_dir/debug_eval_ligand_seq_des/debug_eval_af3_exp1_cfg0/step_55000_epoch_35  # directory containing samples/ folder from previous run
+skip_sampling_dir: /home/possu/jinho/out_dir/debug_eval_ligand_seq_des/debug_eval_af3_exp1_cfg0/step_75000_epoch_47  # directory containing samples/ folder from previous run
 
 # Metadata
 metadata_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1.parquet
@@ -120,7 +120,7 @@ transform_cfg_for_af3_prediction:
 # Denoiser options
 denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp1_cfg0
 sampling_cfg_overrides:
-  batch_size: 1
+  batch_size: 2
   num_seqs_per_pdb: 2  # number of sequences to sample per pdb
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
