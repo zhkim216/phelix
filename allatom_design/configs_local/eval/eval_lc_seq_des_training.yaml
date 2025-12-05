@@ -9,7 +9,7 @@ wandb:
 seed: 0
 num_workers: 1  # for dataloading
 debug: true
-num_sample_debug: 2
+num_sample_debug: 1
 start_step: 55000  # start evaluation after this step, 0 or null to start from the beginning
 end_step: 55000  # end evaluation after this step (inclusive), null to evaluate until the end
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
@@ -120,8 +120,8 @@ transform_cfg_for_af3_prediction:
 # Denoiser options
 denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp1_cfg0
 sampling_cfg_overrides:
-  batch_size: 2
-  num_seqs_per_pdb: 2  # number of sequences to sample per pdb
+  batch_size: 1
+  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
   num_workers: ${num_workers}

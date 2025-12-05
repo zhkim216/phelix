@@ -18,8 +18,6 @@ data_loader_cfg:
   val_pin_memory: false
   val_persistent_workers: false
   
-
-
 sampling_weights:
   alphas_chain:
     a_prot: 1.0
