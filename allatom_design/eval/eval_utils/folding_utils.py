@@ -199,7 +199,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
     assert pdb_chain_info is not None or metadata is not None, "either of metadata or pdb_chain_info must be provided"
         
     protein_columns = ['q_pn_unit_is_protein']
-    nonpolymer_ligand_columns = ['q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal']
+    nonpolymer_ligand_columns = ['q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal', 'q_pn_unit_non_polymer_res_names']
     polymer_ligand_columns = ['q_pn_unit_is_peptide', 'q_pn_unit_is_nuc_ligand', 'q_pn_unit_is_nuc_polymer']
 
     pdb_chain_info = {}
@@ -214,21 +214,22 @@ def make_af3_json(af3_ss_input_dir: str = None,
     for column in polymer_ligand_columns:
         expanded_polymer_ligand_columns.extend([f'{column}_{i}' for i in [1,2]])
                 
-        for _, row in metadata.iterrows():
-            pdb_key = row["pdb_id"]            
-            pdb_chain_info[pdb_key] = {}
-            pdb_chain_info[pdb_key]['protein_chains'] = []
-            pdb_chain_info[pdb_key]['ligand_chains'] = []            
-            for column in expanded_protein_columns:
-                if row[column]:
-                    suffix = column.split("_")[-1]
-                    pdb_chain_info[pdb_key]['protein_chains'].append(row[f'q_pn_unit_iid_{suffix}'])
-            for column in expanded_nonpolymer_ligand_columns:
-                if row[column]:
-                    suffix = column.split("_")[-1]
-                    pdb_chain_info[pdb_key]['ligand_chains'].append(row[f'q_pn_unit_iid_{suffix}'])
+    for _, row in metadata.iterrows():
+        pdb_key = row["pdb_id"]            
+        pdb_chain_info[pdb_key] = {}
+        pdb_chain_info[pdb_key]['protein_chains'] = []
+        pdb_chain_info[pdb_key]['ligand_chains'] = []            
+        for column in expanded_protein_columns:
+            if row[column]:
+                suffix = column.split("_")[-1]
+                pdb_chain_info[pdb_key]['protein_chains'].append(row[f'q_pn_unit_iid_{suffix}'])
+        for column in expanded_nonpolymer_ligand_columns:
+            if row[column]:
+                suffix = column.split("_")[-1]
+                chain_ccd_code = (row[f'q_pn_unit_iid_{suffix}'], row[f'q_pn_unit_non_polymer_res_names_{suffix}'])
+                if chain_ccd_code not in pdb_chain_info[pdb_key]['ligand_chains']:
+                    pdb_chain_info[pdb_key]['ligand_chains'].append(chain_ccd_code)                
                          
-    
     af3_ss_json_paths = []        
     af3_tc_json_paths = []
     for i in range(len(outputs["atom_array"])):
@@ -274,20 +275,18 @@ def make_af3_json(af3_ss_input_dir: str = None,
             })                
         
         
-        for ligand_chain in ligand_chains:
-            _res_starts = get_residue_starts(atom_array[atom_array.pn_unit_iid == ligand_chain])
-            chain_seq = atom_array[atom_array.pn_unit_iid == ligand_chain].res_name[_res_starts]
-            ligand_ccd_code = "".join(chain_seq)
+        for ligand_chain in ligand_chains:        
+            ligand_chain_iid, ligand_ccd_code = ligand_chain
             ss_sequences.append({
                 "ligand": {
-                    "id": ligand_chain.split("_")[0],
+                    "id": ligand_chain_iid.split("_")[0],
                     "ccdCodes": [ligand_ccd_code]
                 }
             })
             
             tc_sequences.append({
                 "ligand": {
-                    "id": ligand_chain.split("_")[0],
+                    "id": ligand_chain_iid.split("_")[0],
                     "ccdCodes": [ligand_ccd_code]
                 }
             })
