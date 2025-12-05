@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=lp_exp1
 #SBATCH -p possu
-#SBATCH --array=6
+#SBATCH --array=0-5
 #SBATCH --gres=gpu:1
-#SBATCH --mem=96G
+#SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-0:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/job_%A_%a.out
@@ -21,8 +21,8 @@ cd "${BASE_DIR}"
 # Wandb settings / experiment name
 WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
-GROUP="atomworks"
-EXP_NAME_BASE="exp1"
+GROUP="training"
+EXP_NAME_BASE="exp2"
 
 # Dataset paths
 RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
@@ -31,15 +31,15 @@ RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 DENOISER_TYPE="lc_atom_mpnn"
 
 CONFIGS=(
-  # "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re data.sampling_weights.betas.beta_chain=1.0 data.sampling_weights.betas.beta_interface=1.0"
-  # "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re data.sampling_weights.betas.beta_chain=1.0 data.sampling_weights.betas.beta_interface=3.0"
-  # "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re data.sampling_weights.betas.beta_chain=1.0 data.sampling_weights.betas.beta_interface=5.0"
-  # "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re data.sampling_weights.betas.beta_chain=1.0 data.sampling_weights.betas.beta_interface=1.0"
-  # "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re data.sampling_weights.betas.beta_chain=1.0 data.sampling_weights.betas.beta_interface=3.0"
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re data.sampling_weights.betas.beta_chain=1.0 data.sampling_weights.betas.beta_interface=5.0"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=false"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=true"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.use_sidechain_context=true denoiser.mpnn.use_ligand_context=true"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=false"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=true"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.use_sidechain_context=true denoiser.mpnn.use_ligand_context=true"
 )
 
-IDX=$((SLURM_ARRAY_TASK_ID) -6)
+IDX=$((SLURM_ARRAY_TASK_ID))
 OVERRIDES="${CONFIGS[$IDX]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
 
@@ -79,8 +79,8 @@ python3 allatom_design/train_seq_denoiser.py \
     data.sampling_weights.alphas_chain.a_metal=0.0 \
     data.sampling_weights.alphas_interface.a_prot=1.0 \
     data.sampling_weights.alphas_interface.a_small_molecule=1.0 \
-    data.sampling_weights.alphas_interface.a_nuc=1.0 \
-    data.sampling_weights.alphas_interface.a_metal=1.0 \
+    data.sampling_weights.alphas_interface.a_nuc=0.0 \
+    data.sampling_weights.alphas_interface.a_metal=0.0 \
     data.sampling_weights.betas.beta_chain=1.0 \
     data.sampling_weights.betas.beta_interface=1.0 \
     data.samples_per_epoch=50000 \

@@ -1,6 +1,6 @@
 # Wandb configuration
 wandb:
-  no_wandb: false  # Disable wandb logging
+  no_wandb: true  # Disable wandb logging
   project: "debug_ligand_seq_des"  # Wandb project name
   wandb_id: "zhkim216"  # Wandb username
   group: "debug" # Wandb group name
@@ -12,7 +12,7 @@ exp_name: null  # Wandb exp name
 # Run settings
 overfit: -1 # Number of examples to overfit to, -1 to disable
 cuda: True
-num_workers: 23 # Dataloader num workers
+num_workers: 8 # Dataloader num workers
 
 # Finetuning options
 finetuning:
