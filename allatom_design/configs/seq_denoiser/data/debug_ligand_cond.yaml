@@ -11,6 +11,14 @@ exclude_val_cluster: false
 ligand_clustered: false
 keep_pn_unit_iids_in_extra_info: true #! (JH) changed 251031
 
+data_loader_cfg:
+  prefetch_factor: 1
+  prefetch_buffer_size: 1
+  train_pin_memory: true
+  train_persistent_workers: true
+  val_pin_memory: false
+  val_persistent_workers: false
+
 sampling_weights:
   alphas_chain:
     a_prot: 1.0
@@ -23,7 +31,7 @@ sampling_weights:
     a_nuc: 1.0
     a_metal: 1.0
   betas:
-    beta_chain: 0.0
+    beta_chain: 1.0
     beta_interface: 1.0
 
 train_filters:
@@ -65,8 +73,8 @@ cif_parser_args:
   hydrogen_policy: "remove"
   
 featurizer_cfg:
-  max_tokens: 512 #! DEBUG
-  max_atoms: 4608 #! DEBUG
+  max_tokens: 256 #! DEBUG
+  max_atoms: 2304 #! DEBUG
   crop_center_cutoff_distance: 15.0
   crop_spatial_p: 0.5
   remove_unresolved_tokens: false #! (JH) changed 250926,
@@ -75,7 +83,7 @@ featurizer_cfg:
   apply_random_augmentation: true
   translation_scale: 1.0
 
-samples_per_epoch: 500 #! DEBUG
+samples_per_epoch: 100 #! DEBUG
 batch_size: ${train.batch_size}
 num_workers: ${num_workers}
 random_seed: ${train.seed}
