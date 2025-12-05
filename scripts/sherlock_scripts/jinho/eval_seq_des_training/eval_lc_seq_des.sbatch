@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=eval_af3
-#SBATCH -p bioe,possu
-#SBATCH --array=0-6
+#SBATCH -p possu
+#SBATCH --array=3-6
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -46,8 +46,7 @@ echo "========================================"
 
 # Input paths
 CKPT_DIR="/scratch/users/zhkim216/out_dir/ligand_seq_des/${EXP_NAME_BASE}"
-CACHED_EXAMPLE_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
-METADATA_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1.parquet
+METADATA_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_rep_cluster.parquet
 
 # Check if checkpoint directory exists
 if [ ! -d "$CKPT_DIR" ]; then
@@ -66,19 +65,20 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_lc_seq_des_training.py 
     wandb.group=eval \
     seed=0 \
     debug=false \
-    start_step=null \
+    start_step=22500 \
     end_step=null \
+    eval_every_n_ckpts=2 \
+    eval_last_ckpt=false \
     use_ema=true \
-    evaluate_self_consistency=true \
+    evaluate_self_consistency=false \
     evaluate_template_conditioned_docking=true \
+    skip_sampling=false \
     metadata_path=${METADATA_PATH} \
     exp_name=${EXP_NAME} \
-    base_out_dir=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des \
-    input_cfg.load_from_cache=true \
-    input_cfg.load_cache_cfg.cached_example_path=${CACHED_EXAMPLE_PATH} \
+    base_out_dir=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des_re \
     denoiser_train_dir=${CKPT_DIR} \
-    sampling_cfg_overrides.batch_size=4 \
-    sampling_cfg_overrides.num_seqs_per_pdb=8 \
+    sampling_cfg_overrides.batch_size=8 \
+    sampling_cfg_overrides.num_seqs_per_pdb=1 \
     sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=500 \
     sampling_cfg_overrides.potts_sampling_cfg.lcp_expand_edge_idx_fix=${LCP_FIX_VALUE} \
     struct_pred_cfg.af3.inference_config.ss.num_recycles=10 \
