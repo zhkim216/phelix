@@ -1,9 +1,9 @@
 task: ${model.task}
 pdb_path: /home/possu/jinho/datasets/debug_atomworks_lmpnn
 parquet_path: /home/possu/jinho/datasets/debug_atomworks_lmpnn/metadata_nuc_clustered_seq_clustered_03.parquet
-validation_ids_file: /home/possu/jinho/datasets/splits/lmpnn_val_list.csv  # Boltz val set ids. Filtering is case insensitive, no extension.
+validation_ids_file: /home/possu/jinho/datasets/splits/lmpnn_val_list.csv 
 debug: ${train.debug}
-debug_num_ids: 80 #! For debugging
+debug_num_ids: 40 #! For debugging
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
 residue_cache_dir: /home/possu/jinho/datasets/atomworks_cached_residue_data
 exclude_val_cluster: false
@@ -27,8 +27,8 @@ sampling_weights:
   alphas_interface:
     a_prot: 1.0
     a_small_molecule: 1.0
-    a_nuc: 1.0
-    a_metal: 1.0
+    a_nuc: 0.0
+    a_metal: 0.0
   betas:
     beta_chain: 0.0
     beta_interface: 1.0
