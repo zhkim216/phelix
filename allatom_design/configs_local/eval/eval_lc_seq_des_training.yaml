@@ -15,18 +15,19 @@ end_step: 75000  # end evaluation after this step (inclusive), null to evaluate 
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
 eval_last_ckpt: true
 use_ema: false
-evaluate_self_consistency: true
-evaluate_template_conditioned_docking: false
+evaluate_self_consistency: false
+evaluate_template_conditioned_docking: true
+protein_only: true
 
 # Skip sampling options (use when sampling is already done)
 skip_sampling: false  # if true, skip sampling and load from skip_sampling_dir
 skip_sampling_dir: /home/possu/jinho/out_dir/debug_eval_ligand_seq_des/debug_eval_af3_exp1_cfg0/step_75000_epoch_47  # directory containing samples/ folder from previous run
 
 # Metadata
-metadata_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1.parquet
+metadata_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_rep_cluster.parquet
 
 # Outputs
-exp_name: eval_af3_exp1_cfg0 # experiment name; used for wandb and output directory
+exp_name: eval_af3_exp1_cfg0_po # experiment name; used for wandb and output directory
 base_out_dir: /home/possu/jinho/out_dir/eval_ligand_seq_des  # outputs will be saved to base_out_dir/exp_name
 
 # Input data and saving cif configuration for sequence design
@@ -120,8 +121,8 @@ transform_cfg_for_af3_prediction:
 # Denoiser options
 denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp1_cfg0
 sampling_cfg_overrides:
-  batch_size: 2
-  num_seqs_per_pdb: 2  # number of sequences to sample per pdb
+  batch_size: 1
+  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
   num_workers: ${num_workers}
@@ -166,7 +167,7 @@ struct_pred_cfg:
         mask_template_sidechains: true
         mask_template_sequence: true            
       tc:
-        num_recycles: 1
+        num_recycles: 10
         num_diffusion_samples: 1
         max_templates: 1
         ligand_protein_template_conditioning_mode: 1

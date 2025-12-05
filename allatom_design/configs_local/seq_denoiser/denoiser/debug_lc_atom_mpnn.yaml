@@ -20,11 +20,10 @@ mpnn:
   num_rbf: 16
 
   # ligand conditioning options
-  ligands:
+  lmpnn_module:
     num_context_feature_processor_layers: 2
-    num_context_feature_aggregator_layers: 2
-    atom_context_num: 16  
-    edge_update: true
+    num_context_feature_aggregator_layers: 2    
+    edge_update: false
 
   token_features:
     ca_only: false
@@ -34,9 +33,12 @@ mpnn:
     edge_n_channel: ${denoiser.mpnn.n_channel}
     num_rbf: ${denoiser.mpnn.num_rbf}
     use_multichain_encoding: true
-    atom_context_num: ${denoiser.mpnn.ligands.atom_context_num}
     token_bonds_masking: true 
     ligand_conditioning: ${denoiser.mpnn.ligand_conditioning}
+    use_sidechain_context: false
+    use_ligand_context: false
+    ligand_atom_context_num: 16  
+    sidechain_context_token_num: 16
 
   potts:
     k_neighbors_potts: 48
