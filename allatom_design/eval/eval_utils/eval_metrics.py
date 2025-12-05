@@ -1676,7 +1676,7 @@ def compute_template_conditioned_docking_metrics(
     
     # Extract receptor and ligand chains (remove suffix like "_1")
     receptor_chains = [ch.split("_")[0] for ch in chain_info.get('protein_chains', [])]
-    ligand_chains = [ch.split("_")[0] for ch in chain_info.get('ligand_chains', [])]
+    ligand_chains = [ch[0].split("_")[0] for ch in chain_info.get('ligand_chains', [])]
     
     if not receptor_chains or not ligand_chains:
         return {"error": "No receptor or ligand chains found"}

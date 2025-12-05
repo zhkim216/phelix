@@ -18,7 +18,8 @@ from atomworks.io.parser import parse as aw_parse
 from atomworks.io.utils import non_rcsb
 from atomworks.io.utils.io_utils import to_cif_string, to_cif_file, load_any
 from atomworks.ml.utils.token import apply_token_wise, get_token_starts, spread_token_wise
-from biotite.structure import AtomArray
+from biotite.structure import AtomArray, AtomArrayStack
+from biotite.structure.filter import filter_amino_acids
 from joblib import Parallel, delayed
 from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
@@ -361,6 +362,65 @@ def run_seq_des_ensemble(
 
     return outputs
 
+
+def extract_ligand_from_structure(
+    atom_array: AtomArray, 
+    ligand_pn_unit_iids: str | list[str] = None
+) -> AtomArray:
+    """
+    Extract ligand atoms from an atom array based on pn_unit_iid(s).
+    
+    Some ligands may consist of canonical amino acids, so filtering by
+    pn_unit_iid is more reliable than filtering by residue type.
+    
+    Args:
+        atom_array: AtomArray containing protein and ligand atoms
+        ligand_pn_unit_iids: pn_unit_iid(s) of the ligand(s) to extract.
+                             Can be a single pn_unit_iid string (e.g., "B_1") or
+                             a list of pn_unit_iids (e.g., ["B_1", "C_1"]).
+                             If None, falls back to extracting non-amino acid atoms.
+        
+    Returns:
+        AtomArray containing only ligand atoms from specified pn_unit_iid(s)
+    """
+    if ligand_pn_unit_iids is None:
+        # Fallback: extract non-amino acid atoms
+        protein_mask = filter_amino_acids(atom_array)
+        ligand_mask = ~protein_mask
+    else:
+        # Extract by pn_unit_iid(s)
+        if isinstance(ligand_pn_unit_iids, str):
+            ligand_pn_unit_iids = [ligand_pn_unit_iids]
+        
+        # Use pn_unit_iid annotation directly
+        ligand_mask = np.isin(atom_array.pn_unit_iid, ligand_pn_unit_iids)
+    
+    if not ligand_mask.any():
+        return None
+    
+    return atom_array[ligand_mask]
+
+
+def add_ligand_to_sample(sample_array: AtomArray, ligand_array: AtomArray) -> AtomArray:
+    """
+    Add ligand atoms to a sample atom array.
+    
+    Args:
+        sample_array: AtomArray from sequence design (protein only)
+        ligand_array: AtomArray containing ligand atoms to add
+        
+    Returns:
+        Combined AtomArray with protein and ligand
+    """
+    if ligand_array is None or len(ligand_array) == 0:
+        return sample_array
+    
+    # Concatenate using biotite's + operator
+    combined = sample_array + ligand_array
+    
+    return combined
+
+
 def run_lc_seq_des(
     *,
     model: SeqDenoiser = None,
@@ -371,7 +431,9 @@ def run_lc_seq_des(
     pdb_paths: list[str] = None,
     device: str = None,
     out_dir: str = None,
-    pos_constraint_df: pd.DataFrame | None = None,    
+    pos_constraint_df: pd.DataFrame | None = None,
+    protein_only: bool = False,
+    ligand_chain_ids: str | list[str] = None,
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
     """
     Given a list of processed structure files, run sequence design on them.
@@ -380,6 +442,12 @@ def run_lc_seq_des(
     will be a dictionary with the following keys:
         - "out_pdb": list of output PDB paths
         - "pred_seqs": list of predicted sequences as a string for each sample
+        
+    Args:
+        ...
+        ligand_chain_ids: Chain ID(s) of the ligand(s) to extract when protein_only=True.
+                          Can be a single chain ID string (e.g., "B") or a list of chain IDs.
+                          If None, falls back to extracting non-amino acid atoms.
     """
     # Set up outputs.
     outputs = defaultdict(list)
@@ -424,7 +492,8 @@ def run_lc_seq_des(
             B = len(batch_pdb_paths)
                                     
             batch = get_sd_batch(batch_pdb_paths,  data_cfg=data_cfg, transform_cfg=transform_cfg, 
-                                 device=device, parallel_pool=parallel_pool, metadata=metadata)
+                                 device=device, parallel_pool=parallel_pool, metadata=metadata,
+                                 protein_only=protein_only)
                                  
                                  
 
@@ -454,28 +523,105 @@ def run_lc_seq_des(
             # Get designed_cif_save_args from data_cfg_for_design
             cif_save_args = OmegaConf.to_container(data_cfg.cif_save_args, resolve=True) if data_cfg and data_cfg.get("cif_save_args") else {}
             
+            # If protein_only, load original structures from cached .pt files to extract ligands
+            original_ligands = {}
+            if protein_only:
+                for pdb_path in batch_pdb_paths:
+                    try:
+                        # Load from cached .pt file
+                        cached_example = torch.load(str(pdb_path), map_location="cpu", weights_only=False)
+                        orig_array = cached_example.get("atom_array")
+                        if orig_array is None:
+                            print(f"Warning: No atom_array found in cached file {pdb_path}")
+                            continue
+                        
+                        # Get pdb_id and find ligand pn_unit_iid from metadata
+                        pdb_id = Path(pdb_path).stem.split("_")[0]
+                        
+                        # Determine ligand pn_unit_iid from metadata if not explicitly provided
+                        current_ligand_pn_unit_iids = ligand_chain_ids  # Can be passed explicitly
+                        if current_ligand_pn_unit_iids is None and metadata is not None:
+                            metadata_row = metadata[metadata["pdb_id"] == pdb_id]
+                            if len(metadata_row) > 0:
+                                # Find non-protein (ligand) pn_unit_iid
+                                # q_pn_unit_is_protein_1/2 indicates if that unit is protein
+                                ligand_pn_unit_iid_list = []
+                                for suffix_num in ["1", "2"]:
+                                    is_protein_col = f"q_pn_unit_is_protein_{suffix_num}"
+                                    pn_unit_iid_col = f"q_pn_unit_iid_{suffix_num}"
+                                    if is_protein_col in metadata_row.columns and pn_unit_iid_col in metadata_row.columns:
+                                        is_protein = metadata_row[is_protein_col].iloc[0]
+                                        if not is_protein:  # This is ligand
+                                            ligand_pn_unit_iid = metadata_row[pn_unit_iid_col].iloc[0]
+                                            if pd.notna(ligand_pn_unit_iid):
+                                                ligand_pn_unit_iid_list.append(ligand_pn_unit_iid)
+                                if ligand_pn_unit_iid_list:
+                                    # Use pn_unit_iid directly (e.g., "B_1") - no suffix removal needed
+                                    current_ligand_pn_unit_iids = ligand_pn_unit_iid_list
+                                    print(f"Auto-detected ligand pn_unit_iid(s) for {pdb_id}: {current_ligand_pn_unit_iids}")
+                        
+                        ligand_array = extract_ligand_from_structure(orig_array, ligand_pn_unit_iids=current_ligand_pn_unit_iids)
+                        original_ligands[pdb_id] = ligand_array
+                    except Exception as e:
+                        print(f"Warning: Failed to extract ligand from {pdb_path}: {e}")
+            
             for si, (example_id, atom_arrays) in enumerate(id_to_atom_arrays.items()):
                 aux = id_to_aux[example_id]
                 
-                sample_stems = [convert_stem(f"{example_id}_sample{si}") for si in range(len(atom_arrays))]
+                # Add _protein_only suffix if protein_only mode (after convert_stem to avoid regex issues)
+                suffix = "_protein_only" if protein_only else ""
+                sample_stems = [convert_stem(f"{example_id}_sample{si}") + suffix for si in range(len(atom_arrays))]
 
+                # Store combined arrays (protein + ligand) for sequence recovery calculation
+                combined_arrays = [None] * len(atom_arrays)
+                
                 # Save output atom arrays to cif files.
                 for ai, sample_stem in enumerate(sample_stems):
-                    out_file = f"{sample_out_dir}/{sample_stem}.cif"
-                    atom_array = atom_arrays[ai]
-                    
-                    out_file = to_cif_file(atom_arrays[ai], 
-                                           out_file,
-                                           file_type="cif",
-                                           **cif_save_args)
-                    
-                    # Fix pdbx_formal_charge format for OpenStructure compatibility
-                    # OpenStructure expects integer (e.g., "1") not signed (e.g., "+1")
-                    _fix_cif_formal_charge(out_file)
-
                     outputs["example_id"].append(example_id)
-                    outputs["out_pdb"].append(out_file)
                     outputs["U"].append(aux[ai]["U"])
+                    
+                    if protein_only:
+                        # For protein_only mode, only save with_ligand file (skip protein-only file)
+                        pdb_id = sample_stem.split("_")[0]
+                        ligand_array = original_ligands.get(pdb_id)
+                        
+                        if ligand_array is not None and len(ligand_array) > 0:
+                            try:
+                                # Add ligand to sample
+                                combined_array = add_ligand_to_sample(atom_arrays[ai], ligand_array)
+                                combined_arrays[ai] = combined_array
+                                
+                                # Save with _protein_only_with_ligand suffix only
+                                with_ligand_stem = sample_stem.replace("_protein_only", "_protein_only_with_ligand")
+                                with_ligand_file = f"{sample_out_dir}/{with_ligand_stem}.cif"
+                                
+                                with_ligand_file = to_cif_file(combined_array,
+                                                               with_ligand_file,
+                                                               file_type="cif",
+                                                               **cif_save_args)
+                                _fix_cif_formal_charge(with_ligand_file)
+                                
+                                outputs["out_pdb"].append(with_ligand_file)
+                                print(f"Saved protein+ligand sample: {with_ligand_file}")
+                            except Exception as e:
+                                print(f"Warning: Failed to save protein+ligand sample for {sample_stem}: {e}")
+                                # Fallback: save protein-only file
+                                out_file = f"{sample_out_dir}/{sample_stem}.cif"
+                                out_file = to_cif_file(atom_arrays[ai], out_file, file_type="cif", **cif_save_args)
+                                _fix_cif_formal_charge(out_file)
+                                outputs["out_pdb"].append(out_file)
+                        else:
+                            # No ligand available, save protein-only file
+                            out_file = f"{sample_out_dir}/{sample_stem}.cif"
+                            out_file = to_cif_file(atom_arrays[ai], out_file, file_type="cif", **cif_save_args)
+                            _fix_cif_formal_charge(out_file)
+                            outputs["out_pdb"].append(out_file)
+                    else:
+                        # Normal mode: save as usual
+                        out_file = f"{sample_out_dir}/{sample_stem}.cif"
+                        out_file = to_cif_file(atom_arrays[ai], out_file, file_type="cif", **cif_save_args)
+                        _fix_cif_formal_charge(out_file)
+                        outputs["out_pdb"].append(out_file)
 
                 # Get sampled sequences as a string, with ":" to separate chains.
                 for ai in range(len(atom_arrays)):
@@ -659,7 +805,8 @@ def get_sd_batch(
     transform_cfg: DictConfig | None = None, 
     device: str = None, 
     parallel_pool: Parallel | None = None, 
-    metadata: pd.DataFrame = None,    
+    metadata: pd.DataFrame = None,
+    protein_only: bool = False,
 ) -> dict[str, Any]:
     """
     Given a list of pdb file paths, return a batch of sequence design model features.
@@ -670,14 +817,16 @@ def get_sd_batch(
         # Load PDBs sequentially.
         batch_examples = [get_sd_example(pdb_path = pdb_path, data_cfg=data_cfg,
                                          transform_cfg = transform_cfg,  
-                                         metadata=metadata) for pdb_path in pdb_paths]                                        
+                                         metadata=metadata,
+                                         protein_only=protein_only) for pdb_path in pdb_paths]                                        
                                          
                                          
                                          
     else:
         # Load PDBs in parallel.
         batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path = pdb_path, data_cfg=data_cfg, transform_cfg = transform_cfg,                                         
-                                                               metadata=metadata) for pdb_path in pdb_paths)
+                                                               metadata=metadata,
+                                                               protein_only=protein_only) for pdb_path in pdb_paths)
 
     # Collate examples.
     batch = sd_collator(batch_examples)
@@ -691,7 +840,8 @@ def get_sd_example(pdb_path: str = None,
                    transform_cfg: DictConfig = None, 
                    metadata: pd.DataFrame = None,       
                    load_from_cache: bool = False,  
-                   use_load_any: bool = False,                             
+                   use_load_any: bool = False,         
+                   protein_only: bool = False,
                    ) -> dict[str, Any]:
     """
     Given a pdb file path, return a dictionary of sequence design model features.
@@ -730,13 +880,42 @@ def get_sd_example(pdb_path: str = None,
     
     #! Replace information in the example with the information from the metadata
     #! Since when caching, it doesn't really care about the metadata as it's just caching the whole structure        
+        
     example['example_id'] = metadata_example["example_id"].iloc[0]
-    query_pn_unit_iids = metadata_example["q_pn_unit_iid_1"].tolist() + metadata_example["q_pn_unit_iid_2"].tolist()
-    example["query_pn_unit_iids"] = query_pn_unit_iids
-    
-    example['extra_info'] = {} #! delete all the information preexisting in the example
-    row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
-    example['extra_info'] = row_dict
+    if protein_only:
+        print(f"Protein only mode: {pdb_id}")
+        protein_chain_cols = ["q_pn_unit_is_protein_1", "q_pn_unit_is_protein_2"]
+        suffix = ""
+        for col in protein_chain_cols:
+            if metadata_example[col].iloc[0]:
+                suffix = col.split("_")[-1]
+                break
+
+        other_suffixes = ["_1", "_2"]
+        other_suffixes.remove(f"_{suffix}")
+        new_metadata = {}
+        for col in metadata_example.columns:            
+            if any(col.endswith(s) for s in other_suffixes):
+                continue
+            
+            # 선택된 suffix가 붙은 컬럼은 suffix 제거
+            if col.endswith(f"_{suffix}"):
+                new_col = col[:-len(f"_{suffix}")]
+            else:
+                new_col = col
+            
+            new_metadata[new_col] = metadata_example[col].iloc[0]
+        
+        example["query_pn_unit_iids"] = new_metadata["q_pn_unit_iid"]
+        example['extra_info'] = new_metadata
+        
+    else:
+        query_pn_unit_iids = metadata_example["q_pn_unit_iid_1"].tolist() + metadata_example["q_pn_unit_iid_2"].tolist()
+        example["query_pn_unit_iids"] = query_pn_unit_iids
+        
+        example['extra_info'] = {} #! delete all the information preexisting in the example
+        row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
+        example['extra_info'] = row_dict
     
     # Featurize the example.
     if not use_load_any:                
