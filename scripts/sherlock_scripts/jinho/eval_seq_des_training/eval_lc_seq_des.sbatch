@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=eval_af3
-#SBATCH -p possu
-#SBATCH --array=3-6
+#SBATCH -p bioe,possu
+#SBATCH --array=0-7
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -18,22 +18,26 @@ mkdir -p /scratch/users/zhkim216/job_output "${HYDRA_DIR}" "${OUT_DIR}"
 
 cd "${BASE_DIR}"
 
+# Ignore warnings
+export PYTHONWARNINGS="ignore"
+
 # Wandb settings
 WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 
-# Experiment names: exp1_cfg0, exp1_cfg1, exp1_cfg2, exp1_cfg3, exp1_cfg4, exp1_cfg6
-# Array 0-5: standard experiments with lcp_expand_edge_idx_fix=true
-# Array 6: exp1_cfg6 with lcp_expand_edge_idx_fix=false
-EXP_NAMES=("exp1_cfg0" "exp1_cfg1" "exp1_cfg2" "exp1_cfg3" "exp1_cfg4" "exp1_cfg6" "exp1_cfg6")
+# Experiment names
+# Array 0-5: standard experiments (protein_only=false)
+# Array 6-7: protein_only=true for exp2_cfg2, exp2_cfg5
+EXP_NAMES=("exp2_cfg0" "exp2_cfg1" "exp2_cfg2" "exp2_cfg3" "exp2_cfg4" "exp2_cfg5" "exp2_cfg2" "exp2_cfg5")
+
 EXP_NAME_BASE=${EXP_NAMES[SLURM_ARRAY_TASK_ID]}
 
-# Set lcp_expand_edge_idx_fix value and exp_name suffix
-if [ $SLURM_ARRAY_TASK_ID -eq 6 ]; then
-    LCP_FIX_VALUE=false
-    EXP_NAME=eval_af3_${EXP_NAME_BASE}_fix_false
+# Set protein_only flag based on array index
+if [[ $SLURM_ARRAY_TASK_ID -eq 6 || $SLURM_ARRAY_TASK_ID -eq 7 ]]; then
+    PROTEIN_ONLY=true
+    EXP_NAME=eval_af3_${EXP_NAME_BASE}_protein_only
 else
-    LCP_FIX_VALUE=true
+    PROTEIN_ONLY=false
     EXP_NAME=eval_af3_${EXP_NAME_BASE}
 fi
 
@@ -41,11 +45,12 @@ echo "========================================"
 echo "SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
 echo "EXP_NAME_BASE: $EXP_NAME_BASE"
 echo "EXP_NAME: $EXP_NAME"
-echo "LCP_FIX_VALUE: $LCP_FIX_VALUE"
+echo "PROTEIN_ONLY: $PROTEIN_ONLY"
 echo "========================================"
 
 # Input paths
 CKPT_DIR="/scratch/users/zhkim216/out_dir/ligand_seq_des/${EXP_NAME_BASE}"
+CACHED_EXAMPLE_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
 METADATA_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_rep_cluster.parquet
 
 # Check if checkpoint directory exists
@@ -70,6 +75,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_lc_seq_des_training.py 
     eval_every_n_ckpts=2 \
     eval_last_ckpt=false \
     use_ema=true \
+    protein_only=${PROTEIN_ONLY} \
     evaluate_self_consistency=false \
     evaluate_template_conditioned_docking=true \
     skip_sampling=false \
@@ -80,9 +86,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_lc_seq_des_training.py 
     sampling_cfg_overrides.batch_size=8 \
     sampling_cfg_overrides.num_seqs_per_pdb=1 \
     sampling_cfg_overrides.potts_sampling_cfg.potts_sweeps=500 \
-    sampling_cfg_overrides.potts_sampling_cfg.lcp_expand_edge_idx_fix=${LCP_FIX_VALUE} \
-    struct_pred_cfg.af3.inference_config.ss.num_recycles=10 \
-    struct_pred_cfg.af3.inference_config.ss.num_diffusion_samples=5 \
+    sampling_cfg_overrides.potts_sampling_cfg.lcp_expand_edge_idx_fix=true \
     struct_pred_cfg.af3.inference_config.tc.num_recycles=10 \
     struct_pred_cfg.af3.inference_config.tc.num_diffusion_samples=5 \
     hydra.run.dir=${HYDRA_DIR}

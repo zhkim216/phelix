@@ -9,10 +9,6 @@ import warnings
 from collections import defaultdict
 from pathlib import Path
 
-# Suppress DeprecationWarning from google.protobuf and jax
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="google.protobuf")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="jax")
-
 import hydra
 import lightning as L
 import numpy as np
@@ -38,6 +34,9 @@ from allatom_design.eval.eval_utils.folding_utils import (
 from atomworks.io.utils.io_utils import load_any
 from biotite.structure import AtomArrayStack
 
+# Suppress warnings
+import warnings
+warnings.filterwarnings("ignore")
 
 def load_outputs_from_samples_dir(samples_dir: str, metadata: pd.DataFrame = None) -> dict:
     """
@@ -128,6 +127,9 @@ def main(cfg: DictConfig):
     L.seed_everything(cfg.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+    if cfg.protein_only:
+        cfg.exp_name = f"{cfg.exp_name}_protein_only"
 
     if cfg.debug:
         cfg.wandb.project = f"debug_{cfg.wandb.project}"
@@ -233,7 +235,8 @@ def main(cfg: DictConfig):
                                     metadata=metadata,
                                     pdb_paths=pdb_files, device=device, 
                                     pos_constraint_df=None,
-                                    out_dir=log_dir_i)
+                                    out_dir=log_dir_i,
+                                    protein_only=cfg.get("protein_only", False))
             
             # === Save sequence recovery metrics ===
             sample_len = len(outputs["example_id"])
@@ -340,7 +343,7 @@ def main(cfg: DictConfig):
             outputs=outputs, 
             metadata=metadata,
             pdb_chain_info=None,                
-            json_config=cfg.struct_pred_cfg.af3.json_config
+            json_config=cfg.struct_pred_cfg.af3.json_config,
         )   
     
         # AF3 self-consistency and docking metrics per sample
