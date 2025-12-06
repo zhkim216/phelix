@@ -21,12 +21,24 @@ from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
 from allatom_design.data.datasets.atomworks_sd_dataset import AtomworksSDDataModule    
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
-@hydra.main(config_path="configs/seq_denoiser", config_name="seq_denoiser", version_base="1.3.2")
+@hydra.main(config_path="configs_local/seq_denoiser", config_name="debug_seq_denoiser", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Script for training an sequence denoiser model.
     """
-    assert cfg.resume.ckpt_path is None, "Resuming checkpoints not supported yet, should be None"
+    # Get resume checkpoint path if provided
+    resume_ckpt_path = cfg.resume.ckpt_path
+    resume_run_name = None  # Will be set if resuming
+    if resume_ckpt_path is not None:
+        assert Path(resume_ckpt_path).exists(), f"Resume checkpoint not found: {resume_ckpt_path}"
+        print(f"Will resume training from checkpoint: {resume_ckpt_path}")
+        
+        # Extract run name from checkpoint path (e.g., lilac-sound-509 from .../lilac-sound-509/checkpoints/...)
+        resume_run_name = Path(resume_ckpt_path).parent.parent.name
+        print(f"Will resume with run name: {resume_run_name}")
+        
+        # Handle config loading from checkpoint directory
+        cfg = load_resume_config(cfg, resume_ckpt_path)
 
     # Update config and resolve
     update_config(cfg)  # Conditionally update certain config values
@@ -58,10 +70,12 @@ def main(cfg: DictConfig):
     else:
         if local_rank is None:
             # If none, then we are either on node rank 0 or not using DDP
+            # Use resume_run_name if resuming, otherwise use exp_name (wandb will auto-generate if None)
+            run_name = resume_run_name if resume_run_name else cfg.exp_name
             wandb.init(
                 project=cfg.wandb.project,
                 entity=cfg.wandb.wandb_id,
-                name=cfg.exp_name,
+                name=run_name,
                 group=cfg.wandb.group,
                 config=cfg_dict,
                 dir=wandb_dir,
@@ -69,7 +83,12 @@ def main(cfg: DictConfig):
             os.environ["WANDB_RUN_NAME"] = wandb.run.name
 
         wandb_run_name = os.environ["WANDB_RUN_NAME"]
-        log_dir = Path(cfg.out_dir, cfg.wandb.project, wandb_run_name)  # base log dir
+        
+        # If resuming, use the original run directory instead of creating a new one
+        if resume_run_name:
+            log_dir = Path(cfg.out_dir, cfg.wandb.project, resume_run_name)
+        else:
+            log_dir = Path(cfg.out_dir, cfg.wandb.project, wandb_run_name)  # base log dir
 
         # path for run outputs
         results_dir = Path(log_dir, "results")
@@ -175,13 +194,66 @@ def main(cfg: DictConfig):
                         callbacks=callbacks,
                         **cfg.trainer
                         )
-    trainer.fit(model=lit_model, datamodule=datamodule)
+    trainer.fit(model=lit_model, datamodule=datamodule, ckpt_path=resume_ckpt_path)
 
 class SamplerEpochCallback(Callback):
     def on_train_epoch_start(self, trainer, pl_module):
         dm = trainer.datamodule
         if hasattr(dm, "_train_sampler"):
             set_sampler_epoch(dm._train_sampler, trainer.current_epoch)
+
+def load_resume_config(cfg: DictConfig, resume_ckpt_path: str) -> DictConfig:
+    """
+    Load config from checkpoint directory if use_current_cfg is False,
+    and apply any overrides specified in resume.overrides.
+    
+    Args:
+        cfg: Current config from hydra
+        resume_ckpt_path: Path to the checkpoint file
+        
+    Returns:
+        Updated config (either current or loaded from checkpoint with overrides)
+    """
+    use_current_cfg = cfg.resume.get("use_current_cfg", True)
+    overrides = cfg.resume.get("overrides", {})
+    
+    if not use_current_cfg:
+        # Load config from checkpoint directory
+        # Checkpoint path: /path/to/run/checkpoints/sd-step100-epoch03.ckpt
+        # Config path: /path/to/run/config.yaml
+        ckpt_path = Path(resume_ckpt_path)
+        run_dir = ckpt_path.parent.parent  # Go up from checkpoints/ to run directory
+        saved_config_path = run_dir / "config.yaml"
+        
+        if not saved_config_path.exists():
+            raise FileNotFoundError(
+                f"Config file not found at {saved_config_path}. "
+                f"Cannot resume with use_current_cfg=False. "
+                f"Set use_current_cfg=True to use current config instead."
+            )
+        
+        print(f"Loading config from checkpoint directory: {saved_config_path}")
+        with open(saved_config_path, "r") as f:
+            saved_cfg_dict = yaml.safe_load(f)
+        
+        # Convert to OmegaConf
+        cfg = OmegaConf.create(saved_cfg_dict)
+        
+        # Restore resume settings from current config (so we keep the ckpt_path etc.)
+        cfg.resume = OmegaConf.create({
+            "ckpt_path": resume_ckpt_path,
+            "use_current_cfg": False,
+            "overrides": overrides
+        })
+    
+    # Apply overrides
+    if overrides:
+        print(f"Applying config overrides: {overrides}")
+        for key, value in overrides.items():
+            OmegaConf.update(cfg, key, value, merge=True)
+    
+    return cfg
+
 
 def update_config(cfg: DictConfig) -> None:
     """
