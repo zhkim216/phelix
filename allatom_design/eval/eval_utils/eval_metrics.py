@@ -1722,7 +1722,7 @@ def compute_template_conditioned_docking_metrics(
             
             # Append scalar metrics (skip pred_array and mask fields)
             for key, value in result.items():
-                if key not in ("error", "aligned_path", "pred_array", "pred_ligand_mask", "pred_binding_site_mask"):
+                if key in ["ligand_rmsd", "binding_site_rmsd", "num_bs_residues"]:
                     per_sample_metrics.setdefault(key, []).append(value)
             
             # Append pLDDT metrics
