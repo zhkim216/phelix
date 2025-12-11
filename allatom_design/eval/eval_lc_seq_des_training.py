@@ -495,8 +495,8 @@ def main(cfg: DictConfig):
             def filter_none(values):
                 return [v for v in values if v is not None]
             
-            out_metrics.update({f"eval/mean/{k}": np.nanmean(filter_none(v)) for k, v in all_metrics.items() if filter_none(v)})
-            out_metrics.update({f"eval/median/{k}": np.nanmedian(filter_none(v)) for k, v in all_metrics.items() if k != "num_bs_residues" and filter_none(v)})
+            out_metrics.update({f"eval/mean_{k}": np.nanmean(filter_none(v)) for k, v in all_metrics.items() if filter_none(v)})
+            # out_metrics.update({f"eval/median/{k}": np.nanmedian(filter_none(v)) for k, v in all_metrics.items() if k != "num_bs_residues" and filter_none(v)})
             
             # Ranked metrics: best pLDDT sample per sample_id
             ranked_metrics = defaultdict(list)
@@ -511,8 +511,8 @@ def main(cfg: DictConfig):
                     if metric_name not in skip_metrics:
                         ranked_metrics[metric_name].append(values[best_diffusion_id])
             
-            out_metrics.update({f"eval/ranked/mean_{k}": np.nanmean(v) for k, v in ranked_metrics.items()})
-            out_metrics.update({f"eval/ranked/median_{k}": np.nanmedian(v) for k, v in ranked_metrics.items()})
+            out_metrics.update({f"eval/best_plddt/mean_{k}": np.nanmean(v) for k, v in ranked_metrics.items()})
+            # out_metrics.update({f"eval/ranked/median_{k}": np.nanmedian(v) for k, v in ranked_metrics.items()})
         else:
             print(f"No metrics computed for step {global_step} (id_to_per_pred_metrics is empty)")
 
