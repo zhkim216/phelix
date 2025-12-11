@@ -235,6 +235,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
     for i in range(len(outputs["atom_array"])):
         atom_array = outputs["atom_array"][i]
         pdb_path = outputs["out_pdb"][i]
+        tc_pdb_path = outputs["out_pdb_for_af3_tc"][i]
         job_name = Path(pdb_path).stem
         pdb_name = job_name.split("_")[0]
         protein_chains = pdb_chain_info[pdb_name]['protein_chains']        
@@ -244,14 +245,27 @@ def make_af3_json(af3_ss_input_dir: str = None,
         tc_sequences = []
         for protein_chain in protein_chains:
             _res_starts = get_residue_starts(atom_array[atom_array.pn_unit_iid == protein_chain])
-            query_indices = template_indices = list(range(len(_res_starts)))
-            chain_seq = atom_array[atom_array.pn_unit_iid == protein_chain].res_name[_res_starts]
-            processed_entity_canonical_sequence = "".join(aa_chem_comp_3to1(standard_only=False).get(res_name, "X") for res_name in chain_seq)
-        
+            _res_ids = atom_array[atom_array.pn_unit_iid == protein_chain].res_id[_res_starts]
+            _res_ids_0based = _res_ids - np.min(_res_ids)
+            
+            # Make full sequence with UNK for missing residues, to properly address missing residues in the sequence, in af3 prediction
+            # This method only fills in the gaps between the actual residues, not the gaps at the beginning or end of the chain
+            full_length = np.max(_res_ids) - np.min(_res_ids) + 1
+            chain_seq_with_gaps = np.full(full_length, "UNK")
+            
+            # Replace residues with actual sequence
+            chain_seq = atom_array[atom_array.pn_unit_iid == protein_chain].res_name[_res_starts]            
+            chain_seq_with_gaps[_res_ids_0based] = chain_seq
+            processed_entity_canonical_sequence_with_gaps = "".join(aa_chem_comp_3to1(standard_only=False).get(res_name, "X") for res_name in chain_seq_with_gaps)            
+            # processed_entity_canonical_sequence = "".join(aa_chem_comp_3to1(standard_only=False).get(res_name, "X") for res_name in chain_seq)
+                        
+            # Make template indices for the actual sequence. 0-based
+            query_indices = template_indices = [int(x) for x in list(_res_ids_0based)]
+                                
             ss_sequences.append({
                 "protein": {
                     "id": protein_chain.split("_")[0],
-                    "sequence": processed_entity_canonical_sequence,
+                    "sequence": processed_entity_canonical_sequence_with_gaps,
                     "unpairedMsa": "",
                     "pairedMsa": ""
                     }
@@ -260,12 +274,12 @@ def make_af3_json(af3_ss_input_dir: str = None,
             tc_sequences.append({
                 "protein": {
                     "id": protein_chain.split("_")[0],
-                    "sequence": processed_entity_canonical_sequence,
+                    "sequence": processed_entity_canonical_sequence_with_gaps, 
                     "unpairedMsa": "",
                     "pairedMsa": "",
                     "templates": [
                         {
-                            "mmcifPath": pdb_path,
+                            "mmcifPath": tc_pdb_path,
                             "queryIndices": query_indices,
                             "templateIndices": template_indices,
                             "templateChainId": protein_chain.split("_")[0],
@@ -436,172 +450,6 @@ def find_pred_sample_path_af3(out_dir: str = None,
             sample_cif_paths.append(cif_path)
             
     return sample_dirs, sample_cif_paths
-
-# try:
-#     from colabdesign import clear_mem, mk_afdesign_model
-#     from colabdesign.af import mk_af_model
-# except ImportError:
-#     print("ColabDesign not installed, skipping import")
-
-
-# def run_esmfold(sequence_list: list[str],
-#                 residue_index: TensorType["b n", torch.long],
-#                 model: EsmForProteinFolding,
-#                 tokenizer: EsmTokenizer
-#                 ) -> dict[str, TensorType["b ..."]]:
-#     """
-#     Run ESMFold on a list of sequences.
-
-#     Returns a dict containing:
-#     - pred_coords: (b n 37 3) predicted coordinates of atoms
-#     - plddt: (b n 37) predicted pLDDTs for all atoms
-#     - ca_plddt: (b n) predicted pLDDTs for CA atoms
-#     - seq_mask: (b n) sequence mask
-#     - aatype: (b n) input amino acid types in AF2 format
-#     - atom_mask: (b n 37) atom mask corresponding to aatype
-#     - residue_index: (b n) residue index, usually just range(n)
-#     - avg_ca_plddt: (b) average CA pLDDT across sequence
-#     """
-#     model = model.eval()
-
-#     esm_outputs = {}
-
-#     # Set up inputs
-#     inputs = tokenizer(
-#         sequence_list,
-#         return_tensors="pt",
-#         padding=True,
-#         add_special_tokens=False,
-#     ).to(model.device)
-
-#     inputs["position_ids"] = residue_index
-
-#     # Run model
-#     with torch.no_grad():
-#         outputs = model(**inputs)
-
-#     # Post-process outputs
-#     seq_mask = inputs.attention_mask
-#     # positions is shape (l, b, n, 14, 3)
-#     pred_coords_atom14 = outputs.positions[-1]
-#     pred_coords_atom37 = data.atom14_aatype_to_atom37(pred_coords_atom14, outputs.aatype)
-#     plddt = outputs.plddt * 100 * seq_mask[..., None]
-#     ca_plddt = plddt[:, :, 1]
-
-#     # Calculate average CA pLDDT
-#     avg_ca_plddt = (ca_plddt * seq_mask).sum(dim=-1) / seq_mask.sum(dim=-1).clamp(min=1e-3)
-
-#     esm_outputs = {
-#         "pred_coords_atom14": pred_coords_atom14,
-#         "pred_coords": pred_coords_atom37,
-#         "plddt": plddt,
-#         "ca_plddt": ca_plddt,
-#         "seq_mask": seq_mask,
-#         "aatype": outputs.aatype,
-#         "residue_index": outputs.residue_index,
-#         "avg_ca_plddt": avg_ca_plddt,
-#     }
-#     esm_outputs = {k: v.cpu() for k, v in esm_outputs.items()}
-
-#     # Add atom mask based on input aatypes for convenience
-#     aatype, seq_mask = esm_outputs["aatype"], esm_outputs["seq_mask"]
-#     esm_outputs["atom_mask"] = torch.tensor(STANDARD_ATOM_MASK)[aatype] * seq_mask[..., None]
-
-#     return esm_outputs
-
-
-
-# def run_esmfold_batched(sequences_list: list[str],
-#                         residue_index_list: list[TensorType["n_s", int]],
-#                         chain_index_list: list[TensorType["n_s", int]],
-#                         model: EsmForProteinFolding,
-#                         tokenizer: EsmTokenizer,
-#                         max_tokens_per_batch: int = 1024,
-#                         ) -> dict[str, list[TensorType["..."]]]:
-#     """
-#     Run ESMFold on a list of sequences, batching them by sequence length and to fit within a token limit.
-
-#     Returns a dict containing:
-#     - pred_coords: (b n 37 3) predicted coordinates of atoms
-#     - plddt: (b n 37) predicted pLDDTs
-#     - ca_plddt: (b n) predicted pLDDTs for CA atoms
-#     - seq_mask: (b n) sequence mask
-#     - aatype: (b n) input amino acid types in AF2 format
-#     - atom_mask: (b n 37) atom mask corresponding to aatype
-#     - residue_index: (b n) residue index, usually just range(n)
-#     - avg_ca_plddt: (b) average CA pLDDT across sequence
-#     """
-#     model = model.eval()
-#     esm_outputs = defaultdict(list)
-#     original_ids = []
-
-#     dataset = create_batched_seq_dataset(sequences_list, residue_index_list, chain_index_list, max_tokens_per_batch=max_tokens_per_batch)
-#     for batch in dataset:
-#         # Set up inputs
-#         inputs = tokenizer(
-#             batch["sequence"],
-#             return_tensors="pt",
-#             padding=True,
-#             add_special_tokens=False,
-#         ).to(model.device)
-
-#         # Add residue index gap of 1000 for chain separation
-#         residue_index = batch["residue_index"]
-#         residue_index = residue_index + (1000 * batch["chain_index"])
-
-#         inputs["position_ids"] = residue_index.to(model.device)
-
-#         # Run model
-#         with torch.no_grad():
-#             outputs = model(**inputs)
-
-#         # Post-process outputs
-#         seq_mask = inputs["attention_mask"]
-#         pred_coords_atom14 = outputs["positions"][-1]  # positions is shape (l, b, n, 14, 3)
-#         pred_coords_atom37 = data.atom14_aatype_to_atom37(pred_coords_atom14, outputs["aatype"])
-#         plddt = outputs["plddt"] * 100 * seq_mask[..., None]
-#         ca_plddt = plddt[:, :, 1]   # get pLDDT for CA atoms
-#         avg_ca_plddt = (ca_plddt * seq_mask).sum(dim=-1) / seq_mask.sum(dim=-1).clamp(min=1e-3)
-
-#         aatype, seq_mask = outputs.aatype.cpu(), seq_mask.cpu()
-#         atom_mask = torch.tensor(STANDARD_ATOM_MASK[aatype]) * seq_mask[..., None]
-
-#         # Create batch outputs
-#         esm_outputs_batch = {
-#             "pred_coords_atom14": pred_coords_atom14,
-#             "pred_coords": pred_coords_atom37,
-#             "plddt": plddt,
-#             "ca_plddt": ca_plddt,
-#             "seq_mask": seq_mask,
-#             "aatype": aatype,
-#             "residue_index": residue_index,
-#             "chain_index": batch["chain_index"],
-#             "avg_ca_plddt": avg_ca_plddt[..., None],  # add sequence dimension for consistency
-#             "atom_mask": atom_mask,    # add atom mask based on input aatypes for convenience
-#         }
-#         esm_outputs_batch = {k: v.cpu() for k, v in esm_outputs_batch.items()}
-
-#         # Crop each output to original sequence length
-#         seq_lens = seq_mask.sum(dim=-1).long()
-#         esm_outputs_batch = {k: [v[i, :l] for i, l in enumerate(seq_lens)] for k, v in esm_outputs_batch.items()}
-
-#         # Store outputs
-#         for k, v in esm_outputs_batch.items():
-#             esm_outputs[k].extend(v)
-
-#         # To preserve original sequence order
-#         original_ids.extend(batch["id"])
-
-#     # Reorder all outputs based on original sequence order
-#     reordered_outputs = {k: [] for k in esm_outputs}
-#     sort_indices = torch.argsort(torch.tensor(original_ids))
-#     for idx in sort_indices:
-#         for k in esm_outputs:
-#             reordered_outputs[k].append(esm_outputs[k][idx])
-
-#     return reordered_outputs
-
-
 
 def create_batched_seq_dataset(all_sequences: list[str],
                                all_residue_indices: list[TensorType["n_s", int]],
