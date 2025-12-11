@@ -43,6 +43,8 @@ from atomworks.ml.utils.token import (apply_token_wise,
 import allatom_design.data.const as const
 from allatom_design.data.transform.pad import pad_dim
 
+import biotite.structure as struc
+
 # Keep track of the token/atom dimensions of the features for padding & cropping
 FEAT_TO_TOKEN_DIM = {
     # Maps feature name to the token dimension
@@ -214,12 +216,13 @@ def sd_featurizer_with_load_any(
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure from cif files of designed structures loaded with load_any.
-    Assume necessary preprocessing has already been done during the design process.
+    Assume necessary preprocessing (e.g., removing clashing PN units) has already been done during the design process.
     """
     
-    transforms = [EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
-                  ComputeAtomToTokenMap(),
+    transforms = [AddGlobalTokenIdAnnotation(),            
+                  EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),      
                   AddChainTypeFeatrues(), 
+                  ComputeAtomToTokenMap(),                   
                   ConvertToTorch(keys=["feats"]),                  
                   FeaturizeCoordsAndMasks(),
                   PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
@@ -227,8 +230,32 @@ def sd_featurizer_with_load_any(
                   RemoveKeys(keys=remove_keys),
     ]
     
+    return Compose(transforms)        
+
+def sd_featurizer_for_af3_prediction(max_tokens: int | None = None, 
+                                     max_atoms: int | None = None, 
+                                     remove_keys: list[str] = [],
+                                     remove_unresolved_tokens: bool = False):
+    transforms = [AtomizeShortPolymers(),
+                  RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
+                AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
+                EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
+                AddChainTypeFeatrues(), #! (JH) added 251031            
+                ComputeAtomToTokenMap(),
+                # AddAF3TokenBondFeatures(), # Todo: Need to look at it later, when we're using bond features
+                ConvertToTorch(keys=["encoded", "feats"]),
+                # Handle missing atoms and tokens
+                # Add features from the atom_array
+                FeaturizeCoordsAndMasks(),
+                # AddChainTypeAnnotationsToAtomArray(), #! (JH) added 251117      
+                PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
+                SubsetToKeys(keys=["example_id", "feats", *INFERENCE_ONLY_KEYS]),
+                FlattenFeatsDict(),
+                RemoveKeys(keys=remove_keys),  
+                ]
     return Compose(transforms)
-        
+
+
 class CheckCoordinatesAreNan(Transform):
     """Check if the coordinates are nan."""
 
@@ -623,13 +650,14 @@ class AddChainTypeFeatrues(Transform):
 
 
 #! (JH) 251128 added: Binding site annotation for docking metrics
-import biotite.structure as struc
 
 def annotate_ligand_pockets(
-    atom_array: AtomArray,
+    atom_array: AtomArray = None,
     pocket_distance: float = 8.0,
     n_min_ligand_atoms: int = 1,
     annotation_name: str = "is_ligand_pocket",
+    receptor_chain: str = "A",
+    ligand_chain: str = "C",
 ) -> AtomArray:
     """
     Identify atoms near ligands of sufficient size.
@@ -658,7 +686,7 @@ def annotate_ligand_pockets(
         all_valid_ligands_mask = np.isin(atom_array.chain_id, valid_ligand_chains) & non_polymer_mask
     else:
         ligand_pn_unit_iids, ligand_counts = np.unique(
-            atom_array.pn_unit_iid[~atom_array.is_polymer], return_counts=True
+            atom_array.pn_unit_iid[atom_array.chain_id == ligand_chain], return_counts=True
         )
         valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
         valid_ligand_pn_unit_iids = ligand_pn_unit_iids[valid_ligand_mask]
@@ -692,8 +720,8 @@ def annotate_ligand_pockets(
     near_ligand_full[valid_coords_mask] = near_ligand_valid
 
     # Only polymer atoms can be pocket atoms
-    is_polymer = atom_array.is_polymer if hasattr(atom_array, 'is_polymer') else ~atom_array.hetero
-    pocket_annotation = is_polymer & near_ligand_full
+    is_protein_chain = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
+    pocket_annotation = is_protein_chain & near_ligand_full
 
     atom_array.set_annotation(annotation_name, pocket_annotation)
     return atom_array
@@ -718,11 +746,13 @@ class AnnotateLigandPockets(Transform):
         check_is_instance(data, "atom_array", AtomArray)
 
     @override
-    def forward(self, data: dict) -> dict:
+    def forward(self, data: dict, receptor_chain: str = "A", ligand_chain: str = "C") -> dict:
         data["atom_array"] = annotate_ligand_pockets(
             data["atom_array"],
             pocket_distance=self.pocket_distance,
             n_min_ligand_atoms=self.n_min_ligand_atoms,
             annotation_name=self.annotation_name,
+            receptor_chain=receptor_chain,
+            ligand_chain=ligand_chain,
         )
         return data
