@@ -30,14 +30,15 @@ from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.seq_des_utils import get_sd_example, get_sd_example_from_af3_prediction
+from allatom_design.data.transform.sd_featurizer import annotate_ligand_pockets
 
 # Atomworks imports
 from atomworks.io.utils.io_utils import to_cif_string
 from atomworks.io.parser import parse as aw_parse
 from atomworks.io.tools.rdkit import atom_array_to_rdkit
 from atomworks.ml.utils.geometry import align_atom_arrays
-from allatom_design.data.transform.sd_featurizer import annotate_ligand_pockets
 from atomworks.io.utils.io_utils import to_cif_file
+import atomworks.enums as aw_enums
 
 from biotite.structure import AtomArray
 # from ost import io, mol
@@ -116,11 +117,13 @@ def _compute_self_consistency_metrics_atomworks_af3(*, pred_example: dict[str, A
     
     # Extract CA atoms from both structures (handles different atom counts)
     # For proteins, select CA atoms; for other chain types, this will be empty
-    pred_ca_mask = (pred_atom_array.atom_name == "CA")
-    sample_ca_mask = (sample_atom_array.atom_name == "CA")
-    
-    pred_ca = pred_atom_array[pred_ca_mask]
+    sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) # 6: polypeptide-l chain type
     sample_ca = sample_atom_array[sample_ca_mask]
+    
+    # Delete UNK residues from pred_atom_array, it's from the sample sequence for the gaps between the actual residues.
+    # Designed sequence don't output UNK residues, so we can safely delete them.
+    pred_ca_mask = (pred_atom_array.atom_name == "CA") & (pred_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (pred_atom_array.res_name != "UNK")
+    pred_ca = pred_atom_array[pred_ca_mask]
     
     # Align pred CA to sample CA using atomworks align_atom_arrays
     # This aligns pred_ca to sample_ca and applies the transformation to the full pred_atom_array
@@ -138,7 +141,7 @@ def _compute_self_consistency_metrics_atomworks_af3(*, pred_example: dict[str, A
         f.write(to_cif_string(aligned_pred_atom_array))
     
     # Create CA atom mask for pLDDT extraction (matching aligned structure)
-    ca_atom_mask = torch.tensor(aligned_pred_atom_array.atom_name == "CA", dtype=torch.bool)
+    ca_atom_mask = torch.tensor(pred_ca_mask, dtype=torch.bool)
 
     # Compute metrics.
     # for metric in ["sc_ca_rmsd", "avg_ca_plddt", "tmalign_score"]:
@@ -183,24 +186,16 @@ def _extract_af3_confidence_metrics(confidence_file_path: str = None,
     
     if metric_name == "atom_plddts":        
         metric = torch.tensor(confidence_data["atom_plddts"], dtype=torch.float16)
+                                
+        assert len(metric) == len(atom_array), f"Number of pLDDTs ({len(metric)}) != number of atoms in atom_array ({len(atom_array)})"            
                 
-        # pLDDT is only for resolved atoms (non-NaN coords)
-        valid_coord_mask = ~np.isnan(atom_array.coord).any(axis=1)
-        num_valid_atoms = np.sum(valid_coord_mask)
-        
-        if len(metric) != num_valid_atoms:
-            raise ValueError(f"Number of pLDDTs ({len(metric)}) != valid atoms ({num_valid_atoms})")
-        
-        #! (JH) 251129 fixed: handle both torch tensor and numpy array masks
-        if isinstance(mask, torch.Tensor):
-            mask_np = mask.cpu().numpy()
+        if isinstance(mask, np.ndarray):
+            mask_torch = torch.tensor(mask, dtype=torch.bool)
         else:
-            mask_np = np.array(mask)
+            mask_torch = mask.bool()
         
-        # Apply mask only to valid atoms
-        # mask is for all atoms, we need to filter it to valid atoms only
-        mask_valid = mask_np[valid_coord_mask]
-        metric = metric[torch.tensor(mask_valid).bool()]
+        # Apply mask to pLDDTs        
+        metric = metric[mask_torch]
         
         if return_mean:
             if len(metric) == 0:
@@ -1421,13 +1416,14 @@ def compute_seq_recovery(native_seq: str, sampled_seq: str,
 
 #! (JH) 251128 added: Atomworks-based implementation
 def calculate_ligand_rmsd_with_binding_site_superposition(
-    ref_cif_path: Path,
-    pred_cif_path: Path,
+    pred_example: dict[str, Any] = None,
+    sample_example: dict[str, Any] = None,    
     receptor_chain: str = "A",
     ligand_chain: str = "C",
     binding_site_radius: float = 8.0,
     save_aligned: bool = True,
-    cif_parser_args: DictConfig = None, 
+    sample_path: str | Path = None,
+    pred_path: str | Path = None,
 ) -> dict[str, float]:
     """
     Calculate ligand RMSD after superimposing structures based on binding site residues.
@@ -1456,146 +1452,127 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     -------
     dict
         Dictionary with RMSD values and other metrics.
-    """    
+    """        
     
-    ref_cif_path = Path(ref_cif_path)
-    pred_cif_path = Path(pred_cif_path)
-            
-    # Load structures using atomworks parse (includes chain_entity annotation)
-    try:
-        ref_parsed = aw_parse(ref_cif_path, **cif_parser_args)
-        pred_parsed = aw_parse(pred_cif_path, **cif_parser_args)
-        
-        ref_array = ref_parsed['asym_unit'][0]
-        pred_array = pred_parsed['asym_unit'][0]
-    except Exception as e:
-        return {"error": f"Failed to load structures: {e}", "ligand_rmsd": None}
+    sample_array = sample_example['atom_array']
+    pred_array = pred_example['atom_array']
     
     # Annotate ligand pockets (binding site residues)
-    ref_array = annotate_ligand_pockets(ref_array, pocket_distance=binding_site_radius)
-    pred_array = annotate_ligand_pockets(pred_array, pocket_distance=binding_site_radius)
+    sample_array = annotate_ligand_pockets(atom_array=sample_array, 
+                                           pocket_distance=binding_site_radius, 
+                                           receptor_chain=receptor_chain,
+                                           ligand_chain=ligand_chain)
+    pred_array = annotate_ligand_pockets(atom_array=pred_array, 
+                                         pocket_distance=binding_site_radius, 
+                                         receptor_chain=receptor_chain,
+                                         ligand_chain=ligand_chain)
     
     # Get binding site CA atoms for superposition
     # Use sequential residue index (order in chain) instead of res_id for matching
     # because res_id may differ between structures (ref vs AF3 prediction)
-    ref_receptor_mask = ref_array.chain_id == receptor_chain
+    sample_receptor_mask = sample_array.chain_id == receptor_chain
     pred_receptor_mask = pred_array.chain_id == receptor_chain
     
     # Get all CA atoms from receptor chain
-    ref_ca_mask = ref_receptor_mask & (ref_array.atom_name == "CA")
-    pred_ca_mask = pred_receptor_mask & (pred_array.atom_name == "CA")
+    sample_ca_mask = sample_receptor_mask & (sample_array.atom_name == "CA") & (sample_array.res_name != "UNK")
     
-    ref_ca = ref_array[ref_ca_mask]
+    # Delete UNK residues from pred_atom_array, it's from the sample sequence for the gaps between the actual residues.
+    # Designed sequence don't output UNK residues, so we can safely delete them.
+    pred_ca_mask = pred_receptor_mask & (pred_array.atom_name == "CA") & (pred_array.res_name != "UNK")
+        
+    sample_ca = sample_array[sample_ca_mask]
     pred_ca = pred_array[pred_ca_mask]
     
-    if len(ref_ca) == 0 or len(pred_ca) == 0:
+    assert len(sample_ca) == len(pred_ca), "Number of CA atoms in sample and pred must match"
+    
+    if len(sample_ca) == 0 or len(pred_ca) == 0:
         return {"error": "No CA atoms found", "ligand_rmsd": None}
     
     # Get binding site mask for CA atoms
-    ref_bs_ca_mask = ref_array.is_ligand_pocket[ref_ca_mask]
-    
-    # Use minimum length (in case sequences differ slightly)
-    min_len = min(len(ref_ca), len(pred_ca))
-    ref_ca = ref_ca[:min_len]
-    pred_ca = pred_ca[:min_len]
-    ref_bs_ca_mask = ref_bs_ca_mask[:min_len]
+    sample_bs_ca_mask = sample_array.is_ligand_pocket[sample_ca_mask]
     
     # Get binding site CA atoms by sequential index
-    ref_bs_sorted = ref_ca[ref_bs_ca_mask]
-    pred_bs_sorted = pred_ca[ref_bs_ca_mask]  # Use ref's BS mask for both
+    sample_bs_sorted = sample_ca[sample_bs_ca_mask]
+    pred_bs_sorted = pred_ca[sample_bs_ca_mask]  # Use ref's BS mask for both
     
-    num_bs_residues = np.sum(ref_bs_ca_mask)
+    assert (sample_bs_sorted.res_name == pred_bs_sorted.res_name).all(), "amino acid residues in sample and pred binding site must match"
     
-    if len(ref_bs_sorted) == 0:
+    num_bs_residues = np.sum(sample_bs_ca_mask)
+    
+    if len(sample_bs_sorted) == 0:
         return {"error": "No binding site CA atoms found", "ligand_rmsd": None}
     
     # Align pred onto ref using binding site CA atoms
     # align_atom_arrays: aligns mbl_sele to tgt_sele, applies transform to mbl_full
     pred_aligned, bs_rmsd = align_atom_arrays(
         mbl_sele=pred_bs_sorted,  # pred binding site (to be aligned)
-        tgt_sele=ref_bs_sorted,   # ref binding site (target)
+        tgt_sele=sample_bs_sorted,   # ref binding site (target)
         mbl_full=pred_array       # full pred structure (to be transformed)
     )
     
     # Get ligand atoms
-    ref_lig_mask = (ref_array.chain_id == ligand_chain) & (ref_array.element != "H")
+    sample_lig_mask = (sample_array.chain_id == ligand_chain) & (sample_array.element != "H")
     pred_lig_mask = (pred_aligned.chain_id == ligand_chain) & (pred_aligned.element != "H")
     
-    ref_lig = ref_array[ref_lig_mask]
+    sample_lig = sample_array[sample_lig_mask]
     pred_lig = pred_aligned[pred_lig_mask]
     
-    if len(ref_lig) == 0 or len(pred_lig) == 0:
+    if len(sample_lig) == 0 or len(pred_lig) == 0:
         return {"error": "No ligand atoms found", "ligand_rmsd": None}
     
     # Match ligand atoms by name
-    ref_atom_names = ref_lig.atom_name
+    sample_atom_names = sample_lig.atom_name
     pred_atom_names = pred_lig.atom_name
-    common_atom_names = np.intersect1d(ref_atom_names, pred_atom_names)
+    common_atom_names = np.intersect1d(sample_atom_names, pred_atom_names)
     
     if len(common_atom_names) == 0:
         return {"error": "No common ligand atoms", "ligand_rmsd": None}
-    
-    # Get coordinates for common atoms (sorted by name)
-    ref_lig_common = ref_lig[np.isin(ref_atom_names, common_atom_names)]
-    pred_lig_common = pred_lig[np.isin(pred_atom_names, common_atom_names)]
-    
-    ref_lig_order = np.argsort(ref_lig_common.atom_name)
-    pred_lig_order = np.argsort(pred_lig_common.atom_name)
-    
-    ref_coords = ref_lig_common.coord[ref_lig_order]
-    pred_coords = pred_lig_common.coord[pred_lig_order]
-    
-    # Calculate ligand RMSD
-    diff = ref_coords - pred_coords
-    ligand_rmsd = np.sqrt(np.mean(np.sum(diff**2, axis=1)))
-    
+            
     # Calculate symmetry-corrected RMSD using RDKit
-    sym_rmsd = None
+    ligand_rmsd = None
     try:        
         # Convert ligand atom arrays to RDKit molecules
-        ref_lig_full = ref_array[ref_array.chain_id == ligand_chain]
+        sample_lig_full = sample_array[sample_array.chain_id == ligand_chain]
         pred_lig_full = pred_aligned[pred_aligned.chain_id == ligand_chain]
         
         # Use atom_array_to_rdkit with sanitize fallback
         try:
-            ref_mol = atom_array_to_rdkit(ref_lig_full, sanitize=True)
+            sample_mol = atom_array_to_rdkit(sample_lig_full, sanitize=True)
+            print("Sample ligand sanitization successful")
         except Exception:
-            ref_mol = atom_array_to_rdkit(ref_lig_full, sanitize=False)
+            sample_mol = atom_array_to_rdkit(sample_lig_full, sanitize=False)
+            print("Sample ligand sanitization failed, not using sanitization fallback")
         
         try:
             pred_mol = atom_array_to_rdkit(pred_lig_full, sanitize=True)
+            print("Pred ligand sanitization successful")
         except Exception:
             pred_mol = atom_array_to_rdkit(pred_lig_full, sanitize=False)
+            print("Pred ligand sanitization failed, not using sanitization fallback")
         
-        if ref_mol and pred_mol:
+        if sample_mol and pred_mol:
             # Remove hydrogens for RMSD calculation
-            ref_mol = Chem.RemoveHs(ref_mol)
+            sample_mol = Chem.RemoveHs(sample_mol)
             pred_mol = Chem.RemoveHs(pred_mol)
-            
-            try:
-                # Try substructure match first
-                match = ref_mol.GetSubstructMatch(pred_mol)
-                if match:
-                    sym_rmsd = rdMolAlign.CalcRMS(ref_mol, pred_mol)
-                else:
-                    sym_rmsd = AllChem.GetBestRMS(ref_mol, pred_mol)
-            except Exception:
-                # Fallback to coordinate-based RMSD
-                sym_rmsd = ligand_rmsd
+                        
+            # Try substructure match first
+            match = sample_mol.GetSubstructMatch(pred_mol)
+            if match:                                        
+                ligand_rmsd = rdMolAlign.CalcRMS(sample_mol, pred_mol)
+                print(f"Substructure match found, symmetry-corrected RMSD: {ligand_rmsd:.4f} Å")                    
+            else:
+                ligand_rmsd = AllChem.GetBestRMS(sample_mol, pred_mol)
+                print(f"No substructure match found, using GetBestRMS: {ligand_rmsd:.4f} Å")            
+                                
     except Exception:
-        pass
+        return {"error": "Failed to calculate ligand RMSD using RDKit", "ligand_rmsd": None}
     
     # Calculate best ligand RMSD
-    if sym_rmsd is not None:
-        best_ligand_rmsd = min(ligand_rmsd, sym_rmsd)
-    else:
-        best_ligand_rmsd = ligand_rmsd
-    
     # Save pocket-aligned structure if requested
     aligned_path = None
     if save_aligned:                
         # Create output path with "_pocket_aligned" suffix
-        aligned_path = pred_cif_path.parent / f"{pred_cif_path.stem}_pocket_aligned.cif"
+        aligned_path = Path(pred_path).parent / f"{Path(pred_path).stem}_pocket_aligned.cif"
         try:
             to_cif_file(
                 pred_aligned,
@@ -1609,25 +1586,21 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
             print(f"Warning: Failed to save aligned structure: {e}")
             aligned_path = None
     
-    #! (JH) 251129 added: also return pred_array and masks for pLDDT extraction
+    #! return pred_array and masks for pLDDT extraction
     # Create ligand and binding site masks for the aligned pred structure
-    pred_ligand_mask = pred_aligned.chain_id == ligand_chain
-    pred_binding_site_mask = pred_aligned.is_ligand_pocket
+    pred_ligand_mask = (pred_aligned.chain_id == ligand_chain)
+    pred_binding_site_mask = (pred_aligned.is_ligand_pocket == True) & (pred_aligned.res_name != "UNK")
     
     return {
         "ligand_rmsd": ligand_rmsd,
-        "sym_ligand_rmsd": sym_rmsd,
-        "best_ligand_rmsd": best_ligand_rmsd,
         "binding_site_rmsd": bs_rmsd,
         "num_bs_residues": int(num_bs_residues),
         "num_matched_atoms": len(common_atom_names),
         "aligned_path": str(aligned_path) if aligned_path else None,
-        #! (JH) 251129 added: for pLDDT extraction
-        "pred_array": pred_aligned,
+        "aligned_pred_array": pred_aligned,
         "pred_ligand_mask": pred_ligand_mask,
         "pred_binding_site_mask": pred_binding_site_mask,
     }
-
 
 def compute_template_conditioned_docking_metrics(
     sample_path: str | Path,
@@ -1635,7 +1608,9 @@ def compute_template_conditioned_docking_metrics(
     pdb_chain_info: dict,
     binding_site_radius: float = 8.0,
     save_aligned: bool = True,
-    cif_parser_args: DictConfig = None, 
+    data_cfg_for_af3_prediction: DictConfig = None,
+    transform_cfg_for_af3_prediction: DictConfig = None,
+    metadata: pd.DataFrame = None,
 ) -> dict[str, float]:
     """
     Compute AF3 docking metrics for template-conditioned predictions.
@@ -1662,10 +1637,13 @@ def compute_template_conditioned_docking_metrics(
     dict
         Dictionary containing docking metrics.
     """
-    sample_path = Path(sample_path)
+    sample_example = get_sd_example(pdb_path=sample_path,                                    
+                                    use_load_any=True,                                
+                                    metadata=metadata)
     
-    # Extract PDB ID from sample path (e.g., "1a28_1_A1_C1_sample0.cif" -> "1a28")
-    sample_stem = sample_path.stem
+    
+    # Extract PDB ID from sample path
+    sample_stem = Path(sample_path).stem
     pdb_id = sample_stem.split("_")[0]
     
     # Get chain info
@@ -1676,7 +1654,7 @@ def compute_template_conditioned_docking_metrics(
     
     # Extract receptor and ligand chains (remove suffix like "_1")
     receptor_chains = [ch.split("_")[0] for ch in chain_info.get('protein_chains', [])]
-    ligand_chains = [ch[0].split("_")[0] for ch in chain_info.get('ligand_chains', [])]
+    ligand_chains = [ch[0].split("_")[0] for ch in chain_info.get('ligand_chains', [])]        
     
     if not receptor_chains or not ligand_chains:
         return {"error": "No receptor or ligand chains found"}
@@ -1686,28 +1664,31 @@ def compute_template_conditioned_docking_metrics(
     ligand_chain = ligand_chains[0]
     
     per_sample_metrics = {}
-    for pred_path in pred_sample_paths:
-        pred_path = Path(pred_path)
+    for pred_path in pred_sample_paths:        
+        pred_example = get_sd_example_from_af3_prediction(pdb_path=pred_path, 
+                                                          data_cfg=data_cfg_for_af3_prediction,
+                                                          transform_cfg=transform_cfg_for_af3_prediction,
+                                                          metadata=metadata)        
         
         result = calculate_ligand_rmsd_with_binding_site_superposition(
-            ref_cif_path=sample_path,
-            pred_cif_path=pred_path,
+            pred_example=pred_example,
+            sample_example=sample_example,
             receptor_chain=receptor_chain,
-            ligand_chain=ligand_chain,
+            ligand_chain=ligand_chain,            
             binding_site_radius=binding_site_radius,
             save_aligned=save_aligned,
-            cif_parser_args=cif_parser_args,  
+            sample_path=sample_path,
+            pred_path=pred_path,
         )
         
         if result.get("error"):
             print(f"Docking metric error for {pred_path}: {result.get('error')}")
-            for key in ["ligand_rmsd", "sym_ligand_rmsd", "best_ligand_rmsd", 
-                        "binding_site_rmsd", "num_bs_residues", "num_matched_atoms",
+            for key in ["ligand_rmsd", "binding_site_rmsd", "num_bs_residues", "num_matched_atoms",
                         "ligand_plddt", "binding_site_plddt"]:
                 per_sample_metrics.setdefault(key, []).append(np.nan)
         else:            
             # Extract pLDDT metrics using the pred_array from calculate_ligand_rmsd_with_binding_site_superposition
-            pred_array = result.get("pred_array")
+            aligned_pred_array = result.get("aligned_pred_array")
             pred_ligand_mask = result.get("pred_ligand_mask")
             pred_binding_site_mask = result.get("pred_binding_site_mask")
             
@@ -1718,11 +1699,11 @@ def compute_template_conditioned_docking_metrics(
             ligand_plddt = np.nan
             binding_site_plddt = np.nan
             
-            if pred_array is not None and Path(confidence_file_path).exists():
+            if aligned_pred_array is not None and Path(confidence_file_path).exists():
                 try:
                     ligand_plddt = _extract_af3_confidence_metrics(
                         confidence_file_path=confidence_file_path,
-                        atom_array=pred_array,
+                        atom_array=aligned_pred_array,
                         mask=pred_ligand_mask,
                         metrics_to_extract=["atom_plddts"],
                         return_mean=True
@@ -1733,7 +1714,7 @@ def compute_template_conditioned_docking_metrics(
                 try:
                     binding_site_plddt = _extract_af3_confidence_metrics(
                         confidence_file_path=confidence_file_path,
-                        atom_array=pred_array,
+                        atom_array=aligned_pred_array,
                         mask=pred_binding_site_mask,
                         metrics_to_extract=["atom_plddts"],
                         return_mean=True

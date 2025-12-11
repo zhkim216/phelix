@@ -261,6 +261,11 @@ def wandb_setup(
             config=cfg_dict,
             dir=wandb_dir,
         )
+        
+        # Define custom x-axis metric to allow non-monotonic step logging
+        # This is needed when evaluating multiple checkpoints in different phases
+        wandb.define_metric("trainer/global_step")
+        wandb.define_metric("*", step_metric="trainer/global_step")
 
     return log_dir
 

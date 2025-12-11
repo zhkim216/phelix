@@ -49,7 +49,7 @@ def load_outputs_from_samples_dir(samples_dir: str, metadata: pd.DataFrame = Non
         metadata: Optional metadata DataFrame
         
     Returns:
-        outputs dict with keys: example_id, out_pdb, atom_array, U, sample_seq_recovery, sample_sp_seq_recovery
+        outputs dict with keys: example_id, out_pdb, out_pdb_for_af3_tc, atom_array, U, sample_seq_recovery, sample_sp_seq_recovery
     """
     outputs = defaultdict(list)
     samples_dir = Path(samples_dir)
@@ -61,8 +61,9 @@ def load_outputs_from_samples_dir(samples_dir: str, metadata: pd.DataFrame = Non
         sample_metadata = torch.load(metadata_path, weights_only=False)
         print(f"Loaded sample_metadata.pt with {len(sample_metadata)} samples")
     
-    # Find all .cif files in the samples directory
-    cif_files = sorted(glob.glob(os.path.join(samples_dir, "*.cif")))
+    # Find all .cif files in the samples directory (exclude _for_af3_tc.cif files)
+    all_cif_files = sorted(glob.glob(os.path.join(samples_dir, "*.cif")))
+    cif_files = [f for f in all_cif_files if not f.endswith("_for_af3_tc.cif")]
     
     if len(cif_files) == 0:
         raise ValueError(f"No .cif files found in {samples_dir}")
@@ -100,6 +101,13 @@ def load_outputs_from_samples_dir(samples_dir: str, metadata: pd.DataFrame = Non
         
         outputs["example_id"].append(example_id)
         outputs["out_pdb"].append(str(cif_file))
+        
+        # Check for corresponding _for_af3_tc.cif file
+        af3_tc_cif_file = cif_file.replace(".cif", "_for_af3_tc.cif")
+        if os.path.exists(af3_tc_cif_file):
+            outputs["out_pdb_for_af3_tc"].append(af3_tc_cif_file)
+        else:
+            outputs["out_pdb_for_af3_tc"].append(None)
     
     # Set placeholder values for total seq recovery metrics
     outputs["total_avg_seq_recovery"] = None
@@ -141,8 +149,9 @@ def main(cfg: DictConfig):
     log_dir = wandb_setup(base_out_dir=cfg.base_out_dir, exp_name=cfg.exp_name, cfg_dict=cfg_dict, **cfg.wandb)
 
     # Load in metadata
-    metadata = pd.read_parquet(cfg.metadata_path)        
+    metadata = pd.read_parquet(cfg.metadata_path)    
     pdb_keys = metadata['pdb_id'].tolist()
+    
     if cfg.debug:
         pdb_keys = pdb_keys[:cfg.num_sample_debug]
 
@@ -277,7 +286,7 @@ def main(cfg: DictConfig):
                         seq_recovery_wandb_metrics["eval/mean_sample_sp_seq_recovery"] = mean_sp_sr
             
             if not cfg.wandb.no_wandb:
-                wandb.log(seq_recovery_wandb_metrics, step=global_step, commit=True)
+                wandb.log(seq_recovery_wandb_metrics, commit=True)
                 print(f"Logged Phase 1 metrics to wandb for step {global_step}")
             
             # === Free PyTorch memory before next checkpoint ===
@@ -423,8 +432,10 @@ def main(cfg: DictConfig):
                                 pred_sample_paths=pred_tc_sample_paths,
                                 pdb_chain_info=pdb_chain_info,
                                 binding_site_radius=cfg.docking_metrics_cfg.binding_site_radius,
-                                save_aligned=cfg.docking_metrics_cfg.get("save_aligned", True),
-                                cif_parser_args=cfg.data_cfg_for_af3_prediction.cif_parser_args,
+                                save_aligned=cfg.docking_metrics_cfg.get("save_aligned", True),                                
+                                data_cfg_for_af3_prediction=cfg.data_cfg_for_af3_prediction,
+                                transform_cfg_for_af3_prediction=cfg.transform_cfg_for_af3_prediction,
+                                metadata=metadata,
                             )
                         except Exception as e:
                             print(f"AF3 docking metrics computation failed for {job_name}: {e}")
@@ -473,7 +484,7 @@ def main(cfg: DictConfig):
             print(f"Saved metrics to {log_dir_i}/{metrics_csv_name}")
 
             # Aggregate metrics for wandb logging
-            skip_metrics = {"ligand_rmsd", "sym_ligand_rmsd", "num_matched_atoms", "aligned_path"}
+            skip_metrics = {"aligned_pred_array", "num_bs_residues"}
             
             all_metrics = defaultdict(list)
             for sample_id, metrics_dict in id_to_per_pred_metrics.items():
@@ -507,7 +518,7 @@ def main(cfg: DictConfig):
 
         # Always log to wandb at end of each checkpoint (even if metrics are empty)
         if not cfg.wandb.no_wandb:
-            wandb.log(out_metrics, step=global_step, commit=True)
+            wandb.log(out_metrics, commit=True)
             print(f"Logged Phase 2 metrics to wandb for step {global_step}")
 
         # Cleanup temp dirs
