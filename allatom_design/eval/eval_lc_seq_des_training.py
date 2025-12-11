@@ -485,6 +485,8 @@ def main(cfg: DictConfig):
 
             # Aggregate metrics for wandb logging
             skip_metrics = {"aligned_pred_array", "num_bs_residues"}
+            sc_metrics_names = {"sc_ca_rmsd", "avg_ca_plddt"}
+            docking_metrics_names = {"ligand_rmsd", "binding_site_rmsd"}
             
             all_metrics = defaultdict(list)
             for sample_id, metrics_dict in id_to_per_pred_metrics.items():
@@ -500,16 +502,21 @@ def main(cfg: DictConfig):
             
             # Ranked metrics: best pLDDT sample per sample_id
             ranked_metrics = defaultdict(list)
-            for sample_id, metrics_dict in id_to_per_pred_metrics.items():
-                if "avg_ca_plddt" not in metrics_dict:
+            for sample_id, metrics_dict in id_to_per_pred_metrics.items():                                
+                if "avg_ca_plddt" not in metrics_dict or "ligand_plddt" not in metrics_dict:
                     continue
                 
-                plddt_values = metrics_dict["avg_ca_plddt"]
-                best_diffusion_id = int(np.argmax(plddt_values))
+                ca_plddt_values = metrics_dict["avg_ca_plddt"]
+                best_diffusion_id_for_sc = int(np.argmax(ca_plddt_values))
                 
-                for metric_name, values in metrics_dict.items():
-                    if metric_name not in skip_metrics:
-                        ranked_metrics[metric_name].append(values[best_diffusion_id])
+                ligand_plddt_values = metrics_dict["ligand_plddt"]
+                best_diffusion_id_for_docking = int(np.argmax(ligand_plddt_values))
+                
+                for metric_name in sc_metrics_names:
+                    ranked_metrics[metric_name].append(metrics_dict[metric_name][best_diffusion_id_for_sc])
+                
+                for metric_name in docking_metrics_names:
+                    ranked_metrics[metric_name].append(metrics_dict[metric_name][best_diffusion_id_for_docking])
             
             out_metrics.update({f"eval/best_plddt/mean_{k}": np.nanmean(v) for k, v in ranked_metrics.items()})
             # out_metrics.update({f"eval/ranked/median_{k}": np.nanmedian(v) for k, v in ranked_metrics.items()})
