@@ -18,7 +18,8 @@ from atomworks.io.parser import parse as aw_parse
 from atomworks.io.utils import non_rcsb
 from atomworks.io.utils.io_utils import to_cif_string, to_cif_file, load_any
 from atomworks.ml.utils.token import apply_token_wise, get_token_starts, spread_token_wise
-from biotite.structure import AtomArray, AtomArrayStack
+import atomworks.enums as aw_enums
+from biotite.structure import AtomArray, AtomArrayStack, get_residue_starts
 from biotite.structure.filter import filter_amino_acids
 from joblib import Parallel, delayed
 from omegaconf import DictConfig, OmegaConf
@@ -31,7 +32,7 @@ from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data.data import to
 from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
 from allatom_design.data.transform.preprocess import preprocess_transform
-from allatom_design.data.transform.sd_featurizer import sd_featurizer, sd_featurizer_with_load_any
+from allatom_design.data.transform.sd_featurizer import sd_featurizer, sd_featurizer_with_load_any, sd_featurizer_for_af3_prediction, annotate_ligand_pockets
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 from allatom_design.data.transform.pad import pad_dim
@@ -60,8 +61,8 @@ def compute_sequence_recovery(
             - pocket_seq_recovery: Pocket sequence recovery (if pocket_mask provided)
     """
     # Get sampled residue types from atom array
-    samp_token_starts = get_token_starts(sampled_atom_array)
-    samp_res_names = sampled_atom_array.res_name[samp_token_starts]
+    token_starts = get_token_starts(sampled_atom_array)
+    samp_res_names = sampled_atom_array.res_name[token_starts]
     samp_res_types = AF3_ENCODING.encode(samp_res_names)
     samp_res_types = torch.tensor(samp_res_types, device=device)
     samp_res_types = pad_dim(samp_res_types, 0, len(orig_res_types) - len(samp_res_types))
@@ -401,26 +402,6 @@ def extract_ligand_from_structure(
     return atom_array[ligand_mask]
 
 
-def add_ligand_to_sample(sample_array: AtomArray, ligand_array: AtomArray) -> AtomArray:
-    """
-    Add ligand atoms to a sample atom array.
-    
-    Args:
-        sample_array: AtomArray from sequence design (protein only)
-        ligand_array: AtomArray containing ligand atoms to add
-        
-    Returns:
-        Combined AtomArray with protein and ligand
-    """
-    if ligand_array is None or len(ligand_array) == 0:
-        return sample_array
-    
-    # Concatenate using biotite's + operator
-    combined = sample_array + ligand_array
-    
-    return combined
-
-
 def run_lc_seq_des(
     *,
     model: SeqDenoiser = None,
@@ -433,7 +414,6 @@ def run_lc_seq_des(
     out_dir: str = None,
     pos_constraint_df: pd.DataFrame | None = None,
     protein_only: bool = False,
-    ligand_chain_ids: str | list[str] = None,
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
     """
     Given a list of processed structure files, run sequence design on them.
@@ -523,156 +503,221 @@ def run_lc_seq_des(
             # Get designed_cif_save_args from data_cfg_for_design
             cif_save_args = OmegaConf.to_container(data_cfg.cif_save_args, resolve=True) if data_cfg and data_cfg.get("cif_save_args") else {}
             
-            # If protein_only, load original structures from cached .pt files to extract ligands
+            # If protein_only, load original structures from cached .pt files to extract ligands                        
             original_ligands = {}
             if protein_only:
                 for pdb_path in batch_pdb_paths:
                     try:
                         # Load from cached .pt file
                         cached_example = torch.load(str(pdb_path), map_location="cpu", weights_only=False)
-                        orig_array = cached_example.get("atom_array")
-                        if orig_array is None:
-                            print(f"Warning: No atom_array found in cached file {pdb_path}")
-                            continue
+                        orig_array = cached_example.get("atom_array")                        
                         
                         # Get pdb_id and find ligand pn_unit_iid from metadata
                         pdb_id = Path(pdb_path).stem.split("_")[0]
                         
-                        # Determine ligand pn_unit_iid from metadata if not explicitly provided
-                        current_ligand_pn_unit_iids = ligand_chain_ids  # Can be passed explicitly
-                        if current_ligand_pn_unit_iids is None and metadata is not None:
-                            metadata_row = metadata[metadata["pdb_id"] == pdb_id]
-                            if len(metadata_row) > 0:
-                                # Find non-protein (ligand) pn_unit_iid
-                                # q_pn_unit_is_protein_1/2 indicates if that unit is protein
-                                ligand_pn_unit_iid_list = []
-                                for suffix_num in ["1", "2"]:
-                                    is_protein_col = f"q_pn_unit_is_protein_{suffix_num}"
-                                    pn_unit_iid_col = f"q_pn_unit_iid_{suffix_num}"
-                                    if is_protein_col in metadata_row.columns and pn_unit_iid_col in metadata_row.columns:
-                                        is_protein = metadata_row[is_protein_col].iloc[0]
-                                        if not is_protein:  # This is ligand
-                                            ligand_pn_unit_iid = metadata_row[pn_unit_iid_col].iloc[0]
-                                            if pd.notna(ligand_pn_unit_iid):
-                                                ligand_pn_unit_iid_list.append(ligand_pn_unit_iid)
-                                if ligand_pn_unit_iid_list:
-                                    # Use pn_unit_iid directly (e.g., "B_1") - no suffix removal needed
-                                    current_ligand_pn_unit_iids = ligand_pn_unit_iid_list
-                                    print(f"Auto-detected ligand pn_unit_iid(s) for {pdb_id}: {current_ligand_pn_unit_iids}")
+                        # Determine ligand pn_unit_iid from metadata
+                        current_ligand_pn_unit_iids = None  
+                
+                        metadata_row = metadata[metadata["pdb_id"] == pdb_id]
+                        assert metadata_row is not None, f"Metadata row is None for {pdb_id}"
+                            
+                        # Find non-protein (ligand) pn_unit_iid
+                        # q_pn_unit_is_protein_1/2 indicates if that unit is protein
+                        ligand_pn_unit_iid_list = []
+                        for suffix_num in ["1", "2"]:
+                            is_protein_col = f"q_pn_unit_is_protein_{suffix_num}"
+                            pn_unit_iid_col = f"q_pn_unit_iid_{suffix_num}"
+                            if is_protein_col in metadata_row.columns and pn_unit_iid_col in metadata_row.columns:
+                                is_protein = metadata_row[is_protein_col].iloc[0]
+                                if not is_protein:  # This is ligand
+                                    ligand_pn_unit_iid = metadata_row[pn_unit_iid_col].iloc[0]                                    
+                                    assert ligand_pn_unit_iid is not None, f"Ligand pn_unit_iid is None for {pdb_id}"                                        
+                                    ligand_pn_unit_iid_list.append(ligand_pn_unit_iid)
+                            if ligand_pn_unit_iid_list:
+                                # Use pn_unit_iid directly (e.g., "B_1") - no suffix removal needed
+                                current_ligand_pn_unit_iids = ligand_pn_unit_iid_list
+                                print(f"Detected ligand pn_unit_iid(s) for {pdb_id}: {current_ligand_pn_unit_iids}")
                         
                         ligand_array = extract_ligand_from_structure(orig_array, ligand_pn_unit_iids=current_ligand_pn_unit_iids)
                         original_ligands[pdb_id] = ligand_array
                     except Exception as e:
                         print(f"Warning: Failed to extract ligand from {pdb_path}: {e}")
-            
+                        
             for si, (example_id, atom_arrays) in enumerate(id_to_atom_arrays.items()):
                 aux = id_to_aux[example_id]
                 
                 # Add _protein_only suffix if protein_only mode (after convert_stem to avoid regex issues)
                 suffix = "_protein_only" if protein_only else ""
                 sample_stems = [convert_stem(f"{example_id}_sample{si}") + suffix for si in range(len(atom_arrays))]
-
-                # Store combined arrays (protein + ligand) for sequence recovery calculation
-                combined_arrays = [None] * len(atom_arrays)
                 
-                # Save output atom arrays to cif files.
+                samp_bb_ligand_atom_arrays = []                                
+                sample_seq_recovery_sum = 0.0
+                sample_sp_seq_recovery_sum = 0.0                
+                # Save outputs, calculate sequence recovery metrics for each sample.
                 for ai, sample_stem in enumerate(sample_stems):
                     outputs["example_id"].append(example_id)
                     outputs["U"].append(aux[ai]["U"])
                     
-                    if protein_only:
-                        # For protein_only mode, only save with_ligand file (skip protein-only file)
-                        pdb_id = sample_stem.split("_")[0]
-                        ligand_array = original_ligands.get(pdb_id)
-                        
-                        if ligand_array is not None and len(ligand_array) > 0:
-                            try:
-                                # Add ligand to sample
-                                combined_array = add_ligand_to_sample(atom_arrays[ai], ligand_array)
-                                combined_arrays[ai] = combined_array
-                                
-                                # Save with _protein_only_with_ligand suffix only
-                                with_ligand_stem = sample_stem.replace("_protein_only", "_protein_only_with_ligand")
-                                with_ligand_file = f"{sample_out_dir}/{with_ligand_stem}.cif"
-                                
-                                with_ligand_file = to_cif_file(combined_array,
-                                                               with_ligand_file,
-                                                               file_type="cif",
-                                                               **cif_save_args)
-                                _fix_cif_formal_charge(with_ligand_file)
-                                
-                                outputs["out_pdb"].append(with_ligand_file)
-                                print(f"Saved protein+ligand sample: {with_ligand_file}")
-                            except Exception as e:
-                                print(f"Warning: Failed to save protein+ligand sample for {sample_stem}: {e}")
-                                # Fallback: save protein-only file
-                                out_file = f"{sample_out_dir}/{sample_stem}.cif"
-                                out_file = to_cif_file(atom_arrays[ai], out_file, file_type="cif", **cif_save_args)
-                                _fix_cif_formal_charge(out_file)
-                                outputs["out_pdb"].append(out_file)
-                        else:
-                            # No ligand available, save protein-only file
-                            out_file = f"{sample_out_dir}/{sample_stem}.cif"
-                            out_file = to_cif_file(atom_arrays[ai], out_file, file_type="cif", **cif_save_args)
-                            _fix_cif_formal_charge(out_file)
-                            outputs["out_pdb"].append(out_file)
-                    else:
-                        # Normal mode: save as usual
-                        out_file = f"{sample_out_dir}/{sample_stem}.cif"
-                        out_file = to_cif_file(atom_arrays[ai], out_file, file_type="cif", **cif_save_args)
-                        _fix_cif_formal_charge(out_file)
-                        outputs["out_pdb"].append(out_file)
-
-                # Get sampled sequences as a string, with ":" to separate chains.
-                for ai in range(len(atom_arrays)):
-                    chain_info = non_rcsb.initialize_chain_info_from_atom_array(atom_arrays[ai])
+                    samp_atom_array = atom_arrays[ai]
+                    
+                    # Save atom_array and sequence
+                    outputs["atom_array"].append(samp_atom_array)                                        
+                    chain_info = non_rcsb.initialize_chain_info_from_atom_array(samp_atom_array)
                     outputs["seq"].append(
                         ":".join(info["processed_entity_canonical_sequence"] for info in chain_info.values())
                     )
-                    outputs["atom_array"].append(atom_arrays[ai])
                     
+                    # Process atom arrays for further task (e.g., sequence recovery metrics, save cif files for af3 template conditioning)
+                    samp_prot_atom_array = samp_atom_array[samp_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+                    samp_prot_bb_atom_array = samp_prot_atom_array[samp_prot_atom_array.is_backbone_atom]    
                     
-                # Compute sequence recovery metrics            
-                bi = example_id_to_batch_idx[example_id]
-                orig_res_types = batch["restype"][bi].argmax(dim=-1)          
-                seq_mask = (1 - batch["seq_cond_mask"][bi]) * batch["token_pad_mask"][bi] * batch["token_resolved_mask"][bi]
-                lp_seq_mask = (1 - batch["seq_cond_mask"][bi]) * batch["token_pad_mask"][bi] * batch["pocket_token_mask"][bi]
+                    if not protein_only:
+                        samp_ligand_atom_array = samp_atom_array[samp_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L]
+                    else:
+                        # For protein_only mode, only save with_ligand file (skip protein-only file)
+                        pdb_id = sample_stem.split("_")[0]
+                        samp_ligand_atom_array = original_ligands.get(pdb_id)                                          
+                    
+                    if samp_ligand_atom_array is None:
+                        print(f"Warning: Ligand array is None for {pdb_id}")
+                        continue
+                    
+                    # Combine protein backbone and ligand atoms
+                    samp_prot_bb_atom_array = samp_prot_atom_array[samp_prot_atom_array.is_backbone_atom]                                                
+                    samp_atom_array_no_sidechain = samp_prot_bb_atom_array + samp_ligand_atom_array #! biotite use + operator to concatenate atom arrays                                       
+                    
+                    # Renumber atom_id sequentially (1-indexed)
+                    samp_atom_array_no_sidechain.atom_id = np.arange(1, len(samp_atom_array_no_sidechain) + 1)
+                    
+                    # Save samp_atom_array_no_sidechain to outputs
+                    outputs["bb_ligand_atom_array"].append(samp_atom_array_no_sidechain)
+                    
+                    # Append samp_atom_array_no_sidechain to bb_ligand_atom_arrays to calculate sequence recovery metrics
+                    samp_bb_ligand_atom_arrays.append(samp_atom_array_no_sidechain)
+                    
+                    # atom_array with gaps for af3 template conditioning
+                    samp_prot_bb_atom_array_with_gaps = samp_prot_bb_atom_array.copy()
+                    
+                    # Delete annotations to handle gaps in a easier way
+                    annot_to_delete = []
+                    for annot in ["within_chain_res_idx", "within_poly_res_idx", "token_id"]:
+                        if annot in samp_prot_bb_atom_array_with_gaps.get_annotation_categories():
+                            annot_to_delete.append(annot)
+                    for annot in annot_to_delete:
+                        samp_prot_bb_atom_array_with_gaps.del_annotation(annot)
+                    
+                    # Insert UNK atoms for gaps in protein backbone atom array
+                    samp_atom_array_no_sidechain_with_gaps = insert_unk_residues_for_gaps_in_atom_array(samp_prot_bb_atom_array_with_gaps)
+                    samp_atom_array_no_sidechain_with_gaps = samp_atom_array_no_sidechain_with_gaps + samp_ligand_atom_array
+                    
+                    # Renumber atom_id sequentially (1-indexed)
+                    samp_atom_array_no_sidechain_with_gaps.atom_id = np.arange(1, len(samp_atom_array_no_sidechain_with_gaps) + 1)
+                    
+                    if not protein_only:
+                        out_file = f"{sample_out_dir}/{sample_stem}.cif"                        
+                        out_file = to_cif_file(samp_atom_array_no_sidechain, out_file, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)                        
+                        _fix_cif_formal_charge(out_file)                        
+                        outputs["out_pdb"].append(out_file)                        
+                        
+                        out_file_for_af3_tc = f"{sample_out_dir}/{sample_stem}_for_af3_tc.cif"
+                        out_file_for_af3_tc = to_cif_file(samp_atom_array_no_sidechain_with_gaps, out_file_for_af3_tc, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)
+                        _fix_cif_formal_charge(out_file_for_af3_tc)
+                        outputs["out_pdb_for_af3_tc"].append(out_file_for_af3_tc)         
+                    else:                                                                                            
+                        # Save with _protein_only_with_ligand suffix only                    
+                        with_ligand_stem = sample_stem.replace("_protein_only", "_protein_only_with_ligand")
+                        out_file_with_ligand = f"{sample_out_dir}/{with_ligand_stem}.cif"                         
+                        
+                        out_file_with_ligand = to_cif_file(samp_atom_array_no_sidechain,
+                                                        out_file_with_ligand,
+                                                        file_type="cif",
+                                                        fill_gaps_in_poly_records=False,
+                                                        **cif_save_args)
+                                                                        
+                        _fix_cif_formal_charge(out_file_with_ligand)                        
+                        outputs["out_pdb"].append(out_file_with_ligand)
+                        print(f"Saved protein+ligand sample: {out_file_with_ligand}")                                                    
+                        
+                        out_file_with_ligand_for_tc = f"{sample_out_dir}/{with_ligand_stem}_for_af3_tc.cif"
+                        out_file_with_ligand_for_tc = to_cif_file(samp_atom_array_no_sidechain_with_gaps, out_file_with_ligand_for_tc, 
+                                                                  file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)
+                        _fix_cif_formal_charge(out_file_with_ligand_for_tc)
+                        outputs["out_pdb_for_af3_tc"].append(out_file_with_ligand_for_tc)                                                      
+                                    
+                    # Compute sequence recovery metrics                            
+                    orig_res_types = batch["restype"][si].argmax(dim=-1)          
+                    seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["token_resolved_mask"][si]
+                    if not protein_only:
+                        lp_seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["pocket_token_mask"][si]
+                    else:
+                        native_atom_array = batch["atom_array"][si]
+                        native_prot_atom_array = native_atom_array[native_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+                        native_prot_ca_atom_array = native_prot_atom_array[native_prot_atom_array.atom_name == "CA"]                                                                        
                 
-                total_seq_recovery = 0.0
-                total_sp_seq_recovery = 0.0
-                # total_mp_seq_recovery = 0.0
-                # total_np_seq_recovery = 0.0
-                for ai in range(len(atom_arrays)):
-                    recovery_metrics = compute_sequence_recovery(
-                        sampled_atom_array=atom_arrays[ai],
-                        orig_res_types=orig_res_types,
-                        seq_mask=seq_mask,
-                        pocket_mask=lp_seq_mask,
-                        device=device,
-                    )
-                    seq_recovery = recovery_metrics["seq_recovery"]
-                    sp_seq_recovery = recovery_metrics["pocket_seq_recovery"]
-                    
+                    # Calculate sequence recovery metrics for each sample                                                
+                    if not protein_only:
+                        recovery_metrics = compute_sequence_recovery(
+                            sampled_atom_array=atom_arrays[ai],
+                            orig_res_types=orig_res_types,
+                            seq_mask=seq_mask,
+                            pocket_mask=lp_seq_mask,
+                            device=device,
+                        )
+                        seq_recovery = recovery_metrics["seq_recovery"]
+                        sp_seq_recovery = recovery_metrics["pocket_seq_recovery"]
+                    else:
+                        #! Assume we're not conditioning on any sequences, for now.                                                
+                        samp_bb_ligand_atom_array = samp_bb_ligand_atom_arrays[ai]
+                        receptor_chain = samp_bb_ligand_atom_array[samp_bb_ligand_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L].chain_id[0]                                                                                                      
+                        ligand_chain = samp_bb_ligand_atom_array[samp_bb_ligand_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L].chain_id[0]
+                                                        
+                        samp_bb_ligand_atom_array = annotate_ligand_pockets(atom_array = samp_bb_ligand_atom_array, 
+                                                                                            pocket_distance = 8.0, 
+                                                                                            receptor_chain = receptor_chain, 
+                                                                                            ligand_chain = ligand_chain)
+                            
+                        samp_prot_atom_array = samp_bb_ligand_atom_array[samp_bb_ligand_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+                        
+                        samp_prot_ca_atom_array = samp_prot_atom_array[samp_prot_atom_array.atom_name == "CA"]
+                        valid_mask = (samp_prot_ca_atom_array.is_backbone_atom) & ~(samp_prot_ca_atom_array.res_name == "UNK") & (samp_prot_ca_atom_array.occupancy > 0.0) & (samp_prot_ca_atom_array.hetero == False)
+                        valid_lp_mask = (samp_prot_ca_atom_array.is_ligand_pocket) & valid_mask
+                        
+                        samp_seq = samp_prot_ca_atom_array[valid_mask].res_name
+                        _res_ids_designed = samp_prot_ca_atom_array[valid_mask].res_id
+                        
+                        samp_pocket_seq = samp_prot_ca_atom_array[valid_lp_mask].res_name
+                        _res_ids_designed_in_pocket = samp_prot_ca_atom_array[valid_lp_mask].res_id
+                        
+                        native_seq = native_prot_ca_atom_array[np.isin(native_prot_ca_atom_array.res_id, _res_ids_designed)].res_name                            
+                        native_pocket_seq = native_prot_ca_atom_array[np.isin(native_prot_ca_atom_array.res_id, _res_ids_designed_in_pocket)].res_name
+                        try:
+                            seq_recovery = ((native_seq == samp_seq).sum() / len(samp_seq))
+                            sp_seq_recovery = ((native_pocket_seq == samp_pocket_seq).sum() / len(samp_pocket_seq))
+                        except Exception as e:
+                            print(f"Error calculating sequence recovery: {e}")
+                            seq_recovery = 0.0
+                            sp_seq_recovery = 0.0
+                                                                                    
+                    # Save sequence recovery metrics
                     outputs["sample_seq_recovery"].append(seq_recovery)
-                    total_seq_recovery += seq_recovery
-                                                                    
+                    sample_seq_recovery_sum += seq_recovery
+                                                                        
                     outputs["sample_sp_seq_recovery"].append(sp_seq_recovery)
-                    total_sp_seq_recovery += sp_seq_recovery
-                    
+                    sample_sp_seq_recovery_sum += sp_seq_recovery                        
                     # Todo: Compute mp and np sequence recovery
                     
                     print (f"sample {ai} of {example_id}: seq recovery: {seq_recovery}, sp seq recovery: {sp_seq_recovery}")                                        
                                         
-                avg_seq_recovery = total_seq_recovery / len(atom_arrays)
-                avg_sp_seq_recovery = total_sp_seq_recovery / len(atom_arrays)
-                outputs["sample_avg_seq_recovery"].append(avg_seq_recovery)
-                outputs["sample_avg_sp_seq_recovery"].append(avg_sp_seq_recovery)
+                sample_avg_seq_recovery = sample_seq_recovery_sum / len(atom_arrays)
+                sample_avg_sp_seq_recovery = sample_sp_seq_recovery_sum / len(atom_arrays)
+                outputs["sample_avg_seq_recovery"].append(sample_avg_seq_recovery)
+                outputs["sample_avg_sp_seq_recovery"].append(sample_avg_sp_seq_recovery)
                                 
-                total_avg_seq_recovery += avg_seq_recovery
-                total_avg_sp_seq_recovery += avg_sp_seq_recovery
+                total_avg_seq_recovery += sample_avg_seq_recovery
+                total_avg_sp_seq_recovery += sample_avg_sp_seq_recovery
 
                 print (f"{example_id} avg seq recovery: {seq_recovery}, avg sp seq recovery: {sp_seq_recovery} out of {len(atom_arrays)} samples")                   
-
+                
             pbar.update(B)
     pbar.close()
     total_avg_seq_recovery /= len(pdb_paths)
@@ -696,6 +741,7 @@ def run_lc_seq_des(
         sample_metadata[sample_stem] = {
             "example_id": outputs["example_id"][idx],
             "out_pdb": outputs["out_pdb"][idx],
+            "out_pdb_for_af3_tc": outputs["out_pdb_for_af3_tc"][idx],
             "U": outputs["U"][idx],
             "sample_seq_recovery": outputs["sample_seq_recovery"][idx] if "sample_seq_recovery" in outputs else None,
             "sample_sp_seq_recovery": outputs["sample_sp_seq_recovery"][idx] if "sample_sp_seq_recovery" in outputs else None,
@@ -960,7 +1006,7 @@ def get_sd_example_from_af3_prediction(pdb_path: str = None,
     example['extra_info'] = row_dict
     
     # Featurize the example.    
-    featurizer = sd_featurizer(**featurizer_cfg)                                                                            
+    featurizer = sd_featurizer_for_af3_prediction(**featurizer_cfg)                                                                            
     example = featurizer(example)
 
     return example    
@@ -1586,4 +1632,116 @@ def _fix_cif_formal_charge(cif_path: str | Path) -> None:
     if content != fixed_content:
         with open(cif_path, 'w') as f:
             f.write(fixed_content)
+
+def insert_unk_residues_for_gaps_in_atom_array(atom_array: AtomArray) -> AtomArray:
+    """
+    Insert UNK CA atoms at gap positions (where res_id is not consecutive).
+    Designed for protein backbone atom array
     
+    Args:
+        atom_array: Atom array
+        
+    Returns:
+        AtomArray with UNK CA atoms inserted at gap positions
+    """
+    
+    annotations = atom_array.get_annotation_categories()
+    if "within_chain_res_idx" in annotations or "within_poly_res_idx" in annotations or "token_id" in annotations:
+        raise ValueError("within_chain_res_idx, within_poly_res_idx, token_id annotations are not supported for gap insertion")    
+    
+    # Get unique residues (first atom of each residue)
+    res_starts = get_residue_starts(atom_array)
+    res_ids = atom_array.res_id[res_starts]
+    
+    
+    # Find gaps: positions where res_id difference > 1
+    res_id_diff = np.diff(res_ids)
+    gap_indices = np.where(res_id_diff > 1)[0]
+    
+    if len(gap_indices) == 0:
+        print(f"No gaps found in the atom array")
+        return atom_array  # No gaps, return as is
+    
+    # Collect UNK atoms to insert
+    unk_atoms_list = []
+    
+    for gap_idx in gap_indices:
+        start_res_id = res_ids[gap_idx]
+        end_res_id = res_ids[gap_idx + 1]
+        
+        # Get template atom for annotations (use atom at gap_idx)
+        template_atom_idx = res_starts[gap_idx]
+        
+        # Create UNK atoms for each missing res_id
+        for missing_res_id in range(start_res_id + 1, end_res_id):
+            # Create single atom array for UNK CA
+            unk_atom = AtomArray(1)
+            
+            # Set coordinates to [0, 0, 0]
+            unk_atom.coord[0] = [0.0, 0.0, 0.0]
+            
+            annot_categories_to_copy = ["chain_id", "pn_unit_id", "molecule_id", 
+                                        "chain_entity", "pn_unit_entity", "molecule_entity", 
+                                        "transformation_id", "chain_iid", "pn_unit_iid", "molecule_iid",
+                                        "chain_type"]
+                                                    
+            # Copy annotations from template atom
+            for annot in atom_array.get_annotation_categories():
+                if annot == "res_id":
+                    unk_atom.set_annotation(annot, np.array([missing_res_id]))
+                elif annot == "res_name":
+                    unk_atom.set_annotation(annot, np.array(["UNK"]))
+                elif annot in ("atom_name", "alt_atom_id"):
+                    unk_atom.set_annotation(annot, np.array(["CA"]))
+                elif annot == "atom_id":
+                    unk_atom.set_annotation(annot, np.array([0]))  # Will be renumbered later
+                elif annot == "element":
+                    unk_atom.set_annotation(annot, np.array(["C"]))
+                elif annot == "hetero":
+                    unk_atom.set_annotation(annot, np.array([False]))
+                elif annot == "occupancy":
+                    unk_atom.set_annotation(annot, np.array([0.0]))
+                elif annot == "b_factor":
+                    unk_atom.set_annotation(annot, np.array([0.0]))
+                elif annot == "stereo":
+                    unk_atom.set_annotation(annot, np.array(["S"]))                
+                elif annot == "is_aromatic":
+                    unk_atom.set_annotation(annot, np.array([False]))
+                elif annot == "is_backbone_atom":
+                    unk_atom.set_annotation(annot, np.array([True]))
+                elif annot == "is_polymer":
+                    unk_atom.set_annotation(annot, np.array([True]))
+                elif annot == "charge":
+                    unk_atom.set_annotation(annot, np.array([0]))
+                elif annot == "atomic_number":
+                    unk_atom.set_annotation(annot, np.array([6]))
+                elif annot == "atomize":
+                    unk_atom.set_annotation(annot, np.array([True]))
+                elif annot == "is_covalent_modification":
+                    unk_atom.set_annotation(annot, np.array([False]))
+                elif annot == "ins_code":
+                    unk_atom.set_annotation(annot, np.array([""]))  # Empty insertion code
+                elif annot in annot_categories_to_copy:
+                    template_val = getattr(atom_array, annot)[template_atom_idx]
+                    unk_atom.set_annotation(annot, np.array([template_val]))          
+                else:                      
+                    unk_atom.set_annotation(annot, np.array([None]))          
+            unk_atoms_list.append(unk_atom)
+            
+    # Concatenate all UNK atoms
+    all_unk_atoms = unk_atoms_list[0]
+    for unk_atom in unk_atoms_list[1:]:
+        all_unk_atoms = all_unk_atoms + unk_atom
+    
+    # Combine with original and sort by res_id
+    combined = atom_array + all_unk_atoms
+    
+    # Sort by chain_id and res_id to maintain proper order
+    sort_indices = np.lexsort((combined.res_id, combined.chain_id))
+    combined = combined[sort_indices]
+    
+    # Renumber atom_id sequentially (1-indexed)
+    combined.atom_id = np.arange(1, len(combined) + 1)
+    
+    return combined
+
