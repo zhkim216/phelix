@@ -138,6 +138,9 @@ def main(cfg: DictConfig):
 
     if cfg.protein_only:
         cfg.exp_name = f"{cfg.exp_name}_protein_only"
+    
+    if cfg.fix_pocket_seq:
+        cfg.exp_name = f"{cfg.exp_name}_ps_fix_{cfg.pocket_distance}"
 
     if cfg.debug:
         cfg.wandb.project = f"debug_{cfg.wandb.project}"
@@ -245,7 +248,10 @@ def main(cfg: DictConfig):
                                     pdb_paths=pdb_files, device=device, 
                                     pos_constraint_df=None,
                                     out_dir=log_dir_i,
-                                    protein_only=cfg.get("protein_only", False))
+                                    protein_only=cfg.get("protein_only", False),
+                                    fix_pocket_seq=cfg.get("fix_pocket_seq", False),
+                                    pocket_distance=cfg.pocket_distance,
+                                    )
             
             # === Save sequence recovery metrics ===
             sample_len = len(outputs["example_id"])
@@ -430,12 +436,12 @@ def main(cfg: DictConfig):
                             per_pred_docking_metrics = compute_template_conditioned_docking_metrics(
                                 sample_path=sample_path, 
                                 pred_sample_paths=pred_tc_sample_paths,
-                                pdb_chain_info=pdb_chain_info,
-                                binding_site_radius=cfg.docking_metrics_cfg.binding_site_radius,
+                                pdb_chain_info=pdb_chain_info,                                
                                 save_aligned=cfg.docking_metrics_cfg.get("save_aligned", True),                                
                                 data_cfg_for_af3_prediction=cfg.data_cfg_for_af3_prediction,
                                 transform_cfg_for_af3_prediction=cfg.transform_cfg_for_af3_prediction,
                                 metadata=metadata,
+                                pocket_distance=cfg.pocket_distance,                                
                             )
                         except Exception as e:
                             print(f"AF3 docking metrics computation failed for {job_name}: {e}")
@@ -484,7 +490,7 @@ def main(cfg: DictConfig):
             print(f"Saved metrics to {log_dir_i}/{metrics_csv_name}")
 
             # Aggregate metrics for wandb logging
-            skip_metrics = {"aligned_pred_array", "num_bs_residues"}
+            skip_metrics = {"aligned_pred_array", "num_matched_atoms"}
             sc_metrics_names = {"sc_ca_rmsd", "avg_ca_plddt"}
             docking_metrics_names = {"ligand_rmsd", "binding_site_rmsd"}
             

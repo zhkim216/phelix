@@ -126,7 +126,8 @@ def sd_featurizer(
     residue_cache_dir: str | None = "/scratch/users/zhkim216/datasets/atomworks/cached_residue_data",
     max_conformers_per_residue: int | None = 50,
     apply_random_augmentation: bool = True,
-    translation_scale: float = 1.0
+    translation_scale: float = 1.0,
+    pocket_distance: float = 8.0,
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
@@ -182,13 +183,13 @@ def sd_featurizer(
             use_element_for_atom_names_of_atomized_tokens=False,
             max_conformers_per_residue=max_conformers_per_residue,
         ), #Todo: add automorphisms and chiral features
-        ComputeAtomToTokenMap(),
-        # AddAF3TokenBondFeatures(), # Todo: Need to look at it later, when we're using bond features
+        ComputeAtomToTokenMap(),        
+        AnnotateLigandPockets(pocket_distance=pocket_distance), 
+        # AddAF3TokenBondFeatures(), # Todo: Need to look at it later, when we're using bond features        
         ConvertToTorch(keys=["encoded", "feats"]),
         # Handle missing atoms and tokens
         PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
-        PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"),
-
+        PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"),        
         # Add features from the atom_array
         FeaturizeCoordsAndMasks(),
         # AddChainTypeAnnotationsToAtomArray(), #! (JH) added 251117
@@ -327,7 +328,13 @@ class FeaturizeCoordsAndMasks(Transform):
         feats["token_is_metal"] = feats["chain_is_metal"].clone()
         feats["atom_is_metal"] = feats["chain_is_metal"].gather(dim=-1, index=feats["atom_to_token_map"])
         
-                
+        # Ligand pocket features
+        if "is_ligand_pocket" in atom_array.get_annotation_categories():    
+            feats["atom_is_ligand_pocket"] = torch.tensor(atom_array.is_ligand_pocket)
+            feats["pocket_atom_mask"] = feats["atom_is_ligand_pocket"] * feats["atom_resolved_mask"]
+            feats["token_is_ligand_pocket"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_ligand_pocket, np.any)).bool()
+            feats["pocket_token_mask"] = feats["token_is_ligand_pocket"] * feats["token_resolved_mask"]                
+            
         # Get ligand related features
         # try:
         #     feats["atom_is_aromatic"] = torch.tensor(atom_array.is_aromatic).float()
@@ -656,8 +663,8 @@ def annotate_ligand_pockets(
     pocket_distance: float = 8.0,
     n_min_ligand_atoms: int = 1,
     annotation_name: str = "is_ligand_pocket",
-    receptor_chain: str = "A",
-    ligand_chain: str = "C",
+    receptor_chain: str = None,
+    ligand_chain: str = None,
 ) -> AtomArray:
     """
     Identify atoms near ligands of sufficient size.
@@ -676,21 +683,26 @@ def annotate_ligand_pockets(
     atom_array = atom_array.copy()
 
     # Find all ligand pn_unit_iids within our structure and their atom counts
-    if not hasattr(atom_array, 'pn_unit_iid'):
-        # Fallback: use chain_id for non-polymer atoms
-        non_polymer_mask = ~atom_array.is_polymer if hasattr(atom_array, 'is_polymer') else atom_array.hetero
-        ligand_chains = np.unique(atom_array.chain_id[non_polymer_mask])
-        ligand_counts = np.array([np.sum(atom_array.chain_id[non_polymer_mask] == ch) for ch in ligand_chains])
+    if (receptor_chain is None) or (ligand_chain is None):
+        non_protein_mask = ~(atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
+        ligand_chains = np.unique(atom_array.chain_id[non_protein_mask])
+        ligand_counts = np.array([np.sum(atom_array.chain_id[non_protein_mask] == ch) for ch in ligand_chains])
         valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
         valid_ligand_chains = ligand_chains[valid_ligand_mask]
-        all_valid_ligands_mask = np.isin(atom_array.chain_id, valid_ligand_chains) & non_polymer_mask
+        all_valid_ligands_mask = np.isin(atom_array.chain_id, valid_ligand_chains) & non_protein_mask
     else:
-        ligand_pn_unit_iids, ligand_counts = np.unique(
-            atom_array.pn_unit_iid[atom_array.chain_id == ligand_chain], return_counts=True
-        )
-        valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
-        valid_ligand_pn_unit_iids = ligand_pn_unit_iids[valid_ligand_mask]
-        all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_pn_unit_iids)
+        if not hasattr(atom_array, 'pn_unit_iid'):
+            ligand_chain_ids, ligand_counts = np.unique(atom_array.chain_id[atom_array.chain_id == ligand_chain], return_counts=True)
+            valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
+            valid_ligand_chain_ids = ligand_chain_ids[valid_ligand_mask]
+            all_valid_ligands_mask = np.isin(atom_array.chain_id, valid_ligand_chains)
+        else:    
+            ligand_pn_unit_iids, ligand_counts = np.unique(
+                atom_array.pn_unit_iid[atom_array.chain_id == ligand_chain], return_counts=True
+            )
+            valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
+            valid_ligand_pn_unit_iids = ligand_pn_unit_iids[valid_ligand_mask]
+            all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_pn_unit_iids)
 
     # Initialize pocket annotation
     pocket_annotation = np.zeros(len(atom_array), dtype=bool)
@@ -719,7 +731,7 @@ def annotate_ligand_pockets(
     near_ligand_full = np.zeros(len(atom_array), dtype=bool)
     near_ligand_full[valid_coords_mask] = near_ligand_valid
 
-    # Only polymer atoms can be pocket atoms
+    # Only protein atoms can be pocket atoms
     is_protein_chain = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
     pocket_annotation = is_protein_chain & near_ligand_full
 
@@ -746,7 +758,8 @@ class AnnotateLigandPockets(Transform):
         check_is_instance(data, "atom_array", AtomArray)
 
     @override
-    def forward(self, data: dict, receptor_chain: str = "A", ligand_chain: str = "C") -> dict:
+    def forward(self, data: dict, receptor_chain: str = None, ligand_chain: str = None) -> dict:
+        print(f"pocket_distance: {self.pocket_distance}")
         data["atom_array"] = annotate_ligand_pockets(
             data["atom_array"],
             pocket_distance=self.pocket_distance,
