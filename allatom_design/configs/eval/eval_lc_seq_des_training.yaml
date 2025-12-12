@@ -18,6 +18,8 @@ use_ema: false
 evaluate_self_consistency: true
 evaluate_template_conditioned_docking: true
 protein_only: true
+fix_pocket_seq: true
+pocket_distance: 5.0
 
 # Skip sampling options (use when sampling is already done)
 skip_sampling: false  # if true, skip sampling and load from skip_sampling_dir
@@ -29,7 +31,6 @@ metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/
 # Outputs
 exp_name: eval_af3_exp1_cfg0 # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des  # outputs will be saved to base_out_dir/exp_name
-
 
 # Input data and saving cif configuration for sequence design
 data_cfg_for_design:
@@ -63,7 +64,7 @@ data_cfg_for_design:
       pdbx_audit_revision_history:
         ordinal: [1]
         revision_id: [1]
-        revision_date: ["1959-01-08"]
+        revision_date: ["1959-01-07"]
         major_revision: [1]
         minor_revision: [0]
         revision_description: ["Dummy date for template-conditioning AF3"]
@@ -79,6 +80,7 @@ transform_cfg_for_design:
     max_conformers_per_residue: 50
     apply_random_augmentation: false
     translation_scale: 1.0
+    pocket_distance: ${pocket_distance}
   preprocess_cfg:
     undesired_res_names: []
     b_factor_min: null
@@ -106,11 +108,7 @@ transform_cfg_for_af3_prediction:
     max_tokens: null
     max_atoms: null
     remove_keys: []
-    remove_unresolved_tokens: true
-    residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
-    max_conformers_per_residue: 50
-    apply_random_augmentation: false
-    translation_scale: 1.0
+    remove_unresolved_tokens: true #! To remove atoms with NaN coords because of atomworks parse
   preprocess_cfg:
     undesired_res_names: []
     b_factor_min: null
@@ -177,7 +175,7 @@ struct_pred_cfg:
         max_template_date: "2021-09-30"
 
 docking_metrics_cfg:
-  binding_site_radius: 8.0  # Radius for binding site superposition in docking metrics
+  binding_site_radius: ${pocket_distance}  # Radius for binding site superposition in docking metrics
   save_aligned: true
   
 hydra:
