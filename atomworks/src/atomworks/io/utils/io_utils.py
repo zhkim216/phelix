@@ -1243,6 +1243,7 @@ def _to_cif_or_bcif(
     include_nan_coords: bool = True,
     include_bonds: bool = True,
     extra_fields: list[str] | Literal["all"] = [],
+    exclude_field_keys: list[str] | None = None,  #! (JH) added: exclude specific annotation keys from extra_fields
     extra_categories: dict[str, dict[str, float | int | str | list | np.ndarray]] | None = None,
     as_bcif: bool = False,
     _allow_ambiguous_bond_annotations: bool = False,
@@ -1306,7 +1307,7 @@ def _to_cif_or_bcif(
     _write_categories_to_block(block, metadata)
 
     # Set the structure in the CIF file
-    if extra_fields == "all" or extra_fields == "all_except_token_ids": #! (JH) changed
+    if extra_fields == "all":
         _standard_cif_annotations = frozenset(
             {
                 "chain_id",
@@ -1323,10 +1324,10 @@ def _to_cif_or_bcif(
                 "b_factor",
             }
         )
-        if extra_fields == "all":
-            extra_fields = list(set(structure.get_annotation_categories()) - _standard_cif_annotations)
-        elif extra_fields == "all_except_token_ids": 
-            extra_fields = list(set(structure.get_annotation_categories()) - _standard_cif_annotations - set(["token_id",]))
+        extra_fields = list(set(structure.get_annotation_categories()) - _standard_cif_annotations)        
+        # Apply exclude_field_keys if provided #! (JH) added
+        if exclude_field_keys:
+            extra_fields = list(set(extra_fields) - set(exclude_field_keys))            
 
     if not include_nan_coords:
         structure = ta.remove_nan_coords(structure)
@@ -1361,6 +1362,7 @@ def to_cif_buffer(
     include_nan_coords: bool = True,
     include_bonds: bool = True,
     extra_fields: list[str] | Literal["all"] = [],
+    exclude_field_keys: list[str] | None = None,  #! (JH) added: exclude specific annotation keys from extra_fields
     extra_categories: dict[str, dict[str, float | int | str | list | np.ndarray]] | None = None,
     _allow_ambiguous_bond_annotations: bool = False,
     as_bcif: bool = False,
@@ -1397,6 +1399,7 @@ def to_cif_buffer(
         include_nan_coords=include_nan_coords,
         include_bonds=include_bonds,
         extra_fields=extra_fields,
+        exclude_field_keys=exclude_field_keys,
         extra_categories=extra_categories,
         as_bcif=as_bcif,
         _allow_ambiguous_bond_annotations=_allow_ambiguous_bond_annotations,
@@ -1418,6 +1421,7 @@ def to_cif_string(
     include_nan_coords: bool = True,
     include_bonds: bool = True,
     extra_fields: list[str] | Literal["all"] = [],
+    exclude_field_keys: list[str] | None = None,  #! (JH) added: exclude specific annotation keys from extra_fields
     extra_categories: dict[str, dict[str, float | int | str | list | np.ndarray]] | None = None,
     as_bcif: bool = False,
     _allow_ambiguous_bond_annotations: bool = False,
@@ -1451,6 +1455,7 @@ def to_cif_string(
         include_nan_coords=include_nan_coords,
         include_bonds=include_bonds,
         extra_fields=extra_fields,
+        exclude_field_keys=exclude_field_keys,
         extra_categories=extra_categories,
         _allow_ambiguous_bond_annotations=_allow_ambiguous_bond_annotations,
         as_bcif=as_bcif,
@@ -1511,6 +1516,7 @@ def to_cif_file(
     include_nan_coords: bool = True,
     include_bonds: bool = True,
     extra_fields: list[str] | Literal["all"] = [],
+    exclude_field_keys: list[str] | None = None,  #! (JH) added: exclude specific annotation keys from extra_fields
     extra_categories: dict[str, dict[str, float | int | str | list | np.ndarray]] | None = None,
     _allow_ambiguous_bond_annotations: bool = False,
     fill_gaps_in_poly_records: bool = False,  #! (JH) fill gaps in entity_poly and entity_poly_seq with X/UNK
@@ -1570,6 +1576,7 @@ def to_cif_file(
         include_nan_coords=include_nan_coords,
         include_bonds=include_bonds,
         extra_fields=extra_fields,
+        exclude_field_keys=exclude_field_keys,
         extra_categories=extra_categories,
         _allow_ambiguous_bond_annotations=_allow_ambiguous_bond_annotations,
         as_bcif=".bcif" in path,
