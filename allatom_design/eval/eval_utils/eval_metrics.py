@@ -1420,7 +1420,7 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     sample_example: dict[str, Any] = None,    
     receptor_chain: str = "A",
     ligand_chain: str = "C",
-    binding_site_radius: float = 8.0,
+    pocket_distance: float = 8.0,    
     save_aligned: bool = True,
     sample_path: str | Path = None,
     pred_path: str | Path = None,
@@ -1457,13 +1457,15 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     sample_array = sample_example['atom_array']
     pred_array = pred_example['atom_array']
     
+    
+    print(f"pocket_distance: {pocket_distance}")
     # Annotate ligand pockets (binding site residues)
     sample_array = annotate_ligand_pockets(atom_array=sample_array, 
-                                           pocket_distance=binding_site_radius, 
+                                           pocket_distance=pocket_distance, 
                                            receptor_chain=receptor_chain,
                                            ligand_chain=ligand_chain)
     pred_array = annotate_ligand_pockets(atom_array=pred_array, 
-                                         pocket_distance=binding_site_radius, 
+                                         pocket_distance=pocket_distance, 
                                          receptor_chain=receptor_chain,
                                          ligand_chain=ligand_chain)
     
@@ -1606,11 +1608,11 @@ def compute_template_conditioned_docking_metrics(
     sample_path: str | Path,
     pred_sample_paths: list[str | Path],
     pdb_chain_info: dict,
-    binding_site_radius: float = 8.0,
     save_aligned: bool = True,
     data_cfg_for_af3_prediction: DictConfig = None,
     transform_cfg_for_af3_prediction: DictConfig = None,
     metadata: pd.DataFrame = None,
+    pocket_distance: float = 8.0,
 ) -> dict[str, float]:
     """
     Compute AF3 docking metrics for template-conditioned predictions.
@@ -1624,8 +1626,10 @@ def compute_template_conditioned_docking_metrics(
     pdb_chain_info : dict
         Dictionary containing chain information for each PDB ID.
         Expected structure: {pdb_id: {'protein_chains': [...], 'ligand_chains': [...]}}
-    binding_site_radius : float
-        Radius for defining binding site residues.
+    pocket_distance_for_metrics : float
+        Radius for defining binding site residues for metrics.
+    pocket_distance_for_align : float
+        Radius for defining binding site residues for alignment.
     save_aligned : bool
         If True, save the pocket-aligned predicted structure.
     parser_kwargs : dict | None
@@ -1675,7 +1679,7 @@ def compute_template_conditioned_docking_metrics(
             sample_example=sample_example,
             receptor_chain=receptor_chain,
             ligand_chain=ligand_chain,            
-            binding_site_radius=binding_site_radius,
+            pocket_distance=pocket_distance,            
             save_aligned=save_aligned,
             sample_path=sample_path,
             pred_path=pred_path,
