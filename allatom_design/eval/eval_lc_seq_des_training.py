@@ -272,18 +272,7 @@ def main(cfg: DictConfig):
             if "total_avg_seq_recovery" in outputs and outputs["total_avg_seq_recovery"] is not None:
                 seq_recovery_wandb_metrics["eval/total_avg_seq_recovery"] = outputs["total_avg_seq_recovery"]
             if "total_avg_sp_seq_recovery" in outputs and outputs["total_avg_sp_seq_recovery"] is not None:
-                seq_recovery_wandb_metrics["eval/total_avg_sp_seq_recovery"] = outputs["total_avg_sp_seq_recovery"]
-            
-            # Also log per-sample mean seq recovery from the DataFrame
-            if len(seq_recovery_df) > 0:
-                if "sample_seq_recovery" in seq_recovery_df.columns:
-                    mean_sr = seq_recovery_df["sample_seq_recovery"].mean()
-                    if pd.notna(mean_sr):
-                        seq_recovery_wandb_metrics["eval/mean_sample_seq_recovery"] = mean_sr
-                if "sample_sp_seq_recovery" in seq_recovery_df.columns:
-                    mean_sp_sr = seq_recovery_df["sample_sp_seq_recovery"].mean()
-                    if pd.notna(mean_sp_sr):
-                        seq_recovery_wandb_metrics["eval/mean_sample_sp_seq_recovery"] = mean_sp_sr
+                seq_recovery_wandb_metrics["eval/total_avg_sp_seq_recovery"] = outputs["total_avg_sp_seq_recovery"]                        
             
             if not cfg.wandb.no_wandb:
                 wandb.log(seq_recovery_wandb_metrics, commit=True)
@@ -497,7 +486,7 @@ def main(cfg: DictConfig):
             def filter_none(values):
                 return [v for v in values if v is not None]
             
-            out_metrics.update({f"eval/mean_{k}": np.nanmean(filter_none(v)) for k, v in all_metrics.items() if filter_none(v)})
+            out_metrics.update({f"eval/mean/{k}": np.nanmean(filter_none(v)) for k, v in all_metrics.items() if filter_none(v)})
             # out_metrics.update({f"eval/median/{k}": np.nanmedian(filter_none(v)) for k, v in all_metrics.items() if k != "num_bs_residues" and filter_none(v)})
             
             # Ranked metrics: best pLDDT sample per sample_id
@@ -518,7 +507,7 @@ def main(cfg: DictConfig):
                 for metric_name in docking_metrics_names:
                     ranked_metrics[metric_name].append(metrics_dict[metric_name][best_diffusion_id_for_docking])
             
-            out_metrics.update({f"eval/best_plddt/mean_{k}": np.nanmean(v) for k, v in ranked_metrics.items()})
+            out_metrics.update({f"eval/best_plddt/mean/{k}": np.nanmean(v) for k, v in ranked_metrics.items()})
             # out_metrics.update({f"eval/ranked/median_{k}": np.nanmedian(v) for k, v in ranked_metrics.items()})
         else:
             print(f"No metrics computed for step {global_step} (id_to_per_pred_metrics is empty)")
