@@ -17,13 +17,9 @@ eval_last_ckpt: false
 use_ema: true
 evaluate_self_consistency: true
 evaluate_template_conditioned_docking: true
-<<<<<<< HEAD
-protein_only: false
-=======
 protein_only: true
 fix_pocket_seq: true
 pocket_distance: 5.0
->>>>>>> refs/remotes/origin/jinho/AAA
 
 # Skip sampling options (use when sampling is already done)
 skip_sampling: false  # if true, skip sampling and load from skip_sampling_dir
