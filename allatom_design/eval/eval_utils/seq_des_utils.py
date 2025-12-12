@@ -489,7 +489,7 @@ def run_lc_seq_des(
             #                                           small_molecule_only=sampling_cfg.small_molecule_only)
 
             # If fix_pocket_seq is enabled, create pos_constraint_df from ligand pocket
-            if fix_pocket_seq and pos_constraint_df is None:
+            if fix_pocket_seq:
                 pos_constraint_df = create_pos_constraint_from_ligand_pocket(batch)
                 print(f"Created pos_constraint_df from ligand pocket: {pos_constraint_df}")
                                         
@@ -726,7 +726,7 @@ def run_lc_seq_des(
                 total_avg_seq_recovery += sample_avg_seq_recovery
                 total_avg_sp_seq_recovery += sample_avg_sp_seq_recovery
 
-                print (f"{example_id} avg seq recovery: {seq_recovery}, avg sp seq recovery: {sp_seq_recovery} out of {len(atom_arrays)} samples")                   
+                print (f"{example_id} avg seq recovery: {seq_recovery}, avg sp seq recovery: {sp_seq_recovery} out of {len(atom_arrays)} samples")                                                   
                 
             pbar.update(B)
     pbar.close()
