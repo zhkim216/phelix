@@ -177,7 +177,7 @@ def run_seq_des(
                 batch = initialize_ligand_pocket_mask(batch, ligand_pocket_dist_cutoff=sampling_cfg.ligand_pocket_dist_cutoff,
                                                       small_molecule_only=sampling_cfg.small_molecule_only)
 
-            # Parse fixed positions.
+            # Parse fixed positions.                                    
             batch = parse_fixed_pos_info(batch, pos_constraint_df, verbose=sampling_cfg.verbose)
 
             # Restrict aatype sampling at certain positions.
@@ -414,6 +414,8 @@ def run_lc_seq_des(
     out_dir: str = None,
     pos_constraint_df: pd.DataFrame | None = None,
     protein_only: bool = False,
+    fix_pocket_seq: bool = False,
+    pocket_distance: float = 8.0,
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
     """
     Given a list of processed structure files, run sequence design on them.
@@ -480,11 +482,17 @@ def run_lc_seq_des(
             # Initialize seq_cond and atom_cond masks.
             batch = initialize_sampling_masks(batch)
             
+            #! Revert, directly use AnnotateLigandPockets transform instead of initialize_pocket_mask
             # Initialize ligand pocket mask if ligand conditioning is enabled.
-            if sampling_cfg.ligand_conditioning:
-                batch = initialize_pocket_mask(batch, ligand_pocket_dist_cutoff=sampling_cfg.ligand_pocket_dist_cutoff,
-                                                      small_molecule_only=sampling_cfg.small_molecule_only)
+            # if sampling_cfg.ligand_conditioning:
+            #     batch = initialize_pocket_mask(batch, ligand_pocket_dist_cutoff=sampling_cfg.ligand_pocket_dist_cutoff,
+            #                                           small_molecule_only=sampling_cfg.small_molecule_only)
 
+            # If fix_pocket_seq is enabled, create pos_constraint_df from ligand pocket
+            if fix_pocket_seq and pos_constraint_df is None:
+                pos_constraint_df = create_pos_constraint_from_ligand_pocket(batch)
+                print(f"Created pos_constraint_df from ligand pocket: {pos_constraint_df}")
+                                        
             # Parse fixed positions.
             batch = parse_fixed_pos_info(batch, pos_constraint_df, verbose=sampling_cfg.verbose)
 
@@ -647,8 +655,10 @@ def run_lc_seq_des(
                     # Compute sequence recovery metrics                            
                     orig_res_types = batch["restype"][si].argmax(dim=-1)          
                     seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["token_resolved_mask"][si]
-                    if not protein_only:
+                    if (not protein_only) and (not fix_pocket_seq):
                         lp_seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["pocket_token_mask"][si]
+                    elif (not protein_only) and fix_pocket_seq:
+                        lp_seq_mask = batch["pocket_token_mask"][si] * batch["token_pad_mask"][si]
                     else:
                         native_atom_array = batch["atom_array"][si]
                         native_prot_atom_array = native_atom_array[native_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
@@ -672,7 +682,7 @@ def run_lc_seq_des(
                         ligand_chain = samp_bb_ligand_atom_array[samp_bb_ligand_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L].chain_id[0]
                                                         
                         samp_bb_ligand_atom_array = annotate_ligand_pockets(atom_array = samp_bb_ligand_atom_array, 
-                                                                                            pocket_distance = 8.0, 
+                                                                                            pocket_distance = pocket_distance, 
                                                                                             receptor_chain = receptor_chain, 
                                                                                             ligand_chain = ligand_chain)
                             
@@ -1745,3 +1755,66 @@ def insert_unk_residues_for_gaps_in_atom_array(atom_array: AtomArray) -> AtomArr
     
     return combined
 
+def create_pos_constraint_from_ligand_pocket(batch: dict) -> pd.DataFrame | None:
+    """
+    Create a pos_constraint_df from the ligand pocket information in the batch.
+    """
+    rows = []
+    
+    for i, example_id in enumerate(batch["example_id"]):
+        atom_array = batch["atom_array"][i]
+                
+        pocket_token_mask = batch["pocket_token_mask"][i].cpu().numpy().astype(bool)  
+        token_pad_mask = batch["token_pad_mask"][i].cpu().numpy().astype(bool)
+        
+        pocket_indices = np.where(pocket_token_mask & token_pad_mask)[0]
+        if len(pocket_indices) == 0:
+            continue
+        
+        # token_starts로 chain_id, res_id 가져오기
+        token_starts = get_token_starts(atom_array)
+        pocket_chain_ids = atom_array.chain_id[token_starts[pocket_indices]]
+        pocket_res_ids = atom_array.res_id[token_starts[pocket_indices]]
+        
+        # "A1-10,A15-20,B5-8" 형식으로 변환
+        fixed_pos_str = _indices_to_pos_string(pocket_chain_ids, pocket_res_ids)
+        
+        rows.append({
+            "pdb_key": example_id,
+            "fixed_pos_seq": fixed_pos_str,
+            "fixed_pos_scn": np.nan,
+        })
+    
+    if not rows:
+        return None
+    
+    return pd.DataFrame(rows).set_index("pdb_key")
+
+
+def _indices_to_pos_string(chain_ids: np.ndarray, res_ids: np.ndarray) -> str:
+    """Convert (chain_id, res_id) array to "A1-10,B5-8" format"""
+    chain_to_res = {}
+    for chain_id, res_id in zip(chain_ids, res_ids):
+        chain_to_res.setdefault(chain_id, []).append(res_id)
+    
+    pos_parts = []
+    for chain_id in sorted(chain_to_res.keys()):
+        res_list = sorted(set(chain_to_res[chain_id]))
+        if not res_list:
+            continue
+        
+        # Group consecutive res_id into ranges
+        ranges = []
+        start = end = res_list[0]
+        for r in res_list[1:]:
+            if r == end + 1:
+                end = r
+            else:
+                ranges.append((start, end))
+                start = end = r
+        ranges.append((start, end))
+        
+        for s, e in ranges:
+            pos_parts.append(f"{chain_id}{s}" if s == e else f"{chain_id}{s}-{e}")
+    
+    return ",".join(pos_parts)
