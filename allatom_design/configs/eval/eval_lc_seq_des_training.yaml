@@ -9,7 +9,7 @@ wandb:
 seed: 0
 num_workers: 1  # for dataloading
 debug: false
-num_sample_debug: 2
+num_sample_debug: 10
 start_step: 75000  # start evaluation after this step, 0 or null to start from the beginning
 end_step: 75000  # end evaluation after this step (inclusive), null to evaluate until the end
 eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
@@ -26,21 +26,21 @@ skip_sampling: false  # if true, skip sampling and load from skip_sampling_dir
 skip_sampling_dir: null  # directory containing samples/ folder from previous run (e.g., /path/to/exp_name/step_75000_epoch_47)
 
 # Metadata
-metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1.parquet
+metadata_path: /scratch/users/zhkim216/datasets/atomworks_boltz2_valset/interface_df.parquet
 
 # Outputs
 exp_name: eval_af3_exp1_cfg0 # experiment name; used for wandb and output directory
-base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des  # outputs will be saved to base_out_dir/exp_name
+base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des_boltz2_val_cifs  # outputs will be saved to base_out_dir/exp_name
 
 # Input data and saving cif configuration for sequence design
 data_cfg_for_design:
   load_from_cache: true  
   load_cache_cfg:
-    cached_example_path: "/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples"
+    cached_example_path: "/scratch/users/zhkim216/datasets/atomworks_boltz2_valset/cached_examples"
     pdb_name_ext: ".pt"
     n_subsample: null
   pdb_cfg:
-    pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/pdbs
+    pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/boltz2_val_cifs/pdbs
     pdb_name_ext: ".cif"  # if pdb_name_list does not have extensions, add this extension
     n_subsample: null  # randomly sample this many pdb keys, null to use all
   use_load_any: false
@@ -76,7 +76,7 @@ transform_cfg_for_design:
     max_atoms: null
     remove_keys: []
     remove_unresolved_tokens: true
-    residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
+    residue_cache_dir: "/scratch/users/zhkim216/datasets/atomworks_boltz2_valset/cached_examples"
     max_conformers_per_residue: 50
     apply_random_augmentation: false
     translation_scale: 1.0
@@ -120,7 +120,7 @@ transform_cfg_for_af3_prediction:
 # Denoiser options
 denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp1_cfg0
 sampling_cfg_overrides:
-  batch_size: 1
+  batch_size: 2
   num_seqs_per_pdb: 2  # number of sequences to sample per pdb
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
