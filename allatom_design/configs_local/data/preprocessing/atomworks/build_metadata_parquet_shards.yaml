@@ -1,5 +1,5 @@
-mmcif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/pdbs
-out_dir: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered
+mmcif_dir: /home/possu/jinho/datasets/val_cifs/boltz2_val_cifs/pdbs
+out_dir: /home/possu/jinho/datasets/atomworks_boltz2_valset
 
 num_workers: 31
 max_file_size: 1000000
@@ -27,19 +27,7 @@ data_preprocessor_cfg:
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: ["144", "15P", "1PE", "2F2", "2JC", "3HR", "3SY", "7N5", "7PE", "9JE",
-                "AAE", "ABA", "ACE", "ACN", "ACT", "ACY", "AZI", "BAM", "BCN", "BCT",
-                "BDN", "BEN", "BME", "BO3", "BR", "BTB", "BTC", "BU1", "C8E", "CAD", "CAQ",
-                "CBM", "CCN", "CIT", "CL", "CLR", "CM", "CMO", "CO3", "CPT", "CXS",
-                "D10", "DEP", "DIO", "DMS", "DN", "DOD", "DOX", "EDO", "EEE", "EGL",
-                "EOH", "EOX", "EPE", "ETF", "FCY", "FJO", "FLC", "FMT", "FW5", "GOL",
-                "GSH", "GTT", "GYF", "HED", "IHP", "IHS", "IMD", "IOD", "IPA", "IPH",
-                "LDA", "MB3", "MEG", "MES", "MLA", "MLI", "MOH", "MPD", "MRD", "MSE",
-                "MYR", "N", "NA", "NAG", "NH2", "NH4", "NHE", "NO3", "K", "O4B", "OHE", "OLA",
-                "OLC", "OMB", "OME", "OXA", "P6G", "PE3", "PE4", "PEG", "PEO", "PEP",
-                "PG0", "PG4", "PGE", "PGR", "PLM", "PO4", "POL", "POP", "PVO", "SAR",
-                "SCN", "SEO", "SIN", "SO4", "SPD", "SPM", "SR", "STE", "STO", "STU",
-                "TAR", "TBU", "TME", "TRS", "UNK", "UNL", "UNX", "UPL", "URE"]
+  remove_ccds: ["UNL", "UNX", "UNK"]
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
@@ -47,5 +35,5 @@ cif_parser_args:
   add_bond_types_from_struct_conn: ["covale"]
 
 # --- sharding for multi-node runs ---
-num_shards: 0     # total number of shards
-shard_id: 1       # per-job shard id
+num_shards: 1     # total number of shards
+shard_id: 0       # per-job shard id
