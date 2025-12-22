@@ -22,7 +22,7 @@ from allatom_design.utils.metadata_utils import (compute_contacts_to_proteins_pe
                                                  compute_nuc_cluster_contacts_to_proteins_per_pdb)
 
 
-def get_pdb_files(pdb_dir: str,
+def get_pdb_files(pdb_dir: str | None,
                   pdb_name_list: str | None,
                   pdb_name_ext: str | None = None,
                   n_subsample: int | None = None,
