@@ -31,8 +31,12 @@ from allatom_design.data.const import AF3_ENCODING
 from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data.data import to
 from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
-from allatom_design.data.transform.preprocess import preprocess_transform
-from allatom_design.data.transform.sd_featurizer import sd_featurizer, sd_featurizer_with_load_any, sd_featurizer_for_af3_prediction, annotate_ligand_pockets
+from allatom_design.data.transform.preprocess import preprocess_transform, preprocess_transform_for_designs_from_other_methods
+from allatom_design.data.transform.sd_featurizer import (sd_featurizer, 
+                                                         sd_featurizer_with_load_any, 
+                                                         sd_featurizer_for_af3_prediction, 
+                                                         sd_featurizer_for_designs_from_other_methods)
+from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 from allatom_design.data.transform.pad import pad_dim
@@ -606,7 +610,7 @@ def run_lc_seq_des(
                     
                     # atom_array with gaps for af3 template conditioning
                     samp_prot_bb_atom_array_with_gaps = samp_prot_bb_atom_array.copy()
-                                                                                
+                                                                                                                                                                
                     # Insert UNK atoms for gaps in protein backbone atom array
                     samp_atom_array_no_sidechain_with_gaps = insert_unk_residues_for_gaps_in_atom_array(samp_prot_bb_atom_array_with_gaps)
                     samp_atom_array_no_sidechain_with_gaps = samp_atom_array_no_sidechain_with_gaps + samp_ligand_atom_array
@@ -648,14 +652,18 @@ def run_lc_seq_des(
                     # Compute sequence recovery metrics                            
                     orig_res_types = batch["restype"][si].argmax(dim=-1)          
                     seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["token_resolved_mask"][si]
-                    if (not protein_only) and (not fix_pocket_seq):
-                        lp_seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["pocket_token_mask"][si]
-                    elif (not protein_only) and fix_pocket_seq:
+                    if all_native:
+                        seq_mask = batch["token_resolved_mask"][si]
                         lp_seq_mask = batch["pocket_token_mask"][si] * batch["token_pad_mask"][si]
                     else:
-                        native_atom_array = batch["atom_array"][si]
-                        native_prot_atom_array = native_atom_array[native_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
-                        native_prot_ca_atom_array = native_prot_atom_array[native_prot_atom_array.atom_name == "CA"]                                                                        
+                        if (not protein_only) and (not fix_pocket_seq):
+                            lp_seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["pocket_token_mask"][si]
+                        elif (not protein_only) and fix_pocket_seq:
+                            lp_seq_mask = batch["pocket_token_mask"][si] * batch["token_pad_mask"][si]
+                        else:
+                            native_atom_array = batch["atom_array"][si]
+                            native_prot_atom_array = native_atom_array[native_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+                            native_prot_ca_atom_array = native_prot_atom_array[native_prot_atom_array.atom_name == "CA"]                                                                        
                 
                     # Calculate sequence recovery metrics for each sample                                                
                     if not protein_only:
@@ -883,7 +891,7 @@ def get_sd_batch(
 
     return batch
 
-
+#!########## Get SD example functions ##########
 def get_sd_example(pdb_path: str = None,
                    data_cfg: DictConfig = None,
                    transform_cfg: DictConfig = None, 
@@ -946,8 +954,7 @@ def get_sd_example(pdb_path: str = None,
         for col in metadata_example.columns:            
             if any(col.endswith(s) for s in other_suffixes):
                 continue
-            
-            # 선택된 suffix가 붙은 컬럼은 suffix 제거
+                        
             if col.endswith(f"_{suffix}"):
                 new_col = col[:-len(f"_{suffix}")]
             else:
@@ -1008,11 +1015,114 @@ def get_sd_example_from_af3_prediction(pdb_path: str = None,
     row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
     example['extra_info'] = row_dict
     
+    
     # Featurize the example.    
     featurizer = sd_featurizer_for_af3_prediction(**featurizer_cfg)                                                                            
     example = featurizer(example)
 
     return example    
+
+def get_sd_example_from_designs_from_other_methods(pdb_path: str = None,
+                                                   data_cfg: DictConfig = None,
+                                                   transform_cfg: DictConfig = None,
+                                                   ) -> dict[str, Any]:
+    """
+    Given a pdb file path from designed samples from other methods, return a dictionary of sequence design model features.
+    """
+    preprocess_transform_cfg = transform_cfg.preprocess_cfg
+    featurizer_cfg = transform_cfg.featurizer_cfg
+    
+    # load_from_pdb: Use preprocess_pdb pipeline
+    example = preprocess_designs_from_other_methods(pdb_path = pdb_path, 
+                                                    data_cfg = data_cfg, 
+                                                    preprocess_transform_cfg = preprocess_transform_cfg)
+    
+    featurizer = sd_featurizer_for_designs_from_other_methods(**featurizer_cfg)
+    example = featurizer(example)
+    
+    return example
+    
+    #! Replace information in the example with the information from the metadata
+
+#!########################################################################################################
+#!###### Preprocessing functions #######
+
+def preprocess_pdb(pdb_path: str | None, data_cfg: DictConfig | None, 
+                   preprocess_transform_cfg: DictConfig | None) -> dict[str, Any]:
+    """
+    Preprocess a PDB file using the preprocessing pipeline.
+    """
+    # Set up arguments for parsing cifs with AtomWorks.
+    if data_cfg is None:
+        default_cif_parser_args = {
+            "add_missing_atoms": True,
+            "remove_waters": True,
+            "remove_ccds": [],
+            "fix_ligands_at_symmetry_centers": True,
+            "fix_arginines": True,
+            "convert_mse_to_met": True,
+            "hydrogen_policy": "remove",
+            "extra_fields": "all",
+        }
+        cif_parser_args = default_cif_parser_args
+    else:
+        cif_parser_args = OmegaConf.to_container(data_cfg.cif_parser_args, resolve=True)
+
+    # Read in the CIF data.
+    transformation_id = "1"  # Leep only the first assembly.
+    cif_parser_args["build_assembly"] = [transformation_id]
+    input_data = aw_parse(pdb_path, **cif_parser_args)
+    atom_array_from_cif = input_data["assemblies"][transformation_id][0]  # (1, num_atoms) -> (num_atoms)
+
+    # Run the preprocessing pipeline on the CIF data.
+    pipeline = preprocess_transform(**dict(preprocess_transform_cfg))
+    return pipeline(
+        data={
+            "example_id": Path(pdb_path).stem,
+            "atom_array": atom_array_from_cif,
+            "chain_info": input_data["chain_info"],
+        }
+    )
+    
+def preprocess_designs_from_other_methods(pdb_path: str | None,
+                                          data_cfg: DictConfig | None,
+                                          preprocess_transform_cfg: DictConfig | None) -> dict[str, Any]:
+    """
+    Preprocess a PDB file using the preprocessing pipeline for designed samples from non-atomworks frameworks.
+    """
+    # Set up arguments for parsing cifs with AtomWorks.
+    if data_cfg is None:
+        default_cif_parser_args = {
+            "add_missing_atoms": True,
+            "remove_waters": True,
+            "remove_ccds": [],
+            "fix_ligands_at_symmetry_centers": True,
+            "fix_arginines": True,
+            "convert_mse_to_met": True,
+            "hydrogen_policy": "remove",
+            "extra_fields": "all",
+        }
+        cif_parser_args = default_cif_parser_args
+    else:
+        cif_parser_args = OmegaConf.to_container(data_cfg.cif_parser_args, resolve=True)
+        
+    # Read in the CIF data.
+    transformation_id = "1"  # Leep only the first assembly.
+    cif_parser_args["build_assembly"] = [transformation_id]
+    input_data = aw_parse(pdb_path, **cif_parser_args)
+    atom_array_from_cif = input_data["assemblies"][transformation_id][0]  # (1, num_atoms) -> (num_atoms)
+    
+    # Run the preprocessing pipeline on the CIF data.
+    pipeline = preprocess_transform_for_designs_from_other_methods(**dict(preprocess_transform_cfg))
+    return pipeline(
+        data={
+            "example_id": Path(pdb_path).stem,
+            "atom_array": atom_array_from_cif,
+            "chain_info": input_data["chain_info"],
+        }
+    )
+
+#!########################################################################################################
 
 def load_cached_example(pdb_path: str) -> dict[str, torch.Tensor]:
     cached_example_path = f"{pdb_path}"
@@ -1080,44 +1190,6 @@ def _fix_cif_annotation_types(atom_array) -> "AtomArray":
                 atom_array.set_annotation(ann, new_val)
     
     return atom_array
-
-def preprocess_pdb(pdb_path: str, data_cfg: DictConfig | None, 
-                   preprocess_transform_cfg: DictConfig | None) -> dict[str, Any]:
-    """
-    Preprocess a PDB file using the preprocessing pipeline.
-    """
-    # Set up arguments for parsing cifs with AtomWorks.
-    if data_cfg is None:
-        default_cif_parser_args = {
-            "add_missing_atoms": True,
-            "remove_waters": True,
-            "remove_ccds": [],
-            "fix_ligands_at_symmetry_centers": True,
-            "fix_arginines": True,
-            "convert_mse_to_met": True,
-            "hydrogen_policy": "remove",
-            "extra_fields": "all",
-        }
-        cif_parser_args = default_cif_parser_args
-    else:
-        cif_parser_args = OmegaConf.to_container(data_cfg.cif_parser_args, resolve=True)
-
-    # Read in the CIF data.
-    transformation_id = "1"  # Leep only the first assembly.
-    cif_parser_args["build_assembly"] = [transformation_id]
-    input_data = aw_parse(pdb_path, **cif_parser_args)
-    atom_array_from_cif = input_data["assemblies"][transformation_id][0]  # (1, num_atoms) -> (num_atoms)
-
-    # Run the preprocessing pipeline on the CIF data.
-    pipeline = preprocess_transform(**dict(preprocess_transform_cfg))
-    return pipeline(
-        data={
-            "example_id": Path(pdb_path).stem,
-            "atom_array": atom_array_from_cif,
-            "chain_info": input_data["chain_info"],
-        }
-    )
-
 
 def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str, torch.Tensor]:
     """
@@ -1745,7 +1817,11 @@ def insert_unk_residues_for_gaps_in_atom_array(atom_array: AtomArray) -> AtomArr
             
             unk_atoms_list.append(unk_atom)
             
-    # Concatenate all UNK atoms        
+    # Concatenate all UNK atoms
+    if len(unk_atoms_list) == 0:
+        print(f"No UNK atoms to insert (gaps detected but no missing residues)")
+        return atom_array
+    
     all_unk_atoms = unk_atoms_list[0]
     for unk_atom in unk_atoms_list[1:]:
         all_unk_atoms = all_unk_atoms + unk_atom
