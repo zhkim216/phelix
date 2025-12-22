@@ -104,8 +104,8 @@ def main(cfg: DictConfig):
     struct_pred_cfg = cfg.struct_pred_cfg
     
     # Make a directory for saving aligned structures
-    # with_ligand_struct_dir = Path(base_out_dir, "sample_with_ligand")
-    # with_ligand_struct_dir.mkdir(parents=True, exist_ok=True)
+    with_ligand_struct_dir = Path(base_out_dir, "sample_with_ligand")
+    with_ligand_struct_dir.mkdir(parents=True, exist_ok=True)
         
     # Get PDB files
     sample_paths = get_pdb_files(**pdb_cfg)
@@ -175,13 +175,11 @@ def main(cfg: DictConfig):
         prot_bb_atom_array = prot_bb_atom_array[prot_bb_atom_array.is_backbone_atom]
         ligand_atom_array = sample_dict[sample_id]["original_ligand_atom_array"]
         
-        #! For now, we're not saving the with_ligand structure as the structure is centered on the COM of the protein,
-        #! So the ligand is not in the correct position.
-        # prot_bb_ligand_atom_array = struc.concatenate([prot_bb_atom_array, ligand_atom_array])
+        prot_bb_ligand_atom_array = struc.concatenate([prot_bb_atom_array, ligand_atom_array])
         
         # Save prot_bb_ligand_atom_array to mmcif file
-        # with_ligand_struct_path = Path(with_ligand_struct_dir, f"{sample_id}_with_ligand.cif")
-        # to_cif_file(prot_bb_ligand_atom_array, str(with_ligand_struct_path))
+        with_ligand_struct_path = Path(with_ligand_struct_dir, f"{sample_id}_with_ligand.cif")
+        to_cif_file(prot_bb_ligand_atom_array, str(with_ligand_struct_path))
         
         protein_chains = [str(chain_id) for chain_id in np.unique(prot_bb_atom_array.chain_id)]    
         ligand_chains = [str(chain_id) for chain_id in np.unique(ligand_atom_array.chain_id)]
@@ -194,7 +192,7 @@ def main(cfg: DictConfig):
         for chain, ccd_code in ligand_chains_ccd_codes:
             pdb_chain_info["ligand_chains_ccd_codes"].append((str(chain), str(ccd_code)))
             
-        sample_dict[sample_id]["sample_atom_array"] = prot_bb_atom_array
+        sample_dict[sample_id]["sample_atom_array"] = prot_bb_ligand_atom_array
         sample_dict[sample_id]["pdb_chain_info"] = pdb_chain_info
         
     ###########################################################
