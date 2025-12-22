@@ -490,6 +490,7 @@ def run_lc_seq_des(
 
             # If fix_pocket_seq is enabled, create pos_constraint_df from ligand pocket
             if fix_pocket_seq:
+                pos_constraint_df = None
                 pos_constraint_df = create_pos_constraint_from_ligand_pocket(batch)
                 print(f"Created pos_constraint_df from ligand pocket: {pos_constraint_df}")
                                         
@@ -605,15 +606,7 @@ def run_lc_seq_des(
                     
                     # atom_array with gaps for af3 template conditioning
                     samp_prot_bb_atom_array_with_gaps = samp_prot_bb_atom_array.copy()
-                    
-                    # Delete annotations to handle gaps in a easier way
-                    annot_to_delete = []
-                    for annot in ["within_chain_res_idx", "within_poly_res_idx", "token_id"]:
-                        if annot in samp_prot_bb_atom_array_with_gaps.get_annotation_categories():
-                            annot_to_delete.append(annot)
-                    for annot in annot_to_delete:
-                        samp_prot_bb_atom_array_with_gaps.del_annotation(annot)
-                    
+                                                                                
                     # Insert UNK atoms for gaps in protein backbone atom array
                     samp_atom_array_no_sidechain_with_gaps = insert_unk_residues_for_gaps_in_atom_array(samp_prot_bb_atom_array_with_gaps)
                     samp_atom_array_no_sidechain_with_gaps = samp_atom_array_no_sidechain_with_gaps + samp_ligand_atom_array
@@ -1656,17 +1649,35 @@ def insert_unk_residues_for_gaps_in_atom_array(atom_array: AtomArray) -> AtomArr
     """
     
     annotations = atom_array.get_annotation_categories()
-    if "within_chain_res_idx" in annotations or "within_poly_res_idx" in annotations or "token_id" in annotations:
-        raise ValueError("within_chain_res_idx, within_poly_res_idx, token_id annotations are not supported for gap insertion")    
+    annot_categories_to_include = ["res_id", "res_name", "atom_name", "alt_atom_id",\
+        "atom_id", "element", "hetero", "occupancy", "b_factor", "stereo",\
+        "is_aromatic", "is_backbone_atom", "is_polymer", "charge", "atomic_number", \
+        "atomize", "is_covalent_modification", "uses_alt_atom_id", "ins_code", "chain_id",\
+        "pn_unit_id", "molecule_id", "chain_entity", "pn_unit_entity", "molecule_entity", \
+        "transformation_id", "chain_iid", "pn_unit_iid", "molecule_iid", "chain_type"
+    ]
     
+    annot_categories_to_copy = ["chain_id", "pn_unit_id", "molecule_id", \
+                                "chain_entity", "pn_unit_entity", "molecule_entity", \
+                                "transformation_id", "chain_iid", "pn_unit_iid", "molecule_iid", \
+                                "chain_type"]
+    
+    annot_categories_to_not_copy = [x for x in annot_categories_to_include if x not in annot_categories_to_copy]
+    
+    # Delete annotations that are not in annotations_to_include
+    for annot in annotations:
+        if annot not in annot_categories_to_include:
+            atom_array.del_annotation(annot)
+            
     # Get unique residues (first atom of each residue)
     res_starts = get_residue_starts(atom_array)
     res_ids = atom_array.res_id[res_starts]
-    
-    
-    # Find gaps: positions where res_id difference > 1
+    chain_ids = atom_array.chain_id[res_starts]
+        
+    # Find gaps: positions where res_id difference > 1 AND same chain
     res_id_diff = np.diff(res_ids)
-    gap_indices = np.where(res_id_diff > 1)[0]
+    same_chain = chain_ids[:-1] == chain_ids[1:]
+    gap_indices = np.where((res_id_diff > 1) & same_chain)[0]
     
     if len(gap_indices) == 0:
         print(f"No gaps found in the atom array")
@@ -1689,14 +1700,9 @@ def insert_unk_residues_for_gaps_in_atom_array(atom_array: AtomArray) -> AtomArr
             
             # Set coordinates to [0, 0, 0]
             unk_atom.coord[0] = [0.0, 0.0, 0.0]
-            
-            annot_categories_to_copy = ["chain_id", "pn_unit_id", "molecule_id", 
-                                        "chain_entity", "pn_unit_entity", "molecule_entity", 
-                                        "transformation_id", "chain_iid", "pn_unit_iid", "molecule_iid",
-                                        "chain_type"]
-                                                    
+                                                                            
             # Copy annotations from template atom
-            for annot in atom_array.get_annotation_categories():
+            for annot in annot_categories_to_include:                
                 if annot == "res_id":
                     unk_atom.set_annotation(annot, np.array([missing_res_id]))
                 elif annot == "res_name":
@@ -1729,16 +1735,17 @@ def insert_unk_residues_for_gaps_in_atom_array(atom_array: AtomArray) -> AtomArr
                     unk_atom.set_annotation(annot, np.array([True]))
                 elif annot == "is_covalent_modification":
                     unk_atom.set_annotation(annot, np.array([False]))
+                elif annot == "uses_alt_atom_id":
+                    unk_atom.set_annotation(annot, np.array([False]))
                 elif annot == "ins_code":
                     unk_atom.set_annotation(annot, np.array([""]))  # Empty insertion code
                 elif annot in annot_categories_to_copy:
                     template_val = getattr(atom_array, annot)[template_atom_idx]
-                    unk_atom.set_annotation(annot, np.array([template_val]))          
-                else:                      
-                    unk_atom.set_annotation(annot, np.array([None]))          
+                    unk_atom.set_annotation(annot, np.array([template_val]))                          
+            
             unk_atoms_list.append(unk_atom)
             
-    # Concatenate all UNK atoms
+    # Concatenate all UNK atoms        
     all_unk_atoms = unk_atoms_list[0]
     for unk_atom in unk_atoms_list[1:]:
         all_unk_atoms = all_unk_atoms + unk_atom
