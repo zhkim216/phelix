@@ -27,6 +27,7 @@ from atomworks.ml.transforms.filters import (
     RemoveNucleicAcidTerminalOxygen, RemovePolymersWithTooFewResolvedResidues,
     RemoveTerminalOxygen, RemoveUnresolvedPNUnits)
 
+# from allatom_design.data.transform.custom_transforms import AssignPNUnitIIDsToAtomArray
 
 def preprocess_transform(
     # Preprocessing
@@ -48,6 +49,45 @@ def preprocess_transform(
         RemoveTerminalOxygen() if remove_terminal_oxygen_protein else Identity(),
         SetOccToZeroOnBfactor(b_factor_min, b_factor_max),
         RemoveUnresolvedPNUnits(),
+        RemovePolymersWithTooFewResolvedResidues(min_residues=min_residues_for_polymers),
+        MaskPolymerResiduesWithUnresolvedFrameAtoms(),
+        # NOTE: For inference, we must keep UNL to support ligands that are not in the CCD
+        HandleUndesiredResTokens(undesired_res_tokens=undesired_res_names),  # e.g., non-standard residues
+        FlagAndReassignCovalentModifications(),
+        FlagNonPolymersForAtomization(),
+        AddGlobalAtomIdAnnotation(allow_overwrite=True),
+        AtomizeByCCDName(
+            atomize_by_default=True,
+            res_names_to_ignore=STANDARD_AA + STANDARD_RNA + STANDARD_DNA,
+            move_atomized_part_to_end=False,
+            validate_atomize=False,
+        ),
+        RemoveNucleicAcidTerminalOxygen() if remove_terminal_oxygen_nucleic_acid else Identity(),
+        AddWithinChainInstanceResIdx(),
+        AddWithinPolyResIdxAnnotation(),
+    ]
+
+    return Compose(preprocessing_transforms)
+
+def preprocess_transform_for_designs_from_other_methods(
+    # Preprocessing
+    undesired_res_names: list[str] = [], #! fixed
+    b_factor_min: float | None = None,
+    b_factor_max: float | None = None,
+    min_residues_for_polymers: int = 0, 
+    remove_terminal_oxygen_protein: bool = False,
+    remove_terminal_oxygen_nucleic_acid: bool = False,
+) -> Transform:
+    """
+    Build a transform pipeline for preprocessing designs from other methods.
+    Assume necessary preprocessing (e.g., removing clashing PN units) has already been done during the design process.
+    """
+    # Preprocesing
+    preprocessing_transforms = [
+        # AssignPNUnitIIDsToAtomArray(),
+        RemoveHydrogens(),
+        RemoveTerminalOxygen() if remove_terminal_oxygen_protein else Identity(),
+        SetOccToZeroOnBfactor(b_factor_min, b_factor_max),        
         RemovePolymersWithTooFewResolvedResidues(min_residues=min_residues_for_polymers),
         MaskPolymerResiduesWithUnresolvedFrameAtoms(),
         # NOTE: For inference, we must keep UNL to support ligands that are not in the CCD

@@ -102,7 +102,7 @@ def _compute_self_consistency_metrics_atomworks_af3(*, pred_example: dict[str, A
                                                    sample_example: dict[str, Any],                                                 
                                                    pred_sample_path: str = None) -> dict[str, float]:
     """
-    Compute self-consistency metrics between a designed structure and its predicted structure.
+    Compute self-consistency metrics between a designed structure and its predicted structure, using atom array.
     
     Uses atomworks align_atom_arrays to handle structures with different atom sets
     (e.g., sample with backbone only vs pred with full sidechain atoms).
@@ -122,6 +122,8 @@ def _compute_self_consistency_metrics_atomworks_af3(*, pred_example: dict[str, A
     # Designed sequence don't output UNK residues, so we can safely delete them.
     pred_ca_mask = (pred_atom_array.atom_name == "CA") & (pred_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (pred_atom_array.res_name != "UNK")
     pred_ca = pred_atom_array[pred_ca_mask]
+    
+    assert (sample_ca.res_name == pred_ca.res_name).all(), "Sample and pred CA residues must match"
     
     # Align pred CA to sample CA using atomworks align_atom_arrays
     # This aligns pred_ca to sample_ca and applies the transformation to the full pred_atom_array
@@ -165,6 +167,80 @@ def _compute_self_consistency_metrics_atomworks_af3(*, pred_example: dict[str, A
         #     metrics[metric] = tmalign_score
 
     return metrics
+
+def _compute_self_consistency_metrics_atomarray(*, pred_atom_array: AtomArray, 
+                                                sample_atom_array: AtomArray,
+                                                pred_sample_path: str = None,
+                                                return_aligned_atom_array: bool = False,
+                                                ) -> dict[str, float]:
+    """
+    Compute self-consistency metrics between a designed structure and its predicted structure, using atom array.
+    
+    Uses atomworks align_atom_arrays to handle structures with different atom sets
+    (e.g., sample with backbone only vs pred with full sidechain atoms).
+    """    
+    metrics = {}
+
+    # Extract CA atoms from both structures (handles different atom counts)
+    # For proteins, select CA atoms; for other chain types, this will be empty
+    sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) # 6: polypeptide-l chain type
+    sample_ca = sample_atom_array[sample_ca_mask]
+    
+    # Delete UNK residues from pred_atom_array, it's from the sample sequence for the gaps between the actual residues.
+    # Designed sequence don't output UNK residues, so we can safely delete them.
+    pred_ca_mask = (pred_atom_array.atom_name == "CA") & (pred_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (pred_atom_array.res_name != "UNK")
+    pred_ca = pred_atom_array[pred_ca_mask]
+    
+    assert (sample_ca.res_name == pred_ca.res_name).all(), "Sample and pred CA residues must match"
+    
+    # Align pred CA to sample CA using atomworks align_atom_arrays
+    # This aligns pred_ca to sample_ca and applies the transformation to the full pred_atom_array
+    aligned_pred_atom_array, ca_rmsd = align_atom_arrays(
+        mbl_sele=pred_ca,           # CA atoms from pred to align
+        tgt_sele=sample_ca,         # CA atoms from sample as target
+        mbl_full=pred_atom_array    # Full pred structure to transform
+    )
+    
+    # Write aligned coords to mmcif
+    with open(f"{Path(pred_sample_path).parent}/{Path(pred_sample_path).stem}_ca_aligned.cif", "w") as f:
+        f.write(to_cif_string(aligned_pred_atom_array))
+    
+    # Create CA atom mask for pLDDT extraction (matching aligned structure)
+    ca_atom_mask = torch.tensor(pred_ca_mask, dtype=torch.bool)
+
+    # Compute metrics.
+    # for metric in ["sc_ca_rmsd", "avg_ca_plddt", "tmalign_score"]:
+    for metric in ["sc_ca_rmsd", "avg_ca_plddt"]:
+        if metric == "sc_ca_rmsd":
+            # CA RMSD computed via align_atom_arrays (already a float)
+            if type(ca_rmsd) != float:
+                try:
+                    ca_rmsd = ca_rmsd.item()
+                except:
+                    ca_rmsd = float(ca_rmsd)
+        
+            metrics[metric] = ca_rmsd
+
+        elif metric == "avg_ca_plddt":
+            # Compute average pLDDT across all CA atoms.
+            confidence_dir = str(pred_sample_path.parent)
+            confidence_file_name = str(pred_sample_path.stem).replace("model", "confidences.json")
+            avg_ca_plddt = _extract_af3_confidence_metrics(confidence_file_path=f"{confidence_dir}/{confidence_file_name}",
+                                                           atom_array=pred_atom_array,
+                                                           mask=ca_atom_mask,
+                                                           metrics_to_extract=["atom_plddts"],
+                                                           return_mean=True)
+            metrics[metric] = avg_ca_plddt
+
+        # elif metric == "tmalign_score":
+        #     # Compute TM-score using TM-align.
+        #     tmalign_score, _ = _compute_tmalign_score(pred_pdb, design_pdb)
+        #     metrics[metric] = tmalign_score
+
+    if return_aligned_atom_array:
+        return metrics, aligned_pred_atom_array
+    else:
+        return metrics
 
 def _extract_af3_confidence_metrics(confidence_file_path: str = None,
                                     atom_array: AtomArray = None,
