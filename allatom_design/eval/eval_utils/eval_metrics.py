@@ -1457,7 +1457,6 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     sample_array = sample_example['atom_array']
     pred_array = pred_example['atom_array']
     
-    
     print(f"pocket_distance: {pocket_distance}")
     # Annotate ligand pockets (binding site residues)
     sample_array = annotate_ligand_pockets(atom_array=sample_array, 
