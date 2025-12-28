@@ -34,7 +34,7 @@ STAMP="$(date +%Y%m%d_%H%M%S)_$$"
 WRAP="$WRAP_DIR/${JOB_BASE%.sbatch}.container.${STAMP}.sbatch"
 
 # Binds
-BIND="$HOME"
+BIND=""
 [[ -n "${SCRATCH:-}"    ]] && BIND="$BIND,$SCRATCH"
 [[ -n "${GROUP_HOME:-}" ]] && BIND="$BIND,$GROUP_HOME"
 BIND="$BIND,$REPO_DIR,$ENV_DIR,$JOB_DIR"
