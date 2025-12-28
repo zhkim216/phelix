@@ -34,7 +34,7 @@ STAMP="$(date +%Y%m%d_%H%M%S)_$$"
 WRAP="$WRAP_DIR/${JOB_BASE%.sbatch}.container.${STAMP}.sbatch"
 
 # Binds
-BIND="$HOME"
+BIND=""
 [[ -n "${SCRATCH:-}"    ]] && BIND="$BIND,$SCRATCH"
 [[ -n "${GROUP_HOME:-}" ]] && BIND="$BIND,$GROUP_HOME"
 BIND="$BIND,$REPO_DIR,$ENV_DIR,$JOB_DIR"
@@ -62,7 +62,7 @@ source "$SCRIPT_DIR/env_setup.sh"
 $APPTAINER_BIN exec --nv \\
   --bind "$BIND" \\
   --env CUDA_HOME=$CUDA_HOME \\
-  --env PATH=$VENV/bin:$CUDA_HOME/bin:\${PATH:-/usr/local/bin:/usr/bin:/bin} \\
+  --env PATH=$VENV/bin:$CUDA_HOME/bin:$PATH \\
   --env LD_LIBRARY_PATH=$CUDA_HOME/lib64:\${LD_LIBRARY_PATH:-} \\
   --env TRITON_LIBCUDA_PATH=$TRITON_LIBCUDA_PATH \\
   --env LIBRARY_PATH=$TRITON_LIBCUDA_PATH:${LIBRARY_PATH:-} \\
