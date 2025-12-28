@@ -47,6 +47,10 @@ BIND="$BIND,$JAX_COMPILATION_CACHE_DIR"
 # CUDA bind, important for torch.compile
 BIND="$BIND,${CUDA_HOST}:${CUDA_HOME}:ro"
 
+# Capture full PATH for container (must be done after env_setup.sh)
+# Include /hmmer/bin which is inside the container image
+CONTAINER_PATH="$VENV/bin:$CUDA_HOME/bin:/hmmer/bin:$PATH"
+
 {
   echo '#!/usr/bin/env bash'
   # Keep original #SBATCH
@@ -62,7 +66,7 @@ source "$SCRIPT_DIR/env_setup.sh"
 $APPTAINER_BIN exec --nv \\
   --bind "$BIND" \\
   --env CUDA_HOME=$CUDA_HOME \\
-  --env PATH=$VENV/bin:$CUDA_HOME/bin:$PATH \\
+  --env PATH=$CONTAINER_PATH \\
   --env LD_LIBRARY_PATH=$CUDA_HOME/lib64:\${LD_LIBRARY_PATH:-} \\
   --env TRITON_LIBCUDA_PATH=$TRITON_LIBCUDA_PATH \\
   --env LIBRARY_PATH=$TRITON_LIBCUDA_PATH:${LIBRARY_PATH:-} \\
