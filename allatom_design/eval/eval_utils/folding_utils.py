@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Generator, List, Tuple
 
 import hydra
+
 import numpy as np
 import pandas as pd
 import torch
@@ -22,6 +23,7 @@ from tqdm import tqdm
 
 from allatom_design.data import data
 from allatom_design.data.residue_constants import STANDARD_ATOM_MASK
+from atomworks.io.utils.atom_array_plus import AtomArray
 from atomworks.io.utils.selection import get_residue_starts
 from atomworks.io.utils.sequence import aa_chem_comp_3to1
 
@@ -183,68 +185,121 @@ def _chain_letters(n: int) -> list[str]:
 
 
 def make_af3_json(af3_ss_input_dir: str = None,
-                    af3_tc_input_dir: str = None,                    
-                    outputs: dict = None,
-                    metadata: pd.DataFrame = None,
-                    pdb_chain_info: dict = None,                        
+                    af3_tc_input_dir: str = None,           
+                    sample_id_list: list[str] = None,         
+                    pdb_id_list: list[str] = None,
+                    sample_atom_array_list: list[AtomArray] = None,
+                    template_pdb_path_list: list[Path] = None,
+                    pdb_chain_info: dict = None,         
+                    metadata: pd.DataFrame = None,                                   
                     json_config: dict = None,
+                    make_tc_input: bool = False,
                     ) -> None:
     """
     Create AF3 JSON input files for single-sequence and template-conditioned inference.
+    
+    Args:
+        af3_ss_input_dir: Directory to save AF3 single-sequence input JSON files
+        af3_tc_input_dir: Directory to save AF3 template-conditioned input JSON files
+        sample_id_list: List of sample IDs
+        pdb_id_list: List of PDB IDs
+        sample_atom_array_list: List of sample atom arrays
+        template_pdb_path_list: List of template PDB paths
+        pdb_chain_info: PDB chain info dictionary
+        metadata: Metadata DataFrame        
+        json_config: Configuration dict containing AF3 model_seeds and version
+    
+    Note:
+        Either of metadata or pdb_chain_info must be provided.
+        All lists must have the same length and be aligned by index
+        (i.e., sample_id_list[i] corresponds to pdb_id_list[i], sample_atom_array_list[i], and template_pdb_path_list[i])    
     """                           
     model_seeds = list(json_config.get('model_seeds', [42]))
     version = int(json_config.get('version', 2))
     
-    assert pdb_chain_info is not None or metadata is not None, "either of metadata or pdb_chain_info must be provided"
-        
-    protein_columns = ['q_pn_unit_is_protein']
-    nonpolymer_ligand_columns = ['q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal', 'q_pn_unit_non_polymer_res_names']
-    polymer_ligand_columns = ['q_pn_unit_is_peptide', 'q_pn_unit_is_nuc_ligand', 'q_pn_unit_is_nuc_polymer']
-
-    pdb_chain_info = {}
+    assert pdb_chain_info is not None or metadata is not None, "either of metadata or pdb_chain_info must be provided"    
     
-    expanded_protein_columns = []
-    expanded_nonpolymer_ligand_columns = []
-    expanded_polymer_ligand_columns = []
-    for column in protein_columns:
-        expanded_protein_columns.extend([f'{column}_{i}' for i in [1,2]])
-    for column in nonpolymer_ligand_columns:
-        expanded_nonpolymer_ligand_columns.extend([f'{column}_{i}' for i in [1,2]])
-    for column in polymer_ligand_columns:
-        expanded_polymer_ligand_columns.extend([f'{column}_{i}' for i in [1,2]])
+    if not make_tc_input:
+        assert len(sample_id_list) == len(pdb_id_list) == len(sample_atom_array_list), "all lists must have the same length"
+    else:
+        assert len(sample_id_list) == len(pdb_id_list) == len(sample_atom_array_list) == len(template_pdb_path_list), "all lists must have the same length"
+    
+    use_metadata = False
+    if metadata is not None and pdb_chain_info is None:        
+        protein_columns = ['q_pn_unit_is_protein']
+        nonpolymer_ligand_columns = ['q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal', 'q_pn_unit_non_polymer_res_names']
+        polymer_ligand_columns = ['q_pn_unit_is_peptide', 'q_pn_unit_is_nuc_ligand', 'q_pn_unit_is_nuc_polymer']
+
+        pdb_chain_info = {}
+        
+        expanded_protein_columns = []
+        expanded_nonpolymer_ligand_columns = []
+        expanded_polymer_ligand_columns = []
+        for column in protein_columns:
+            expanded_protein_columns.extend([f'{column}_{i}' for i in [1,2]])
+        for column in nonpolymer_ligand_columns:
+            expanded_nonpolymer_ligand_columns.extend([f'{column}_{i}' for i in [1,2]])
+        for column in polymer_ligand_columns:
+            expanded_polymer_ligand_columns.extend([f'{column}_{i}' for i in [1,2]])
+                    
+        for _, row in metadata.iterrows():
+            pdb_key = row["pdb_id"]            
+            pdb_chain_info[pdb_key] = {}
+            pdb_chain_info[pdb_key]['protein_chains'] = []
+            pdb_chain_info[pdb_key]['ligand_chains'] = []       
+            pdb_chain_info[pdb_key]['ligand_ccd_codes'] = []
+            
+            for column in expanded_protein_columns:
+                if row[column]:
+                    suffix = column.split("_")[-1]
+                    protein_chain_iid = row[f'q_pn_unit_iid_{suffix}']
+                    pdb_chain_info[pdb_key]['protein_chains'].append(protein_chain_iid)
+                    
+            for column in expanded_nonpolymer_ligand_columns:
+                if row[column]:
+                    suffix = column.split("_")[-1]
+                    ligand_chain_iid = row[f'q_pn_unit_iid_{suffix}']
+                    ligand_ccd_code = row[f'q_pn_unit_non_polymer_res_names_{suffix}']
+                    pdb_chain_info[pdb_key]['ligand_chains'].append(ligand_chain_iid)
+                    pdb_chain_info[pdb_key]['ligand_ccd_codes'].append(ligand_ccd_code)                                               
+        
+        use_metadata = True        
+                                       
+    af3_ss_json_paths = []     
+    if make_tc_input:
+        af3_tc_json_paths = []            
+        
+    if "pn_unit_iid" in sample_atom_array_list[0].get_annotation_categories() and use_metadata:
+        chain_identifier = "pn_unit_iid"
+        use_pn_unit_iid = True
+    else:
+        chain_identifier = "chain_id"
+        use_pn_unit_iid = False
+                                
+    for i in tqdm(range(len(sample_atom_array_list)), desc="Creating AF3 JSONs"):
+        sample_id = sample_id_list[i]
+        pdb_id = pdb_id_list[i]
+        sample_atom_array = sample_atom_array_list[i]        
+        job_name = sample_id        
+        
+        if use_metadata:
+            chain_info_key = pdb_id
+        else:
+            chain_info_key = sample_id
+        
+        if make_tc_input:
+            template_pdb_path = template_pdb_path_list[i]
                 
-    for _, row in metadata.iterrows():
-        pdb_key = row["pdb_id"]            
-        pdb_chain_info[pdb_key] = {}
-        pdb_chain_info[pdb_key]['protein_chains'] = []
-        pdb_chain_info[pdb_key]['ligand_chains'] = []            
-        for column in expanded_protein_columns:
-            if row[column]:
-                suffix = column.split("_")[-1]
-                pdb_chain_info[pdb_key]['protein_chains'].append(row[f'q_pn_unit_iid_{suffix}'])
-        for column in expanded_nonpolymer_ligand_columns:
-            if row[column]:
-                suffix = column.split("_")[-1]
-                chain_ccd_code = (row[f'q_pn_unit_iid_{suffix}'], row[f'q_pn_unit_non_polymer_res_names_{suffix}'])
-                if chain_ccd_code not in pdb_chain_info[pdb_key]['ligand_chains']:
-                    pdb_chain_info[pdb_key]['ligand_chains'].append(chain_ccd_code)                
-                         
-    af3_ss_json_paths = []        
-    af3_tc_json_paths = []
-    for i in range(len(outputs["atom_array"])):
-        atom_array = outputs["atom_array"][i]
-        pdb_path = outputs["out_pdb"][i]
-        tc_pdb_path = outputs["out_pdb_for_af3_tc"][i]
-        job_name = Path(pdb_path).stem
-        pdb_name = job_name.split("_")[0]
-        protein_chains = pdb_chain_info[pdb_name]['protein_chains']        
-        ligand_chains = pdb_chain_info[pdb_name]['ligand_chains']
+        protein_chains = pdb_chain_info[chain_info_key]['protein_chains']        
+        ligand_chains = pdb_chain_info[chain_info_key]['ligand_chains']
+        ligand_ccd_codes = pdb_chain_info[chain_info_key]['ligand_ccd_codes']
         
         ss_sequences = []
         tc_sequences = []
         for protein_chain in protein_chains:
-            _res_starts = get_residue_starts(atom_array[atom_array.pn_unit_iid == protein_chain])
-            _res_ids = atom_array[atom_array.pn_unit_iid == protein_chain].res_id[_res_starts]
+            chain_mask = (getattr(sample_atom_array, chain_identifier) == protein_chain)
+            _res_starts = get_residue_starts(sample_atom_array[chain_mask])
+            _res_ids = sample_atom_array[chain_mask].res_id[_res_starts]
             _res_ids_0based = _res_ids - np.min(_res_ids)
             
             # Make full sequence with UNK for missing residues, to properly address missing residues in the sequence, in af3 prediction
@@ -253,56 +308,60 @@ def make_af3_json(af3_ss_input_dir: str = None,
             chain_seq_with_gaps = np.full(full_length, "UNK")
             
             # Replace residues with actual sequence
-            chain_seq = atom_array[atom_array.pn_unit_iid == protein_chain].res_name[_res_starts]            
+            chain_seq = sample_atom_array[chain_mask].res_name[_res_starts]            
             chain_seq_with_gaps[_res_ids_0based] = chain_seq
             processed_entity_canonical_sequence_with_gaps = "".join(aa_chem_comp_3to1(standard_only=False).get(res_name, "X") for res_name in chain_seq_with_gaps)            
             # processed_entity_canonical_sequence = "".join(aa_chem_comp_3to1(standard_only=False).get(res_name, "X") for res_name in chain_seq)
-                        
-            # Make template indices for the actual sequence. 0-based
-            query_indices = template_indices = [int(x) for x in list(_res_ids_0based)]
+            
+            if make_tc_input:
+                # Make template indices for the actual sequence. 0-based
+                query_indices = template_indices = [int(x) for x in list(_res_ids_0based)]
                                 
             ss_sequences.append({
                 "protein": {
-                    "id": protein_chain.split("_")[0],
+                    "id": protein_chain.split("_")[0] if use_pn_unit_iid else protein_chain,
                     "sequence": processed_entity_canonical_sequence_with_gaps,
                     "unpairedMsa": "",
                     "pairedMsa": ""
                     }
                 }                
             )
-            tc_sequences.append({
-                "protein": {
-                    "id": protein_chain.split("_")[0],
-                    "sequence": processed_entity_canonical_sequence_with_gaps, 
-                    "unpairedMsa": "",
-                    "pairedMsa": "",
-                    "templates": [
-                        {
-                            "mmcifPath": tc_pdb_path,
-                            "queryIndices": query_indices,
-                            "templateIndices": template_indices,
-                            "templateChainId": protein_chain.split("_")[0],
-                        }
-                    ]
-                }
-            })                
+            
+            if make_tc_input:
+                tc_sequences.append({
+                    "protein": {
+                        "id": protein_chain.split("_")[0] if use_pn_unit_iid else protein_chain,
+                        "sequence": processed_entity_canonical_sequence_with_gaps, 
+                        "unpairedMsa": "",
+                        "pairedMsa": "",
+                        "templates": [
+                            {
+                                "mmcifPath": template_pdb_path,
+                                "queryIndices": query_indices,
+                                "templateIndices": template_indices,
+                                "templateChainId": protein_chain.split("_")[0] if use_pn_unit_iid else protein_chain,
+                            }
+                        ]
+                    }
+                })                
         
         
-        for ligand_chain in ligand_chains:        
-            ligand_chain_iid, ligand_ccd_code = ligand_chain
+        for ligand_chain, ligand_ccd_code in zip(ligand_chains, ligand_ccd_codes):                    
             ss_sequences.append({
                 "ligand": {
-                    "id": ligand_chain_iid.split("_")[0],
+                    "id": ligand_chain.split("_")[0] if use_pn_unit_iid else ligand_chain,
                     "ccdCodes": [ligand_ccd_code]
                 }
             })
             
-            tc_sequences.append({
-                "ligand": {
-                    "id": ligand_chain_iid.split("_")[0],
-                    "ccdCodes": [ligand_ccd_code]
-                }
-            })
+            if make_tc_input:
+                tc_sequences.append({
+                    "ligand": {
+                        "id": ligand_chain.split("_")[0] if use_pn_unit_iid else ligand_chain,
+                        "ccdCodes": [ligand_ccd_code]
+                    }
+                })
+        
         
         sample_af3_ss_json = {
             "name": job_name,
@@ -312,25 +371,31 @@ def make_af3_json(af3_ss_input_dir: str = None,
             "version": version,
         }
         
-        sample_af3_tc_json = {
-            "name": job_name,
-            "sequences": tc_sequences,
-            "modelSeeds": model_seeds,
-            "dialect": "alphafold3",
-            "version": version,
-        }
+        if make_tc_input:
+            sample_af3_tc_json = {
+                "name": job_name,
+                "sequences": tc_sequences,
+                "modelSeeds": model_seeds,
+                "dialect": "alphafold3",
+                "version": version,
+            }
         
+        # input json paths and save json files            
         json_path_ss = Path(af3_ss_input_dir, f"{job_name}.json")
-        json_path_tc = Path(af3_tc_input_dir, f"{job_name}.json")
         with open(json_path_ss, "w") as f:
             json.dump(sample_af3_ss_json, f)
-        with open(json_path_tc, "w") as f:
-            json.dump(sample_af3_tc_json, f)
         af3_ss_json_paths.append(json_path_ss)
-        af3_tc_json_paths.append(json_path_tc)
-        
-    return af3_ss_json_paths, af3_tc_json_paths, pdb_chain_info    
-
+                            
+        if make_tc_input:
+            json_path_tc = Path(af3_tc_input_dir, f"{job_name}.json")
+            with open(json_path_tc, "w") as f:
+                json.dump(sample_af3_tc_json, f)
+            af3_tc_json_paths.append(json_path_tc)                  
+    
+    if not make_tc_input:
+        return af3_ss_json_paths, None, pdb_chain_info
+    else:
+        return af3_ss_json_paths, af3_tc_json_paths, pdb_chain_info
 
 def run_af3_single_sequence(json_path: str,
                             out_dir: str,
