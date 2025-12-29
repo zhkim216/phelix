@@ -9,10 +9,10 @@ wandb:
   group: null
 
 # Basic settings
-debug: true
-num_debug_samples: 10
-evaluate_self_consistency: true
 seed: 0
+debug: true
+num_debug_samples: 2
+evaluate_self_consistency: true
 
 # Metadata
 metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
@@ -26,7 +26,7 @@ cached_example_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_fil
 
 # Configurations for getting designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_lmpnn_val_set_af2/samples
+  pdb_dir: /home/possu/jinho/allatom-design/debug/251223_benchmark_pmpnn_lmpnn/eval_pmpnn_lmpnnval_af3/samples
   pdb_name_list: null  # null to use all files in pdb_dir
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
@@ -37,9 +37,9 @@ data_cfg_for_design:
     add_missing_atoms: true
     remove_waters: true
     remove_ccds: []
-    fix_ligands_at_symmetry_centers: true
-    fix_arginines: true
-    convert_mse_to_met: true
+    fix_ligands_at_symmetry_centers: false
+    fix_arginines: false
+    convert_mse_to_met: false
     hydrogen_policy: "remove"
     extra_fields: "all"  
 
