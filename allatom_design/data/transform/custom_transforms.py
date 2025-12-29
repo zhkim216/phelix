@@ -508,8 +508,8 @@ def annotate_ligand_pockets(
     pocket_distance: float = 8.0,
     n_min_ligand_atoms: int = 1,
     annotation_name: str = "is_ligand_pocket",
-    receptor_chain: str = None,
-    ligand_chain: str = None,
+    receptor_chains: list[str] = None,
+    ligand_chains: list[str] = None,
 ) -> AtomArray:
     """
     Identify atoms near ligands of sufficient size.
@@ -521,14 +521,15 @@ def annotate_ligand_pockets(
         pocket_distance: Distance threshold for pocket identification (Angstroms)
         n_min_ligand_atoms: Minimum atoms required for a ligand to define pockets
         annotation_name: Name for the boolean annotation
-
+        receptor_chains: List of receptor chain IDs
+        ligand_chains: List of ligand chain IDs
     Returns:
         AtomArray with ligand pocket annotation added
     """
     atom_array = atom_array.copy()
 
     # Find all ligand pn_unit_iids within our structure and their atom counts
-    if (receptor_chain is None) or (ligand_chain is None):
+    if (receptor_chains is None) or (ligand_chains is None):
         non_protein_mask = ~(atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
         ligand_chains = np.unique(atom_array.chain_id[non_protein_mask])
         ligand_counts = np.array([np.sum(atom_array.chain_id[non_protein_mask] == ch) for ch in ligand_chains])
@@ -537,13 +538,13 @@ def annotate_ligand_pockets(
         all_valid_ligands_mask = np.isin(atom_array.chain_id, valid_ligand_chains) & non_protein_mask
     else:
         if not hasattr(atom_array, 'pn_unit_iid'):
-            ligand_chain_ids, ligand_counts = np.unique(atom_array.chain_id[atom_array.chain_id == ligand_chain], return_counts=True)
+            ligand_chain_ids, ligand_counts = np.unique(atom_array.chain_id[np.isin(atom_array.chain_id, ligand_chains)], return_counts=True)
             valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
             valid_ligand_chain_ids = ligand_chain_ids[valid_ligand_mask]
-            all_valid_ligands_mask = np.isin(atom_array.chain_id, valid_ligand_chains)
+            all_valid_ligands_mask = np.isin(atom_array.chain_id, valid_ligand_chain_ids)
         else:    
             ligand_pn_unit_iids, ligand_counts = np.unique(
-                atom_array.pn_unit_iid[atom_array.chain_id == ligand_chain], return_counts=True
+                atom_array.pn_unit_iid[np.isin(atom_array.chain_id, ligand_chains)], return_counts=True
             )
             valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
             valid_ligand_pn_unit_iids = ligand_pn_unit_iids[valid_ligand_mask]
@@ -603,14 +604,14 @@ class AnnotateLigandPockets(Transform):
         check_is_instance(data, "atom_array", AtomArray)
 
     @override
-    def forward(self, data: dict, receptor_chain: str = None, ligand_chain: str = None) -> dict:
+    def forward(self, data: dict, receptor_chains: list[str] = None, ligand_chains: list[str] = None) -> dict:
         print(f"pocket_distance: {self.pocket_distance}")
         data["atom_array"] = annotate_ligand_pockets(
             data["atom_array"],
             pocket_distance=self.pocket_distance,
             n_min_ligand_atoms=self.n_min_ligand_atoms,
             annotation_name=self.annotation_name,
-            receptor_chain=receptor_chain,
-            ligand_chain=ligand_chain,
+            receptor_chains=receptor_chains,
+            ligand_chains=ligand_chains,
         )
         return data
