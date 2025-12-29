@@ -25,16 +25,20 @@ export PYTHONWARNINGS="ignore"
 WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 
+# pocket distances
+POCKET_DISTANCES=(3.0 5.0 8.0)
+
 # Experiment name
-EXP_NAME=redesign_pocket_seq
+EXP_NAME=redesign_pocket_seq_replace_with_native_${POCKET_DISTANCES[${SLURM_ARRAY_TASK_ID}]}
+
+
 
 # Input paths
 CACHED_EXAMPLE_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
 METADATA_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
 PDB_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_wocenter_lmpnn_val_set_af2/samples
 
-# pocket distances
-POCKET_DISTANCES=(3.0 5.0 8.0)
+
 
 echo "Starting evaluation..."
 
