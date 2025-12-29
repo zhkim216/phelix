@@ -1873,6 +1873,41 @@ def create_pos_constraint_from_ligand_pocket(batch: dict) -> pd.DataFrame | None
     
     return pd.DataFrame(rows).set_index("pdb_key")
 
+def create_pos_constraint_from_ligand_pocket(batch: dict) -> pd.DataFrame | None:
+    """
+    Create a pos_constraint_df from the ligand pocket information in the batch.
+    """
+    rows = []
+    
+    for i, example_id in enumerate(batch["example_id"]):
+        atom_array = batch["atom_array"][i]
+                
+        pocket_token_mask = batch["pocket_token_mask"][i].cpu().numpy().astype(bool)  
+        token_pad_mask = batch["token_pad_mask"][i].cpu().numpy().astype(bool)
+        
+        pocket_indices = np.where(pocket_token_mask & token_pad_mask)[0]
+        if len(pocket_indices) == 0:
+            continue
+        
+        # token_starts로 chain_id, res_id 가져오기
+        token_starts = get_token_starts(atom_array)
+        pocket_chain_ids = atom_array.chain_id[token_starts[pocket_indices]]
+        pocket_res_ids = atom_array.res_id[token_starts[pocket_indices]]
+        
+        # "A1-10,A15-20,B5-8" 형식으로 변환
+        fixed_pos_str = _indices_to_pos_string(pocket_chain_ids, pocket_res_ids)
+        
+        rows.append({
+            "pdb_key": example_id,
+            "fixed_pos_seq": fixed_pos_str,
+            "fixed_pos_scn": np.nan,
+        })
+    
+    if not rows:
+        return None
+    
+    return pd.DataFrame(rows).set_index("pdb_key")
+
 
 def _indices_to_pos_string(chain_ids: np.ndarray, res_ids: np.ndarray) -> str:
     """Convert (chain_id, res_id) array to "A1-10,B5-8" format"""
