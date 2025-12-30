@@ -1,4 +1,4 @@
-# Evaluation config for CaliBy samples on LMPNN validation set with AF3
+# Redesign pocket sequence config
 # This config is for evaluating pre-designed samples from CaliBy codebase
 
 # Wandb settings
@@ -9,24 +9,34 @@ wandb:
   group: null
 
 # Basic settings
-seed: 0
 debug: true
-num_debug_samples: 2
+num_debug_samples: 1
 evaluate_self_consistency: true
+seed: 0
 
 # Metadata
-metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
+metadata_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_total.parquet
 
 # Outputs
-exp_name: eval_caliby_lmpnnval_af3  # experiment name; used for wandb and output directory
-base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
+exp_name: eval_caliby_lmpnnval_af3 # experiment name; used for wandb and output directory
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/251230_caliby_lcaliby_redesign_pocket_seq
 
 # Cached examples (original structures with ligands)
-cached_example_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
+cached_example_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/cached_examples
+
+# Redesign pocket sequence options
+redesign_cfg:
+  redesign_pocket_seq: true
+  use_native_pocket_seq: true #! If false, automatically redesign the pocket sequence using lcaliby
+  pocket_distance: 5.0
+
+# Docking metrics configuration
+docking_metrics_cfg:
+  pocket_distance_for_metrics: 8.0
 
 # Configurations for getting designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_wocenter_lmpnn_val_set_af2/samples
+  pdb_dir: /home/possu/jinho/allatom-design/debug/251230_caliby_wocenter_samples/samples
   pdb_name_list: null  # null to use all files in pdb_dir
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
@@ -37,9 +47,9 @@ data_cfg_for_design:
     add_missing_atoms: true
     remove_waters: true
     remove_ccds: []
-    fix_ligands_at_symmetry_centers: false
-    fix_arginines: false
-    convert_mse_to_met: false
+    fix_ligands_at_symmetry_centers: true
+    fix_arginines: true
+    convert_mse_to_met: true
     hydrogen_policy: "remove"
     extra_fields: "all"  
 
@@ -90,15 +100,15 @@ transform_cfg_for_af3_prediction:
 struct_pred_cfg:
   model_name: "af3"
   af3:
-    runner_path: /home/users/zhkim216/code/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
+    runner_path: /home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py
     json_config:
       model_seeds: [42]
       version: 2
     inference_config:
       base:
-        model_dir: /scratch/users/zhkim216/model_params/af3
-        db_dir: /scratch/users/zhkim216/af3_databases
-        flash_attention_implementation: "triton"
+        model_dir: /home/possu/jinho/model_params/af3
+        db_dir: /home/possu/jinho/af3_databases
+        flash_attention_implementation: "xla"
       ss:  # Single-sequence prediction config
         num_recycles: 1
         num_diffusion_samples: 1
@@ -117,4 +127,4 @@ struct_pred_cfg:
 
 hydra:
   run:
-    dir: /scratch/users/zhkim216/hydra_outputs
+    dir: /home/possu/jinho/hydra_outputs
