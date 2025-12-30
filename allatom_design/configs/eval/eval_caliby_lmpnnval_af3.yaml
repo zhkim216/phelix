@@ -10,7 +10,7 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 10
+num_debug_samples: 4
 evaluate_self_consistency: true
 seed: 0
 
@@ -26,7 +26,7 @@ cached_example_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_fil
 
 # Configurations for getting designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_lmpnn_val_set_af2/samples
+  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_wocenter_lmpnn_val_set_af2/samples
   pdb_name_list: null  # null to use all files in pdb_dir
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
@@ -98,7 +98,7 @@ struct_pred_cfg:
       base:
         model_dir: /scratch/users/zhkim216/model_params/af3
         db_dir: /scratch/users/zhkim216/af3_databases
-        flash_attention_implementation: "xla"
+        flash_attention_implementation: "triton"
       ss:  # Single-sequence prediction config
         num_recycles: 1
         num_diffusion_samples: 1
