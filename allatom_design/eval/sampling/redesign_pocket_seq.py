@@ -258,7 +258,7 @@ def replace_pocket_sequence_with_native(native_atom_array: AtomArray = None,
     return sample_atom_array
 
 
-@hydra.main(config_path="../../configs_local/eval/sampling", config_name="redesign_pocket_seq", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/sampling", config_name="redesign_pocket_seq", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Redesign pocket sequence using lcaliby.
