@@ -28,7 +28,7 @@ from allatom_design.eval.eval_utils.seq_des_utils import (get_sd_example,
 from allatom_design.eval.eval_utils.folding_utils import (run_af3_single_sequence,
                                                           find_pred_sample_path_af3,
                                                           make_af3_json)
-from allatom_design.eval.eval_utils.eval_metrics import _compute_self_consistency_metrics_atomarray
+from allatom_design.eval.eval_utils.eval_metrics import _compute_self_consistency_metrics_atomarray, _compute_docking_metrics_atomarray
 from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets
 
 def create_sample_dict(sample_paths: list[str] = None, 
@@ -184,16 +184,17 @@ def load_designed_structures_from_caliby(sample_dict: dict = None,
         if return_combined_atom_array:
             sample_bb_ligand_atom_array = struc.concatenate([sample_bb_atom_array, ligand_atom_array])
             # Renumber atom_id sequentially (1-indexed)
-            sample_bb_ligand_atom_array.atom_id = np.arange(1, len(sample_bb_ligand_atom_array) + 1)
+            sample_bb_ligand_atom_array.atom_id = np.arange(1, len(sample_bb_ligand_atom_array) + 1)            
+            sample_dict[sample_id]["sample_atom_array"] = sample_bb_ligand_atom_array                    
+            if save_combined_atom_array:                
+                # Save the combined atom array, can be used later if pocket sequence is not redesigned
+                cif_path = Path(save_dir, f"{sample_id}.cif")
+                to_cif_file(sample_bb_ligand_atom_array, str(cif_path))
+                
+                # Save the original atom array with ligand, can be used later for checking the original pocket sequence if pocket sequence is redesigned
+                backup_cif_path = Path(save_dir, f"{sample_id}_original_with_ligand.cif")
+                to_cif_file(sample_bb_ligand_atom_array, str(backup_cif_path))        
             
-            sample_dict[sample_id]["sample_atom_array"] = sample_bb_ligand_atom_array        
-            if save_combined_atom_array:
-                with_ligand_struct_path = Path(save_dir, f"{sample_id}_with_ligand.cif")
-                to_cif_file(sample_bb_ligand_atom_array, str(with_ligand_struct_path))
-        
-        else:
-            sample_dict[sample_id]["sample_atom_array"] = sample_bb_atom_array
-        
         protein_chains = [str(chain_id) for chain_id in np.unique(sample_bb_atom_array.chain_id)]    
         ligand_chains = [str(chain_id) for chain_id in np.unique(ligand_atom_array.chain_id)]
         ccd_codes = [str(ligand_atom_array[ligand_atom_array.chain_id == chain].res_name[0]) for chain in ligand_chains]
@@ -250,12 +251,14 @@ def replace_pocket_sequence_with_native(native_atom_array: AtomArray = None,
     }
     
     # Replace pocket sequence with native pocket sequence
+    num_replaced_pocket_residues = 0
     for i in range(len(sample_atom_array)):
         key = (sample_atom_array.chain_id[i], sample_atom_array.res_id[i])
         if key in pocket_residue_to_name:
             sample_atom_array.res_name[i] = pocket_residue_to_name[key]
-    
-    return sample_atom_array
+            num_replaced_pocket_residues += 1
+            
+    return sample_atom_array, num_replaced_pocket_residues
 
 
 @hydra.main(config_path="../../configs_local/eval/sampling", config_name="redesign_pocket_seq", version_base="1.3.2")
@@ -293,8 +296,8 @@ def main(cfg: DictConfig):
     struct_pred_cfg = cfg.struct_pred_cfg
     
     # Make a directory for saving aligned structures
-    with_ligand_struct_dir = Path(base_out_dir, "sample_with_ligand")
-    with_ligand_struct_dir.mkdir(parents=True, exist_ok=True)
+    processed_samples_dir = Path(base_out_dir, "samples")
+    processed_samples_dir.mkdir(parents=True, exist_ok=True)
         
     # Get PDB files
     sample_paths = get_pdb_files(**pdb_cfg)
@@ -318,8 +321,9 @@ def main(cfg: DictConfig):
                                                        transform_cfg=cfg.transform_cfg_for_design, 
                                                        return_combined_atom_array=True, 
                                                        save_combined_atom_array=True, 
-                                                       save_dir=with_ligand_struct_dir)
-                            
+                                                       save_dir=processed_samples_dir)
+        
+    
     if cfg.redesign_cfg.redesign_pocket_seq:
         if cfg.redesign_cfg.use_native_pocket_seq:            
             sample_ids = list(sample_dict.keys())
@@ -330,18 +334,24 @@ def main(cfg: DictConfig):
                 sample_atom_array = sample_dict[sample_id]["sample_atom_array"]
                 
                 
-                sample_atom_array = replace_pocket_sequence_with_native(native_atom_array=native_atom_array,
+                sample_atom_array, num_replaced_pocket_residues = replace_pocket_sequence_with_native(native_atom_array=native_atom_array,
                                                                        sample_atom_array=sample_atom_array,
                                                                        pocket_distance=cfg.redesign_cfg.pocket_distance,
                                                                        protein_chains=protein_chains,
                                                                        ligand_chains=ligand_chains)
                 
+                # Overwrite the sample atom array in sample_dict with the replaced one
                 sample_dict[sample_id]["sample_atom_array"] = sample_atom_array
+                sample_dict[sample_id]["num_replaced_pocket_residues"] = num_replaced_pocket_residues   
+                print(f"Replaced {num_replaced_pocket_residues} pocket residues for {sample_id}")
                 
+                # Save the replaced sample atom array. It'll overwrite the original atom array saved in the load_designed_structures_from_caliby function
+                cif_path = Path(processed_samples_dir, f"{sample_id}.cif")
+                to_cif_file(sample_atom_array, str(cif_path))
+                                
         else:
             print("Need to implement redesigning pocket sequence using lcaliby")
-                
-    print(1)                                           
+                                                     
         
     ###########################################################
     # Make AF3 JSON input files for single-sequence prediction
@@ -355,11 +365,7 @@ def main(cfg: DictConfig):
         # Make a directory for af3 single-sequence prediction outputs
         af3_ss_pred_dir = Path(base_out_dir, "af3_ss_preds")
         af3_ss_pred_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Model seeds
-        model_seeds = list(struct_pred_cfg.af3.json_config.model_seeds)
-        version = int(struct_pred_cfg.af3.json_config.version)
-                
+                        
         print("Creating AF3 JSON input files...")
         
         sample_ids = list(sample_dict.keys())
@@ -379,11 +385,14 @@ def main(cfg: DictConfig):
         
         print(f"Created {len(sample_ids)} AF3 JSON input files in {af3_ss_input_dir}")
             
-        # Run AF3 self-consistency evaluation            
+        ###########################################################
+        # Run AF3 self-consistency and docking evaluation
+        ###########################################################        
         af3_runner_path = struct_pred_cfg.af3.runner_path
         af3_inference_config = struct_pred_cfg.af3.inference_config
         
         sample_id_to_per_pred_sc_metrics = {}
+        sample_id_to_per_pred_docking_metrics = {}
         
         print("\n" + "="*80)
         print("Running AF3 Self-Consistency Evaluation")
@@ -411,43 +420,95 @@ def main(cfg: DictConfig):
                 continue
             
             else:   
-                sample_id_to_per_pred_sc_metrics[sample_id] = {}            
-                try:                    
-                    for pred_idx, pred_ss_sample_path in enumerate(pred_ss_sample_paths):
+                sample_id_to_per_pred_sc_metrics[sample_id] = {}      
+                sample_id_to_per_pred_docking_metrics[sample_id] = {}                                          
+                for pred_idx, pred_ss_sample_path in enumerate(pred_ss_sample_paths):
+                    try:
                         pred_example = get_sd_example_from_af3_prediction(pdb_path=pred_ss_sample_path,
                                                                         data_cfg=data_cfg_for_af3_prediction,
-                                                                        transform_cfg=transform_cfg_for_af3_prediction,
-                                                                        metadata=metadata)
+                                                                        transform_cfg=transform_cfg_for_af3_prediction)
+                                                                                        
                         pred_atom_array = pred_example["atom_array"]
                         per_pred_sc_metrics = _compute_self_consistency_metrics_atomarray(
                             pred_atom_array=pred_atom_array,
                             sample_atom_array=sample_atom_array,
                             pred_sample_path=pred_ss_sample_path,
-                            return_aligned_atom_array=False)
-                                                                        
-                        # Store metrics in sample_dict
-                        sample_id_to_per_pred_sc_metrics[sample_id][f"diffusion_{pred_idx}"] = per_pred_sc_metrics
+                            return_aligned_atom_array=False)                                                                                            
                 
-                except Exception as e:
-                    print(f"Self-consistency metrics computation failed for {pdb_id}: {e}")
-                    continue
+                    except Exception as e:
+                        print(f"Self-consistency metrics computation failed for {sample_id, pred_idx}: {e}")
+                        continue
+                    else:            
+                        # Store self-consistency metrics in sample_dict
+                        sample_id_to_per_pred_sc_metrics[sample_id][f"diffusion_{pred_idx}"] = per_pred_sc_metrics
+                    
+                    try: 
+                        per_pred_docking_metrics = _compute_docking_metrics_atomarray(
+                        pred_atom_array=pred_atom_array,
+                        sample_atom_array=sample_atom_array,
+                        pred_sample_path=pred_ss_sample_path,
+                        return_aligned_atom_array=False,
+                        pocket_distance_for_metrics=cfg.docking_metrics_cfg.pocket_distance_for_metrics,
+                        receptor_chain = pdb_chain_info[sample_id]["protein_chains"][0],
+                        ligand_chain = pdb_chain_info[sample_id]["ligand_chains"][0])
+                    
+                    except Exception as e:
+                        print(f"Docking metrics computation failed for {sample_id, pred_idx}: {e}")
+                        continue
+                    else:
+                        # Store docking metrics in sample_dict
+                        sample_id_to_per_pred_docking_metrics[sample_id][f"diffusion_{pred_idx}"] = per_pred_docking_metrics
         
-        sample_id_best_sc_metrics = {}
+        
+        
+        sample_id_best_sc_metrics = {}        
         for sample_id, per_pred_sc_metrics in sample_id_to_per_pred_sc_metrics.items():
             best_sc_metrics = {}
-            best_sc_metrics["sc_ca_rmsd"] = min(per_pred_sc_metrics.values(), key=lambda x: x["sc_ca_rmsd"])["sc_ca_rmsd"]
-            best_sc_metrics["avg_ca_plddt"] = max(per_pred_sc_metrics.values(), key=lambda x: x["avg_ca_plddt"])["avg_ca_plddt"]
+            # Find the prediction with max avg_ca_plddt
+            best_pred = max(per_pred_sc_metrics.values(), key=lambda x: x["avg_ca_plddt"])
+            best_sc_metrics["avg_ca_plddt"] = best_pred["avg_ca_plddt"]
+            best_sc_metrics["sc_ca_rmsd"] = best_pred["sc_ca_rmsd"]
             sample_id_best_sc_metrics[sample_id] = best_sc_metrics
+            
+        sample_id_best_docking_metrics = {}
+        for sample_id, per_pred_docking_metrics in sample_id_to_per_pred_docking_metrics.items():
+            # Find the prediction with max ligand_plddt
+            best_pred = max(per_pred_docking_metrics.values(), key=lambda x: x["ligand_plddt"])
+            best_docking_metrics = {
+                "ligand_rmsd": best_pred["ligand_rmsd"],
+                "binding_site_rmsd": best_pred["binding_site_rmsd"],
+                "ligand_plddt": best_pred["ligand_plddt"],
+                "binding_site_plddt": best_pred["binding_site_plddt"],
+                "iptm": best_pred["iptm"],
+                "interface_min_pae": best_pred["interface_min_pae"],
+            }
+            sample_id_best_docking_metrics[sample_id] = best_docking_metrics  
+        
+        if "num_replaced_pocket_residues" in sample_dict.keys():
+            for sample_id, num_replaced_pocket_residues in sample_dict.items():
+                sample_id_best_docking_metrics[sample_id]["num_replaced_pocket_residues"] = num_replaced_pocket_residues            
                 
-        # Save all results        
+        ### Save all results                
+        # Self-consistency metrics
         all_sc_metrics_df = pd.DataFrame.from_dict(sample_id_to_per_pred_sc_metrics, orient='index')
         all_sc_metrics_df = all_sc_metrics_df.reset_index().rename(columns={'index': 'sample_id'})
         all_sc_metrics_df.to_csv(Path(base_out_dir, "all_sc_metrics_results.csv"), index=False)
         
-        # Save best results
+        # Docking metrics
+        all_docking_metrics_df = pd.DataFrame.from_dict(sample_id_to_per_pred_docking_metrics, orient='index')
+        all_docking_metrics_df = all_docking_metrics_df.reset_index().rename(columns={'index': 'sample_id'})
+        all_docking_metrics_df.to_csv(Path(base_out_dir, "all_docking_metrics_results.csv"), index=False)
+        
+        ### Save best results        
+        # Self-consistency metrics
         best_sc_metrics_df = pd.DataFrame.from_dict(sample_id_best_sc_metrics, orient='index')
         best_sc_metrics_df = best_sc_metrics_df.reset_index().rename(columns={'index': 'sample_id'})
         best_sc_metrics_df.to_csv(Path(base_out_dir, "best_sc_metrics_results.csv"), index=False)
+        
+        # Docking metrics
+        best_docking_metrics_df = pd.DataFrame.from_dict(sample_id_best_docking_metrics, orient='index')
+        best_docking_metrics_df = best_docking_metrics_df.reset_index().rename(columns={'index': 'sample_id'})
+        best_docking_metrics_df.to_csv(Path(base_out_dir, "best_docking_metrics_results.csv"), index=False)
         
         # Log summary metrics to wandb
         if sample_id_best_sc_metrics:
@@ -455,16 +516,37 @@ def main(cfg: DictConfig):
             best_avg_ca_plddts = [m["avg_ca_plddt"] for m in sample_id_best_sc_metrics.values()]
             
             wandb_metrics = {                
-                "eval/median/best/sc_ca_rmsd": np.median(best_sc_ca_rmsds),
-                "eval/median/best/avg_ca_plddt": np.median(best_avg_ca_plddts),            
+                "eval/median/sc_ca_rmsd": np.median(best_sc_ca_rmsds),
+                "eval/median/avg_ca_plddt": np.median(best_avg_ca_plddts),            
             }
             
             if not cfg.wandb.no_wandb:
                 wandb.log(wandb_metrics, commit=True)
                 print(f"Logged metrics to wandb: {wandb_metrics}")
         
+        if sample_id_best_docking_metrics:
+            best_ligand_rmsd = [m["ligand_rmsd"] for m in sample_id_best_docking_metrics.values()]
+            best_binding_site_rmsd = [m["binding_site_rmsd"] for m in sample_id_best_docking_metrics.values()]
+            best_ligand_plddt = [m["ligand_plddt"] for m in sample_id_best_docking_metrics.values()]
+            best_binding_site_plddt = [m["binding_site_plddt"] for m in sample_id_best_docking_metrics.values()]
+            best_iptm = [m["iptm"] for m in sample_id_best_docking_metrics.values()]
+            best_interface_min_pae = [m["interface_min_pae"] for m in sample_id_best_docking_metrics.values()]
+            
+            wandb_metrics = {                
+                "eval/median/ligand_rmsd": np.median(best_ligand_rmsd),
+                "eval/median/binding_site_rmsd": np.median(best_binding_site_rmsd),
+                "eval/median/ligand_plddt": np.median(best_ligand_plddt),
+                "eval/median/binding_site_plddt": np.median(best_binding_site_plddt),
+                "eval/median/iptm": np.median(best_iptm),
+                "eval/median/interface_min_pae": np.median(best_interface_min_pae),
+            }
+            
+            if not cfg.wandb.no_wandb:
+                wandb.log(wandb_metrics, commit=True)
+                print(f"Logged metrics to wandb: {wandb_metrics}")
+                                        
         print("\n" + "="*80)
-        print("AF3 Self-Consistency Evaluation Complete")
+        print("AF3 Self-Consistency and Docking Evaluation Complete")
         print(f"Results saved to {base_out_dir}")
         print("="*80 + "\n")        
 
