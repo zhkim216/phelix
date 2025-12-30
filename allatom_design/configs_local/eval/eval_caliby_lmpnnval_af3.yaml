@@ -10,7 +10,7 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 10
+num_debug_samples: 1
 evaluate_self_consistency: true
 seed: 0
 
@@ -18,7 +18,7 @@ seed: 0
 metadata_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_total.parquet
 
 # Outputs
-exp_name: eval_caliby_lmpnnval_af3_diff1  # experiment name; used for wandb and output directory
+exp_name: eval_caliby_lmpnnval_af3 # experiment name; used for wandb and output directory
 base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/251220_af3eval_caliby
 
 # Cached examples (original structures with ligands)
@@ -26,7 +26,7 @@ cached_example_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/
 
 # Configurations for getting designed structures' paths
 pdb_cfg:
-  pdb_dir: /home/possu/jinho/allatom-design/debug/251217_comparison_calibyaf2_lcalibyaf3/caliby_lmpnn_val_set_af2/samples
+  pdb_dir: /home/possu/jinho/allatom-design/debug/251223_benchmark_pmpnn_lmpnn/eval_pmpnn_lmpnnval_af3/samples/backbones
   pdb_name_list: null  # null to use all files in pdb_dir
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
@@ -37,9 +37,9 @@ data_cfg_for_design:
     add_missing_atoms: true
     remove_waters: true
     remove_ccds: []
-    fix_ligands_at_symmetry_centers: true
-    fix_arginines: true
-    convert_mse_to_met: true
+    fix_ligands_at_symmetry_centers: false
+    fix_arginines: false
+    convert_mse_to_met: false
     hydrogen_policy: "remove"
     extra_fields: "all"  
 

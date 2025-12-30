@@ -26,19 +26,15 @@ WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 
 # pocket distances
-POCKET_DISTANCES=(3.0 5.0 8.0)
+POCKET_DISTANCES=(4.0 6.0 8.0)
 
 # Experiment name
 EXP_NAME=redesign_pocket_seq_replace_with_native_${POCKET_DISTANCES[${SLURM_ARRAY_TASK_ID}]}
-
-
 
 # Input paths
 CACHED_EXAMPLE_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
 METADATA_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
 PDB_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_wocenter_lmpnn_val_set_af2/samples
-
-
 
 echo "Starting evaluation..."
 
@@ -58,6 +54,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/redesign_pocket_seq
     redesign_cfg.redesign_pocket_seq=true \
     redesign_cfg.use_native_pocket_seq=true \
     redesign_cfg.pocket_distance=${POCKET_DISTANCES[${SLURM_ARRAY_TASK_ID}]} \
+    docking_metrics_cfg.pocket_distance_for_metrics=8.0 \
     pdb_cfg.pdb_dir=${PDB_DIR} \
     struct_pred_cfg.af3.inference_config.base.flash_attention_implementation=triton \
     struct_pred_cfg.af3.inference_config.ss.num_recycles=10 \
