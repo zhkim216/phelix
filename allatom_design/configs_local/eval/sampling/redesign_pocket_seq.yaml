@@ -50,7 +50,8 @@ pdb_cfg:
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
 
-# Data configuration for loading designed structures
+#### For designing samples ####
+# Data configuration for design samples
 data_cfg_for_design:
   cif_parser_args:
     add_missing_atoms: true
@@ -62,7 +63,7 @@ data_cfg_for_design:
     hydrogen_policy: "remove"
     extra_fields: "all"  
 
-# Transform configuration for featurizing designed structures
+# Transform configuration for design samples
 transform_cfg_for_design:
   preprocess_cfg:
     undesired_res_names: []
@@ -77,6 +78,35 @@ transform_cfg_for_design:
     remove_keys: []    
     remove_unresolved_tokens: true
 
+#### For loading designed samples ####
+# Data configuration for loading designed structures
+data_cfg_for_designed_samples:
+  cif_parser_args:
+    add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
+    remove_waters: false
+    remove_ccds: []
+    fix_ligands_at_symmetry_centers: false
+    fix_arginines: false
+    convert_mse_to_met: false
+    hydrogen_policy: "remove"
+    extra_fields: "all"  
+
+# Transform configuration for featurizing designed structures
+transform_cfg_for_designed_samples:
+  preprocess_cfg:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: false
+    remove_terminal_oxygen_nucleic_acid: false
+  featurizer_cfg:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []    
+    remove_unresolved_tokens: true
+
+#### For AF3 predicted samples ####
 # Data configuration for loading AF3 predictions (for self-consistency evaluation)
 data_cfg_for_af3_prediction:
   use_load_any: false
