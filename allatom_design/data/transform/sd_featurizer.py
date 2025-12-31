@@ -53,7 +53,6 @@ from allatom_design.data.transform.custom_transforms import (
     AtomizeShortPolymers,
     AddChainTypeFeatrues,
     AnnotateLigandPockets,
-    annotate_ligand_pockets,
 )
 
 logger = logging.getLogger(__name__)
@@ -182,24 +181,17 @@ def sd_featurizer_for_af3_prediction(
     max_tokens: int | None = None, 
     max_atoms: int | None = None, 
     remove_keys: list[str] = [],
-    remove_unresolved_tokens: bool = False
+    remove_unresolved_tokens: bool = False,
+    pocket_distance: float = 8.0,
 ) -> Transform:
     """
     Build a transform pipeline for AF3 prediction.
     """
-    transforms = [
-        AtomizeShortPolymers(),
+    transforms = [        
         RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
         AddGlobalTokenIdAnnotation(),
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
-        AddChainTypeFeatrues(),
-        ComputeAtomToTokenMap(),
-        ConvertToTorch(keys=["encoded", "feats"]),
-        FeaturizeCoordsAndMasks(),
-        PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
-        SubsetToKeys(keys=["example_id", "feats", *INFERENCE_ONLY_KEYS]),
-        FlattenFeatsDict(),
-        RemoveKeys(keys=remove_keys),  
+        ComputeAtomToTokenMap(),        
     ]
     return Compose(transforms)
 
