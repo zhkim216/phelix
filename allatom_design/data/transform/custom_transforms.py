@@ -460,6 +460,7 @@ class AddChainTypeFeatrues(Transform):
         
         return data
     
+    
 # class AddChainTypeAnnotationsToAtomArray(Transform):
 #     """Copy chain_is_x (token-wise) to atom_array annotation"""
 #     @override
@@ -510,6 +511,7 @@ def annotate_ligand_pockets(
     annotation_name: str = "is_ligand_pocket",
     receptor_chains: list[str] = None,
     ligand_chains: list[str] = None,
+    annotate_scaffold: bool = False,
 ) -> AtomArray:
     """
     Identify atoms near ligands of sufficient size.
@@ -581,7 +583,11 @@ def annotate_ligand_pockets(
     is_protein_chain = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
     pocket_annotation = is_protein_chain & near_ligand_full
 
-    atom_array.set_annotation(annotation_name, pocket_annotation)
+    if annotate_scaffold:
+        scaffold_part_annotation = ~pocket_annotation
+        atom_array.set_annotation(annotation_name, scaffold_part_annotation)
+    else:        
+        atom_array.set_annotation(annotation_name, pocket_annotation)
     return atom_array
 
 
