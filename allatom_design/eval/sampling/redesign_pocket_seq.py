@@ -448,8 +448,7 @@ def redesign_with_lcaliby(sample_dict: dict,
             sampling_cfg=seq_des_model["sampling_cfg"],                          
             metadata=metadata,
             pdb_paths=sample_with_ligand_paths, 
-            device=device, 
-            pos_constraint_df=None,
+            device=device,         
             out_dir=str(log_dir_per_ckpt),
             protein_only=cfg.get("protein_only", False),
             fix_pocket_seq=cfg.get("fix_pocket_seq", False),
@@ -504,7 +503,7 @@ def evaluate_af3_consistency(sample_dict: dict,
     
     sample_ids = list(sample_dict.keys())
     pdb_ids = [sample_dict[sid]['pdb_id'] for sid in sample_ids]
-    sample_atom_arrays = [sample_dict[sid]['sample_atom_array'] for sid in sample_ids]
+    redesigned_sample_atom_arrays = [sample_dict[sid]['redesigned_sample_atom_array'] for sid in sample_ids]
     pdb_chain_info = {sid: sample_dict[sid]['pdb_chain_info'] for sid in sample_ids}
     
     af3_ss_json_paths, _, pdb_chain_info = make_af3_json(
@@ -512,7 +511,7 @@ def evaluate_af3_consistency(sample_dict: dict,
         af3_tc_input_dir=None,
         sample_id_list=sample_ids,
         pdb_id_list=pdb_ids,
-        sample_atom_array_list=sample_atom_arrays,
+        sample_atom_array_list=redesigned_sample_atom_arrays,
         template_pdb_path_list=None,
         pdb_chain_info=pdb_chain_info,
         metadata=None,
@@ -536,7 +535,7 @@ def evaluate_af3_consistency(sample_dict: dict,
         sample_id = sample_ids[i]
         pdb_id = pdb_ids[i]                        
         ss_json_path = af3_ss_json_paths[i]       
-        sample_atom_array = sample_atom_arrays[i]
+        redesigned_sample_atom_array = redesigned_sample_atom_arrays[i]
         
         try:
             run_af3_single_sequence(str(ss_json_path), str(af3_ss_pred_dir), 
@@ -567,7 +566,7 @@ def evaluate_af3_consistency(sample_dict: dict,
                     pred_atom_array = pred_example["atom_array"]
                     per_pred_sc_metrics = _compute_self_consistency_metrics_atomarray(
                         pred_atom_array=pred_atom_array,
-                        sample_atom_array=sample_atom_array,
+                        sample_atom_array=redesigned_sample_atom_array,
                         pred_sample_path=pred_ss_sample_path,
                         return_aligned_atom_array=False
                     )                                                                                            
@@ -582,7 +581,7 @@ def evaluate_af3_consistency(sample_dict: dict,
                 try: 
                     per_pred_docking_metrics = _compute_docking_metrics_atomarray(
                         pred_atom_array=pred_atom_array,
-                        sample_atom_array=sample_atom_array,
+                        sample_atom_array=redesigned_sample_atom_array,
                         pred_sample_path=pred_ss_sample_path,
                         return_aligned_atom_array=False,
                         pocket_distance_for_metrics=cfg.docking_metrics_cfg.pocket_distance_for_metrics,
@@ -780,8 +779,7 @@ def main(cfg: DictConfig):
         sample_dict=sample_dict, 
         cfg=cfg, 
         save_dir=processed_original_samples_dir
-    )
-    
+    )    
     ###########################################################
     # Phase 2: Redesign pocket sequence
     ###########################################################
@@ -793,8 +791,7 @@ def main(cfg: DictConfig):
         if cfg.redesign_cfg.use_native_pocket_seq:
             # Native replace mode
             redesign_out_dir = log_dir / "redesigned_samples"
-            sample_dict = redesign_with_native(sample_dict, cfg, redesign_out_dir)
-            
+            sample_dict = redesign_with_native(sample_dict, cfg, redesign_out_dir)            
             # Evaluate if needed
             if cfg.evaluate_self_consistency:
                 print("\n" + "="*80)
