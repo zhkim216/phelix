@@ -280,8 +280,8 @@ def load_designed_structures(sample_dict: dict,
         # Load a designed structure and featurize it
         example = get_sd_example_from_designs_from_other_methods(
             pdb_path=sample_dict[sample_id]['sample_path'], 
-            data_cfg=cfg.data_cfg_for_design, 
-            transform_cfg=cfg.transform_cfg_for_design
+            data_cfg=cfg.data_cfg_for_designed_samples, 
+            transform_cfg=cfg.transform_cfg_for_designed_samples
         )
         
         sample_atom_array = example["atom_array"]
@@ -469,7 +469,7 @@ def redesign_with_lcaliby(sample_dict: dict,
                 if example_id in ckpt_sample_dict:
                     ckpt_sample_dict[example_id]["sample_atom_array"] = outputs["bb_ligand_atom_array"][idx]
         
-        results.append((ckpt_sample_dict, ckpt_out_dir, ckpt_info))
+        results.append((ckpt_sample_dict, log_dir_per_ckpt, ckpt_info))
     
     return results
 
@@ -810,7 +810,7 @@ def main(cfg: DictConfig):
                                          sample_atom_array_list=sample_atom_array_list, 
                                          pdb_chain_info=pdb_chain_info, 
                                          num_redesigned_pocket_residue_list=num_redesigned_pocket_residue_list, 
-                                         out_dir=redesign_out_dir, 
+                                         out_dir=log_dir, 
                                          cfg=cfg,
                                          ckpt_info=None)
         else:
