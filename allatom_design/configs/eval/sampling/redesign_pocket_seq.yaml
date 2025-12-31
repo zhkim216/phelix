@@ -14,6 +14,14 @@ num_debug_samples: 1
 evaluate_self_consistency: true
 seed: 0
 
+# Basic settings for L-caliby design
+num_workers: 8 # for dataloading
+start_step: 15000  # start evaluation after this step, 0 or null to start from the beginning
+end_step: 22500  # end evaluation after this step (inclusive), null to evaluate until the end
+eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
+eval_last_ckpt: false
+use_ema: false
+
 # Metadata
 metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
 
