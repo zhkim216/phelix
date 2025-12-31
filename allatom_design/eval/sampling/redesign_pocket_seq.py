@@ -166,7 +166,6 @@ def create_pos_constraint_dict_from_atom_array(
     
     return pos_constraint_dict
 
-
 ###########################################################
 # Phase 1: Prepare Samples (Common)
 ###########################################################
@@ -346,7 +345,7 @@ def redesign_with_native(sample_dict: dict,
         ligand_chains = sample_dict[sample_id]["pdb_chain_info"]["ligand_chains"]
         sample_atom_array_with_ligand = sample_dict[sample_id]["sample_atom_array_with_ligand"]
         
-        redesigned_sample_atom_array, num_replaced_pocket_residues = replace_pocket_sequence_with_native(
+        redesigned_sample_atom_array, num_redesigned_pocket_residues = replace_pocket_sequence_with_native(
             native_atom_array=native_atom_array,
             sample_atom_array=sample_atom_array_with_ligand,
             pocket_distance=pocket_distance,
@@ -356,8 +355,8 @@ def redesign_with_native(sample_dict: dict,
         
         # Update sample_dict
         sample_dict[sample_id]["redesigned_sample_atom_array"] = redesigned_sample_atom_array
-        sample_dict[sample_id]["num_replaced_pocket_residues"] = num_replaced_pocket_residues   
-        print(f"Replaced {num_replaced_pocket_residues} pocket residues for {sample_id}")
+        sample_dict[sample_id]["num_redesigned_pocket_residues"] = num_redesigned_pocket_residues   
+        print(f"Redesigned {num_redesigned_pocket_residues} pocket residues for {sample_id} with native pocket sequence, within {pocket_distance} Å of the ligand")
         
         # Save the replaced sample atom array
         cif_path = Path(out_dir, f"{sample_id}_rwn_{pocket_distance}.cif")
@@ -421,8 +420,10 @@ def redesign_with_lcaliby(sample_dict: dict,
     
     scaffold_pos_constraint_df = pd.DataFrame(rows).set_index("pdb_key")             
     
-    results = []
     
+    
+    # Run lcaliby sequence design for each checkpoint
+    results = []    
     for sd_ckpt in tqdm(sd_ckpts, desc="Redesigning pocket sequence using lcaliby"):
         match = pattern.search(Path(sd_ckpt).name)
         global_step, epoch = int(match.group(1)), int(match.group(2))
@@ -440,6 +441,7 @@ def redesign_with_lcaliby(sample_dict: dict,
         cfg.seq_des_cfg.atom_mpnn.ckpt_path = sd_ckpt
         seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
         
+        #!!!!!!!!!!!!!!!!!!!!!!!!!!!! 251231 JH: Continue here.
         # Run lcaliby sequence design
         outputs = run_lc_seq_des(
             model=seq_des_model["model"], 
@@ -448,7 +450,11 @@ def redesign_with_lcaliby(sample_dict: dict,
             sampling_cfg=seq_des_model["sampling_cfg"],                          
             metadata=metadata,
             pdb_paths=sample_with_ligand_paths, 
+<<<<<<< HEAD
             device=device,         
+=======
+            device=device,             
+>>>>>>> refs/remotes/origin/jinho/AAA
             out_dir=str(log_dir_per_ckpt),
             protein_only=cfg.get("protein_only", False),
             fix_pocket_seq=cfg.get("fix_pocket_seq", False),
@@ -476,9 +482,13 @@ def redesign_with_lcaliby(sample_dict: dict,
 # Phase 3: AF3 Evaluation
 ###########################################################
 
-def evaluate_af3_consistency(sample_dict: dict,
-                             out_dir: Path,
-                             cfg: DictConfig,
+def evaluate_af3_consistency(sample_id_list: list[str] = None,
+                             pdb_id_list: list[str] = None,
+                             sample_atom_array_list: list[AtomArray] = None,
+                             pdb_chain_info: list[dict] = None,                             
+                             num_redesigned_pocket_residue_list: list[int] = None,
+                             out_dir: Path = None,
+                             cfg: DictConfig = None,
                              ckpt_info: dict = None) -> None:
     """
     Run AF3 self-consistency and docking evaluation.
@@ -501,6 +511,7 @@ def evaluate_af3_consistency(sample_dict: dict,
                     
     print("Creating AF3 JSON input files...")
     
+<<<<<<< HEAD
     sample_ids = list(sample_dict.keys())
     pdb_ids = [sample_dict[sid]['pdb_id'] for sid in sample_ids]
     redesigned_sample_atom_arrays = [sample_dict[sid]['redesigned_sample_atom_array'] for sid in sample_ids]
@@ -512,13 +523,21 @@ def evaluate_af3_consistency(sample_dict: dict,
         sample_id_list=sample_ids,
         pdb_id_list=pdb_ids,
         sample_atom_array_list=redesigned_sample_atom_arrays,
+=======
+    af3_ss_json_paths, _, pdb_chain_info = make_af3_json(
+        af3_ss_input_dir=af3_ss_input_dir,
+        af3_tc_input_dir=None,
+        sample_id_list=sample_id_list,
+        pdb_id_list=pdb_id_list,
+        sample_atom_array_list=sample_atom_array_list,
+>>>>>>> refs/remotes/origin/jinho/AAA
         template_pdb_path_list=None,
         pdb_chain_info=pdb_chain_info,
         metadata=None,
         json_config=struct_pred_cfg.af3.json_config
     )
     
-    print(f"Created {len(sample_ids)} AF3 JSON input files in {af3_ss_input_dir}")
+    print(f"Created {len(sample_id_list)} AF3 JSON input files in {af3_ss_input_dir}")
         
     # Run AF3 self-consistency and docking evaluation
     af3_runner_path = struct_pred_cfg.af3.runner_path
@@ -531,11 +550,15 @@ def evaluate_af3_consistency(sample_dict: dict,
     print("Running AF3 Self-Consistency Evaluation")
     print("="*80 + "\n")        
     
-    for i in tqdm(range(len(sample_ids)), desc="AF3 predictions"):
-        sample_id = sample_ids[i]
-        pdb_id = pdb_ids[i]                        
+    for i in tqdm(range(len(sample_id_list)), desc="AF3 predictions"):
+        sample_id = sample_id_list[i]
+        pdb_id = pdb_id_list[i]                         
         ss_json_path = af3_ss_json_paths[i]       
+<<<<<<< HEAD
         redesigned_sample_atom_array = redesigned_sample_atom_arrays[i]
+=======
+        sample_atom_array = sample_atom_array_list[i]
+>>>>>>> refs/remotes/origin/jinho/AAA
         
         try:
             run_af3_single_sequence(str(ss_json_path), str(af3_ss_pred_dir), 
@@ -601,11 +624,10 @@ def evaluate_af3_consistency(sample_dict: dict,
     sample_id_best_docking_metrics = _aggregate_best_docking_metrics(sample_id_to_per_pred_docking_metrics)
     
     # Add num_replaced_pocket_residues if available
-    for sample_id in sample_dict.keys():
-        if "num_replaced_pocket_residues" in sample_dict[sample_id]:
+    if num_redesigned_pocket_residue_list is not None:        
+        for sample_id, num_replaced_pocket_residues in zip(sample_id_list, num_redesigned_pocket_residue_list):
             if sample_id in sample_id_best_docking_metrics:
-                sample_id_best_docking_metrics[sample_id]["num_replaced_pocket_residues"] = \
-                    sample_dict[sample_id]["num_replaced_pocket_residues"]
+                sample_id_best_docking_metrics[sample_id]["num_replaced_pocket_residues"] = num_replaced_pocket_residues
             
     # Save results
     _save_metrics_results(
@@ -791,13 +813,31 @@ def main(cfg: DictConfig):
         if cfg.redesign_cfg.use_native_pocket_seq:
             # Native replace mode
             redesign_out_dir = log_dir / "redesigned_samples"
+<<<<<<< HEAD
             sample_dict = redesign_with_native(sample_dict, cfg, redesign_out_dir)            
+=======
+            sample_dict = redesign_with_native(sample_dict, cfg, redesign_out_dir)
+            
+            sample_id_list = list(sample_dict.keys())
+            pdb_id_list = [sample_dict[sid]['pdb_id'] for sid in sample_id_list]
+            sample_atom_array_list = [sample_dict[sid]['redesigned_sample_atom_array'] for sid in sample_id_list]
+            pdb_chain_info = {sid: sample_dict[sid]['pdb_chain_info'] for sid in sample_id_list}
+            num_redesigned_pocket_residue_list = [sample_dict[sid]['num_redesigned_pocket_residues'] for sid in sample_id_list]
+            
+>>>>>>> refs/remotes/origin/jinho/AAA
             # Evaluate if needed
             if cfg.evaluate_self_consistency:
                 print("\n" + "="*80)
                 print("Phase 3: AF3 Evaluation")
                 print("="*80 + "\n")
-                evaluate_af3_consistency(sample_dict, redesign_out_dir, cfg)
+                evaluate_af3_consistency(sample_id_list=sample_id_list, 
+                                         pdb_id_list=pdb_id_list, 
+                                         sample_atom_array_list=sample_atom_array_list, 
+                                         pdb_chain_info=pdb_chain_info, 
+                                         num_redesigned_pocket_residue_list=num_redesigned_pocket_residue_list, 
+                                         out_dir=redesign_out_dir, 
+                                         cfg=cfg,
+                                         ckpt_info=None)
         else:
             # Lcaliby mode - iterate over checkpoints        
             results = redesign_with_lcaliby(sample_dict, cfg, metadata, log_dir)
