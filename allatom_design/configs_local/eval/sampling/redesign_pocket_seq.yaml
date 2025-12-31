@@ -1,6 +1,8 @@
 # Redesign pocket sequence config
 # This config is for evaluating pre-designed samples from CaliBy codebase
 
+########### Basic settings #########
+
 # Wandb settings
 wandb:
   no_wandb: true  # Disable wandb logging
@@ -13,13 +15,19 @@ debug: true
 num_debug_samples: 1
 evaluate_self_consistency: true
 seed: 0
+num_workers: 8 # for dataloading
+start_step: 15000  # start evaluation after this step, 0 or null to start from the beginning
+end_step: 22500  # end evaluation after this step (inclusive), null to evaluate until the end
+eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
+eval_last_ckpt: false
+use_ema: false
 
 # Metadata
 metadata_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_total.parquet
 
 # Outputs
-exp_name: eval_caliby_lmpnnval_af3 # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/251230_caliby_lcaliby_redesign_pocket_seq
+exp_name: redesign_with_lcaliby_5.0 # experiment name; used for wandb and output directory
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/251231
 
 # Cached examples (original structures with ligands)
 cached_example_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/cached_examples
@@ -34,6 +42,7 @@ redesign_cfg:
 docking_metrics_cfg:
   pocket_distance_for_metrics: 8.0
 
+######### Data & Transform configurations #########
 # Configurations for getting designed structures' paths
 pdb_cfg:
   pdb_dir: /home/possu/jinho/allatom-design/debug/251230_caliby_wocenter_samples/samples
@@ -96,7 +105,33 @@ transform_cfg_for_af3_prediction:
     remove_terminal_oxygen_protein: false
     remove_terminal_oxygen_nucleic_acid: false
 
-# Structure prediction model configuration (AF3)
+######### L-Caliby configuration #########
+denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp2_cfg2
+sampling_cfg_overrides:
+  batch_size: 2
+  num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+  omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
+  noise_labels: null
+  num_workers: ${num_workers}
+  use_potts_sampling: true
+  ligand_conditioning: true
+  potts_sampling_cfg:
+    potts_sweeps: 500
+    lcp_expand_edge_idx_fix: true
+
+# Positional constraints: supports columns in [pdb_key,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
+# e.g. 2fyzA,"A1-100,B1-100","A1-100"
+pos_constraint_csv: null
+  
+# Sequence design config
+seq_des_cfg:
+  model_name: "lc_atom_mpnn"
+  atom_mpnn:
+    ckpt_path: null
+    sampling_cfg: /home/possu/jinho/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
+    overrides: ${sampling_cfg_overrides}
+
+######### Structure prediction model configuration (AF3) #########
 struct_pred_cfg:
   model_name: "af3"
   af3:
