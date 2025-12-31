@@ -420,6 +420,7 @@ def run_lc_seq_des(
     protein_only: bool = False,
     fix_pocket_seq: bool = False,
     pocket_distance: float = 8.0,
+    redesign_pocket_seq: bool = False,
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
     """
     Given a list of processed structure files, run sequence design on them.
@@ -437,7 +438,11 @@ def run_lc_seq_des(
     """
     # Set up outputs.
     outputs = defaultdict(list)
-    sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
+    if not redesign_pocket_seq:
+        sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
+    else:
+        sample_out_dir = f"{out_dir}/redesigned_samples"  # directory for output PDBs
+        
     Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
 
     # Validate pos_constraint_df.
@@ -476,7 +481,8 @@ def run_lc_seq_des(
         for pi in range(0, len(pdb_paths), sampling_cfg.batch_size):
             batch_pdb_paths = pdb_paths[pi : pi + sampling_cfg.batch_size]
             B = len(batch_pdb_paths)
-                                    
+            
+            #!!!!!!!!!!!!!!!!!!!!!!!!!!!! 251231 JH: Continue here.                        
             batch = get_sd_batch(batch_pdb_paths,  data_cfg=data_cfg, transform_cfg=transform_cfg, 
                                  device=device, parallel_pool=parallel_pool, metadata=metadata,
                                  protein_only=protein_only)
@@ -487,11 +493,6 @@ def run_lc_seq_des(
             batch = initialize_sampling_masks(batch)
             
             #! Revert, directly use AnnotateLigandPockets transform instead of initialize_pocket_mask
-            # Initialize ligand pocket mask if ligand conditioning is enabled.
-            # if sampling_cfg.ligand_conditioning:
-            #     batch = initialize_pocket_mask(batch, ligand_pocket_dist_cutoff=sampling_cfg.ligand_pocket_dist_cutoff,
-            #                                           small_molecule_only=sampling_cfg.small_molecule_only)
-
             # If fix_pocket_seq is enabled, create pos_constraint_df from ligand pocket
             if fix_pocket_seq:
                 pos_constraint_df = create_pos_constraint_from_ligand_pocket(batch)
@@ -985,8 +986,7 @@ def get_sd_example(pdb_path: str = None,
 
 def get_sd_example_from_af3_prediction(pdb_path: str = None,
                    data_cfg: DictConfig = None,
-                   transform_cfg: DictConfig = None, 
-                   metadata: pd.DataFrame = None,
+                   transform_cfg: DictConfig = None,                    
                    ) -> dict[str, Any]:
     """
     Given a pdb file path from AF3 prediction, return a dictionary of sequence design model features.     
@@ -1000,22 +1000,18 @@ def get_sd_example_from_af3_prediction(pdb_path: str = None,
     featurizer_cfg = transform_cfg.featurizer_cfg
             
     # load_from_pdb: Use preprocess_pdb pipeline
-    example = preprocess_pdb(pdb_path, data_cfg = data_cfg, preprocess_transform_cfg = preprocess_transform_cfg)
-    pdb_id = (Path(pdb_path).stem).split("_")[0]
+    example = preprocess_pdb(pdb_path, data_cfg = data_cfg, preprocess_transform_cfg = preprocess_transform_cfg)    
     
-    metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)
+    # metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)
     
-    #! Replace information in the example with the information from the metadata
-    #! Since when caching, it doesn't really care about the metadata as it's just caching the whole structure        
-    example['example_id'] = metadata_example["example_id"].iloc[0]
-    query_pn_unit_iids = metadata_example["q_pn_unit_iid_1"].tolist() + metadata_example["q_pn_unit_iid_2"].tolist()
-    example["query_pn_unit_iids"] = query_pn_unit_iids
+    # example['example_id'] = metadata_example["example_id"].iloc[0]
+    # query_pn_unit_iids = metadata_example["q_pn_unit_iid_1"].tolist() + metadata_example["q_pn_unit_iid_2"].tolist()
+    # example["query_pn_unit_iids"] = query_pn_unit_iids
     
-    example['extra_info'] = {} #! delete all the information preexisting in the example
-    row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
-    example['extra_info'] = row_dict
-    
-    
+    # example['extra_info'] = {} #! delete all the information preexisting in the example
+    # row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
+    # example['extra_info'] = row_dict
+        
     # Featurize the example.    
     featurizer = sd_featurizer_for_af3_prediction(**featurizer_cfg)                                                                            
     example = featurizer(example)
