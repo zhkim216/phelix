@@ -450,11 +450,7 @@ def redesign_with_lcaliby(sample_dict: dict,
             sampling_cfg=seq_des_model["sampling_cfg"],                          
             metadata=metadata,
             pdb_paths=sample_with_ligand_paths, 
-<<<<<<< HEAD
-            device=device,         
-=======
             device=device,             
->>>>>>> refs/remotes/origin/jinho/AAA
             out_dir=str(log_dir_per_ckpt),
             protein_only=cfg.get("protein_only", False),
             fix_pocket_seq=cfg.get("fix_pocket_seq", False),
@@ -511,26 +507,12 @@ def evaluate_af3_consistency(sample_id_list: list[str] = None,
                     
     print("Creating AF3 JSON input files...")
     
-<<<<<<< HEAD
-    sample_ids = list(sample_dict.keys())
-    pdb_ids = [sample_dict[sid]['pdb_id'] for sid in sample_ids]
-    redesigned_sample_atom_arrays = [sample_dict[sid]['redesigned_sample_atom_array'] for sid in sample_ids]
-    pdb_chain_info = {sid: sample_dict[sid]['pdb_chain_info'] for sid in sample_ids}
-    
-    af3_ss_json_paths, _, pdb_chain_info = make_af3_json(
-        af3_ss_input_dir=af3_ss_input_dir,
-        af3_tc_input_dir=None,
-        sample_id_list=sample_ids,
-        pdb_id_list=pdb_ids,
-        sample_atom_array_list=redesigned_sample_atom_arrays,
-=======
     af3_ss_json_paths, _, pdb_chain_info = make_af3_json(
         af3_ss_input_dir=af3_ss_input_dir,
         af3_tc_input_dir=None,
         sample_id_list=sample_id_list,
         pdb_id_list=pdb_id_list,
         sample_atom_array_list=sample_atom_array_list,
->>>>>>> refs/remotes/origin/jinho/AAA
         template_pdb_path_list=None,
         pdb_chain_info=pdb_chain_info,
         metadata=None,
@@ -554,11 +536,7 @@ def evaluate_af3_consistency(sample_id_list: list[str] = None,
         sample_id = sample_id_list[i]
         pdb_id = pdb_id_list[i]                         
         ss_json_path = af3_ss_json_paths[i]       
-<<<<<<< HEAD
-        redesigned_sample_atom_array = redesigned_sample_atom_arrays[i]
-=======
         sample_atom_array = sample_atom_array_list[i]
->>>>>>> refs/remotes/origin/jinho/AAA
         
         try:
             run_af3_single_sequence(str(ss_json_path), str(af3_ss_pred_dir), 
@@ -574,12 +552,13 @@ def evaluate_af3_consistency(sample_id_list: list[str] = None,
         if len(pred_ss_sample_paths) == 0:
             print(f"No AF3 predicted structure found for {pdb_id}")
             continue
-        
+                
         else:   
             sample_id_to_per_pred_sc_metrics[sample_id] = {}      
             sample_id_to_per_pred_docking_metrics[sample_id] = {}                                          
             for pred_idx, pred_ss_sample_path in enumerate(pred_ss_sample_paths):
                 try:
+                    # import ipdb; ipdb.set_trace()
                     pred_example = get_sd_example_from_af3_prediction(
                         pdb_path=pred_ss_sample_path,
                         data_cfg=cfg.data_cfg_for_af3_prediction,
@@ -589,7 +568,7 @@ def evaluate_af3_consistency(sample_id_list: list[str] = None,
                     pred_atom_array = pred_example["atom_array"]
                     per_pred_sc_metrics = _compute_self_consistency_metrics_atomarray(
                         pred_atom_array=pred_atom_array,
-                        sample_atom_array=redesigned_sample_atom_array,
+                        sample_atom_array=sample_atom_array,
                         pred_sample_path=pred_ss_sample_path,
                         return_aligned_atom_array=False
                     )                                                                                            
@@ -604,7 +583,7 @@ def evaluate_af3_consistency(sample_id_list: list[str] = None,
                 try: 
                     per_pred_docking_metrics = _compute_docking_metrics_atomarray(
                         pred_atom_array=pred_atom_array,
-                        sample_atom_array=redesigned_sample_atom_array,
+                        sample_atom_array=sample_atom_array,
                         pred_sample_path=pred_ss_sample_path,
                         return_aligned_atom_array=False,
                         pocket_distance_for_metrics=cfg.docking_metrics_cfg.pocket_distance_for_metrics,
@@ -813,9 +792,6 @@ def main(cfg: DictConfig):
         if cfg.redesign_cfg.use_native_pocket_seq:
             # Native replace mode
             redesign_out_dir = log_dir / "redesigned_samples"
-<<<<<<< HEAD
-            sample_dict = redesign_with_native(sample_dict, cfg, redesign_out_dir)            
-=======
             sample_dict = redesign_with_native(sample_dict, cfg, redesign_out_dir)
             
             sample_id_list = list(sample_dict.keys())
@@ -824,7 +800,6 @@ def main(cfg: DictConfig):
             pdb_chain_info = {sid: sample_dict[sid]['pdb_chain_info'] for sid in sample_id_list}
             num_redesigned_pocket_residue_list = [sample_dict[sid]['num_redesigned_pocket_residues'] for sid in sample_id_list]
             
->>>>>>> refs/remotes/origin/jinho/AAA
             # Evaluate if needed
             if cfg.evaluate_self_consistency:
                 print("\n" + "="*80)
@@ -835,7 +810,7 @@ def main(cfg: DictConfig):
                                          sample_atom_array_list=sample_atom_array_list, 
                                          pdb_chain_info=pdb_chain_info, 
                                          num_redesigned_pocket_residue_list=num_redesigned_pocket_residue_list, 
-                                         out_dir=redesign_out_dir, 
+                                         out_dir=log_dir, 
                                          cfg=cfg,
                                          ckpt_info=None)
         else:
