@@ -1,7 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=redesign_pocket_seq
+<<<<<<< HEAD
 #SBATCH -p possu
 #SBATCH --array=0
+=======
+#SBATCH -p bioe,possu
+#SBATCH --array=0-3
+>>>>>>> refs/remotes/origin/jinho/AAA
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -26,16 +31,17 @@ WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 
 # pocket distances
-POCKET_DISTANCES=(5.0)
-# POCKET_DISTANCES=(4.0 6.0 8.0)
+POCKET_DISTANCES=(4.0 5.0 6.0 8.0)
+POCKET_DISTANCE=${POCKET_DISTANCES[${SLURM_ARRAY_TASK_ID}]}
 
 # Experiment name
-EXP_NAME=redesign_pocket_seq_native_${POCKET_DISTANCES[${SLURM_ARRAY_TASK_ID}]}
+EXP_NAME=caliby_wocenter_lmpnnval_restrict_pocket_seq_native_${POCKET_DISTANCE}
 
 # Input paths
 CACHED_EXAMPLE_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
 METADATA_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
-PDB_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_wocenter_lmpnn_val_set_af2/samples
+
+PDB_DIR=${BASE_OUT_DIR}/${EXP_NAME}/samples
 
 echo "Starting evaluation..."
 
@@ -52,8 +58,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/redesign_pocket_seq
     exp_name=${EXP_NAME} \
     base_out_dir=${BASE_OUT_DIR} \
     cached_example_path=${CACHED_EXAMPLE_PATH} \
-    redesign_cfg.redesign_pocket_seq=true \
-    redesign_cfg.use_native_pocket_seq=true \
+    redesign_cfg.redesign_pocket_seq=false \
+    redesign_cfg.use_native_pocket_seq=false \
     redesign_cfg.pocket_distance=${POCKET_DISTANCES[${SLURM_ARRAY_TASK_ID}]} \
     docking_metrics_cfg.pocket_distance_for_metrics=8.0 \
     pdb_cfg.pdb_dir=${PDB_DIR} \
