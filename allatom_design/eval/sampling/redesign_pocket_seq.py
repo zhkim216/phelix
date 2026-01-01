@@ -125,6 +125,8 @@ def replace_pocket_sequence_with_native(native_atom_array: AtomArray = None,
     native_bb_atom_array = native_prot_atom_array[native_prot_atom_array.is_backbone_atom]
     pocket_bb_atom_array = native_bb_atom_array[native_bb_atom_array.is_ligand_pocket]
     
+    
+    
     # Get pocket residue starts
     pocket_res_starts = get_residue_starts(pocket_bb_atom_array)
     
@@ -418,9 +420,7 @@ def redesign_with_lcaliby(sample_dict: dict,
         
         rows.append(pos_constraint_dict)
     
-    scaffold_pos_constraint_df = pd.DataFrame(rows).set_index("pdb_key")             
-    
-    
+    scaffold_pos_constraint_df = pd.DataFrame(rows).set_index("pdb_key")                     
     
     # Run lcaliby sequence design for each checkpoint
     results = []    
@@ -441,7 +441,6 @@ def redesign_with_lcaliby(sample_dict: dict,
         cfg.seq_des_cfg.atom_mpnn.ckpt_path = sd_ckpt
         seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
         
-        #!!!!!!!!!!!!!!!!!!!!!!!!!!!! 251231 JH: Continue here.
         # Run lcaliby sequence design
         outputs = run_lc_seq_des(
             model=seq_des_model["model"], 
@@ -826,12 +825,24 @@ def main(cfg: DictConfig):
                     print(f"\nEvaluating checkpoint: step_{ckpt_info['global_step']}_epoch_{ckpt_info['epoch']}")
                     evaluate_af3_consistency(ckpt_sample_dict, ckpt_out_dir, cfg, ckpt_info)
     else:
+        redesign_out_dir = log_dir / "samples"
+        sample_id_list = list(sample_dict.keys())
+        pdb_id_list = [sample_dict[sid]['pdb_id'] for sid in sample_id_list]
+        sample_atom_array_list = [sample_dict[sid]['sample_atom_array_with_ligand'] for sid in sample_id_list]
+        pdb_chain_info = {sid: sample_dict[sid]['pdb_chain_info'] for sid in sample_id_list}
         # No redesign, just evaluate original
         if cfg.evaluate_self_consistency:
             print("\n" + "="*80)
             print("Phase 3: AF3 Evaluation (no redesign)")
             print("="*80 + "\n")
-            evaluate_af3_consistency(sample_dict, log_dir, cfg)
+            evaluate_af3_consistency(sample_id_list=sample_id_list, 
+                                         pdb_id_list=pdb_id_list, 
+                                         sample_atom_array_list=sample_atom_array_list, 
+                                         pdb_chain_info=pdb_chain_info, 
+                                         num_redesigned_pocket_residue_list=None, 
+                                         out_dir=log_dir, 
+                                         cfg=cfg,
+                                         ckpt_info=None)
     
     print("\n" + "="*80)
     print("All phases complete!")
