@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=redesign_pocket_seq
-#SBATCH -p bioe,possu
-#SBATCH --array=0-2
+#SBATCH -p possu
+#SBATCH --array=0
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -26,10 +26,11 @@ WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 
 # pocket distances
-POCKET_DISTANCES=(4.0 6.0 8.0)
+POCKET_DISTANCES=(5.0)
+# POCKET_DISTANCES=(4.0 6.0 8.0)
 
 # Experiment name
-EXP_NAME=redesign_pocket_seq_replace_with_native_${POCKET_DISTANCES[${SLURM_ARRAY_TASK_ID}]}
+EXP_NAME=redesign_pocket_seq_native_${POCKET_DISTANCES[${SLURM_ARRAY_TASK_ID}]}
 
 # Input paths
 CACHED_EXAMPLE_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
