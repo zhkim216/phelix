@@ -9,10 +9,10 @@ wandb:
   group: null
 
 # Basic settings
+seed: 0
 debug: true
 num_debug_samples: 1
 evaluate_self_consistency: true
-seed: 0
 
 # Basic settings for L-caliby design
 num_workers: 8 # for dataloading
@@ -26,7 +26,7 @@ use_ema: false
 metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
 
 # Outputs
-exp_name: redesign_pocket_seq # experiment name; used for wandb and output directory
+exp_name: redesign_ # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Cached examples (original structures with ligands)
@@ -34,9 +34,9 @@ cached_example_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_fil
 
 # Redesign pocket sequence options
 redesign_cfg:
-  redesign_pocket_seq: true
-  use_native_pocket_seq: true #! If false, automatically redesign the pocket sequence using lcaliby
-  pocket_distance: 5.0
+  redesign_pocket_seq: false
+  use_native_pocket_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
+  pocket_distance: 0.5
 
 # Docking metrics configuration
 docking_metrics_cfg:
@@ -44,7 +44,7 @@ docking_metrics_cfg:
 
 # Configurations for getting designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_wocenter_lmpnn_val_set_af2/samples
+  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_wocenter_lmpnn_val_set_redesign_pocket_seq_native_4.0/samples
   pdb_name_list: null  # null to use all files in pdb_dir
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
