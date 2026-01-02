@@ -1,12 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=redesign_pocket_seq
-<<<<<<< HEAD
-#SBATCH -p possu
-#SBATCH --array=0
-=======
 #SBATCH -p bioe,possu
 #SBATCH --array=0-3
->>>>>>> refs/remotes/origin/jinho/AAA
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
