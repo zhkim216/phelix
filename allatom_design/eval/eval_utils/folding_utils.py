@@ -246,22 +246,22 @@ def make_af3_json(af3_ss_input_dir: str = None,
         for _, row in metadata.iterrows():
             pdb_key = row["pdb_id"]            
             pdb_chain_info[pdb_key] = {}
-            pdb_chain_info[pdb_key]['protein_chains'] = []
-            pdb_chain_info[pdb_key]['ligand_chains'] = []       
+            pdb_chain_info[pdb_key]['protein_chain_iids'] = []
+            pdb_chain_info[pdb_key]['ligand_chain_iids'] = []       
             pdb_chain_info[pdb_key]['ligand_ccd_codes'] = []
             
             for column in expanded_protein_columns:
                 if row[column]:
                     suffix = column.split("_")[-1]
                     protein_chain_iid = row[f'q_pn_unit_iid_{suffix}']
-                    pdb_chain_info[pdb_key]['protein_chains'].append(protein_chain_iid)
+                    pdb_chain_info[pdb_key]['protein_chain_iids'].append(protein_chain_iid)
                     
             for column in expanded_nonpolymer_ligand_columns:
                 if row[column]:
                     suffix = column.split("_")[-1]
                     ligand_chain_iid = row[f'q_pn_unit_iid_{suffix}']
                     ligand_ccd_code = row[f'q_pn_unit_non_polymer_res_names_{suffix}']
-                    pdb_chain_info[pdb_key]['ligand_chains'].append(ligand_chain_iid)
+                    pdb_chain_info[pdb_key]['ligand_chain_iids'].append(ligand_chain_iid)
                     pdb_chain_info[pdb_key]['ligand_ccd_codes'].append(ligand_ccd_code)                                               
         
         use_metadata = True        
@@ -269,14 +269,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
     af3_ss_json_paths = []     
     if make_tc_input:
         af3_tc_json_paths = []            
-        
-    if "pn_unit_iid" in sample_atom_array_list[0].get_annotation_categories() and use_metadata:
-        chain_identifier = "pn_unit_iid"
-        use_pn_unit_iid = True
-    else:
-        chain_identifier = "chain_id"
-        use_pn_unit_iid = False
-                                
+                                            
     for i in tqdm(range(len(sample_atom_array_list)), desc="Creating AF3 JSONs"):
         sample_id = sample_id_list[i]
         pdb_id = pdb_id_list[i]
@@ -291,14 +284,14 @@ def make_af3_json(af3_ss_input_dir: str = None,
         if make_tc_input:
             template_pdb_path = template_pdb_path_list[i]
                 
-        protein_chains = pdb_chain_info[chain_info_key]['protein_chains']        
-        ligand_chains = pdb_chain_info[chain_info_key]['ligand_chains']
+        protein_chain_iids = pdb_chain_info[chain_info_key]['protein_chain_iids']        
+        ligand_chain_iids = pdb_chain_info[chain_info_key]['ligand_chain_iids']
         ligand_ccd_codes = pdb_chain_info[chain_info_key]['ligand_ccd_codes']
         
         ss_sequences = []
         tc_sequences = []
-        for protein_chain in protein_chains:
-            chain_mask = (getattr(sample_atom_array, chain_identifier) == protein_chain)
+        for protein_chain_iid in protein_chain_iids:
+            chain_mask = (sample_atom_array.chain_iid == protein_chain_iid)
             _res_starts = get_residue_starts(sample_atom_array[chain_mask])
             _res_ids = sample_atom_array[chain_mask].res_id[_res_starts]
             _res_ids_0based = _res_ids - np.min(_res_ids)
@@ -320,7 +313,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
                                 
             ss_sequences.append({
                 "protein": {
-                    "id": protein_chain.split("_")[0] if use_pn_unit_iid else protein_chain,
+                    "id": protein_chain_iid.split("_")[0], 
                     "sequence": processed_entity_canonical_sequence_with_gaps,
                     "unpairedMsa": "",
                     "pairedMsa": ""
@@ -331,7 +324,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
             if make_tc_input:
                 tc_sequences.append({
                     "protein": {
-                        "id": protein_chain.split("_")[0] if use_pn_unit_iid else protein_chain,
+                        "id": protein_chain_iid.split("_")[0],
                         "sequence": processed_entity_canonical_sequence_with_gaps, 
                         "unpairedMsa": "",
                         "pairedMsa": "",
@@ -340,17 +333,17 @@ def make_af3_json(af3_ss_input_dir: str = None,
                                 "mmcifPath": template_pdb_path,
                                 "queryIndices": query_indices,
                                 "templateIndices": template_indices,
-                                "templateChainId": protein_chain.split("_")[0] if use_pn_unit_iid else protein_chain,
+                                "templateChainId": protein_chain_iid.split("_")[0],
                             }
                         ]
                     }
                 })                
         
         
-        for ligand_chain, ligand_ccd_code in zip(ligand_chains, ligand_ccd_codes):                    
+        for ligand_chain_iid, ligand_ccd_code in zip(ligand_chain_iids, ligand_ccd_codes):                    
             ss_sequences.append({
                 "ligand": {
-                    "id": ligand_chain.split("_")[0] if use_pn_unit_iid else ligand_chain,
+                    "id": ligand_chain_iid.split("_")[0],
                     "ccdCodes": [ligand_ccd_code]
                 }
             })
@@ -358,7 +351,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
             if make_tc_input:
                 tc_sequences.append({
                     "ligand": {
-                        "id": ligand_chain.split("_")[0] if use_pn_unit_iid else ligand_chain,
+                        "id": ligand_chain_iid.split("_")[0],
                         "ccdCodes": [ligand_ccd_code]
                     }
                 })
