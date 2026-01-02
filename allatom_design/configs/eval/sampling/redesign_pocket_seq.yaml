@@ -9,16 +9,22 @@ wandb:
   group: null
 
 # Basic settings
+seed: 0
+num_workers: 0 # for dataloading
 debug: true
 num_debug_samples: 1
 evaluate_self_consistency: true
-seed: 0
+start_step: 22500  # start evaluation after this step, 0 or null to start from the beginning
+end_step: 22500  # end evaluation after this step (inclusive), null to evaluate until the end
+eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
+eval_last_ckpt: false
+use_ema: false
 
 # Metadata
 metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
 
 # Outputs
-exp_name: redesign_pocket_seq # experiment name; used for wandb and output directory
+exp_name: redesign_pocket_seq_lcaliby # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Cached examples (original structures with ligands)
@@ -27,7 +33,7 @@ cached_example_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_fil
 # Redesign pocket sequence options
 redesign_cfg:
   redesign_pocket_seq: true
-  use_native_pocket_seq: true #! If false, automatically redesign the pocket sequence using lcaliby
+  use_native_pocket_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
   pocket_distance: 5.0
 
 # Docking metrics configuration
@@ -44,6 +50,8 @@ pdb_cfg:
 #### For designing samples ####
 # Data configuration for design samples
 data_cfg_for_design:
+  load_from_cache: false
+  use_load_any: false
   cif_parser_args:
     add_missing_atoms: true
     remove_waters: true
@@ -53,9 +61,35 @@ data_cfg_for_design:
     convert_mse_to_met: true
     hydrogen_policy: "remove"
     extra_fields: "all"  
+  cif_save_args:
+    date: "1959-01-07" #! Young-Ae Lee's birthday
+    include_entity_poly: True
+    include_entity_nonpoly: True
+    include_nan_coords: False #! designed structures should not have nan coords
+    include_bonds: True
+    extra_fields: "all"
+    exclude_field_keys: ["token_id", "is_ligand_pocket"]
+    extra_categories:
+      pdbx_audit_revision_history:
+        ordinal: [1]
+        revision_id: [1]
+        revision_date: ["1959-01-07"]
+        major_revision: [1]
+        minor_revision: [0]
+        revision_description: ["Dummy date for template-conditioning AF3"]
 
 # Transform configuration for design samples
 transform_cfg_for_design:
+  featurizer_cfg:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []    
+    remove_unresolved_tokens: true
+    residue_cache_dir: "/scratch/users/zhkim216/datasets/atomworks_cached_residue_data"
+    max_conformers_per_residue: 50
+    apply_random_augmentation: false
+    translation_scale: 1.0
+    pocket_distance: ${redesign_cfg.pocket_distance}
   preprocess_cfg:
     undesired_res_names: []
     b_factor_min: null
@@ -63,11 +97,6 @@ transform_cfg_for_design:
     min_residues_for_polymers: 0
     remove_terminal_oxygen_protein: true
     remove_terminal_oxygen_nucleic_acid: true
-  featurizer_cfg:
-    max_tokens: null
-    max_atoms: null
-    remove_keys: []    
-    remove_unresolved_tokens: true
 
 #### For loading designed samples ####
 # Data configuration for loading designed structures
@@ -127,7 +156,7 @@ transform_cfg_for_af3_prediction:
     remove_terminal_oxygen_nucleic_acid: false
 
 ######### L-Caliby configuration #########
-denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp2_cfg2
+denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp2_cfg5
 sampling_cfg_overrides:
   batch_size: 2
   num_seqs_per_pdb: 1  # number of sequences to sample per pdb

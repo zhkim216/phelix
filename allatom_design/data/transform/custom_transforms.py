@@ -509,9 +509,11 @@ def annotate_ligand_pockets(
     pocket_distance: float = 8.0,
     n_min_ligand_atoms: int = 1,
     annotation_name: str = "is_ligand_pocket",
-    receptor_chains: list[str] = None,
-    ligand_chains: list[str] = None,
-    annotate_scaffold: bool = False,
+    receptor_chain_iids: list[str] = None,
+    ligand_chain_iids: list[str] = None,
+    receptor_chain_ids: list[str] = None,
+    ligand_chain_ids: list[str] = None,
+    spread_residue_wise: bool = False,
 ) -> AtomArray:
     """
     Identify atoms near ligands of sufficient size.
@@ -523,34 +525,52 @@ def annotate_ligand_pockets(
         pocket_distance: Distance threshold for pocket identification (Angstroms)
         n_min_ligand_atoms: Minimum atoms required for a ligand to define pockets
         annotation_name: Name for the boolean annotation
-        receptor_chains: List of receptor chain IDs
-        ligand_chains: List of ligand chain IDs
+        receptor_chain_iids: List of receptor chain IIDs
+        ligand_chain_iids: List of ligand chain IIDs
+        receptor_chain_ids: List of receptor chain IDs
+        ligand_chain_ids: List of ligand chain IDs
+        spread_residue_wise: If True, mark all atoms in a residue as pocket if any atom is in pocket
     Returns:
         AtomArray with ligand pocket annotation added
     """
     atom_array = atom_array.copy()
-
-    # Find all ligand pn_unit_iids within our structure and their atom counts
-    if (receptor_chains is None) or (ligand_chains is None):
+    
+    
+    use_chain_iid = False
+    use_chain_id = False
+    if hasattr(atom_array, 'chain_iid'):    
+        receptor_chain_identifiers = receptor_chain_iids
+        ligand_chain_identifiers = ligand_chain_iids
+        use_chain_iid = True  # Fixed: was use_chain_unit_iid
+        print("Using chain_iid to get receptor and ligand chains")
+    else:        
+        receptor_chain_identifiers = receptor_chain_ids
+        ligand_chain_identifiers = ligand_chain_ids
+        use_chain_id = True
+        print("Using chain_id to get receptor and ligand chains, it may include multiple chain_iids with the same chain_id")
+        
+    if (receptor_chain_identifiers is None) or (ligand_chain_identifiers is None):
+        # Using chain_id will automatically include multiple chain_iids with the same chain_id        
         non_protein_mask = ~(atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
         ligand_chains = np.unique(atom_array.chain_id[non_protein_mask])
         ligand_counts = np.array([np.sum(atom_array.chain_id[non_protein_mask] == ch) for ch in ligand_chains])
         valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
         valid_ligand_chains = ligand_chains[valid_ligand_mask]
         all_valid_ligands_mask = np.isin(atom_array.chain_id, valid_ligand_chains) & non_protein_mask
+                    
     else:
-        if not hasattr(atom_array, 'pn_unit_iid'):
-            ligand_chain_ids, ligand_counts = np.unique(atom_array.chain_id[np.isin(atom_array.chain_id, ligand_chains)], return_counts=True)
+        if use_chain_iid:
+            ligand_chain_iids, ligand_counts = np.unique(atom_array.chain_iid[np.isin(atom_array.chain_iid, ligand_chain_identifiers)], return_counts=True)                
             valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
-            valid_ligand_chain_ids = ligand_chain_ids[valid_ligand_mask]
-            all_valid_ligands_mask = np.isin(atom_array.chain_id, valid_ligand_chain_ids)
+            valid_ligand_chain_iids = ligand_chain_iids[valid_ligand_mask]  # Fixed: was ligand_chain_ids
+            all_valid_ligands_mask = np.isin(atom_array.chain_iid, valid_ligand_chain_iids)
         else:    
-            ligand_pn_unit_iids, ligand_counts = np.unique(
-                atom_array.pn_unit_iid[np.isin(atom_array.chain_id, ligand_chains)], return_counts=True
+            ligand_chain_iids, ligand_counts = np.unique(
+                atom_array.chain_iid[np.isin(atom_array.chain_id, ligand_chain_identifiers)], return_counts=True
             )
             valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
-            valid_ligand_pn_unit_iids = ligand_pn_unit_iids[valid_ligand_mask]
-            all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_pn_unit_iids)
+            valid_ligand_chain_iids = ligand_chain_iids[valid_ligand_mask]
+            all_valid_ligands_mask = np.isin(atom_array.chain_iid, valid_ligand_chain_iids)
 
     # Initialize pocket annotation
     pocket_annotation = np.zeros(len(atom_array), dtype=bool)
@@ -582,12 +602,8 @@ def annotate_ligand_pockets(
     # Only protein atoms can be pocket atoms
     is_protein_chain = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
     pocket_annotation = is_protein_chain & near_ligand_full
-
-    if annotate_scaffold:
-        scaffold_part_annotation = ~pocket_annotation
-        atom_array.set_annotation(annotation_name, scaffold_part_annotation)
-    else:        
-        atom_array.set_annotation(annotation_name, pocket_annotation)
+        
+    atom_array.set_annotation(annotation_name, pocket_annotation)
     return atom_array
 
 
@@ -610,14 +626,23 @@ class AnnotateLigandPockets(Transform):
         check_is_instance(data, "atom_array", AtomArray)
 
     @override
-    def forward(self, data: dict, receptor_chains: list[str] = None, ligand_chains: list[str] = None) -> dict:
+    def forward(self, data: dict = None,
+                receptor_chain_iids: list[str] = None, 
+                ligand_chain_iids: list[str] = None,
+                receptor_chain_ids: list[str] = None,
+                ligand_chain_ids: list[str] = None,
+            ) -> dict:
+        
         print(f"pocket_distance: {self.pocket_distance}")
+        
         data["atom_array"] = annotate_ligand_pockets(
-            data["atom_array"],
+            atom_array=data["atom_array"],
             pocket_distance=self.pocket_distance,
             n_min_ligand_atoms=self.n_min_ligand_atoms,
             annotation_name=self.annotation_name,
-            receptor_chains=receptor_chains,
-            ligand_chains=ligand_chains,
+            receptor_chain_iids=receptor_chain_iids,
+            ligand_chain_iids=ligand_chain_iids,
+            receptor_chain_ids=receptor_chain_ids,
+            ligand_chain_ids=ligand_chain_ids,            
         )
         return data

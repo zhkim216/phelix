@@ -247,8 +247,8 @@ def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
                                        pred_sample_path: str = None,
                                        return_aligned_atom_array: bool = False,
                                        pocket_distance_for_metrics: float = 8.0,
-                                       receptor_chain: str = "A",
-                                       ligand_chain: str = "C",
+                                       receptor_chain_iid: str = "A_1",
+                                       ligand_chain_iid: str = "C_1",
                                        save_aligned: bool = True,
                                        ) -> dict[str, float]:
     """
@@ -259,19 +259,19 @@ def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
     sample_atom_array = annotate_ligand_pockets(atom_array=sample_atom_array, 
                                            pocket_distance=pocket_distance_for_metrics,
                                            annotation_name="is_ligand_pocket_for_metrics",
-                                           receptor_chains=[receptor_chain],
-                                           ligand_chains=[ligand_chain])
+                                           receptor_chain_iids=[receptor_chain_iid],
+                                           ligand_chain_iids=[ligand_chain_iid])
     pred_atom_array = annotate_ligand_pockets(atom_array=pred_atom_array, 
                                          pocket_distance=pocket_distance_for_metrics,
                                          annotation_name="is_ligand_pocket_for_metrics",
-                                         receptor_chains=[receptor_chain],
-                                         ligand_chains=[ligand_chain])
+                                         receptor_chain_iids=[receptor_chain_iid],
+                                         ligand_chain_iids=[ligand_chain_iid])
     
     # Get binding site CA atoms for superposition
     # Use sequential residue index (order in chain) instead of res_id for matching
     # because res_id may differ between structures (ref vs AF3 prediction)
-    sample_receptor_mask = sample_atom_array.chain_id == receptor_chain
-    pred_receptor_mask = pred_atom_array.chain_id == receptor_chain
+    sample_receptor_mask = sample_atom_array.chain_iid == receptor_chain_iid
+    pred_receptor_mask = pred_atom_array.chain_iid == receptor_chain_iid
     
     # Get all CA atoms from receptor chain
     sample_ca_mask = sample_receptor_mask & (sample_atom_array.atom_name == "CA") & (sample_atom_array.res_name != "UNK")
@@ -313,8 +313,8 @@ def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
     )
     
     # Prepare masks for ligand and binding site
-    sample_ligand_mask = (sample_atom_array.chain_id == ligand_chain) & (sample_atom_array.element != "H")
-    pred_ligand_mask = (pred_aligned_atom_array.chain_id == ligand_chain) & (pred_aligned_atom_array.element != "H")    
+    sample_ligand_mask = (sample_atom_array.chain_iid == ligand_chain_iid) & (sample_atom_array.element != "H")
+    pred_ligand_mask = (pred_aligned_atom_array.chain_iid == ligand_chain_iid) & (pred_aligned_atom_array.element != "H")    
     pred_binding_site_mask = (pred_aligned_atom_array.is_ligand_pocket_for_metrics == True) & (pred_aligned_atom_array.res_name != "UNK")
     
     # Get ligand atom arrays from sample and pred
@@ -1684,8 +1684,8 @@ def get_binding_site_residues(
 def calculate_ligand_rmsd_with_binding_site_superposition(
     pred_example: dict[str, Any] = None,
     sample_example: dict[str, Any] = None,    
-    receptor_chain: str = "A",
-    ligand_chain: str = "C",
+    receptor_chain_iid: str = "A_1",
+    ligand_chain_iid: str = "C_1",
     pocket_distance: float = 8.0,    
     save_aligned: bool = True,
     sample_path: str | Path = None,
@@ -1728,18 +1728,18 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     # Annotate ligand pockets (binding site residues)
     sample_array = annotate_ligand_pockets(atom_array=sample_array, 
                                            pocket_distance=pocket_distance, 
-                                           receptor_chain=receptor_chain,
-                                           ligand_chain=ligand_chain)
+                                           receptor_chain_iid=receptor_chain_iid,
+                                           ligand_chain_iid=ligand_chain_iid)
     pred_array = annotate_ligand_pockets(atom_array=pred_array, 
                                          pocket_distance=pocket_distance, 
-                                         receptor_chain=receptor_chain,
-                                         ligand_chain=ligand_chain)
+                                         receptor_chain_iid=receptor_chain_iid,
+                                         ligand_chain_iid=ligand_chain_iid)
     
     # Get binding site CA atoms for superposition
     # Use sequential residue index (order in chain) instead of res_id for matching
     # because res_id may differ between structures (ref vs AF3 prediction)
-    sample_receptor_mask = sample_array.chain_id == receptor_chain
-    pred_receptor_mask = pred_array.chain_id == receptor_chain
+    sample_receptor_mask = sample_array.chain_iid == receptor_chain_iid
+    pred_receptor_mask = pred_array.chain_iid == receptor_chain_iid
     
     # Get all CA atoms from receptor chain
     sample_ca_mask = sample_receptor_mask & (sample_array.atom_name == "CA") & (sample_array.res_name != "UNK")
@@ -1800,8 +1800,8 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     ligand_rmsd = None
     try:        
         # Convert ligand atom arrays to RDKit molecules
-        sample_lig_full = sample_array[sample_array.chain_id == ligand_chain]
-        pred_lig_full = pred_aligned[pred_aligned.chain_id == ligand_chain]
+        sample_lig_full = sample_array[sample_array.chain_iid == ligand_chain_iid]
+        pred_lig_full = pred_aligned[pred_aligned.chain_iid == ligand_chain_iid]
         
         # Use atom_array_to_rdkit with sanitize fallback
         try:
@@ -1856,7 +1856,7 @@ def calculate_ligand_rmsd_with_binding_site_superposition(
     
     #! return pred_array and masks for pLDDT extraction
     # Create ligand and binding site masks for the aligned pred structure
-    pred_ligand_mask = (pred_aligned.chain_id == ligand_chain)
+    pred_ligand_mask = (pred_aligned.chain_iid == ligand_chain_iid)
     pred_binding_site_mask = (pred_aligned.is_ligand_pocket == True) & (pred_aligned.res_name != "UNK")
     
     return {

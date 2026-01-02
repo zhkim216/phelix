@@ -21,6 +21,7 @@ import copy
 import atomworks.enums as aw_enums
 from atomworks.io.utils.sequence import aa_chem_comp_3to1
 from atomworks.io.utils.io_utils import to_cif_file
+from atomworks.ml.transforms.atom_array import apply_and_spread_residue_wise
 
 from allatom_design.eval.eval_utils.seq_des_utils import (get_sd_example, 
                                                           load_example_with_load_any,                                                          
@@ -102,8 +103,8 @@ def extract_ligand_from_structure(
 def replace_pocket_sequence_with_native(native_atom_array: AtomArray = None,
                                         sample_atom_array: AtomArray = None,
                                         pocket_distance: float = 5.0,
-                                        protein_chains: list[str] = None,
-                                        ligand_chains: list[str] = None) -> AtomArray:
+                                        protein_chain_iids: list[str] = None,
+                                        ligand_chain_iids: list[str] = None) -> AtomArray:
     """
     Args:
         native_atom_array: Native atom array.
@@ -117,16 +118,16 @@ def replace_pocket_sequence_with_native(native_atom_array: AtomArray = None,
     """
     native_atom_array = annotate_ligand_pockets(atom_array=native_atom_array, 
                                                 pocket_distance=pocket_distance, 
-                                                receptor_chains=protein_chains,
-                                                ligand_chains=ligand_chains)
+                                                receptor_chain_iids=protein_chain_iids,
+                                                ligand_chain_iids=ligand_chain_iids)
     
-    # Get native protein atom array and backbone atom array
-    native_prot_atom_array = native_atom_array[native_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
-    native_bb_atom_array = native_prot_atom_array[native_prot_atom_array.is_backbone_atom]
-    pocket_bb_atom_array = native_bb_atom_array[native_bb_atom_array.is_ligand_pocket]
+    # Spread residue-wise: if any atom in a residue is in pocket, mark all atoms in that residue as pocket
+    residue_wise_pocket_mask = apply_and_spread_residue_wise(native_atom_array, native_atom_array.get_annotation("is_ligand_pocket"), function=np.any)
     
-    
-    
+    # Get native backbone atom array in pocket
+    prot_bb_mask = (native_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (native_atom_array.is_backbone_atom)    
+    pocket_bb_atom_array = native_atom_array[prot_bb_mask & residue_wise_pocket_mask]
+            
     # Get pocket residue starts
     pocket_res_starts = get_residue_starts(pocket_bb_atom_array)
     
@@ -274,8 +275,8 @@ def load_designed_structures(sample_dict: dict,
         
         sample_dict[sample_id]["sample_atom_array"] = None        
         pdb_chain_info = {
-            "protein_chains": [],
-            "ligand_chains": [],
+            "protein_chain_iids": [],
+            "ligand_chain_iids": [],
             "ligand_ccd_codes": []
         }
                   
@@ -302,16 +303,16 @@ def load_designed_structures(sample_dict: dict,
         to_cif_file(sample_bb_ligand_atom_array, str(cif_path))      
         sample_dict[sample_id]["sample_atom_array_with_ligand_path"] = cif_path
             
-        protein_chains = [str(chain_id) for chain_id in np.unique(sample_bb_atom_array.chain_id)]    
-        ligand_chains = [str(chain_id) for chain_id in np.unique(ligand_atom_array.chain_id)]
-        ccd_codes = [str(ligand_atom_array[ligand_atom_array.chain_id == chain].res_name[0]) for chain in ligand_chains]
-        ligand_chains_ccd_codes = list(zip(ligand_chains, ccd_codes))
+        protein_chain_iids = [str(chain_iid) for chain_iid in np.unique(sample_bb_atom_array.chain_iid)]    
+        ligand_chain_iids = [str(chain_iid) for chain_iid in np.unique(ligand_atom_array.chain_iid)]
+        ligand_ccd_codes = [str(ligand_atom_array[ligand_atom_array.chain_iid == chain_iid].res_name[0]) for chain_iid in ligand_chain_iids]
+        ligand_chain_iids_ccd_codes = list(zip(ligand_chain_iids, ligand_ccd_codes))
         
-        for chain in protein_chains:
-            pdb_chain_info["protein_chains"].append(str(chain))
+        for chain_iid in protein_chain_iids:
+            pdb_chain_info["protein_chain_iids"].append(str(chain_iid))
         
-        for chain, ccd_code in ligand_chains_ccd_codes:
-            pdb_chain_info["ligand_chains"].append(str(chain))
+        for chain_iid, ccd_code in ligand_chain_iids_ccd_codes:
+            pdb_chain_info["ligand_chain_iids"].append(str(chain_iid))
             pdb_chain_info["ligand_ccd_codes"].append(str(ccd_code))            
             
         sample_dict[sample_id]["pdb_chain_info"] = pdb_chain_info
@@ -343,16 +344,16 @@ def redesign_with_native(sample_dict: dict,
     sample_ids = list(sample_dict.keys())
     for sample_id in tqdm(sample_ids, desc="Replacing pocket sequence with native"):
         native_atom_array = sample_dict[sample_id]["native_atom_array"]
-        protein_chains = sample_dict[sample_id]["pdb_chain_info"]["protein_chains"]
-        ligand_chains = sample_dict[sample_id]["pdb_chain_info"]["ligand_chains"]
+        protein_chain_iids = sample_dict[sample_id]["pdb_chain_info"]["protein_chain_iids"]
+        ligand_chain_iids = sample_dict[sample_id]["pdb_chain_info"]["ligand_chain_iids"]
         sample_atom_array_with_ligand = sample_dict[sample_id]["sample_atom_array_with_ligand"]
         
         redesigned_sample_atom_array, num_redesigned_pocket_residues = replace_pocket_sequence_with_native(
             native_atom_array=native_atom_array,
             sample_atom_array=sample_atom_array_with_ligand,
             pocket_distance=pocket_distance,
-            protein_chains=protein_chains,
-            ligand_chains=ligand_chains
+            protein_chain_iids=protein_chain_iids,
+            ligand_chain_iids=ligand_chain_iids
         )
         
         # Update sample_dict
@@ -405,22 +406,27 @@ def redesign_with_lcaliby(sample_dict: dict,
     # Create pos_constraint_df for the scaffold part of sample_with_ligand
     rows = []
     for sample_id in sample_dict.keys():
+        sample_id_with_ligand = sample_id + "_with_ligand"
         sample_atom_array_with_ligand = sample_dict[sample_id]["sample_atom_array_with_ligand"]
         sample_atom_array_with_ligand = annotate_ligand_pockets(atom_array=sample_atom_array_with_ligand, 
-                                                                pocket_distance=cfg.redesign_cfg.pocket_distance, 
-                                                                annotate_scaffold=True,
-                                                                annotation_name="is_scaffold")
+                                                                pocket_distance=cfg.redesign_cfg.pocket_distance,                                                                 
+                                                                annotation_name="is_ligand_pocket")
         
-        scaffold_atom_array = sample_atom_array_with_ligand[sample_atom_array_with_ligand.is_scaffold]
+        
+        # Spread residue-wise: if any atom in a residue is in pocket, mark all atoms in that residue as pocket
+        residue_wise_pocket_mask = apply_and_spread_residue_wise(sample_atom_array_with_ligand, sample_atom_array_with_ligand.get_annotation("is_ligand_pocket"), function=np.any)        
+        residue_wise_scaffold_mask = (~residue_wise_pocket_mask) & (sample_atom_array_with_ligand.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
+        
+        scaffold_atom_array = sample_atom_array_with_ligand[residue_wise_scaffold_mask]
         
         pos_constraint_dict = create_pos_constraint_dict_from_atom_array(
-            pdb_key=sample_id,
+            pdb_key=sample_id_with_ligand,
             atom_array=scaffold_atom_array
         )
         
         rows.append(pos_constraint_dict)
     
-    scaffold_pos_constraint_df = pd.DataFrame(rows).set_index("pdb_key")                     
+    scaffold_pos_constraint_df = pd.DataFrame(rows)
     
     # Run lcaliby sequence design for each checkpoint
     results = []    
@@ -453,22 +459,21 @@ def redesign_with_lcaliby(sample_dict: dict,
             out_dir=str(log_dir_per_ckpt),
             protein_only=cfg.get("protein_only", False),
             fix_pocket_seq=cfg.get("fix_pocket_seq", False),
-            pocket_distance=cfg.pocket_distance,
+            pocket_distance=None,
             redesign_pocket_seq=True,
             pos_constraint_df=scaffold_pos_constraint_df,
         )
         
         # Deep copy and update sample_dict with lcaliby outputs
         # Note: run_lc_seq_des saves CIF files, we need to update sample_dict accordingly
-        ckpt_sample_dict = copy.deepcopy(sample_dict)
+        sample_dict_per_ckpt = copy.deepcopy(sample_dict)
         
-        # Update sample_atom_array from outputs if available
-        if "bb_ligand_atom_array" in outputs:
-            for idx, example_id in enumerate(outputs["example_id"]):
-                if example_id in ckpt_sample_dict:
-                    ckpt_sample_dict[example_id]["sample_atom_array"] = outputs["bb_ligand_atom_array"][idx]
+        # Update sample_atom_array from outputs if available                        
+        example_id_to_sample_id = {example_id: sample_id for example_id, sample_id in zip(outputs["example_id"], sample_dict_per_ckpt.keys())}
+        for idx, example_id in enumerate(outputs["example_id"]):                
+            sample_dict_per_ckpt[example_id_to_sample_id[example_id]]["redesigned_sample_atom_array"] = outputs["bb_ligand_atom_array"][idx]
         
-        results.append((ckpt_sample_dict, log_dir_per_ckpt, ckpt_info))
+        results.append((sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info))
     
     return results
 
@@ -519,7 +524,7 @@ def evaluate_af3_consistency(sample_id_list: list[str] = None,
     )
     
     print(f"Created {len(sample_id_list)} AF3 JSON input files in {af3_ss_input_dir}")
-        
+
     # Run AF3 self-consistency and docking evaluation
     af3_runner_path = struct_pred_cfg.af3.runner_path
     af3_inference_config = struct_pred_cfg.af3.inference_config
@@ -536,6 +541,10 @@ def evaluate_af3_consistency(sample_id_list: list[str] = None,
         pdb_id = pdb_id_list[i]                         
         ss_json_path = af3_ss_json_paths[i]       
         sample_atom_array = sample_atom_array_list[i]
+        
+        # Get protein and ligand chain ids, because AF3 expects chain ids, not chain iids
+        protein_chain_iids = pdb_chain_info[sample_id]["protein_chain_iids"]
+        ligand_chain_iids = pdb_chain_info[sample_id]["ligand_chain_iids"]
         
         try:
             run_af3_single_sequence(str(ss_json_path), str(af3_ss_pred_dir), 
@@ -585,8 +594,8 @@ def evaluate_af3_consistency(sample_id_list: list[str] = None,
                         pred_sample_path=pred_ss_sample_path,
                         return_aligned_atom_array=False,
                         pocket_distance_for_metrics=cfg.docking_metrics_cfg.pocket_distance_for_metrics,
-                        receptor_chain=pdb_chain_info[sample_id]["protein_chains"][0],
-                        ligand_chain=pdb_chain_info[sample_id]["ligand_chains"][0]
+                        receptor_chain_iid=protein_chain_iids[0], #! FIXME
+                        ligand_chain_iid=ligand_chain_iids[0]
                     )
                 
                 except Exception as e:
@@ -821,9 +830,21 @@ def main(cfg: DictConfig):
                 print("\n" + "="*80)
                 print("Phase 3: AF3 Evaluation (per checkpoint)")
                 print("="*80 + "\n")
-                for ckpt_sample_dict, ckpt_out_dir, ckpt_info in results:
+                for sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info in results:
+                    sample_id_list = list(sample_dict_per_ckpt.keys())
+                    pdb_id_list = [sample_dict_per_ckpt[sid]['pdb_id'] for sid in sample_id_list]
+                    sample_atom_array_list = [sample_dict_per_ckpt[sid]['redesigned_sample_atom_array'] for sid in sample_id_list]
+                    pdb_chain_info = {sid: sample_dict_per_ckpt[sid]['pdb_chain_info'] for sid in sample_id_list}
+                    
                     print(f"\nEvaluating checkpoint: step_{ckpt_info['global_step']}_epoch_{ckpt_info['epoch']}")
-                    evaluate_af3_consistency(ckpt_sample_dict, ckpt_out_dir, cfg, ckpt_info)
+                    evaluate_af3_consistency(sample_id_list=sample_id_list, 
+                                             pdb_id_list=pdb_id_list, 
+                                             sample_atom_array_list=sample_atom_array_list, 
+                                             pdb_chain_info=pdb_chain_info, 
+                                             num_redesigned_pocket_residue_list=None, 
+                                             out_dir=log_dir_per_ckpt, 
+                                             cfg=cfg,
+                                             ckpt_info=ckpt_info)
     else:
         redesign_out_dir = log_dir / "samples"
         sample_id_list = list(sample_dict.keys())

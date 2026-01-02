@@ -459,6 +459,13 @@ def run_lc_seq_des(
 
         # Set empty string to NaN for easier parsing.
         pos_constraint_df = pos_constraint_df.replace("", np.nan)
+        
+        if redesign_pocket_seq: #!! FIXME !!! 260101
+            sample_ids = [Path(pdb_path).stem for pdb_path in pdb_paths]
+            pdb_ids = [Path(pdb_path).stem.split("_")[0] for pdb_path in pdb_paths]
+            pdb_ids_to_sample_ids = {pdb_id: sample_id for pdb_id, sample_id in zip(pdb_ids, sample_ids)}
+            metadata = metadata[metadata["pdb_id"].isin(pdb_ids)]
+            metadata["example_id"] = metadata["pdb_id"].map(pdb_ids_to_sample_ids)
 
     # Print omitted amino acids.
     if sampling_cfg.verbose and sampling_cfg.omit_aas is not None:
@@ -480,9 +487,8 @@ def run_lc_seq_des(
     with parallel_context as parallel_pool:
         for pi in range(0, len(pdb_paths), sampling_cfg.batch_size):
             batch_pdb_paths = pdb_paths[pi : pi + sampling_cfg.batch_size]
-            B = len(batch_pdb_paths)
-            
-            #!!!!!!!!!!!!!!!!!!!!!!!!!!!! 251231 JH: Continue here.                        
+            B = len(batch_pdb_paths)                            
+                                     
             batch = get_sd_batch(batch_pdb_paths,  data_cfg=data_cfg, transform_cfg=transform_cfg, 
                                  device=device, parallel_pool=parallel_pool, metadata=metadata,
                                  protein_only=protein_only)
@@ -652,18 +658,15 @@ def run_lc_seq_des(
                     # Compute sequence recovery metrics                            
                     orig_res_types = batch["restype"][si].argmax(dim=-1)          
                     seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["token_resolved_mask"][si]
-                    if all_native:
-                        seq_mask = batch["token_resolved_mask"][si]
+                                        
+                    if (not protein_only) and (not fix_pocket_seq):
+                        lp_seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["pocket_token_mask"][si]
+                    elif (not protein_only) and fix_pocket_seq:
                         lp_seq_mask = batch["pocket_token_mask"][si] * batch["token_pad_mask"][si]
                     else:
-                        if (not protein_only) and (not fix_pocket_seq):
-                            lp_seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["pocket_token_mask"][si]
-                        elif (not protein_only) and fix_pocket_seq:
-                            lp_seq_mask = batch["pocket_token_mask"][si] * batch["token_pad_mask"][si]
-                        else:
-                            native_atom_array = batch["atom_array"][si]
-                            native_prot_atom_array = native_atom_array[native_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
-                            native_prot_ca_atom_array = native_prot_atom_array[native_prot_atom_array.atom_name == "CA"]                                                                        
+                        native_atom_array = batch["atom_array"][si]
+                        native_prot_atom_array = native_atom_array[native_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+                        native_prot_ca_atom_array = native_prot_atom_array[native_prot_atom_array.atom_name == "CA"]                                                                        
                 
                     # Calculate sequence recovery metrics for each sample                                                
                     if not protein_only:
