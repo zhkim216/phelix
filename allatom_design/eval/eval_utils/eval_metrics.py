@@ -357,16 +357,20 @@ def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
             pred_mol = Chem.RemoveHs(pred_mol)
                                                                     
             try:
-                ligand_rmsd = AllChem.GetBestRMS(sample_mol, pred_mol)
-                print(f"using GetBestRMS: {ligand_rmsd:.4f} Å")
+                # Use CalcRMS instead of GetBestRMS to compute symmetry-aware RMSD 
+                # WITHOUT additional alignment (in-place calculation)
+                # This is what we want for docking poses after binding site superposition
+                ligand_rmsd = rdMolAlign.CalcRMS(sample_mol, pred_mol)
+                print(f"using CalcRMS (no alignment, symmetry-aware): {ligand_rmsd:.4f} Å")
             except:
-                print(f"GetBestRMS failed using (sample_mol, pred_mol), sample_mol: {sample_mol.GetNumHeavyAtoms()}, pred_mol: {pred_mol.GetNumHeavyAtoms()}")
-                print(f"This is because the number of heavy atoms of sample_mol is modified because of atomworks preprocessing")
-                print(f"In this case, sample_mol can be not a substructure of pred_mol, thus giving GetBestRMS error")
+                print(f"CalcRMS failed using (sample_mol, pred_mol), sample_mol: {sample_mol.GetNumHeavyAtoms()}, pred_mol: {pred_mol.GetNumHeavyAtoms()}")
+                print(f"This is i) because the number of heavy atoms of sample_mol can be modified because of atomworks preprocessing")
+                print(f"This is ii) or the ligand structure of AF3 prediction is wrong, e.g.) RI2 in 5yft")
+                print(f"In this case, sample_mol can be not a substructure of pred_mol, thus giving CalcRMS error")
                 print(f"So trying (pred_mol, sample_mol) instead")
                 try:
-                    ligand_rmsd = AllChem.GetBestRMS(pred_mol, sample_mol)
-                    print(f"using GetBestRMS: {ligand_rmsd:.4f} Å")
+                    ligand_rmsd = rdMolAlign.CalcRMS(pred_mol, sample_mol)
+                    print(f"using CalcRMS (no alignment, symmetry-aware): {ligand_rmsd:.4f} Å")
                 except Exception as e:
                     print(f"Both directions failed, cannot compute RMSD")
                     print(f"Error: {e}")
