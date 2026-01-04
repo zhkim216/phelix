@@ -1,0 +1,78 @@
+# Make positional constraint DataFrame config
+# Creates pos constraint DataFrame for ligand pocket or scaffold regions
+
+########### Basic settings #########
+debug: false
+num_debug_samples: 5  # Number of samples to process in debug mode
+
+# Input settings
+cif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
+pdb_list_file: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/small_molecule_val_monomer_512_cluster_rep.txt
+metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
+load_designed_samples: true
+
+# Output settings
+output_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/pmpnn_lmpnn_pos_constraints
+
+# Save LigandMPNN input CSV
+save_ligand_mpnn_csv: true
+
+# Pocket constraint settings
+pocket_distance: 8.0
+constraint_type: scaffold  # "pocket", "scaffold", or "both"
+
+######### Data & Transform configurations #########
+# Data configuration (for parsing original CIF files)
+data_cfg_for_design:
+  load_from_cache: false
+  use_load_any: false
+  cif_parser_args:
+    add_missing_atoms: true
+    remove_waters: true
+    remove_ccds: []
+    fix_ligands_at_symmetry_centers: true
+    fix_arginines: true
+    convert_mse_to_met: true
+    hydrogen_policy: "remove"
+    extra_fields: "all"
+
+# Transform configuration
+transform_cfg_for_design:
+  preprocess_cfg:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: true
+    remove_terminal_oxygen_nucleic_acid: true  
+
+data_cfg_for_designed_samples:
+  cif_parser_args:
+    add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
+    remove_waters: false
+    remove_ccds: []
+    fix_ligands_at_symmetry_centers: false
+    fix_arginines: false
+    convert_mse_to_met: false
+    hydrogen_policy: "remove"
+    extra_fields: "all"  
+
+# Transform configuration for featurizing designed structures
+transform_cfg_for_designed_samples:
+  preprocess_cfg:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: false
+    remove_terminal_oxygen_nucleic_acid: false
+  featurizer_cfg:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []    
+    remove_unresolved_tokens: true
+
+hydra:
+  run:
+    dir: /home/possu/jinho/hydra_outputs
+
