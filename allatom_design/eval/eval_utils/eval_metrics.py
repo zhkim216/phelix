@@ -355,17 +355,24 @@ def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
             # Remove hydrogens for RMSD calculation
             sample_mol = Chem.RemoveHs(sample_mol)
             pred_mol = Chem.RemoveHs(pred_mol)
-                        
-            # Try substructure match first
-            match = sample_mol.GetSubstructMatch(pred_mol)
-            if match:                                        
-                ligand_rmsd = rdMolAlign.CalcRMS(sample_mol, pred_mol)
-                print(f"Substructure match found, symmetry-corrected RMSD: {ligand_rmsd:.4f} Å")                    
-            else:
+                                                                    
+            try:
                 ligand_rmsd = AllChem.GetBestRMS(sample_mol, pred_mol)
-                print(f"No substructure match found, using GetBestRMS: {ligand_rmsd:.4f} Å")            
-                                
-    except Exception:
+                print(f"using GetBestRMS: {ligand_rmsd:.4f} Å")
+            except:
+                print(f"GetBestRMS failed using (sample_mol, pred_mol), sample_mol: {sample_mol.GetNumHeavyAtoms()}, pred_mol: {pred_mol.GetNumHeavyAtoms()}")
+                print(f"This is because the number of heavy atoms of sample_mol is modified because of atomworks preprocessing")
+                print(f"In this case, sample_mol can be not a substructure of pred_mol, thus giving GetBestRMS error")
+                print(f"So trying (pred_mol, sample_mol) instead")
+                try:
+                    ligand_rmsd = AllChem.GetBestRMS(pred_mol, sample_mol)
+                    print(f"using GetBestRMS: {ligand_rmsd:.4f} Å")
+                except Exception as e:
+                    print(f"Both directions failed, cannot compute RMSD")
+                    print(f"Error: {e}")
+                                                
+    except Exception as e:
+        print(f"Failed to calculate ligand RMSD: {e}")
         return {"error": "Failed to calculate ligand RMSD using RDKit", "ligand_rmsd": None}
         
     
