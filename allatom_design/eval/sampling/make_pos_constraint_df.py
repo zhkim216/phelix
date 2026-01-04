@@ -95,6 +95,8 @@ def create_pos_constraint_dict_from_pocket(
     constraint_type: str = "pocket",  # "pocket" or "scaffold"
     receptor_chain_iids: list[str] = None,
     ligand_chain_iids: list[str] = None,
+    cif_path: str = None,
+    return_ligand_mpnn_format: bool = False,
 ) -> dict:
     """
     Create a pos_constraint_dict from an atom array based on ligand pocket annotation.
@@ -106,9 +108,12 @@ def create_pos_constraint_dict_from_pocket(
         constraint_type: "pocket" to constrain pocket residues, "scaffold" to constrain non-pocket residues
         receptor_chain_iids: List of receptor (protein) chain IIDs
         ligand_chain_iids: List of ligand chain IIDs
+        cif_path: Path to the CIF file (required if return_ligand_mpnn_format=True)
+        return_ligand_mpnn_format: If True, also include LigandMPNN CSV fields (pdb_path, chains, fixed_residues)
         
     Returns:
-        Dictionary with pdb_key, fixed_pos_seq, fixed_pos_scn, and metadata
+        Dictionary with pdb_key, fixed_pos_seq, fixed_pos_scn, and metadata.
+        If return_ligand_mpnn_format=True, also includes pdb_path, chains, fixed_residues for LigandMPNN.
     """
     # Annotate ligand pockets
     annotated_atom_array = annotate_ligand_pockets(
@@ -126,13 +131,14 @@ def create_pos_constraint_dict_from_pocket(
     if constraint_type == "pocket":
         constrained_mask = protein_mask & residue_wise_pocket_mask
     elif constraint_type == "scaffold":
-        constrained_mask = protein_mask & ~residue_wise_pocket_mask
+        constrained_mask = protein_mask & ~residue_wise_pocket_mask        
     else: 
         raise ValueError(f"Invalid constraint type: {constraint_type}")
 
     # Get constrained atom array     
     constrained_atom_array = annotated_atom_array[constrained_mask]
     
+    # Early return if no constrained residues
     if len(constrained_atom_array) == 0:
         return {
             'pdb_key': pdb_key,
@@ -141,24 +147,34 @@ def create_pos_constraint_dict_from_pocket(
             'pocket_distance': pocket_distance,
             'constraint_type': constraint_type,
             'num_constrained_residues': 0,
-        }
+        }, {}
     
     # Get residue starts
     res_starts = get_residue_starts(constrained_atom_array)
     chain_ids = constrained_atom_array.chain_id[res_starts]
     res_ids = constrained_atom_array.res_id[res_starts]
     
-    # Convert to position string format
-    fixed_pos_str = _indices_to_pos_string(chain_ids, res_ids)
-    
-    return {
+    result = {
         'pdb_key': pdb_key,
-        'fixed_pos_seq': fixed_pos_str,
+        'fixed_pos_seq': _indices_to_pos_string(chain_ids, res_ids),
         'fixed_pos_scn': np.nan,
         'pocket_distance': pocket_distance,
         'constraint_type': constraint_type,
         'num_constrained_residues': len(res_starts),
     }
+    
+    # Add LigandMPNN format fields if requested
+    results_for_ligand_mpnn = {}
+    if return_ligand_mpnn_format:                               
+        results_for_ligand_mpnn['pdb_path'] = cif_path if cif_path else ""
+        fixed_residues_list = [f"{cid}{rid}" for cid, rid in zip(chain_ids, res_ids)]
+        results_for_ligand_mpnn['fixed_residues'] = " ".join(fixed_residues_list)
+        # Get chains to parse (protein + ligand)
+        protein_chain_ids = list({chain_iid.split("_")[0] for chain_iid in receptor_chain_iids})
+        ligand_chain_ids = list({chain_iid.split("_")[0] for chain_iid in ligand_chain_iids})
+        results_for_ligand_mpnn['chains'] = ",".join(protein_chain_ids + ligand_chain_ids)                    
+                                    
+    return result, results_for_ligand_mpnn
 
 
 def make_pos_constraint_df(
@@ -172,7 +188,8 @@ def make_pos_constraint_df(
     pdb_chain_info_dict: dict[str, dict] = None,
     debug: bool = False,
     num_debug_samples: int = 5,
-) -> pd.DataFrame:
+    save_ligand_mpnn_csv: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create a positional constraint DataFrame for multiple CIF files.
     
@@ -187,9 +204,10 @@ def make_pos_constraint_df(
         pdb_chain_info_dict: Dictionary mapping pdb_id to pdb_chain_info
         debug: If True, only process num_debug_samples samples
         num_debug_samples: Number of samples to process in debug mode
+        save_ligand_mpnn_csv: If True, also save LigandMPNN input CSV
         
     Returns:
-        DataFrame with positional constraints
+        Tuple of (positional constraint DataFrame, LigandMPNN input DataFrame)
     """
     cif_dir = Path(cif_dir)
     
@@ -213,6 +231,7 @@ def make_pos_constraint_df(
     
     rows = []
     failed_pdbs = []
+    results_for_ligand_mpnn = []
     
     # Get preprocess config
     preprocess_cfg = transform_cfg.preprocess_cfg if transform_cfg is not None else None
@@ -251,16 +270,20 @@ def make_pos_constraint_df(
                 continue
             
             # Create positional constraint dict
-            pos_constraint_dict = create_pos_constraint_dict_from_pocket(
+            pos_constraint_dict, ligand_mpnn_dict = create_pos_constraint_dict_from_pocket(
                 pdb_key=pdb_key,
                 atom_array=atom_array,
                 pocket_distance=pocket_distance,
                 constraint_type=constraint_type,
                 receptor_chain_iids=receptor_chain_iids,
                 ligand_chain_iids=ligand_chain_iids,
+                cif_path=str(cif_path) if save_ligand_mpnn_csv else None,
+                return_ligand_mpnn_format=save_ligand_mpnn_csv,
             )
             
             rows.append(pos_constraint_dict)
+            if ligand_mpnn_dict:
+                results_for_ligand_mpnn.append(ligand_mpnn_dict)
             
         except Exception as e:
             print(f"Error processing {pdb_key}: {e}")
@@ -272,6 +295,9 @@ def make_pos_constraint_df(
     
     if len(df) > 0:
         df = df.set_index("pdb_key")
+    
+    # Create LigandMPNN DataFrame
+    ligand_mpnn_input_df = pd.DataFrame(results_for_ligand_mpnn) if results_for_ligand_mpnn else pd.DataFrame()
     
     print(f"\nSuccessfully processed {len(df)} CIF files")
     print(f"Failed: {len(failed_pdbs)} CIF files")
@@ -293,8 +319,8 @@ def make_pos_constraint_df(
         elif output_path.suffix == ".csv":
             df_to_save.to_csv(output_path)
         else:
-            # Default to parquet
-            df.to_parquet(output_path)
+            # Default to csv
+            df_to_save.to_csv(output_path)
         
         print(f"Saved positional constraint DataFrame to {output_path}")
         
@@ -308,8 +334,16 @@ def make_pos_constraint_df(
             df.to_parquet(full_output_path)
         
         print(f"Saved full positional constraint DataFrame to {full_output_path}")
+        
+        # Save LigandMPNN input CSV
+        if save_ligand_mpnn_csv and len(ligand_mpnn_input_df) > 0:
+            ligand_mpnn_csv_path = output_path.parent / (output_path.stem + "_for_ligandmpnn.csv")
+            # Select only required columns for LigandMPNN: pdb_path, chains, fixed_residues
+            ligand_mpnn_df_to_save = ligand_mpnn_input_df[['pdb_path', 'chains', 'fixed_residues']]
+            ligand_mpnn_df_to_save.to_csv(ligand_mpnn_csv_path, index=False)
+            print(f"Saved LigandMPNN input CSV to {ligand_mpnn_csv_path}")
     
-    return df
+    return df, ligand_mpnn_input_df
 
 
 @hydra.main(config_path="../../configs/eval/sampling", config_name="make_pos_constraint_df", version_base="1.3.2")
@@ -319,6 +353,13 @@ def main(cfg: DictConfig):
     """
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    if not cfg.load_designed_samples:
+        data_cfg = cfg.data_cfg_for_design
+        transform_cfg = cfg.transform_cfg_for_design
+    else:
+        data_cfg = cfg.data_cfg_for_designed_samples
+        transform_cfg = cfg.transform_cfg_for_designed_samples
     
     # Load metadata and extract pdb_chain_info
     metadata = pd.read_parquet(cfg.metadata_path)
@@ -345,17 +386,18 @@ def main(cfg: DictConfig):
             output_filename = f"debug_pos_constraint_{constraint_type}_{cfg.pocket_distance}A.csv"
         output_path = output_dir / output_filename
         
-        df = make_pos_constraint_df(
+        df, ligand_mpnn_df = make_pos_constraint_df(
             cif_dir=cfg.cif_dir,
             pdb_list_file=cfg.pdb_list_file,
             output_path=str(output_path),
             pocket_distance=cfg.pocket_distance,
             constraint_type=constraint_type,
-            data_cfg=cfg.data_cfg,
-            transform_cfg=cfg.transform_cfg,
+            data_cfg=data_cfg,
+            transform_cfg=transform_cfg,
             pdb_chain_info_dict=pdb_chain_info_dict,
             debug=cfg.get("debug", False),
             num_debug_samples=cfg.get("num_debug_samples", 5),
+            save_ligand_mpnn_csv=cfg.get("save_ligand_mpnn_csv", True),
         )
         
         # Print summary statistics
@@ -367,6 +409,13 @@ def main(cfg: DictConfig):
             print(f"  Max constrained residues: {df['num_constrained_residues'].max()}")
             print(f"\nSample entries:")
             print(df.head())
+        
+        if len(ligand_mpnn_df) > 0:
+            print(f"\nLigandMPNN input CSV summary:")
+            print(f"  Total entries: {len(ligand_mpnn_df)}")
+            print(f"  Entries with fixed_residues: {(ligand_mpnn_df['fixed_residues'] != '').sum()}")
+            print(f"\nSample LigandMPNN entries:")
+            print(ligand_mpnn_df[['pdb_path', 'chains', 'fixed_residues']].head())
     
     print(f"\n{'='*60}")
     print("Done!")
