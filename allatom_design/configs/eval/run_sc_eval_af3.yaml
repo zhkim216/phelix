@@ -28,7 +28,6 @@ cached_example_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_fil
 add_ligands_to_designed_samples: false
 
 # Configurations for getting designed structures' paths
-add_ligands_to_designed_samples: false
 pdb_cfg:
   pdb_dir: /home/possu/jinho/allatom-design/debug/251229_redesign_pocket_with_native/redesign_pocket_seq_replace_with_native_3.0/sample_with_ligand
   pdb_name_list: null  # null to use all files in pdb_dir
@@ -86,7 +85,6 @@ transform_cfg_for_design:
     remove_terminal_oxygen_protein: true
     remove_terminal_oxygen_nucleic_acid: true
   
-
 #### For loading designed samples ####
 # Data configuration for loading designed structures
 data_cfg_for_designed_samples:
@@ -143,6 +141,10 @@ transform_cfg_for_af3_prediction:
     min_residues_for_polymers: 0
     remove_terminal_oxygen_protein: false #! AF3 predictions have OXT atoms, removing it will give mismatch in confidence metrics
     remove_terminal_oxygen_nucleic_acid: false #! AF3 predictions have OXT atoms, removing it will give mismatch in confidence metrics
+
+# Docking metrics configuration
+docking_metrics_cfg:
+  pocket_distance_for_metrics: 8.0
 
 # Structure prediction model configuration (AF3)
 struct_pred_cfg:
