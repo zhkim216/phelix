@@ -1,0 +1,181 @@
+# Self-consistency evaluation config for AF3
+# This config is for evaluating pre-designed samples using AF3
+
+# Wandb settings
+wandb:
+  no_wandb: true  # Disable wandb logging
+  project: "ligand_seq_des"
+  wandb_id: "zhkim216"  # Wandb username
+  group: null
+
+# Basic settings
+debug: true
+num_debug_samples: 2
+calculate_metrics_only: false
+seed: 0
+
+# Metadata
+metadata_path: null
+
+# Outputs
+exp_name: step_2500_epoch_1 # experiment name; used for wandb and output directory
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260104_lmpnn_redesign
+
+# Cached examples (original structures with ligands)
+cached_example_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/cached_examples
+
+######### Data & Transform configurations #########
+add_ligands_to_designed_samples: false
+
+# Configurations for getting native or designed structures' paths
+pdb_cfg:
+  pdb_dir: /home/possu/jinho/allatom-design/local_debug_output/260104_lmpnn_redesign/samples/backbones
+  pdb_name_list: null  # null to use all files in pdb_dir
+  pdb_name_ext: ".pdb"
+  n_subsample: null  # null to use all samples  
+
+#### For designing samples ####
+# Data configuration for design samples
+data_cfg_for_design:
+  load_from_cache: false
+  use_load_any: false
+  cif_parser_args:
+    add_missing_atoms: true
+    remove_waters: true
+    remove_ccds: []
+    fix_ligands_at_symmetry_centers: true
+    fix_arginines: true
+    convert_mse_to_met: true
+    hydrogen_policy: "remove"
+    extra_fields: "all"  
+  cif_save_args:
+    date: "1959-01-07" #! Young-Ae Lee's birthday
+    include_entity_poly: True
+    include_entity_nonpoly: True
+    include_nan_coords: False #! designed structures should not have nan coords
+    include_bonds: True
+    extra_fields: "all"
+    exclude_field_keys: ["token_id", "is_ligand_pocket"]
+    extra_categories:
+      pdbx_audit_revision_history:
+        ordinal: [1]
+        revision_id: [1]
+        revision_date: ["1959-01-07"]
+        major_revision: [1]
+        minor_revision: [0]
+        revision_description: ["Dummy date for template-conditioning AF3"]
+
+# Transform configuration for design samples
+transform_cfg_for_design:
+  featurizer_cfg:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []    
+    remove_unresolved_tokens: true
+    residue_cache_dir: "/home/possu/jinho/datasets/atomworks_cached_residue_data"
+    max_conformers_per_residue: 50
+    apply_random_augmentation: false
+    translation_scale: 1.0
+    pocket_distance: 8.0
+  preprocess_cfg:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: true
+    remove_terminal_oxygen_nucleic_acid: true
+  
+
+#### For loading designed samples ####
+# Data configuration for loading designed structures
+data_cfg_for_designed_samples:
+  cif_parser_args:
+    add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
+    remove_waters: false
+    remove_ccds: []
+    fix_ligands_at_symmetry_centers: false
+    fix_arginines: false
+    convert_mse_to_met: false
+    hydrogen_policy: "remove"
+    extra_fields: null  
+
+# Transform configuration for featurizing designed structures
+transform_cfg_for_designed_samples:
+  preprocess_cfg:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: true #! OXT atoms are nan coords because of add_missing_atoms=true
+    remove_terminal_oxygen_nucleic_acid: true #! OXT atoms are nan coords because of add_missing_atoms=true
+  featurizer_cfg:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []    
+    remove_unresolved_tokens: true
+
+#### For AF3 predicted samples ####
+# Data configuration for loading AF3 predictions (for self-consistency evaluation)
+data_cfg_for_af3_prediction:
+  use_load_any: false
+  cif_parser_args:
+    add_missing_atoms: true  # For charge annotation
+    remove_waters: false
+    remove_ccds: []
+    fix_ligands_at_symmetry_centers: false  # Keep AF3's original ligand predictions
+    fix_arginines: false
+    convert_mse_to_met: false
+    hydrogen_policy: "remove"
+    extra_fields: []  # AF3 CIF files don't have custom annotations
+
+# Transform configuration for AF3 predictions
+transform_cfg_for_af3_prediction:
+  featurizer_cfg:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []
+    remove_unresolved_tokens: true  # Remove atoms with NaN coords
+  preprocess_cfg:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: false #! AF3 predictions have OXT atoms, removing it will give mismatch in confidence metrics
+    remove_terminal_oxygen_nucleic_acid: false #! AF3 predictions have OXT atoms, removing it will give mismatch in confidence metrics
+
+# Docking metrics configuration
+docking_metrics_cfg:
+  pocket_distance_for_metrics: 8.0
+
+# Structure prediction model configuration (AF3)
+struct_pred_cfg:
+  model_name: "af3"
+  af3:
+    runner_path: /home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py
+    json_config:
+      model_seeds: [42]
+      version: 2
+    inference_config:
+      base:
+        model_dir: /home/possu/jinho/model_params/af3
+        db_dir: /home/possu/jinho/af3_databases
+        flash_attention_implementation: "xla"
+      ss:  # Single-sequence prediction config
+        num_recycles: 1
+        num_diffusion_samples: 1
+        max_templates: 0
+        ligand_protein_template_conditioning_mode: 0
+        mask_template_sidechains: true
+        mask_template_sequence: true
+      tc:  # Template-conditioned prediction config
+        num_recycles: 1
+        num_diffusion_samples: 1
+        max_templates: 1
+        ligand_protein_template_conditioning_mode: 1
+        mask_template_sidechains: true
+        mask_template_sequence: true
+        max_template_date: "2021-09-30"
+
+hydra:
+  run:
+    dir: /home/possu/jinho/hydra_outputs

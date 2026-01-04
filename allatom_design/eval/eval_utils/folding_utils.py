@@ -10,16 +10,15 @@ from pathlib import Path
 from typing import Any, Dict, Generator, List, Tuple
 
 import hydra
-
 import numpy as np
 import pandas as pd
 import torch
+import wandb
 
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning import Trainer
 from torchtyping import TensorType
 from tqdm import tqdm
-# from transformers import AutoTokenizer, EsmForProteinFolding, EsmTokenizer
 
 from allatom_design.data import data
 from allatom_design.data.residue_constants import STANDARD_ATOM_MASK
@@ -29,16 +28,17 @@ from atomworks.io.utils.sequence import aa_chem_comp_3to1
 
 
 # ============================================================================
-# AF3 In-Process Runner Utils
+# AF3 In-Process Runner Utils (Internal)
 # ============================================================================
 
 # Global cache for AF3 runner module
 _AF3_RUNNER_MOD = None
 _AF3_FLAGS_INITIALIZED = False
 
+
 def _load_af3_runner(runner_path: str):
     """
-    Load run_alphafold_debug_local.py as a module dynamically.
+    Load run_alphafold.py as a module dynamically.
     Cached after first load.
     
     Args:
@@ -164,10 +164,9 @@ def _run_af3_inprocess(
             raise RuntimeError(f"AF3 main() exited with code {e.code}")
         # Exit code 0 or None is fine
 
-    
 
 # ============================================================================
-# AF3 Utils
+# AF3 JSON Input Creation
 # ============================================================================
 
 def _chain_letters(n: int) -> list[str]:
@@ -391,6 +390,11 @@ def make_af3_json(af3_ss_input_dir: str = None,
     else:
         return af3_ss_json_paths, af3_tc_json_paths, pdb_chain_info
 
+
+# ============================================================================
+# AF3 Inference Functions
+# ============================================================================
+
 def run_af3_single_sequence(json_path: str,
                             out_dir: str,
                             runner_path: str,                            
@@ -441,6 +445,7 @@ def run_af3_single_sequence(json_path: str,
             inference_config=inference_config,
             mode="ss",
         )  
+
 
 def run_af3_template_conditioned(json_path: str,
                             out_dir: str,
@@ -495,6 +500,10 @@ def run_af3_template_conditioned(json_path: str,
         ) 
 
 
+# ============================================================================
+# AF3 Prediction Path Utils
+# ============================================================================
+
 def find_pred_sample_path_af3(out_dir: str = None,
                            job_name: str = None) -> tuple[list[Path], list[Path]]:
     """Find AF3 prediction sample paths for a given job name."""
@@ -508,6 +517,294 @@ def find_pred_sample_path_af3(out_dir: str = None,
             sample_cif_paths.append(cif_path)
             
     return sample_dirs, sample_cif_paths
+
+
+# ============================================================================
+# AF3 Evaluation Functions
+# ============================================================================
+
+def evaluate_af3_consistency(sample_id_list: list[str] = None,
+                             pdb_id_list: list[str] = None,
+                             sample_atom_array_list: list[AtomArray] = None,
+                             pdb_chain_info: list[dict] = None,                             
+                             num_redesigned_pocket_residue_list: list[int] = None,
+                             out_dir: Path = None,
+                             cfg: DictConfig = None,
+                             ckpt_info: dict = None,
+                             calculate_metrics_only: bool = False) -> None:
+    """
+    Run AF3 self-consistency and docking evaluation.
+    
+    Args:
+        sample_id_list: List of sample IDs.
+        pdb_id_list: List of PDB IDs.
+        sample_atom_array_list: List of sample atom arrays.
+        pdb_chain_info: PDB chain info dictionary.
+        num_redesigned_pocket_residue_list: List of number of redesigned pocket residues.
+        out_dir: Output directory.
+        cfg: Configuration object.
+        ckpt_info: Checkpoint info (optional, for wandb logging).
+    """
+    # Import here to avoid circular imports
+    from allatom_design.eval.eval_utils.seq_des_utils import get_sd_example_from_af3_prediction
+    from allatom_design.eval.eval_utils.eval_metrics import (
+        _compute_self_consistency_metrics_atomarray, 
+        _compute_docking_metrics_atomarray
+    )
+    
+    struct_pred_cfg = cfg.struct_pred_cfg
+    
+    # Make json input directory
+    af3_ss_input_dir = Path(out_dir, "af3_ss_inputs")
+    af3_ss_input_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Make a directory for af3 single-sequence prediction outputs
+    af3_ss_pred_dir = Path(out_dir, "af3_ss_preds")
+    af3_ss_pred_dir.mkdir(parents=True, exist_ok=True)
+                    
+    print("Creating AF3 JSON input files...")
+    
+    af3_ss_json_paths, _, pdb_chain_info = make_af3_json(
+        af3_ss_input_dir=af3_ss_input_dir,
+        af3_tc_input_dir=None,
+        sample_id_list=sample_id_list,
+        pdb_id_list=pdb_id_list,
+        sample_atom_array_list=sample_atom_array_list,
+        template_pdb_path_list=None,
+        pdb_chain_info=pdb_chain_info,
+        metadata=None,
+        json_config=struct_pred_cfg.af3.json_config
+    )
+    
+    print(f"Created {len(sample_id_list)} AF3 JSON input files in {af3_ss_input_dir}")
+
+    # Run AF3 self-consistency and docking evaluation
+    af3_runner_path = struct_pred_cfg.af3.runner_path
+    af3_inference_config = struct_pred_cfg.af3.inference_config
+    
+    sample_id_to_per_pred_sc_metrics = {}
+    sample_id_to_per_pred_docking_metrics = {}
+    
+    print("\n" + "="*80)
+    print("Running AF3 Self-Consistency Evaluation")
+    print("="*80 + "\n")        
+    
+    for i in tqdm(range(len(sample_id_list)), desc="AF3 predictions"):
+        sample_id = sample_id_list[i]
+        pdb_id = pdb_id_list[i]                         
+        ss_json_path = af3_ss_json_paths[i]       
+        sample_atom_array = sample_atom_array_list[i]
+        
+        # Get protein and ligand chain ids, because AF3 expects chain ids, not chain iids
+        protein_chain_iids = pdb_chain_info[sample_id]["protein_chain_iids"]
+        ligand_chain_iids = pdb_chain_info[sample_id]["ligand_chain_iids"]
+        
+        if not calculate_metrics_only:
+            # Run AF3 single-sequence prediction
+            try:
+                run_af3_single_sequence(str(ss_json_path), str(af3_ss_pred_dir), 
+                                        runner_path=af3_runner_path, 
+                                        inference_config=af3_inference_config)
+            except Exception as e:
+                print(f"AF3 single sequence prediction failed for {pdb_id}: {e}")
+                continue
+            
+        _, pred_ss_sample_paths = find_pred_sample_path_af3(out_dir=str(af3_ss_pred_dir), 
+                                                            job_name=sample_id)
+        
+        if len(pred_ss_sample_paths) == 0:
+            print(f"No AF3 predicted structure found for {pdb_id}")
+            continue
+        
+        else:   
+            sample_id_to_per_pred_sc_metrics[sample_id] = {}      
+            sample_id_to_per_pred_docking_metrics[sample_id] = {}                                          
+            for pred_idx, pred_ss_sample_path in enumerate(pred_ss_sample_paths):
+                try:
+                    pred_example = get_sd_example_from_af3_prediction(
+                        pdb_path=pred_ss_sample_path,
+                        data_cfg=cfg.data_cfg_for_af3_prediction,
+                        transform_cfg=cfg.transform_cfg_for_af3_prediction
+                    )
+                                                                                    
+                    pred_atom_array = pred_example["atom_array"]
+                    per_pred_sc_metrics = _compute_self_consistency_metrics_atomarray(
+                        pred_atom_array=pred_atom_array,
+                        sample_atom_array=sample_atom_array,
+                        pred_sample_path=pred_ss_sample_path,
+                        return_aligned_atom_array=False
+                    )                                                                                            
+            
+                except Exception as e:
+                    print(f"Self-consistency metrics computation failed for {sample_id, pred_idx}: {e}")
+                    continue
+                else:            
+                    # Store self-consistency metrics in sample_dict
+                    sample_id_to_per_pred_sc_metrics[sample_id][f"diffusion_{pred_idx}"] = per_pred_sc_metrics
+                
+                try: 
+                    per_pred_docking_metrics = _compute_docking_metrics_atomarray(
+                        pred_atom_array=pred_atom_array,
+                        sample_atom_array=sample_atom_array,
+                        pred_sample_path=pred_ss_sample_path,
+                        return_aligned_atom_array=False,
+                        pocket_distance_for_metrics=cfg.docking_metrics_cfg.pocket_distance_for_metrics,
+                        receptor_chain_iid=protein_chain_iids[0], #! FIXME
+                        ligand_chain_iid=ligand_chain_iids[0] #! FIXME
+                    )
+                
+                except Exception as e:
+                    print(f"Docking metrics computation failed for {sample_id, pred_idx}: {e}")
+                    continue
+                else:
+                    # Store docking metrics in sample_dict
+                    sample_id_to_per_pred_docking_metrics[sample_id][f"diffusion_{pred_idx}"] = per_pred_docking_metrics
+    
+    # Aggregate best metrics
+    sample_id_best_sc_metrics = _aggregate_best_sc_metrics(sample_id_to_per_pred_sc_metrics)
+    sample_id_best_docking_metrics = _aggregate_best_docking_metrics(sample_id_to_per_pred_docking_metrics)
+    
+    # Add num_replaced_pocket_residues if available
+    if num_redesigned_pocket_residue_list is not None:        
+        for sample_id, num_replaced_pocket_residues in zip(sample_id_list, num_redesigned_pocket_residue_list):
+            if sample_id in sample_id_best_docking_metrics:
+                sample_id_best_docking_metrics[sample_id]["num_replaced_pocket_residues"] = num_replaced_pocket_residues
+            
+    # Save results
+    _save_metrics_results(
+        out_dir=out_dir,
+        sample_id_to_per_pred_sc_metrics=sample_id_to_per_pred_sc_metrics,
+        sample_id_to_per_pred_docking_metrics=sample_id_to_per_pred_docking_metrics,
+        sample_id_best_sc_metrics=sample_id_best_sc_metrics,
+        sample_id_best_docking_metrics=sample_id_best_docking_metrics,
+        cfg=cfg,
+        ckpt_info=ckpt_info
+    )
+    
+    print("\n" + "="*80)
+    print("AF3 Self-Consistency and Docking Evaluation Complete")
+    print(f"Results saved to {out_dir}")
+    print("="*80 + "\n")
+
+
+def _aggregate_best_sc_metrics(sample_id_to_per_pred_sc_metrics: dict) -> dict:
+    """Aggregate best self-consistency metrics (by max avg_ca_plddt)."""
+    sample_id_best_sc_metrics = {}        
+    for sample_id, per_pred_sc_metrics in sample_id_to_per_pred_sc_metrics.items():
+        if not per_pred_sc_metrics:
+            continue
+        # Find the prediction with max avg_ca_plddt
+        best_pred = max(per_pred_sc_metrics.values(), key=lambda x: x["avg_ca_plddt"])
+        sample_id_best_sc_metrics[sample_id] = {
+            "avg_ca_plddt": best_pred["avg_ca_plddt"],
+            "sc_ca_rmsd": best_pred["sc_ca_rmsd"]
+        }
+    return sample_id_best_sc_metrics
+
+
+def _aggregate_best_docking_metrics(sample_id_to_per_pred_docking_metrics: dict) -> dict:
+    """Aggregate best docking metrics (by max ligand_plddt)."""
+    sample_id_best_docking_metrics = {}
+    for sample_id, per_pred_docking_metrics in sample_id_to_per_pred_docking_metrics.items():
+        if not per_pred_docking_metrics:
+            continue
+        
+        # Filter out predictions that don't have ligand_plddt (failed docking metrics computation)
+        valid_preds = {k: v for k, v in per_pred_docking_metrics.items() if "ligand_plddt" in v and v["ligand_plddt"] is not None}
+        
+        if not valid_preds:
+            print(f"Warning: No valid docking metrics for sample {sample_id}, skipping.")
+            continue
+            
+        # Find the prediction with max ligand_plddt
+        best_pred = max(valid_preds.values(), key=lambda x: x["ligand_plddt"])
+        sample_id_best_docking_metrics[sample_id] = {
+            "ligand_rmsd": best_pred["ligand_rmsd"],
+            "binding_site_rmsd": best_pred["binding_site_rmsd"],
+            "ligand_plddt": best_pred["ligand_plddt"],
+            "binding_site_plddt": best_pred["binding_site_plddt"],
+            "iptm": best_pred["iptm"],
+            "interface_min_pae": best_pred["interface_min_pae"],
+        }
+    return sample_id_best_docking_metrics
+
+
+def _save_metrics_results(out_dir: Path,
+                          sample_id_to_per_pred_sc_metrics: dict,
+                          sample_id_to_per_pred_docking_metrics: dict,
+                          sample_id_best_sc_metrics: dict,
+                          sample_id_best_docking_metrics: dict,
+                          cfg: DictConfig,
+                          ckpt_info: dict = None) -> None:
+    """Save metrics results to CSV and log to wandb."""
+    
+    # Self-consistency metrics
+    all_sc_metrics_df = pd.DataFrame.from_dict(sample_id_to_per_pred_sc_metrics, orient='index')
+    all_sc_metrics_df = all_sc_metrics_df.reset_index().rename(columns={'index': 'sample_id'})
+    all_sc_metrics_df.to_csv(Path(out_dir, "all_sc_metrics_results.csv"), index=False)
+    
+    # Docking metrics
+    all_docking_metrics_df = pd.DataFrame.from_dict(sample_id_to_per_pred_docking_metrics, orient='index')
+    all_docking_metrics_df = all_docking_metrics_df.reset_index().rename(columns={'index': 'sample_id'})
+    all_docking_metrics_df.to_csv(Path(out_dir, "all_docking_metrics_results.csv"), index=False)
+    
+    # Best self-consistency metrics
+    best_sc_metrics_df = pd.DataFrame.from_dict(sample_id_best_sc_metrics, orient='index')
+    best_sc_metrics_df = best_sc_metrics_df.reset_index().rename(columns={'index': 'sample_id'})
+    best_sc_metrics_df.to_csv(Path(out_dir, "best_sc_metrics_results.csv"), index=False)
+    
+    # Best docking metrics
+    best_docking_metrics_df = pd.DataFrame.from_dict(sample_id_best_docking_metrics, orient='index')
+    best_docking_metrics_df = best_docking_metrics_df.reset_index().rename(columns={'index': 'sample_id'})
+    best_docking_metrics_df.to_csv(Path(out_dir, "best_docking_metrics_results.csv"), index=False)
+    
+    # Log summary metrics to wandb
+    if sample_id_best_sc_metrics:
+        best_sc_ca_rmsds = [m["sc_ca_rmsd"] for m in sample_id_best_sc_metrics.values()]
+        best_avg_ca_plddts = [m["avg_ca_plddt"] for m in sample_id_best_sc_metrics.values()]
+        
+        wandb_metrics = {                
+            "eval/median/sc_ca_rmsd": np.median(best_sc_ca_rmsds),
+            "eval/median/avg_ca_plddt": np.median(best_avg_ca_plddts),            
+        }
+        
+        if ckpt_info:
+            wandb_metrics["trainer/global_step"] = ckpt_info["global_step"]
+            wandb_metrics["trainer/epoch"] = ckpt_info["epoch"]
+        
+        if not cfg.wandb.no_wandb:
+            wandb.log(wandb_metrics, commit=True)
+            print(f"Logged metrics to wandb: {wandb_metrics}")
+    
+    if sample_id_best_docking_metrics:
+        best_ligand_rmsd = [m["ligand_rmsd"] for m in sample_id_best_docking_metrics.values()]
+        best_binding_site_rmsd = [m["binding_site_rmsd"] for m in sample_id_best_docking_metrics.values()]
+        best_ligand_plddt = [m["ligand_plddt"] for m in sample_id_best_docking_metrics.values()]
+        best_binding_site_plddt = [m["binding_site_plddt"] for m in sample_id_best_docking_metrics.values()]
+        best_iptm = [m["iptm"] for m in sample_id_best_docking_metrics.values()]
+        best_interface_min_pae = [m["interface_min_pae"] for m in sample_id_best_docking_metrics.values()]
+        
+        wandb_metrics = {                
+            "eval/median/ligand_rmsd": np.median(best_ligand_rmsd),
+            "eval/median/binding_site_rmsd": np.median(best_binding_site_rmsd),
+            "eval/median/ligand_plddt": np.median(best_ligand_plddt),
+            "eval/median/binding_site_plddt": np.median(best_binding_site_plddt),
+            "eval/median/iptm": np.median(best_iptm),
+            "eval/median/interface_min_pae": np.median(best_interface_min_pae),
+        }
+        
+        if ckpt_info:
+            wandb_metrics["trainer/global_step"] = ckpt_info["global_step"]
+            wandb_metrics["trainer/epoch"] = ckpt_info["epoch"]
+        
+        if not cfg.wandb.no_wandb:
+            wandb.log(wandb_metrics, commit=True)
+            print(f"Logged metrics to wandb: {wandb_metrics}")
+
+
+# ============================================================================
+# ESMFold Utils
+# ============================================================================
 
 def create_batched_seq_dataset(all_sequences: list[str],
                                all_residue_indices: list[TensorType["n_s", int]],
@@ -563,6 +860,11 @@ def create_batched_seq_dataset(all_sequences: list[str],
         pbar.update(len(seq))
 
     yield collate_fn(batch_examples)
+
+
+# ============================================================================
+# Legacy Code (AF2/ESMFold - commented out)
+# ============================================================================
 
 # def run_af2(sequences_list: list[str],
 #             residue_index_list: list[TensorType["n_s", int]],
