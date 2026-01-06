@@ -2,6 +2,7 @@ import ast
 import math
 import os
 import pickle
+import re
 import shutil
 import subprocess
 import uuid
@@ -153,7 +154,7 @@ def _compute_self_consistency_metrics_atomworks_af3(*, pred_example: dict[str, A
         elif metric == "avg_ca_plddt":
             # Compute average pLDDT across all CA atoms.
             confidence_dir = str(pred_sample_path.parent)
-            confidence_file_name = str(pred_sample_path.stem).replace("model", "confidences.json")
+            confidence_file_name = re.sub(r'_model$', '_confidences', str(pred_sample_path.stem)) + '.json'
             avg_ca_plddt = _extract_af3_confidence_metrics(confidence_file_path=f"{confidence_dir}/{confidence_file_name}",
                                                            atom_array=pred_example["atom_array"],
                                                            mask=ca_atom_mask,
@@ -224,7 +225,7 @@ def _compute_self_consistency_metrics_atomarray(*, pred_atom_array: AtomArray,
         elif metric == "avg_ca_plddt":
             # Compute average pLDDT across all CA atoms.
             confidence_dir = str(pred_sample_path.parent)
-            confidence_file_name = str(pred_sample_path.stem).replace("model", "confidences.json")
+            confidence_file_name = re.sub(r'_model$', '_confidences', str(pred_sample_path.stem)) + '.json'
             avg_ca_plddt = _extract_af3_confidence_metrics(confidence_file_path=f"{confidence_dir}/{confidence_file_name}",
                                                            atom_array=pred_atom_array,
                                                            mask=ca_atom_mask,
@@ -382,8 +383,8 @@ def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
     
     # Calculate AF3 confidence metrics using the aligned pred structure
     confidence_dir = str(pred_sample_path.parent)
-    full_confidence_file_path = f"{confidence_dir}/{str(pred_sample_path.stem).replace("model", "confidences.json")}"
-    summary_confidence_file_path = f"{confidence_dir}/{str(pred_sample_path.stem).replace("model", "summary_confidences.json")}"
+    full_confidence_file_path = f"{confidence_dir}/{re.sub(r'_model$', '_confidences', str(pred_sample_path.stem))}.json"
+    summary_confidence_file_path = f"{confidence_dir}/{re.sub(r'_model$', '_summary_confidences', str(pred_sample_path.stem))}.json"
     ligand_plddt = _extract_af3_confidence_metrics(confidence_file_path=full_confidence_file_path,
                                                    atom_array=pred_aligned_atom_array,
                                                    mask=pred_ligand_mask,

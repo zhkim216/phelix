@@ -2059,6 +2059,7 @@ def _extract_ligand_atom_array_from_cached_examples(sample_dict: dict = None,
 def load_designed_samples(sample_dict: dict = None,
                           data_cfg_for_designed_samples: DictConfig = None,
                           transform_cfg_for_designed_samples: DictConfig = None,
+                          is_all_atom_sample: bool = False,
                           add_ligands_to_designed_samples: bool = False,
                           save_dir: Path = None) -> dict:
     """
@@ -2076,13 +2077,13 @@ def load_designed_samples(sample_dict: dict = None,
         data_cfg_for_designed_samples = {
             "cif_parser_args": {
                 "add_missing_atoms": True,
-                "remove_waters": True,
+                "remove_waters": False,
                 "remove_ccds": [],
                 "fix_ligands_at_symmetry_centers": False,
                 "fix_arginines": False,
                 "convert_mse_to_met": False,
                 "hydrogen_policy": "remove",
-                "extra_fields": "all",
+                "extra_fields": None,
             }
         }
         
@@ -2094,8 +2095,8 @@ def load_designed_samples(sample_dict: dict = None,
                 "b_factor_min": None,
                 "b_factor_max": None,
                 "min_residues_for_polymers": 0,
-                "remove_terminal_oxygen_protein": False,
-                "remove_terminal_oxygen_nucleic_acid": False,
+                "remove_terminal_oxygen_protein": True,
+                "remove_terminal_oxygen_nucleic_acid": True,
             },
             "featurizer_cfg": {
                 "max_tokens": None,
@@ -2105,8 +2106,11 @@ def load_designed_samples(sample_dict: dict = None,
             }
         }
         transform_cfg_for_designed_samples = DictConfig(transform_cfg_for_designed_samples)
+    
+    # Make save_dir if it exists
+    if save_dir is not None:
+        save_dir.mkdir(parents=True, exist_ok=True)
         
-    save_dir.mkdir(parents=True, exist_ok=True)
     sample_ids = list(sample_dict.keys())
             
     for sample_id in tqdm(sample_ids, desc="Loading designed samples"):        
@@ -2127,39 +2131,38 @@ def load_designed_samples(sample_dict: dict = None,
             transform_cfg=transform_cfg_for_designed_samples
         )
         
-        sample_atom_array = example["atom_array"]        
-        if add_ligands_to_designed_samples:
-            sample_bb_atom_array = sample_atom_array[sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
-            sample_bb_atom_array = sample_bb_atom_array[sample_bb_atom_array.is_backbone_atom]
-            ligand_atom_array = sample_dict[sample_id]["native_ligand_atom_array"]
-            
-            # Combine backbone and ligand
-            sample_bb_ligand_atom_array = struc.concatenate([sample_bb_atom_array, ligand_atom_array])
-            sample_bb_ligand_atom_array.atom_id = np.arange(1, len(sample_bb_ligand_atom_array) + 1)            
-            
-            # Overwrite the original sample_atom_array
-            sample_atom_array = sample_bb_ligand_atom_array
-        
+        sample_atom_array = example["atom_array"]          
+        if is_all_atom_sample:
+            sample_dict[sample_id]["sample_atom_array"] = sample_atom_array
+            sample_prot_atom_array = sample_atom_array[sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+            ligand_atom_array = sample_atom_array[sample_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L]            
         else:
-            sample_bb_atom_array = sample_atom_array[sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
-            sample_bb_atom_array = sample_bb_atom_array[sample_bb_atom_array.is_backbone_atom]
-            ligand_atom_array = sample_atom_array[sample_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L]
-            sample_bb_ligand_atom_array = struc.concatenate([sample_bb_atom_array, ligand_atom_array])
-            sample_bb_ligand_atom_array.atom_id = np.arange(1, len(sample_bb_ligand_atom_array) + 1)  
+            sample_prot_atom_array = sample_atom_array[sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+            sample_prot_atom_array = sample_prot_atom_array[sample_prot_atom_array.is_backbone_atom]
+            
+            if add_ligands_to_designed_samples:
+                ligand_atom_array = sample_dict[sample_id]["native_ligand_atom_array"]
+            else:
+                ligand_atom_array = sample_atom_array[sample_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L]
+            
+            # Combine protein and ligand atom arrays
+            sample_prot_ligand_atom_array = struc.concatenate([sample_prot_atom_array, ligand_atom_array])
+            sample_prot_ligand_atom_array.atom_id = np.arange(1, len(sample_prot_ligand_atom_array) + 1)            
             
             # Overwrite the original sample_atom_array
-            sample_atom_array = sample_bb_ligand_atom_array
+            sample_atom_array = sample_prot_ligand_atom_array
             
         # Add sample_atom_array to sample_dict
         sample_dict[sample_id]["sample_atom_array"] = sample_atom_array
         
-        # Save the sample_atom_array to a cif file
-        cif_path = Path(save_dir, f"{sample_id}.cif")
-        to_cif_file(sample_atom_array, str(cif_path))
-        sample_dict[sample_id]["sample_atom_array_path"] = cif_path
+        # Save the sample_atom_array to a cif file                
+        if save_dir is not None:
+            cif_path = Path(save_dir, f"{sample_id}.cif")
+            to_cif_file(sample_atom_array, str(cif_path))
+            sample_dict[sample_id]["sample_atom_array_path"] = cif_path
         
         # Extract chain iids and ccd codes    
-        protein_chain_iids = [str(chain_iid) for chain_iid in np.unique(sample_bb_atom_array.chain_iid)]    
+        protein_chain_iids = [str(chain_iid) for chain_iid in np.unique(sample_prot_atom_array.chain_iid)]    
         ligand_chain_iids = [str(chain_iid) for chain_iid in np.unique(ligand_atom_array.chain_iid)]
         ligand_ccd_codes = [str(ligand_atom_array[ligand_atom_array.chain_iid == chain_iid].res_name[0]) for chain_iid in ligand_chain_iids]
         ligand_chain_iids_ccd_codes = list(zip(ligand_chain_iids, ligand_ccd_codes))

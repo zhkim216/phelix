@@ -89,6 +89,7 @@ def main(cfg: DictConfig):
         data_cfg_for_designed_samples=cfg.data_cfg_for_designed_samples,
         transform_cfg_for_designed_samples=cfg.transform_cfg_for_designed_samples,
         add_ligands_to_designed_samples=cfg.get("add_ligands_to_designed_samples", False),
+        is_all_atom_sample=cfg.get("is_all_atom_sample", False),
         save_dir=processed_original_samples_dir
     )
                                                                                          
