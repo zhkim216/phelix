@@ -1968,7 +1968,7 @@ def create_sample_dict(sample_paths: list[str] = None,
     if sample_ids is None:
         sample_ids = [Path(sample_path).stem for sample_path in sample_paths]
     if pdb_ids is None:
-        pdb_ids = [Path(sample_path).stem.split("_")[0] for sample_path in sample_paths]
+        pdb_ids = [Path(sample_path).stem.rsplit("_", 1)[0] for sample_path in sample_paths]
     
     sample_dict = {}
     for i, sample_id in enumerate(sample_ids):
@@ -1980,7 +1980,7 @@ def create_sample_dict(sample_paths: list[str] = None,
 
 def prepare_samples(cfg: DictConfig = None,
                     metadata: pd.DataFrame = None,
-                    add_ligands_to_designed_samples: bool = False) -> dict:
+                    ) -> dict:
     """
     Prepare sample_dict with ligand extraction and designed structure loading.
     
@@ -2000,11 +2000,57 @@ def prepare_samples(cfg: DictConfig = None,
     # Initialize dictionary for storing sample information
     sample_dict = create_sample_dict(sample_paths=sample_paths)
     
-    if cfg.add_ligands_to_designed_samples:
-        sample_dict = _extract_ligand_atom_array_from_cached_examples(sample_dict=sample_dict,
-                                                       cached_example_path=cfg.cached_example_path,
-                                                       metadata=metadata)
+    # Load ligand atom arrays from ligand source path
+    if cfg.ligand_source_cfg.add_ligands_to_designed_samples:
+        if not cfg.ligand_source_cfg.source_is_designed:
+            data_cfg = cfg.data_cfg_for_design
+            transform_cfg = cfg.transform_cfg_for_design
+        else:
+            data_cfg = cfg.data_cfg_for_designed_samples
+            transform_cfg = cfg.transform_cfg_for_designed_samples
+            
+        sample_dict = _load_ligand_atom_arrays_from_ligand_source_samples(sample_dict=sample_dict,
+                                                                   source_is_designed=cfg.ligand_source_cfg.source_is_designed,
+                                                                   ligand_source_path=cfg.ligand_source_cfg.ligand_source_path,
+                                                                   data_cfg = data_cfg,
+                                                                   transform_cfg = transform_cfg,
+                                                                   metadata = metadata)
+        
                 
+    return sample_dict
+
+def _load_ligand_atom_arrays_from_ligand_source_samples(sample_dict: dict = None,
+                                                     source_is_designed: bool = False,
+                                                     ligand_source_path: str = None,
+                                                     data_cfg: DictConfig = None,
+                                                     transform_cfg: DictConfig = None,
+                                                     metadata: pd.DataFrame = None) -> dict:
+    """
+    Load ligand atom arrays from ligand source path.
+    """
+    sample_ids = list(sample_dict.keys())
+    for sample_id in tqdm(sample_ids, desc="Loading ligand atom arrays from ligand source path"):
+        pdb_path = Path(ligand_source_path, sample_dict[sample_id]['pdb_id'] + ".cif")
+        
+        # Load source atom array
+        if not source_is_designed:
+            example = get_sd_example(pdb_path = pdb_path,
+                                     data_cfg = data_cfg,
+                                     transform_cfg = transform_cfg,
+                                     metadata = metadata)
+            # Todo(260106): Need to take a look at whether this part works fine
+                        
+        else:
+            example = get_sd_example_from_designs_from_other_methods(
+                pdb_path = pdb_path,
+                data_cfg = data_cfg,
+                transform_cfg = transform_cfg)
+        
+        # Extract ligand atom array
+        source_atom_array = example.get("atom_array")
+        ligand_atom_array = source_atom_array[source_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L]
+        sample_dict[sample_id]["ligand_atom_array"] = ligand_atom_array
+    
     return sample_dict
 
 
@@ -2141,7 +2187,7 @@ def load_designed_samples(sample_dict: dict = None,
             sample_prot_atom_array = sample_prot_atom_array[sample_prot_atom_array.is_backbone_atom]
             
             if add_ligands_to_designed_samples:
-                ligand_atom_array = sample_dict[sample_id]["native_ligand_atom_array"]
+                ligand_atom_array = sample_dict[sample_id]["ligand_atom_array"]
             else:
                 ligand_atom_array = sample_atom_array[sample_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L]
             
@@ -2161,6 +2207,7 @@ def load_designed_samples(sample_dict: dict = None,
             to_cif_file(sample_atom_array, str(cif_path))
             sample_dict[sample_id]["sample_atom_array_path"] = cif_path
         
+        # Make pdb_chain_info
         # Extract chain iids and ccd codes    
         protein_chain_iids = [str(chain_iid) for chain_iid in np.unique(sample_prot_atom_array.chain_iid)]    
         ligand_chain_iids = [str(chain_iid) for chain_iid in np.unique(ligand_atom_array.chain_iid)]
@@ -2177,7 +2224,6 @@ def load_designed_samples(sample_dict: dict = None,
         sample_dict[sample_id]["pdb_chain_info"] = pdb_chain_info
     
     return sample_dict
-
 
 ###########################################################
 # Redesign Functions
