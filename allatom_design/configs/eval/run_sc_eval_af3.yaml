@@ -15,10 +15,10 @@ calculate_metrics_only: false
 seed: 0
 
 # Metadata
-metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
+metadata_path: null
 
 # Outputs
-exp_name: redesign_pocket_seq # experiment name; used for wandb and output directory
+exp_name: rfd3_af3eval # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Cached examples (original structures with ligands)
@@ -26,11 +26,12 @@ cached_example_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_fil
 
 ######### Data & Transform configurations #########
 add_ligands_to_designed_samples: false
+is_all_atom_sample: true
 
 # Configurations for getting designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_wocenter_lmpnnval_redesign_lmpnn020/samples/backbones
-  pdb_name_list: null  # null to use all files in pdb_dir
+  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
+  pdb_name_list: /scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/rfd3_min_max_median_len150_filtered.txt  # null to use all files in pdb_dir
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
 
