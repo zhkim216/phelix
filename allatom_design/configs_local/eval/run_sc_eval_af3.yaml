@@ -11,27 +11,30 @@ wandb:
 # Basic settings
 debug: true
 num_debug_samples: 2
-calculate_metrics_only: true
+calculate_metrics_only: false
 seed: 0
 
 # Metadata
 metadata_path: null
 
 # Outputs
-exp_name: step_2500_epoch_1 # experiment name; used for wandb and output directory
+exp_name: caliby_rfd3val_af3 # experiment name; used for wandb and output directory
 base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260106_rfd3_af3eval
 
-# Cached examples (original structures with ligands)
-cached_example_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered/cached_examples
-
 ######### Data & Transform configurations #########
-add_ligands_to_designed_samples: false
-is_all_atom_sample: true
+# Configurations for loading ligand atom arrays from ligand source path
+ligand_source_cfg:
+  ligand_source_path: /home/possu/jinho/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
+  add_ligands_to_designed_samples: true
+  source_is_designed: true
+
+# Whether the sample is all-atom sample
+is_all_atom_sample: false
 
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /home/possu/jinho/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
-  pdb_name_list: /home/possu/jinho/datasets/val_cifs/rfd3_ligand_conditional/rfd3_min_max_median_len150_filtered.txt  # null to use all files in pdb_dir
+  pdb_dir: /home/possu/jinho/allatom-design/debug/260106_rfd3_eval/samples
+  pdb_name_list: null  # null to use all files in pdb_dir
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples  
 
