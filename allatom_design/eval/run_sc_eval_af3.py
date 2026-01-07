@@ -77,7 +77,7 @@ def main(cfg: DictConfig):
     print("Phase 1: Preparing samples")
     print("="*80 + "\n")
     
-    sample_dict = prepare_samples(cfg, metadata)
+    sample_dict = prepare_samples(cfg = cfg, metadata = metadata)
     
     # Make a directory for saving original structures with ligand    
     processed_original_samples_dir = log_dir / "original_samples"
@@ -88,7 +88,7 @@ def main(cfg: DictConfig):
         sample_dict=sample_dict, 
         data_cfg_for_designed_samples=cfg.data_cfg_for_designed_samples,
         transform_cfg_for_designed_samples=cfg.transform_cfg_for_designed_samples,
-        add_ligands_to_designed_samples=cfg.get("add_ligands_to_designed_samples", False),
+        add_ligands_to_designed_samples=cfg.ligand_source_cfg.get("add_ligands_to_designed_samples", False),
         is_all_atom_sample=cfg.get("is_all_atom_sample", False),
         save_dir=processed_original_samples_dir
     )

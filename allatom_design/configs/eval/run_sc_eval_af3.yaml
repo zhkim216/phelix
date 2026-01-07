@@ -18,15 +18,21 @@ seed: 0
 metadata_path: null
 
 # Outputs
-exp_name: rfd3_af3eval # experiment name; used for wandb and output directory
+exp_name: caliby_rfd3val_af3 # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Cached examples (original structures with ligands)
 cached_example_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
 
 ######### Data & Transform configurations #########
-add_ligands_to_designed_samples: false
-is_all_atom_sample: true
+# Configurations for loading ligand atom arrays from ligand source path
+ligand_source_cfg:
+  ligand_source_path: /scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
+  add_ligands_to_designed_samples: true
+  source_is_designed: true
+
+# Whether the sample is all-atom sample
+is_all_atom_sample: false
 
 # Configurations for getting designed structures' paths
 pdb_cfg:
