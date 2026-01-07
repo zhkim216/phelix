@@ -2,27 +2,29 @@
 # Creates pos constraint DataFrame for ligand pocket or scaffold regions
 
 ########### Basic settings #########
-debug: true
+debug: false
 num_debug_samples: 5  # Number of samples to process in debug mode
 
 # Input settings
-cif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs
-pdb_list_file: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/small_molecule_val_monomer_512_cluster_rep.txt
-metadata_path: /home/possu/jinho/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_total.parquet
-load_designed_samples: true
+cif_dir: /home/possu/jinho/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
+pdb_list_file: /home/possu/jinho/datasets/val_cifs/rfd3_ligand_conditional/rfd3_min_max_median_len150_filtered.txt
+metadata_path: null
 
 # Output settings
 output_dir: /home/possu/jinho/LigandMPNN/inputs_jinho
+output_prefix: "eval_caliby_lmpnn_redesign_rf3val"
 
 # Save LigandMPNN input CSV
 save_ligand_mpnn_csv: true
 
 # Pocket constraint settings
-pocket_distance: 8.0
+pocket_distance: 3.0
 constraint_type: scaffold  # "pocket", "scaffold", or "both"
 
 ######### Data & Transform configurations #########
 # Data configuration (for parsing original CIF files)
+source_is_designed: true
+
 data_cfg_for_design:
   load_from_cache: false
   use_load_any: false
@@ -55,7 +57,7 @@ data_cfg_for_designed_samples:
     fix_arginines: false
     convert_mse_to_met: false
     hydrogen_policy: "remove"
-    extra_fields: "all"  
+    extra_fields: null  
 
 # Transform configuration for featurizing designed structures
 transform_cfg_for_designed_samples:
@@ -64,8 +66,8 @@ transform_cfg_for_designed_samples:
     b_factor_min: null
     b_factor_max: null
     min_residues_for_polymers: 0
-    remove_terminal_oxygen_protein: false
-    remove_terminal_oxygen_nucleic_acid: false
+    remove_terminal_oxygen_protein: true #! OXT atoms are nan coords because of add_missing_atoms=true
+    remove_terminal_oxygen_nucleic_acid: true #! OXT atoms are nan coords because of add_missing_atoms=true
   featurizer_cfg:
     max_tokens: null
     max_atoms: null
