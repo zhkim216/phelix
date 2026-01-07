@@ -36,7 +36,7 @@ METADATA_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_r
 # Exp names and output paths
 EXP_NAME=${MODEL_NAME}_rfd3val_af3
 PDB_DIR=${BASE_OUT_DIR}/${EXP_NAME}/samples/backbones
-PDB_NAME_LIST=/scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/rfd3_min_max_median_len150_filtered.txt
+PDB_NAME_LIST=null
 PDB_NAME_EXT=.pdb
 
 echo "Starting evaluation..."
