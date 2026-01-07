@@ -178,7 +178,7 @@ def create_pos_constraint_dict_from_pocket(
 
 
 def make_pos_constraint_df(
-    cif_dir: str,
+    cif_dir: str = None,
     pdb_list_file: str = None,
     output_path: str = None,
     pocket_distance: float = 5.0,
@@ -353,20 +353,24 @@ def main(cfg: DictConfig):
     """
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    if not cfg.load_designed_samples:
+            
+    # Load metadata and extract pdb_chain_info
+    if cfg.metadata_path is not None:
+        metadata = pd.read_parquet(cfg.metadata_path)
+        print(f"Loaded metadata with {len(metadata)} entries")
+    else:
+        metadata = None
+
+    if not cfg.source_is_designed:
         data_cfg = cfg.data_cfg_for_design
         transform_cfg = cfg.transform_cfg_for_design
+        pdb_chain_info_dict = extract_pdb_chain_info_from_metadata(metadata)
+        print(f"Extracted pdb_chain_info for {len(pdb_chain_info_dict)} PDBs")
     else:
         data_cfg = cfg.data_cfg_for_designed_samples
         transform_cfg = cfg.transform_cfg_for_designed_samples
-    
-    # Load metadata and extract pdb_chain_info
-    metadata = pd.read_parquet(cfg.metadata_path)
-    print(f"Loaded metadata with {len(metadata)} entries")
-    
-    pdb_chain_info_dict = extract_pdb_chain_info_from_metadata(metadata)
-    print(f"Extracted pdb_chain_info for {len(pdb_chain_info_dict)} PDBs")
+        pdb_chain_info_dict = {}
+        
     
     # Determine constraint types to process
     if cfg.constraint_type == "both":
@@ -381,9 +385,9 @@ def main(cfg: DictConfig):
         print(f"{'='*60}\n")
         
         if not cfg.debug:
-            output_filename = f"pos_constraint_{constraint_type}_{cfg.pocket_distance}A.csv"
+            output_filename = f"{cfg.output_prefix}_pos_constraint_{constraint_type}_{cfg.pocket_distance}A.csv"
         else:
-            output_filename = f"debug_pos_constraint_{constraint_type}_{cfg.pocket_distance}A.csv"
+            output_filename = f"debug_{cfg.output_prefix}_pos_constraint_{constraint_type}_{cfg.pocket_distance}A.csv"
         output_path = output_dir / output_filename
         
         df, ligand_mpnn_df = make_pos_constraint_df(
