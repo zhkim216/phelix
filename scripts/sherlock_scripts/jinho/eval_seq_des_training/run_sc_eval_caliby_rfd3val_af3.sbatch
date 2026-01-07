@@ -26,14 +26,14 @@ WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 
 # Input paths
-CACHED_EXAMPLE_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
 METADATA_PATH=null
-
-# Exp names and output paths
-EXP_NAME=caliby_rfd3val_af3
-PDB_DIR=${BASE_OUT_DIR}/${EXP_NAME}/samples
+PDB_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_rfd3val_af3/samples
 PDB_NAME_LIST=null
 PDB_NAME_EXT=.cif
+LIGAND_SOURCE_PATH=/scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
+
+# Exp name
+EXP_NAME=caliby_rfd3val_af3
 
 echo "Starting evaluation..."
 
@@ -49,11 +49,12 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/run_sc_eval_af3.py \
     metadata_path=${METADATA_PATH} \
     exp_name=${EXP_NAME} \
     base_out_dir=${BASE_OUT_DIR} \
-    cached_example_path=${CACHED_EXAMPLE_PATH} \
     pdb_cfg.pdb_dir=${PDB_DIR} \
     pdb_cfg.pdb_name_list=${PDB_NAME_LIST} \
     pdb_cfg.pdb_name_ext=${PDB_NAME_EXT} \
-    add_ligands_to_designed_samples=true \
+    ligand_source_cfg.ligand_source_path=${LIGAND_SOURCE_PATH} \
+    ligand_source_cfg.add_ligands_to_designed_samples=true \
+    ligand_source_cfg.source_is_designed=true \
     is_all_atom_sample=false \
     struct_pred_cfg.af3.inference_config.base.flash_attention_implementation=triton \
     struct_pred_cfg.af3.inference_config.ss.num_recycles=10 \
