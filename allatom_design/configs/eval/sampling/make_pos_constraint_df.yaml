@@ -6,8 +6,8 @@ debug: false
 num_debug_samples: 5  # Number of samples to process in debug mode
 
 # Input settings
-cif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
-pdb_list_file: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/small_molecule_val_monomer_512_cluster_rep.txt
+cif_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_samples/original_samples_with_ligand
+pdb_list_file: null
 metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
 load_designed_samples: true
 
@@ -74,5 +74,5 @@ transform_cfg_for_designed_samples:
 
 hydra:
   run:
-    dir: /home/possu/jinho/hydra_outputs
+    dir: /scratch/users/zhkim216/hydra_outputs
 
