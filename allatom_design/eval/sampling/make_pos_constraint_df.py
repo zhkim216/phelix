@@ -228,7 +228,7 @@ def make_pos_constraint_df(
         print(f"[DEBUG MODE] Processing only {len(cif_paths)} samples")
     
     print(f"Found {len(cif_paths)} CIF files to process")
-    
+
     rows = []
     failed_pdbs = []
     results_for_ligand_mpnn = []
