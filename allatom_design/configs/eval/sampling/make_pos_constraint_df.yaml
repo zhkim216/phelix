@@ -6,13 +6,13 @@ debug: false
 num_debug_samples: 5  # Number of samples to process in debug mode
 
 # Input settings
-cif_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/caliby_samples/original_samples_with_ligand
-pdb_list_file: null
-metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
-load_designed_samples: true
+cif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
+pdb_list_file: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/small_molecule_val_monomer_512_cluster_rep.txt
+metadata_path: null
 
 # Output settings
 output_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/pmpnn_lmpnn_pos_constraints
+output_prefix: "eval_caliby_lmpnn_redesign_rf3val"
 
 # Save LigandMPNN input CSV
 save_ligand_mpnn_csv: true
@@ -23,6 +23,8 @@ constraint_type: scaffold  # "pocket", "scaffold", or "both"
 
 ######### Data & Transform configurations #########
 # Data configuration (for parsing original CIF files)
+source_is_designed: true
+
 data_cfg_for_design:
   load_from_cache: false
   use_load_any: false
@@ -64,8 +66,8 @@ transform_cfg_for_designed_samples:
     b_factor_min: null
     b_factor_max: null
     min_residues_for_polymers: 0
-    remove_terminal_oxygen_protein: false
-    remove_terminal_oxygen_nucleic_acid: false
+    remove_terminal_oxygen_protein: true #! OXT atoms are nan coords because of add_missing_atoms=true
+    remove_terminal_oxygen_nucleic_acid: true #! OXT atoms are nan coords because of add_missing_atoms=true
   featurizer_cfg:
     max_tokens: null
     max_atoms: null
