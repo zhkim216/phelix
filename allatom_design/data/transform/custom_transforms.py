@@ -8,12 +8,15 @@ from pathlib import Path
 
 import biotite.structure as struc
 from biotite.structure import AtomArray
+from atomworks.constants import METAL_ELEMENTS
 import atomworks.enums as aw_enums
+from atomworks.ml.utils.token import get_token_starts
 from atomworks.ml.transforms.base import Transform
 from atomworks.ml.transforms._checks import check_contains_keys, check_is_instance, check_atom_array_annotation
 from atomworks.ml.transforms.filters import filter_to_specified_pn_units
 from atomworks.ml.utils.geometry import masked_center, random_rigid_augmentation
 from atomworks.ml.utils.token import apply_token_wise, get_af3_token_center_idxs
+
 
 import allatom_design.data.const as const
 from allatom_design.data.transform.pad import pad_dim
@@ -389,7 +392,7 @@ class AtomizeShortPolymers(Transform):
         data["atom_array"] = aa
         return data
     
-class AddChainTypeFeatrues(Transform):
+class AddChainTypeFeaturesForTrain(Transform):
     """Add chain type features to the data dict."""
     def __init__(self):
         pass
@@ -460,6 +463,50 @@ class AddChainTypeFeatrues(Transform):
         
         return data
     
+class AddChainTypeFeaturesForInference(Transform):
+    """Add chain type features to the data dict."""
+    def __init__(self):
+        pass
+
+    @override
+    def forward(self, data: dict) -> dict:      
+        
+        atom_array = data["atom_array"]
+        asym_id = data["feats"]["asym_id"]
+        
+        chain_is_protein = np.zeros_like(asym_id, dtype=bool)
+        chain_is_nuc = np.zeros_like(asym_id, dtype=bool)
+        chain_is_small_molecule = np.zeros_like(asym_id, dtype=bool)
+        chain_is_metal = np.zeros_like(asym_id, dtype=bool)
+        
+        token_starts = get_token_starts(atom_array)
+        token_level_array = atom_array[token_starts]
+        protein_chain_iids = np.unique(token_level_array.chain_iid[token_level_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L])
+        non_polymer_chain_iids = np.unique(token_level_array.chain_iid[token_level_array.chain_type == aw_enums.ChainType.NON_POLYMER])
+                
+        for protein_chain_iid in protein_chain_iids:
+            sel = token_level_array.chain_iid == protein_chain_iid
+            chain_is_protein[sel] = True
+        
+        for non_polymer_chain_iid in non_polymer_chain_iids:
+            sel = token_level_array.chain_iid == non_polymer_chain_iid
+            
+            # For single metal ions
+            if len(token_level_array[sel]) == 1 and token_level_array[sel].element in METAL_ELEMENTS:
+                chain_is_metal[sel] = True            
+            else:
+                chain_is_small_molecule[sel] = True
+            
+        # Todo: Need to implement nuc chain type features for inference. Need to consider DNA, RNA, and DNA_RNA_HYBRID as in grouped chains                        
+                                                                                        
+        data["feats"] |= {
+            "chain_is_protein": chain_is_protein,
+            "chain_is_nuc": chain_is_nuc,
+            "chain_is_small_molecule": chain_is_small_molecule,
+            "chain_is_metal": chain_is_metal,
+        }
+        
+        return data
     
 # class AddChainTypeAnnotationsToAtomArray(Transform):
 #     """Copy chain_is_x (token-wise) to atom_array annotation"""
@@ -542,7 +589,7 @@ def annotate_ligand_pockets(
         receptor_chain_identifiers = receptor_chain_iids
         ligand_chain_identifiers = ligand_chain_iids
         use_chain_iid = True  # Fixed: was use_chain_unit_iid
-        print("Using chain_iid to get receptor and ligand chains")
+        # print("Using chain_iid to get receptor and ligand chains")
     else:        
         receptor_chain_identifiers = receptor_chain_ids
         ligand_chain_identifiers = ligand_chain_ids
