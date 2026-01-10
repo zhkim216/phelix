@@ -51,7 +51,8 @@ from allatom_design.data.transform.custom_transforms import (
     ErrIfAllUnresolved,
     AddCachedResidueData,
     AtomizeShortPolymers,
-    AddChainTypeFeatrues,
+    AddChainTypeFeaturesForTrain,
+    AddChainTypeFeaturesForInference,
     AnnotateLigandPockets,
 )
 
@@ -71,13 +72,14 @@ def sd_featurizer(
     apply_random_augmentation: bool = True,
     translation_scale: float = 1.0,
     pocket_distance: float = 8.0,
+    is_inference: bool = False,
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
     """
     # Featurization that must be done before cropping
     featurization_transforms_pre_crop = [
-        AtomizeShortPolymers(),
+        # AtomizeShortPolymers(), #Todo: Fix this later
         MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={
             aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_FRAME_ATOM_NAMES,
             aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_FRAME_ATOM_NAMES,
@@ -117,7 +119,7 @@ def sd_featurizer(
     featurization_transforms_post_crop = [
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
-        AddChainTypeFeatrues(),
+        AddChainTypeFeaturesForTrain() if not is_inference else AddChainTypeFeaturesForInference(),
         AddCachedResidueData(residue_cache_dir=residue_cache_dir),
         GetAF3ReferenceMoleculeFeatures(
             save_rdkit_mols=False,
@@ -151,38 +153,11 @@ def sd_featurizer(
 
     return Compose(transforms)
 
-
-def sd_featurizer_with_load_any(
-    max_tokens: int | None = None,
-    max_atoms: int | None = None,
-    remove_keys: list[str] = [], 
-) -> Transform:
-    """
-    Build a transform pipeline that transforms a featurized structure from cif files of designed structures loaded with load_any.
-    Assume necessary preprocessing (e.g., removing clashing PN units) has already been done during the design process.
-    """
-    
-    transforms = [
-        AddGlobalTokenIdAnnotation(),            
-        EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),      
-        AddChainTypeFeatrues(), 
-        ComputeAtomToTokenMap(),                   
-        ConvertToTorch(keys=["feats"]),                  
-        FeaturizeCoordsAndMasks(),
-        PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
-        FlattenFeatsDict(),
-        RemoveKeys(keys=remove_keys),
-    ]
-    
-    return Compose(transforms)        
-
-
-def sd_featurizer_for_af3_prediction(
+def featurizer_af3_prediction(
     max_tokens: int | None = None, 
     max_atoms: int | None = None, 
     remove_keys: list[str] = [],
     remove_unresolved_tokens: bool = False,
-    pocket_distance: float = 8.0,
 ) -> Transform:
     """
     Build a transform pipeline for AF3 prediction.
@@ -195,7 +170,7 @@ def sd_featurizer_for_af3_prediction(
     ]
     return Compose(transforms)
 
-def sd_featurizer_for_designs_from_other_methods(
+def featurizer_designed_samples(
     max_tokens: int | None = None,
     max_atoms: int | None = None,
     remove_keys: list[str] = [], 
@@ -213,3 +188,27 @@ def sd_featurizer_for_designs_from_other_methods(
     ]
     
     return Compose(transforms)        
+
+# def sd_featurizer_with_load_any(
+#     max_tokens: int | None = None,
+#     max_atoms: int | None = None,
+#     remove_keys: list[str] = [], 
+# ) -> Transform:
+#     """
+#     Build a transform pipeline that transforms a featurized structure from cif files of designed structures loaded with load_any.
+#     Assume necessary preprocessing (e.g., removing clashing PN units) has already been done during the design process.
+#     """
+    
+#     transforms = [
+#         AddGlobalTokenIdAnnotation(),            
+#         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),      
+#         AddChainTypeFeatrues(), 
+#         ComputeAtomToTokenMap(),                   
+#         ConvertToTorch(keys=["feats"]),                  
+#         FeaturizeCoordsAndMasks(),
+#         PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
+#         FlattenFeatsDict(),
+#         RemoveKeys(keys=remove_keys),
+#     ]
+    
+#     return Compose(transforms)        

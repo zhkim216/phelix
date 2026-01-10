@@ -35,11 +35,10 @@ from allatom_design.data.const import AF3_ENCODING
 from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 from allatom_design.data.data import to
 from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
-from allatom_design.data.transform.preprocess import preprocess_transform, preprocess_transform_for_designs_from_other_methods
+from allatom_design.data.transform.preprocess import preprocess_transform, preprocess_transform_designed_samples
 from allatom_design.data.transform.sd_featurizer import (sd_featurizer, 
-                                                         sd_featurizer_with_load_any, 
-                                                         sd_featurizer_for_af3_prediction, 
-                                                         sd_featurizer_for_designs_from_other_methods)
+                                                         featurizer_af3_prediction, 
+                                                         featurizer_designed_samples)
 from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
@@ -100,7 +99,8 @@ def compute_sequence_recovery(
 # Model Loading
 ###########################################################
 
-def get_seq_des_model(cfg: DictConfig, device: str) -> dict[str, Any]:
+def get_seq_des_model(cfg: DictConfig = None,
+                      device: str = None) -> dict[str, Any]:
     """
     Load in a sequence design model.
     Example config:
@@ -108,10 +108,27 @@ def get_seq_des_model(cfg: DictConfig, device: str) -> dict[str, Any]:
     seq_des_cfg:
         # MPNN args
         model_name: "atom_mpnn"  # ["atom_mpnn"]
-            atom_mpnn:
-                # Atom MPNN args
-                atom_mpnn_cfg: caliby/configs/seq_des/atom_mpnn_inference.yaml
-                atom_mpnn_ckpt:
+        denoiser_train_dir: /path/to/denoiser_train_dir
+        ckpt_cfg:
+            start_step: 22500
+            end_step: 22500
+            eval_every_n_ckpts: 1
+            eval_last_ckpt: false
+            use_ema: false
+        atom_mpnn:
+            ckpt_path: null
+            sampling_cfg: /path/to/sampling_cfg.yaml
+            overrides:
+                batch_size: 1
+                num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+                omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
+                noise_labels: null
+                num_workers: ${num_workers}
+                use_potts_sampling: true
+                ligand_conditioning: true
+                potts_sampling_cfg:
+                    potts_sweeps: 500
+                    lcp_expand_edge_idx_fix: true
     """
     model_name = cfg.model_name
     seq_des_model = {"model_name": model_name, "cfg": cfg, "device": device}
@@ -426,8 +443,188 @@ def extract_ligand_from_structure(
     
     return atom_array[ligand_mask]
 
-
 def run_lc_seq_des(
+    *,
+    model: SeqDenoiser = None,
+    sample_is_designed: bool = False,
+    cif_parse_cfg: DictConfig = None,
+    preprocess_cfg: DictConfig = None,
+    featurizer_cfg: DictConfig = None,
+    cif_save_cfg: DictConfig = None,
+    sampling_cfg: DictConfig = None,
+    metadata: pd.DataFrame = None,
+    pdb_paths: list[str] = None,
+    device: str = None,
+    out_dir: str = None,
+    pos_constraint_df: pd.DataFrame | None = None,
+) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
+    """
+    Given a list of processed structure files, run sequence design on them.
+
+    If out_dir is not None, PDBs with sampled sequences will be saved to the provided directory. In this case, run_aux
+    will be a dictionary with the following keys:
+        - "out_pdb": list of output PDB paths
+        - "pred_seqs": list of predicted sequences as a string for each sample
+        
+    Args:
+        ...
+        ligand_chain_ids: Chain ID(s) of the ligand(s) to extract when protein_only=True.
+                          Can be a single chain ID string (e.g., "B") or a list of chain IDs.
+                          If None, falls back to extracting non-amino acid atoms.
+    """
+    # Set up outputs.
+    outputs = {}
+    
+    # directory for output PDBs
+    sample_out_dir = f"{out_dir}/samples"          
+    Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
+    sample_out_dir_for_af3_tc = f"{out_dir}/samples_for_af3_tc"
+    Path(sample_out_dir_for_af3_tc).mkdir(parents=True, exist_ok=True)
+
+    # Validate pos_constraint_df.
+    if pos_constraint_df is not None:
+        valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype"]
+        if not set(pos_constraint_df.columns).issubset(valid_columns):
+            # Columns in input df must be a subset of valid columns.
+            raise ValueError(
+                f"Invalid columns in pos_constraint_df. Expected subset of {valid_columns}. "
+                f"Found: {pos_constraint_df.columns}"
+            )
+        # Set index to pdb name.
+        pos_constraint_df = pos_constraint_df.set_index("pdb_key")
+
+        # Set empty string to NaN for easier parsing.
+        pos_constraint_df = pos_constraint_df.replace("", np.nan)
+        
+    # Print omitted amino acids.
+    if sampling_cfg.verbose and sampling_cfg.omit_aas is not None:
+        print(f"Omitting aatype sampling for: {sampling_cfg.omit_aas}")
+
+    # Process PDBs in parallel.
+    parallel_context = Parallel(n_jobs=sampling_cfg.num_workers) if sampling_cfg.num_workers > 1 else nullcontext()
+
+    # Begin sampling.
+    pbar = tqdm(
+        total=len(pdb_paths),
+        desc=f"Sampling {len(pdb_paths)} PDBs, {sampling_cfg.num_seqs_per_pdb} sequences per PDB...",
+    )
+    
+    with parallel_context as parallel_pool:
+        for bi in range(0, len(pdb_paths), sampling_cfg.batch_size):
+            batch_pdb_paths = pdb_paths[bi : bi + sampling_cfg.batch_size]
+            B = len(batch_pdb_paths)                            
+                                     
+            batch = get_sd_batch(pdb_paths = batch_pdb_paths, 
+                                 sample_is_designed = sample_is_designed,
+                                 cif_parse_cfg = cif_parse_cfg,
+                                 preprocess_cfg = preprocess_cfg,
+                                 featurizer_cfg = featurizer_cfg, 
+                                 device=device, 
+                                 parallel_pool=parallel_pool, 
+                                 metadata=metadata)
+                                                                                                   
+            # Initialize seq_cond and atom_cond masks.
+            batch = initialize_sampling_masks(batch)                        
+                                        
+            # Parse fixed positions.
+            batch = parse_fixed_pos_info(batch, pos_constraint_df, verbose=sampling_cfg.verbose)
+
+            # Restrict aatype sampling at certain positions.
+            sampling_inputs = OmegaConf.to_container(sampling_cfg, resolve=True)
+            sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(
+                batch, pos_constraint_df, verbose=sampling_cfg.verbose
+            )
+
+            # Run sampling.
+            id_to_atom_arrays, id_to_aux = model.sample(batch, sampling_inputs=sampling_inputs)
+
+            # Save outputs.
+            example_id_to_batch_idx = {eid: idx for idx, eid in enumerate(batch["example_id"])}
+            
+            # Get designed_cif_save_args from cif_save_cfg
+            cif_save_args = OmegaConf.to_container(cif_save_cfg, resolve=True) if cif_save_cfg else {}
+                                    
+            for sample_idx, (example_id, atom_arrays) in enumerate(id_to_atom_arrays.items()):
+                if example_id not in outputs:
+                    outputs[example_id] = defaultdict(list)
+                aux = id_to_aux[example_id]
+                                                                                
+                for ai, designed_atom_array in enumerate(atom_arrays):                            
+                    designed_sample_id = f"{example_id}_sample{ai}"
+                    outputs[example_id]["designed_sample_id"].append(designed_sample_id)
+                    outputs[example_id]["U"].append(aux[ai]["U"])
+                    
+                    # Save atom_array and sequence
+                    outputs[example_id]["designed_sample_atom_array"].append(designed_atom_array)                                        
+                    chain_info = non_rcsb.initialize_chain_info_from_atom_array(designed_atom_array)
+                    outputs[example_id]["designed_sample_seq"].append(
+                        ":".join(info["processed_entity_canonical_sequence"] for info in chain_info.values())
+                    )
+                    
+                    # Process atom arrays for af3 template conditioning
+                    designed_prot_atom_array = designed_atom_array[designed_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+                    designed_ligand_atom_array = designed_atom_array[np.isin(designed_atom_array.chain_type, list(aw_enums.ChainTypeInfo.NON_POLYMERS))]
+                    designed_prot_bb_atom_array = designed_prot_atom_array[designed_prot_atom_array.is_backbone_atom]                                                                                                                
+                    
+                    # Combine protein backbone and ligand atoms                    
+                    designed_atom_array_no_sidechain = designed_prot_bb_atom_array + designed_ligand_atom_array #! biotite use + operator to concatenate atom arrays                                       
+                    
+                    # Renumber atom_id sequentially (1-indexed)
+                    designed_atom_array_no_sidechain.atom_id = np.arange(1, len(designed_atom_array_no_sidechain) + 1)
+                    
+                    # Save samp_atom_array_no_sidechain to outputs
+                    outputs[example_id]["designed_sample_bb_ligand_atom_array"].append(designed_atom_array_no_sidechain)
+                    
+                    # atom_array with gaps for af3 template conditioning
+                    designed_prot_bb_atom_array_with_gaps = designed_prot_bb_atom_array.copy()
+                                                                                                                                                                
+                    # Insert UNK atoms for gaps in protein backbone atom array
+                    designed_atom_array_no_sidechain_with_gaps = insert_unk_residues_for_gaps_in_atom_array(designed_prot_bb_atom_array_with_gaps)
+                    designed_atom_array_no_sidechain_with_gaps = designed_atom_array_no_sidechain_with_gaps + designed_ligand_atom_array
+                    
+                    # Renumber atom_id sequentially (1-indexed)
+                    designed_atom_array_no_sidechain_with_gaps.atom_id = np.arange(1, len(designed_atom_array_no_sidechain_with_gaps) + 1)
+                    
+                    # Save designed atom array to cif file
+                    out_file = f"{sample_out_dir}/{designed_sample_id}.cif"                        
+                    out_file = to_cif_file(designed_atom_array_no_sidechain, out_file, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)                        
+                    _fix_cif_formal_charge(out_file)                        
+                    outputs[example_id]["designed_sample_path"].append(out_file)                        
+                    
+                    out_file_for_af3_tc = f"{sample_out_dir_for_af3_tc}/{designed_sample_id}.cif"
+                    out_file_for_af3_tc = to_cif_file(designed_atom_array_no_sidechain_with_gaps, out_file_for_af3_tc, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)
+                    _fix_cif_formal_charge(out_file_for_af3_tc)
+                    outputs[example_id]["designed_sample_path_for_af3_tc"].append(out_file_for_af3_tc)                                                                                                                               
+            pbar.update(B)
+    pbar.close()
+    
+    # Convert tensors to CPU values
+    for example_id, example_outputs in outputs.items():
+        for k, v in example_outputs.items():
+            if isinstance(v, list) and len(v) > 0 and isinstance(v[0], torch.Tensor):
+                example_outputs[k] = [t.detach().cpu().item() for t in v]
+            elif isinstance(v, torch.Tensor):
+                example_outputs[k] = v.detach().cpu().item()
+
+    # Save sample_metadata.pt for later use 
+    sample_metadata = {}
+    for example_id, example_outputs in outputs.items():
+        for idx in range(len(example_outputs["designed_sample_id"])):
+            designed_sample_id = example_outputs["designed_sample_id"][idx]
+            sample_metadata[designed_sample_id] = {
+                "example_id": example_id,
+                "designed_sample_id": designed_sample_id,
+                "designed_sample_path": example_outputs["designed_sample_path"][idx],
+                "designed_sample_seq": example_outputs["designed_sample_seq"][idx],
+                "U": example_outputs["U"][idx],
+            }
+    torch.save(sample_metadata, f"{sample_out_dir}/sample_metadata.pt")
+    print(f"Saved sample_metadata.pt with {len(sample_metadata)} samples to {sample_out_dir}")
+
+    return outputs
+
+
+def run_lc_seq_des_prev(
     *,
     model: SeqDenoiser = None,
     data_cfg: DictConfig = None,
@@ -541,7 +738,7 @@ def run_lc_seq_des(
             # Save outputs.
             example_id_to_batch_idx = {eid: idx for idx, eid in enumerate(batch["example_id"])}
             
-            # Get designed_cif_save_args from data_cfg_for_design
+            # Get designed_cif_save_args from data_cfg (for run_lc_seq_des_prev)
             cif_save_args = OmegaConf.to_container(data_cfg.cif_save_args, resolve=True) if data_cfg and data_cfg.get("cif_save_args") else {}
             
             # If protein_only, load original structures from cached .pt files to extract ligands                        
@@ -890,33 +1087,39 @@ def score_samples_ensemble(
 ###########################################################
 
 def get_sd_batch(
-    pdb_paths: list[str], *, 
-    data_cfg: DictConfig = None,    
-    transform_cfg: DictConfig | None = None, 
+    *, 
+    pdb_paths: list[str] = None,
+    sample_is_designed: bool = False,
+    cif_parse_cfg: DictConfig = None,
+    preprocess_cfg: DictConfig = None,
+    featurizer_cfg: DictConfig = None,
     device: str = None, 
-    parallel_pool: Parallel | None = None, 
+    parallel_pool: Parallel = None, 
     metadata: pd.DataFrame = None,
-    protein_only: bool = False,
 ) -> dict[str, Any]:
     """
     Given a list of pdb file paths, return a batch of sequence design model features.
 
-    If data_cfg is None, use default cif parser args.
+    If cif_parse_cfg is None, use default cif parser args.
     """
     if parallel_pool is None:
         # Load PDBs sequentially.
-        batch_examples = [get_sd_example(pdb_path = pdb_path, data_cfg=data_cfg,
-                                         transform_cfg = transform_cfg,  
+        batch_examples = [get_sd_example(pdb_path = pdb_path, 
+                                         cif_parse_cfg=cif_parse_cfg,
+                                         preprocess_cfg=preprocess_cfg,
+                                         featurizer_cfg=featurizer_cfg,  
                                          metadata=metadata,
-                                         protein_only=protein_only) for pdb_path in pdb_paths]                                        
-                                         
-                                         
-                                         
+                                         sample_is_designed=sample_is_designed) for pdb_path in pdb_paths]                                       
+                                                                                                                                                                     
     else:
         # Load PDBs in parallel.
-        batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path = pdb_path, data_cfg=data_cfg, transform_cfg = transform_cfg,                                         
+        batch_examples = parallel_pool(delayed(get_sd_example)(pdb_path = pdb_path, 
+                                                               cif_parse_cfg=cif_parse_cfg, 
+                                                               preprocess_cfg=preprocess_cfg,
+                                                               featurizer_cfg=featurizer_cfg,                                         
                                                                metadata=metadata,
-                                                               protein_only=protein_only) for pdb_path in pdb_paths)
+                                                               sample_is_designed=sample_is_designed) for pdb_path in pdb_paths)
+                                                               
 
     # Collate examples.
     batch = sd_collator(batch_examples)
@@ -924,17 +1127,18 @@ def get_sd_batch(
 
     return batch
 
-def get_sd_example(pdb_path: str = None,
-                   data_cfg: DictConfig = None,
-                   transform_cfg: DictConfig = None, 
+def get_sd_example(*, 
+                   pdb_path: str = None,
+                   sample_is_designed: bool = False,
+                   cif_parse_cfg: DictConfig = None,
+                   preprocess_cfg: DictConfig = None,
+                   featurizer_cfg: DictConfig = None,
                    metadata: pd.DataFrame = None,       
-                   load_from_cache: bool = False,  
-                   use_load_any: bool = False,         
-                   protein_only: bool = False,
+                   load_from_cache: bool = False,                     
                    ) -> dict[str, Any]:
     """
     Given a pdb file path, return a dictionary of sequence design model features.
-
+    Used for inference time.
     If data_cfg is None, use default cif parser args.
     
     Args:
@@ -942,12 +1146,7 @@ def get_sd_example(pdb_path: str = None,
         use_load_any: If True, use load_any to load atom_array from cif file (preserves pn_unit_iid)
         load_from_pdb: If both load_from_cache and use_load_any are False, use preprocess_pdb
     """
-    if transform_cfg is not None:
-        featurizer_cfg = transform_cfg.featurizer_cfg
-        preprocess_cfg = transform_cfg.preprocess_cfg
-    if data_cfg is not None:
-        load_from_cache = data_cfg.load_from_cache        
-        use_load_any = data_cfg.use_load_any
+
     
     # Load the cache example if it exists.
     if load_from_cache:
@@ -955,16 +1154,15 @@ def get_sd_example(pdb_path: str = None,
         # Todo: i) Single protein chain with multiple ligands at different pocket sites
         # Todo: ii) Single protein chain with multiple ligands at the same pocket site
         example = load_cached_example(pdb_path)
-        pdb_id = Path(pdb_path).stem
-    elif use_load_any:
-        # Load atom_array from cif using load_any (preserves pn_unit_iid annotation)
-        example = load_example_with_load_any(pdb_path)
-        pdb_id = (Path(pdb_path).stem).split("_")[0]
+        pdb_id = Path(pdb_path).stem    
     else:
-        # load_from_pdb: Use preprocess_pdb pipeline
-        example = preprocess_pdb(pdb_path, data_cfg = data_cfg, preprocess_transform_cfg = preprocess_cfg)
+        example = preprocess_pdb(pdb_path = pdb_path,                                  
+                                 cif_parse_cfg = cif_parse_cfg,
+                                 preprocess_cfg = preprocess_cfg,
+                                 sample_is_designed = sample_is_designed)
         pdb_id = (Path(pdb_path).stem).split("_")[0]
     
+<<<<<<< HEAD
     metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)
     
     #! Replace information in the example with the information from the metadata
@@ -998,25 +1196,30 @@ def get_sd_example(pdb_path: str = None,
         example['extra_info'] = new_metadata
         
     else:
+=======
+    if not sample_is_designed:
+        metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)        
+            
+        example['example_id'] = metadata_example["example_id"].iloc[0]                            
+>>>>>>> refs/remotes/origin/jinho/AAA
         query_pn_unit_iids = metadata_example["q_pn_unit_iid_1"].tolist() + metadata_example["q_pn_unit_iid_2"].tolist()
         example["query_pn_unit_iids"] = query_pn_unit_iids
         
         example['extra_info'] = {} #! delete all the information preexisting in the example
         row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
         example['extra_info'] = row_dict
-    
+                        
     # Featurize the example.
-    if not use_load_any:                
-        featurizer = sd_featurizer(**featurizer_cfg)                                                                
-    else:
-        featurizer = sd_featurizer_with_load_any()
+    featurizer = sd_featurizer(**featurizer_cfg, is_inference=True)                                                                                    
         
     example = featurizer(example)
 
     return example    
 
-def get_sd_example_from_af3_prediction(pdb_path: str = None,
-                   data_cfg: DictConfig = None,
+def prepare_af3_prediction(pdb_path: str = None,
+                   cif_parse_cfg: DictConfig = None,
+                   preprocess_cfg: DictConfig = None,
+                   featurizer_cfg: DictConfig = None,
                    transform_cfg: DictConfig = None,                    
                    ) -> dict[str, Any]:
     """
@@ -1027,34 +1230,34 @@ def get_sd_example_from_af3_prediction(pdb_path: str = None,
         metadata: Metadata for the pdb file
     """
     
-    preprocess_transform_cfg = transform_cfg.preprocess_cfg
-    featurizer_cfg = transform_cfg.featurizer_cfg
-            
     # load_from_pdb: Use preprocess_pdb pipeline
-    example = preprocess_pdb(pdb_path, data_cfg = data_cfg, preprocess_transform_cfg = preprocess_transform_cfg)        
+    example = preprocess_pdb(pdb_path = pdb_path, 
+                             cif_parse_cfg = cif_parse_cfg,
+                             preprocess_cfg = preprocess_cfg,                             
+                             sample_is_designed = True)        
         
     # Featurize the example.    
-    featurizer = sd_featurizer_for_af3_prediction(**featurizer_cfg)                                                                            
+    featurizer = featurizer_af3_prediction(**featurizer_cfg)                                                                            
     example = featurizer(example)
 
     return example    
 
-def get_sd_example_from_designs_from_other_methods(pdb_path: str = None,
-                                                   data_cfg: DictConfig = None,
-                                                   transform_cfg: DictConfig = None,
-                                                   ) -> dict[str, Any]:
+def prepare_designed_sample(pdb_path: str = None,
+                            cif_parse_cfg: DictConfig = None,
+                            preprocess_cfg: DictConfig = None,
+                            featurizer_cfg: DictConfig = None) -> dict[str, Any]:
+                            
     """
     Given a pdb file path from designed samples from other methods, return a dictionary of sequence design model features.
     """
-    preprocess_transform_cfg = transform_cfg.preprocess_cfg
-    featurizer_cfg = transform_cfg.featurizer_cfg
     
     # load_from_pdb: Use preprocess_pdb pipeline
-    example = preprocess_designs_from_other_methods(pdb_path = pdb_path, 
-                                                    data_cfg = data_cfg, 
-                                                    preprocess_transform_cfg = preprocess_transform_cfg)
+    example = preprocess_pdb(pdb_path = pdb_path, 
+                             cif_parse_cfg = cif_parse_cfg,
+                             preprocess_cfg = preprocess_cfg,
+                             sample_is_designed = True)
     
-    featurizer = sd_featurizer_for_designs_from_other_methods(**featurizer_cfg)
+    featurizer = featurizer_designed_samples(**featurizer_cfg)
     example = featurizer(example)
     
     return example        
@@ -1063,35 +1266,54 @@ def get_sd_example_from_designs_from_other_methods(pdb_path: str = None,
 # Preprocessing Functions
 ###########################################################
 
-def preprocess_pdb(pdb_path: str | None, data_cfg: DictConfig | None, 
-                   preprocess_transform_cfg: DictConfig | None) -> dict[str, Any]:
+def preprocess_pdb(pdb_path: str = None, 
+                   cif_parse_cfg: DictConfig = None,
+                   preprocess_cfg: DictConfig = None,
+                   sample_is_designed: bool = False) -> dict[str, Any]:
     """
     Preprocess a PDB file using the preprocessing pipeline.
     """
     # Set up arguments for parsing cifs with AtomWorks.
-    if data_cfg is None:
-        default_cif_parser_args = {
-            "add_missing_atoms": True,
-            "remove_waters": True,
-            "remove_ccds": [],
-            "fix_ligands_at_symmetry_centers": True,
-            "fix_arginines": True,
-            "convert_mse_to_met": True,
-            "hydrogen_policy": "remove",
-            "extra_fields": "all",
-        }
-        cif_parser_args = default_cif_parser_args
+    if cif_parse_cfg is None:
+        if not sample_is_designed:
+            default_cif_parse_cfg = {
+                "add_missing_atoms": True,
+                "remove_waters": True,
+                "remove_ccds": [],
+                "fix_ligands_at_symmetry_centers": True,
+                "fix_arginines": True,
+                "convert_mse_to_met": True,
+                "hydrogen_policy": "remove",
+                "extra_fields": "all",
+            }
+        else:
+            default_cif_parse_cfg = {
+                "add_missing_atoms": True,
+                "remove_waters": False,
+                "remove_ccds": [],
+                "fix_ligands_at_symmetry_centers": False,
+                "fix_arginines": False,
+                "convert_mse_to_met": False,
+                "hydrogen_policy": "remove",
+                "extra_fields": None,
+            }
+        cif_parse_cfg = default_cif_parse_cfg
     else:
-        cif_parser_args = OmegaConf.to_container(data_cfg.cif_parser_args, resolve=True)
+        cif_parse_cfg = OmegaConf.to_container(cif_parse_cfg, resolve=True)
 
     # Read in the CIF data.
     transformation_id = "1"  # Leep only the first assembly.
-    cif_parser_args["build_assembly"] = [transformation_id]
-    input_data = aw_parse(pdb_path, **cif_parser_args)
+    cif_parse_cfg["build_assembly"] = [transformation_id]
+    input_data = aw_parse(pdb_path, **cif_parse_cfg)
     atom_array_from_cif = input_data["assemblies"][transformation_id][0]  # (1, num_atoms) -> (num_atoms)
 
     # Run the preprocessing pipeline on the CIF data.
-    pipeline = preprocess_transform(**dict(preprocess_transform_cfg))
+    if not sample_is_designed:
+        # Preprocess for native samples
+        pipeline = preprocess_transform(**dict(preprocess_cfg))
+    else:
+        # Preprocess for designed samples
+        pipeline = preprocess_transform_designed_samples(**dict(preprocess_cfg))
     return pipeline(
         data={
             "example_id": Path(pdb_path).stem,
@@ -1099,45 +1321,6 @@ def preprocess_pdb(pdb_path: str | None, data_cfg: DictConfig | None,
             "chain_info": input_data["chain_info"],
         }
     )
-    
-def preprocess_designs_from_other_methods(pdb_path: str | None,
-                                          data_cfg: DictConfig | None,
-                                          preprocess_transform_cfg: DictConfig | None) -> dict[str, Any]:
-    """
-    Preprocess a PDB file using the preprocessing pipeline for designed samples from non-atomworks frameworks.
-    """
-    # Set up arguments for parsing cifs with AtomWorks.
-    if data_cfg is None:
-        default_cif_parser_args = {
-            "add_missing_atoms": True,
-            "remove_waters": True,
-            "remove_ccds": [],
-            "fix_ligands_at_symmetry_centers": True,
-            "fix_arginines": True,
-            "convert_mse_to_met": True,
-            "hydrogen_policy": "remove",
-            "extra_fields": "all",
-        }
-        cif_parser_args = default_cif_parser_args
-    else:
-        cif_parser_args = OmegaConf.to_container(data_cfg.cif_parser_args, resolve=True)
-        
-    # Read in the CIF data.
-    transformation_id = "1"  # Leep only the first assembly.
-    cif_parser_args["build_assembly"] = [transformation_id]
-    input_data = aw_parse(pdb_path, **cif_parser_args)
-    atom_array_from_cif = input_data["assemblies"][transformation_id][0]  # (1, num_atoms) -> (num_atoms)
-    
-    # Run the preprocessing pipeline on the CIF data.
-    pipeline = preprocess_transform_for_designs_from_other_methods(**dict(preprocess_transform_cfg))
-    return pipeline(
-        data={
-            "example_id": Path(pdb_path).stem,
-            "atom_array": atom_array_from_cif,
-            "chain_info": input_data["chain_info"],
-        }
-    )
-
 
 ###########################################################
 # Example Loading Utilities
@@ -1695,22 +1878,22 @@ def _validate_ensemble_alignment(batch: dict[str, TensorType["b ..."]]):
             "set ensemble_ignore_res_idx_mismatch=True."
         )
         
-def convert_stem(stem: str) -> str:
-    # {example_id}{1a28}{1}{['A_1', 'C_1']}_sample0
-    m = re.search(r"\{[^}]*\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}_sample(\d+)", stem)
-    if not m:
-        return stem  # no match
+# def convert_stem(stem: str) -> str:
+#     # {example_id}{1a28}{1}{['A_1', 'C_1']}_sample0
+#     m = re.search(r"\{[^}]*\}\{([^}]*)\}\{([^}]*)\}\{([^}]*)\}_sample(\d+)", stem)
+#     if not m:
+#         return stem  # no match
 
-    id1, id2, list_str, idx = m.groups()  # '1a28', '1', "['A_1', 'C_1']", '0'
+#     id1, id2, list_str, idx = m.groups()  # '1a28', '1', "['A_1', 'C_1']", '0'
 
-    # extract elements from the list: 'A_1', 'C_1' → ["A_1", "C_1"]
-    items = re.findall(r"'([^']+)'", list_str)
+#     # extract elements from the list: 'A_1', 'C_1' → ["A_1", "C_1"]
+#     items = re.findall(r"'([^']+)'", list_str)
 
-    # remove underscore from each element: "A_1" → "A1"
-    items = [x.replace("_", "") for x in items]
+#     # remove underscore from each element: "A_1" → "A1"
+#     items = [x.replace("_", "") for x in items]
 
-    # recombine to the desired format
-    return f"{id1}_{id2}_{'_'.join(items)}_sample{idx}"
+#     # recombine to the desired format
+#     return f"{id1}_{id2}_{'_'.join(items)}_sample{idx}"
         
     
 def _fix_cif_formal_charge(cif_path: str | Path) -> None:
@@ -1959,28 +2142,27 @@ def create_pos_constraint_dict_from_atom_array(
 # Sample Dict / Data Preparation Utilities
 ###########################################################
 
-def create_sample_dict(sample_paths: list[str] = None, 
-                       sample_ids: list[str] = None, 
-                       pdb_ids: list[str] = None) -> dict:
+def create_sample_dict(*,
+                       input_sample_paths: list[str] = None,                        
+                       input_sample_ids: list[str] = None) -> dict:
+                       
     """
     Create a dictionary of sample information.
     """
-    if sample_ids is None:
-        sample_ids = [Path(sample_path).stem for sample_path in sample_paths]
-    if pdb_ids is None:
-        pdb_ids = [Path(sample_path).stem.rsplit("_", 1)[0] for sample_path in sample_paths]
+    if input_sample_ids is None:
+        input_sample_ids = [Path(input_sample_path).stem for input_sample_path in input_sample_paths]        
     
-    sample_dict = {}
-    for i, sample_id in enumerate(sample_ids):
-        sample_dict[sample_id] = {}
-        sample_dict[sample_id]['sample_path'] = sample_paths[i]
-        sample_dict[sample_id]['pdb_id'] = pdb_ids[i]
+    sample_dict = defaultdict(dict)
+    for i, input_sample_id in enumerate(input_sample_ids):
+        sample_dict[input_sample_id] = {}
+        sample_dict[input_sample_id]['input_sample_path'] = input_sample_paths[i]
+        sample_dict[input_sample_id]['input_sample_id'] = input_sample_ids[i]
     return sample_dict
 
 
 def prepare_samples(cfg: DictConfig = None,
-                    metadata: pd.DataFrame = None,
-                    ) -> dict:
+                    metadata: pd.DataFrame = None) -> dict:
+                            
     """
     Prepare sample_dict with ligand extraction and designed structure loading.
     
@@ -1992,28 +2174,31 @@ def prepare_samples(cfg: DictConfig = None,
         sample_dict: Dictionary containing sample information.
     """
     # Get PDB files
-    sample_paths = get_pdb_files(**cfg.pdb_cfg)
+    input_sample_paths = get_pdb_files(**cfg.pdb_cfg)
     
     if cfg.debug:
-        sample_paths = sample_paths[:cfg.num_debug_samples]
+        input_sample_paths = input_sample_paths[:cfg.num_debug_samples]
         
     # Initialize dictionary for storing sample information
-    sample_dict = create_sample_dict(sample_paths=sample_paths)
+    sample_dict = create_sample_dict(input_sample_paths=input_sample_paths)
     
     # Load ligand atom arrays from ligand source path
     if cfg.ligand_source_cfg.add_ligands_to_designed_samples:
         if not cfg.ligand_source_cfg.source_is_designed:
-            data_cfg = cfg.data_cfg_for_design
-            transform_cfg = cfg.transform_cfg_for_design
+            cif_parse_cfg = cfg.cif_cfg.parse.native
+            preprocess_cfg = cfg.preprocess_cfg.native
+            featurizer_cfg = cfg.featurizer_cfg.design
         else:
-            data_cfg = cfg.data_cfg_for_designed_samples
-            transform_cfg = cfg.transform_cfg_for_designed_samples
+            cif_parse_cfg = cfg.cif_cfg.parse.designed_samples
+            preprocess_cfg = cfg.preprocess_cfg.designed_samples
+            featurizer_cfg = cfg.featurizer_cfg.prepare_designed_samples
             
         sample_dict = _load_ligand_atom_arrays_from_ligand_source_samples(sample_dict=sample_dict,
                                                                    source_is_designed=cfg.ligand_source_cfg.source_is_designed,
                                                                    ligand_source_path=cfg.ligand_source_cfg.ligand_source_path,
-                                                                   data_cfg = data_cfg,
-                                                                   transform_cfg = transform_cfg,
+                                                                   cif_parse_cfg = cif_parse_cfg,
+                                                                   preprocess_cfg = preprocess_cfg,
+                                                                   featurizer_cfg = featurizer_cfg,
                                                                    metadata = metadata)
         
                 
@@ -2022,34 +2207,39 @@ def prepare_samples(cfg: DictConfig = None,
 def _load_ligand_atom_arrays_from_ligand_source_samples(sample_dict: dict = None,
                                                      source_is_designed: bool = False,
                                                      ligand_source_path: str = None,
-                                                     data_cfg: DictConfig = None,
-                                                     transform_cfg: DictConfig = None,
+                                                     cif_parse_cfg: DictConfig = None,
+                                                     preprocess_cfg: DictConfig = None,
+                                                     featurizer_cfg: DictConfig = None,
                                                      metadata: pd.DataFrame = None) -> dict:
     """
     Load ligand atom arrays from ligand source path.
     """
     sample_ids = list(sample_dict.keys())
     for sample_id in tqdm(sample_ids, desc="Loading ligand atom arrays from ligand source path"):
-        pdb_path = Path(ligand_source_path, sample_dict[sample_id]['pdb_id'] + ".cif")
+        ligand_source_path = Path(ligand_source_path, sample_dict[sample_id]['input_sample_id'] + ".cif")
+        sample_dict[sample_id]["ligand_source_path"] = ligand_source_path
         
         # Load source atom array
         if not source_is_designed:
-            example = get_sd_example(pdb_path = pdb_path,
-                                     data_cfg = data_cfg,
-                                     transform_cfg = transform_cfg,
+            example = get_sd_example(pdb_path = ligand_source_path,
+                                     cif_parse_cfg = cif_parse_cfg,
+                                     preprocess_cfg = preprocess_cfg,
+                                     featurizer_cfg = featurizer_cfg,
                                      metadata = metadata)
             # Todo(260106): Need to take a look at whether this part works fine
                         
         else:
-            example = get_sd_example_from_designs_from_other_methods(
-                pdb_path = pdb_path,
-                data_cfg = data_cfg,
-                transform_cfg = transform_cfg)
-        
+            example = prepare_designed_sample(
+                pdb_path = ligand_source_path,
+                cif_parse_cfg = cif_parse_cfg,
+                preprocess_cfg = preprocess_cfg,
+                featurizer_cfg = featurizer_cfg)
+                        
         # Extract ligand atom array
         source_atom_array = example.get("atom_array")
-        ligand_atom_array = source_atom_array[source_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L]
-        sample_dict[sample_id]["ligand_atom_array"] = ligand_atom_array
+        sample_dict[sample_id]["source_atom_array"] = source_atom_array
+        source_ligand_atom_array = source_atom_array[source_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L]
+        sample_dict[sample_id]["source_ligand_atom_array"] = source_ligand_atom_array
     
     return sample_dict
 
@@ -2103,8 +2293,9 @@ def _extract_ligand_atom_array_from_cached_examples(sample_dict: dict = None,
 
 
 def load_designed_samples(sample_dict: dict = None,
-                          data_cfg_for_designed_samples: DictConfig = None,
-                          transform_cfg_for_designed_samples: DictConfig = None,
+                          cif_parse_cfg: DictConfig = None,
+                          preprocess_cfg: DictConfig = None,
+                          featurizer_cfg: DictConfig = None,
                           is_all_atom_sample: bool = False,
                           add_ligands_to_designed_samples: bool = False,
                           save_dir: Path = None) -> dict:
@@ -2119,9 +2310,8 @@ def load_designed_samples(sample_dict: dict = None,
     Returns:
         sample_dict: Updated dictionary with designed structures.
     """
-    if data_cfg_for_designed_samples is None:
-        data_cfg_for_designed_samples = {
-            "cif_parser_args": {
+    if cif_parse_cfg is None:
+        default_cif_parse_cfg = {
                 "add_missing_atoms": True,
                 "remove_waters": False,
                 "remove_ccds": [],
@@ -2130,12 +2320,12 @@ def load_designed_samples(sample_dict: dict = None,
                 "convert_mse_to_met": False,
                 "hydrogen_policy": "remove",
                 "extra_fields": None,
-            }
         }
         
-        data_cfg_for_designed_samples = DictConfig(data_cfg_for_designed_samples)
-    if transform_cfg_for_designed_samples is None:
-        transform_cfg_for_designed_samples = {
+        cif_parse_cfg = DictConfig(default_cif_parse_cfg)
+    
+    if preprocess_cfg is None:
+        default_preprocess_cfg = {
             "preprocess_cfg": {
                 "undesired_res_names": [],
                 "b_factor_min": None,
@@ -2144,6 +2334,11 @@ def load_designed_samples(sample_dict: dict = None,
                 "remove_terminal_oxygen_protein": True,
                 "remove_terminal_oxygen_nucleic_acid": True,
             },
+        }
+        preprocess_cfg = DictConfig(default_preprocess_cfg)
+    
+    if featurizer_cfg is None:
+        default_featurizer_cfg = {
             "featurizer_cfg": {
                 "max_tokens": None,
                 "max_atoms": None,
@@ -2151,7 +2346,7 @@ def load_designed_samples(sample_dict: dict = None,
                 "remove_unresolved_tokens": True,
             }
         }
-        transform_cfg_for_designed_samples = DictConfig(transform_cfg_for_designed_samples)
+        featurizer_cfg = DictConfig(default_featurizer_cfg)
     
     # Make save_dir if it exists
     if save_dir is not None:
@@ -2162,7 +2357,7 @@ def load_designed_samples(sample_dict: dict = None,
     for sample_id in tqdm(sample_ids, desc="Loading designed samples"):        
         
         # Initialize sample_atom_array
-        sample_dict[sample_id]["sample_atom_array"] = None        
+        sample_dict[sample_id]["input_sample_atom_array"] = None        
         
         pdb_chain_info = {
             "protein_chain_iids": [],
@@ -2171,23 +2366,23 @@ def load_designed_samples(sample_dict: dict = None,
         }
                   
         # Load a designed structure and featurize it
-        example = get_sd_example_from_designs_from_other_methods(
-            pdb_path=sample_dict[sample_id]['sample_path'], 
-            data_cfg=data_cfg_for_designed_samples, 
-            transform_cfg=transform_cfg_for_designed_samples
+        example = prepare_designed_sample(
+            pdb_path=sample_dict[sample_id]['input_sample_path'], 
+            cif_parse_cfg=cif_parse_cfg,
+            preprocess_cfg=preprocess_cfg,
+            featurizer_cfg=featurizer_cfg,
         )
         
         sample_atom_array = example["atom_array"]          
-        if is_all_atom_sample:
-            sample_dict[sample_id]["sample_atom_array"] = sample_atom_array
-            sample_prot_atom_array = sample_atom_array[sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+        
+        sample_prot_atom_array = sample_atom_array[sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+        if is_all_atom_sample:                        
             ligand_atom_array = sample_atom_array[sample_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L]            
-        else:
-            sample_prot_atom_array = sample_atom_array[sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+        else:            
             sample_prot_atom_array = sample_prot_atom_array[sample_prot_atom_array.is_backbone_atom]
-            
+                        
             if add_ligands_to_designed_samples:
-                ligand_atom_array = sample_dict[sample_id]["ligand_atom_array"]
+                ligand_atom_array = sample_dict[sample_id]["source_ligand_atom_array"]
             else:
                 ligand_atom_array = sample_atom_array[sample_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L]
             
@@ -2199,13 +2394,15 @@ def load_designed_samples(sample_dict: dict = None,
             sample_atom_array = sample_prot_ligand_atom_array
             
         # Add sample_atom_array to sample_dict
-        sample_dict[sample_id]["sample_atom_array"] = sample_atom_array
+        sample_dict[sample_id]["input_sample_atom_array"] = sample_atom_array
         
         # Save the sample_atom_array to a cif file                
         if save_dir is not None:
             cif_path = Path(save_dir, f"{sample_id}.cif")
             to_cif_file(sample_atom_array, str(cif_path))
-            sample_dict[sample_id]["sample_atom_array_path"] = cif_path
+            
+            #! Overwrite the original input_sample_path with the new cif path
+            sample_dict[sample_id]["input_sample_path"] = cif_path
         
         # Make pdb_chain_info
         # Extract chain iids and ccd codes    
@@ -2293,6 +2490,10 @@ def redesign_with_native(sample_dict: dict,
         
     Returns:
         sample_dict: Updated dictionary with redesigned sequences.
+            - designed_sample_id: list of designed sample IDs (consistent with lcaliby output)
+            - designed_sample_atom_array: list of designed atom arrays
+            - designed_sample_path: list of paths to saved CIF files
+            - designed_sample_path_for_af3_tc: list of paths for AF3 template-conditioned (same as designed_sample_path)
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     pocket_distance = cfg.redesign_cfg.pocket_distance
@@ -2312,29 +2513,48 @@ def redesign_with_native(sample_dict: dict,
             ligand_chain_iids=ligand_chain_iids
         )
         
-        sample_dict[sample_id]["redesigned_sample_atom_array"] = redesigned_sample_atom_array
-        sample_dict[sample_id]["num_redesigned_pocket_residues"] = num_redesigned_pocket_residues   
-        print(f"Redesigned {num_redesigned_pocket_residues} pocket residues for {sample_id} with native pocket sequence, within {pocket_distance} Å of the ligand")
-        
-        cif_path = Path(out_dir, f"{sample_id}_rwn_{pocket_distance}.cif")
+        # Create designed_sample_id (consistent with lcaliby output format)
+        designed_sample_id = f"{sample_id}_rwn_{pocket_distance}"
+        cif_path = Path(out_dir, f"{designed_sample_id}.cif")
         to_cif_file(redesigned_sample_atom_array, str(cif_path))
+        
+        # Store as lists (consistent with lcaliby output structure)
+        sample_dict[sample_id]["designed_sample_id"] = [designed_sample_id]
+        sample_dict[sample_id]["designed_sample_atom_array"] = [redesigned_sample_atom_array]
+        sample_dict[sample_id]["designed_sample_path"] = [str(cif_path)]
+        sample_dict[sample_id]["designed_sample_path_for_af3_tc"] = [str(cif_path)]
+        sample_dict[sample_id]["num_redesigned_pocket_residues"] = num_redesigned_pocket_residues   
+        
+        print(f"Redesigned {num_redesigned_pocket_residues} pocket residues for {sample_id} with native pocket sequence, within {pocket_distance} Å of the ligand")
     
     return sample_dict
 
 
-def redesign_with_lcaliby(sample_dict: dict,
-                          cfg: DictConfig,
-                          metadata: pd.DataFrame,
-                          log_dir: Path) -> list[tuple[dict, Path, dict]]:
+def redesign_with_lcaliby(seed: int = 0,
+                        sample_is_designed: bool = False,
+                        sample_dict: dict = None,
+                        seq_des_cfg: DictConfig = None,
+                        cif_parse_cfg: DictConfig = None,
+                        preprocess_cfg: DictConfig = None,
+                        featurizer_cfg: DictConfig = None,
+                        cif_save_cfg: DictConfig = None,                          
+                        metadata: pd.DataFrame = None,
+                        log_dir: Path = None,
+                        pos_constraint_df: pd.DataFrame = None) -> list[tuple[dict, Path, dict]]:
     """
     Redesign pocket sequence using lcaliby model for each checkpoint.
     
     Args:
+        seed: Random seed.
         sample_dict: Dictionary of sample information.
-        cfg: Configuration object.
+        seq_des_cfg: Sequence design configuration.
+        cif_parse_cfg: CIF parser configuration for loading samples.
+        preprocess_cfg: Preprocessing configuration.
+        featurizer_cfg: Featurizer configuration.
+        cif_save_cfg: CIF save configuration.
         metadata: Metadata DataFrame.
         log_dir: Log directory.
-        
+        pos_constraint_df: Positional constraints DataFrame.
     Returns:
         List of tuples: (sample_dict, output_dir, ckpt_info) for each checkpoint.
     """
@@ -2342,43 +2562,18 @@ def redesign_with_lcaliby(sample_dict: dict,
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     sd_ckpts, pattern = get_training_checkpoints(
-        cfg.denoiser_train_dir, "seq_denoiser",
-        cfg.eval_every_n_ckpts, cfg.start_step, cfg.end_step, cfg.use_ema,
-        cfg.get("eval_last_ckpt", True)
+        seq_des_cfg.denoiser_train_dir, "seq_denoiser",
+        seq_des_cfg.ckpt_cfg.eval_every_n_ckpts, 
+        seq_des_cfg.ckpt_cfg.start_step, 
+        seq_des_cfg.ckpt_cfg.end_step,
+        seq_des_cfg.ckpt_cfg.use_ema,
+        seq_des_cfg.ckpt_cfg.eval_last_ckpt
     )
     
-    sample_paths = [sample_dict[sid]['sample_path'] for sid in sample_dict.keys()]
-    sample_with_ligand_paths = [sample_dict[sid]['sample_atom_array_with_ligand_path'] for sid in sample_dict.keys()]
-        
-    # Create pos_constraint_df for the scaffold part
-    rows = []
-    for sample_id in sample_dict.keys():
-        sample_id_with_ligand = sample_id + "_with_ligand"
-        sample_atom_array_with_ligand = sample_dict[sample_id]["sample_atom_array_with_ligand"]
-        sample_atom_array_with_ligand = annotate_ligand_pockets(
-            atom_array=sample_atom_array_with_ligand, 
-            pocket_distance=cfg.redesign_cfg.pocket_distance,                                                                 
-            annotation_name="is_ligand_pocket"
-        )
-        
-        residue_wise_pocket_mask = apply_and_spread_residue_wise(
-            sample_atom_array_with_ligand, 
-            sample_atom_array_with_ligand.get_annotation("is_ligand_pocket"), 
-            function=np.any
-        )        
-        residue_wise_scaffold_mask = (~residue_wise_pocket_mask) & (sample_atom_array_with_ligand.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
-        
-        scaffold_atom_array = sample_atom_array_with_ligand[residue_wise_scaffold_mask]
-        pos_constraint_dict = create_pos_constraint_dict_from_atom_array(
-            pdb_key=sample_id_with_ligand,
-            atom_array=scaffold_atom_array
-        )
-        rows.append(pos_constraint_dict)
-    
-    scaffold_pos_constraint_df = pd.DataFrame(rows)
-    
+    input_sample_paths = [sample_dict[sid]['input_sample_path'] for sid in sample_dict.keys()]
+            
     results = []    
-    for sd_ckpt in tqdm(sd_ckpts, desc="Redesigning pocket sequence using lcaliby"):
+    for sd_ckpt in tqdm(sd_ckpts, desc="Redesigning sequence using lcaliby"):
         match = pattern.search(Path(sd_ckpt).name)
         global_step, epoch = int(match.group(1)), int(match.group(2))
         
@@ -2387,33 +2582,36 @@ def redesign_with_lcaliby(sample_dict: dict,
         
         ckpt_info = {"global_step": global_step, "epoch": epoch, "ckpt_path": sd_ckpt}
         
-        L.seed_everything(cfg.seed)
+        L.seed_everything(seed)
         
-        cfg.seq_des_cfg.atom_mpnn.ckpt_path = sd_ckpt
-        seq_des_model = get_seq_des_model(cfg.seq_des_cfg, device=device)
+        seq_des_cfg.atom_mpnn.ckpt_path = sd_ckpt
+        seq_des_model = get_seq_des_model(cfg = seq_des_cfg, device=device)
         
         outputs = run_lc_seq_des(
             model=seq_des_model["model"], 
-            data_cfg=cfg.data_cfg_for_design,
-            transform_cfg=cfg.transform_cfg_for_design,                                     
+            sample_is_designed = sample_is_designed,
+            cif_parse_cfg=cif_parse_cfg,
+            preprocess_cfg=preprocess_cfg,
+            featurizer_cfg=featurizer_cfg,
+            cif_save_cfg=cif_save_cfg,                                     
             sampling_cfg=seq_des_model["sampling_cfg"],                          
             metadata=metadata,
-            pdb_paths=sample_with_ligand_paths, 
+            pdb_paths=input_sample_paths, 
             device=device,             
             out_dir=str(log_dir_per_ckpt),
-            protein_only=cfg.get("protein_only", False),
-            fix_pocket_seq=cfg.get("fix_pocket_seq", False),
-            pocket_distance=None,
-            redesign_pocket_seq=True,
-            pos_constraint_df=scaffold_pos_constraint_df,
+            pos_constraint_df=pos_constraint_df,
         )
         
         sample_dict_per_ckpt = copy.deepcopy(sample_dict)
-        
-        example_id_to_sample_id = {example_id: sample_id for example_id, sample_id in zip(outputs["example_id"], sample_dict_per_ckpt.keys())}
-        for idx, example_id in enumerate(outputs["example_id"]):                
-            sample_dict_per_ckpt[example_id_to_sample_id[example_id]]["redesigned_sample_atom_array"] = outputs["bb_ligand_atom_array"][idx]
-        
+                
+        for example_id, output in outputs.items():  
+            sample_dict_per_ckpt[example_id]['designed_sample_id'] = output["designed_sample_id"]
+            sample_dict_per_ckpt[example_id]['designed_sample_atom_array'] = output["designed_sample_atom_array"]
+            sample_dict_per_ckpt[example_id]['designed_sample_bb_ligand_atom_array'] = output["designed_sample_bb_ligand_atom_array"]
+            sample_dict_per_ckpt[example_id]['designed_sample_seq'] = output["designed_sample_seq"]
+            sample_dict_per_ckpt[example_id]['designed_sample_path'] = output["designed_sample_path"]
+            sample_dict_per_ckpt[example_id]['designed_sample_path_for_af3_tc'] = output["designed_sample_path_for_af3_tc"]
+                    
         results.append((sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info))
     
     return results
