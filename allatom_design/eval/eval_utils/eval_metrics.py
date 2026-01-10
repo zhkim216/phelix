@@ -30,7 +30,7 @@ import allatom_design.data.residue_constants as rc
 from allatom_design.data import data
 from allatom_design.data.data import load_feats_from_pdb
 from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
-from allatom_design.eval.eval_utils.seq_des_utils import get_sd_example, get_sd_example_from_af3_prediction
+from allatom_design.eval.eval_utils.seq_des_utils import get_sd_example, prepare_af3_prediction
 from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets
 
 # Atomworks imports
@@ -80,7 +80,7 @@ def compute_self_consistency_metrics_atomworks(sample_path: str = None,
     pred_sample_paths = natsorted(pred_sample_paths)
     per_pred_metrics = {}
     for pred_sample_path in pred_sample_paths:
-        pred_example = get_sd_example_from_af3_prediction(pdb_path=pred_sample_path,
+        pred_example = prepare_af3_prediction(pdb_path=pred_sample_path,
                                                         data_cfg=data_cfg_for_af3_prediction,
                                                         transform_cfg=transform_cfg_for_af3_prediction,
                                                         metadata=metadata)
@@ -1948,7 +1948,7 @@ def compute_template_conditioned_docking_metrics(
     
     per_sample_metrics = {}
     for pred_path in pred_sample_paths:        
-        pred_example = get_sd_example_from_af3_prediction(pdb_path=pred_path, 
+        pred_example = prepare_af3_prediction(pdb_path=pred_path, 
                                                           data_cfg=data_cfg_for_af3_prediction,
                                                           transform_cfg=transform_cfg_for_af3_prediction,
                                                           metadata=metadata)        
