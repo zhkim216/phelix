@@ -69,7 +69,7 @@ def preprocess_transform(
 
     return Compose(preprocessing_transforms)
 
-def preprocess_transform_for_designs_from_other_methods(
+def preprocess_transform_designed_samples(
     # Preprocessing
     undesired_res_names: list[str] = [], #! fixed
     b_factor_min: float | None = None,
