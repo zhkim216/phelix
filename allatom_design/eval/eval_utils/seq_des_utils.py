@@ -1162,46 +1162,10 @@ def get_sd_example(*,
                                  sample_is_designed = sample_is_designed)
         pdb_id = (Path(pdb_path).stem).split("_")[0]
     
-<<<<<<< HEAD
-    metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)
-    
-    #! Replace information in the example with the information from the metadata
-    #! Since when caching, it doesn't really care about the metadata as it's just caching the whole structure        
-        
-    example['example_id'] = metadata_example["example_id"].iloc[0]
-    if protein_only:
-        print(f"Protein only mode: {pdb_id}")
-        protein_chain_cols = ["q_pn_unit_is_protein_1", "q_pn_unit_is_protein_2"]
-        suffix = ""
-        for col in protein_chain_cols:
-            if metadata_example[col].iloc[0]:
-                suffix = col.split("_")[-1]
-                break
-
-        other_suffixes = ["_1", "_2"]
-        other_suffixes.remove(f"_{suffix}")
-        new_metadata = {}
-        for col in metadata_example.columns:            
-            if any(col.endswith(s) for s in other_suffixes):
-                continue
-                        
-            if col.endswith(f"_{suffix}"):
-                new_col = col[:-len(f"_{suffix}")]
-            else:
-                new_col = col
-            
-            new_metadata[new_col] = metadata_example[col].iloc[0]
-        
-        example["query_pn_unit_iids"] = new_metadata["q_pn_unit_iid"]
-        example['extra_info'] = new_metadata
-        
-    else:
-=======
     if not sample_is_designed:
         metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)        
             
         example['example_id'] = metadata_example["example_id"].iloc[0]                            
->>>>>>> refs/remotes/origin/jinho/AAA
         query_pn_unit_iids = metadata_example["q_pn_unit_iid_1"].tolist() + metadata_example["q_pn_unit_iid_2"].tolist()
         example["query_pn_unit_iids"] = query_pn_unit_iids
         
