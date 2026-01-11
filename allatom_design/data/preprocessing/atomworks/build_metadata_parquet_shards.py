@@ -65,7 +65,7 @@ def _process_cif_worker(cif_path: str):
         signal.signal(signal.SIGALRM, old_handler)
 
 
-@hydra.main(config_path="../../../configs_local/data/preprocessing/atomworks", config_name="build_metadata_parquet_shards", version_base="1.3.2")
+@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="build_metadata_parquet_shards", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Process a set of mmCIFs using AtomWorks.
@@ -228,7 +228,8 @@ def get_cif_paths(mmcif_dir: str, max_file_size: int | None = None) -> list[str]
     Returns:
         List of CIF file paths after filtering
     """
-    cif_paths = glob.glob(f"{mmcif_dir}/**/*.cif", recursive=True)
+    cif_paths = glob.glob(f"{mmcif_dir}/**/*.cif.gz", recursive=True)
+    # cif_paths = glob.glob(f"{mmcif_dir}/*.cif", recursive=True)
     
     # Filter by file size only
     if max_file_size is not None:
