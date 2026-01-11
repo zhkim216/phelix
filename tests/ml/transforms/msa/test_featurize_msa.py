@@ -726,7 +726,7 @@ def test_msa_featurize_like_af3_full_pipeline(pdb_id):
 
 
 # Define a simple TokenEncoding class for testing
-class TestTokenEncoding:
+class DummyTokenEncoding:
     def __init__(self, n_tokens):
         self.n_tokens = n_tokens
 
@@ -737,7 +737,7 @@ TEST_FULL_MSA_PROFILE_AND_INSERTION_MEAN = [
         "encoded_msa": torch.tensor([[0, 1, 2], [1, 2, 0]]),
         "msa_raw_ins": torch.tensor([[0, 1, 0], [2, 0, 1]]),
         "msa_is_padded_mask": torch.tensor([[False, False, False], [False, False, False]]),
-        "encoding": TestTokenEncoding(3),
+        "encoding": DummyTokenEncoding(3),
         "expected_profile": torch.tensor([[0.5, 0.5, 0.0], [0.0, 0.5, 0.5], [0.5, 0.0, 0.5]]),
         "expected_ins_mean": torch.tensor([1.0, 0.5, 0.5]),
     },
@@ -753,7 +753,7 @@ TEST_FULL_MSA_PROFILE_AND_INSERTION_MEAN = [
                 [True, True, True, True],
             ]
         ),
-        "encoding": TestTokenEncoding(3),
+        "encoding": DummyTokenEncoding(3),
         "expected_profile": torch.tensor([[1 / 3, 1 / 3, 1 / 3], [0.0, 0.5, 0.5], [0.5, 0.0, 0.5], [0.0, 1.0, 0.0]]),
         "expected_ins_mean": torch.tensor([1.0, 0.5, 1.0, 1.0]),
     },

@@ -4,6 +4,7 @@ import math
 from collections.abc import Iterator, Sequence
 from operator import add
 
+import numpy as np
 import pandas as pd
 import torch
 from toolz import accumulate
@@ -445,9 +446,15 @@ class LazyWeightedRandomSampler(WeightedRandomSampler):
         generator: torch.Generator | None = None,
         prefetch_buffer_size: int = 1,
     ) -> None:
-        assert replacement, "LazyWeightedRandomSampler only supports replacement=True".capitalize
+        assert replacement, "LazyWeightedRandomSampler only supports replacement=True"
         super().__init__(weights, num_samples, replacement, generator)
         self.prefetch_buffer_size = prefetch_buffer_size
+
+        # We cannot use torch.multinomial with > 2^24 categories (and MGnify validation has more than this)
+        # precompute sampling probabilities
+        weights_np = self.weights.cpu().numpy() if self.weights.is_cuda else self.weights.numpy()
+        self.cumsum = np.cumsum(weights_np, dtype=np.float64)
+        self.cumsum = self.cumsum / self.cumsum[-1]  # Normalize to [0, 1]
 
     def __iter__(self):
         prefetch_buffer = []
@@ -455,9 +462,9 @@ class LazyWeightedRandomSampler(WeightedRandomSampler):
         for _ in range(self.num_samples):
             if not prefetch_buffer:
                 # Pull another buffer of length `prefetch_buffer_size`
-                prefetch_buffer = torch.multinomial(
-                    self.weights, self.prefetch_buffer_size, self.replacement, generator=self.generator
-                ).tolist()
+                # Use inverse transform sampling with precomputed CDF
+                random_values = torch.rand(self.prefetch_buffer_size, generator=self.generator).cpu().numpy()
+                prefetch_buffer = np.searchsorted(self.cumsum, random_values).tolist()
 
             yield prefetch_buffer.pop(0)
 

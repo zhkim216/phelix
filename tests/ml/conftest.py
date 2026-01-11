@@ -8,14 +8,14 @@ import pytest
 from dotenv import load_dotenv
 
 from atomworks.constants import AF3_EXCLUDED_LIGANDS_REGEX, PDB_MIRROR_PATH, _load_env_var
+from atomworks.io.parser import STANDARD_PARSER_ARGS
 from atomworks.io.tools.inference import SequenceComponent
-from atomworks.ml.datasets.datasets import ConcatDatasetWithID, PandasDataset
+from atomworks.ml.datasets import ConcatDatasetWithID, PandasDataset
 from atomworks.ml.datasets.loaders import (
     create_base_loader,
     create_loader_with_interfaces_and_pn_units_to_score,
     create_loader_with_query_pn_units,
 )
-from atomworks.ml.datasets.parsers.base import DEFAULT_PARSER_ARGS
 from atomworks.ml.pipelines.af3 import build_af3_transform_pipeline
 from atomworks.ml.pipelines.rf2aa import build_rf2aa_transform_pipeline
 from atomworks.ml.preprocessing.constants import TRAINING_SUPPORTED_CHAIN_TYPES_INTS
@@ -392,7 +392,7 @@ def atom_array():
     Load a CIF file from somewhere local and return the atom_array
     """
     parser_args = {
-        **DEFAULT_PARSER_ARGS,
+        **STANDARD_PARSER_ARGS,
         **{
             "fix_arginines": False,
             "add_missing_atoms": False,  # this is crucial otherwise the annotations are deleted

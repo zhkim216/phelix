@@ -1,18 +1,10 @@
-# set -e  # Exit on error
+set -e  # Exit on error
 
 echo "Running from $PWD"
 
-export CCD_MIRROR_PATH=/projects/ml/frozen_pdb_copies/2024_12_11_ccd
-export PDB_MIRROR_PATH=/projects/ml/frozen_pdb_copies/2024_12_01_pdb
-export TEMPLATE_LOOKUP_PATH=/projects/ml/TrRosetta/PDB-2021AUG02/list_v02.csv
-export TEMPLATE_BASE_DIR=/projects/ml/TrRosetta/PDB-2021AUG02/torch/hhr/
-export MSA_CACHE_PATH=/projects/ml/RF2_allatom/cache/msa
-export AF2FB_PATH=/squash/af2_distillation_facebook
-export X3DNA=/projects/ml/prot_dna/x3dna-v2.4
-export RESIDUE_CACHE_DIR=/net/tukwila/ncorley/datahub/egret/egret_embeddings_ccd
 export OPENBLAS_NUM_THREADS=1
 export OMP_NUM_THREADS=1
-apptainer_path=/projects/ml/modelhub/apptainer/modelhub_2025-07-07.sif
+apptainer_path=/net/software/containers/users/ncorley/atomworks/atomworks_dev.sif
 tar -xf /net/lab/pub/atomworks/test_pack_latest.tar.gz -C tests/data > /dev/null 2>&1
 
 # Get max processes from environment variable, default to 24 if not set

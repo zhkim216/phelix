@@ -11,6 +11,7 @@ from atomworks.ml.transforms.atom_array import (
     AddGlobalTokenIdAnnotation,
     AddMoleculeSymmetricIdAnnotation,
     AddProteinTerminiAnnotation,
+    AddWithinChainInstanceResIdx,
     AddWithinPolyResIdxAnnotation,
     ComputeAtomToTokenMap,
     RenumberNonPolymerResidueIdx,
@@ -71,6 +72,7 @@ def test_add_within_poly_res_idx_annotation(pdb_id: str):
 
     pipe = Compose(
         [
+            AddWithinChainInstanceResIdx(),
             AddWithinPolyResIdxAnnotation(),
             LoadPolymerMSAs(protein_msa_dirs=PROTEIN_MSA_DIRS, rna_msa_dirs=RNA_MSA_DIRS),
         ],

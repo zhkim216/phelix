@@ -8,8 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class X3DNAFiber(Executable):
-    """
-    Executable wrapper for the x3dna-fiber program from the 3DNA package.
+    """Executable wrapper for the x3dna-fiber program from the 3DNA package.
 
     This class manages the x3dna-fiber executable, which is used to generate B-form conformation
     DNA fibers (i.e. linear duplexes).
@@ -47,8 +46,7 @@ class X3DNAFiber(Executable):
 
     @classmethod
     def _setup(cls, bin_path: PathLike) -> None:
-        """
-        Sets up the X3DNA environment by setting the X3DNA environment variable.
+        """Sets up the X3DNA environment by setting the X3DNA environment variable.
 
         The X3DNA environment variable must point to the root directory of the X3DNA installation,
         which is typically two levels up from the executable location.

@@ -38,10 +38,17 @@ from atomworks.io.transforms.categories import (
     load_monomer_sequence_information_from_category,
 )
 from atomworks.io.utils.assembly import build_assemblies_from_asym_unit
+from atomworks.io.utils.atom_array_plus import AtomArrayPlus, AtomArrayPlusStack, stack_any
 from atomworks.io.utils.bonds import get_struct_conn_dict_from_atom_array
 from atomworks.io.utils.ccd import check_ccd_codes_are_available
 from atomworks.io.utils.chain import create_chain_id_generator
-from atomworks.io.utils.io_utils import get_structure, infer_pdb_file_type, read_any
+from atomworks.io.utils.io_utils import (
+    apply_sharding_pattern,
+    build_sharding_pattern,
+    get_structure,
+    infer_pdb_file_type,
+    read_any,
+)
 from atomworks.io.utils.non_rcsb import (
     get_identity_assembly_gen_category,
     get_identity_op_expr_category,
@@ -52,20 +59,31 @@ logger = logging.getLogger("atomworks.io")
 
 __all__ = ["parse"]
 
-DEFAULT_PARSE_KWARGS = {
+STANDARD_PARSER_ARGS = {
     "add_missing_atoms": True,
     "add_id_and_entity_annotations": True,
-    "add_bond_types_from_struct_conn": ["covale"],
-    "remove_ccds": CRYSTALLIZATION_AIDS,
+    "add_bond_types_from_struct_conn": ("covale",),
+    "remove_ccds": tuple(CRYSTALLIZATION_AIDS),
     "remove_waters": True,
     "fix_ligands_at_symmetry_centers": True,
-    "hydrogen_policy": "keep",
     "fix_arginines": True,
     "fix_formal_charges": True,
-    "convert_mse_to_met": True,
-    "build_assembly": "all",
+    "fix_bond_types": True,
+    "convert_mse_to_met": True,  # Changed from False to True vs. atomworks.io.parser.parse default
+    "hydrogen_policy": "keep",
+    "model": None,  # all models
 }
-"""Some fairly standard parsing arguments that can be imported for convenience."""
+"""Common cif parser arguments for `atomworks.io.parse` for many biomolecular use cases.
+
+Similar to the defaults below but additionally converts selenomethionine (MSE) residues to methionine (MET) residues,
+which is desirable for many practical applications but would not be appropriate as a universal default.
+
+This dictionary exists to provide a convenient import for the standard parameters.
+"""
+
+# Cache sharding configuration (internal, not exposed to parse() to avoid complexity)
+_CACHE_SHARDING_DEPTH = 2  # Use 2-level sharding by default (e.g., ab/cd/abcdef123456/)
+_CACHE_SHARDING_CHARS_PER_DIR = 2  # Number of characters per directory level
 
 
 def _get_atomworks_version() -> str:
@@ -78,10 +96,36 @@ def _get_atomworks_version() -> str:
         return "unknown"
 
 
+def _parse_args_to_hash(parse_arguments: dict[str, Any], truncate: int = 8) -> str:
+    """Compute hash from parse arguments with sorted keys."""
+    args_string = ",".join(str(parse_arguments[k]) for k in sorted(parse_arguments.keys()))
+    return string_to_md5_hash(args_string, truncate=truncate)
+
+
+def _build_cache_file_path(
+    cache_dir: Path,
+    args_hash: str,
+    filename: os.PathLike,
+    assembly_info: str,
+) -> Path:
+    """Build sharded cache file path for parsed structure."""
+    structure_id = Path(filename).stem
+
+    # Pad structure ID to minimum required length for sharding
+    min_length = _CACHE_SHARDING_DEPTH * _CACHE_SHARDING_CHARS_PER_DIR
+    structure_id_padded = structure_id.ljust(min_length, "_")
+
+    # Build sharded path
+    sharding_pattern = build_sharding_pattern(depth=_CACHE_SHARDING_DEPTH, chars_per_dir=_CACHE_SHARDING_CHARS_PER_DIR)
+    sharded_path = apply_sharding_pattern(structure_id_padded, sharding_pattern)
+
+    return cache_dir / args_hash / sharded_path / f"{structure_id}_assembly_{assembly_info}.pkl.gz"
+
+
 def parse(
     filename: os.PathLike | io.StringIO | io.BytesIO,
     *,
-    file_type: Literal["cif", "pdb"] | None = None,
+    file_type: Literal["cif", "pdb", "mmjson"] | None = None,
     ccd_mirror_path: os.PathLike | None = CCD_MIRROR_PATH,
     cache_dir: os.PathLike | None = None,
     save_to_cache: bool = False,
@@ -119,7 +163,7 @@ def parse(
             atomic-level structure (e.g. .cif, .bcif, .cif.gz, .pdb), although .cif files are strongly recommended.
 
         **Wrapper arguments:**
-        file_type (Literal["cif", "pdb"] | None, optional): The file type of the structure file.
+        file_type (Literal["cif", "pdb", "mmjson"] | None, optional): The file type of the structure file.
             If not provided, the file type will be inferred automatically.
         load_from_cache (bool, optional): Whether to load pre-compiled results from cache. Defaults to False.
         cache_dir (PathLike, optional): Directory path to save pre-compiled results. Defaults to None.
@@ -181,12 +225,11 @@ def parse(
                 Should typically not be used directly.
 
     """
-    # CCD mirror
     if ccd_mirror_path and not os.path.exists(ccd_mirror_path):
-        logger.warning(
-            f"Local mirror of the Chemical Component Dictionary does not exist: {ccd_mirror_path}. Falling back to Biotite's built-in CCD."
+        raise FileNotFoundError(
+            f"Local mirror of the Chemical Component Dictionary does not exist: {ccd_mirror_path}. "
+            "To use Biotite's built-in CCD, set `ccd_mirror_path` to None."
         )
-        ccd_mirror_path = None
 
     # Set default value for remove_ccds if None
     if remove_ccds is None:
@@ -231,15 +274,13 @@ def parse(
             "convert_mse_to_met": convert_mse_to_met,
             "hydrogen_policy": hydrogen_policy,
         }
-        # Compose args_string from parse_arguments values (in order)
-        args_string = ",".join(str(parse_arguments[k]) for k in parse_arguments)
-        args_hash = string_to_md5_hash(args_string, truncate=8)
+        args_hash = _parse_args_to_hash(parse_arguments)
 
         # ... generate assembly info
         assembly_info = ",".join(build_assembly) if isinstance(build_assembly, list | tuple) else build_assembly
 
-        # ... construct the full cache file path
-        cache_file_path = cache_dir / args_hash / f"{Path(filename).stem}_assembly_{assembly_info}.pkl.gz"
+        # ... construct the full cache file path with sharding
+        cache_file_path = _build_cache_file_path(cache_dir, args_hash, filename, assembly_info)
 
         # If we are loading from cache, try to load the result from the cache
         if load_from_cache:
@@ -267,8 +308,7 @@ def parse(
                     result["assemblies"] = assemblies
                     return result
             except Exception as e:
-                # Log an error, and continue to parse from CIF
-                logger.error(f"Error loading from cache: {e}")
+                raise RuntimeError(f"Error loading from cache: {e}, tried path: {cache_file_path}") from e
 
     if file_type == "pdb":
         result = _parse_from_pdb(
@@ -289,9 +329,10 @@ def parse(
             build_assembly=build_assembly,
             extra_fields=extra_fields,
         )
-    elif file_type in ("cif", "bcif"):
+    elif file_type in ("cif", "bcif", "mmjson"):
         result = _parse_from_cif(
             filename=filename,
+            file_type=file_type,
             ccd_mirror_path=ccd_mirror_path,
             add_missing_atoms=add_missing_atoms,
             add_id_and_entity_annotations=add_id_and_entity_annotations,
@@ -314,9 +355,9 @@ def parse(
 
     if not is_buffer and save_to_cache and cache_dir and (not cache_file_path.exists()):
         # We want our cache to include:
-        #   (1) All keys in `result` excep the assemblies and
-        #   (2) The information needed to rebuild the assembly(s), which is stored in `result["extra_info"]`
-        #   (3) The parse_arguments and atomworks.io version
+        #   (1) All keys in `result` except the assemblies; and,
+        #   (2) The information needed to rebuild the assembly(s), which is stored in `result["extra_info"]`; and,
+        #   (3) The parse_arguments and atomworks version
 
         # Add parse_arguments and version to metadata before saving
         result.setdefault("metadata", {}).update(
@@ -334,7 +375,7 @@ def parse(
 
 
 def parse_atom_array(
-    atom_array_or_stack: AtomArray | AtomArrayStack,
+    atom_array_or_stack: AtomArray | AtomArrayStack | AtomArrayPlus | AtomArrayPlusStack,
     data_dict: dict | None = None,
     _cif_file: pdbx.CIFFile | pdbx.BinaryCIFFile | None = None,
     ccd_mirror_path: os.PathLike | None = CCD_MIRROR_PATH,
@@ -349,10 +390,12 @@ def parse_atom_array(
     fix_bond_types: bool = True,
     convert_mse_to_met: bool = False,
     hydrogen_policy: Literal["keep", "remove", "infer"] = "keep",
-    build_assembly: Literal["first", "all", "_spoof"] | list[str] | tuple[str] | None = "all",
+    build_assembly: Literal["first", "all"] | list[str] | tuple[str] | None = "all",
     extra_fields: list[str] | Literal["all"] | None = None,
 ) -> dict[str, Any]:
     """Parse, clean and augment an AtomArray or AtomArrayStack.
+
+    AtomArrayPlus and AtomArrayPlusStack inputs are also supported, with some restrictions (see Notes).
 
     Args:
         atom_array_or_stack (AtomArray | AtomArrayStack): The AtomArray or AtomArrayStack to parse.
@@ -360,16 +403,62 @@ def parse_atom_array(
             will be created.
         _cif_file (pdbx.CIFFile | pdbx.BinaryCIFFile | None, optional): The biotite CIF file object to use for parsing.
             Intended for internal use only. Defaults to None, corresponding to direct AtomArray parsing.
-        build_assembly (Literal["first", "all", "_spoof"] | list[str] | tuple[str] | None, optional): Same as in parse,
-            with the addition of a "_spoof" option that will create a single assembly for the entire AtomArray. This
-            is risky as it will reset the transformation_id, and is intended for internal use only.
-
-
+        build_assembly: Specifies which assembly to build. Options:
+            - ``None``: Creates a single identity assembly (ID "1") with instance ID annotations
+              (``chain_iid``, ``pn_unit_iid``, ``molecule_iid``).
+            - ``"first"``: Build only the first assembly defined in the file.
+            - ``"all"``: Build all assemblies defined in the file.
+            - ``list | tuple``: Build specific assemblies by their IDs (e.g., ``["1", "2"]``).
         **additional_kwargs: See `parse` documentation for details.
 
-    Returns chain information, residue information, atom array, and metadata.
-    This method performs all aspects of `_parse_from_cif` that do not require a CIF file input.
+    Returns:
+        Dictionary containing chain information, residue information, atom array, assemblies, and metadata.
+        This method performs all aspects of ``_parse_from_cif`` that do not require a CIF file input.
+
+    Note:
+        When using AtomArrayPlus or AtomArrayPlusStack inputs, the following
+        restrictions apply:
+
+        - add_missing_atoms must be False
+        - hydrogen_policy cannot be "infer"
+        - convert_mse_to_met must be False
+        - _cif_file must be None
+
+        These restrictions ensure that 2D annotations remain aligned with atom indices.
     """
+
+    # TODO: Support more arguments with AtomArrayPlus
+    if isinstance(atom_array_or_stack, AtomArrayPlus | AtomArrayPlusStack):
+        if exists(_cif_file):
+            raise ValueError(
+                "Providing a CIF file is not supported when parsing an AtomArrayPlus or AtomArrayPlusStack. "
+                "Consider using parse() instead, which accepts CIF files directly."
+            )
+        if add_missing_atoms:
+            raise ValueError(
+                "Adding missing atoms is not supported when parsing an AtomArrayPlus or AtomArrayPlusStack. "
+                "Convert to AtomArray using atom_array.as_atom_array() first, or pass add_missing_atoms=False."
+            )
+        if hydrogen_policy == "infer":
+            raise ValueError(
+                "Hydrogen inference is not supported when parsing an AtomArrayPlus or AtomArrayPlusStack. "
+                "Convert to AtomArray using atom_array.as_atom_array() first, or use hydrogen_policy='keep' or 'remove'."
+            )
+        if convert_mse_to_met:
+            raise ValueError(
+                "MSE to MET conversion is not supported when parsing an AtomArrayPlus or AtomArrayPlusStack. "
+                "Convert to AtomArray using atom_array.as_atom_array() first, or pass convert_mse_to_met=False."
+            )
+
+    if build_assembly == "_spoof":
+        import warnings
+
+        warnings.warn(
+            "build_assembly='_spoof' is deprecated. Use build_assembly='all' or None instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        build_assembly = "all"
 
     # ... ensure that the input AtomArray or AtomArrayStack has a BondList
     if atom_array_or_stack.bonds is None:
@@ -410,11 +499,6 @@ def parse_atom_array(
 
     if exists(extra_fields) and not exists(_cif_file):
         logger.warning("The `extra_fields` argument will be ignored if there is no CIF file input.")
-    if exists(build_assembly) and build_assembly != "_spoof" and not exists(_cif_file):
-        logger.warning(
-            "When parsing an AtomArray directly, `build_assembly` will be ignored unless set to '_spoof' (not advised)."
-        )
-        build_assembly = None
 
     if "label_entity_id" not in atom_array_or_stack.get_annotation_categories():
         if "chain_entity" in atom_array_or_stack.get_annotation_categories():
@@ -533,7 +617,7 @@ def parse_atom_array(
         models.append(atom_array)
 
     # ... create an AtomArrayStack from the list of AtomArrays
-    asym_unit_stack = struc.stack(models)
+    asym_unit_stack = stack_any(models)
 
     # ... add the atomic number annotation (vs. element, which is a string)
     asym_unit_stack = ta.add_atomic_number_annotation(asym_unit_stack)
@@ -551,34 +635,32 @@ def parse_atom_array(
             if msa_path != "":
                 data_dict["chain_info"][chain]["msa_path"] = Path(msa_path)
 
-    # ... optionally, build assemblies and add assembly-specifc annotation (instance IDs like `chain_iid`, `pn_unit_iid`, `molecule_iid`)
+    # ... build assemblies and add assembly-specific annotations (instance IDs like `chain_iid`, `pn_unit_iid`, `molecule_iid`)
     if exists(build_assembly):
-        assert (
-            build_assembly in ["first", "all", "_spoof"] or isinstance(build_assembly, list | tuple)
-        ), "Invalid `build_assembly` option. Must be 'first', 'all', '_spoof', or a list/tuple of assembly IDs as strings."
+        assert build_assembly in ["first", "all"] or isinstance(
+            build_assembly, list | tuple
+        ), "Invalid `build_assembly` option. Must be 'first', 'all', or a list/tuple of assembly IDs as strings."
 
-        if exists(_cif_file) and "pdbx_struct_assembly" in data_dict["cif_block"]:
-            # ... build the assemblies from the CIF file, adding the `iid` annotations as we do so
-            assembly_gen_category = data_dict["cif_block"]["pdbx_struct_assembly_gen"]
-            struct_oper_category = data_dict["cif_block"]["pdbx_struct_oper_list"]
-        else:
-            # If there are no assemblies, set the `assembly_gen_category` and `struct_oper_category` to identity operations
-            assembly_gen_category = get_identity_assembly_gen_category(list(data_dict["chain_info"].keys()))
-            struct_oper_category = get_identity_op_expr_category()
-
-        data_dict["assemblies"] = build_assemblies_from_asym_unit(
-            assembly_gen_category=assembly_gen_category,
-            struct_oper_category=struct_oper_category,
-            asym_unit_atom_array_stack=asym_unit_stack,
-            build_assembly=build_assembly if build_assembly != "_spoof" else "all",
-            fix_symmetry_centers=fix_ligands_at_symmetry_centers,
-        )
-
-        # Store the assembly generation and struct oper categories in extra_info for caching and future reference
-        data_dict["extra_info"]["assembly_gen_category"] = assembly_gen_category
-        data_dict["extra_info"]["struct_oper_category"] = struct_oper_category
+    # Determine assembly categories: use CIF data if build_assembly is set, otherwise identity operations
+    if exists(build_assembly) and exists(_cif_file) and "pdbx_struct_assembly" in data_dict["cif_block"]:
+        assembly_gen_category = data_dict["cif_block"]["pdbx_struct_assembly_gen"]
+        struct_oper_category = data_dict["cif_block"]["pdbx_struct_oper_list"]
     else:
-        data_dict["assemblies"] = {}
+        assembly_gen_category = get_identity_assembly_gen_category(list(data_dict["chain_info"].keys()))
+        struct_oper_category = get_identity_op_expr_category()
+
+    # When build_assembly=None with identity ops, "all" builds the single identity assembly (ID "1")
+    data_dict["assemblies"] = build_assemblies_from_asym_unit(
+        assembly_gen_category=assembly_gen_category,
+        struct_oper_category=struct_oper_category,
+        asym_unit_atom_array_stack=asym_unit_stack,
+        build_assembly=build_assembly if build_assembly is not None else "all",
+        fix_symmetry_centers=fix_ligands_at_symmetry_centers,
+    )
+
+    # Store the assembly generation and struct oper categories in extra_info for caching and future reference
+    data_dict["extra_info"]["assembly_gen_category"] = assembly_gen_category
+    data_dict["extra_info"]["struct_oper_category"] = struct_oper_category
 
     # Handle instances where ph information is included in crystallization conditions
     if exists(_cif_file) and "exptl_crystal_grow" in _cif_file.block:
@@ -603,7 +685,9 @@ def parse_atom_array(
     return data_dict
 
 
-def _parse_from_cif(filename: os.PathLike | io.StringIO | io.BytesIO, **kwargs) -> dict[str, Any]:
+def _parse_from_cif(
+    filename: os.PathLike | io.StringIO | io.BytesIO, file_type: str | None = None, **kwargs
+) -> dict[str, Any]:
     """Parse the CIF file.
 
     Return chain information, residue information, atom array, and metadata.
@@ -615,7 +699,7 @@ def _parse_from_cif(filename: os.PathLike | io.StringIO | io.BytesIO, **kwargs) 
     data_dict = {"extra_info": {}}
 
     # ... read the CIF file into the dictionary (we will clean up the dictionary before returning)
-    cif_file = read_any(filename)
+    cif_file = read_any(filename, file_type=file_type)
     data_dict["cif_block"] = cif_file.block
 
     # ... load metadata into "metadata" key (either from RCSB standard fields, or from the custom `extra_metadata` field)
@@ -738,7 +822,8 @@ def _parse_from_pdb(filename: os.PathLike, **parse_from_cif_kwargs) -> dict[str,
     # ... parse the CIF block into a dictionary
     parse_from_cif_kwargs["file_type"] = "pdb"
     parse_from_cif_kwargs["extra_fields"] = None
-    parse_from_cif_kwargs["build_assembly"] = "_spoof"
+    # PDB files use identity assembly, so "all" builds just the single identity assembly
+    parse_from_cif_kwargs["build_assembly"] = "all"
 
     kwargs_to_pass = {k: v for k, v in parse_from_cif_kwargs.items() if k not in ["model", "file_type"]}
     data_dict = parse_atom_array(atom_array_stack, _cif_file=None, **kwargs_to_pass)

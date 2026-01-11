@@ -230,7 +230,7 @@ def apply_segment_wise_2d(array: np.ndarray, segment_start_end_idxs: np.ndarray,
     return array
 
 
-def get_af3_token_representative_masks(atom_array: AtomArray) -> np.ndarray:
+def get_af3_token_representative_masks(atom_array: AtomArray, enforce_one_per_token: bool = True) -> np.ndarray:
     """Returns a boolean mask indicating the representative atoms of the tokens in the atom array.
 
     From the AF-3 supplement, section 4.4. (Distogram prediction):
@@ -242,6 +242,8 @@ def get_af3_token_representative_masks(atom_array: AtomArray) -> np.ndarray:
 
     Args:
         atom_array (AtomArray): The atom array to get the representative atoms of.
+        enforce_one_per_token (bool, optional): If True, raises an error if the number of representative atoms
+            does not match the number of tokens. Defaults to True.
 
     Returns:
         np.ndarray: A boolean mask indicating the representative atoms of the tokens in the atom array.
@@ -272,7 +274,7 @@ def get_af3_token_representative_masks(atom_array: AtomArray) -> np.ndarray:
         | unknown_protein_residue_representative_atom
         | atoms
     )
-    if is_representative_atom.sum() != get_token_count(atom_array):
+    if enforce_one_per_token and (is_representative_atom.sum() != get_token_count(atom_array)):
         raise ValueError(
             f"Number of representative atoms ({is_representative_atom.sum()}) does not match number"
             f"of tokens ({get_token_count(atom_array)}). This is likely due to you filtering out"
@@ -312,7 +314,7 @@ def get_af3_token_representative_coords(atom_array: AtomArray) -> np.ndarray:
     return atom_array.coord[get_af3_token_representative_masks(atom_array)]
 
 
-def get_af3_token_center_masks(atom_array: AtomArray) -> np.ndarray:
+def get_af3_token_center_masks(atom_array: AtomArray, enforce_one_per_token: bool = True) -> np.ndarray:
     """Returns a boolean mask indicating the center atoms of the tokens in the atom array as per the AF3 definition.
 
     NOTE: "Center" atoms are distinct from "representative" atoms, which are used during distogram prediction (and more closely represent the center of mass).
@@ -324,6 +326,8 @@ def get_af3_token_center_masks(atom_array: AtomArray) -> np.ndarray:
 
     Args:
         atom_array (AtomArray): The atom array to get the center atoms of.
+        enforce_one_per_token (bool, optional): If True, raises an error if the number of center atoms
+            does not match the number of tokens. Defaults to True.
 
     Returns:
         np.ndarray: A boolean mask indicating the center atoms of the tokens in the atom array.
@@ -341,7 +345,7 @@ def get_af3_token_center_masks(atom_array: AtomArray) -> np.ndarray:
         | (atom_array.atom_name == "CA")  # CA for amino acids
         | (atom_array.atom_name == "C1'")  # C1' for nucleotides
     )
-    if is_center_atom.sum() != get_token_count(atom_array):
+    if enforce_one_per_token and (is_center_atom.sum() != get_token_count(atom_array)):
         raise ValueError(
             f"Number of center atoms ({is_center_atom.sum()}) does not match"
             f"number of tokens ({get_token_count(atom_array)}). This is likely"

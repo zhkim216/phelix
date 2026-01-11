@@ -3,6 +3,17 @@ from collections.abc import Callable
 import biotite.structure as struc
 import numpy as np
 
+NUMPY_REDUCE_FUNCS = {
+    np.any: np.logical_or.reduceat,
+    np.all: np.logical_and.reduceat,
+    np.maximum: np.maximum.reduceat,
+    np.minimum: np.minimum.reduceat,
+    np.max: np.maximum.reduceat,
+    np.min: np.minimum.reduceat,
+    np.add: np.add.reduceat,
+    np.sum: np.add.reduceat,
+}
+
 
 def apply_and_spread(
     segment_start_stop_idxs: np.ndarray, data: np.ndarray, function: Callable, axis: int | None = None
@@ -38,6 +49,9 @@ def apply_and_spread(
         >>> print(result)
         [ 6  6  6 15 15 15]
     """
-    data_after_apply = struc.segments.apply_segment_wise(segment_start_stop_idxs, data, function, axis)
+    if function in NUMPY_REDUCE_FUNCS and axis is None:
+        data_after_apply = NUMPY_REDUCE_FUNCS[function](data, segment_start_stop_idxs[:-1])
+    else:
+        data_after_apply = struc.segments.apply_segment_wise(segment_start_stop_idxs, data, function, axis)
     data_after_spread = struc.segments.spread_segment_wise(segment_start_stop_idxs, data_after_apply)
     return data_after_spread

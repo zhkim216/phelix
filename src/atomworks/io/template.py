@@ -7,7 +7,7 @@ import numpy as np
 from biotite.structure import AtomArray, BondList
 
 import atomworks.io.transforms.atom_array as ta
-from atomworks.common import exists, immutable_lru_cache
+from atomworks.common import exists
 from atomworks.constants import CCD_MIRROR_PATH, DO_NOT_MATCH_CCD
 from atomworks.io.utils.bonds import (
     correct_bond_types_for_nucleophilic_additions,
@@ -23,7 +23,6 @@ from atomworks.io.utils.testing import has_ambiguous_annotation_set
 logger = logging.getLogger(__file__)
 
 
-@immutable_lru_cache(maxsize=200)
 def get_empty_ccd_template(
     ccd_code: str,
     *,
@@ -31,35 +30,38 @@ def get_empty_ccd_template(
     remove_hydrogens: bool = True,
     **res_wise_annotations: int | float | str,
 ) -> AtomArray:
-    """
-    Creates an empty template AtomArray from a Chemical Component Dictionary (CCD) entry with optional residue-wise
-    annotations.
+    """Get empty CCD template with safe independent copy.
+
+    Creates an empty template AtomArray from a Chemical Component Dictionary (CCD)
+    entry with optional residue-wise annotations. Returns an independent copy that
+    can be safely modified without affecting the cached template.
 
     Args:
-        - ccd_code (str): The three-letter code of the chemical component to create a template for.
-        - ccd_mirror_path (os.PathLike, optional): Path to the local CCD mirror directory. Defaults to CCD_MIRROR_PATH.
-        - remove_hydrogens (bool, optional): Whether to remove hydrogen atoms from the template. Defaults to True.
-        - **res_wise_annotations: Additional residue-wise annotations to add to the template. Values can be int, float,
-            or str and will be broadcast to all atoms in the template.
+        ccd_code: The three-letter code of the chemical component to create a template for.
+        ccd_mirror_path: Path to the local CCD mirror directory. Defaults to CCD_MIRROR_PATH.
+        remove_hydrogens: Whether to remove hydrogen atoms from the template. Defaults to True.
+        **res_wise_annotations: Additional residue-wise annotations to add to the template.
+            Values can be int, float, or str and will be broadcast to all atoms in the template.
 
     Returns:
-        - AtomArray: An empty template structure with nan coordinates but with bonds and annotations from the CCD entry,
-            plus any additional specified annotations.
+        AtomArray: An empty template structure with nan coordinates but with bonds and
+            annotations from the CCD entry, plus any additional specified annotations.
+            This is an independent copy that can be safely modified.
 
     Example:
         >>> template = get_empty_ccd_template("ALA", chain_id="A", res_id=1, occupancy=1.0)
     """
-    template_cc = atom_array_from_ccd_code(ccd_code, ccd_mirror_path, coords=None)
+    template = atom_array_from_ccd_code(ccd_code, ccd_mirror_path, coords=None)
 
     if remove_hydrogens:
-        template_cc = ta.remove_hydrogens(template_cc)
+        template = ta.remove_hydrogens(template)
 
-    # set default residue-wise annotations
+    n_atoms = len(template)
     for annot, value in res_wise_annotations.items():
         if value is not None:
-            template_cc.set_annotation(annot, np.full(len(template_cc), value))
+            template.set_annotation(annot, np.full(n_atoms, value))
 
-    return template_cc
+    return template
 
 
 def match_residue_to_template(
