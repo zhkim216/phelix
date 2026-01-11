@@ -1,10 +1,10 @@
 mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
-out_dir: /scratch/users/zhkim216/datasets/atomworks_plinder
+out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full
 
 num_workers: 8
 
 dataset:
-  _target_: atomworks.ml.datasets.datasets.PandasDataset
+  _target_: atomworks.ml.datasets.PandasDataset
   data: ${out_dir}/metadata_for_caching.parquet
   name: pdb
   id_column: example_id
@@ -30,26 +30,20 @@ dataset:
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: [
-    "144", "15P", "1PE", "2F2", "2JC", "3HR", "3SY", "7N5", "7PE", "9JE",
-    "AAE", "ABA", "ACE", "ACN", "ACT", "ACY", "AZI", "BAM", "BCN", "BCT",
-    "BDN", "BEN", "BME", "BO3", "BTB", "BTC", "BU1", "C8E", "CAD", "CAQ",
-    "CBM", "CCN", "CIT", "CL", "CLR", "CM", "CMO", "CO3", "CPT", "CXS",
-    "D10", "DEP", "DIO", "DMS", "DN", "DOD", "DOX", "EDO", "EEE", "EGL",
-    "EOH", "EOX", "EPE", "ETF", "FCY", "FJO", "FLC", "FMT", "FW5", "GOL",
-    "GSH", "GTT", "GYF", "HED", "IHP", "IHS", "IMD", "IOD", "IPA", "IPH",
-    "LDA", "MB3", "MEG", "MES", "MLA", "MLI", "MOH", "MPD", "MRD", "MSE",
-    "MYR", "N", "NA", "NAG", "NH2", "NH4", "NHE", "NO3", "O4B", "OHE", "OLA",
-    "OLC", "OMB", "OME", "OXA", "P6G", "PE3", "PE4", "PEG", "PEO", "PEP",
-    "PG0", "PG4", "PGE", "PGR", "PLM", "PO4", "POL", "POP", "PVO", "SAR",
-    "SCN", "SEO", "SIN", "SO4", "SPD", "SPM", "SR", "STE", "STO", "STU",
-    "TAR", "TBU", "TME", "TRS", "UNK", "UNL", "UNX", "UPL", "URE"
-  ] # SEP, TPO are excluded in this list, check atomworks/constants.py
+  remove_ccds: ["UNX", "N", "DN", "UNL", "UNK"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
   hydrogen_policy: "remove"
-  add_bond_types_from_struct_conn: ["covale", "metalc"]
+  add_bond_types_from_struct_conn: ["covale"]
+
+preprocess_cfg:
+  undesired_res_names: ["UNX", "N", "DN", "UNL", "UNK"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
+  b_factor_min: null
+  b_factor_max: null
+  min_residues_for_polymers: 1
+  remove_terminal_oxygen_protein: true
+  remove_terminal_oxygen_nucleic_acid: true
 
 # --- sharding for multi-node runs ---
 num_shards: 1      # total number of shards

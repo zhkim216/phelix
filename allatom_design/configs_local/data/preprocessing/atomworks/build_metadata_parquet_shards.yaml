@@ -3,7 +3,6 @@ out_dir: /home/possu/jinho/datasets/atomworks_lmpnnval_ld
 
 num_workers: 20
 max_file_size: 20000000
-return_filtered_atom_array: false
 
 # Data preprocessor args to specify in addition to the cif parser args
 data_preprocessor_cfg:
