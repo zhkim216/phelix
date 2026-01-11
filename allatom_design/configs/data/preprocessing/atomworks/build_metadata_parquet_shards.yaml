@@ -4,6 +4,11 @@ out_dir: /scratch/users/zhkim216/datasets/atomworks_lmpnnval
 num_workers: 31
 max_file_size: 20000000
 
+# OOM resilience settings
+processing_timeout: 300       # Per-file timeout in seconds
+batch_size: 100               # Process in batches to recover from OOM
+max_tasks_per_child: 50       # Restart workers periodically to prevent memory leaks
+
 # Data preprocessor args
 data_preprocessor_cfg:
   from_rcsb: true

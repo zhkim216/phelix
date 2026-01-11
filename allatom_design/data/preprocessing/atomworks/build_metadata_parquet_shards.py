@@ -166,17 +166,56 @@ def main(cfg: DictConfig):
         timeout = getattr(cfg, 'processing_timeout', 300)
         # Pre-allocate results in input order to preserve deterministic ordering
         results_list = [None] * len(cif_paths)
-        # Use ProcessPoolExecutor to get true parallelism and isolate timeouts
-        with ProcessPoolExecutor(max_workers=cfg.num_workers, initializer=_init_worker,
-                                 initargs=(preprocessor_args, timeout)) as executor:
-            for idx, res in enumerate(tqdm(executor.map(_process_cif_worker, cif_paths), total=len(cif_paths), desc=f"Processing mmCIFs (shard {cfg.shard_id})")):
-                status, payload = res
-                if status == 'ok':
-                    results_list[idx] = payload
-                else:
-                    message = payload if isinstance(payload, str) else repr(payload)
-                    skipped_with_reason.append((cif_paths[idx], status, message))
-                    results_list[idx] = []
+        
+        # Process in batches to handle OOM gracefully
+        batch_size = getattr(cfg, 'batch_size', 100)  # Configurable batch size
+        max_tasks_per_child = getattr(cfg, 'max_tasks_per_child', 50)  # Restart workers periodically to prevent memory leaks
+        
+        for batch_start in range(0, len(cif_paths), batch_size):
+            batch_end = min(batch_start + batch_size, len(cif_paths))
+            batch_paths = cif_paths[batch_start:batch_end]
+            
+            try:
+                # Use ProcessPoolExecutor with maxtasksperchild to prevent memory leaks
+                with ProcessPoolExecutor(
+                    max_workers=cfg.num_workers, 
+                    initializer=_init_worker,
+                    initargs=(preprocessor_args, timeout),
+                    max_tasks_per_child=max_tasks_per_child  # Restart workers periodically
+                ) as executor:
+                    batch_results = list(tqdm(
+                        executor.map(_process_cif_worker, batch_paths, chunksize=1),
+                        total=len(batch_paths), 
+                        desc=f"Processing mmCIFs (shard {cfg.shard_id}, batch {batch_start//batch_size + 1})"
+                    ))
+                    
+                    for idx, res in enumerate(batch_results):
+                        global_idx = batch_start + idx
+                        status, payload = res
+                        if status == 'ok':
+                            results_list[global_idx] = payload
+                        else:
+                            message = payload if isinstance(payload, str) else repr(payload)
+                            skipped_with_reason.append((cif_paths[global_idx], status, message))
+                            results_list[global_idx] = []
+                            
+            except Exception as e:
+                # Handle BrokenProcessPool or other pool errors gracefully
+                print(f"WARNING: Batch {batch_start//batch_size + 1} failed with error: {repr(e)}")
+                print(f"Falling back to sequential processing for this batch...")
+                
+                for idx, cif_path in enumerate(batch_paths):
+                    global_idx = batch_start + idx
+                    if results_list[global_idx] is not None:
+                        continue  # Already processed
+                    try:
+                        # Reinitialize processor for fallback
+                        fallback_processor = DataPreprocessor(**preprocessor_args)
+                        res = fallback_processor.get_rows(cif_path)
+                        results_list[global_idx] = res
+                    except Exception as fallback_e:
+                        skipped_with_reason.append((cif_path, 'fallback_error', repr(fallback_e)))
+                        results_list[global_idx] = []
     else:
         results_list = []
         for cif_path in tqdm(cif_paths, desc=f"Processing mmCIFs (shard {cfg.shard_id})"):
