@@ -137,7 +137,9 @@ def _get_paired(msa_a: dict, msa_b: dict, shared_tax_ids: np.array) -> tuple[np.
     return i_paired_a, i_paired_b
 
 
-def join_two_msas_by_tax_id(msa_a: dict, msa_b: dict, unpaired_padding: np.ndarray) -> dict:
+def join_two_msas_by_tax_id(
+    msa_a: dict, msa_b: dict, unpaired_padding: np.ndarray, add_residue_is_paired_feature: bool = False
+) -> dict:
     """
     Joins (or "pairs") 2 MSAs by matching sequences with the same taxonomic ID.
     Sequences that aren't paired will be added to the bottom of the joined MSA in a block-diagonal fashion, with padding.
@@ -166,6 +168,8 @@ def join_two_msas_by_tax_id(msa_a: dict, msa_b: dict, unpaired_padding: np.ndarr
             Second MSA to be joined, with keys `msa`, `ins`, and `tax_ids`.
         unpaired_padding (np.ndarray):
             Scalar array for unpaired sequences. Must match the dtype of the MSA data.
+        add_residue_is_paired_feature (bool):
+            Whether to add a binary feature indicating whether a residue is part of a paired MSA.
 
     Returns:
         dict: Paired MSA, with keys `msa`, `ins`, `tax_ids`, `any_paired`, `all_paired`, and `msa_is_padded_mask`.
@@ -189,6 +193,8 @@ def join_two_msas_by_tax_id(msa_a: dict, msa_b: dict, unpaired_padding: np.ndarr
     i_paired_a, i_paired_b = _get_paired(msa_a, msa_b, shared_tax_ids)
 
     # ...get indices of sequences that are not paired
+    # NOTE: Since np.setdiff1d returns a sorted array, the unpaired rows will have their relative order preserved
+    # This ensures that the fully unpaired sequences are block-diagonal and at the bottom of the MSA, even after many iterations.
     i_unpaired_a = np.setdiff1d(np.arange(msa_a_num_sequences), i_paired_a)
     i_unpaired_b = np.setdiff1d(np.arange(msa_b_num_sequences), i_paired_b)
 
@@ -291,6 +297,16 @@ def join_two_msas_by_tax_id(msa_a: dict, msa_b: dict, unpaired_padding: np.ndarr
         ],
     )
 
+    # ... label residues that were paired, if requested
+    if add_residue_is_paired_feature:
+        # Within the any_paired region, any unpaired regions will be masked (and the converse always holds).
+        # This correspondence does not hold in general, as fully unpaired sequences are not considered masked.
+        residue_is_paired = ~msa_is_padded_mask
+        residue_is_paired[~any_paired] = False
+
+        # (Sanity check)
+        assert np.all(residue_is_paired[all_paired, :]), "Residues in all_paired rows should all be paired"
+
     # ...and assert that the first row is still the query sequence as a sanity check
     assert np.all(
         msa[0] == np.concatenate([msa_a["msa"][0], msa_b["msa"][0]])
@@ -304,6 +320,10 @@ def join_two_msas_by_tax_id(msa_a: dict, msa_b: dict, unpaired_padding: np.ndarr
         "all_paired": all_paired,
         "msa_is_padded_mask": msa_is_padded_mask,
     }
+
+    if add_residue_is_paired_feature:
+        result["residue_is_paired"] = residue_is_paired
+
     return result
 
 
@@ -312,6 +332,7 @@ def join_multiple_msas_by_tax_id(
     unpaired_padding: np.ndarray = np.array([AMINO_ACID_ONE_LETTER_TO_INT["-"]], dtype=np.int8),  # noqa: B008
     dense: bool = False,
     shuffle_unpaired_sequences: bool = False,
+    add_residue_is_paired_feature: bool = False,
 ) -> dict:
     """
     Join multiple MSAs by tax_id, merging them sequentially and updating pairing information.
@@ -339,6 +360,7 @@ def join_multiple_msas_by_tax_id(
         unpaired_padding (Any): Padding for unpaired sequences. Datatype must match the datatype of the MSAs. Defaults to the integer encoding of "-" (gap).
         dense (bool, optional): Whether to densely pack unpadded sequences (AF-3 style), or use sparse block matrices (AF-Multimer style). Defaults to False.
         shuffle_unpaired (bool, optional): Whether to shuffle unpaired sequences before collapsing during dense merging. Defaults to False.
+        add_residue_is_paired_feature (bool): Whether to add a binary feature indicating whether a residue is part of a paired MSA.
 
     Returns:
         dict: Merged MSA with updated pairing information.
@@ -351,7 +373,12 @@ def join_multiple_msas_by_tax_id(
     # Assert that the unpaired padding has the same dtype as the MSA data
     assert msas[0]["msa"].dtype == unpaired_padding.dtype, "unpaired_padding must have the same dtype as the MSA data"
 
-    result = reduce(lambda a, b: join_two_msas_by_tax_id(a, b, unpaired_padding=unpaired_padding), msas)
+    result = reduce(
+        lambda a, b: join_two_msas_by_tax_id(
+            a, b, unpaired_padding=unpaired_padding, add_residue_is_paired_feature=add_residue_is_paired_feature
+        ),
+        msas,
+    )
 
     # If we are in dense mode, we need to handle unpaired sequences differently
     if dense:
@@ -442,5 +469,7 @@ def join_multiple_msas_by_tax_id(
             : result["msa"].shape[0]
         ]  # Trim to match the new MSA shape; we only re-ordered the unpaired sequences
         result["all_paired"] = result["all_paired"][: result["msa"].shape[0]]
+        if add_residue_is_paired_feature:
+            result["residue_is_paired"] = result["residue_is_paired"][: result["msa"].shape[0], :]
 
     return result

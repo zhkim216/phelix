@@ -34,7 +34,7 @@ from atomworks.ml.transforms._checks import (
 from atomworks.ml.transforms.atom_array import _renumber_res_ids_around_reference
 from atomworks.ml.transforms.base import Transform
 from atomworks.ml.utils.geometry import align_atom_arrays
-from atomworks.ml.utils.misc import _randomly_select_items_with_weights
+from atomworks.ml.utils.misc import randomly_select_items_with_weights
 from atomworks.ml.utils.testing import is_clash
 
 logger = logging.getLogger("atomworks.ml")
@@ -356,7 +356,7 @@ class PadDNA(Transform):
         """
         Adds random sequence padding to a DNA sequence string.
         """
-        new_seq = _randomly_select_items_with_weights(self.pad_nt_weights, n=n)
+        new_seq = randomly_select_items_with_weights(self.pad_nt_weights, n=n)
 
         # place original sequence at a random position in the new sequence
         seq_idx = np.random.randint(0, len(new_seq) - len(seq) + 1)
@@ -416,7 +416,7 @@ class PadDNA(Transform):
             return completed_duplex_seq, -1
 
         # sample what the final length will be
-        new_len = _randomly_select_items_with_weights(pad_dict)
+        new_len = randomly_select_items_with_weights(pad_dict)
 
         # generate random DNA sequence of chosen final length
         # can use a configurable distribution for sequence generation (default is uniform ACTG)
@@ -501,7 +501,7 @@ class PadDNA(Transform):
         # prepare for alignment
         # Collect short-named variables needed for indexing sections to align
         n = struc.get_residue_count(array_a_nan_free)
-        a = _randomly_select_items_with_weights(self.align_len_weights, 1)
+        a = randomly_select_items_with_weights(self.align_len_weights, 1)
         a = min(a, n)  # can't align more residues than there are in the structure
         o = len(new_seq)
         r, u = rm_a_begin, rm_b_end
@@ -560,12 +560,15 @@ class PadDNA(Transform):
         component_fourth = _renumber_res_ids_around_reference(component_fourth, ref=component_fifth, where="before")
         component_sixth = _renumber_res_ids_around_reference(component_sixth, ref=component_fifth, where="after")
 
-        # construct final hybrid DNA structure
-        array_new_dna = (
-            component_first + component_second + component_third + component_fourth + component_fifth + component_sixth
-        )
+        dna_chain_first = component_first + component_second + component_third
+        dna_chain_second = component_fourth + component_fifth + component_sixth
 
-        return atom_array_non_dna + array_new_dna
+        # finally, if chains were symmetric, padding breaks symmetry so we need to relabel
+        if dna_chain_first.molecule_entity[0] == dna_chain_second.molecule_entity[0]:
+            next_id = np.max((atom_array_non_dna + dna_chain_first).molecule_entity) + 1
+            dna_chain_second.molecule_entity = np.full_like(dna_chain_second.molecule_entity, next_id)
+
+        return atom_array_non_dna + dna_chain_first + dna_chain_second
 
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
         if np.random.rand() < self.p_skip:

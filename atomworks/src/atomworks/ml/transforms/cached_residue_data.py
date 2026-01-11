@@ -11,9 +11,9 @@ from biotite.structure import AtomArray, residue_iter
 from toolz import keyfilter
 
 from atomworks.common import exists
+from atomworks.io.utils.io_utils import apply_sharding_pattern, build_sharding_pattern
 from atomworks.ml.transforms._checks import check_atom_array_annotation, check_contains_keys
 from atomworks.ml.transforms.base import Transform
-from atomworks.ml.utils.io import get_sharded_file_path
 
 logger = logging.getLogger("atomworks.ml")
 
@@ -28,8 +28,12 @@ def _load_json(path: Path) -> Any:
         return json.load(f)
 
 
+def _load_pt(path: Path) -> Any:
+    return torch.load(path, map_location="cpu", weights_only=False)
+
+
 FILE_LOADERS: dict[str, Callable[[Path], Any]] = {
-    ".pt": lambda path: torch.load(path, map_location="cpu", weights_only=False),
+    ".pt": _load_pt,
     ".pkl": _load_pkl,
     ".json": _load_json,
 }
@@ -114,14 +118,20 @@ def load_cached_residue_level_data(
     cached_data_by_res_name = {}
 
     for res_name in unique_res_names:
-        file_path = get_sharded_file_path(
-            base_dir=Path(dir),
-            file_hash=res_name,
-            extension=file_extension,
-            depth=sharding_depth,
-            chars_per_dir=1,
-            include_subdirectory=True,
-        )
+        # Build sharded file path
+        # For "ALA" with depth=1: sharded_path = "A/ALA"
+        # Final path: dir/A/ALA/ALA.pt
+        if sharding_depth > 0:
+            # Pad residue name to minimum required length for sharding
+            # Example: "A" with depth=2, chars_per_dir=1 → "A_" to avoid empty string directories
+            min_length = sharding_depth * 1  # chars_per_dir is always 1 for residue names
+            res_name_padded = res_name.ljust(min_length, "_")
+
+            sharding_pattern = build_sharding_pattern(depth=sharding_depth, chars_per_dir=1)
+            sharded_path = apply_sharding_pattern(res_name_padded, sharding_pattern)
+            file_path = Path(dir) / sharded_path / f"{res_name}{file_extension}"
+        else:
+            file_path = Path(dir) / res_name / f"{res_name}{file_extension}"
 
         if not file_path.exists():
             logger.warning(f"Cached data not found for {res_name} at {file_path}")

@@ -35,11 +35,12 @@ This example demonstrates how to work with datasets in AtomWorks, from simple fi
 #
 # **NOTE**: All AtomWorks Datasets require a `name` attribute to support many of the logging/debugging features that are supplied out-of-the-box.
 
-from atomworks.ml.datasets.datasets import FileDataset
+from atomworks.ml.datasets import FileDataset
 
 # To setup the test pack, if not already, run `atomworks setup tests`
 dataset = FileDataset.from_directory(
-    directory="../../tests/data/ml/af2_distillation/cif", name="example_directory_dataset"
+    directory="../../tests/data/ml/af2_distillation/cif",
+    name="example_directory_dataset",
 )
 
 ########################################################################
@@ -58,7 +59,7 @@ for i, example in enumerate(dataset):
 # Understanding Dataset Requirements
 # ----------------------------------
 #
-# At a high level, to train models with AtomWorks, we need typically need a Dataset that:
+# At a high level, to train models with AtomWorks, we typically need a Dataset that:
 #
 # (1) Takes as input an item index and returns the corresponding example information; typically includes:
 #     a. Path to a structural file saved on disk (`/path/to/dataset/my_dataset_0.cif`)
@@ -74,17 +75,21 @@ for i, example in enumerate(dataset):
 #
 # In most cases, this will involve using `parse` or `load_any` from `AtomWorks.io` to build an `AtomArray`, which is the common language of our `Transform` library.
 
+from typing import Any
+
 from atomworks.io import parse
 
 
-def simple_loading_fn(raw_data) -> dict:
+def simple_loading_fn(raw_data: Any) -> dict:
     """Simple loading function that parses structural data and returns an AtomArray."""
     parse_output = parse(raw_data)
     return {"atom_array": parse_output["assemblies"]["1"][0]}
 
 
 dataset_with_loading_fn = FileDataset.from_directory(
-    directory="../../tests/data/pdb", name="example_pdb_dataset", loader=simple_loading_fn
+    directory="../../tests/data/pdb",
+    name="example_pdb_dataset",
+    loader=simple_loading_fn,
 )
 output = dataset_with_loading_fn[1]
 print(f"Output AtomArray has {len(output['atom_array'])} atoms!")
@@ -95,15 +100,15 @@ print(f"Output AtomArray has {len(output['atom_array'])} atoms!")
 #
 # Next up is adding in a pipeline. Let's create a simple one with a dramatic crop.
 
-from atomworks.ml.transforms.base import Compose
-from atomworks.ml.transforms.crop import (
-    CropSpatialLikeAF3,
-)
+from atomworks.constants import STANDARD_AA
 from atomworks.ml.transforms.atom_array import (
     AddGlobalAtomIdAnnotation,
 )
 from atomworks.ml.transforms.atomize import AtomizeByCCDName
-from atomworks.constants import STANDARD_AA
+from atomworks.ml.transforms.base import Compose
+from atomworks.ml.transforms.crop import (
+    CropSpatialLikeAF3,
+)
 
 pipe = Compose(
     [
@@ -120,7 +125,10 @@ pipe = Compose(
 # Just like with the loading function, we can also pass a composed `Transform` pipeline to our datasets.
 
 dataset_with_loading_fn_and_transforms = FileDataset.from_directory(
-    directory="../../tests/data/pdb", name="example_pdb_dataset", loader=simple_loading_fn, transform=pipe
+    directory="../../tests/data/pdb",
+    name="example_pdb_dataset",
+    loader=simple_loading_fn,
+    transform=pipe,
 )
 
 ########################################################################
@@ -148,7 +156,7 @@ view(pipeline_output["atom_array"])
 #
 # The only "gotcha" outside of normal PyTorch sampling is that you'll need to implement a default collate function (which could simply be the identity) so long as your output dictionary contains an `AtomArray`.
 
-from torch.utils.data import RandomSampler, DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 
 sampler = RandomSampler(dataset_with_loading_fn_and_transforms)
 loader = DataLoader(
@@ -216,7 +224,7 @@ print(interfaces_df.head())
 #
 # **NOTE**: Because a given PDB ID may contain many interfaces and thus may appear multiple times in our dataset, we must also incorporate the `assembly_id` and the `pn_unit_iids` of the two interacting chains within the `example_id`.
 
-from atomworks.ml.datasets.datasets import PandasDataset
+from atomworks.ml.datasets import PandasDataset
 from atomworks.ml.datasets.loaders import create_loader_with_query_pn_units
 
 dataset = PandasDataset(

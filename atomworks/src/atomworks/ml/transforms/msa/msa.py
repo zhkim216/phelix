@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 from biotite.structure import AtomArray
 
+from atomworks.common import exists
 from atomworks.enums import ChainType
 from atomworks.ml.encoding_definitions import RF2AA_ATOM36_ENCODING, AF3SequenceEncoding, TokenEncoding
 from atomworks.ml.transforms._checks import (
@@ -68,6 +69,7 @@ class PairAndMergePolymerMSAs(Transform):
     Args:
         unpaired_padding (Any): The MSA token to use for padding unpaired sequences. Defaults to the integer representation of the gap token.
         dense (bool): Whether to densely pack unpaired sequences at the bottom of the MSA. If False, unpaired sequences are block-diagonally added to the bottom of the MSA.
+        add_residue_is_paired_feature (bool): Whether to add a binary feature indicating whether a residue is part of a paired sequence.
     """
 
     requires_previous_transforms: ClassVar[list[str | Transform]] = ["LoadPolymerMSAs"]
@@ -76,6 +78,7 @@ class PairAndMergePolymerMSAs(Transform):
         self,
         unpaired_padding: int = AMINO_ACID_ONE_LETTER_TO_INT["-"],  # Integer representation of gap token
         dense: bool = False,
+        add_residue_is_paired_feature: bool = False,
     ):
         if not (
             isinstance(unpaired_padding, int) and np.iinfo(np.int8).min <= unpaired_padding <= np.iinfo(np.int8).max
@@ -86,6 +89,7 @@ class PairAndMergePolymerMSAs(Transform):
             )
         self.unpaired_padding = np.array(unpaired_padding, dtype=np.int8)
         self.dense = dense
+        self.add_residue_is_paired_feature = add_residue_is_paired_feature
 
     def check_input(self, data: dict) -> None:
         check_contains_keys(data, ["polymer_msas_by_chain_id"])
@@ -142,7 +146,10 @@ class PairAndMergePolymerMSAs(Transform):
         if len(msa_list) > 1:
             # Heteromeric complex - pair and merge the MSAs
             merged_polymer_msas = join_multiple_msas_by_tax_id(
-                msa_list, unpaired_padding=self.unpaired_padding, dense=self.dense
+                msa_list,
+                unpaired_padding=self.unpaired_padding,
+                dense=self.dense,
+                add_residue_is_paired_feature=self.add_residue_is_paired_feature,
             )
         else:
             # Homomeric complex - no need to pair, we will concatenate the MSAs later
@@ -151,6 +158,8 @@ class PairAndMergePolymerMSAs(Transform):
             # We consider homomers to be unpaired
             merged_polymer_msas["all_paired"] = np.zeros(merged_polymer_msas["msa"].shape[0], dtype=bool)
             merged_polymer_msas["any_paired"] = np.zeros(merged_polymer_msas["msa"].shape[0], dtype=bool)
+            if self.add_residue_is_paired_feature:
+                merged_polymer_msas["residue_is_paired"] = np.zeros(merged_polymer_msas["msa"].shape, dtype=bool)
 
         # Distribute entity-level MSAs to chain-level MSAs by pointing each chain_id to the MSA for its corresponding chain_entity
         polymer_msas_by_chain_entity = {}
@@ -168,6 +177,11 @@ class PairAndMergePolymerMSAs(Transform):
                 "any_paired": merged_polymer_msas["any_paired"],  # Common across entities (sequence dimension)
                 "all_paired": merged_polymer_msas["all_paired"],  # Common across entities (sequence dimension)
             }
+
+            if self.add_residue_is_paired_feature:
+                polymer_msas_by_chain_entity[chain_entity]["residue_is_paired"] = merged_polymer_msas[
+                    "residue_is_paired"
+                ][:, entity_mask]
 
         for chain_id in data["polymer_msas_by_chain_id"]:
             chain_entity = chain_with_msa_id_to_entity[chain_id]
@@ -441,6 +455,8 @@ class FillFullMSAFromEncoded(Transform):
 
     Attributes:
         pad_token (str): The token used for padding in the MSA. The pad token should match the padding token used when padding unpaired MSA sequences.
+        add_residue_is_paired_feature (bool): Whether to add a binary feature indicating whether a residue is part of a paired MSA.
+            Must match the value used in PairAndMergePolymerMSAs.
 
     Returns:
         The full MSA, with padding, as a 2D np.array of integers, stored in `data["encoded"]["msa"]`.
@@ -485,8 +501,9 @@ class FillFullMSAFromEncoded(Transform):
 
     requires_previous_transforms: ClassVar[list[str]] = ["EncodeMSA", AtomizeByCCDName, AddWithinPolyResIdxAnnotation]
 
-    def __init__(self, pad_token: str):
+    def __init__(self, pad_token: str, add_residue_is_paired_feature: bool = False):
         self.PAD_TOKEN = pad_token
+        self.add_residue_is_paired_feature = add_residue_is_paired_feature
 
     def check_input(self, data: dict) -> None:
         check_contains_keys(data, ["polymer_msas_by_chain_id", "encoded"])
@@ -507,6 +524,9 @@ class FillFullMSAFromEncoded(Transform):
                 # ... we set `msa_raw_ins` to all zeros
                 "msa_raw_ins": np.zeros((1, num_tokens_in_example), dtype=int),
             }
+            if self.add_residue_is_paired_feature:
+                # ... we set `msa_residue_is_paired` to all zeros
+                data["full_msa_details"]["msa_residue_is_paired"] = np.zeros((1, num_tokens_in_example), dtype=bool)
             data["encoded"]["msa"] = full_encoded_msa
             # ...and we early return!
             return data
@@ -541,6 +561,20 @@ class FillFullMSAFromEncoded(Transform):
         )  # [n_rows, n_tokens_across_chains] (bool) 1 = padded, 0 = not padded
         full_msa_ins = np.zeros((n_rows, token_count), dtype=int)  # [n_rows, n_tokens_across_chains] (int)
 
+        # Sanity check on residue pairing feature
+        contains_residue_pairing_feature = "residue_is_paired" in data["polymer_msas_by_chain_id"][first_chain_id]
+        if self.add_residue_is_paired_feature != contains_residue_pairing_feature:
+            raise ValueError(
+                f"The residue pairing feature is {'not' if not contains_residue_pairing_feature else ''} present in the input MSA, "
+                f"but `add_residue_is_paired_feature` is set to {self.add_residue_is_paired_feature}."
+            )
+
+        # Instantiate residue pairing feature if requested
+        if self.add_residue_is_paired_feature:
+            full_msa_residue_is_paired = np.zeros(
+                (n_rows, token_count), dtype=bool
+            )  # [n_rows, n_tokens_across_chains] (bool)
+
         # Create a mask indicating whether any atom in each token is atomized
         is_token_atomized = apply_token_wise(atom_array, atom_array.atomize, np.any)  # [n_tokens_across_chains] (bool)
 
@@ -562,6 +596,10 @@ class FillFullMSAFromEncoded(Transform):
                     "msa_is_padded_mask"
                 ]  # [n_rows, n_res_in_chain] (bool)
                 msa_ins = data["polymer_msas_by_chain_id"][chain_id]["ins"]  # [n_rows, n_res_in_chain] (int)
+                if self.add_residue_is_paired_feature:
+                    residue_pairing = data["polymer_msas_by_chain_id"][chain_id][
+                        "residue_is_paired"
+                    ]  # [n_rows, n_res_in_chain] (bool)
 
                 # ... create a global mask to indicate whether any atom in each token is in this chain
                 global_is_token_in_chain = apply_token_wise(
@@ -584,6 +622,10 @@ class FillFullMSAFromEncoded(Transform):
                     :, within_poly_res_idx
                 ]  # [n_rows, n_non_atomized_res_in_chain] (bool)
                 subselected_msa_ins = msa_ins[:, within_poly_res_idx]  # [n_rows, n_non_atomized_res_in_chain] (int)
+                if self.add_residue_is_paired_feature:
+                    subselected_residue_pairing = residue_pairing[
+                        :, within_poly_res_idx
+                    ]  # [n_rows, n_non_atomized_res_in_chain] (bool)
 
                 # ... set all non-atomized tokens in this chain (e.g., full residues) to the subselected MSA
                 mask = global_is_token_in_chain & (~is_token_atomized)  # [n_tokens_across_chains] (bool)
@@ -592,12 +634,16 @@ class FillFullMSAFromEncoded(Transform):
                     subselected_msa_is_padded_mask  # [n_rows, n_tokens_across_chains] (bool)
                 )
                 full_msa_ins[:, mask] = subselected_msa_ins  # [n_rows, n_tokens_across_chains] (int)
+                if self.add_residue_is_paired_feature:
+                    full_msa_residue_is_paired[:, mask] = subselected_residue_pairing
                 token_idx_has_msa[mask] = True  # [n_tokens_across_chains] (bool)
 
         # ... for the first row, set the tokens directly from the output of the `Atomize` transform (i.e., the atomized tokens, and anything without an MSA)
         # (Note that this also handles setting the MSA for polymers without MSAs, and non-polymers)
         full_encoded_msa[0] = data["encoded"]["seq"]  # [n_tokens_across_chains] (int)
         full_msa_is_padded_mask[0] = False  # [n_tokens_across_chains] (bool)
+        if self.add_residue_is_paired_feature:
+            full_msa_residue_is_paired[0] = True  # [n_tokens_across_chains] (bool)
 
         data["encoded"]["msa"] = full_encoded_msa  # [n_rows, n_tokens_across_chains] (int)
         data["full_msa_details"] = {
@@ -606,6 +652,9 @@ class FillFullMSAFromEncoded(Transform):
             # The insertions are not yet encoded (still raw counts), so we store them separately
             "msa_raw_ins": full_msa_ins,  # [n_rows, n_tokens_across_chains] (int)
         }
+
+        if self.add_residue_is_paired_feature:
+            data["full_msa_details"]["msa_residue_is_paired"] = full_msa_residue_is_paired
 
         return data
 
@@ -1032,6 +1081,7 @@ class FeaturizeMSALikeAF3(Transform):
             n_msa=self.n_msa,
             encoding=self.encoding,
             eps=self.eps,
+            residue_is_paired=data["full_msa_details"].get("msa_residue_is_paired", None),
         )
 
         # ...add them to the data dictionary
@@ -1047,6 +1097,7 @@ def featurize_msa_like_af3(
     encoding: AF3SequenceEncoding,
     n_recycles: int,
     eps: float = 1e-6,
+    residue_is_paired: torch.Tensor | None = None,
 ) -> dict[str, list[torch.Tensor]]:
     """Functional version of FeaturizeMSALikeAF3. See FeaturizeMSALikeAF3 for more details."""
     # ...select either the first `n_msa` rows or all rows, whichever is smaller
@@ -1068,6 +1119,9 @@ def featurize_msa_like_af3(
         "insertion_value": [],  # [n_msa, n_tokens_across_chains] (float)
     }
 
+    if exists(residue_is_paired):
+        msa_features_per_recycle_dict["residue_is_paired"] = []
+
     for _ in range(n_recycles):
         # ...uniformly select n_msa sequences from the n_rows sequences in the (paired) MSA
         selected_indices, _ = uniformly_select_rows(n_rows, n_msa, preserve_first_index=True)
@@ -1078,6 +1132,8 @@ def featurize_msa_like_af3(
         )
         msa_features_per_recycle_dict["has_insertion"].append(msa_raw_ins[selected_indices] > 0)
         msa_features_per_recycle_dict["insertion_value"].append(transform_ins_counts(msa_raw_ins[selected_indices]))
+        if exists(residue_is_paired):
+            msa_features_per_recycle_dict["residue_is_paired"].append(residue_is_paired[selected_indices])
 
     # ...and the features that do not differ across recycles
     msa_static_features_dict = {

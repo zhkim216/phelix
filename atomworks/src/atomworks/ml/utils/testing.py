@@ -23,9 +23,9 @@ def get_pdb_mirror_path(pdbid: str, base_dir: str = PDB_MIRROR_PATH) -> str:
     return filename
 
 
-@immutable_lru_cache(maxsize=1000)
+@immutable_lru_cache(maxsize=1000, deepcopy=True)
 def cached_parse(pdb_id: str, **kwargs) -> dict:
-    """Wrapper around _cached_parse with caching to return an immutable copy of the output dict"""
+    """Wrapper around parse with caching to return an independent copy of the output dict."""
     data = parse(filename=get_pdb_mirror_path(pdb_id), **kwargs)
     if "atom_array" not in data:
         assembly_ids = list(data["assemblies"].keys())

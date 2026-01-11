@@ -5,7 +5,7 @@ import logging
 import numpy as np
 import pytest
 
-from atomworks.ml.datasets.datasets import get_row_and_index_by_example_id
+from atomworks.ml.datasets import get_row_and_index_by_example_id
 from atomworks.ml.utils.rng import create_rng_state_from_seeds, rng_state
 from tests.conftest import skip_if_on_github_runner
 
