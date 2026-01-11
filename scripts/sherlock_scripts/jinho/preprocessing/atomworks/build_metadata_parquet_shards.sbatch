@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=metadata_atomworks_pdb_full
 #SBATCH -p possu,normal,owners
-#SBATCH --array=0-19
-#SBATCH --cpus-per-task=4
+#SBATCH --array=0-99
+#SBATCH --cpus-per-task=8
 #SBATCH --time=6:00:00
-#SBATCH --mem=48GB
+#SBATCH --mem=16GB
 
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/users/zhkim216/job_output/data_preprocessing/job_%A_%a.out
@@ -34,7 +34,5 @@ python3 allatom_design/data/preprocessing/atomworks/build_metadata_parquet_shard
     num_workers=${SLURM_CPUS_PER_TASK} \
     num_shards=${NUM_SHARDS} \
     shard_id=${SLURM_ARRAY_TASK_ID} \
-    max_file_size=20000000 \
-    data_preprocessor_cfg.polymer_pn_unit_limit=1000 \
-    batch_size=50 \
-    max_tasks_per_child=25
+    max_file_size=5000000 \
+    data_preprocessor_cfg.polymer_pn_unit_limit=500
