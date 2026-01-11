@@ -76,5 +76,5 @@ transform_cfg_for_designed_samples:
 
 hydra:
   run:
-    dir: /home/possu/jinho/hydra_outputs
+    dir: /scratch/users/zhkim216/hydra_outputs
 

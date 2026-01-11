@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=run_sc_eval_rfd3_af3
-#SBATCH -p possu
+#SBATCH -p possu,bioe
 #SBATCH --array=0
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8

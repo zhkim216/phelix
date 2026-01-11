@@ -1,29 +1,29 @@
 # Wandb configuration
 wandb:
-  no_wandb: false  # Disable wandb logging
+  no_wandb: true  # Disable wandb logging
   project: "ligand_seq_des"  # Wandb project name
   wandb_id: "zhkim216"  # Wandb username
-  group: "eval" # Wandb group name
+  group: "eval_exp2" # Wandb group name
 
-# Run settings
+## Run settings
 seed: 0
 num_workers: 1  # for dataloading
-debug: false
-num_sample_debug: 10
-start_step: 75000  # start evaluation after this step, 0 or null to start from the beginning
-end_step: 75000  # end evaluation after this step (inclusive), null to evaluate until the end
-eval_every_n_ckpts: 1  # evaluate every n checkpoints, for speed
-eval_last_ckpt: true  # always include the last checkpoint even if not selected by eval_every_n_ckpts
-use_ema: false
+debug: true
+num_sample_debug: 2
+start_step: 52500  # start evaluation after this step, 0 or null to start from the beginning
+end_step: 52500 # end evaluation after this step (inclusive), null to evaluate until the end
+eval_every_n_ckpts: 4  # evaluate every n checkpoints, for speed
+eval_last_ckpt: false
+use_ema: true
 evaluate_self_consistency: true
 evaluate_template_conditioned_docking: true
-protein_only: true
+protein_only: false
 fix_pocket_seq: true
 pocket_distance: 5.0
 
 # Skip sampling options (use when sampling is already done)
 skip_sampling: false  # if true, skip sampling and load from skip_sampling_dir
-skip_sampling_dir: null  # directory containing samples/ folder from previous run (e.g., /path/to/exp_name/step_75000_epoch_47)
+skip_sampling_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des/debug_eval_af3_exp1_cfg0/step_55000_epoch_35  # directory containing samples/ folder from previous run (e.g., /path/to/exp_name/step_75000_epoch_47)
 
 # Metadata
 metadata_path: /scratch/users/zhkim216/datasets/atomworks_boltz2_valset/interface_df.parquet
@@ -60,6 +60,7 @@ data_cfg_for_design:
     include_nan_coords: False
     include_bonds: True
     extra_fields: "all"
+    exclude_field_keys: ["token_id", "is_ligand_pocket"]
     extra_categories:
       pdbx_audit_revision_history:
         ordinal: [1]
@@ -118,17 +119,15 @@ transform_cfg_for_af3_prediction:
     remove_terminal_oxygen_nucleic_acid: False
 
 # Denoiser options
-denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp1_cfg0
+denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp2_cfg2
 sampling_cfg_overrides:
-  batch_size: 2
-  num_seqs_per_pdb: 2  # number of sequences to sample per pdb
+  batch_size: 1
+  num_seqs_per_pdb: 1 # number of sequences to sample per pdb
   omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
   noise_labels: null
   num_workers: ${num_workers}
   use_potts_sampling: true
   ligand_conditioning: true
-  ligand_pocket_dist_cutoff: 5.0
-  small_molecule_only: true
   potts_sampling_cfg:
     potts_sweeps: 500
     lcp_expand_edge_idx_fix: true
@@ -175,7 +174,7 @@ struct_pred_cfg:
         max_template_date: "2021-09-30"
 
 docking_metrics_cfg:
-  binding_site_radius: ${pocket_distance}  # Radius for binding site superposition in docking metrics
+  pocket_distance_for_align: 8.0  # Radius for binding site superposition in docking metrics
   save_aligned: true
   
 hydra:

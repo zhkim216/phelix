@@ -41,7 +41,7 @@ from allatom_design.data.transform.custom_transforms import annotate_ligand_pock
 
 
 
-@hydra.main(config_path="../configs_local/eval", config_name="run_sc_eval_af3", version_base="1.3.2")
+@hydra.main(config_path="../configs/eval", config_name="run_sc_eval_af3", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Run AF3 self-consistency evaluation.
