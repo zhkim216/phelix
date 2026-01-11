@@ -5,10 +5,15 @@ Build metadata parquet shards from mmCIF files using AtomWorks.
 This script adds a minimal per-file timeout to avoid hanging on
 pathological structures. Other behavior is kept identical to the
 original implementation.
+
+Features:
+- Batch processing with intermediate saves for OOM resilience
+- Resume support: skips already processed files on restart
 """
 
 import glob
 import itertools
+import json
 import signal
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor
@@ -153,70 +158,109 @@ def main(cfg: DictConfig):
         print(f"Shard {cfg.shard_id}: no files to process, exiting.")
         return
 
-    # Prepare logging file path (summary of skipped files)
+    # Prepare paths for intermediate saves and progress tracking
     log_file = shard_dir / f"metadata_shard_{cfg.shard_id:05d}.log"
+    progress_file = shard_dir / f"metadata_shard_{cfg.shard_id:05d}_progress.json"
+    batch_dir = shard_dir / f"shard_{cfg.shard_id:05d}_batches"
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Load progress if resuming
+    processed_paths: set[str] = set()
+    completed_batches: set[int] = set()
+    if progress_file.exists():
+        try:
+            with open(progress_file, 'r') as f:
+                progress_data = json.load(f)
+                processed_paths = set(progress_data.get('processed_paths', []))
+                completed_batches = set(progress_data.get('completed_batches', []))
+            print(f"Resuming: found {len(processed_paths)} already processed files, {len(completed_batches)} completed batches.")
+        except Exception as e:
+            print(f"Warning: could not load progress file: {e}")
     
     # Track skipped details with reasons
     skipped_with_reason: list[tuple[str, str, str]] = []  # (path, reason, message)
+    
+    # Batch processing settings
+    batch_size = getattr(cfg, 'batch_size', 100)
+    max_tasks_per_child = getattr(cfg, 'max_tasks_per_child', 50)
+    total_batches = (len(cif_paths) + batch_size - 1) // batch_size
 
     # Process files (sequential or parallel with per-file timeouts)
     if use_parallel:
-        # Build args for workers once
         preprocessor_args = {**cfg.cif_parser_args, **cfg.data_preprocessor_cfg}
         timeout = getattr(cfg, 'processing_timeout', 300)
-        # Pre-allocate results in input order to preserve deterministic ordering
-        results_list = [None] * len(cif_paths)
         
-        # Process in batches to handle OOM gracefully
-        batch_size = getattr(cfg, 'batch_size', 100)  # Configurable batch size
-        max_tasks_per_child = getattr(cfg, 'max_tasks_per_child', 50)  # Restart workers periodically to prevent memory leaks
-        
-        for batch_start in range(0, len(cif_paths), batch_size):
+        for batch_idx in range(total_batches):
+            batch_num = batch_idx + 1
+            
+            # Skip already completed batches
+            if batch_num in completed_batches:
+                print(f"Skipping already completed batch {batch_num}/{total_batches}")
+                continue
+            
+            batch_start = batch_idx * batch_size
             batch_end = min(batch_start + batch_size, len(cif_paths))
             batch_paths = cif_paths[batch_start:batch_end]
+            batch_results = []
             
             try:
-                # Use ProcessPoolExecutor with maxtasksperchild to prevent memory leaks
                 with ProcessPoolExecutor(
                     max_workers=cfg.num_workers, 
                     initializer=_init_worker,
                     initargs=(preprocessor_args, timeout),
-                    max_tasks_per_child=max_tasks_per_child  # Restart workers periodically
+                    max_tasks_per_child=max_tasks_per_child
                 ) as executor:
-                    batch_results = list(tqdm(
+                    for idx, res in enumerate(tqdm(
                         executor.map(_process_cif_worker, batch_paths, chunksize=1),
                         total=len(batch_paths), 
-                        desc=f"Processing mmCIFs (shard {cfg.shard_id}, batch {batch_start//batch_size + 1})"
-                    ))
-                    
-                    for idx, res in enumerate(batch_results):
-                        global_idx = batch_start + idx
+                        desc=f"Processing mmCIFs (shard {cfg.shard_id}, batch {batch_num}/{total_batches})"
+                    )):
                         status, payload = res
                         if status == 'ok':
-                            results_list[global_idx] = payload
+                            batch_results.append(payload)
                         else:
                             message = payload if isinstance(payload, str) else repr(payload)
-                            skipped_with_reason.append((cif_paths[global_idx], status, message))
-                            results_list[global_idx] = []
+                            skipped_with_reason.append((batch_paths[idx], status, message))
+                            batch_results.append([])
                             
             except Exception as e:
-                # Handle BrokenProcessPool or other pool errors gracefully
-                print(f"WARNING: Batch {batch_start//batch_size + 1} failed with error: {repr(e)}")
+                print(f"WARNING: Batch {batch_num} failed with error: {repr(e)}")
                 print(f"Falling back to sequential processing for this batch...")
                 
                 for idx, cif_path in enumerate(batch_paths):
-                    global_idx = batch_start + idx
-                    if results_list[global_idx] is not None:
-                        continue  # Already processed
+                    if idx < len(batch_results):
+                        continue
                     try:
-                        # Reinitialize processor for fallback
                         fallback_processor = DataPreprocessor(**preprocessor_args)
                         res = fallback_processor.get_rows(cif_path)
-                        results_list[global_idx] = res
+                        batch_results.append(res)
                     except Exception as fallback_e:
                         skipped_with_reason.append((cif_path, 'fallback_error', repr(fallback_e)))
-                        results_list[global_idx] = []
+                        batch_results.append([])
+            
+            # Save batch parquet immediately
+            batch_df = pd.DataFrame(itertools.chain(*batch_results))
+            if not batch_df.empty:
+                # Add columns before saving
+                _add_parquet_columns(batch_df, dataset_name, cfg.mmcif_dir)
+                batch_parquet = batch_dir / f"batch_{batch_num:05d}.parquet"
+                batch_df.to_parquet(batch_parquet)
+                print(f"Saved batch {batch_num} with {len(batch_df)} rows to {batch_parquet}")
+            
+            # Update progress
+            processed_paths.update(batch_paths)
+            completed_batches.add(batch_num)
+            try:
+                with open(progress_file, 'w') as f:
+                    json.dump({
+                        'processed_paths': list(processed_paths),
+                        'completed_batches': list(completed_batches)
+                    }, f)
+            except Exception:
+                pass
+                
     else:
+        # Sequential mode - process all at once, save as single batch
         results_list = []
         for cif_path in tqdm(cif_paths, desc=f"Processing mmCIFs (shard {cfg.shard_id})"):
             try:
@@ -230,30 +274,66 @@ def main(cfg: DictConfig):
             except Exception as e:
                 skipped_with_reason.append((cif_path, 'error', repr(e)))
                 results_list.append([])
-
-    # Flatten list of lists and create DataFrame
-    df = pd.DataFrame(itertools.chain(*results_list))
+        
+        batch_df = pd.DataFrame(itertools.chain(*results_list))
+        if not batch_df.empty:
+            _add_parquet_columns(batch_df, dataset_name, cfg.mmcif_dir)
+            batch_parquet = batch_dir / "batch_00001.parquet"
+            batch_df.to_parquet(batch_parquet)
 
     # Write summary log for skipped files
     try:
         with open(log_file, 'w') as f:
-            f.write(f"Shard {cfg.shard_id}: processed={len(results_list)}\n")
+            f.write(f"Shard {cfg.shard_id}: total_files={len(cif_paths)}, completed_batches={len(completed_batches)}\n")
             f.write(f"Skipped {len(skipped_with_reason)} files:\n")
             for p, reason, message in skipped_with_reason:
                 f.write(f"SKIPPED\t{reason}\t{message}\t{p}\n")
     except Exception:
-        # Logging should never crash the run
         pass
 
-    # If nothing produced, skip writing
-    if df.empty:
-        print(f"Shard {cfg.shard_id}: produced 0 rows, skipping parquet write.")
-        return
+    # Merge batch parquets into final shard parquet
+    _merge_batch_parquets(batch_dir, shard_dir, cfg.shard_id)
 
-    # Write one parquet per shard
-    shard_out = shard_dir / f"metadata_shard_{cfg.shard_id:05d}.parquet"
-    save_to_parquet(df, dataset_name, cfg.mmcif_dir, str(shard_out))
-    print(f"Shard {cfg.shard_id}: wrote {len(df)} rows to {shard_out}")
+
+def _add_parquet_columns(df: pd.DataFrame, dataset_name: str, pdb_in_dir: str):
+    """Add example_id and rel_path columns to dataframe (in-place)."""
+    # Convert all object columns to string
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = df[col].astype(str)
+    
+    # Add example_id
+    df["example_id"] = df.apply(
+        lambda x: generate_example_id(
+            [str(dataset_name)],
+            str(x["pdb_id"]),
+            str(x["assembly_id"]),
+            [str(x["q_pn_unit_iid"])],
+        ),
+        axis=1,
+    )
+    
+    # Add relative path
+    df["rel_path"] = df["path"].apply(lambda x: str(Path(x).relative_to(pdb_in_dir)))
+
+
+def _merge_batch_parquets(batch_dir: Path, shard_dir: Path, shard_id: int):
+    """Merge all batch parquets into a single shard parquet."""
+    batch_files = sorted(batch_dir.glob("batch_*.parquet"))
+    if not batch_files:
+        print(f"Shard {shard_id}: no batch files to merge.")
+        return
+    
+    dfs = [pd.read_parquet(f) for f in batch_files]
+    df = pd.concat(dfs, ignore_index=True)
+    
+    if df.empty:
+        print(f"Shard {shard_id}: produced 0 rows after merging.")
+        return
+    
+    shard_out = shard_dir / f"metadata_shard_{shard_id:05d}.parquet"
+    df.to_parquet(shard_out)
+    print(f"Shard {shard_id}: merged {len(batch_files)} batches, wrote {len(df)} rows to {shard_out}")
 
 
 def get_cif_paths(mmcif_dir: str, max_file_size: int | None = None) -> list[str]:
@@ -279,35 +359,6 @@ def get_cif_paths(mmcif_dir: str, max_file_size: int | None = None) -> list[str]
     return cif_paths
 
 
-def save_to_parquet(df: pd.DataFrame,
-                    dataset_name: str,
-                    pdb_in_dir: str,
-                    out_path: str):
-    """
-    Save a dataframe to parquet.
-    Also adds an example_id column based on the name of the dataset.
-    """
-    # Convert all object columns to string to save to parquet
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            df[col] = df[col].astype(str)
-    
-    # Add example_id based on the name of this dataset
-    df["example_id"] = df.apply(
-            lambda x: generate_example_id(
-                [str(dataset_name)],
-                str(x["pdb_id"]),
-                str(x["assembly_id"]),
-                [str(x["q_pn_unit_iid"])],
-            ),
-            axis=1,
-        )
-
-    # Add in relative path
-    df["rel_path"] = df["path"].apply(lambda x: str(Path(x).relative_to(pdb_in_dir)))
-
-    df.to_parquet(out_path)
-    print(f"Saved {len(df)} rows to {out_path}")
 
 
 if __name__ == "__main__":
