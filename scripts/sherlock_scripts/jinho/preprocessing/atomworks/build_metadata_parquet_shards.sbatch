@@ -2,9 +2,9 @@
 #SBATCH --job-name=metadata_atomworks_pdb_full
 #SBATCH -p possu,normal,owners
 #SBATCH --array=0-99
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=4
 #SBATCH --time=6:00:00
-#SBATCH --mem=16GB
+#SBATCH --mem=64GB
 
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/users/zhkim216/job_output/data_preprocessing/job_%A_%a.out
