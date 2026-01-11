@@ -1,3 +1,4 @@
-pdb_path: /scratch/users/zhkim216/datasets/atomworks_af3_re
-parquet_path: /scratch/users/zhkim216/datasets/atomworks_af3_re/metadata_nuc_clustered.parquet
-seq_id_threshold: 0.3 #! same as LMPNN
+pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full
+parquet_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full/metadata.parquet
+exclude_chain_types: ["POLYPEPTIDE(D)", "PEPTIDE NUCLEIC ACID", "OTHER"]
+seq_id_threshold: 0.4 #! same as LMPNN
