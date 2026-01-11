@@ -1,10 +1,10 @@
-mmcif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/pdbs
-out_dir: /home/possu/jinho/datasets/debug_atomworks_lmpnn
+mmcif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs
+out_dir: /home/possu/jinho/datasets/atomworks_lmpnnval_ld
 
-num_workers: 8
+num_workers: 20
 
 dataset:
-  _target_: atomworks.ml.datasets.datasets.PandasDataset
+  _target_: atomworks.ml.datasets.PandasDataset
   data: ${out_dir}/metadata_for_caching.parquet
   name: pdb
   id_column: example_id
@@ -30,14 +30,20 @@ dataset:
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: ['NA', 'CL', 'K', 'BR']
+  remove_ccds: ["UNX", "N", "DN", "UNL", "UNK"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
   hydrogen_policy: "remove"
+  add_bond_types_from_struct_conn: ["covale"]
 
-preprocess:
-  min_residues_for_polymers: 1 #! 251102 (JH) fixed
+preprocess_cfg:
+  undesired_res_names: ["UNX", "N", "DN", "UNL", "UNK"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
+  b_factor_min: null
+  b_factor_max: null
+  min_residues_for_polymers: 1
+  remove_terminal_oxygen_protein: true
+  remove_terminal_oxygen_nucleic_acid: true
 
 # --- sharding for multi-node runs ---
 num_shards: 1   # total number of shards
