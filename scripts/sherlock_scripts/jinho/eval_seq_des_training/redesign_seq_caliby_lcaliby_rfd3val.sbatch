@@ -40,6 +40,7 @@ POCKET_DISTANCES=(4.0 5.0 6.0)
 # Input paths
 METADATA_PATH=null
 CACHED_EXAMPLE_PATH=null
+POS_CONSTRAINT_CSV_DIR=/scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lcaliby_pos_constraint_df
 PDB_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_caliby_rfd3val_af3/original_samples
 PDB_NAME_LIST=/scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/rfd3_min_max_median_len150_filtered_nonsimilar_ccd_clustered03_caliby_sample.txt   # null to use all files in pdb_dir
 LIGAND_SOURCE_PATH=/scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
@@ -53,10 +54,13 @@ for POCKET_DISTANCE in "${POCKET_DISTANCES[@]}"; do
     # Experiment name (step is not included, step folder is created under base_out_dir/exp_name)
     EXP_NAME=eval_caliby_${MODEL_NAME}_redesign_${POCKET_DISTANCE}_rfd3val_af3
     
+    # Set pos_constraint_csv based on pocket_distance
+    POS_CONSTRAINT_CSV=${POS_CONSTRAINT_CSV_DIR}/eval_caliby_lcaliby_redesign_rf3val_pos_constraint_scaffold_${POCKET_DISTANCE}A.csv
+    
     echo "Running with pocket_distance=${POCKET_DISTANCE}, exp_name=${EXP_NAME}"
     
     # Run evaluation script
-    WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/redesign_pocket_seq.py \
+    WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/redesign_seq.py \
         wandb.no_wandb=false \
         wandb.project=${PROJECT} \
         wandb.wandb_id=${WANDB_ID} \
@@ -65,6 +69,7 @@ for POCKET_DISTANCE in "${POCKET_DISTANCES[@]}"; do
         seed=0 \
         num_workers=${SLURM_CPUS_PER_TASK} \
         metadata_path=${METADATA_PATH} \
+        pos_constraint_csv=${POS_CONSTRAINT_CSV} \
         exp_name=${EXP_NAME} \
         base_out_dir=${BASE_OUT_DIR} \
         seq_des_cfg.denoiser_train_dir=${DENOISER_TRAIN_DIR} \
