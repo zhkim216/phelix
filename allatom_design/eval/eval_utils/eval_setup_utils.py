@@ -199,9 +199,11 @@ def get_training_checkpoints(
                     filtered_ckpts.append(ckpt)
             else:
                 raise ValueError(f"Unexpected checkpoint filename: {Path(ckpt).name}")
+    else:
+        filtered_ckpts = all_ckpts
 
     ckpts = filtered_ckpts[::eval_every_n_ckpts]
-    
+
     # Include the last checkpoint if eval_last_ckpt is True and it's not already included
     if eval_last_ckpt and all_ckpts and all_ckpts[-1] not in ckpts:
         ckpts.append(all_ckpts[-1])

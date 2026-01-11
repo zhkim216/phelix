@@ -560,12 +560,13 @@ def evaluate_af3_consistency(sample_id_list: list[str] = None,
         if len(pred_ss_sample_paths) == 0:
             print(f"No AF3 predicted structure found for {pdb_id}")
             continue
-        
+                
         else:   
             sample_id_to_per_pred_sc_metrics[sample_id] = {}      
             sample_id_to_per_pred_docking_metrics[sample_id] = {}                                          
             for pred_idx, pred_ss_sample_path in enumerate(pred_ss_sample_paths):
                 try:
+                    # import ipdb; ipdb.set_trace()
                     pred_example = get_sd_example_from_af3_prediction(
                         pdb_path=pred_ss_sample_path,
                         data_cfg=cfg.data_cfg_for_af3_prediction,
@@ -743,7 +744,7 @@ def _save_metrics_results(out_dir: Path,
 # Main
 ###########################################################
 
-@hydra.main(config_path="../../configs_local/eval/sampling", config_name="redesign_pocket_seq", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/sampling", config_name="redesign_pocket_seq", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Redesign pocket sequence using native sequence or lcaliby.
@@ -787,8 +788,7 @@ def main(cfg: DictConfig):
         sample_dict=sample_dict, 
         cfg=cfg, 
         save_dir=processed_original_samples_dir
-    )
-    
+    )    
     ###########################################################
     # Phase 2: Redesign pocket sequence
     ###########################################################

@@ -7,14 +7,17 @@
 #SBATCH --mem=16GB
 
 # Send stdout and stderr to logs
-#SBATCH --output=/scratch/users/zhkim216/slurm_log_files/job_%A_%a.out
-#SBATCH --error=/scratch/users/zhkim216/slurm_log_files/job_%A_%a.err
+#SBATCH --output=/scratch/users/zhkim216/job_output/data_preprocessing/job_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/data_preprocessing/job_%A_%a.err
 
 ## Load modules and set environment variables:
 BASE_DIR=/home/users/zhkim216/code/allatom-design
 
 export PDB_MIRROR_PATH="/scratch/users/zhkim216/datasets/pdb_mirror"
 export CCD_MIRROR_PATH="/scratch/users/zhkim216/datasets/ccd_mirror"
+
+# Create output directories if they don't exist
+mkdir -p /scratch/users/zhkim216/job_output/data_preprocessing
 
 cd ${BASE_DIR}
 

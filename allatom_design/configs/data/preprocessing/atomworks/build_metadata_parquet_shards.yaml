@@ -4,7 +4,7 @@ out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full
 num_workers: 31
 max_file_size: 20000000
 
-# Data preprocessor args to specify in addition to the cif parser args
+# Data preprocessor args
 data_preprocessor_cfg:
   from_rcsb: true
   build_assembly: "first"

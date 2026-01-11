@@ -33,7 +33,6 @@ export XLA_CLIENT_MEM_FRACTION=0.95
 
 # Paths
 export SIF=/scratch/users/zhkim216/containers/lullaby.sif
-export VENV=/scratch/users/zhkim216/venv/lullaby
 export SCRATCH=/scratch/users/zhkim216
 
 # Project root (Parent directory of the scripts)
@@ -46,4 +45,3 @@ echo "Environment loaded:"
 echo "  PROJECT_ROOT: $PROJECT_ROOT"
 echo "  CUDA_HOME: $CUDA_HOME"
 echo "  SIF: $SIF"
-echo "  VENV: $VENV"

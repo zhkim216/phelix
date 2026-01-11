@@ -719,6 +719,7 @@ def run_lc_seq_des_prev(
             #! Revert, directly use AnnotateLigandPockets transform instead of initialize_pocket_mask
             # If fix_pocket_seq is enabled, create pos_constraint_df from ligand pocket
             if fix_pocket_seq:
+                pos_constraint_df = None
                 pos_constraint_df = create_pos_constraint_from_ligand_pocket(batch)
                 print(f"Created pos_constraint_df from ligand pocket: {pos_constraint_df}")
                                         
