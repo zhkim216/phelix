@@ -39,9 +39,6 @@ class DataPreprocessor:
     contact_distance: float = 5
     second_shell_distance: float = 8
     clash_distance: float = 1.0
-    # (Contact requirements)
-    min_contacts_required: int = 1
-    min_contacts_required_for_metals: int = 3
     # (Misc)
     ignore_residues: list[str] = field(default_factory=list)
     # (Efficiency)
