@@ -30,6 +30,6 @@ def main(out_dir: str):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out_dir", default="/home/possu/jinho/datasets/atomworks_lmpnnval")
+    ap.add_argument("--out_dir", default="/scratch/users/zhkim216/datasets/atomworks_lmpnnval")
     args = ap.parse_args()
     main(args.out_dir)
