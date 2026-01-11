@@ -53,7 +53,7 @@ def _process_cif_worker(cif_path: str):
     old_handler = signal.signal(signal.SIGALRM, _worker_timeout_handler)
     signal.alarm(TIMEOUT_SECS)
     try:
-        result, _ = PROCESSOR.get_rows(cif_path, return_filtered_atom_array=False)
+        result = PROCESSOR.get_rows(cif_path)
         signal.alarm(0)
         return ('ok', result)
     except TimeoutError:
@@ -65,7 +65,7 @@ def _process_cif_worker(cif_path: str):
         signal.signal(signal.SIGALRM, old_handler)
 
 
-@hydra.main(config_path="../../../configs_local/data/preprocessing/atomworks", config_name="build_metadata_parquet_shards_for_debug", version_base="1.3.2")
+@hydra.main(config_path="../../../configs_local/data/preprocessing/atomworks", config_name="build_metadata_parquet_shards", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Process a set of mmCIFs using AtomWorks.
@@ -121,7 +121,7 @@ def main(cfg: DictConfig):
         signal.alarm(timeout)
         
         try:
-            result, _ = processor.get_rows(cif_path, return_filtered_atom_array=False)
+            result = processor.get_rows(cif_path)
             signal.alarm(0)  # Cancel the alarm
             return result
         except TimeoutError:
