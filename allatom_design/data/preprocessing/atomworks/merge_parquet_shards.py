@@ -1,19 +1,83 @@
 #!/usr/bin/env python3
+"""
+Merge parquet shards into a single metadata file.
+
+This script handles two cases:
+1. Final shard parquets: shards/metadata_shard_*.parquet
+2. Batch parquets (for incomplete shards): shards/shard_*_batches/batch_*.parquet
+
+If a shard's final parquet doesn't exist but batch parquets do, 
+they will be merged first.
+"""
 import argparse
 import glob
 from pathlib import Path
 
 import pandas as pd
+from tqdm import tqdm
 
 
-def main(out_dir: str):
+def merge_batch_parquets_for_shard(batch_dir: Path, shard_dir: Path, shard_id: int) -> Path | None:
+    """Merge batch parquets for a single shard if final parquet doesn't exist."""
+    shard_parquet = shard_dir / f"metadata_shard_{shard_id:05d}.parquet"
+    
+    # If final shard parquet already exists, use it
+    if shard_parquet.exists():
+        return shard_parquet
+    
+    # Otherwise, try to merge batch parquets
+    batch_files = sorted(batch_dir.glob("batch_*.parquet"))
+    if not batch_files:
+        return None
+    
+    print(f"  Merging {len(batch_files)} batch files for shard {shard_id}...")
+    dfs = [pd.read_parquet(f) for f in batch_files]
+    df = pd.concat(dfs, ignore_index=True)
+    
+    if df.empty:
+        return None
+    
+    df.to_parquet(shard_parquet)
+    print(f"  Created {shard_parquet} with {len(df)} rows")
+    return shard_parquet
+
+
+def main(out_dir: str, merge_batches: bool = True):
     out = Path(out_dir)
     shard_dir = out / "shards"
+    
+    if not shard_dir.exists():
+        raise SystemExit(f"Shard directory not found: {shard_dir}")
+    
+    # First, merge any incomplete batch parquets into shard parquets
+    if merge_batches:
+        batch_dirs = sorted(shard_dir.glob("shard_*_batches"))
+        if batch_dirs:
+            print(f"Found {len(batch_dirs)} batch directories, checking for incomplete shards...")
+            for batch_dir in batch_dirs:
+                # Extract shard_id from directory name (shard_00001_batches -> 1)
+                try:
+                    shard_id = int(batch_dir.name.split("_")[1])
+                    merge_batch_parquets_for_shard(batch_dir, shard_dir, shard_id)
+                except (ValueError, IndexError):
+                    print(f"  Warning: Could not parse shard_id from {batch_dir.name}")
+    
+    # Now collect all shard parquets
     shard_files = sorted(glob.glob(str(shard_dir / "metadata_shard_*.parquet")))
     if not shard_files:
         raise SystemExit(f"No shard files found in {shard_dir}")
+    
     print(f"Found {len(shard_files)} shard files, concatenating...")
-    dfs = [pd.read_parquet(p) for p in shard_files]
+    dfs = []
+    for p in tqdm(shard_files, desc="Loading shards"):
+        try:
+            dfs.append(pd.read_parquet(p))
+        except Exception as e:
+            print(f"  Warning: Failed to read {p}: {e}")
+    
+    if not dfs:
+        raise SystemExit("No valid parquet files found")
+    
     df = pd.concat(dfs, ignore_index=True)
 
     # Write combined metadata
@@ -26,10 +90,19 @@ def main(out_dir: str):
     cache_path = out / "metadata_for_caching.parquet"
     df_cache.to_parquet(cache_path)
     print(f"Wrote {len(df_cache)} rows to {cache_path}")
+    
+    # Print summary
+    print(f"\nSummary:")
+    print(f"  Total shards merged: {len(shard_files)}")
+    print(f"  Total rows: {len(df)}")
+    print(f"  Unique PDB IDs: {len(df_cache)}")
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--out_dir", default="/scratch/users/zhkim216/datasets/atomworks_lmpnnval")
+    ap = argparse.ArgumentParser(description="Merge parquet shards into a single metadata file")
+    ap.add_argument("--out_dir", default="/home/possu/jinho/datasets/atomworks_lmpnnval",
+                    help="Output directory containing shards/ subdirectory")
+    ap.add_argument("--no-merge-batches", action="store_true",
+                    help="Skip merging batch parquets for incomplete shards")
     args = ap.parse_args()
-    main(args.out_dir)
+    main(args.out_dir, merge_batches=not args.no_merge_batches)
