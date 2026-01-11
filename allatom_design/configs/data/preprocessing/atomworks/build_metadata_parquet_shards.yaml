@@ -4,6 +4,11 @@ out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full
 num_workers: 31
 max_file_size: 5000000
 
+# OOM resilience settings
+processing_timeout: 300       # Per-file timeout in seconds
+batch_size: 50                # Save intermediate results every N files (enables resume)
+max_tasks_per_child: 25       # Restart workers periodically to prevent memory leaks
+
 # Data preprocessor args
 data_preprocessor_cfg:
   from_rcsb: true
