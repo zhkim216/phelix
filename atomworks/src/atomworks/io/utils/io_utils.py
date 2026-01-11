@@ -1337,9 +1337,9 @@ def _to_cif_or_bcif(
         structure.bonds.convert_bond_type(struc.bonds.BondType.COORDINATION, struc.bonds.BondType.SINGLE)
         # mask = structure.bonds._bonds[:, 2] == struc.bonds.BondType.COORDINATION
         # structure.bonds._bonds[mask, 2] = struc.bonds.BondType.SINGLE
-
+    
     pdbx.set_structure(cif_file, structure, data_block=id, include_bonds=include_bonds, extra_fields=extra_fields)
-
+    
     # Add extra categories if provided
     extra_categories = extra_categories or {}
     if extra_categories:
