@@ -55,7 +55,7 @@ def get_pdb_files(pdb_dir: str | None,
     """
     # Read in PDB files from directory or list of PDB names
     if pdb_name_list is not None:
-        if isinstance(pdb_name_list, np.ndarray): #! From metadata
+        if isinstance(pdb_name_list, np.ndarray): 
             pdb_name_list = pdb_name_list.tolist()
             pdb_names = [f"{Path(name).with_suffix(pdb_name_ext)}" for name in pdb_name_list]
             pdb_files = [f"{pdb_dir}/{name}" for name in pdb_names]

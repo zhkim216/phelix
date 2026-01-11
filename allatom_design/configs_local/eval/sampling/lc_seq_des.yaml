@@ -1,6 +1,7 @@
 # Redesign pocket sequence config
 # This config is for evaluating pre-designed samples from CaliBy codebase
 
+########### Basic settings #########
 # Wandb settings
 wandb:
   no_wandb: true  # Disable wandb logging
@@ -10,7 +11,7 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 2
+num_debug_samples: 1
 seed: 0
 num_workers: 0 # for dataloading
 
@@ -18,22 +19,22 @@ num_workers: 0 # for dataloading
 metadata_path: null
 
 # Outputs
-exp_name: caliby_lcaliby_redesign_rfd3val_2 # experiment name; used for wandb and output directory
-base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
+exp_name: caliby_lcaliby_redesign_rfd3val # experiment name; used for wandb and output directory
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260111
 
 # Sequence design config
 seq_des_cfg:  
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp2_cfg2
+  denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp2_cfg2
   ckpt_cfg:
     start_step: 22500
     end_step: 22500
     eval_every_n_ckpts: 1
     eval_last_ckpt: false
-    use_ema: true      
+    use_ema: true
   atom_mpnn:
     ckpt_path: null
-    sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
+    sampling_cfg: /home/possu/jinho/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
     overrides:
       batch_size: 1
       num_seqs_per_pdb: 2  # number of sequences to sample per pdb
@@ -46,11 +47,12 @@ seq_des_cfg:
         potts_sweeps: 500
         lcp_expand_edge_idx_fix: true
 
-pos_constraint_csv: /scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lcaliby_pos_constraint_df/eval_caliby_lcaliby_redesign_rf3val_pos_constraint_scaffold_4.0A.csv
-
+# Positional constraints: supports columns in [pdb_key,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
+# e.g. 2fyzA,"A1-100,B1-100","A1-100"
+pos_constraint_csv: null
+  
 # Redesign pocket sequence options
 redesign_cfg:
-  redesign_seq: true
   use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
   pocket_distance: 5.0
 
@@ -63,16 +65,16 @@ is_all_atom_sample: false
 sample_is_designed: true
 load_from_cache: false
 
-# Configurations for getting designed structures' paths
+# Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_caliby_rfd3val_af3/original_samples
-  pdb_name_list: /scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/rfd3_min_max_median_len150_filtered_nonsimilar_ccd_clustered03_caliby_sample.txt   # null to use all files in pdb_dir
+  pdb_dir: /home/possu/jinho/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
+  pdb_name_list: /home/possu/jinho/datasets/val_cifs/rfd3_ligand_conditional/rfd3_min_max_median_len150_filtered_nonsimilar_ccd_clustered03.txt
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
 
 # Configurations for loading ligand atom arrays from ligand source path
 ligand_source_cfg:
-  ligand_source_path: /scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
+  ligand_source_path: /home/possu/jinho/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
   add_ligands_to_designed_samples: false
   source_is_designed: true
 
@@ -153,7 +155,7 @@ featurizer_cfg:
     max_atoms: null
     remove_keys: []    
     remove_unresolved_tokens: true
-    residue_cache_dir: "/scratch/users/zhkim216/datasets/atomworks_cached_residue_data"
+    residue_cache_dir: "/home/possu/jinho/datasets/atomworks_cached_residue_data"
     max_conformers_per_residue: 50
     apply_random_augmentation: false
     translation_scale: 1.0
@@ -169,22 +171,21 @@ featurizer_cfg:
     remove_keys: []    
     remove_unresolved_tokens: true
 
-
 ######### Structure prediction model configuration (AF3) #########
 struct_pred_cfg:
   model_name: "af3"
   evaluate_self_consistency: true
   calculate_metrics_only: false
   af3:
-    runner_path: /home/users/zhkim216/code/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
+    runner_path: /home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py
     json_config:
       model_seeds: [42]
       version: 2
     inference_config:
       base:
-        model_dir: /scratch/users/zhkim216/model_params/af3
-        db_dir: /scratch/users/zhkim216/af3_databases
-        flash_attention_implementation: "triton"
+        model_dir: /home/possu/jinho/model_params/af3
+        db_dir: /home/possu/jinho/af3_databases
+        flash_attention_implementation: "xla"
       ss:  # Single-sequence prediction config
         num_recycles: 1
         num_diffusion_samples: 1
@@ -203,4 +204,4 @@ struct_pred_cfg:
 
 hydra:
   run:
-    dir: /scratch/users/zhkim216/hydra_outputs
+    dir: /home/possu/jinho/hydra_outputs
