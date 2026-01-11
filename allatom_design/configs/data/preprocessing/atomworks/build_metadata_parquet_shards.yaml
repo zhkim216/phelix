@@ -19,7 +19,7 @@ data_preprocessor_cfg:
   contact_distance: 5
   clash_distance: 1.0
   # Misc
-  ignore_residues: ["UNL", "UNX"]
+  ignore_residues: ["UNL", "UNX"] #! unknown ligands, and atoms
   # Efficiency
   polymer_pn_unit_limit: 500
 
@@ -27,7 +27,7 @@ data_preprocessor_cfg:
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: ["UNL", "UNX"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
+  remove_ccds: ["UNL", "UNX"] #! unknown ligands, and atoms
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
