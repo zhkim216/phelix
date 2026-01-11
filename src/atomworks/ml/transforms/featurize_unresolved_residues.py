@@ -9,6 +9,7 @@ from typing import Any, ClassVar
 import numpy as np
 from biotite.structure import AtomArray
 
+from atomworks.common import exists
 from atomworks.constants import NUCLEIC_ACID_FRAME_ATOM_NAMES, PROTEIN_FRAME_ATOM_NAMES
 from atomworks.enums import ChainTypeInfo
 from atomworks.ml.transforms._checks import check_atom_array_annotation, check_contains_keys, check_is_instance
@@ -170,7 +171,10 @@ class MaskPolymerResiduesWithUnresolvedFrameAtoms(Transform):
 
 
 def place_unresolved_token_on_closest_resolved_token_in_sequence(
-    atom_array: AtomArray, annotation_to_update: str = "coord_to_be_noised", annotation_to_copy: str = "coord"
+    atom_array: AtomArray,
+    annotation_to_update: str = "coord_to_be_noised",
+    annotation_to_copy: str = "coord",
+    annotation_for_token_representatives: str | None = None,
 ) -> AtomArray:
     """Place all atoms within fully-unresolved residues on the closest resolved neighbor in sequence space.
 
@@ -186,6 +190,8 @@ def place_unresolved_token_on_closest_resolved_token_in_sequence(
         annotation_to_copy (str): The annotation to copy from the resolved atom to the unresolved atom. E.g., "coord" (if we want to copy the ground-truth),
             or "coord_to_be_noised" (if we want to copy the coordinates that will be noised, which may have been modified by previous transforms).
             In the AF-3 pipeline, we want to copy "coord_to_be_noised", to correctly resolve residues after applying PlaceUnresolvedTokenAtomsOnRepresentativeAtom.
+        annotation_for_token_representatives (str | None, optional): The annotation to use for determining the representative atoms of each token.
+            If None, the representative atoms will be computed with `get_af3_token_representative_masks`.
 
     Returns:
         AtomArray: The modified atom array.
@@ -235,9 +241,14 @@ def place_unresolved_token_on_closest_resolved_token_in_sequence(
         else:
             source_coordinates = chain_atom_array.get_annotation(annotation_to_copy)
 
-        representative_atom_coordinates_atom_level = source_coordinates[
-            get_af3_token_representative_masks(chain_atom_array)
-        ]  # (n_atoms, 3)
+        if exists(annotation_for_token_representatives):
+            representative_atom_coordinates_atom_level = source_coordinates[
+                chain_atom_array.get_annotation(annotation_for_token_representatives)
+            ]  # (n_atoms, 3)
+        else:
+            representative_atom_coordinates_atom_level = source_coordinates[
+                get_af3_token_representative_masks(chain_atom_array)
+            ]  # (n_atoms, 3)
 
         assert len(representative_atom_coordinates_atom_level) == len(is_token_resolved_token_level)
 
@@ -269,6 +280,8 @@ class PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(Transform):
             or "coord_to_be_noised" (if we want to modify only the coordinates that will be noised).
             NOTE: Must match the annotation used for `PlaceUnresolvedTokenAtomsOnRepresentativeAtom`.
         annotation_to_copy (str): The annotation to copy from the resolved atom to the unresolved atom.
+        annotation_for_token_representatives (str | None, optional): The annotation to use for determining the representative atoms of each token.
+            If None, the representative atoms will be computed with `get_af3_token_representative_masks`.
     """
 
     requires_previous_transforms: ClassVar[list[str | Transform]] = [
@@ -277,10 +290,14 @@ class PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(Transform):
     ]
 
     def __init__(
-        self, annotation_to_update: str = "coord_to_be_noised", annotation_to_copy: str = "coord_to_be_noised"
+        self,
+        annotation_to_update: str = "coord_to_be_noised",
+        annotation_to_copy: str = "coord_to_be_noised",
+        annotation_for_token_representatives: str | None = None,
     ) -> None:
         self.annotation_to_update = annotation_to_update
         self.annotation_to_copy = annotation_to_copy
+        self.annotation_for_token_representatives = annotation_for_token_representatives
 
     def check_input(self, data: dict[str, Any]) -> None:
         check_contains_keys(data, ["atom_array"])
@@ -292,6 +309,8 @@ class PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(Transform):
             annotations_to_check.add(self.annotation_to_update)
         if self.annotation_to_copy != "coord":
             annotations_to_check.add(self.annotation_to_copy)
+        if exists(self.annotation_for_token_representatives):
+            annotations_to_check.add(self.annotation_for_token_representatives)
 
         check_atom_array_annotation(data, list(annotations_to_check))
 
@@ -300,12 +319,16 @@ class PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(Transform):
             data["atom_array"],
             annotation_to_update=self.annotation_to_update,
             annotation_to_copy=self.annotation_to_copy,
+            annotation_for_token_representatives=self.annotation_for_token_representatives,
         )
         return data
 
 
 def place_unresolved_token_atoms_on_token_representative_atom(
-    atom_array: AtomArray, annotation_to_update: str = "coord_to_be_noised"
+    atom_array: AtomArray,
+    annotation_to_update: str = "coord_to_be_noised",
+    annotation_for_token_representatives: str | None = None,
+    annotation_for_token_centers: str | None = None,
 ) -> AtomArray:
     """Place unresolved token atoms (e.g., side chain atoms) on the representative atom of the corresponding residue (token).
 
@@ -318,6 +341,10 @@ def place_unresolved_token_atoms_on_token_representative_atom(
         atom_array (AtomArray): The atom array to modify.
         annotation_to_update (str): The annotation to update with the new coordinates. E.g., "coord" (if we want to modify the ground-truth),
             or "coord_to_be_noised" (if we want to modify only the coordinates that will be noised).
+        annotation_for_token_representatives (str | None, optional): The annotation to use for determining the representative atom of each token.
+            If None, the representative atoms will be computed with `get_af3_token_representative_masks`.
+        annotation_for_token_centers (str | None, optional): The annotation to use for determining the center atom of each token.
+            If None, the center atoms will be computed with `get_af3_token_center_masks`.
 
     Returns:
         AtomArray: The modified atom array.
@@ -329,10 +356,16 @@ def place_unresolved_token_atoms_on_token_representative_atom(
     chain_iids_with_unresolved_atoms = np.unique(atom_array.chain_iid[(unresolved_atom_mask) & (~atom_array.atomize)])
 
     # ... prepare a mask of representative atoms for each residue
-    representative_atom_mask = get_af3_token_representative_masks(atom_array)
+    if exists(annotation_for_token_representatives):
+        representative_atom_mask = atom_array.get_annotation(annotation_for_token_representatives)
+    else:
+        representative_atom_mask = get_af3_token_representative_masks(atom_array)
 
     # (For cases where the representative atom is unresolved, we also try the token center atom)
-    center_atom_mask = get_af3_token_center_masks(atom_array)
+    if exists(annotation_for_token_centers):
+        center_atom_mask = atom_array.get_annotation(annotation_for_token_centers)
+    else:
+        center_atom_mask = get_af3_token_center_masks(atom_array)
 
     for chain_iid in chain_iids_with_unresolved_atoms:
         # NOTE: We cannot rely on the `is_polymer` annotation, as in some instances (like acyl groups) we may have non-polymer tokens within a polymer chain (see: 7RCU)
@@ -375,22 +408,40 @@ class PlaceUnresolvedTokenAtomsOnRepresentativeAtom(Transform):
     Args:
         annotation_to_update (str): The annotation to update with the new coordinates. E.g., "coord" (if we want to modify the ground-truth),
         or "coord_to_be_noised" (if we want to modify only the coordinates that will be noised).
+        annotation_for_token_representatives (str | None, optional): The annotation to use for determining the representative atom of each token.
+            If None, the representative atoms will be computed with `get_af3_token_representative_masks`.
+        annotation_for_token_centers (str | None, optional): The annotation to use for determining the center atom of each token.
+            If None, the center atoms will be computed with `get_af3_token_center_masks`.
     """
 
     requires_previous_transforms: ClassVar[list[str | Transform]] = ["AtomizeByCCDName"]
 
-    def __init__(self, annotation_to_update: str = "coord_to_be_noised") -> None:
+    def __init__(
+        self,
+        annotation_to_update: str = "coord_to_be_noised",
+        annotation_for_token_representatives: str | None = None,
+        annotation_for_token_centers: str | None = None,
+    ) -> None:
         self.annotation_to_update = annotation_to_update
+        self.annotation_for_token_representatives = annotation_for_token_representatives
+        self.annotation_for_token_centers = annotation_for_token_centers
 
     def check_input(self, data: dict[str, Any]) -> None:
         annotations_to_check = ["occupancy"]
         if self.annotation_to_update != "coord":
             # "coord" is a special annotation, and technically not in `atom_array.get_annotation_categories()`
             annotations_to_check += [self.annotation_to_update]
+        if exists(self.annotation_for_token_representatives):
+            annotations_to_check += [self.annotation_for_token_representatives]
+        if exists(self.annotation_for_token_centers):
+            annotations_to_check += [self.annotation_for_token_centers]
         check_atom_array_annotation(data, annotations_to_check)
 
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
         data["atom_array"] = place_unresolved_token_atoms_on_token_representative_atom(
-            data["atom_array"], annotation_to_update=self.annotation_to_update
+            data["atom_array"],
+            annotation_to_update=self.annotation_to_update,
+            annotation_for_token_representatives=self.annotation_for_token_representatives,
+            annotation_for_token_centers=self.annotation_for_token_centers,
         )
         return data

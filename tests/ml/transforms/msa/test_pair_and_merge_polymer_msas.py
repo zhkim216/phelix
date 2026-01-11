@@ -64,6 +64,15 @@ PAIR_MSA_TEST_CASES = [
                 ],
                 dtype=bool,
             ),
+            "residue_is_paired": np.array(
+                [
+                    [1, 1, 1, 1, 1],
+                    [1, 1, 1, 1, 1],
+                    [1, 1, 1, 1, 1],
+                    [0, 0, 0, 0, 0],
+                ],
+                dtype=bool,
+            ),
         },
     },
     {
@@ -121,6 +130,16 @@ PAIR_MSA_TEST_CASES = [
                     [0, 0, 0, 0, 0, 0],
                     [0, 0, 0, 0, 0, 0],
                     [1, 1, 1, 0, 0, 0],
+                ],
+                dtype=bool,
+            ),
+            "residue_is_paired": np.array(
+                [
+                    [1, 1, 1, 1, 1, 1],
+                    [1, 1, 1, 0, 0, 1],
+                    [1, 1, 1, 1, 1, 1],
+                    [0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0, 0],
                 ],
                 dtype=bool,
             ),
@@ -218,18 +237,36 @@ PAIR_MSA_TEST_CASES = [
                 ],
                 dtype=bool,
             ),
+            "residue_is_paired": np.array(
+                [
+                    [1, 1, 1, 1, 1, 1, 1, 1],
+                    [1, 1, 1, 1, 1, 1, 1, 1],
+                    [1, 1, 1, 1, 1, 0, 0, 0],
+                    [1, 1, 1, 1, 1, 0, 0, 0],
+                    [0, 0, 0, 1, 1, 1, 1, 1],
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                ],
+                dtype=bool,
+            ),
         },
     },
 ]
 
 
-def get_tuples(msa, ins, tax_id, msa_is_padded, mask):
+def get_tuples(msa, ins, tax_id, msa_is_padded, residue_is_paired, mask):
     msa_filtered = msa[mask]
     ins_filtered = ins[mask]
     tax_id_filtered = tax_id[mask]
     msa_is_padded_filtered = msa_is_padded[mask]
+    residue_is_paired_filtered = residue_is_paired[mask]
     return {
-        (tuple(msa_filtered[i]), tuple(ins_filtered[i]), tax_id_filtered[i], tuple(msa_is_padded_filtered[i]))
+        (
+            tuple(msa_filtered[i]),
+            tuple(ins_filtered[i]),
+            tax_id_filtered[i],
+            tuple(msa_is_padded_filtered[i]),
+            tuple(residue_is_paired_filtered[i]),
+        )
         for i in range(msa_filtered.shape[0])
     }
 
@@ -237,39 +274,57 @@ def get_tuples(msa, ins, tax_id, msa_is_padded, mask):
 def assert_msa_results(result, expected_output):
     # Check fully paired MSAs
     fully_paired_result_tuples = get_tuples(
-        result["msa"], result["ins"], result["tax_ids"], result["msa_is_padded_mask"], mask=result["all_paired"]
+        result["msa"],
+        result["ins"],
+        result["tax_ids"],
+        result["msa_is_padded_mask"],
+        result["residue_is_paired"],
+        mask=result["all_paired"],
     )
     fully_paired_expected_tuples = get_tuples(
         expected_output["msa"],
         expected_output["ins"],
         expected_output["tax_ids"],
         expected_output["msa_is_padded_mask"],
+        expected_output["residue_is_paired"],
         mask=expected_output["all_paired"],
     )
     assert fully_paired_result_tuples == fully_paired_expected_tuples
 
     # Check partially paired MSAs
     any_paired_result_tuples = get_tuples(
-        result["msa"], result["ins"], result["tax_ids"], result["msa_is_padded_mask"], mask=result["any_paired"]
+        result["msa"],
+        result["ins"],
+        result["tax_ids"],
+        result["msa_is_padded_mask"],
+        result["residue_is_paired"],
+        mask=result["any_paired"],
     )
     any_paired_expected_tuples = get_tuples(
         expected_output["msa"],
         expected_output["ins"],
         expected_output["tax_ids"],
         expected_output["msa_is_padded_mask"],
+        expected_output["residue_is_paired"],
         mask=expected_output["any_paired"],
     )
     assert any_paired_result_tuples == any_paired_expected_tuples
 
     # Check unpaired MSAs
     unpaired_result_tuples = get_tuples(
-        result["msa"], result["ins"], result["tax_ids"], result["msa_is_padded_mask"], mask=~result["any_paired"]
+        result["msa"],
+        result["ins"],
+        result["tax_ids"],
+        result["msa_is_padded_mask"],
+        result["residue_is_paired"],
+        mask=~result["any_paired"],
     )
     unpaired_expected_tuples = get_tuples(
         expected_output["msa"],
         expected_output["ins"],
         expected_output["tax_ids"],
         expected_output["msa_is_padded_mask"],
+        expected_output["residue_is_paired"],
         mask=~expected_output["any_paired"],
     )
     assert unpaired_result_tuples == unpaired_expected_tuples
@@ -287,7 +342,10 @@ def test_pair_and_merge_polymer_msas(test_case: dict):
     input_msas = test_case["input_msas"]
     output_msa = test_case["output_msa"]
     result = join_multiple_msas_by_tax_id(
-        list(input_msas.values()), unpaired_padding=np.array(["-"], dtype="S"), dense=test_case["dense"]
+        list(input_msas.values()),
+        unpaired_padding=np.array(["-"], dtype="S"),
+        dense=test_case["dense"],
+        add_residue_is_paired_feature=True,
     )
 
     # ...assert original result
@@ -298,7 +356,10 @@ def test_pair_and_merge_polymer_msas(test_case: dict):
     input_msas["A"]["ins"] = np.concatenate([input_msas["A"]["ins"][:1], input_msas["A"]["ins"][1:][::-1]])
     input_msas["A"]["tax_ids"] = np.concatenate([input_msas["A"]["tax_ids"][:1], input_msas["A"]["tax_ids"][1:][::-1]])
     result_inverted = join_multiple_msas_by_tax_id(
-        list(input_msas.values()), unpaired_padding=np.array(["-"], dtype="S"), dense=test_case["dense"]
+        list(input_msas.values()),
+        unpaired_padding=np.array(["-"], dtype="S"),
+        dense=test_case["dense"],
+        add_residue_is_paired_feature=True,
     )
 
     # ...assert inverted result
@@ -395,7 +456,7 @@ def test_msa_pairing_pipline(pdb_id: str):
     output_before_pairing = copy.deepcopy(output)
 
     # Pair and merge
-    output = PairAndMergePolymerMSAs()(output)
+    output = PairAndMergePolymerMSAs(add_residue_is_paired_feature=True)(output)
 
     assert "polymer_msas_by_chain_id" in output
 
@@ -440,3 +501,11 @@ def test_msa_pairing_pipline(pdb_id: str):
 
         # Check that wherever `msa_is_padded_mask` is True, there are no insertion
         assert np.all(output["polymer_msas_by_chain_id"][chain_id]["ins"][msa_is_padded_mask == 1] == 0)
+
+        # Check that `residue_is_paired` contains the expected values
+        any_paired = output["polymer_msas_by_chain_id"][chain_id]["any_paired"]
+        assert np.all(
+            output["polymer_msas_by_chain_id"][chain_id]["residue_is_paired"][any_paired]
+            == ~msa_is_padded_mask[any_paired]
+        )
+        assert not np.any(output["polymer_msas_by_chain_id"][chain_id]["residue_is_paired"][~any_paired])

@@ -1,4 +1,5 @@
 import copy
+import logging
 import numbers
 from collections import defaultdict
 from collections.abc import Sequence
@@ -7,6 +8,8 @@ from typing import Any, Generic, TypeVar, Union
 import biotite.structure as struc
 import numpy as np
 from biotite.structure import AtomArray, AtomArrayStack
+
+logger = logging.getLogger("atomworks.io")
 
 T = TypeVar("T")
 
@@ -98,8 +101,18 @@ class AnnotationList2D(Generic[T]):
         # ... ensure we get numpy arrays
         pairs, values = np.asarray(pairs), np.asarray(values)
 
+        # ... ensure pairs is an integer array
+        if not np.issubdtype(pairs.dtype, np.integer):
+            pairs = pairs.astype(np.int32)
+
         # ... reshape pairs to (N, 2) array if it's not already
-        pairs = np.array(pairs, dtype=np.int32).reshape(-1, 2) if pairs.size > 0 else np.empty((0, 2), dtype=np.int32)
+        if pairs.size > 0:
+            if len(pairs.shape) == 1:
+                pairs = pairs.reshape(-1, 2)
+            elif pairs.shape[1] != 2:
+                raise ValueError(f"pairs must have shape (N, 2), got {pairs.shape}")
+        else:
+            pairs = np.empty((0, 2), dtype=np.int32)
 
         # (Sanity checks)
         assert pairs.shape[1] == 2 and len(pairs) == len(values), "pairs must be (N, 2) array and match values length"
@@ -236,6 +249,103 @@ class AnnotationList2D(Generic[T]):
         self.pairs = np.vstack([self.pairs, [i, j]])
         self.values = np.append(self.values, value)
 
+    def symmetrized(self) -> "AnnotationList2D":
+        """
+        Return a symmetrized version of this AnnotationList2D (does not modify in place).
+
+        If (i,j) exists but (j,i) doesn't, adds (j,i) with the same value.
+        If both exist, raises error if values differ.
+
+        This algorithm uses vectorized operations on the pairs and values arrays to avoid looping over pairs
+        and realizing the large arrays in memory.
+
+        Returns:
+            Symmetric AnnotationList2D.
+
+        Raises:
+            ValueError: If (i,j) and (j,i) both exist with different values.
+        """
+        if len(self.pairs) == 0:
+            return AnnotationList2D(self.n_atoms, self.pairs.copy(), self.values.copy())
+
+        upper_triangle_pairs_mask = self.pairs[:, 0] <= self.pairs[:, 1]  # includes diagonal
+        lower_triangle_pairs_mask = self.pairs[:, 0] > self.pairs[:, 1]  # does NOT include diagonal
+
+        upper_triangle_pairs = self.pairs[upper_triangle_pairs_mask]
+        lower_triangle_pairs = self.pairs[lower_triangle_pairs_mask]
+
+        upper_triangle_sort_idx = np.argsort(upper_triangle_pairs[:, 0] * self.n_atoms + upper_triangle_pairs[:, 1])
+        upper_triangle_pairs = upper_triangle_pairs[upper_triangle_sort_idx]
+
+        lower_triangle_pairs_reverse = lower_triangle_pairs[
+            :, ::-1
+        ]  # needs to be sorted again because we reversed the order (want to sort by first index now)
+        lower_reverse_sort_idx = np.argsort(
+            lower_triangle_pairs_reverse[:, 0] * self.n_atoms + lower_triangle_pairs_reverse[:, 1]
+        )
+        lower_reverse_pairs = lower_triangle_pairs_reverse[lower_reverse_sort_idx]
+
+        upper_values = self.values[upper_triangle_pairs_mask][upper_triangle_sort_idx]
+        lower_reverse_values = self.values[lower_triangle_pairs_mask][lower_reverse_sort_idx]
+
+        if len(upper_values) == len(lower_reverse_values) and np.array_equal(upper_triangle_pairs, lower_reverse_pairs):
+            # all values should be the same since the pairs are the same
+            if np.issubdtype(upper_values.dtype, np.number):
+                if not np.allclose(upper_values, lower_reverse_values, equal_nan=True):
+                    raise ValueError(f"Asymmetric input values: {upper_values} != {lower_reverse_values}")
+            else:
+                if not np.array_equal(upper_values, lower_reverse_values):
+                    raise ValueError(f"Asymmetric input values: {upper_values} != {lower_reverse_values}")
+
+            # if they are, great! Just return the original list here
+            return AnnotationList2D(self.n_atoms, self.pairs.copy(), self.values.copy())
+
+        # ... inputs are not symmetric, but maybe we can rescue
+
+        upper_triangle_pairs_keys = upper_triangle_pairs[:, 0] * self.n_atoms + upper_triangle_pairs[:, 1]
+        lower_triangle_pairs_reverse_keys = lower_reverse_pairs[:, 0] * self.n_atoms + lower_reverse_pairs[:, 1]
+
+        # find overlaps using searchsorted
+        search_idx = np.searchsorted(
+            upper_triangle_pairs_keys, lower_triangle_pairs_reverse_keys, side="left"
+        )  # returns where each lower_triangle_pairs_reverse_key would be inserted in upper_triangle_pairs_keys
+        valid = search_idx < len(
+            upper_triangle_pairs_keys
+        )  # possible that there are some search_idx keys that are outside of len_upper_triangle_pairs_keys since
+        matches = upper_triangle_pairs_keys[search_idx[valid]] == lower_triangle_pairs_reverse_keys[valid]
+
+        if np.any(matches):  # there are overlaps, make sure they are equal
+            overlap_lower_values = lower_reverse_values[valid][matches]
+            overlap_upper_values = upper_values[search_idx[valid]][matches]
+
+            if np.issubdtype(overlap_lower_values.dtype, np.number):
+                if not np.allclose(overlap_lower_values, overlap_upper_values, equal_nan=True):
+                    raise ValueError(f"Asymmetric values: {overlap_lower_values} != {overlap_upper_values}")
+            else:
+                if not np.array_equal(overlap_lower_values, overlap_upper_values):
+                    raise ValueError(f"Asymmetric values: {overlap_lower_values} != {overlap_upper_values}")
+
+            # if there's matches, lets remove the duplicates from one of the lists (in this case, lower triangle)
+            # can't just use matches because it is not necessarily the right length (not same length as valid)
+            overlap_idx = np.where(valid)[0][matches]
+            lower_reverse_pairs = np.delete(lower_reverse_pairs, overlap_idx, axis=0)
+            lower_reverse_values = np.delete(lower_reverse_values, overlap_idx, axis=0)
+
+        # add in unique values to one combined upper-triangle list
+        combined_pairs = np.vstack([upper_triangle_pairs, lower_reverse_pairs])
+        combined_values = np.concatenate([upper_values, lower_reverse_values])
+
+        # symmetrize! (but don't duplicate diagonal elements where i == j)
+        diagonal_mask = combined_pairs[:, 0] == combined_pairs[:, 1]
+        off_diagonal_pairs = combined_pairs[~diagonal_mask]
+        off_diagonal_values = combined_values[~diagonal_mask]
+
+        # Combine diagonal, off-diagonal, and reversed off-diagonal
+        symmetrized_pairs = np.vstack([combined_pairs, off_diagonal_pairs[:, ::-1]])
+        symmetrized_values = np.concatenate([combined_values, off_diagonal_values])
+
+        return AnnotationList2D(self.n_atoms, symmetrized_pairs, symmetrized_values)
+
     def __getitem__(self, index: Any) -> "AnnotationList2D | tuple[int, int, T]":
         """
         Subset or index the annotation list.
@@ -314,7 +424,11 @@ class _AtomArrayPlusBase:
             pairs (Sequence[Sequence[int]]): List of (i, j) pairs.
             values (Sequence[Any]): List of values for each pair.
         """
-        self._annot_2d[name] = AnnotationList2D(self.array_length(), np.array(pairs, dtype=np.int32), np.array(values))
+        if not isinstance(pairs, np.ndarray) or not np.issubdtype(pairs.dtype, np.integer):
+            pairs = np.array(pairs, dtype=np.int32)
+        if not isinstance(values, np.ndarray):
+            values = np.array(values)
+        self._annot_2d[name] = AnnotationList2D(self.array_length(), pairs, values)
 
     def get_annotation_2d(self, name: str) -> "AnnotationList2D":
         """Return a 2D annotation (AnnotationList2D)."""
@@ -325,6 +439,15 @@ class _AtomArrayPlusBase:
     def get_annotation_2d_categories(self) -> list[str]:
         """Return a list of all 2D annotation names (categories)."""
         return list(self._annot_2d.keys())
+
+    def del_annotation_2d(self, name: str) -> None:
+        """Remove a 2D annotation category.
+
+        Args:
+            name: The 2D annotation category to remove.
+        """
+        if name in self._annot_2d:
+            del self._annot_2d[name]
 
     def _copy_2d_annotations(self, clone: Any) -> None:
         """Deep copy 2D annotations to the clone."""
@@ -806,8 +929,8 @@ def insert_atoms(
     """
     n_atoms_orig = arr.array_length()
     assert isinstance(new_atoms, list) and isinstance(
-        new_atoms[0], AtomArray
-    ), "new_atoms must be a list of AtomArray like objects (not atoms)"
+        new_atoms[0], AtomArray | AtomArrayPlus | struc.Atom
+    ), "new_atoms must be a list of AtomArray, AtomArrayPlus, or Atom objects."
     assert len(new_atoms) == len(insert_positions), "Each new atom must have a corresponding insert position."
     arr_all = concatenate_any([arr, *new_atoms])
 
@@ -900,3 +1023,29 @@ def stack_any(arrays: list[AtomArray | AtomArrayPlus]) -> AtomArrayStack | AtomA
     if any(isinstance(arr, AtomArrayPlus) for arr in arrays):
         return stack_atom_array_plus([as_atom_array_plus(arr) for arr in arrays])
     return struc.stack(arrays)
+
+
+def as_atom_array_plus_stack(
+    arrays: AtomArray
+    | AtomArrayPlus
+    | AtomArrayStack
+    | AtomArrayPlusStack
+    | list[AtomArray | AtomArrayPlus | struc.Atom]
+    | struc.Atom,
+) -> AtomArrayPlusStack:
+    """Convert various input types to an AtomArrayPlusStack."""
+    # Already the target type
+    if isinstance(arrays, AtomArrayPlusStack):
+        return arrays
+
+    # Convert from regular stack
+    if isinstance(arrays, AtomArrayStack):
+        return AtomArrayPlusStack.from_atom_array_stack(arrays)
+
+    # Convert from list
+    if isinstance(arrays, list):
+        arrays_plus = [as_atom_array_plus(arr) for arr in arrays]
+        return stack_atom_array_plus(arrays_plus)
+
+    # Single array (AtomArray, AtomArrayPlus, or Atom) - wrap in list and stack
+    return stack_atom_array_plus([as_atom_array_plus(arrays)])

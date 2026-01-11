@@ -83,7 +83,7 @@ class AggregateFeaturesLikeAF3(Transform):
         has_deletion_stacked_by_recycle = torch.stack(
             msa_feats["msa_features_per_recycle_dict"]["has_insertion"]
         )  # [n_recycles, n_sequences, n_tokens_across_chains]
-        deltion_value_stacked_by_recycle = torch.stack(
+        deletion_value_stacked_by_recycle = torch.stack(
             msa_feats["msa_features_per_recycle_dict"]["insertion_value"]
         )  # [n_recycles, n_sequences, n_tokens_across_chains]
 
@@ -91,10 +91,23 @@ class AggregateFeaturesLikeAF3(Transform):
             [
                 msa_stacked_by_recycle,
                 rearrange(has_deletion_stacked_by_recycle, "... -> ... 1"),
-                rearrange(deltion_value_stacked_by_recycle, "... -> ... 1"),
+                rearrange(deletion_value_stacked_by_recycle, "... -> ... 1"),
             ],
             dim=-1,
         )  # [n_recycles, n_msa, n_tokens_across_chains, n_types_of_tokens + 2] (float)
+
+        # Add pairing information if present
+        if "residue_is_paired" in msa_feats["msa_features_per_recycle_dict"]:
+            residue_is_paired_stacked_by_recycle = torch.stack(
+                msa_feats["msa_features_per_recycle_dict"]["residue_is_paired"]
+            )
+            data["feats"]["msa_stack"] = torch.concatenate(
+                [
+                    data["feats"]["msa_stack"],
+                    rearrange(residue_is_paired_stacked_by_recycle, "... -> ... 1"),
+                ],
+                dim=-1,
+            )  # [n_recycles, n_msa_cluster_representatives, n_tokens_across_chains, n_types_of_tokens + 3] (float)
 
         data["feats"] |= {
             "profile": msa_feats["msa_static_features_dict"]["profile"],

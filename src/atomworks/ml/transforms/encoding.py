@@ -31,6 +31,64 @@ from atomworks.ml.utils.token import get_token_count, get_token_starts, token_it
 logger = getLogger(__name__)
 
 
+def atom_array_to_encoded_resnames(
+    atom_array: AtomArray,
+    encoding: TokenEncoding,
+    atomize_token: str = "<A>",
+) -> np.ndarray:
+    """Encode residue types from an AtomArray.
+
+    Encodes at token level, then spreads to atom level for efficiency.
+    Handles proteins, DNA, RNA, atomized residues (ligands, ions), and unknown tokens.
+
+    For atomized residues, uses the atomize_token.
+    For masked/to-be-generated residues, use the `<M>` (mask) token.
+
+    Args:
+        atom_array: AtomArray with token_id annotation.
+        encoding: TokenEncoding defining the mapping (e.g., UNIFIED_ATOM37_ENCODING).
+        atomize_token: Token to use for atomized residues. Defaults to `<A>`.
+
+    Returns:
+        Array of token type indices with shape [n_atoms], where each index
+        corresponds to encoding.token_to_idx. Each atom gets the encoding of its token.
+
+    Examples:
+        >>> from atomworks.ml.encoding_definitions import UNIFIED_ATOM37_ENCODING
+        >>> resnames = atom_array_to_encoded_resnames(atom_array, UNIFIED_ATOM37_ENCODING)
+        >>> # resnames[i] is the encoded residue type for atom i
+    """
+    n_tokens = get_token_count(atom_array)
+    token_encoded_seq = np.empty(n_tokens, dtype=int)
+
+    # Check if atom array has atomize annotation
+    has_atomize = "atomize" in atom_array.get_annotation_categories()
+
+    # Iterate over tokens and encode token names (token-level encoding)
+    for i, token in enumerate(token_iter(atom_array)):
+        # Case 1: atomized tokens (ligands, ions) or single-atom tokens
+        # Use atomize_token
+        if (has_atomize and token.atomize[0]) or len(token) == 1:
+            token_name = atomize_token
+
+        # Case 2: residue tokens (proteins, DNA, RNA)
+        # Use res_name as token identifier
+        else:
+            token_name = token.res_name[0]
+
+        # Resolve unknown tokens (e.g., UNK for unknown AA, N for unknown RNA, DN for unknown DNA)
+        if token_name not in encoding.token_to_idx:
+            token_is_atom = (has_atomize and token.atomize[0]) or len(token) == 1
+            token_name = encoding.resolve_unknown_token_name(token_name, token_is_atom)
+            assert token_name in encoding.token_to_idx, f"Unknown token name: {token_name}"
+
+        # Encode as integer index
+        token_encoded_seq[i] = encoding.token_to_idx[token_name]
+
+    # Spread token-level encoding to atom-level (single vectorized operation)
+    return token_encoded_seq[atom_array.token_id]
+
+
 def atom_array_to_encoding(
     atom_array: AtomArray,
     encoding: TokenEncoding,
@@ -43,6 +101,7 @@ def atom_array_to_encoding(
         "chain_iid",
         "transformation_id",
     ],
+    coord_annotation: str = "coord",
 ) -> dict:
     """
     Encode an atom array using a specified `TokenEncoding`.
@@ -58,6 +117,9 @@ def atom_array_to_encoding(
           the atom array has the `atomize` annotation, in which case the number of tokens may exceed the
           number of residues.
 
+    TODO: Refactor so that `atom_array_to_encoding` uses `atom_array_to_encoded_resnames` internally.
+    TODO: Vectorize
+
     Args:
         - atom_array (AtomArray): The atom array containing polymer information. If the atom array has the
           `atomize` annotation (True for atoms that should be atomized), the number of tokens will differ
@@ -72,6 +134,8 @@ def atom_array_to_encoding(
           integers, where the first occurrence of a given ID is encoded as `0`, and subsequent occurrences
           are encoded as `1`, `2`, etc. Defaults to
           ["chain_id", "chain_entity", "molecule_iid", "chain_iid", "transformation_id"].
+        - coord_annotation (str, optional): The annotation of the AtomArray containing the coordinates to encode.
+          Defaults to "coord".
 
     Returns:
         - dict: A dictionary containing the following keys:
@@ -149,7 +213,7 @@ def atom_array_to_encoding(
             # ... case 1: atom name is in the encoding
             if (token_name, atom_name) in encoding.atom_to_idx:
                 to_idx = encoding.atom_to_idx[(token_name, atom_name)]
-                encoded_coord[i, to_idx, :] = atom.coord
+                encoded_coord[i, to_idx, :] = getattr(atom, coord_annotation)
                 encoded_mask[i, to_idx] = atom.occupancy > occupancy_threshold
 
             # ... case 2: atom name does not exist for token, but token is an `unknown` token,
@@ -163,7 +227,7 @@ def atom_array_to_encoding(
                 alt_atom_name = alt_to_std.get(atom_name, None)
                 if exists(alt_atom_name) and (token_name, alt_atom_name) in encoding.atom_to_idx:
                     to_idx = encoding.atom_to_idx[(token_name, alt_atom_name)]
-                    encoded_coord[i, to_idx, :] = atom.coord
+                    encoded_coord[i, to_idx, :] = getattr(atom, coord_annotation)
 
             # ... case 4: failed to find the relevant atom_name for this token when we should, so we raise an error
             else:
@@ -189,13 +253,13 @@ def atom_array_to_encoding(
 
 def atom_array_from_encoding(
     encoded_coord: torch.Tensor | np.ndarray,
-    encoded_mask: torch.Tensor | np.ndarray,
     encoded_seq: torch.Tensor | np.ndarray,
     encoding: TokenEncoding,
-    chain_id: str = "A",  # TODO: Allow passing a numpy array of chain ids
+    chain_id: str = "A",
+    *,
+    encoded_mask: torch.Tensor | np.ndarray | None = None,
     token_is_atom: torch.Tensor | np.ndarray | None = None,
     **other_annotations: np.ndarray | None,
-    # TODO: Allow passing a res_id
 ) -> AtomArray:
     """Create an AtomArray from encoded coordinates, mask, and sequence.
 
@@ -206,13 +270,14 @@ def atom_array_from_encoding(
 
     Args:
         encoded_coord: Encoded coordinates tensor.
-        encoded_mask: Encoded mask tensor.
         encoded_seq: Encoded sequence tensor.
         encoding: The encoding to use for encoding the atom array.
         chain_id: Chain ID. Can be a single string (e.g., "A")
           or a numpy array of shape (n_res,) corresponding to each residue. Defaults to "A".
+        encoded_mask: Optional encoded mask tensor. If not provided, will be derived
+          from coordinates by checking for NaN values. Defaults to ``None``.
         token_is_atom: Boolean mask indicating
-          whether each token corresponds to an atom.
+          whether each token corresponds to an atom. Defaults to ``None``.
         **other_annotations: Additional annotations to include in the
           AtomArray. The shape must match one of the following:
 
@@ -227,10 +292,15 @@ def atom_array_from_encoding(
     # Turn tensors into numpy arrays if necessary
     _from_tensor = lambda x: x.cpu().numpy() if isinstance(x, torch.Tensor) else x  # noqa E731
     encoded_coord = _from_tensor(encoded_coord)
-    encoded_mask = _from_tensor(encoded_mask)
     encoded_seq = _from_tensor(encoded_seq)
     token_is_atom = _from_tensor(token_is_atom)
     other_annotations = {annot: _from_tensor(annot_arr) for annot, annot_arr in other_annotations.items()}
+
+    # Derive mask from coordinates if not provided
+    if encoded_mask is None:
+        encoded_mask = ~np.isnan(encoded_coord[..., 0])
+    else:
+        encoded_mask = _from_tensor(encoded_mask)
 
     # Extract token, element and atom name information via the encoding
     seq = encoding.idx_to_token[encoded_seq]  # [n_res] (str)
@@ -252,6 +322,9 @@ def atom_array_from_encoding(
 
     # ... set atomize annotation if `token_is_atom` is provided
     if token_is_atom is not None:
+        # Expand token_is_atom to n_atoms_per_token if necessary
+        if token_is_atom.ndim == 1:
+            token_is_atom = np.repeat(token_is_atom[:, np.newaxis], encoding.n_atoms_per_token, axis=1)
         atom_array.set_annotation("atomize", np.asarray(token_is_atom[atom_should_exist], dtype=np.bool_))
 
     # ... flatten and annotate coordinates
@@ -321,6 +394,7 @@ class EncodeAtomArray(Transform):
             "chain_iid",
             "transformation_id",
         ],
+        coord_annotation: str = "coord",
     ):
         """
         Convert an atom array to an encoding.
@@ -334,6 +408,8 @@ class EncodeAtomArray(Transform):
                 like `chain_id` or `molecule_iid`, as the encoding will be generated as `int`s. Each first occurrence
                 of a given `id` will be encoded as `0`, and each subsequent occurrence will be encoded as `1`, `2`, etc.
                 Defaults to ["chain_id", "chain_entity", "molecule_iid", "chain_iid", "transformation_id"].
+            - `coord_annotation` (str, optional): The annotation of the AtomArray containing the coordinates to encode.
+                Defaults to "coord," but in same cases we may want to use a different annotation (e.g., if we imputed coordinates)
         """
         if not isinstance(encoding, TokenEncoding):
             raise ValueError(f"Encoding must be a `TokenEncoding`, but got: {type(encoding)}.")
@@ -341,9 +417,11 @@ class EncodeAtomArray(Transform):
         self.default_coord = default_coord
         self.occupancy_threshold = occupancy_threshold
         self.extra_annotations = extra_annotations
+        self.coord_annotation = coord_annotation
 
     def check_input(self, data: dict[str, Any]) -> None:
-        check_atom_array_annotation(data, ["occupancy"])
+        required = ["occupancy", *([self.coord_annotation] if self.coord_annotation not in (None, "coord") else [])]
+        check_atom_array_annotation(data, required)
 
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
         atom_array = data["atom_array"]
@@ -354,6 +432,7 @@ class EncodeAtomArray(Transform):
             default_coord=self.default_coord,
             occupancy_threshold=self.occupancy_threshold,
             extra_annotations=self.extra_annotations,
+            coord_annotation=self.coord_annotation,
         )
 
         data["encoded"] = encoded

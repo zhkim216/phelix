@@ -81,6 +81,18 @@ from atomworks.ml.transforms.template import (
 )
 
 
+def _is_inference(data: dict) -> bool:
+    return data.get("is_inference", False)
+
+
+def _has_input_file_template(data: dict) -> bool:
+    return "is_input_file_templated" in data["atom_array"].get_annotation_categories()
+
+
+def _run_confidence_head(data: dict) -> bool:
+    return data.get("run_confidence_head", False)
+
+
 def build_af3_transform_pipeline(
     *,
     # Training or inference (required)
@@ -189,7 +201,7 @@ def build_af3_transform_pipeline(
         # NOTE: For inference, we must keep UNL to support ligands that are not in the CCD
         HandleUndesiredResTokens(undesired_res_tokens=undesired_res_names),  # e.g., non-standard residues
         ConditionalRoute(
-            condition_func=lambda data: data.get("is_inference", False),
+            condition_func=_is_inference,
             transform_map={
                 True: Identity(),
                 False: PadDNA(p_skip=pad_dna_p_skip) if pad_dna_p_skip > 0 else Identity(),
@@ -233,7 +245,7 @@ def build_af3_transform_pipeline(
 
     transforms.append(
         ConditionalRoute(
-            condition_func=lambda data: data.get("is_inference", False),
+            condition_func=_is_inference,
             transform_map={
                 True: Identity(),
                 False: cropping_transform,
@@ -269,7 +281,7 @@ def build_af3_transform_pipeline(
     )
     inference_template_load_from_structure = AddInputFileTemplate()
     inference_template_loading_transforms = ConditionalRoute(
-        condition_func=lambda data: "is_input_file_templated" in data["atom_array"].get_annotation_categories(),
+        condition_func=_has_input_file_template,
         transform_map={
             True: inference_template_load_from_structure,
             False: inference_template_loading_from_disk,
@@ -288,7 +300,7 @@ def build_af3_transform_pipeline(
         GetRDKitChiralCenters(),
         AddAF3ChiralFeatures(),
         ConditionalRoute(
-            condition_func=lambda data: data["is_inference"],
+            condition_func=_is_inference,
             transform_map={
                 False: training_template_loading_transforms,
                 True: inference_template_loading_transforms,
@@ -365,7 +377,7 @@ def build_af3_transform_pipeline(
 
     transforms.append(
         ConditionalRoute(
-            condition_func=lambda data: data.get("run_confidence_head", False),
+            condition_func=_run_confidence_head,
             transform_map={
                 True: confidence_transforms,
                 False: Identity(),

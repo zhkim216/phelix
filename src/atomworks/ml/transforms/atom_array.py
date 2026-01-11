@@ -208,22 +208,30 @@ class RenumberNonPolymerResidueIdx(Transform):
 
 
 def get_within_poly_res_idx(atom_array: AtomArray) -> np.ndarray:
-    # Add annotation, where we default to -1 for residues that are not within a polymer
-    within_poly_res_idx = np.full(len(atom_array), -1, dtype=np.int16)
+    """Get the within-polymer residue index for the atom array.
 
-    # Filter to polymers
-    polymer_atom_array = atom_array[atom_array.is_polymer]  # NOTE: This creates a COPY of the atom array! Danger!
+    For polymers, this is identical to within_chain_res_idx (since polymers have
+    one chain per polymer). For non-polymers, the value is -1.
 
-    # Loop through ever unique chain_iid (which for polymers, is the same as the pn_unit_iid)
-    for chain_iid in np.unique(polymer_atom_array.chain_iid):
-        chain_mask = atom_array.chain_iid == chain_iid
+    Note:
+        If `within_chain_res_idx` annotation exists, it will be reused for efficiency.
+        Otherwise, it will be computed on-the-fly (same logic as AddWithinChainInstanceResIdx).
 
-        # Spread residue-wise
-        residue_count = len(struc.get_residue_starts(atom_array[chain_mask], add_exclusive_stop=False))
-        new_res_idx = struc.spread_residue_wise(atom_array[chain_mask], np.arange(0, residue_count))
+    Args:
+        atom_array: The atom array to process. Must have `is_polymer` annotation.
 
-        # Update the atom_array with the generated res_ids, indexing into the full atom array
-        within_poly_res_idx[chain_mask] = new_res_idx
+    Returns:
+        Array of within-polymer residue indices (0-indexed for polymers, -1 for non-polymers).
+    """
+    # Check if within_chain_res_idx already exists (performance optimization)
+    if "within_chain_res_idx" in atom_array.get_annotation_categories():
+        within_poly_res_idx = atom_array.within_chain_res_idx.copy()
+    else:
+        # Compute on-the-fly using same logic as AddWithinChainInstanceResIdx
+        within_poly_res_idx = get_within_group_res_idx(atom_array, group_by="chain_iid")
+
+    # Set non-polymers to -1
+    within_poly_res_idx[~atom_array.is_polymer] = -1
 
     return within_poly_res_idx
 
@@ -234,21 +242,30 @@ def get_within_group_res_idx(atom_array: AtomArray, group_by: str) -> np.ndarray
     Of note:
         - Groups do not need to be contiguous.
         - Groups are defined by the unique values of the `group_by` annotation.
+
+    Args:
+        atom_array (AtomArray): The atom array to process.
+        group_by (str): The annotation name to group residues by (e.g., "chain_iid").
+
+    Returns:
+        np.ndarray: An array of within-group residue indices for each atom in the atom array.
     """
-    # Add annotation, where we default to -1 for residues that are not within a group
-    within_group_res_idx = np.empty(len(atom_array), dtype=np.int32)
+    residue_starts = struc.get_residue_starts(atom_array, add_exclusive_stop=False)
+    n_residues = len(residue_starts)
 
+    # Get the group annotation for each residue (sample at residue starts)
     group_annotation = atom_array.get_annotation(group_by)
+    residue_groups = group_annotation[residue_starts]
 
-    # NOTE: We have overwritten struc.get_residue_starts in atomworks.io to handle the presence of multiple transformation_ids
-    # If this disagrees with the biotite computation of residue starts, spread_residue_wise will fail
-    # However, this indicates a case in which biotite would have given the incorrect solution
-    # If this becomes an issue for some use-case, we will have to re-implement spread_residue_wise
-    for group_id in np.unique(group_annotation):
-        group_mask = group_annotation == group_id
-        residue_count = len(struc.get_residue_starts(atom_array[group_mask], add_exclusive_stop=False))
-        in_group_res_idx = struc.spread_residue_wise(atom_array[group_mask], np.arange(0, residue_count))
-        within_group_res_idx[group_mask] = in_group_res_idx
+    # Compute within-group residue indices for each residue
+    within_group_res_idx_per_residue = np.empty(n_residues, dtype=np.int32)
+
+    for group in np.unique(residue_groups):
+        mask = residue_groups == group
+        within_group_res_idx_per_residue[mask] = np.arange(np.sum(mask))
+
+    # Spread residue-wise indices to all atoms
+    within_group_res_idx = struc.spread_residue_wise(atom_array, within_group_res_idx_per_residue)
 
     return within_group_res_idx
 
@@ -315,17 +332,15 @@ def get_within_entity_idx(
 
 
 class AddWithinPolyResIdxAnnotation(Transform):
-    """Adds the `within_poly_res_idx` (within polymer residue index) annotation to the AtomArray.
+    """Adds the `within_poly_res_idx` (within polymer residue index) annotation.
 
-    For polymers, the `within_poly_res_idx` is a zero-indexed, continuous residue index within the chain.
-    For non-polymers, the `within_poly_res_idx` is set to -1. This annotation is later used to index into the
-    MSA, as it remains consistent with MSA indices even after cropping the AtomArray.
+    For polymers, the `within_poly_res_idx` is a zero-indexed, continuous residue
+    index within the chain. For non-polymers, the value is set to -1.
 
     Note:
-        The `within_poly_res_idx` is zero-indexed, since it is used as an index into the MSA. In contrast,
-        the `res_id` annotation (derived from the mmCIF file) is one-indexed. We generate `within_poly_res_idx`
-        from scratch rather than inferring from `res_id` to avoid any mmCIF annotation errors.
-
+        The `within_poly_res_idx` is zero-indexed, since it is used as an index
+        into the MSA. In contrast, the `res_id` annotation (derived from the mmCIF
+        file) is one-indexed.
     """
 
     incompatible_previous_transforms: ClassVar[list[str | Transform]] = [
@@ -334,13 +349,12 @@ class AddWithinPolyResIdxAnnotation(Transform):
     ]  # cropping changes the residue indices
 
     def check_input(self, data: dict) -> None:
-        check_atom_array_annotation(data, ["chain_iid"])
+        check_atom_array_annotation(data, ["chain_iid", "is_polymer"])
 
     def forward(self, data: dict) -> dict:
         atom_array = data["atom_array"]
 
         within_poly_res_idx = get_within_poly_res_idx(atom_array)
-        within_poly_res_idx[~atom_array.is_polymer] = -1
         atom_array.set_annotation("within_poly_res_idx", within_poly_res_idx)
 
         data["atom_array"] = atom_array
@@ -528,8 +542,12 @@ class AddGlobalTokenIdAnnotation(Transform):
 
     incompatible_previous_transforms: ClassVar[list[str | Transform]] = ["AddGlobalTokenIdAnnotation"]
 
+    def __init__(self, allow_overwrite: bool = False):
+        self.allow_overwrite = allow_overwrite
+
     def check_input(self, data: dict) -> None:
-        check_atom_array_annotation(data, required=[], forbidden=["token_id"])
+        if "token_id" in data["atom_array"].get_annotation_categories() and not self.allow_overwrite:
+            raise ValueError("AtomArray already contains 'token_id' annotation! It would be overwritten.")
 
     def forward(self, data: dict) -> dict:
         atom_array = data["atom_array"]

@@ -555,7 +555,19 @@ class Compose(Transform):
                 raise
             except Exception as e:
                 # construct error message including the RNG states
-                msg = f"Transforms failed at stage `{transform.__class__.__name__}`: " + str(e)
+                failed_transform_name = transform.__class__.__name__
+
+                # Give more informative messages for failures within a ConditionalRoute or RandomRoute
+                if (
+                    failed_transform_name in ["ConditionalRoute", "RandomRoute"]
+                    and hasattr(data, "__transform_history__")
+                    and len(data.__transform_history__) > 0
+                ):
+                    last_transform = data.__transform_history__[-1]["name"]
+                    if last_transform != failed_transform_name:
+                        failed_transform_name += f" -> {last_transform}"
+
+                msg = f"Transforms failed at stage `{failed_transform_name}`: " + str(e)
                 if "example_id" in data:
                     msg += f"\nFailure occurred for example ID: {data['example_id']}."
                 if self.track_rng_state and self.print_rng_state:
@@ -583,6 +595,25 @@ class Compose(Transform):
             return Compose([self.transforms[i] for i in idx], track_rng_state=self.track_rng_state)
         else:
             return self.transforms[idx]
+
+
+class ListBuilder:
+    """A convenience class to build lists element by element with the '+=' operator"""
+
+    def __init__(self):
+        self.list = []
+
+    def __add__(self, other: Any) -> ListBuilder:
+        if isinstance(other, list):
+            self.list.extend(other)
+        elif isinstance(other, ListBuilder):
+            self.list.extend(other.list)
+        else:
+            self.list.append(other)
+        return self
+
+    def tolist(self) -> list[Any]:
+        return self.list
 
 
 class RemoveKeys(Transform):

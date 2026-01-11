@@ -43,6 +43,5 @@ __all__ = [
     "__version__",
     "io",
     "ml",
-    "monkey_patch_atomarray",
     "parse",
 ]

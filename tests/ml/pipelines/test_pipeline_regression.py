@@ -13,15 +13,15 @@ from atomworks.constants import (
 )
 from atomworks.enums import ChainType
 from atomworks.io import parse
+from atomworks.io.parser import STANDARD_PARSER_ARGS
 from atomworks.io.utils.testing import assert_same_atom_array
-from atomworks.ml.datasets.parsers.base import DEFAULT_PARSER_ARGS
 from atomworks.ml.pipelines.af3 import build_af3_transform_pipeline
 from atomworks.ml.utils.rng import create_rng_state_from_seeds, rng_state
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-example_names = ["1wym"]
+example_names = ["1wym", "6w13", "1fix"]
 
 
 def build_pipelines():
@@ -76,10 +76,14 @@ def instantiate_example(example_name: str):
     result_dict = parse(
         filename=file,
         build_assembly=("1",),
-        **DEFAULT_PARSER_ARGS,
+        **STANDARD_PARSER_ARGS,
     )
-    for chain_id in result_dict["chain_info"]:
-        result_dict["chain_info"][chain_id]["msa_path"] = test_data_dir / example_name / f"{example_name}.a3m"
+
+    # Only set msa_path if the MSA file exists
+    msa_file = test_data_dir / example_name / f"{example_name}.a3m"
+    if msa_file.exists():
+        for chain_id in result_dict["chain_info"]:
+            result_dict["chain_info"][chain_id]["msa_path"] = msa_file
 
     input = {
         "atom_array": result_dict["assemblies"]["1"][0],  # First model
