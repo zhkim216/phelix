@@ -2,7 +2,7 @@
 #SBATCH --job-name=metadata_atomworks_pdb_full
 #SBATCH -p possu,normal,owners
 #SBATCH --array=0-99
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=4
 #SBATCH --time=6:00:00
 #SBATCH --mem=16GB
 
@@ -35,4 +35,6 @@ python3 allatom_design/data/preprocessing/atomworks/build_metadata_parquet_shard
     num_shards=${NUM_SHARDS} \
     shard_id=${SLURM_ARRAY_TASK_ID} \
     max_file_size=5000000 \
-    data_preprocessor_cfg.polymer_pn_unit_limit=500
+    data_preprocessor_cfg.polymer_pn_unit_limit=500 \
+    batch_size=50 \
+    max_tasks_per_child=25
