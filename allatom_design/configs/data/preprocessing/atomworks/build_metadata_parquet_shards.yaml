@@ -1,5 +1,5 @@
 mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
-out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full
+out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full_interact
 
 num_workers: 31
 max_file_size: 5000000
@@ -30,5 +30,5 @@ cif_parser_args:
   add_bond_types_from_struct_conn: ["covale"]
 
 # --- sharding for multi-node runs ---
-num_shards: 20     # total number of shards
-shard_id: 19    # per-job shard id
+num_shards: 1     # total number of shards
+shard_id: 0   # per-job shard id
