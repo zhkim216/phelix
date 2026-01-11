@@ -41,8 +41,6 @@ class DataPreprocessor:
     clash_distance: float = 1.0
     # (Misc)
     ignore_residues: list[str] = field(default_factory=list)
-    apply_biolip2_contact_criteria: bool = True
-    apply_rigorous_contact_criteria_for_metals: bool = True
     # (Efficiency)
     polymer_pn_unit_limit: int = 1000
     # (CIFUtils defaults)
@@ -55,8 +53,6 @@ class DataPreprocessor:
     convert_mse_to_met: bool = True
     hydrogen_policy: Literal["remove", "infer", "keep"] = "remove",
     add_bond_types_from_struct_conn: list[str] = field(default_factory=lambda: ["covale"]) #! (JH) changed 251016
-    min_contacts_required: int = 2
-    min_contacts_required_for_metals: int = 3
 
     def __post_init__(self):
         logger.info(f"Initialized DataPreprocessor with the following parameters: {self.__dict__}")

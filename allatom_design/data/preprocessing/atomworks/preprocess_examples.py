@@ -9,7 +9,7 @@ from pathlib import Path
 import hydra
 import torch
 import yaml
-from atomworks.ml.datasets.datasets import PandasDataset
+from atomworks.ml.datasets import PandasDataset
 from omegaconf import DictConfig, OmegaConf, open_dict
 from tqdm import tqdm
 
