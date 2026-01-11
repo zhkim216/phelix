@@ -34,7 +34,7 @@ def preprocess_transform(
     undesired_res_names: list[str] = [], #! fixed
     b_factor_min: float | None = None,
     b_factor_max: float | None = None,
-    min_residues_for_polymers: int = 0, 
+    min_residues_for_polymers: int = 1, 
     remove_terminal_oxygen_protein: bool = True,
     remove_terminal_oxygen_nucleic_acid: bool = True,
 ) -> Transform:
