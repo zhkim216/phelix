@@ -511,5 +511,61 @@ def test_chiral_centers_with_cached_conformers(cache_dir, data_with_subsampled_c
     _ = chiral_pipe(data_with_subsampled_conformers)
 
 
+@pytest.mark.parametrize(
+    "res_name",
+    [
+        "G",  # 1-letter CCD code (cached at G/G/G.pt)
+        "DISEP",  # 5-letter CCD code/ligand (cached at D/DISEP/DISEP.pt)
+    ],
+)
+def test_cached_data_with_different_ccd_lengths(cache_dir, res_name):
+    """Test that CCD codes of different lengths work correctly with sharding.
+
+    Verifies that:
+    1. Sharding works correctly for 1-letter and 5-letter CCD codes
+    2. Data is actually loaded from cache for different length codes
+    3. Loaded data contains expected keys (mol, descriptors, etc.)
+    """
+    # Create atom array with the specified residue name
+    atom_array = struc.info.residue("ALA")  # Use ALA as template
+    atom_array = atom_array[atom_array.element != "H"]
+    atom_array.res_name[:] = res_name  # Set to test residue name
+    atom_array = add_global_token_id_annotation(atom_array)
+
+    # Test with sharding_depth=1 (matches actual cache structure)
+    pipe = Compose(
+        [
+            AddGlobalResIdAnnotation(),
+            LoadCachedResidueLevelData(dir=cache_dir, sharding_depth=1),
+        ]
+    )
+
+    result = pipe({"atom_array": atom_array})
+
+    # Verify basic structure
+    assert "atom_array" in result
+    assert "cached_residue_level_data" in result
+
+    # Verify the cached data structure
+    cached_data = result["cached_residue_level_data"]
+    assert "residues" in cached_data
+    assert "metadata" in cached_data
+
+    # Verify data was actually loaded for this residue
+    residues_data = cached_data["residues"]
+    assert res_name in residues_data, f"Cache data not loaded for {res_name} - cache file should exist at cache_dir"
+
+    # Verify the loaded data has expected structure
+    res_data = residues_data[res_name]
+    assert isinstance(res_data, dict), f"Expected dict for {res_name}, got {type(res_data)}"
+
+    # Check for expected keys (mol is the most important one)
+    assert "mol" in res_data, f"Expected 'mol' key in cached data for {res_name}"
+
+    # Verify mol is not None and has conformers
+    assert res_data["mol"] is not None, f"Expected non-None mol for {res_name}"
+    assert res_data["mol"].GetNumConformers() > 0, f"Expected conformers for {res_name}, got 0"
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

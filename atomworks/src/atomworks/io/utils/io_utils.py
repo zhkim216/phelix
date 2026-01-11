@@ -1,12 +1,27 @@
 """General utility functions for working with CIF files in Biotite."""
 
-__all__ = ["get_structure", "load_any", "read_any", "to_cif_buffer", "to_cif_file", "to_cif_string"]
+__all__ = [
+    "apply_sharding_pattern",
+    "build_sharding_pattern",
+    "get_structure",
+    "load_any",
+    "parse_sharding_pattern",
+    "read_any",
+    "suppress_logging_messages",
+    "to_cif_buffer",
+    "to_cif_file",
+    "to_cif_string",
+]
 
 import gzip
 import io
+import json
 import logging
 import os
+import re
 import warnings
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -30,7 +45,43 @@ from atomworks.io.utils.testing import has_ambiguous_annotation_set
 
 logger = logging.getLogger("atomworks.io")
 
-CIF_LIKE_EXTENSIONS = {".cif", ".pdb", ".bcif", ".cif.gz", ".pdb.gz", ".bcif.gz"}
+CIF_LIKE_EXTENSIONS = {
+    ".cif",
+    ".pdb",
+    ".bcif",
+    ".cif.gz",
+    ".pdb.gz",
+    ".bcif.gz",
+    ".json",
+    ".json.gz",
+    ".mmjson",
+    ".mmjson.gz",
+}
+
+
+@contextmanager
+def suppress_logging_messages(logger_name: str, message_pattern: str) -> Generator[None, None, None]:
+    """Temporarily suppress logging messages matching a pattern.
+
+    Args:
+        logger_name: Name of the logger to filter.
+        message_pattern: String pattern to match in log messages (substring match).
+
+    Examples:
+        >>> with suppress_logging_messages("atomworks.io", "not found"):
+        ...     # Code that generates "not found" warnings
+        ...     pass
+    """
+    target_logger = logging.getLogger(logger_name)
+
+    def filter_func(record: logging.LogRecord) -> bool:
+        return message_pattern not in record.getMessage()
+
+    target_logger.addFilter(filter_func)
+    try:
+        yield
+    finally:
+        target_logger.removeFilter(filter_func)
 
 
 def _get_logged_in_user() -> str:
@@ -47,7 +98,7 @@ def _get_logged_in_user() -> str:
 
 def load_any(
     file_or_buffer: os.PathLike | io.StringIO | io.BytesIO,
-    file_type: Literal["cif", "mmcif", "pdbx", "pdb", "pdb1", "bcif"] | None = None,
+    file_type: Literal["cif", "mmcif", "pdbx", "pdb", "pdb1", "bcif", "mmjson"] | None = None,
     *,
     extra_fields: list[str] | Literal["all"] = [],
     include_bonds: bool = True,
@@ -281,7 +332,28 @@ def get_structure(
     return atom_array_stack
 
 
-def infer_pdb_file_type(path_or_buffer: os.PathLike | io.StringIO | io.BytesIO) -> Literal["cif", "pdb", "bcif", "sdf"]:
+def _infer_file_type_from_buffer(buffer: io.BytesIO | io.StringIO) -> str:
+    """Infer file type from buffer contents."""
+    if isinstance(buffer, io.BytesIO):
+        return "bcif"
+
+    # StringIO - peek at contents to determine format
+    buffer.seek(0)
+    first_char = buffer.read(1)
+    buffer.readline()  # finish first line
+    second_line = buffer.readline()
+    buffer.seek(0)
+
+    if first_char == "{":
+        return "mmjson"
+    if second_line.startswith("#"):
+        return "cif"
+    return "pdb"
+
+
+def infer_pdb_file_type(
+    path_or_buffer: os.PathLike | io.StringIO | io.BytesIO,
+) -> Literal["cif", "pdb", "bcif", "sdf", "mmjson"]:
     """
     Infer the file type of a PDB file or buffer.
     """
@@ -290,15 +362,8 @@ def infer_pdb_file_type(path_or_buffer: os.PathLike | io.StringIO | io.BytesIO) 
         path_or_buffer = Path(path_or_buffer)
 
     # Determine file type and open context
-    if isinstance(path_or_buffer, io.BytesIO):
-        return "bcif"
-    elif isinstance(path_or_buffer, io.StringIO):
-        # ... if second line starts with '#', it is very likely a cif file
-        path_or_buffer.seek(0)
-        path_or_buffer.readline()  # Skip the first line
-        second_line = path_or_buffer.readline().strip()
-        path_or_buffer.seek(0)
-        return "cif" if second_line.startswith("#") else "pdb"
+    if isinstance(path_or_buffer, io.StringIO | io.BytesIO):
+        return _infer_file_type_from_buffer(path_or_buffer)
     elif isinstance(path_or_buffer, Path):
         if path_or_buffer.suffix in (".gz", ".gzip"):
             inferred_file_type = Path(path_or_buffer.stem).suffix.lstrip(".")
@@ -314,13 +379,32 @@ def infer_pdb_file_type(path_or_buffer: os.PathLike | io.StringIO | io.BytesIO) 
         return "bcif"
     elif inferred_file_type == "sdf":
         return "sdf"
+    elif inferred_file_type in ("json", "mmjson"):
+        return "mmjson"
     else:
         raise ValueError(f"Unsupported file type: {inferred_file_type}")
 
 
+def _read_mmjson(file_obj: io.StringIO | io.BytesIO | io.TextIOWrapper) -> pdbx.CIFFile:
+    """Read an mmjson file into a CIFFile object."""
+    data = json.load(file_obj)
+    cif_file = pdbx.CIFFile()
+    for block_name, block_data in data.items():
+        cif_block = pdbx.CIFBlock()
+        for cat_name, cat_data in block_data.items():
+            cif_category = pdbx.CIFCategory()
+            for col_name, col_data in cat_data.items():
+                # Convert None to "?" and ensure all elements are strings
+                processed_data = [str(x) if x is not None else "?" for x in col_data]
+                cif_category[col_name] = pdbx.CIFColumn(processed_data)
+            cif_block[cat_name] = cif_category
+        cif_file[block_name] = cif_block
+    return cif_file
+
+
 def read_any(
     path_or_buffer: os.PathLike | io.StringIO | io.BytesIO,
-    file_type: Literal["cif", "pdb", "bcif", "sdf"] | None = None,
+    file_type: Literal["cif", "pdb", "bcif", "sdf", "mmjson"] | None = None,
 ) -> pdbx.CIFFile | biotite_pdb.PDBFile | pdbx.BinaryCIFFile:
     """
     Reads any of the allowed file types into the appropriate Biotite file object.
@@ -328,7 +412,7 @@ def read_any(
     Args:
         path_or_buffer (PathLike | io.StringIO | io.BytesIO): The path to the file or a buffer to read from.
             If a buffer, it's highly recommended to specify the file_type.
-        file_type (Literal["cif", "pdb", "bcif"], optional): Type of the file.
+        file_type (Literal["cif", "pdb", "bcif", "mmjson"], optional): Type of the file.
             If None, it will be inferred from the file extension. When using a buffer, the file type must be specified.
 
     Returns:
@@ -340,7 +424,8 @@ def read_any(
     # Determine file type
     if file_type is None:
         file_type = infer_pdb_file_type(path_or_buffer)
-        open_mode = "rb" if file_type == "bcif" else "rt"
+
+    open_mode = "rb" if file_type == "bcif" else "rt"
 
     # Convert string paths to Path objects and decompress if necessary
     if isinstance(path_or_buffer, str | Path):
@@ -359,6 +444,13 @@ def read_any(
         file_cls = pdbx.BinaryCIFFile
     elif file_type == "sdf":
         file_cls = mol.SDFile
+    elif file_type == "mmjson":
+        # Special handling for mmjson
+        if isinstance(path_or_buffer, io.StringIO | io.BytesIO):
+            return _read_mmjson(path_or_buffer)
+        else:
+            with open(path_or_buffer) as f:
+                return _read_mmjson(f)
     else:
         raise ValueError(f"Unsupported file type: {file_type}")
 
@@ -1665,3 +1757,110 @@ def _filter_extra_fields(extra_fields: list[str], atom_site: pdbx.CIFCategory) -
             logger.warning(f"Field {field} not found in file, ignoring.")
 
     return filtered_extra_fields
+
+
+def find_files_by_extension(input_dir: Path, extension: str) -> list[Path]:
+    """Recursively find files with the specified extension in a directory."""
+    files = [f for f in input_dir.rglob(f"*{extension}") if str(f).endswith(extension)]
+
+    if not files:
+        raise FileNotFoundError(f"No files with extension {extension} found in {input_dir}")
+
+    return files
+
+
+def build_sharding_pattern(depth: int, chars_per_dir: int = 2) -> str:
+    """Build a sharding pattern string from depth and characters per directory.
+
+    Args:
+        depth: Number of directory levels.
+        chars_per_dir: Number of characters to use for each directory level.
+
+    Returns:
+        Sharding pattern string.
+
+    Examples:
+        >>> build_sharding_pattern(2, 2)
+        '/0:2/2:4/'
+        >>> build_sharding_pattern(3, 1)
+        '/0:1/1:2/2:3/'
+    """
+    if depth == 0:
+        return ""
+
+    parts = []
+    for i in range(depth):
+        start = i * chars_per_dir
+        end = start + chars_per_dir
+        parts.append(f"/{start}:{end}")
+
+    return "".join(parts) + "/"
+
+
+def parse_sharding_pattern(sharding_pattern: str) -> list[tuple[int, int]]:
+    """Parse a sharding pattern string into directory levels.
+
+    Args:
+        sharding_pattern: String like ``"/1:2/0:2/"`` where each ``/start:end/`` defines a directory level.
+            ``start:end`` defines the character range to use for that directory level.
+
+    Returns:
+        List of (start, end) tuples for each directory level.
+
+    Examples:
+        >>> parse_sharding_pattern("/1:2/0:2/")
+        [(1, 2), (0, 2)]
+    """
+    # Find all patterns like /start:end/ using a non-consuming lookahead
+    pattern = r"/(\d+):(\d+)(?=/)"
+    matches = []
+    for match in re.finditer(pattern, sharding_pattern):
+        matches.append((int(match.group(1)), int(match.group(2))))
+
+    if not matches:
+        raise ValueError(f"Invalid sharding pattern format: {sharding_pattern}. Expected format like '/1:2/0:2/'")
+
+    return matches
+
+
+def apply_sharding_pattern(path: os.PathLike, sharding_pattern: str | None = None) -> Path:
+    """Apply a sharding pattern to construct a file path.
+
+    Args:
+        path: The base path or identifier (e.g., PDB ID).
+        sharding_pattern: Pattern for organizing files in subdirectories. Examples:
+            - ``"/0:2/"``: Use first two characters for first directory level
+            - ``"/0:2/2:4/"``: Use chars 0-2 for first dir, then chars 2-4 for second dir
+            - ``None``: No sharding (default)
+
+    Returns:
+        The constructed file path with sharding applied.
+
+    Examples:
+        >>> apply_sharding_pattern("12as", "/0:2/1:3/")
+        Path("12/2a/12as")
+    """
+    path_str = str(path)
+    assert path_str and path_str != ".", "Path cannot be empty"
+
+    if not sharding_pattern:
+        return Path(path_str)
+
+    if not sharding_pattern.startswith("/"):
+        raise ValueError(f"Sharding pattern must start with '/': {sharding_pattern}")
+
+    try:
+        shard_ranges = parse_sharding_pattern(sharding_pattern)
+    except ValueError as e:
+        raise ValueError(f"Invalid sharding pattern '{sharding_pattern}': {e}") from e
+
+    # Validate all ranges before building path
+    for start, end in shard_ranges:
+        if end > len(path_str):
+            raise ValueError(f"Sharding range {start}:{end} exceeds path length {len(path_str)} for '{path_str}'")
+
+    # Build directory components from sharding ranges
+    directory_parts = [path_str[start:end] for start, end in shard_ranges]
+
+    # Construct final path: directories + filename
+    return Path(*directory_parts, path_str)

@@ -146,6 +146,14 @@ class RF2AAInputs(NamedTuple):
         return {key: getattr(self, key) for key in self._fields}
 
 
+def _is_inference(data: dict) -> bool:
+    return data.get("is_inference", False)
+
+
+def _is_training(data: dict) -> bool:
+    return not data.get("is_inference", False)
+
+
 def _convert_feats_to_rf2aa_input_tuple(data: dict) -> RF2AAInputs:
     data["feats"] = RF2AAInputs.from_dict(data["feats"])
     return data
@@ -354,7 +362,7 @@ def build_rf2aa_transform_pipeline(
     )
     transforms.append(
         ConditionalRoute(
-            condition_func=lambda data: data.get("is_inference", False),
+            condition_func=_is_inference,
             transform_map={
                 True: Identity(),
                 False: cropping_transform,
@@ -440,7 +448,7 @@ def build_rf2aa_transform_pipeline(
         # 8. Create symmetry copies (isomorphic chain swaps for polys, automorphisms for small molecules)
         # ============================================
         ConditionalRoute(
-            condition_func=lambda data: not data.get("is_inference", False),
+            condition_func=_is_training,
             transform_map={
                 True: CreateSymmetryCopyAxisLikeRF2AA(encoding=encoding, max_automorphs=1, max_isomorphisms=1),
                 False: CreateSymmetryCopyAxisLikeRF2AA(

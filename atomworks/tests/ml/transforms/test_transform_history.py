@@ -1,6 +1,6 @@
 import pytest
 
-from atomworks.ml.transforms.base import Compose, Identity, Transform, TransformPipelineError
+from atomworks.ml.transforms.base import Compose, ConditionalRoute, Identity, Transform, TransformPipelineError
 
 
 class Transform1(Transform):
@@ -81,6 +81,17 @@ def test_compose_error_handling():
         transform(data)
 
     assert "This transform always raises an error" in str(excinfo.value)
+
+
+def test_compose_error_handling_with_conditional_route():
+    error_route = ConditionalRoute(
+        condition_func=lambda data: True, transform_map={True: ErrorTransform(), False: Transform1()}
+    )
+    transform = Compose([error_route, Transform1(), Transform2()], track_rng_state=False)
+    with pytest.raises(ValueError) as excinfo:
+        transform(data)
+
+    assert "ConditionalRoute -> ErrorTransform" in str(excinfo.value)
 
 
 def test_compose_stop_before():

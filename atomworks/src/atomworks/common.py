@@ -126,18 +126,32 @@ def as_list(value: Any) -> list:
         return [value]
 
 
-def immutable_lru_cache(maxsize: int = 128, typed: bool = False, deepcopy: bool = True) -> Callable:
+def immutable_lru_cache(
+    maxsize: int = 128,
+    typed: bool = False,
+    deepcopy: bool = True,
+    copy_func: Callable | None = None,
+) -> Callable:
     """An immutable version of lru_cache for caching functions that return mutable objects.
 
     Args:
         maxsize: Maximum number of items to cache.
         typed: Whether to treat different types as separate cache entries.
         deepcopy: Whether to use deep copy for immutable caching.
+        copy_func: Custom copy function to use. If provided, overrides deepcopy parameter.
+            Should be a callable that takes the cached object and returns a copy.
 
     Returns:
         A decorator that provides immutable caching functionality.
+
+    Example:
+        >>> # Use biotite's fast copy for AtomArrays
+        >>> @immutable_lru_cache(maxsize=200, copy_func=lambda x: x.copy())
+        >>> def get_template(code):
+        ...     return atom_array_from_ccd_code(code)
     """
-    copy_func = copy.deepcopy if deepcopy else copy.copy
+    if copy_func is None:
+        copy_func = copy.deepcopy if deepcopy else copy.copy
 
     def decorator(func: Callable) -> Callable:
         cached_func = lru_cache(maxsize=maxsize, typed=typed)(func)

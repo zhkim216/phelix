@@ -324,20 +324,34 @@ def parse_ccd_cif(
     # Initialize the empty array:
     atoms = struc.AtomArray(atom_data.row_count)
 
-    # Fill standard annotations
-    as_bool = lambda x: np.where(x.as_array(str) == "Y", True, False)  # noqa: E731
+    # Fill annotations
+    n_atoms = len(atoms)
+
+    def _get_str(field_name: str, default: str = "") -> np.ndarray:
+        """Get string field or return default."""
+        field = atom_data.get(field_name)
+        return field.as_array(str) if field is not None else np.full(n_atoms, default, dtype=str)
+
+    def _get_bool(field_name: str) -> np.ndarray:
+        """Get boolean field (Y/N) or return False."""
+        field = atom_data.get(field_name)
+        return np.where(field.as_array(str) == "Y", True, False) if field is not None else np.full(n_atoms, False)
+
+    # Required annotations (no defaults)
     atoms.set_annotation("res_name", atom_data.get("comp_id").as_array(str))
     atoms.set_annotation("atom_name", atom_data.get("atom_id").as_array(str))
-    atoms.set_annotation("alt_atom_id", atom_data.get("alt_atom_id").as_array(str))
     atoms.set_annotation("element", atom_data.get("type_symbol").as_array(str))
     atoms.set_annotation("charge", atom_data.get("charge").as_array(np.int8))
-    atoms.set_annotation("stereo", atom_data.get("pdbx_stereo_config").as_array(str))
-    atoms.set_annotation("is_aromatic", as_bool(atom_data.get("pdbx_aromatic_flag")))
-    atoms.set_annotation("is_leaving_atom", as_bool(atom_data.get("pdbx_leaving_atom_flag")))
-    atoms.set_annotation("is_backbone_atom", as_bool(atom_data.get("pdbx_backbone_atom_flag")))
-    atoms.set_annotation("is_n_terminal_atom", as_bool(atom_data.get("pdbx_n_terminal_atom_flag")))
-    atoms.set_annotation("is_c_terminal_atom", as_bool(atom_data.get("pdbx_c_terminal_atom_flag")))
-    atoms.set_annotation("res_id", np.full(len(atoms), 1))  # We 1-index residue IDs to be consistent with RCSB
+    atoms.set_annotation("res_id", np.full(n_atoms, 1))  # We 1-index residue IDs to be consistent with RCSB
+
+    # Optional annotations (with defaults)
+    atoms.set_annotation("alt_atom_id", _get_str("alt_atom_id"))
+    atoms.set_annotation("stereo", _get_str("pdbx_stereo_config"))
+    atoms.set_annotation("is_aromatic", _get_bool("pdbx_aromatic_flag"))
+    atoms.set_annotation("is_leaving_atom", _get_bool("pdbx_leaving_atom_flag"))
+    atoms.set_annotation("is_backbone_atom", _get_bool("pdbx_backbone_atom_flag"))
+    atoms.set_annotation("is_n_terminal_atom", _get_bool("pdbx_n_terminal_atom_flag"))
+    atoms.set_annotation("is_c_terminal_atom", _get_bool("pdbx_c_terminal_atom_flag"))
 
     # Try setting hetero flag
     hetero = ccd_code not in struc.info.atoms.NON_HETERO_RESIDUES
@@ -403,9 +417,13 @@ def parse_ccd_cif(
         if bond_data is not None:
             bond_dict = pdbx.convert._parse_intra_residue_bonds(bond_data)
             atoms.bonds = struc.connect_via_residue_names(atoms, custom_bond_dict=bond_dict)
-    except KeyError:
-        atoms.bonds = None
-        logger.warning(f"No bond data found for `{ccd_code}`. Bonds will be `None`.")
+    except KeyError as e:
+        raise KeyError(
+            f"Failed to extract bond data for `{ccd_code}`: missing key {e}. "
+            f"Required fields are: comp_id, atom_id_1, atom_id_2, value_order, pdbx_aromatic_flag"
+        ) from e
+    except Exception as e:
+        raise RuntimeError(f"Error parsing bond data for `{ccd_code}`: {e!s}") from e
 
     # Set general annotations:
     if add_properties:
@@ -426,7 +444,7 @@ def parse_ccd_cif(
     return atoms
 
 
-@immutable_lru_cache(maxsize=20000, deepcopy=True)
+@immutable_lru_cache(maxsize=20000, copy_func=lambda x: x.copy())
 def get_ccd_component_from_mirror(
     ccd_code: str, ccd_mirror_path: os.PathLike = CCD_MIRROR_PATH, **parse_ccd_cif_kwargs
 ) -> struc.AtomArray:
@@ -453,7 +471,7 @@ def get_ccd_component_from_mirror(
     return atom_array
 
 
-@immutable_lru_cache(maxsize=200, deepcopy=True)
+@immutable_lru_cache(maxsize=200, copy_func=lambda x: x.copy())
 def atom_array_from_ccd_code(
     ccd_code: str, ccd_mirror_path: os.PathLike = CCD_MIRROR_PATH, **parse_ccd_cif_kwargs
 ) -> struc.AtomArray:

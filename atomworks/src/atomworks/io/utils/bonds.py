@@ -336,6 +336,12 @@ def get_struct_conn_bonds(
     Reference:
         `struct_conn.conn_type_id <https://mmcif.wwpdb.org/dictionaries/mmcif_pdbx_v50.dic/Items/_struct_conn.conn_type_id.html>`_
     """
+
+    def match_or_wildcard(array: np.ndarray, value: str) -> np.ndarray:
+        if value == "*":
+            return np.ones_like(array, dtype=bool)
+        return array == value
+
     # ... validate input
     invalid_bond_types = set(add_bond_types) - STRUCT_CONN_BOND_TYPES
     if len(invalid_bond_types) > 0:
@@ -364,7 +370,7 @@ def get_struct_conn_bonds(
     alt_atom_ids = get_annotation(atom_array, "alt_atom_id", default=atom_names)
     uses_alt_atom_id = get_annotation(atom_array, "uses_alt_atom_id", default=np.zeros(len(atom_array), dtype=bool))
 
-    all_res_names = np.unique(res_names)
+    all_res_names = np.append(np.unique(res_names), "*")
     all_chain_ids = np.unique(chain_ids)
     polymer_chain_ids = np.unique(chain_ids[is_polymer])
 
@@ -383,8 +389,8 @@ def get_struct_conn_bonds(
     leaving: list[np.ndarray] = []
 
     for _, row in struct_conn_df.iterrows():
-        res_name1 = row["ptnr1_label_comp_id"]
-        res_name2 = row["ptnr2_label_comp_id"]
+        res_name1 = str(row["ptnr1_label_comp_id"])
+        res_name2 = str(row["ptnr2_label_comp_id"])
         if (res_name1 not in all_res_names) or (res_name2 not in all_res_names):
             # ... skip if the residues were removed from the structure
             if raise_on_failure:
@@ -418,6 +424,7 @@ def get_struct_conn_bonds(
         # For non-polymers, we use the auth_seq_id if available and valid (i.e., not "." or "?"); otherwise we use the label_seq_id
         # (Required to avoid ambiguity, since if using `label` only we may have multiple residue within a
         # chain with the same label_seq_id and the same res_name; see: 6MUB)
+
         res_id1 = int(
             row["ptnr1_label_seq_id"]
             if ((chain_id1 in relevant_polymer_chain_identifiers) or ("ptnr1_auth_seq_id" not in row))
@@ -440,13 +447,13 @@ def get_struct_conn_bonds(
         in_res1 = (
             (relevant_chain_identifiers == chain_id1)
             & (res_ids == res_id1)
-            & (res_names == res_name1)
+            & match_or_wildcard(res_names, res_name1)
             & (ins_codes == ins_code1)
         )
         in_res2 = (
             (relevant_chain_identifiers == chain_id2)
             & (res_ids == res_id2)
-            & (res_names == res_name2)
+            & match_or_wildcard(res_names, res_name2)
             & (ins_codes == ins_code2)
         )
 
@@ -471,8 +478,8 @@ def get_struct_conn_bonds(
         if (
             (in_res1.sum() == 0)
             or (in_res2.sum() == 0)
-            or (res_name1 != res_names[in_res1_start])
-            or (res_name2 != res_names[in_res2_start])
+            or (res_name1 != res_names[in_res1_start] if res_name1 != "*" else False)
+            or (res_name2 != res_names[in_res2_start] if res_name2 != "*" else False)
         ):
             logger.info(
                 f"Covalent bond involving residues {chain_id1}/{res_id1}/{res_name1} and "
@@ -681,12 +688,16 @@ def _atom_array_to_networkx_graph(
     """Convert an AtomArray to a NetworkX graph."""
     # ... create the bond graph
     bonds = atom_array.bonds.as_array()
-    bond_list = bonds[:, :2]
 
-    # ... create the bond graph for the atom array
+    # ... create the bond graph for the atom array, adding all nodes first to ensure correct indexing
     bond_graph = nx.Graph()
     bond_graph.add_nodes_from(range(len(atom_array)))
-    bond_graph.add_edges_from(bond_list)
+    bond_list = []
+
+    # ... add edges from bond list
+    if len(bonds) > 0:
+        bond_list = [tuple(bond) for bond in bonds[:, :2]]
+        bond_graph.add_edges_from(bond_list)
 
     # ... annotate the bond graph with bond order
     if bond_order:

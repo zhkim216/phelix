@@ -3,7 +3,7 @@ import logging
 import numpy as np
 import pytest
 
-from atomworks.ml.datasets.datasets import PandasDataset
+from atomworks.ml.datasets import PandasDataset
 
 # NOTE: See the conftest for the filters applied to pn_units_dataset, which are validated below
 
