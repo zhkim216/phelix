@@ -289,7 +289,6 @@ class DataPreprocessor:
                 contact_distance=self.contact_distance,
                 min_contacts_required=1,
                 calculate_min_distance=True,
-                second_shell=False,
             )
                         
             # Find close PN units, which will be used to determine which PN units to load at train-time
