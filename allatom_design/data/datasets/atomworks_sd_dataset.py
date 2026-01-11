@@ -13,7 +13,7 @@ import pandas as pd
 import torch
 import torch.distributed as dist
 from atomworks.ml.example_id import generate_example_id
-from atomworks.ml.datasets.datasets import MolecularDataset
+from atomworks.ml.datasets import MolecularDataset
 from atomworks.ml.datasets.parsers import GenericDFParser
 from atomworks.ml.samplers import DistributedMixedSampler
 from atomworks.ml.utils.io import read_parquet_with_metadata
