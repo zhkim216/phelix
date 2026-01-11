@@ -25,7 +25,7 @@ from atomworks.constants import (
 )
 from atomworks.enums import ChainType, ChainTypeInfo
 from atomworks.io import parse
-from atomworks.io.parser import DEFAULT_PARSE_KWARGS
+from atomworks.io.parser import STANDARD_PARSER_ARGS
 from atomworks.io.template import build_template_atom_array
 from atomworks.io.tools.fasta import one_letter_to_ccd_code, split_generalized_fasta_sequence
 from atomworks.io.utils.bonds import (
@@ -257,7 +257,7 @@ class CIFOrPDBFileComponent(ChemicalComponent):
             self.custom_parse_kwargs = {}
 
         # We add missing atoms later to the fully-concatenated inference AtomArray
-        parse_kwargs = {**DEFAULT_PARSE_KWARGS, "add_missing_atoms": False} | self.custom_parse_kwargs
+        parse_kwargs = {**STANDARD_PARSER_ARGS, "add_missing_atoms": False} | self.custom_parse_kwargs
 
         if parse_kwargs["add_missing_atoms"]:
             logger.warning(

@@ -171,6 +171,43 @@ class TestAnnotationList2D:
         assert arr.values.shape == (0,)
         assert arr.n_atoms == 3
 
+    def test_symmetrization(self):
+        """Test ensure_symmetric adds missing pairs and detects value mismatches."""
+        # Adds missing reverse pairs
+        annot = AnnotationList2D(3, np.array([[0, 0], [0, 1], [1, 2]]), np.array([0.5, 1.5, 2.5]))
+        result = annot.symmetrized()
+        assert len(result.pairs) == 5
+        assert np.allclose(result.pairs, np.array([[0, 0], [0, 1], [1, 2], [1, 0], [2, 1]]))
+        assert np.allclose(result.values, [0.5, 1.5, 2.5, 1.5, 2.5])
+
+        # Errors on value mismatch
+        with pytest.raises(ValueError, match="^Asymmetric input values"):
+            AnnotationList2D(3, np.array([[0, 1], [1, 0]]), np.array([1.0, 2.0])).symmetrized()
+
+        # Handles NaN correctly (NaN == NaN)
+        assert len(AnnotationList2D(3, np.array([[0, 1], [1, 0]]), np.array([np.nan, np.nan])).symmetrized().pairs) == 2
+
+        # Some more edge cases
+        annot = AnnotationList2D(
+            4,
+            np.array([[0, 1], [0, 2], [2, 1], [1, 3]]),  # upper and lower triangle pairs
+            np.array([1.0, 2.0, 3.0, 4.0]),
+        )
+        result = annot.symmetrized()
+        assert len(result.pairs) == 8
+        assert np.allclose(
+            result.as_dense_array(),
+            np.array(
+                [
+                    [np.nan, 1.0, 2.0, np.nan],
+                    [1.0, np.nan, 3.0, 4.0],
+                    [2.0, 3.0, np.nan, np.nan],
+                    [np.nan, 4.0, np.nan, np.nan],
+                ]
+            ),
+            equal_nan=True,
+        )
+
 
 def _make_single_atom(element: str, coord: list[float], annotations_2d: list[str] = None) -> AtomArrayPlus:
     """Helper function to create a single-atom AtomArrayPlus with the given element, coordinates, and optional 2D annotation names."""
@@ -209,6 +246,27 @@ class TestAtomArrayPlus:
         arr.set_annotation_2d("bar", [(1, 0)], [24])
         names = arr.get_annotation_2d_categories()
         assert set(names) == {"distances", "foo", "bar"}
+
+    def test_del_annotation_2d(self, simple_array):
+        """Test deleting 2D annotations from AtomArrayPlus."""
+        arr = deepcopy(simple_array)
+        arr.set_annotation_2d("foo", [(0, 1)], [42])
+        arr.set_annotation_2d("bar", [(1, 0)], [24])
+
+        # Verify initial state
+        assert set(arr.get_annotation_2d_categories()) == {"distances", "foo", "bar"}
+
+        # Delete one annotation
+        arr.del_annotation_2d("foo")
+        assert set(arr.get_annotation_2d_categories()) == {"distances", "bar"}
+
+        # Delete another
+        arr.del_annotation_2d("distances")
+        assert set(arr.get_annotation_2d_categories()) == {"bar"}
+
+        # Delete nonexistent annotation (should not raise error, like AtomArray.del_annotation)
+        arr.del_annotation_2d("nonexistent")  # Should do nothing
+        assert set(arr.get_annotation_2d_categories()) == {"bar"}
 
     def test_slice_and_filter_2d_annotations(self, complex_array):
         """Test filtering of 2D annotations when slicing AtomArrayPlus."""

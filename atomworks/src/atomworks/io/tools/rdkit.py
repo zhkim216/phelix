@@ -1,6 +1,4 @@
-"""
-Tools for using RDKit with AtomArray objects.
-"""
+"""Tools for using RDKit with AtomArray objects."""
 
 import copy
 import io
@@ -34,6 +32,7 @@ from atomworks.constants import (
 from atomworks.io.utils.ccd import atom_array_from_ccd_code
 
 logger = logging.getLogger(__name__)
+
 
 # Set default pickle properties to all properties, otherwise
 #  annotations get lost when pickling/unpickling molecules
@@ -214,9 +213,7 @@ def _calc_formal_charge_from_valence(rdatom: Chem.Atom) -> int:
     num_valence_electrons = Chem.GetPeriodicTable().GetDefaultValence(
         rdatom.GetSymbol()
     )  # ... how many electrons are missing to full outer shell
-    num_electrons_in_bonds = (
-        rdatom.GetImplicitValence() + rdatom.GetExplicitValence()
-    )  # ... how many electrons are involved in bonds
+    num_electrons_in_bonds = rdatom.GetTotalValence()  # Total valence (explicit + implicit)
     num_radicals = rdatom.GetNumRadicalElectrons()  # ... how many unpaired, radical electrons
     return (num_electrons_in_bonds + num_radicals) - num_valence_electrons
 
@@ -547,6 +544,8 @@ def atom_array_from_rdkit(
                 hetero=True,  # per default, set all atoms to be hetero atoms
                 atom_name=f"{rdatom.GetSymbol().upper()}{element_occurence}",  # per default, set atom name to be element symbol + index
                 res_name=UNKNOWN_LIGAND,  # per default, set residue name to UNL (unknown ligand)
+                chiral_tag=int(rdatom.GetChiralTag()),
+                is_aromatic=rdatom.GetIsAromatic(),
             )
         )
     atom_array = struc.array(atoms)
@@ -611,7 +610,7 @@ def atom_array_from_rdkit(
                     default = -1
             elif np.issubdtype(val.dtype, np.floating):
                 default = np.nan
-            elif np.issubdtype(val.dtype, np.str_):
+            elif np.issubdtype(val.dtype, np.str_ or str):
                 default = ""
             elif np.issubdtype(val.dtype, bool):
                 default = False
@@ -662,7 +661,8 @@ def atom_array_to_rdkit(
         Aromaticity, hybridization states, and other properties are automatically
         perceived by RDKit's SanitizeMol during the conversion process.
     """
-    # Initialize the RDKit molecule
+    # Initialize the RDKit molecule; copy AtomArray to avoid modifying the original
+    atom_array = atom_array.copy()
     mol = Chem.RWMol()
 
     # Set atoms
@@ -696,32 +696,37 @@ def atom_array_to_rdkit(
         rdkit_atom_ids.append(atom_id)
         mol.AddAtom(rdatom)
 
-    # Set bonds
-    _should_be_aromatic = set()
-
-    if exists(atom_array.bonds):
-        for bond in atom_array.bonds.as_array():
-            atom1, atom2, bond_type = list(map(int, bond))
-            if bond_type == struc.bonds.BondType.ANY:
-                # ... warn if underspecified bonds are encountered
-                logger.warning("Encountered BondType.ANY. Interpreting as single bond.")
-            bond_order, bond_is_aromatic = BIOTITE_BOND_TYPE_TO_RDKIT[bond_type]
-            mol.AddBond(atom1, atom2, order=bond_order)
-            if bond_is_aromatic and not attempt_fixing_corrupted_molecules:
-                # ... set aromaticity explicitly (and require the molecule makes sense later)
-                mol.GetAtomWithIdx(atom1).SetIsAromatic(True)
-                mol.GetAtomWithIdx(atom2).SetIsAromatic(True)
-            _should_be_aromatic.union({atom1, atom2})
-
-    # Set coordinates
+    # Set coordinates first
     set_coord = set_coord or not np.any(np.isnan(atom_array.coord))
     if set_coord:
         # ... add conformer (at id 0)
         conf_id = mol.AddConformer(Chem.Conformer(len(atom_array)), assignId=True)
+
         # ... fill in coordinates
         for atom_id, atom_coord in enumerate(atom_array.coord):
             mol.GetConformer(conf_id).SetAtomPosition(atom_id, atom_coord.tolist())
-        # ... assign stereochemistry
+
+    # Set bonds from existing bonds in atom_array
+    _should_be_aromatic = set()
+    if exists(atom_array.bonds):
+        # Use existing bonds from atom_array
+        for bond in atom_array.bonds.as_array():
+            atom1, atom2, bond_type = list(map(int, bond))
+
+            if bond_type == struc.bonds.BondType.ANY:
+                logger.warning("Encountered BondType.ANY. Interpreting as single bond.")
+
+            bond_order, bond_is_aromatic = BIOTITE_BOND_TYPE_TO_RDKIT[bond_type]
+            mol.AddBond(atom1, atom2, order=bond_order)
+
+            if bond_is_aromatic and not attempt_fixing_corrupted_molecules:
+                mol.GetAtomWithIdx(atom1).SetIsAromatic(True)
+                mol.GetAtomWithIdx(atom2).SetIsAromatic(True)
+
+            _should_be_aromatic.union({atom1, atom2})
+
+    # Assign stereochemistry (requires 3D coordinates and bonds)
+    if mol.GetNumConformers() > 0:
         try:
             Chem.AssignStereochemistryFrom3D(mol)
         except ValueError:
@@ -748,7 +753,7 @@ def atom_array_to_rdkit(
         )
 
     # Clean up the molecule and infer various properties
-    #  (we always sanitize when attempting to fix corrupted molecules)
+    # (We always sanitize when attempting to fix corrupted molecules)
     if sanitize or attempt_fixing_corrupted_molecules:
         # ... verify validity of the molecule (according to Lewis octet rule)
         try:
@@ -765,7 +770,7 @@ def atom_array_to_rdkit(
             ).GetIsAromatic(), f"Atom {atom_idx} is not aromatic but was labelled as aromatic."
 
     # Turn into a non-editable molecule
-    mol = mol.GetMol()
+    mol = mol.GetMol() if isinstance(mol, Chem.RWMol) else mol
 
     # Attach custom atom-level annotations from the atom array
     mol._annotations = {"rdkit_atom_id": np.array(rdkit_atom_ids)}

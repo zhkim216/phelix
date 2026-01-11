@@ -7,10 +7,7 @@ from types import MappingProxyType
 from typing import Final
 
 from biotite.structure.bonds import BondType
-from dotenv import load_dotenv
 from toolz import keymap
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +97,9 @@ METAL_ELEMENTS: Final[frozenset[str]] = frozenset(map(str.upper, [
     "Li", "Na", "K", "Rb", "Cs", "Be", "Mg", "Ca", "Sr", "Ba",
     "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn",
     "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd",
-    "La", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
+    "La", "Ce", "Pr", "Nd", "Pm", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu",
+    "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
+    "Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr",
     "Al", "Ga", "In", "Sn", "Tl", "Pb", "Bi",
 ]))
 """A set of all metal elements, all *UPPERCASE*.
@@ -113,42 +112,17 @@ Reference:
 """
 # fmt: on
 
-CHEM_COMP_TYPES: Final[tuple[str, ...]] = tuple(
-    [
-        chemtype.upper()
-        for chemtype in (
-            "D-beta-peptide, C-gamma linking",
-            "D-gamma-peptide, C-delta linking",
-            "D-peptide COOH carboxy terminus",
-            "D-peptide NH3 amino terminus",
-            "D-peptide linking",
-            "D-saccharide",
-            "D-saccharide, alpha linking",
-            "D-saccharide, beta linking",
-            "DNA OH 3 prime terminus",
-            "DNA OH 5 prime terminus",
-            "DNA linking",
-            "L-DNA linking",
-            "L-RNA linking",
-            "L-beta-peptide, C-gamma linking",
-            "L-gamma-peptide, C-delta linking",
-            "L-peptide COOH carboxy terminus",
-            "L-peptide NH3 amino terminus",
-            "L-peptide linking",
-            "L-saccharide",
-            "L-saccharide, alpha linking",
-            "L-saccharide, beta linking",
-            "RNA OH 3 prime terminus",
-            "RNA OH 5 prime terminus",
-            "RNA linking",
-            "non-polymer",
-            "other",
-            "peptide linking",
-            "peptide-like",
-            "saccharide",
-        )
-    ]
-)
+# fmt: off
+CHEM_COMP_TYPES: Final[tuple[str, ...]] = tuple([
+    chemtype.upper() for chemtype in (
+        "D-beta-peptide, C-gamma linking", "D-gamma-peptide, C-delta linking", "D-peptide COOH carboxy terminus", "D-peptide NH3 amino terminus", "D-peptide linking",
+        "D-saccharide", "D-saccharide, alpha linking", "D-saccharide, beta linking", "DNA OH 3 prime terminus", "DNA OH 5 prime terminus", "DNA linking", "L-DNA linking",
+        "L-RNA linking", "L-beta-peptide, C-gamma linking", "L-gamma-peptide, C-delta linking", "L-peptide COOH carboxy terminus", "L-peptide NH3 amino terminus",
+        "L-peptide linking", "L-saccharide", "L-saccharide, alpha linking", "L-saccharide, beta linking", "RNA OH 3 prime terminus", "RNA OH 5 prime terminus",
+        "RNA linking", "non-polymer", "other", "peptide linking", "peptide-like", "saccharide",
+    )
+])
+# fmt: on
 """Allowed Chemical Component Types for residues in the PDB + `mask`.
 
 All uppercase.
@@ -157,122 +131,73 @@ Reference:
     `RCSB mmCIF Dictionary - chem_comp.type <http://mmcif.rcsb.org/dictionaries/mmcif_pdbx_v50.dic/Items/_chem_comp.type.html>`_
 """
 
-AA_LIKE_CHEM_TYPES: Final[frozenset[str]] = frozenset(
-    [
-        chemtype.upper()
-        for chemtype in (
-            "D-beta-peptide, C-gamma linking",
-            "D-gamma-peptide, C-delta linking",
-            "D-peptide COOH carboxy terminus",
-            "D-peptide NH3 amino terminus",
-            "D-peptide linking",
-            "L-beta-peptide, C-gamma linking",
-            "L-gamma-peptide, C-delta linking",
-            "L-peptide COOH carboxy terminus",
-            "L-peptide NH3 amino terminus",
-            "L-peptide linking",
-            "peptide linking",
-            "peptide-like",
-        )
-    ]
-)
+# fmt: off
+AA_LIKE_CHEM_TYPES: Final[frozenset[str]] = frozenset([
+    chemtype.upper() for chemtype in (
+        "D-beta-peptide, C-gamma linking", "D-gamma-peptide, C-delta linking", "D-peptide COOH carboxy terminus", "D-peptide NH3 amino terminus", "D-peptide linking",
+        "L-beta-peptide, C-gamma linking", "L-gamma-peptide, C-delta linking", "L-peptide COOH carboxy terminus", "L-peptide NH3 amino terminus", "L-peptide linking",
+        "peptide linking", "peptide-like",
+    )
+])
+# fmt: on
 """Set of amino acid-like chemical component types. All uppercase."""
 
-POLYPEPTIDE_L_CHEM_TYPES: Final[frozenset[str]] = frozenset(
-    [
-        chemtype.upper()
-        for chemtype in (
-            "L-beta-peptide, C-gamma linking",
-            "L-gamma-peptide, C-delta linking",
-            "L-peptide COOH carboxy terminus",
-            "L-peptide NH3 amino terminus",
-            "L-peptide linking",
-        )
-    ]
-)
+# fmt: off
+POLYPEPTIDE_L_CHEM_TYPES: Final[frozenset[str]] = frozenset([
+    chemtype.upper() for chemtype in (
+        "L-beta-peptide, C-gamma linking", "L-gamma-peptide, C-delta linking", "L-peptide COOH carboxy terminus", "L-peptide NH3 amino terminus", "L-peptide linking",
+    )
+])
+# fmt: on
 """Set of polypeptide-L (left-handed amino acids) chemical component types. All uppercase."""
 
-POLYPEPTIDE_D_CHEM_TYPES: Final[frozenset[str]] = frozenset(
-    [
-        chemtype.upper()
-        for chemtype in (
-            "D-beta-peptide, C-gamma linking",
-            "D-gamma-peptide, C-delta linking",
-            "D-peptide COOH carboxy terminus",
-            "D-peptide NH3 amino terminus",
-            "D-peptide linking",
-        )
-    ]
-)
+# fmt: off
+POLYPEPTIDE_D_CHEM_TYPES: Final[frozenset[str]] = frozenset([
+    chemtype.upper() for chemtype in (
+        "D-beta-peptide, C-gamma linking", "D-gamma-peptide, C-delta linking", "D-peptide COOH carboxy terminus", "D-peptide NH3 amino terminus", "D-peptide linking",
+    )
+])
+# fmt: on
 """Set of polypeptide-D (right-handed amino acids) chemical component types. All uppercase."""
 
-RNA_LIKE_CHEM_TYPES: Final[frozenset[str]] = frozenset(
-    [
-        chemtype.upper()
-        for chemtype in (
-            "L-RNA linking",
-            "RNA OH 3 prime terminus",
-            "RNA OH 5 prime terminus",
-            "RNA linking",
-        )
-    ]
-)
+# fmt: off
+RNA_LIKE_CHEM_TYPES: Final[frozenset[str]] = frozenset([
+    chemtype.upper() for chemtype in ("L-RNA linking", "RNA OH 3 prime terminus", "RNA OH 5 prime terminus", "RNA linking")
+])
+# fmt: on
 """Set of RNA-like chemical component types. All uppercase."""
 
-DNA_LIKE_CHEM_TYPES: Final[frozenset[str]] = frozenset(
-    [
-        chemtype.upper()
-        for chemtype in (
-            "DNA OH 3 prime terminus",
-            "DNA OH 5 prime terminus",
-            "DNA linking",
-            "L-DNA linking",
-        )
-    ]
-)
+# fmt: off
+DNA_LIKE_CHEM_TYPES: Final[frozenset[str]] = frozenset([
+    chemtype.upper() for chemtype in ("DNA OH 3 prime terminus", "DNA OH 5 prime terminus", "DNA linking", "L-DNA linking")
+])
+# fmt: on
 """Set of DNA-like chemical component types. All uppercase."""
 
 NA_LIKE_CHEM_TYPES: Final[frozenset[str]] = RNA_LIKE_CHEM_TYPES | DNA_LIKE_CHEM_TYPES
 """DNA or RNA-like chemical component types."""
 
-CARBOHYDRATE_LIKE_CHEM_TYPES: Final[frozenset[str]] = frozenset(
-    [
-        chemtype.upper()
-        for chemtype in (
-            "D-saccharide",
-            "D-saccharide, alpha linking",
-            "D-saccharide, beta linking",
-            "L-saccharide",
-            "L-saccharide, alpha linking",
-            "L-saccharide, beta linking",
-            "saccharide",
-        )
-    ]
-)
+# fmt: off
+CARBOHYDRATE_LIKE_CHEM_TYPES: Final[frozenset[str]] = frozenset([
+    chemtype.upper() for chemtype in (
+        "D-saccharide", "D-saccharide, alpha linking", "D-saccharide, beta linking", "L-saccharide", "L-saccharide, alpha linking", "L-saccharide, beta linking", "saccharide",
+    )
+])
+# fmt: on
 """Set of carbohydrate-like chemical component types. All uppercase."""
 
-CARBOHYDRATE_L_CHEM_TYPES: Final[frozenset[str]] = frozenset(
-    [
-        chemtype.upper()
-        for chemtype in (
-            "L-saccharide",
-            "L-saccharide, alpha linking",
-            "L-saccharide, beta linking",
-        )
-    ]
-)
+# fmt: off
+CARBOHYDRATE_L_CHEM_TYPES: Final[frozenset[str]] = frozenset([
+    chemtype.upper() for chemtype in ("L-saccharide", "L-saccharide, alpha linking", "L-saccharide, beta linking")
+])
+# fmt: on
 """Set of carbohydrate-L (left-handed saccharides) chemical component types. All uppercase."""
 
-CARBOHYDRATE_D_CHEM_TYPES: Final[frozenset[str]] = frozenset(
-    [
-        chemtype.upper()
-        for chemtype in (
-            "D-saccharide",
-            "D-saccharide, alpha linking",
-            "D-saccharide, beta linking",
-        )
-    ]
-)
+# fmt: off
+CARBOHYDRATE_D_CHEM_TYPES: Final[frozenset[str]] = frozenset([
+    chemtype.upper() for chemtype in ("D-saccharide", "D-saccharide, alpha linking", "D-saccharide, beta linking")
+])
+# fmt: on
 """Set of carbohydrate-D (right-handed saccharides) chemical component types. All uppercase."""
 
 LIGAND_LIKE_CHEM_TYPES: Final[frozenset[str]] = frozenset([chemtype.upper() for chemtype in ("non-polymer", "other")])
@@ -330,18 +255,24 @@ Reference:
 
 BIOTITE_BOND_TYPE_TO_BOND_ORDER: Final[MappingProxyType[BondType, int]] = MappingProxyType(
     {
-        # biotite bond type -> (rdkit bond type, is_aromatic)
-        BondType.ANY: 1,
-        BondType.SINGLE: 1,
-        BondType.DOUBLE: 2,
-        BondType.TRIPLE: 3,
-        BondType.QUADRUPLE: 4,
-        BondType.AROMATIC_SINGLE: 1,
-        BondType.AROMATIC_DOUBLE: 2,
-        BondType.AROMATIC_TRIPLE: 3,
+        # biotite bond type -> bond order
+        BondType.ANY: 1,  # 0
+        BondType.SINGLE: 1,  # 1
+        BondType.DOUBLE: 2,  # 2
+        BondType.TRIPLE: 3,  # 3
+        BondType.QUADRUPLE: 4,  # 4
+        BondType.AROMATIC_SINGLE: 1,  # 5
+        BondType.AROMATIC_DOUBLE: 2,  # 6
+        BondType.AROMATIC_TRIPLE: 3,  # 7
     }
 )
-"""Mapping from Biotite bond types to bond orders."""
+"""Mapping from Biotite bond types to bond orders.
+
+NOTE: We do not include BondType.COORDINATION (8) and BondType.AROMATIC (9) as bond orders are not well-defined; they should be handled separately.
+
+Reference:
+    `biotite.structure.BondType <https://www.biotite-python.org/latest/apidoc/biotite.structure.BondType.html>`_
+"""
 
 DEFAULT_VALENCE = {
     "H": 1,
@@ -360,163 +291,29 @@ Reference:
     `RDKit Book - Valence Calculation <https://www.rdkit.org/docs/RDKit_Book.html#valence-calculation-and-allowed-valences>`_
 """
 
-CRYSTALLIZATION_AIDS: Final[list[str]] = [
-    "SO4",
-    "GOL",
-    "EDO",
-    "PO4",
-    "ACT",
-    "PEG",
-    "DMS",
-    "TRS",
-    "PGE",
-    "PG4",
-    "FMT",
-    "EPE",
-    "MPD",
-    "MES",
-    "CD",
-    "IOD",
-]
+# fmt: off
+CRYSTALLIZATION_AIDS: Final[list[str]] = ["SO4", "GOL", "EDO", "PO4", "ACT", "PEG", "DMS", "TRS", "PGE", "PG4", "FMT", "EPE", "MPD", "MES", "CD", "IOD"]
+# fmt: on
 """A list of CCD codes of common crystallization aids used in the crystallization of proteins.
 
 Reference:
     `AF3 (Supp. Table 9) <https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-024-07487-w/MediaObjects/41586_2024_7487_MOESM1_ESM.pdf>`_
 """
 
+# fmt: off
 AF3_EXCLUDED_LIGANDS: Final[list[str]] = [
-    "144",
-    "15P",
-    "1PE",
-    "2F2",
-    "2JC",
-    "3HR",
-    "3SY",
-    "7N5",
-    "7PE",
-    "9JE",
-    "AAE",
-    "ABA",
-    "ACE",
-    "ACN",
-    "ACT",
-    "ACY",
-    "AZI",
-    "BAM",
-    "BCN",
-    "BCT",
-    "BDN",
-    "BEN",
-    "BME",
-    "BO3",
-    "BTB",
-    "BTC",
-    "BU1",
-    "C8E",
-    "CAD",
-    "CAQ",
-    "CBM",
-    "CCN",
-    "CIT",
-    "CL",
-    "CLR",
-    "CM",
-    "CMO",
-    "CO3",
-    "CPT",
-    "CXS",
-    "D10",
-    "DEP",
-    "DIO",
-    "DMS",
-    "DN",
-    "DOD",
-    "DOX",
-    "EDO",
-    "EEE",
-    "EGL",
-    "EOH",
-    "EOX",
-    "EPE",
-    "ETF",
-    "FCY",
-    "FJO",
-    "FLC",
-    "FMT",
-    "FW5",
-    "GOL",
-    "GSH",
-    "GTT",
-    "GYF",
-    "HED",
-    "IHP",
-    "IHS",
-    "IMD",
-    "IOD",
-    "IPA",
-    "IPH",
-    "LDA",
-    "MB3",
-    "MEG",
-    "MES",
-    "MLA",
-    "MLI",
-    "MOH",
-    "MPD",
-    "MRD",
-    "MSE",
-    "MYR",
-    "N",
-    "NA",
-    "NH2",
-    "NH4",
-    "NHE",
-    "NO3",
-    "O4B",
-    "OHE",
-    "OLA",
-    "OLC",
-    "OMB",
-    "OME",
-    "OXA",
-    "P6G",
-    "PE3",
-    "PE4",
-    "PEG",
-    "PEO",
-    "PEP",
-    "PG0",
-    "PG4",
-    "PGE",
-    "PGR",
-    "PLM",
-    "PO4",
-    "POL",
-    "POP",
-    "PVO",
-    "SAR",
-    "SCN",
-    "SEO",
-    # "SEP", # Phosphoserine; a commonly occuring PTM in proteins, useful in cellular signaling pathways
-    "SIN",
-    "SO4",
-    "SPD",
-    "SPM",
-    "SR",
-    "STE",
-    "STO",
-    "STU",
-    "TAR",
-    "TBU",
-    "TME",
-    # "TPO", # Phosphothreonine; a commonly occuring PTM in proteins, useful in cellular signaling pathways
-    "TRS",
-    "UNK",
-    "UNL",
-    "UNX",
-    "UPL",
-    "URE",
+    "144", "15P", "1PE", "2F2", "2JC", "3HR", "3SY", "7N5", "7PE", "9JE", "AAE", "ABA", "ACE", "ACN", "ACT", "ACY", "AZI", "BAM", "BCN", "BCT",
+    "BDN", "BEN", "BME", "BO3", "BTB", "BTC", "BU1", "C8E", "CAD", "CAQ", "CBM", "CCN", "CIT", "CL", "CLR", "CM", "CMO", "CO3", "CPT", "CXS",
+    "D10", "DEP", "DIO", "DMS", "DN", "DOD", "DOX", "EDO", "EEE", "EGL", "EOH", "EOX", "EPE", "ETF", "FCY", "FJO", "FLC", "FMT", "FW5", "GOL",
+    "GSH", "GTT", "GYF", "HED", "IHP", "IHS", "IMD", "IOD", "IPA", "IPH", "LDA", "MB3", "MEG", "MES", "MLA", "MLI", "MOH", "MPD", "MRD", "MSE",
+    "MYR", "N", "NA", "NH2", "NH4", "NHE", "NO3", "O4B", "OHE", "OLA", "OLC", "OMB", "OME", "OXA", "P6G", "PE3", "PE4", "PEG", "PEO", "PEP",
+    "PG0", "PG4", "PGE", "PGR", "PLM", "PO4", "POL", "POP", "PVO", "SAR", "SCN", "SEO",
+    # "SEP",  # Phosphoserine; a commonly occuring PTM in proteins, useful in cellular signaling pathways
+    "SIN", "SO4", "SPD", "SPM", "SR", "STE", "STO", "STU", "TAR", "TBU", "TME",
+    # "TPO",  # Phosphothreonine; a commonly occuring PTM in proteins, useful in cellular signaling pathways
+    "TRS", "UNK", "UNL", "UNX", "UPL", "URE",
 ]
+# fmt: on
 """A list of CCD codes of ligands that were excluded in AF3.
 
 Reference:
@@ -526,33 +323,14 @@ Reference:
 AF3_EXCLUDED_LIGANDS_REGEX: Final[str] = r"(?:^|,)\s*(?:" + "|".join(AF3_EXCLUDED_LIGANDS) + r")\s*(?:,|$)"
 """A regex pattern that matches any of the ligands in `AF3_EXCLUDED_LIGANDS`. Used for filtering out ligands from the assembled dataframes."""
 
+# fmt: off
 # TODO: Replace this by general mapping of CCD codes to one-letter codes.
 DICT_THREE_TO_ONE: Final[dict[str, str]] = {
-    "ALA": "A",
-    "CYS": "C",
-    "ASP": "D",
-    "GLU": "E",
-    "PHE": "F",
-    "GLY": "G",
-    "HIS": "H",
-    "ILE": "I",
-    "LYS": "K",
-    "LEU": "L",
-    "MET": "M",
-    "ASN": "N",
-    "PRO": "P",
-    "GLN": "Q",
-    "ARG": "R",
-    "SER": "S",
-    "THR": "T",
-    "VAL": "V",
-    "TRP": "W",
-    "TYR": "Y",
-    "ASX": "B",
-    "GLX": "Z",
-    "UNK": "X",
-    " * ": "*",
+    "ALA": "A", "CYS": "C", "ASP": "D", "GLU": "E", "PHE": "F", "GLY": "G", "HIS": "H", "ILE": "I", "LYS": "K", "LEU": "L",
+    "MET": "M", "ASN": "N", "PRO": "P", "GLN": "Q", "ARG": "R", "SER": "S", "THR": "T", "VAL": "V", "TRP": "W", "TYR": "Y",
+    "ASX": "B", "GLX": "Z", "UNK": "X", " * ": "*",
 }
+# fmt: on
 """A dictionary that maps three-letter amino acid codes to one-letter codes.
 
 Reference:
@@ -601,33 +379,14 @@ GAP: Final[str] = sys.intern("<G>")
 GAP_ONE_LETTER: Final[str] = sys.intern("-")
 """The one-letter code for a gap token."""
 
+MASKED: Final[str] = sys.intern("<M>")
+"""The (non-standard) code for a masked token."""
 
-STANDARD_AA: Final[tuple[str, ...]] = tuple(
-    sorted(
-        [
-            "ALA",
-            "ARG",
-            "ASN",
-            "ASP",
-            "CYS",
-            "GLN",
-            "GLU",
-            "GLY",
-            "HIS",
-            "ILE",
-            "LEU",
-            "LYS",
-            "MET",
-            "PHE",
-            "PRO",
-            "SER",
-            "THR",
-            "TRP",
-            "TYR",
-            "VAL",
-        ]
-    )
-)
+# fmt: off
+STANDARD_AA: Final[tuple[str, ...]] = tuple(sorted([
+    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE", "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+]))
+# fmt: on
 """Tuple of the CCD codes for the standard 20 amino acids, alphabetically sorted by their three-letter CCD codes."""
 
 STANDARD_AA_ONE_LETTER: Final[tuple[str, ...]] = tuple(map(DICT_THREE_TO_ONE.get, STANDARD_AA))
@@ -691,28 +450,13 @@ PDB_ISOTOPE_SYMBOL_TO_ELEMENT_SYMBOL: Final[dict[str, str]] = {
 NOTE: Other isotopes like 14C do not have a special symbol in the PDB.
 """
 
+# fmt: off
 STANDARD_AA_TIP_ATOM_NAMES: Final[dict[str, list[str]]] = {
-    "ALA": ["CB"],
-    "ARG": ["NH1", "NH2"],
-    "ASN": ["OD1", "ND2"],
-    "ASP": ["OD1", "OD2"],
-    "CYS": ["SG"],
-    "GLN": ["OE1", "NE2"],
-    "GLU": ["OE1", "OE2"],
-    "GLY": ["CA"],
-    "HIS": ["CE1", "NE2"],
-    "ILE": ["CD1"],
-    "LEU": ["CD1", "CD2"],
-    "LYS": ["NZ"],
-    "MET": ["CE"],
-    "PHE": ["CZ"],
-    "PRO": ["CD", "CG"],
-    "SER": ["OG"],
-    "THR": ["OG1", "CG2"],
-    "TRP": ["CH2"],
-    "TYR": ["OH"],
-    "VAL": ["CG1", "CG2"],
+    "ALA": ["CB"], "ARG": ["NH1", "NH2"], "ASN": ["OD1", "ND2"], "ASP": ["OD1", "OD2"], "CYS": ["SG"], "GLN": ["OE1", "NE2"], "GLU": ["OE1", "OE2"], "GLY": ["CA"],
+    "HIS": ["CE1", "NE2"], "ILE": ["CD1"], "LEU": ["CD1", "CD2"], "LYS": ["NZ"], "MET": ["CE"], "PHE": ["CZ"], "PRO": ["CD", "CG"], "SER": ["OG"],
+    "THR": ["OG1", "CG2"], "TRP": ["CH2"], "TYR": ["OH"], "VAL": ["CG1", "CG2"],
 }
+# fmt: on
 """A dictionary that maps the standard 20 amino acids to their tip atoms.
 
 Tip atoms are defined as the side-chain heavy atoms that are furthest away
@@ -725,3 +469,31 @@ PROTEIN_FRAME_ATOM_NAMES: Final[tuple[str, ...]] = ("N", "CA", "C")
 
 NUCLEIC_ACID_FRAME_ATOM_NAMES: Final[tuple[str, ...]] = ("C1'", "C3'", "C4'")
 """A tuple of the names of the frame atoms (backbone) for nucleic acids."""
+
+PROTEIN_BACKBONE_ATOM_NAMES: Final[tuple[str, ...]] = ("N", "CA", "C", "O", "OXT")
+"""A tuple of the names of all protein backbone atoms (N-CA-C backbone + carbonyl oxygen + terminal OXT)."""
+
+# fmt: off
+RNA_BACKBONE_ATOM_NAMES: Final[tuple[str, ...]] = ("P", "OP1", "OP2", "O5'", "C5'", "C4'", "C3'", "C2'", "C1'", "O4'", "O3'", "O2'")
+# fmt: on
+"""A tuple of the names of RNA backbone atoms (sugar-phosphate backbone including 2' hydroxyl)."""
+
+# fmt: off
+DNA_BACKBONE_ATOM_NAMES: Final[tuple[str, ...]] = ("P", "OP1", "OP2", "O5'", "C5'", "C4'", "C3'", "C2'", "C1'", "O4'", "O3'")
+# fmt: on
+"""A tuple of the names of DNA backbone atoms (sugar-phosphate backbone, no 2' hydroxyl)."""
+
+NUCLEIC_ACID_BACKBONE_ATOM_NAMES: Final[tuple[str, ...]] = tuple(
+    sorted(set(RNA_BACKBONE_ATOM_NAMES) | set(DNA_BACKBONE_ATOM_NAMES))
+)
+"""A tuple of the names of all nucleic acid backbone atoms (union of RNA and DNA backbones)."""
+
+# fmt: off
+NA_VALUES = [
+    "", " ", "#N/A", "#N/A N/A", "#NA", "-1.#IND", "-1.#QNAN", "-NaN", "-nan", "1.#IND", "1.#QNAN", "<NA>", "N/A", "NULL", "NaN", "None", "n/a", "nan", "null",
+]
+# fmt: on
+"""A list of strings that are considered as NA/NaN ("missing" values) values in dataframes.
+
+NOTE: By default, "NA" is considered as a missing value by Pandas, which can lead to subtle bugs.
+"""

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from atomworks.io.utils.testing import assert_same_atom_array
-from atomworks.ml.datasets.datasets import get_row_and_index_by_example_id
+from atomworks.ml.datasets import get_row_and_index_by_example_id
 from atomworks.ml.datasets.parsers import InterfacesDFParser, PNUnitsDFParser, load_example_from_metadata_row
 from atomworks.ml.encoding_definitions import RF2AA_ATOM36_ENCODING
 from atomworks.ml.transforms.atom_array import (

@@ -242,7 +242,7 @@ def get_spatial_crop_center(
         ), f"No crop center found! It appears `query_pn_unit_iid` {query_pn_unit_iids} is not in the atom array or unresolved."
 
         return can_be_crop_center
-    
+
     # ... get mask for ligands of interest
     is_at_interface = np.zeros_like(is_query_pn_unit, dtype=bool)
     for pn_unit_1_iid, pn_unit_2_iid in itertools.combinations(query_pn_unit_iids, 2):

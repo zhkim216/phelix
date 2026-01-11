@@ -17,7 +17,7 @@ import logging
 
 from tqdm import tqdm
 
-from atomworks.ml.datasets.datasets import get_row_and_index_by_example_id
+from atomworks.ml.datasets import get_row_and_index_by_example_id
 from tests.conftest import PDB_DATASET
 from tests.pipelines.test_data_loading_pipelines import BENCHMARK_EXAMPLE_IDS
 
