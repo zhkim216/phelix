@@ -287,8 +287,7 @@ class DataPreprocessor:
                 filtered_atom_array=filtered_atom_array,
                 cell_list=cell_list,
                 contact_distance=self.contact_distance,
-                min_contacts_required=self.min_contacts_required,
-                min_contacts_required_for_metals=self.min_contacts_required_for_metals,
+                min_contacts_required=1,
                 calculate_min_distance=True,
                 second_shell=False,
             )
