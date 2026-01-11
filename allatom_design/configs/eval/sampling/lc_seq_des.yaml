@@ -15,10 +15,10 @@ seed: 0
 num_workers: 0 # for dataloading
 
 # Metadata
-metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
+metadata_path: null
 
 # Outputs
-exp_name: caliby_lcaliby_redesign_rfd3val # experiment name; used for wandb and output directory
+exp_name: exp2_cfg2_rfd3val
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
@@ -46,12 +46,11 @@ seq_des_cfg:
         potts_sweeps: 500
         lcp_expand_edge_idx_fix: true
 
-pos_constraint_csv: /scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lcaliby_pos_constraint_df/eval_caliby_lcaliby_redesign_rf3val_pos_constraint_scaffold_4.0A.csv
+pos_constraint_csv: null
 
 # Redesign pocket sequence options
 redesign_cfg:
-  redesign_pocket_seq: true
-  use_native_pocket_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
+  use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
   pocket_distance: 5.0
 
 # Docking metrics configuration
@@ -65,8 +64,8 @@ load_from_cache: false
 
 # Configurations for getting designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_caliby_lmpnnval_af3/original_samples
-  pdb_name_list: null  # null to use all files in pdb_dir
+  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
+  pdb_name_list: /scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/rfd3_min_max_median_len150_filtered_nonsimilar_ccd_clustered03.txt
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
 
