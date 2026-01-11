@@ -4,20 +4,6 @@ out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full
 num_workers: 31
 max_file_size: 20000000
 
-# Data preprocessor args to specify in addition to the cif parser args
-data_preprocessor_cfg:
-  from_rcsb: true
-  build_assembly: "first"
-
-  # Cutoff distances
-  close_distance: 30.0
-  contact_distance: 5
-  clash_distance: 1.0
-  # Misc
-  ignore_residues: [] #! (JH) changed 250926
-  # Efficiency
-  polymer_pn_unit_limit: 1000
-
 # CIF parser args
 cif_parser_args:
   add_missing_atoms: true
@@ -28,6 +14,19 @@ cif_parser_args:
   convert_mse_to_met: true
   hydrogen_policy: "remove"
   add_bond_types_from_struct_conn: ["covale"]
+
+# Data preprocessor args to specify in addition to the cif parser args
+data_preprocessor_cfg:
+  from_rcsb: true
+  build_assembly: "first"
+  # Cutoff distances
+  close_distance: 30.0
+  contact_distance: 5
+  clash_distance: 1.0
+  # Misc
+  ignore_residues: [] 
+  # Efficiency
+  polymer_pn_unit_limit: 1000
 
 # --- sharding for multi-node runs ---
 num_shards: 10000     # total number of shards
