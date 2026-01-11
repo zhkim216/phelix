@@ -127,7 +127,6 @@ class DataPreprocessor:
             "ranking_model_fit",
             "ranking_model_geometry",
         ],
-        return_filtered_atom_array: bool = False,
     ) -> list[dict[str, Any]]:
         """Processes a structure file, applies filters, and generates a list of records to be loaded at train-time.
 
@@ -168,35 +167,26 @@ class DataPreprocessor:
             ligand_validity_scores = None
 
         # Process each assembly
-        records = []
-        filtered_atom_arrays = []
+        records = []        
         for assembly_id in result_dict["assemblies"]:
-            result, filtered_atom_array = self._generate_pn_unit_metadata_for_assembly(
+            result = self._generate_pn_unit_metadata_for_assembly(
                 result_dict,
                 assembly_id,
                 ligand_validity_scores,
-                return_filtered_atom_array=return_filtered_atom_array,
             )
-            if return_filtered_atom_array:
-                filtered_atom_arrays.append(filtered_atom_array)
             if result is not None:
                 # The path info should be saved as well
                 for row in result:
                     row["path"] = path_to_structure
                 records.extend(result)
-                
-        if return_filtered_atom_array:
-            return records, filtered_atom_arrays
-        else:
-            return records, None
+                                
+        return records
 
     def _generate_pn_unit_metadata_for_assembly(
         self,
         result_dict: dict,
         assembly_id: str,
         ligand_validity_scores: pd.DataFrame | None = None,
-        return_id_map_dict: bool = False,
-        return_filtered_atom_array: bool = False,
     ) -> list[dict[str, Any]]:
         """Processes an atom array that represents a single assembly and generate a list of metadata records for each PN unit.
 
@@ -288,11 +278,7 @@ class DataPreprocessor:
         
         for query_pn_unit_iid in pn_unit_iids_to_consider:
             query_pn_unit_atom_array = filtered_atom_array[filtered_atom_array.pn_unit_iid == query_pn_unit_iid]
-            
-            elements = np.char.upper(np.char.strip(query_pn_unit_atom_array.element.astype(str)))
-            vdw_radius = np.round(np.array([VDW_DICT.get(el, 1.75) for el in elements], dtype=np.float32), 2)
-            query_pn_unit_atom_array.set_annotation("vdw_radius", vdw_radius)
-            
+                        
             assert len(query_pn_unit_atom_array) > 0, f"Query PN unit {query_pn_unit_iid} has zero atoms"
 
             query_pn_unit_type = ChainType(
@@ -310,22 +296,7 @@ class DataPreprocessor:
                 calculate_min_distance=True,
                 second_shell=False,
             )
-            
-            # #! (JH) Find second-shell contacting PN units, which will be used to construct ligand clusters 
-            # second_shell_pn_unit_iids = dp.get_contacting_pn_units(
-            #     query_pn_unit=query_pn_unit_atom_array,
-            #     filtered_atom_array=filtered_atom_array,
-            #     cell_list=cell_list,
-            #     contact_distance=self.second_shell_distance,
-            #     min_contacts_required=1,
-            #     calculate_min_distance=True,
-            #     second_shell=True,
-            # )
-            
-            # #! (JH) Remove contacting PN units from second-shell contacting PN units
-            # contacting_iids = {item["pn_unit_iid"] for item in contacting_pn_unit_iids}
-            # second_shell_pn_unit_iids = [item for item in second_shell_pn_unit_iids if item["pn_unit_iid"] not in contacting_iids]                        
-
+                        
             # Find close PN units, which will be used to determine which PN units to load at train-time
             close_pn_unit_iids = dp.get_contacting_pn_units(
                 query_pn_unit=query_pn_unit_atom_array,
@@ -343,13 +314,6 @@ class DataPreprocessor:
                 key=lambda x: (x["num_contacts"], -x["min_distance"]),
                 reverse=True,
             )
-
-            # #! (JH) Sort second-shell contacting PN units by number of contacting atoms and then by minimum distance
-            # second_shell_pn_unit_iids = sorted(
-            #     second_shell_pn_unit_iids,
-            #     key=lambda x: (x["num_contacts"], -x["min_distance"]),
-            #     reverse=True,
-            # )
 
             # Determine the primary polymer chain, which is the first partner polymer PN unit for non-polymers, or the query PN unit itself for polymers
             if not query_pn_unit_type.is_non_polymer():
@@ -410,6 +374,7 @@ class DataPreprocessor:
                     "ligand_validity": ligand_validity,
                     "non_polymer_res_names": non_polymer_res_names,
                 }
+                
             elif query_pn_unit_type.is_polymer():
                 chain_id = query_pn_unit_atom_array.chain_id[0]  # (Polymers have only one chain)
                 ec_numbers = chain_info_dict[chain_id].get("ec_numbers", None)
@@ -514,40 +479,9 @@ class DataPreprocessor:
                         for partner in contacting_pn_unit_iids
                     ]
                 ),
-                # #! (JH) Add second-shell contacting PN units
-                # "q_pn_unit_second_shell_pn_unit_iids": json.dumps(
-                #     [
-                #         {
-                #             "pn_unit_iid": id_map_dict["pn_unit_iid"][partner["pn_unit_iid"]],
-                #             **{k: v for k, v in partner.items() if k != "pn_unit_iid"},
-                #         }
-                #         for partner in second_shell_pn_unit_iids
-                #     ]
-                # ),
                 "q_pn_unit_close_pn_unit_iids": json.dumps(close_pn_unit_iids),
             }
             # fmt: on
             assembly_records.append(pn_unit_record)
-        if not return_filtered_atom_array:
-            return assembly_records, None
-        else:
-            # Map pn_unit annotations back to their original verbose string labels for convenience
-            try:
-                # Restore pn_unit_id (e.g., "A", "B")
-                _pn_unit_id_verbose = np.array(
-                    [id_map_dict["pn_unit_id"][int(i)] for i in filtered_atom_array.pn_unit_id], dtype=object
-                )
-                filtered_atom_array.del_annotation("pn_unit_id")
-                filtered_atom_array.set_annotation("pn_unit_id", _pn_unit_id_verbose)
-
-                # Restore pn_unit_iid (e.g., "A_1", "B_2")
-                _pn_unit_iid_verbose = np.array(
-                    [id_map_dict["pn_unit_iid"][int(i)] for i in filtered_atom_array.pn_unit_iid], dtype=object
-                )
-                filtered_atom_array.del_annotation("pn_unit_iid")
-                filtered_atom_array.set_annotation("pn_unit_iid", _pn_unit_iid_verbose)
-            except Exception:
-                # If any issue occurs, fall back to returning the integer annotations unchanged
-                pass
-
-            return assembly_records, filtered_atom_array
+        
+        return assembly_records

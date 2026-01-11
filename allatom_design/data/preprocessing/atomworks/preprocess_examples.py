@@ -24,11 +24,7 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 
 
-<<<<<<< HEAD
 @hydra.main(config_path="../../../configs_local/data/preprocessing/atomworks", config_name="preprocess_examples", version_base="1.3.2")
-=======
-@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="preprocess_examples_for_debug", version_base="1.3.2")
->>>>>>> refs/remotes/origin/jinho/AAA
 def main(cfg: DictConfig):
     """
     Process a set of mmCIFs using AtomWorks.
@@ -56,13 +52,13 @@ def main(cfg: DictConfig):
     cache_fn = partial(_cache_examples, cached_example_dir=cached_example_dir)
 
     # iterate over the dataset, and the caching will happen automatically
-    struct_dataset = hydra.utils.instantiate(cfg.dataset, transform=preprocess_transform(cfg.preprocess.min_residues_for_polymers))
+    struct_dataset = hydra.utils.instantiate(cfg.dataset, transform=preprocess_transform(**cfg.preprocess_cfg))
     indices = list(range(len(struct_dataset)))
     indices = take_shard(indices, shard_id=cfg.shard_id, num_shards=cfg.num_shards)
 
     if use_parallel:
         with ProcessPoolExecutor(max_workers=cfg.num_workers, mp_context=mp.get_context("forkserver"),
-                                 initializer=_init_dataset, initargs=(cfg.dataset, cfg.preprocess.min_residues_for_polymers)) as executor:
+                                 initializer=_init_dataset, initargs=(cfg.dataset, cfg.preprocess_cfg)) as executor:
             for _ in tqdm(executor.map(cache_fn, indices), total=len(indices), desc="Caching examples"):
                 pass
     else:
@@ -88,9 +84,10 @@ def _cache_examples(idx: int,
 # Initialize the dataset in each worker so that the dataset is not pickled
 _DATASET: PandasDataset | None = None
 
-def _init_dataset(dataset_cfg: DictConfig, min_residues_for_polymers: int):
+def _init_dataset(dataset_cfg: DictConfig = None,
+                  preprocess_cfg: DictConfig = None):
     global _DATASET
-    _DATASET = hydra.utils.instantiate(dataset_cfg, transform=preprocess_transform(min_residues_for_polymers=min_residues_for_polymers))
+    _DATASET = hydra.utils.instantiate(dataset_cfg, transform=preprocess_transform(**preprocess_cfg))
 
 
 if __name__ == "__main__":
