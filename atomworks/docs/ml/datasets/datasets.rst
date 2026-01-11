@@ -19,7 +19,7 @@ The current AtomWorks dataset system consists of three main components:
 Dataset Classes
 ---------------
 
-.. automodule:: atomworks.ml.datasets.datasets
+.. automodule:: atomworks.ml.datasets
    :members:
    :undoc-members:
    :show-inheritance:
@@ -42,7 +42,7 @@ Basic Usage Examples
 
 .. code-block:: python
 
-   from atomworks.ml.datasets.datasets import FileDataset
+   from atomworks.ml.datasets import FileDataset
    from atomworks.io import parse
    
    def simple_loading_fn(raw_data) -> dict:
@@ -60,13 +60,13 @@ Basic Usage Examples
 
 .. code-block:: python
 
-   from atomworks.ml.datasets.datasets import PandasDataset
-   from atomworks.ml.datasets.loaders import loader_with_query_pn_units
-   
+   from atomworks.ml.datasets import PandasDataset
+   from atomworks.ml.datasets.loaders import create_loader_with_query_pn_units
+
    dataset = PandasDataset(
        data="metadata.parquet",
        name="interfaces_dataset",
-       loader=loader_with_query_pn_units(
+       loader=create_loader_with_query_pn_units(
            pn_unit_iid_colnames=["pn_unit_1_iid", "pn_unit_2_iid"]
        )
    )
@@ -107,11 +107,11 @@ Common Loader Patterns
 
 .. code-block:: python
 
-   from atomworks.ml.datasets.loaders import loader_base
-   
-   loader = loader_base(
+   from atomworks.ml.datasets.loaders import create_base_loader
+
+   loader = create_base_loader(
        example_id_colname="example_id",
-       path_colname="path", 
+       path_colname="path",
        assembly_id_colname="assembly_id",
        base_path="/data/structures",
        extension=".cif"
@@ -121,9 +121,9 @@ Common Loader Patterns
 
 .. code-block:: python
 
-   from atomworks.ml.datasets.loaders import loader_with_query_pn_units
-   
-   loader = loader_with_query_pn_units(
+   from atomworks.ml.datasets.loaders import create_loader_with_query_pn_units
+
+   loader = create_loader_with_query_pn_units(
        pn_unit_iid_colnames=["pn_unit_1_iid", "pn_unit_2_iid"],
        base_path="/data/pdb",
        extension=".cif.gz"
@@ -133,9 +133,9 @@ Common Loader Patterns
 
 .. code-block:: python
 
-   from atomworks.ml.datasets.loaders import loader_with_interfaces_and_pn_units_to_score
-   
-   loader = loader_with_interfaces_and_pn_units_to_score(
+   from atomworks.ml.datasets.loaders import create_loader_with_interfaces_and_pn_units_to_score
+
+   loader = create_loader_with_interfaces_and_pn_units_to_score(
        interfaces_to_score_colname="interfaces_to_score",
        pn_units_to_score_colname="pn_units_to_score"
    )

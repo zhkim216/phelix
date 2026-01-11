@@ -174,9 +174,9 @@ def initialize_chain_info_from_atom_array(
         if "label_entity_id" in atom_array.get_annotation_categories():
             # (Entity ID is the same for all atoms in the chain)
             atom_level_chain_identifiers = atom_array.chain_iid if use_chain_iids else atom_array.chain_id
-            chain_info_dict[chain_identifier]["rcsb_entity"] = int(
-                atom_array.label_entity_id[atom_level_chain_identifiers == chain_identifier][0]
-            )
+            representative_entity_id = atom_array.label_entity_id[atom_level_chain_identifiers == chain_identifier][0]
+            if representative_entity_id not in [".", "?"]:
+                chain_info_dict[chain_identifier]["rcsb_entity"] = int(representative_entity_id)
 
         if infer_chain_type:
             chain_info_dict[chain_identifier]["chain_type"] = chain_type

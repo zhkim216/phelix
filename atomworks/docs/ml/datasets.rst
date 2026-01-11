@@ -6,7 +6,7 @@ This module contains dataset classes and utilities for loading and processing mo
 Core Dataset Classes
 --------------------
 
-.. automodule:: atomworks.ml.datasets.datasets
+.. automodule:: atomworks.ml.datasets
    :members:
    :undoc-members:
    :show-inheritance:

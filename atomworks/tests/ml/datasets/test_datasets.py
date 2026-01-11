@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch.utils.data import SequentialSampler, WeightedRandomSampler
 
-from atomworks.ml.datasets.datasets import (
+from atomworks.ml.datasets import (
     ConcatDatasetWithID,
     PandasDataset,
     get_row_and_index_by_example_id,

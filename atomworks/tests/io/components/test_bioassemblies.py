@@ -24,8 +24,9 @@ def test_assembly_counts(test_case: dict):
     filename = get_pdb_path(pdbid)
 
     # test the different build_assembly options
+    # build_assembly=None creates an identity assembly with IID annotations
     out_no_assembly = parse(filename=filename, build_assembly=None, remove_ccds=[])
-    assert len(out_no_assembly["assemblies"]) == 0
+    assert len(out_no_assembly["assemblies"]) == 1
 
     out_first = parse(filename=filename, build_assembly="first", remove_ccds=[])
     assert len(out_first["assemblies"]) == 1

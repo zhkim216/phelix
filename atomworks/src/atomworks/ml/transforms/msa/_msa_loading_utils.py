@@ -6,12 +6,13 @@ from pathlib import Path
 
 import numpy as np
 
-from atomworks.enums import ChainType
+from atomworks.enums import ChainType, MSAFileExtension
+from atomworks.io.utils.io_utils import apply_sharding_pattern, build_sharding_pattern
 from atomworks.ml.transforms.msa._msa_constants import (
     AMINO_ACID_ONE_LETTER_ASCII_TO_INT_LOOKUP_TABLE,
     RNA_NUCLEOTIDE_ONE_LETTER_ASCII_TO_INT_LOOKUP_TABLE,
 )
-from atomworks.ml.utils.io import get_sharded_file_path, open_file
+from atomworks.ml.utils.io import open_file
 from atomworks.ml.utils.misc import hash_sequence
 
 
@@ -25,16 +26,50 @@ def extract_tax_id(line: str, unknown_tax_id: str = "") -> str:
     return unknown_tax_id  # (unknown tax ID, which must be handled correctly when pairing downstream)
 
 
+def get_msa_format_from_extension(filename: PathLike) -> str:
+    """Determine MSA format (a3m or fasta) from filename, ignoring compression.
+
+    Args:
+        filename: Path to the MSA file.
+
+    Returns:
+        Format string: either "a3m" or "fasta".
+    """
+    name = str(filename).lower()
+
+    # Check a3m formats (including all compression variants)
+    for ext in [MSAFileExtension.A3M_ZST, MSAFileExtension.A3M_GZ, MSAFileExtension.A3M]:
+        if name.endswith(ext.value):
+            return "a3m"
+
+    # Check fasta formats (including all compression variants)
+    for ext in [MSAFileExtension.AFA_ZST, MSAFileExtension.AFA_GZ, MSAFileExtension.AFA]:
+        if name.endswith(ext.value):
+            return "fasta"
+
+    # Also support .fasta extension (common alternative to .afa)
+    for ext in [".fasta.zst", ".fasta.gz", ".fasta"]:
+        if name.endswith(ext):
+            return "fasta"
+
+    raise ValueError(f"Unsupported MSA file extension: {filename}")
+
+
 def parse_msa(
     filename: PathLike, maxseq: int = 10000, query_tax_id: str = "query"
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Routes to the appropriate MSA parser based on the file extension."""
-    if filename.name.endswith((".a3m", ".a3m.gz")):
+    """Routes to the appropriate MSA parser based on the file extension.
+
+    Supports .a3m and .afa (fasta) formats with optional .gz or .zst compression.
+    """
+    msa_format = get_msa_format_from_extension(filename)
+
+    if msa_format == "a3m":
         return parse_a3m(filename, maxseq, query_tax_id)
-    elif filename.name.endswith((".afa", ".afa.gz", ".fasta", ".fasta.gz")):
+    elif msa_format == "fasta":
         return parse_fasta(filename, maxseq, query_tax_id)
     else:
-        raise ValueError(f"Unsupported MSA file extension: {filename.name}")
+        raise ValueError(f"Unsupported MSA format: {msa_format}")
 
 
 def remove_header_from_msa_file(fstream: Iterable[str]) -> Iterable[str]:
@@ -60,6 +95,8 @@ def parse_fasta(filename: PathLike, maxseq: int = 10000, query_tax_id: str = "qu
     TODO: Update this function to handle insertions. Note that in FASTA files, insertions must be handled differently than in A3M files.
     For FASTA, we would need to remove all gaps from the query sequence, and consider non-gap characters in those columns as insertions.
 
+    TODO: Deprecate and use Biotite to load FASTA files.
+
     Args:
         filename (PathLike): The path to the FASTA file (can be gzipped).
         maxseq (int): The maximum number of sequences to read from the file (for processing speed).
@@ -72,6 +109,7 @@ def parse_fasta(filename: PathLike, maxseq: int = 10000, query_tax_id: str = "qu
 
     Reference:
         `UniProt FASTA Header Documentation <https://www.uniprot.org/help/fasta-headers>`_
+
     """
     msa = []
     ins = []
@@ -163,6 +201,9 @@ def parse_a3m(
     fstream = remove_header_from_msa_file(open_file(filename))
 
     for index, line in enumerate(fstream):
+        line = line.replace("\x00", "")  # Files from the mmseq server may have stray null characters
+        if len(line) == 0:
+            continue
         # Extract taxonomy ID from the header line, but don't process like the rest of the MSA
         if line[0] == ">":
             if index == 0:
@@ -237,9 +278,10 @@ def get_msa_path(seq: str, msa_dirs: list[dict[str, str]]) -> Path | None:
     """
     sequence_hash = hash_sequence(seq)
     for msa_dir in msa_dirs:
-        msa_file = get_sharded_file_path(
-            Path(msa_dir["dir"]), sequence_hash, msa_dir["extension"], msa_dir.get("directory_depth", 0)
-        )
+        depth = msa_dir.get("directory_depth", 0)
+        sharding_pattern = build_sharding_pattern(depth=depth, chars_per_dir=2)
+        sharded_path = apply_sharding_pattern(sequence_hash, sharding_pattern)
+        msa_file = Path(msa_dir["dir"]) / sharded_path.with_suffix(msa_dir["extension"])
         if msa_file.exists():
             return msa_file
     return None

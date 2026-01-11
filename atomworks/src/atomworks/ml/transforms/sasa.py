@@ -16,7 +16,11 @@ logger = logging.getLogger("atomworks.ml")
 
 
 def calculate_atomwise_sasa(
-    atom_array: AtomArray, probe_radius: float = 1.4, atom_radii: str | np.ndarray = "ProtOr", point_number: int = 100
+    atom_array: AtomArray,
+    probe_radius: float = 1.4,
+    atom_radii: str | np.ndarray = "ProtOr",
+    point_number: int = 100,
+    atom_filter: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Calculate the SASA for each atom in `atom_array`, excluding those
@@ -27,24 +31,30 @@ def calculate_atomwise_sasa(
         probe_radius (float, optional): Van-der-Waals radius of the probe in Angstrom. Defaults to 1.4 (for water).
         atom_radii (str | np.ndarray, optional): Atom radii set to use for calculation. Defaults to "ProtOr". "ProtOr" will not get sasa's for hydrogen atoms and some other atoms, like ions or certain atoms with charges
         point_number (int, optional): Number of points in the Shrake-Rupley algorithm to sample for calculating SASA. Defaults to 100.
-
+        atom_filter (np.ndarray | None, optional): A boolean array of length `atom_array.array_length()` to filter the atoms to calculate SASA for. Defaults to None. Only calculates SASA for filtered atoms
     """
     # 1) Create a boolean vector for valid atoms (no NaNs in their coordinates)
     has_resolved_coordinates = ~np.isnan(atom_array.coord).any(axis=-1)
+    if atom_filter is None:
+        atom_filter = has_resolved_coordinates
+    else:
+        atom_filter = atom_filter & has_resolved_coordinates
 
     # 2) Slice the array to keep only valid atoms
-    valid_atom_array = atom_array[has_resolved_coordinates]
+    valid_atom_array = atom_array[atom_filter]
 
-    # 3) Compute SASA on only the valid atoms
+    # Early return if no valid atoms remain
+    if len(valid_atom_array) == 0:
+        return np.full(atom_array.array_length(), np.nan, dtype=float)
+
+    # Compute SASA on only the valid atoms
     valid_sasa = struc.sasa(
         valid_atom_array, probe_radius=probe_radius, vdw_radii=atom_radii, point_number=point_number
     )
 
-    # 4) Create a full-length result array, fill with NaNs
+    # 3) Place valid SASA values back into their original positions
     full_sasa = np.full(atom_array.array_length(), np.nan, dtype=float)
-
-    # 5) Place valid SASA values back into their original positions
-    full_sasa[has_resolved_coordinates] = valid_sasa
+    full_sasa[atom_filter] = valid_sasa
 
     return full_sasa
 
@@ -54,6 +64,7 @@ def calculate_atomwise_rasa(
     probe_radius: float = 1.4,
     atom_radii: str | np.ndarray = "ProtOr",
     point_number: int = 100,
+    atom_filter: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Calculate the Relative Solvent-Accessible Surface Area (RASA) for each atom in `atom_array`.
@@ -68,12 +79,14 @@ def calculate_atomwise_rasa(
         probe_radius (float, optional): Van-der-Waals radius of the probe in Angstrom. Defaults to 1.4 (for water).
         atom_radii (str | np.ndarray, optional): Atom radii set to use for calculation. Defaults to "ProtOr". "ProtOr" will not get sasa's for hydrogen atoms and some other atoms, like ions or certain atoms with charges
         point_number (int, optional): Number of points in the Shrake-Rupley algorithm to sample for calculating SASA. Defaults to 100.
+        atom_filter (np.ndarray | None, optional): A boolean array of length `atom_array.array_length()` to filter the atoms to calculate SASA for. Defaults to None. Only calculates SASA for filtered atoms
     """
     default_vdw_radius = 1.8
     # 1) Calculate the SASA for each atom in the atom array
     try:
         sasa = calculate_atomwise_sasa(
             atom_array,
+            atom_filter=atom_filter,
             probe_radius=probe_radius,
             atom_radii=atom_radii,
             point_number=point_number,
@@ -84,13 +97,12 @@ def calculate_atomwise_rasa(
 
     # 2) Calculate the SASA for each atom in an extended conformation
     max_value = np.zeros(atom_array.array_length(), dtype=float)
-    for i, row in enumerate(atom_array):
-        # get the residue name and atom name
-        res_name = row.res_name
-        atom_name = row.atom_name
+    res_names = atom_array.res_name
+    atom_names = atom_array.atom_name
+    for i in range(atom_array.array_length()):
         # get the vdw radius
         try:
-            vdw_radius = struc.info.radii.vdw_radius_protor(res_name, atom_name)
+            vdw_radius = struc.info.radii.vdw_radius_protor(res_names[i], atom_names[i])
         except Exception:
             # if the residue name and atom name are not found, set vdw_radius to 1.8
             vdw_radius = default_vdw_radius
