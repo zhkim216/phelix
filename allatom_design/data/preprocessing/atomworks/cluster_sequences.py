@@ -18,14 +18,23 @@ import atomworks.ml.preprocessing.constants as aw_const
 from omegaconf import DictConfig
 from tqdm import tqdm
 
-@hydra.main(config_path="../../../configs/data/preprocessing/atomworks", config_name="cluster_sequences", version_base="1.3.2",)
+@hydra.main(config_path="../../../configs_local/data/preprocessing/atomworks", config_name="cluster_sequences", version_base="1.3.2",)
 def main(cfg: DictConfig) -> None:
     """
     Cluster the sequences in the metadata parquet file.
     """
     df = pd.read_parquet(cfg.parquet_path)
-
+    
+    # exclude chain types by ChainType enums
+    exclude_chain_types = [aw_enums.ChainType.from_string(chain_type).value for chain_type in cfg.exclude_chain_types]
+    
+    original_len = len(df)    
+    df = df[~df["q_pn_unit_type"].isin(exclude_chain_types)]
+    print(f"Excluded {original_len - len(df)} sequences of types: {cfg.exclude_chain_types}")
+    
+    # Seq threshold for clustering
     seq_id_threshold = cfg.seq_id_threshold
+    print(f"Using sequence identity threshold: {seq_id_threshold}")
     subdir_name = f"clustering_thres_{str(seq_id_threshold).replace(".", "")}"
 
     clustering_dir = Path(cfg.pdb_path) / subdir_name
@@ -33,26 +42,25 @@ def main(cfg: DictConfig) -> None:
 
     # Get all polymer sequences from metadata df
     proteins = set()
-    shorts = set()
-    nucleic_acids = set()
+    peptides = set()
+    cyclic_peptides = set()
+    nucleic_acids = set()    
     nonpolymer_seqs = set()
 
     for _, row in tqdm(df.iterrows(), desc="Sorting sequences by type", total=len(df)):
         chain_type = row["q_pn_unit_type"]
-        if chain_type in aw_enums.ChainTypeInfo.PROTEINS:
-            if len(row["q_pn_unit_processed_entity_canonical_sequence"]) <= aw_const.PEPTIDE_MAX_RESIDUES:
-                # short sequence
-                shorts.add(row["q_pn_unit_processed_entity_canonical_sequence"])
+        if chain_type == aw_enums.ChainType.POLYPEPTIDE_L:            
+            if len(row["q_pn_unit_processed_entity_canonical_sequence"]) <= aw_const.PEPTIDE_MAX_RESIDUES:                
+                peptides.add(row["q_pn_unit_processed_entity_canonical_sequence"]) # short sequence (peptide)
             else:
-                # protein
-                proteins.add(row["q_pn_unit_processed_entity_canonical_sequence"])
-        elif chain_type in aw_enums.ChainTypeInfo.NUCLEIC_ACIDS:
-            # nucleic acid
+                proteins.add(row["q_pn_unit_processed_entity_canonical_sequence"]) # long sequence (protein)
+        elif chain_type == aw_enums.ChainType.CYCLIC_PSEUDO_PEPTIDE:
+            cyclic_peptides.add(row["q_pn_unit_processed_entity_canonical_sequence"])                
+        elif chain_type in aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: # canonical nucleic acid            
             nucleic_acids.add(row["q_pn_unit_processed_entity_canonical_sequence"])
-        else:
-            # non-polymer
-            nonpolymer_seqs.add(row["q_pn_unit_non_polymer_res_names"])
-
+        elif chain_type in aw_enums.ChainTypeInfo.NON_POLYMERS:
+            nonpolymer_seqs.add(row["q_pn_unit_non_polymer_res_names"])        
+            
     # Run mmseqs on the protein data
     proteins = [f">{hash_sequence(seq)}\n{seq}" for seq in proteins]
     with (clustering_dir / "proteins.fasta").open("w") as f:
@@ -71,12 +79,16 @@ def main(cfg: DictConfig) -> None:
     items = protein_data[1]
     clustering = dict(zip(list(items), list(clusters)))
 
-    # Each short sequence is given an id
-    for short in shorts:
-        short_id = hash_sequence(short)
-        clustering[short_id] = short_id
+    # Each peptide sequence is given an id
+    for peptide in peptides:
+        peptide_id = hash_sequence(peptide)
+        clustering[peptide_id] = peptide_id
 
-    # Each unique rna sequence is given an id
+    for cyclic_peptide in cyclic_peptides:
+        cyclic_peptide_id = hash_sequence(f"cyclic_{cyclic_peptide}") #! add prefix to avoid collisions with peptides
+        clustering[cyclic_peptide_id] = cyclic_peptide_id
+
+    # Each unique rna, dna sequences are given an id
     for nucl in nucleic_acids:
         nucl_id = hash_sequence(nucl)
         clustering[nucl_id] = nucl_id
