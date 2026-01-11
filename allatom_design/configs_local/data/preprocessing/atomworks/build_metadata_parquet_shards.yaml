@@ -1,8 +1,8 @@
-mmcif_dir: /home/possu/jinho/datasets/val_cifs/boltz2_val_cifs/pdbs
-out_dir: /home/possu/jinho/datasets/atomworks_boltz2_valset
+mmcif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs
+out_dir: /home/possu/jinho/datasets/atomworks_lmpnnval
 
-num_workers: 31
-max_file_size: 1000000
+num_workers: 20
+max_file_size: 20000000
 return_filtered_atom_array: false
 
 # Data preprocessor args to specify in addition to the cif parser args
@@ -15,10 +15,8 @@ data_preprocessor_cfg:
   contact_distance: 5
   second_shell_distance: 8
   clash_distance: 1.0
-
-  # Misc
-  apply_biolip2_contact_criteria: true
-  apply_rigorous_contact_criteria_for_metals: false
+  
+  # Ignore residues
   ignore_residues: [] #! (JH) changed 250926
   # Efficiency
   polymer_pn_unit_limit: 500
