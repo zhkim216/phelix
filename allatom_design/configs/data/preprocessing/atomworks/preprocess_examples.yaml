@@ -1,7 +1,7 @@
-mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
-out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full
+mmcif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
+out_dir: /scratch/users/zhkim216/datasets/atomworks_lmpnnval
 
-num_workers: 8
+num_workers: 24
 
 dataset:
   _target_: atomworks.ml.datasets.PandasDataset
