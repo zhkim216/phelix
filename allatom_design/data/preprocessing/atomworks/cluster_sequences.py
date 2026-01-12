@@ -13,10 +13,78 @@ import atomworks.enums as aw_enums
 import hydra
 import numpy as np
 import pandas as pd
+import logging
 from atomworks.ml.utils.misc import hash_sequence
 import atomworks.ml.preprocessing.constants as aw_const
 from omegaconf import DictConfig
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
+
+def apply_query(query: str, df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply a single query to the data.
+
+    Args:
+        query (str): A query string to apply to the data.
+        df (pd.DataFrame): The DataFrame to filter.
+    
+    Returns:
+        pd.DataFrame: The filtered DataFrame.
+    """
+    original_num_rows = len(df)
+    df = df.query(query).copy()  # .copy() to avoid SettingWithCopyWarning
+    filtered_num_rows = len(df)
+    _validate_filter_impact(query, original_num_rows, filtered_num_rows)
+    return df
+
+
+def _validate_filter_impact(query: str, original_num_rows: int, filtered_num_rows: int) -> None:
+    """
+    Validate the impact of the filter.
+
+    Args:
+        query (str): The query string that was applied.
+        original_num_rows (int): The number of rows before applying the filter.
+        filtered_num_rows (int): The number of rows after applying the filter.
+
+    Raises:
+        Warning: If the filter did not remove any rows.
+        ValueError: If the filter removed all rows.
+    """
+    rows_removed = original_num_rows - filtered_num_rows
+    percent_removed = (rows_removed / original_num_rows) * 100
+    percent_remaining = (filtered_num_rows / original_num_rows) * 100
+
+    if filtered_num_rows == original_num_rows:
+        logger.warning(f"Query '{query}' did not remove any rows.")
+    elif filtered_num_rows == 0:
+        raise ValueError(f"Query '{query}' removed all rows.")
+    else:
+        logger.info(
+            f"\n+-------------------------------------------+\n"
+            f"Query '{query}':\n"
+            f"  - Started with: {original_num_rows:,} rows\n"
+            f"  - Removed: {rows_removed:,} rows ({percent_removed:.2f}%)\n"
+            f"  - Remaining: {filtered_num_rows:,} rows ({percent_remaining:.2f}%)\n"
+            f"+-------------------------------------------+\n"
+        )
+
+
+def apply_filters(filters: list[str], df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply a list of query filters to the DataFrame.
+
+    Args:
+        filters (list[str]): List of query strings to apply.
+        df (pd.DataFrame): The DataFrame to filter.
+    
+    Returns:
+        pd.DataFrame: The filtered DataFrame.
+    """
+    for query in filters:
+        df = apply_query(query, df)
+    return df
 
 @hydra.main(config_path="../../../configs_local/data/preprocessing/atomworks", config_name="cluster_sequences", version_base="1.3.2",)
 def main(cfg: DictConfig) -> None:
@@ -26,11 +94,14 @@ def main(cfg: DictConfig) -> None:
     df = pd.read_parquet(cfg.parquet_path)
     
     # exclude chain types by ChainType enums
-    exclude_chain_types = [aw_enums.ChainType.from_string(chain_type).value for chain_type in cfg.exclude_chain_types]
+    exclude_chain_types = [aw_enums.ChainType.from_string(chain_type).value for chain_type in cfg.exclude_chain_types]      
+    df = apply_query(f"q_pn_unit_type not in {exclude_chain_types}", df)
     
-    original_len = len(df)    
-    df = df[~df["q_pn_unit_type"].isin(exclude_chain_types)]
-    print(f"Excluded {original_len - len(df)} sequences of types: {cfg.exclude_chain_types}")
+    # Annotate protein and peptide chains
+    is_polypeptide_l = df['q_pn_unit_type'] == aw_enums.ChainType.POLYPEPTIDE_L.value
+    protein_seq_len = df['q_pn_unit_processed_entity_canonical_sequence'].str.len()
+    df['q_pn_unit_is_protein'] = is_polypeptide_l & (protein_seq_len >= aw_const.PEPTIDE_MAX_RESIDUES)
+    df['q_pn_unit_is_peptide'] = is_polypeptide_l & (protein_seq_len < aw_const.PEPTIDE_MAX_RESIDUES)
     
     # Seq threshold for clustering
     seq_id_threshold = cfg.seq_id_threshold
@@ -40,25 +111,23 @@ def main(cfg: DictConfig) -> None:
     clustering_dir = Path(cfg.pdb_path) / subdir_name
     clustering_dir.mkdir(parents=True, exist_ok=True)
 
-    # Get all polymer sequences from metadata df
+    # Get all sequences by type
     proteins = set()
     peptides = set()
-    cyclic_peptides = set()
     nucleic_acids = set()    
     nonpolymer_seqs = set()
 
+    nucleic_acid_type_values = [aw_enums.ChainType.DNA.value, aw_enums.ChainType.RNA.value, aw_enums.ChainType.DNA_RNA_HYBRID.value]
+    nonpolymer_type_values = [aw_enums.ChainType.BRANCHED.value, aw_enums.ChainType.MACROLIDE.value, aw_enums.ChainType.NON_POLYMER.value, aw_enums.ChainType.WATER.value]
+
     for _, row in tqdm(df.iterrows(), desc="Sorting sequences by type", total=len(df)):
-        chain_type = row["q_pn_unit_type"]
-        if chain_type == aw_enums.ChainType.POLYPEPTIDE_L:            
-            if len(row["q_pn_unit_processed_entity_canonical_sequence"]) <= aw_const.PEPTIDE_MAX_RESIDUES:                
-                peptides.add(row["q_pn_unit_processed_entity_canonical_sequence"]) # short sequence (peptide)
-            else:
-                proteins.add(row["q_pn_unit_processed_entity_canonical_sequence"]) # long sequence (protein)
-        elif chain_type == aw_enums.ChainType.CYCLIC_PSEUDO_PEPTIDE:
-            cyclic_peptides.add(row["q_pn_unit_processed_entity_canonical_sequence"])                
-        elif chain_type in aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: # canonical nucleic acid            
+        if row["q_pn_unit_is_protein"]:            
+            proteins.add(row["q_pn_unit_processed_entity_canonical_sequence"])
+        elif row["q_pn_unit_is_peptide"]:
+            peptides.add(row["q_pn_unit_processed_entity_canonical_sequence"])
+        elif row["q_pn_unit_type"] in nucleic_acid_type_values:
             nucleic_acids.add(row["q_pn_unit_processed_entity_canonical_sequence"])
-        elif chain_type in aw_enums.ChainTypeInfo.NON_POLYMERS:
+        elif row["q_pn_unit_type"] in nonpolymer_type_values:
             nonpolymer_seqs.add(row["q_pn_unit_non_polymer_res_names"])        
             
     # Run mmseqs on the protein data
@@ -83,11 +152,7 @@ def main(cfg: DictConfig) -> None:
     for peptide in peptides:
         peptide_id = hash_sequence(peptide)
         clustering[peptide_id] = peptide_id
-
-    for cyclic_peptide in cyclic_peptides:
-        cyclic_peptide_id = hash_sequence(f"cyclic_{cyclic_peptide}") #! add prefix to avoid collisions with peptides
-        clustering[cyclic_peptide_id] = cyclic_peptide_id
-
+    
     # Each unique rna, dna sequences are given an id
     for nucl in nucleic_acids:
         nucl_id = hash_sequence(nucl)
@@ -108,9 +173,20 @@ def main(cfg: DictConfig) -> None:
         json.dump(clustering, handle)
 
     # Add cluster IDs to metadata df
-    df["q_pn_unit_cluster_id"] = np.where(df["q_pn_unit_is_polymer"],
-                                          df["q_pn_unit_processed_entity_canonical_sequence_hash"].map(clustering),
-                                          df["q_pn_unit_non_polymer_res_names"].apply(hash_sequence).map(clustering))
+    conditions = [
+        df["q_pn_unit_is_protein"],
+        df["q_pn_unit_is_peptide"],
+        df["q_pn_unit_type"].isin(nucleic_acid_type_values),
+        df["q_pn_unit_type"].isin(nonpolymer_type_values),
+    ]
+    choices = [
+        df['q_pn_unit_processed_entity_canonical_sequence_hash'].map(clustering),
+        df['q_pn_unit_processed_entity_canonical_sequence_hash'].map(clustering),
+        df['q_pn_unit_processed_entity_canonical_sequence_hash'].map(clustering),
+        df['q_pn_unit_non_polymer_res_names'].apply(hash_sequence).map(clustering),
+    ]
+        
+    df["q_pn_unit_cluster_id"] = np.select(conditions, choices)
 
     # Sanity check that we have no missing values
     if df["q_pn_unit_cluster_id"].isna().any():
