@@ -3,6 +3,10 @@ out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full
 
 num_workers: 8
 
+# OOM resilience settings
+batch_size: 50                # Save progress every N examples (enables resume)
+max_tasks_per_child: 25       # Restart workers periodically to prevent memory leaks
+
 dataset:
   _target_: atomworks.ml.datasets.PandasDataset
   data: ${out_dir}/metadata_for_caching.parquet
@@ -30,7 +34,7 @@ dataset:
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: ["UNX", "N", "DN", "UNL", "UNK"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
+  remove_ccds: ["UNL", "UNX"] #! ligands, and atoms
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
@@ -38,7 +42,7 @@ cif_parser_args:
   add_bond_types_from_struct_conn: ["covale"]
 
 preprocess_cfg:
-  undesired_res_names: ["UNX", "N", "DN", "UNL", "UNK"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
+  undesired_res_names: ["UNL", "UNX"] #! ligands, and atoms
   b_factor_min: null
   b_factor_max: null
   min_residues_for_polymers: 1
