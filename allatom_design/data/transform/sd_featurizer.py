@@ -78,15 +78,13 @@ def sd_featurizer(
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
     """
     # Featurization that must be done before cropping
-    featurization_transforms_pre_crop = [
-        # AtomizeShortPolymers(), #Todo: Fix this later
+    featurization_transforms_pre_crop = [    
         MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={
             aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_FRAME_ATOM_NAMES,
             aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_FRAME_ATOM_NAMES,
         }),
         FilterToQueryPNUnits(),
         RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
-        MaskAtomizedTokensInProtein(),
         RemoveUnsupportedChainTypes(),
         ErrIfAllUnresolved(),
     ]
@@ -119,15 +117,15 @@ def sd_featurizer(
     featurization_transforms_post_crop = [
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
-        AddChainTypeFeaturesForTrain() if not is_inference else AddChainTypeFeaturesForInference(),
-        AddCachedResidueData(residue_cache_dir=residue_cache_dir),
-        GetAF3ReferenceMoleculeFeatures(
-            save_rdkit_mols=False,
-            use_cached_conformers=True,
-            conformer_generation_timeout=5.0,
-            use_element_for_atom_names_of_atomized_tokens=False,
-            max_conformers_per_residue=max_conformers_per_residue,
-        ),
+        # AddChainTypeFeaturesForTrain() if not is_inference else AddChainTypeFeaturesForInference(),
+        # AddCachedResidueData(residue_cache_dir=residue_cache_dir),
+        # GetAF3ReferenceMoleculeFeatures(
+        #     save_rdkit_mols=False,
+        #     use_cached_conformers=True,
+        #     conformer_generation_timeout=5.0,
+        #     use_element_for_atom_names_of_atomized_tokens=False,
+        #     max_conformers_per_residue=max_conformers_per_residue,
+        # ),
         ComputeAtomToTokenMap(),        
         AnnotateLigandPockets(pocket_distance=pocket_distance), 
         ConvertToTorch(keys=["encoded", "feats"]),

@@ -8,14 +8,31 @@ from pathlib import Path
 
 import biotite.structure as struc
 from biotite.structure import AtomArray
-from atomworks.constants import METAL_ELEMENTS
+from atomworks.constants import (
+    DNA_BACKBONE_ATOM_NAMES,
+    ELEMENT_NAME_TO_ATOMIC_NUMBER,
+    METAL_ELEMENTS,
+    NUCLEIC_ACID_BACKBONE_ATOM_NAMES,
+    PROTEIN_BACKBONE_ATOM_NAMES,
+    RNA_BACKBONE_ATOM_NAMES,
+    STANDARD_AA,
+    STANDARD_AA_TIP_ATOM_NAMES,
+    STANDARD_DNA,
+    STANDARD_PURINE_RESIDUES,
+    STANDARD_PYRIMIDINE_RESIDUES,
+    STANDARD_RNA,
+    UNKNOWN_AA,
+    UNKNOWN_DNA,
+    UNKNOWN_RNA,
+)
 import atomworks.enums as aw_enums
 from atomworks.ml.utils.token import get_token_starts
 from atomworks.ml.transforms.base import Transform
 from atomworks.ml.transforms._checks import check_contains_keys, check_is_instance, check_atom_array_annotation
 from atomworks.ml.transforms.filters import filter_to_specified_pn_units
 from atomworks.ml.utils.geometry import masked_center, random_rigid_augmentation
-from atomworks.ml.utils.token import apply_token_wise, get_af3_token_center_idxs
+from atomworks.ml.utils.token import apply_token_wise, get_af3_token_center_idxs, apply_and_spread_token_wise
+from atomworks.ml.conditions.annotator import is_protein_backbone, is_protein_sidechain
 
 
 import allatom_design.data.const as const
@@ -116,23 +133,64 @@ class FeaturizeCoordsAndMasks(Transform):
         feats["token_pad_mask"] = torch.ones_like(feats["token_resolved_mask"])
         feats["atom_pad_mask"] = torch.ones_like(feats["atom_resolved_mask"])
 
-        # Get protein backbone and sidechain atom masks
-        feats["atom_to_token_map"] = feats["atom_to_token_map"].long()
-        atom_is_prot = feats["is_protein"].gather(dim=-1, index=feats["atom_to_token_map"]) #! changed 251101 (JH)
-        feats["atom_is_prot"] = atom_is_prot        
+        # Get Chain type features        
+        token_starts = get_token_starts(atom_array)
+        feats["atom_chain_type"] = torch.tensor(atom_array.chain_type).long()
+        feats["token_chain_type"] = torch.tensor(atom_array[token_starts].chain_type)
+        feats["atom_is_polymer"] = torch.tensor(atom_array.is_polymer).float()
+        feats["token_is_polymer"] = torch.tensor(atom_array[token_starts].is_polymer).float()        
+                
+        # hetero flags
+        feats["atom_is_hetero"] = torch.tensor(atom_array.hetero).float()
+        feats["token_is_hetero"] = torch.tensor(apply_token_wise(atom_array, atom_array.hetero, np.any)).float()
         
-        atomized = torch.tensor(atom_array.atomize)
-        bb_atom_mask = torch.tensor(atom_array.is_backbone_atom) #! changed 251101 (JH)
-
-        feats["prot_bb_atom_mask"] = bb_atom_mask * ~atomized * atom_is_prot
-        feats["prot_scn_atom_mask"] = ~bb_atom_mask * ~atomized * atom_is_prot
-        feats["token_to_center_atom"] = torch.tensor(get_af3_token_center_idxs(atom_array))
-
-        feats["token_is_polymer"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_polymer, np.any)).float()
-        feats["token_chain_type"] = torch.tensor(apply_token_wise(atom_array, atom_array.chain_type, np.any)).float()
+        # atomic number and charge
         feats["atomic_number"] = torch.tensor(atom_array.atomic_number).long()
+        feats["atom_charge"] = torch.tensor(atom_array.charge).float()
+        
+        # covalent modification flags
+        feats["atom_is_covalent_modification"] = torch.tensor(atom_array.is_covalent_modification).float()
+        feats["token_is_covalent_modification"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_covalent_modification, np.any)).float()
+    
+        # is_ligand_pocket flags
+        feats["atom_is_ligand_pocket"] = torch.tensor(atom_array.is_ligand_pocket).float()
+        feats["token_is_ligand_pocket"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_ligand_pocket, np.any)).float()
+
+        # Get chain type flags
+        polymer_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.POLYMERS]
+        nucleic_acid_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.NUCLEIC_ACIDS]
+        non_polymer_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.NON_POLYMERS]
+        
+        # Protein chain flags
+        for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
+            pn_unit_mask = atom_array.pn_unit_iid == pn_unit_iid
+            sel_atom_array = atom_array[pn_unit_mask]
+            chain_type = np.unique(sel_atom_array.chain_type)
+            if chain_type in polymer_chain_type_enums:
+                if chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value:                    
+                    feats["atom_is_protein_chain"] = torch.tensor(pn_unit_mask).float()
+                    feats["token_is_protein_chain"] = torch.tensor(apply_token_wise(atom_array, pn_unit_mask, np.any)).float()
+                elif chain_type in nucleic_acid_chain_type_enums:
+                    feats["atom_is_nucleic_acid_chain"] = torch.tensor(pn_unit_mask).float()
+                    feats["token_is_nucleic_acid_chain"] = torch.tensor(apply_token_wise(atom_array, pn_unit_mask, np.any)).float()
+                elif np.isin(sel_atom_array.chain_type, non_polymer_chain_type_enums):
+                    if len(sel_atom_array) == 1 & np.isin(sel_atom_array.element, METAL_ELEMENTS):
+                        feats["atom_is_metal_chain"] = torch.tensor(pn_unit_mask).float()
+                        feats["token_is_metal_chain"] = torch.tensor(apply_token_wise(atom_array, pn_unit_mask, np.any)).float()
+                    else:
+                        feats["atom_is_small_molecule_chain"] = torch.tensor(pn_unit_mask).float()
+                        feats["token_is_small_molecule_chain"] = torch.tensor(apply_token_wise(atom_array, pn_unit_mask, np.any)).float()                                                    
+        
+        # atom to tokens map and token to center atom map
+        feats["atom_to_token_map"] = feats["atom_to_token_map"].long()
+        feats["token_to_center_atom"] = torch.tensor(get_af3_token_center_idxs(atom_array))        
+
+        # protein backbone and sidechain atom masks
+        is_prot_bb = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
+        is_prot_scn = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & ~np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
+        feats["prot_bb_atom_mask"] = torch.tensor(is_prot_bb).float()
+        feats["prot_scn_atom_mask"] = torch.tensor(is_prot_scn).float()        
                         
-        # Convert atomwise to tokenwise (same method as get_tokenwise_coords)        
         # Calculate number of atoms per token
         device = feats["coords"].device
         N_tokens = feats["token_pad_mask"].shape[0]
@@ -142,31 +200,12 @@ class FeaturizeCoordsAndMasks(Transform):
         tokenwise_atom_idxs = torch.cat([torch.zeros((1,), device=device), n_atoms_per_token.cumsum(dim=-1)[:-1]], dim=-1).long()
         tokenwise_atom_idxs = tokenwise_atom_idxs[..., None] + torch.arange(const.MAX_NUM_ATOMS, device=device)[None, :]
         tokenwise_atom_idxs_mask = torch.arange(const.MAX_NUM_ATOMS, device=device)[None, :] < n_atoms_per_token[..., None]
-        tokenwise_atom_idxs = tokenwise_atom_idxs * tokenwise_atom_idxs_mask
+        tokenwise_atom_idxs = torch.where(tokenwise_atom_idxs_mask, tokenwise_atom_idxs, -1 * torch.ones_like(tokenwise_atom_idxs, dtype=torch.long))
         
         feats["tokenwise_atom_idxs"] = tokenwise_atom_idxs
         feats["tokenwise_atom_idxs_mask"] = tokenwise_atom_idxs_mask                
         feats["pseudo_cb_coords"] = self._get_pseudo_cb_coords(data)
-                    
-        # Ligand related features
-        atom_is_dna = feats["is_dna"].gather(dim=-1, index=feats["atom_to_token_map"])
-        atom_is_rna = feats["is_rna"].gather(dim=-1, index=feats["atom_to_token_map"])
-        atom_is_ligand = feats["is_ligand"].gather(dim=-1, index=feats["atom_to_token_map"])
-        
-        feats["atom_is_dna"] = atom_is_dna
-        feats["atom_is_rna"] = atom_is_rna
-        feats["atom_is_ligand"] = atom_is_ligand
-        
-        feats["token_is_metal"] = feats["chain_is_metal"].clone()
-        feats["atom_is_metal"] = feats["chain_is_metal"].gather(dim=-1, index=feats["atom_to_token_map"])
-        
-        # Ligand pocket features
-        if "is_ligand_pocket" in atom_array.get_annotation_categories():    
-            feats["atom_is_ligand_pocket"] = torch.tensor(atom_array.is_ligand_pocket)
-            feats["pocket_atom_mask"] = feats["atom_is_ligand_pocket"] * feats["atom_resolved_mask"]
-            feats["token_is_ligand_pocket"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_ligand_pocket, np.any)).bool()
-            feats["pocket_token_mask"] = feats["token_is_ligand_pocket"] * feats["token_resolved_mask"]                
-            
+
         # Get ligand related features
         # try:
         #     feats["atom_is_aromatic"] = torch.tensor(atom_array.is_aromatic).float()
@@ -182,40 +221,43 @@ class FeaturizeCoordsAndMasks(Transform):
         """
         Get pseudo CB coordinates for the atom array.
         """
-        atom_array = data["atom_array"]                           
-        token_is_protein = data["feats"]["is_protein"] * data["feats"]["chain_is_protein"]
-        token_len = len(token_is_protein)
+        atom_array = data["atom_array"]           
         
-        token_id = atom_array.token_id  # [n_atoms]
-        atom_name = atom_array.atom_name  # [n_atoms]
-        coords_np = atom_array.coord  # [n_atoms, 3]
-                
-        atom_is_prot = data["feats"]["atom_is_prot"].detach().to(torch.bool).cpu().numpy() #! Important to convert to numpy and bool, to use boolean mask
+        # token_is_protein_standard_aa = data["feats"]["token_is_protein_chain"] * (1 - data["feats"]["token_is_hetero"])
+        # pseudo_cb_valid_mask = token_is_protein_standard_aa * data["feats"]["token_resolved_mask"]
         
-        ca_mask = atom_is_prot & (atom_name == "CA")
-        n_mask = atom_is_prot & (atom_name == "N")
-        c_mask = atom_is_prot & (atom_name == "C")
+        token_len = len(data["feats"]["token_is_protein_chain"])
         
-        # Positions and their token ids
-        pos_ca, toks_ca = np.where(ca_mask)[0], token_id[ca_mask]
-        pos_n,  toks_n  = np.where(n_mask)[0],  token_id[n_mask]
-        pos_c,  toks_c  = np.where(c_mask)[0],  token_id[c_mask]
-
-        # Allocate and scatter
-        ca_coords = torch.zeros((token_len, 3), dtype=torch.float32)
-        n_coords  = torch.zeros((token_len, 3), dtype=torch.float32)
-        c_coords  = torch.zeros((token_len, 3), dtype=torch.float32)
-
-        ca_coords[toks_ca] = torch.from_numpy(coords_np[pos_ca]).float()
-        n_coords[toks_n]   = torch.from_numpy(coords_np[pos_n]).float()
-        c_coords[toks_c]   = torch.from_numpy(coords_np[pos_c]).float()
+        # Get pseudo CB valid mask. For standard amino acids (not hetero) in protein chains, and all n, ca, c resolved.
+        standard_aa_mask = np.isin(atom_array.res_name, STANDARD_AA)
+        standard_aa_prot_mask = standard_aa_mask & (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value)
+        is_ncac_resolved = ((np.isin(atom_array.atom_name, ["N", "CA", "C"])) & (atom_array.occupancy > 0))
+        has_all_backbone = apply_and_spread_token_wise(atom_array, is_ncac_resolved, lambda x: np.sum(x) == 3)
+        pseudo_cb_valid_mask = standard_aa_prot_mask & has_all_backbone
+        
+        # token ids
+        token_idxs = atom_array.token_id  # [n_atoms]
+        
+        # Get ca, n, c mask for pseudo CB calculation.
+        ca_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "CA")
+        n_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "N")
+        c_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "C")
+        
+        # ca_coords, n_coords, c_coords and token ids
+        ca_coords = atom_array.coord[ca_mask]
+        n_coords = atom_array.coord[n_mask]
+        c_coords = atom_array.coord[c_mask]
+        pseudo_cb_token_idxs = token_idxs[ca_mask]
         
         b = ca_coords - n_coords
         c = c_coords - ca_coords
-        a = torch.cross(b, c, dim=-1)
-        cb_coords = -0.58273431 * a + 0.56802827 * b - 0.54067466 * c + ca_coords
+        a = np.cross(b, c, axis=-1)
+        np_cb_coords = -0.58273431 * a + 0.56802827 * b - 0.54067466 * c + ca_coords
         
-        return cb_coords                    
+        torch_cb_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+        torch_cb_coords[pseudo_cb_token_idxs] = torch.from_numpy(np_cb_coords).float()        
+        
+        return torch_cb_coords                    
 
 class PadSDFeats(Transform):
     """Pad the token and atom features to the maximum number of tokens and atoms."""
@@ -553,14 +595,11 @@ class AddChainTypeFeaturesForInference(Transform):
 
 def annotate_ligand_pockets(
     atom_array: AtomArray = None,
-    pocket_distance: float = 8.0,
-    n_min_ligand_atoms: int = 1,
+    pocket_distance: float = 6.0,
+    n_min_ligand_atoms: int = 5,
     annotation_name: str = "is_ligand_pocket",
     receptor_chain_iids: list[str] = None,
     ligand_chain_iids: list[str] = None,
-    receptor_chain_ids: list[str] = None,
-    ligand_chain_ids: list[str] = None,
-    spread_residue_wise: bool = False,
 ) -> AtomArray:
     """
     Identify atoms near ligands of sufficient size.
@@ -585,57 +624,39 @@ def annotate_ligand_pockets(
     
     use_chain_iid = False
     use_chain_id = False
-    if hasattr(atom_array, 'chain_iid'):    
-        receptor_chain_identifiers = receptor_chain_iids
-        ligand_chain_identifiers = ligand_chain_iids
-        use_chain_iid = True  # Fixed: was use_chain_unit_iid
-        # print("Using chain_iid to get receptor and ligand chains")
-    else:        
-        receptor_chain_identifiers = receptor_chain_ids
-        ligand_chain_identifiers = ligand_chain_ids
-        use_chain_id = True
-        print("Using chain_id to get receptor and ligand chains, it may include multiple chain_iids with the same chain_id")
+    assert hasattr(atom_array, 'chain_iid') or hasattr(atom_array, 'pn_unit_iid'), "atom_array must have chain_iid or pn_unit_iid"
         
-    if (receptor_chain_identifiers is None) or (ligand_chain_identifiers is None):
-        # Using chain_id will automatically include multiple chain_iids with the same chain_id        
-        non_protein_mask = ~(atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
-        ligand_chains = np.unique(atom_array.chain_id[non_protein_mask])
-        ligand_counts = np.array([np.sum(atom_array.chain_id[non_protein_mask] == ch) for ch in ligand_chains])
+    if (receptor_chain_iids is None) or (ligand_chain_iids is None):
+        # Used in training time or when there is no specified receptor and ligand chains
+        ligand_pn_unit_iids, ligand_counts = np.unique(atom_array.pn_unit_iid[~atom_array.is_polymer], return_counts=True)
+        # Todo: handling covalently linked non-polymers
         valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
-        valid_ligand_chains = ligand_chains[valid_ligand_mask]
-        all_valid_ligands_mask = np.isin(atom_array.chain_id, valid_ligand_chains) & non_protein_mask
-                    
-    else:
-        if use_chain_iid:
-            ligand_chain_iids, ligand_counts = np.unique(atom_array.chain_iid[np.isin(atom_array.chain_iid, ligand_chain_identifiers)], return_counts=True)                
-            valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
-            valid_ligand_chain_iids = ligand_chain_iids[valid_ligand_mask]  # Fixed: was ligand_chain_ids
-            all_valid_ligands_mask = np.isin(atom_array.chain_iid, valid_ligand_chain_iids)
-        else:    
-            ligand_chain_iids, ligand_counts = np.unique(
-                atom_array.chain_iid[np.isin(atom_array.chain_id, ligand_chain_identifiers)], return_counts=True
-            )
-            valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
-            valid_ligand_chain_iids = ligand_chain_iids[valid_ligand_mask]
-            all_valid_ligands_mask = np.isin(atom_array.chain_iid, valid_ligand_chain_iids)
+        valid_ligand_iids = ligand_pn_unit_iids[valid_ligand_mask] #! in this case, pn_unit_iids are used        
+        all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_iids)
+        
+        
+                            
+    else:        
+        ligand_chain_iids, ligand_counts = np.unique(atom_array.chain_iid[np.isin(atom_array.chain_iid, ligand_chain_iids)], return_counts=True)                
+        valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
+        valid_ligand_iids = ligand_chain_iids[valid_ligand_mask]  # Fixed: was ligand_chain_ids
+        all_valid_ligands_mask = np.isin(atom_array.chain_iid, valid_ligand_iids)        
 
     # Initialize pocket annotation
     pocket_annotation = np.zeros(len(atom_array), dtype=bool)
 
-    if not np.any(all_valid_ligands_mask):
+    if len(valid_ligand_iids) == 0:
         atom_array.set_annotation(annotation_name, pocket_annotation)
         return atom_array
 
     # Build CellList for efficient distance computations
     valid_coords_mask = ~np.isnan(atom_array.coord).any(axis=1)
-    if not np.any(valid_coords_mask):
-        atom_array.set_annotation(annotation_name, pocket_annotation)
-        return atom_array
+    assert np.any(valid_coords_mask), "No valid coordinates found"
 
     valid_coords = atom_array.coord[valid_coords_mask]
     cell_list = struc.CellList(valid_coords, cell_size=pocket_distance)
 
-    # Get coordinates of all valid ligands
+    # Get coordinates of all valid ligands    
     all_ligand_coords = atom_array.coord[all_valid_ligands_mask]
 
     # Find atoms within distance of any ligand coordinates
@@ -647,8 +668,7 @@ def annotate_ligand_pockets(
     near_ligand_full[valid_coords_mask] = near_ligand_valid
 
     # Only protein atoms can be pocket atoms
-    is_protein_chain = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
-    pocket_annotation = is_protein_chain & near_ligand_full
+    pocket_annotation = atom_array.is_polymer & near_ligand_full
         
     atom_array.set_annotation(annotation_name, pocket_annotation)
     return atom_array
@@ -676,11 +696,7 @@ class AnnotateLigandPockets(Transform):
     def forward(self, data: dict = None,
                 receptor_chain_iids: list[str] = None, 
                 ligand_chain_iids: list[str] = None,
-                receptor_chain_ids: list[str] = None,
-                ligand_chain_ids: list[str] = None,
             ) -> dict:
-        
-        print(f"pocket_distance: {self.pocket_distance}")
         
         data["atom_array"] = annotate_ligand_pockets(
             atom_array=data["atom_array"],
@@ -689,7 +705,5 @@ class AnnotateLigandPockets(Transform):
             annotation_name=self.annotation_name,
             receptor_chain_iids=receptor_chain_iids,
             ligand_chain_iids=ligand_chain_iids,
-            receptor_chain_ids=receptor_chain_ids,
-            ligand_chain_ids=ligand_chain_ids,            
         )
         return data
