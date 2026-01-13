@@ -16,6 +16,7 @@ import pandas as pd
 import logging
 from atomworks.ml.utils.misc import hash_sequence
 import atomworks.ml.preprocessing.constants as aw_const
+from atomworks.ml.preprocessing.constants import TRAINING_SUPPORTED_CHAIN_TYPES_INTS
 from omegaconf import DictConfig
 from tqdm import tqdm
 
@@ -94,8 +95,7 @@ def main(cfg: DictConfig) -> None:
     df = pd.read_parquet(cfg.parquet_path)
     
     # exclude chain types by ChainType enums
-    exclude_chain_types = [aw_enums.ChainType.from_string(chain_type).value for chain_type in cfg.exclude_chain_types]      
-    df = apply_query(f"q_pn_unit_type not in {exclude_chain_types}", df)
+    df = apply_query(f"q_pn_unit_type in {TRAINING_SUPPORTED_CHAIN_TYPES_INTS}", df)
     
     # Annotate protein and peptide chains
     is_polypeptide_l = df['q_pn_unit_type'] == aw_enums.ChainType.POLYPEPTIDE_L.value
