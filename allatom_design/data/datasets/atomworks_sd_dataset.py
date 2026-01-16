@@ -22,7 +22,7 @@ from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader
 
-# from allatom_design.data.sampler import Sampler
+from allatom_design.data.sampler import Sampler
 from allatom_design.data.transform.pad import pad_to_max
 from allatom_design.data.transform import sd_featurizer
 
@@ -35,66 +35,29 @@ class AtomworksSDDataModule(L.LightningDataModule):
         self.pdb_path = cfg.pdb_path
         self._train_set = SDDataset(cfg, phase="train")
         self._val_set = SDDataset(cfg, phase="val")
-        
-        # prefetch_factor is only valid when num_workers > 0
-        self.prefetch_factor = cfg.data_loader_cfg.prefetch_factor if cfg.num_workers > 0 else None
-        self.prefetch_buffer_size = cfg.data_loader_cfg.prefetch_buffer_size                
-        self.train_pin_memory = cfg.data_loader_cfg.train_pin_memory
-        # persistent_workers is only valid when num_workers > 0
-        self.train_persistent_workers = cfg.data_loader_cfg.train_persistent_workers if cfg.num_workers > 0 else False
-        self.val_pin_memory = cfg.data_loader_cfg.val_pin_memory
-        self.val_persistent_workers = cfg.data_loader_cfg.val_persistent_workers if cfg.num_workers > 0 else False
-        
-    def train_dataloader(self) -> DataLoader:
-        weights = torch.as_tensor(self._train_set.get_sampling_weights(), dtype=torch.float32)        
-        
-        if self.cfg.samples_per_epoch is not None:
-            num_samples = self.cfg.samples_per_epoch
-        else:
-            num_samples = len(self._train_set)
-        
-        base_sampler = LazyWeightedRandomSampler(weights, num_samples=num_samples, \
-            replacement=True, prefetch_buffer_size=self.prefetch_buffer_size)
-        
-        rank = dist.get_rank() if dist.is_initialized() else 0
-        world_size = dist.get_world_size() if dist.is_initialized() else 1
-        
-        #Todo (JH): Extend to multiple datasets
-        sampler = DistributedMixedSampler(
-                    datasets_info=[{"dataset": self._train_set, "sampler": base_sampler, "probability": 1.0}],
-                    num_replicas=world_size,
-                    rank=rank,
-                    n_examples_per_epoch=num_samples,
-                    shuffle=True,
-                    drop_last=True,
-                )
                 
-        loader = DataLoader(dataset=self._train_set,
-                            sampler=sampler,
+    def train_dataloader(self) -> DataLoader:
+                                
+        train_loader = DataLoader(dataset=self._train_set,                            
                             batch_size=self.cfg.batch_size,
                             num_workers=self.cfg.num_workers,
                             shuffle=False,
-                            pin_memory=self.train_pin_memory,
+                            pin_memory=True,
                             drop_last=True,
-                            collate_fn=sd_collator,
-                            persistent_workers=self.train_persistent_workers,
-                            worker_init_fn=worker_init_fn,
-                            prefetch_factor=self.prefetch_factor)
-
-        self._train_sampler = sampler
-
-        return loader
+                            collate_fn=sd_collator,                            
+                            worker_init_fn=worker_init_fn)
+                            
+        
+        return train_loader
         
 
     def val_dataloader(self) -> DataLoader:
-        val_loader = DataLoader(self._val_set,
+        val_loader = DataLoader(dataset=self._val_set,
                                 batch_size=self.cfg.batch_size,
                                 num_workers=self.cfg.num_workers,
                                 shuffle=False,
-                                pin_memory=self.val_pin_memory,
-                                persistent_workers=self.val_persistent_workers,
-                                prefetch_factor=self.prefetch_factor,
-                                drop_last=True, #! (JH) changed 251029
+                                pin_memory=True,
+                                drop_last=True,
                                 collate_fn=sd_collator,
                                 worker_init_fn=worker_init_fn)
 
@@ -112,8 +75,7 @@ class SDDataset(MolecularDataset):
             
         self.cfg = cfg
         self.phase = phase
-        self.save_failed_examples_to_dir = cfg.save_failed_examples_to_dir        
-        self._rng = None # For fallback sampling
+        self.save_failed_examples_to_dir = cfg.save_failed_examples_to_dir                
 
         # Initialize featurizer
         # Note: We remove INFERENCE_ONLY_KEYS to avoid cuda initialization issues during training.
@@ -121,9 +83,6 @@ class SDDataset(MolecularDataset):
                                                       remove_keys=sd_featurizer.INFERENCE_ONLY_KEYS,
                                                       ) #! (JH) changed
                             
-        # Link featurizer to transform
-        self.transform = self.featurizer        
-        
         # Process chain df
         self.chain_df = self._process_chain_df()
         
@@ -133,16 +92,19 @@ class SDDataset(MolecularDataset):
         # Parse dfs into a common format and concatenate
         self.parsed_df = self._parse_dfs()
         self.data = self.parsed_df
-                                
-        # Prepare fallback probabilities
-        # Todo: Change to FallbackDatasetWrapper + FallbackSamplerWrapper, when using DDP
-        self._fallback_probs = self.get_sampling_weights().astype(np.float64)
-        self._fallback_probs /= self._fallback_probs.sum()
         
+        # Initialize per-worker random number generator
+        if phase == "train":
+            self._sampler = Sampler(self.get_sampling_weights())
+            self._rng, self._samples = None, None
+
 
     @override
     def __getitem__(self, idx: int):       
-        self._ensure_worker_rng() # Prepare per-worker random number generator for fallback
+        if self.phase == "train":
+            # For training, draw from infinite sampler.
+            self._ensure_worker_rng()
+            idx = next(self._samples)
         
         # Load cached example.        
         example_id = self.idx_to_id(idx)                                            
@@ -151,50 +113,32 @@ class SDDataset(MolecularDataset):
         try:
             example = self._load_cached_example(parsed_row["extra_info"]["pdb_id"])
         except FileNotFoundError:
-            logger.warning(f"Cached example for {parsed_row['extra_info']['pdb_id']} not found in {self.cfg.pdb_path}/cached_examples in {self.phase} dataset, skipping...")            
-            if self.phase == "train":
-                # Fallback to next example, based on fallback probabilities                        
-                fallback_idx = self._rng.choice(len(self.parsed_df), p=self._fallback_probs)
-                # logger.warning(f"Falling back to next example {fallback_idx} based on fallback probabilities in {self.phase} dataset...")
-                return self.__getitem__(fallback_idx)
-            else:
-                idx = idx + 1
-                # logger.warning(f"Falling back to next example {idx} in {self.phase} dataset...")                
-                return self.__getitem__(idx)
+            logger.warning(f"Cached example for {parsed_row['extra_info']['pdb_id']} not found in {self.cfg.pdb_path}/cached_examples in {self.phase} dataset, skipping...")                        
+            return self.__getitem__(idx + 1)
+            
             
         example.update(parsed_row)  # add in query_pn_unit_iids
                     
         # Apply train-time transforms.
         try:
-            feats = self._apply_transform(example, example_id=example_id, idx=idx)            
+            feats = self.featurizer(example)            
         except Exception as e:
             logger.error(f"Error applying train-time transforms to example {example_id} in {self.phase} dataset: {e}")
-            if self.phase == "train":
-                # Fallback to next example, based on fallback probabilities                        
-                fallback_idx = self._rng.choice(len(self.parsed_df), p=self._fallback_probs)
-                # logger.warning(f"Falling back to next example {fallback_idx} based on fallback probabilities in {self.phase} dataset...")
-                return self.__getitem__(fallback_idx)
-            else:
-                idx = idx + 1
-                # logger.warning(f"Falling back to next example {idx} in {self.phase} dataset...")                
-                return self.__getitem__(idx)            
+            return self.__getitem__(idx + 1)
 
         return feats
 
     def _ensure_worker_rng(self):
         """Ensure that each worker has a unique random number generator."""
         if self._rng is None:
-            self._rng = np.random.default_rng(torch.initial_seed() % 2**32)        
-
-    def _annotate_chain_df(self) -> pd.DataFrame:
-        """Annotate the chain dataframe with chain type information."""
-
+            self._rng = np.random.default_rng(torch.initial_seed() % 2**32)
+            self._samples = self._sampler.sample(self._rng)
+    
 
     def _process_chain_df(self) -> pd.DataFrame:
         """
         Processes the chain dataframe. Adds chain counts info and sampling weights, and applies filters.
-        """                                            
-        
+        """                                                    
         chain_df = read_parquet_with_metadata(self.cfg.parquet_path)
         # Set index to example_id        
         chain_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
@@ -228,9 +172,7 @@ class SDDataset(MolecularDataset):
         
         # Apply chain filters
         chain_df = self._apply_filters(self.cfg.train_filters.chain_filter if self.phase == "train" else self.cfg.val_filters.chain_filter, chain_df)
-        
-        
-        
+                        
         # Add chain counts info
         chain_df = add_chain_counts_info(chain_df)
         
