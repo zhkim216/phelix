@@ -100,7 +100,7 @@ def main(out_dir: str, merge_batches: bool = True):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Merge parquet shards into a single metadata file")
-    ap.add_argument("--out_dir", default="/home/possu/jinho/datasets/atomworks_lmpnnval",
+    ap.add_argument("--out_dir", default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v2",
                     help="Output directory containing shards/ subdirectory")
     ap.add_argument("--no-merge-batches", action="store_true",
                     help="Skip merging batch parquets for incomplete shards")
