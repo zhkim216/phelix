@@ -22,7 +22,7 @@ from omegaconf import DictConfig
 from torch.utils import data
 from torch.utils.data import DataLoader
 
-# from allatom_design.data.sampler import Sampler
+from allatom_design.data.sampler import Sampler
 from allatom_design.data.transform.pad import pad_to_max
 from allatom_design.data.transform import sd_featurizer
 
@@ -35,64 +35,29 @@ class AtomworksSDDataModule(L.LightningDataModule):
         self.pdb_path = cfg.pdb_path
         self._train_set = SDDataset(cfg, phase="train")
         self._val_set = SDDataset(cfg, phase="val")
-        
-        self.prefetch_factor = cfg.data_loader_cfg.prefetch_factor
-        self.prefetch_buffer_size = cfg.data_loader_cfg.prefetch_buffer_size                
-        self.train_pin_memory = cfg.data_loader_cfg.train_pin_memory
-        self.train_persistent_workers = cfg.data_loader_cfg.train_persistent_workers
-        self.val_pin_memory = cfg.data_loader_cfg.val_pin_memory
-        self.val_persistent_workers = cfg.data_loader_cfg.val_persistent_workers
-        
-    def train_dataloader(self) -> DataLoader:
-        weights = torch.as_tensor(self._train_set.get_sampling_weights(), dtype=torch.float32)        
-        
-        if self.cfg.samples_per_epoch is not None:
-            num_samples = self.cfg.samples_per_epoch
-        else:
-            num_samples = len(self._train_set)
-        
-        base_sampler = LazyWeightedRandomSampler(weights, num_samples=num_samples, \
-            replacement=True, prefetch_buffer_size=self.prefetch_buffer_size)
-        
-        rank = dist.get_rank() if dist.is_initialized() else 0
-        world_size = dist.get_world_size() if dist.is_initialized() else 1
-        
-        #Todo (JH): Extend to multiple datasets
-        sampler = DistributedMixedSampler(
-                    datasets_info=[{"dataset": self._train_set, "sampler": base_sampler, "probability": 1.0}],
-                    num_replicas=world_size,
-                    rank=rank,
-                    n_examples_per_epoch=num_samples,
-                    shuffle=True,
-                    drop_last=True,
-                )
                 
-        loader = DataLoader(dataset=self._train_set,
-                            sampler=sampler,
+    def train_dataloader(self) -> DataLoader:
+                                
+        train_loader = DataLoader(dataset=self._train_set,                            
                             batch_size=self.cfg.batch_size,
                             num_workers=self.cfg.num_workers,
                             shuffle=False,
-                            pin_memory=self.train_pin_memory,
+                            pin_memory=True,
                             drop_last=True,
-                            collate_fn=sd_collator,
-                            persistent_workers=self.train_persistent_workers,
-                            worker_init_fn=worker_init_fn,
-                            prefetch_factor=self.prefetch_factor)
-
-        self._train_sampler = sampler
-
-        return loader
+                            collate_fn=sd_collator,                            
+                            worker_init_fn=worker_init_fn)
+                            
+        
+        return train_loader
         
 
     def val_dataloader(self) -> DataLoader:
-        val_loader = DataLoader(self._val_set,
+        val_loader = DataLoader(dataset=self._val_set,
                                 batch_size=self.cfg.batch_size,
                                 num_workers=self.cfg.num_workers,
                                 shuffle=False,
-                                pin_memory=self.val_pin_memory,
-                                persistent_workers=self.val_persistent_workers,
-                                prefetch_factor=self.prefetch_factor,
-                                drop_last=True, #! (JH) changed 251029
+                                pin_memory=True,
+                                drop_last=True,
                                 collate_fn=sd_collator,
                                 worker_init_fn=worker_init_fn)
 
@@ -110,8 +75,7 @@ class SDDataset(MolecularDataset):
             
         self.cfg = cfg
         self.phase = phase
-        self.save_failed_examples_to_dir = cfg.save_failed_examples_to_dir        
-        self._rng = None # For fallback sampling
+        self.save_failed_examples_to_dir = cfg.save_failed_examples_to_dir                
 
         # Initialize featurizer
         # Note: We remove INFERENCE_ONLY_KEYS to avoid cuda initialization issues during training.
@@ -119,14 +83,9 @@ class SDDataset(MolecularDataset):
                                                       remove_keys=sd_featurizer.INFERENCE_ONLY_KEYS,
                                                       ) #! (JH) changed
                             
-        # Link featurizer to transform
-        self.transform = self.featurizer
+        # Process chain df
+        self.chain_df = self._process_chain_df()
         
-        # #* 251030 (JH) lp0_exp0, ligand clustering
-        # if not self.cfg.ligand_clustered:      
-        # Read in chain metadata parquet        
-        self.chain_df, self.dummy_chain_df = self._process_chain_df()
-
         # Build interface df from contacts in chain df
         self.interface_df = self._process_interface_df()
 
@@ -134,17 +93,18 @@ class SDDataset(MolecularDataset):
         self.parsed_df = self._parse_dfs()
         self.data = self.parsed_df
         
-        # else: self.cfg.ligand_clustered:
-                    
-        # Prepare fallback probabilities
-        # Todo: Change to FallbackDatasetWrapper + FallbackSamplerWrapper, when using DDP
-        self._fallback_probs = self.get_sampling_weights().astype(np.float64)
-        self._fallback_probs /= self._fallback_probs.sum()
-        
+        # Initialize per-worker random number generator
+        if phase == "train":
+            self._sampler = Sampler(self.get_sampling_weights())
+            self._rng, self._samples = None, None
+
 
     @override
     def __getitem__(self, idx: int):       
-        self._ensure_worker_rng() # Prepare per-worker random number generator for fallback
+        if self.phase == "train":
+            # For training, draw from infinite sampler.
+            self._ensure_worker_rng()
+            idx = next(self._samples)
         
         # Load cached example.        
         example_id = self.idx_to_id(idx)                                            
@@ -153,93 +113,66 @@ class SDDataset(MolecularDataset):
         try:
             example = self._load_cached_example(parsed_row["extra_info"]["pdb_id"])
         except FileNotFoundError:
-            logger.warning(f"Cached example for {parsed_row['extra_info']['pdb_id']} not found in {self.cfg.pdb_path}/cached_examples in {self.phase} dataset, skipping...")            
-            if self.phase == "train":
-                # Fallback to next example, based on fallback probabilities                        
-                fallback_idx = self._rng.choice(len(self.parsed_df), p=self._fallback_probs)
-                # logger.warning(f"Falling back to next example {fallback_idx} based on fallback probabilities in {self.phase} dataset...")
-                return self.__getitem__(fallback_idx)
-            else:
-                idx = idx + 1
-                # logger.warning(f"Falling back to next example {idx} in {self.phase} dataset...")                
-                return self.__getitem__(idx)
+            logger.warning(f"Cached example for {parsed_row['extra_info']['pdb_id']} not found in {self.cfg.pdb_path}/cached_examples in {self.phase} dataset, skipping...")                        
+            return self.__getitem__(idx + 1)
+            
             
         example.update(parsed_row)  # add in query_pn_unit_iids
                     
         # Apply train-time transforms.
         try:
-            feats = self._apply_transform(example, example_id=example_id, idx=idx)            
+            feats = self.featurizer(example)            
         except Exception as e:
             logger.error(f"Error applying train-time transforms to example {example_id} in {self.phase} dataset: {e}")
-            if self.phase == "train":
-                # Fallback to next example, based on fallback probabilities                        
-                fallback_idx = self._rng.choice(len(self.parsed_df), p=self._fallback_probs)
-                # logger.warning(f"Falling back to next example {fallback_idx} based on fallback probabilities in {self.phase} dataset...")
-                return self.__getitem__(fallback_idx)
-            else:
-                idx = idx + 1
-                # logger.warning(f"Falling back to next example {idx} in {self.phase} dataset...")                
-                return self.__getitem__(idx)            
+            return self.__getitem__(idx + 1)
 
         return feats
 
     def _ensure_worker_rng(self):
         """Ensure that each worker has a unique random number generator."""
         if self._rng is None:
-            self._rng = np.random.default_rng(torch.initial_seed() % 2**32)        
+            self._rng = np.random.default_rng(torch.initial_seed() % 2**32)
+            self._samples = self._sampler.sample(self._rng)
+    
 
     def _process_chain_df(self) -> pd.DataFrame:
         """
         Processes the chain dataframe. Adds chain counts info and sampling weights, and applies filters.
-        """
-        
-        # Read in chain parquet        
+        """                                                    
         chain_df = read_parquet_with_metadata(self.cfg.parquet_path)
-        
+        # Set index to example_id        
         chain_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
+        
+        # Convert q_pn_unit_contacting_pn_unit_iids to list. It was saved as a json string.
         chain_df["q_pn_unit_contacting_pn_unit_iids"] = chain_df["q_pn_unit_contacting_pn_unit_iids"].apply(json.loads)
     
-        # Load in validation IDs and hold out based on phase. Case insensitive, no extension.    
-        if self.cfg.validation_ids_file.endswith(".csv"):
-            if self.cfg.debug:
-                val_split = pd.read_csv(self.cfg.validation_ids_file)["pdb_id"].str.lower().tolist()[:self.cfg.debug_num_ids]
-            else:
-                val_split = pd.read_csv(self.cfg.validation_ids_file)["pdb_id"].str.lower().tolist()
-            logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_file}...")
-        else:
-            with open(self.cfg.validation_ids_file, "r") as f:                
-                val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}
-            logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_file}...")
+        # Load in validation IDs and hold out based on phase. Case insensitive, no extension.                    
+        with open(self.cfg.validation_ids_file, "r") as f:                
+            val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}
+        logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_file}...")
             
         if self.cfg.debug:
-            chain_df = chain_df[chain_df["pdb_id"].isin(val_split)]
-            train_pdb_ids = val_split[:8*len(val_split)//9]
-            val_pdb_ids = val_split[8*len(val_split)//9:]
-            chain_df.loc[chain_df["pdb_id"].isin(train_pdb_ids), "phase"] = "train"
-            chain_df.loc[chain_df["pdb_id"].isin(val_pdb_ids), "phase"] = "val"
+            debug_pdb_list = np.random.choice(chain_df['pdb_id'].unique().tolist(), size=self.cfg.debug_num_ids, replace=False)
+            debug_train_pdb_list = debug_pdb_list[:3*self.cfg.debug_num_ids//4]
+            debug_val_pdb_list = debug_pdb_list[3*self.cfg.debug_num_ids//4:]
+            chain_df.loc[chain_df["pdb_id"].isin(debug_train_pdb_list), "phase"] = "train"                        
+            chain_df.loc[chain_df["pdb_id"].isin(debug_val_pdb_list), "phase"] = "val"            
         else:                                            
             chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
             chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"        
             
         if self.cfg.exclude_val_cluster: #Todo: This is a strategy used in ligandmpnn, need to be revisited later (JH)
             self.val_cluster_ids = list(set(chain_df[(chain_df['q_pn_unit_is_protein'] == True) & (chain_df['phase'] == 'val')]['q_pn_unit_cluster_id']))
-            
+        
+        # Subset chain_df to the current phase
         chain_df = chain_df[chain_df["phase"] == self.phase]
                                                 
-        # Add chain counts info and sampling weights
-        if self.cfg.debug: 
-            t0 = time.perf_counter()
-                
-        # Copy chain_df to dummy_chain_df to construct interface df later
-        dummy_chain_df = chain_df.copy()
-                
-        # Take only protein chains                                          
-        chain_df = chain_df[chain_df["q_pn_unit_is_protein"]]                          
+        # Apply cif filters
+        chain_df = self._apply_filters(self.cfg.train_filters.cif_filter if self.phase == "train" else self.cfg.val_filters.cif_filter, chain_df)
         
-        #* FIX: Apply chain filters first before adding sampling_weights info
-        chain_filter_protein = self.cfg.train_filters.chain_filter_protein if self.phase == "train" else self.cfg.val_filters.chain_filter_protein
-        chain_df = self._apply_filters(chain_filter_protein, chain_df)
-        
+        # Apply chain filters
+        chain_df = self._apply_filters(self.cfg.train_filters.chain_filter if self.phase == "train" else self.cfg.val_filters.chain_filter, chain_df)
+                        
         # Add chain counts info
         chain_df = add_chain_counts_info(chain_df)
         
@@ -251,21 +184,18 @@ class SDDataset(MolecularDataset):
                                              cluster_cols=["q_pn_unit_cluster_id"])
                         
         
-        chain_filter_protein_ligand = self.cfg.train_filters.chain_filter_protein_ligand if self.phase == "train" else self.cfg.val_filters.chain_filter_protein_ligand
-        dummy_chain_df = self._apply_filters(chain_filter_protein_ligand, dummy_chain_df)
-                        
-        return chain_df, dummy_chain_df
+        return chain_df
         
 
     def _process_interface_df(self) -> pd.DataFrame:
         """
         Processes the interface dataframe based on the filtered chain dataframe. Adds chain counts info and sampling weights.
         """                
-        interface_df = build_interface_df(self.dummy_chain_df, dataset_name=Path(self.cfg.parquet_path).parent.name)
+        interface_df = build_interface_df(self.chain_df, dataset_name=Path(self.cfg.parquet_path).parent.name)
                     
         interface_df = add_chain_counts_info(interface_df)
                 
-        alphas = self.cfg.sampling_weights["alphas_interface"] #! (JH) changed 250925
+        alphas = self.cfg.sampling_weights["alphas_interface"] 
             
         interface_df = add_sampling_weights_info(interface_df,
                                                  alphas=alphas,
@@ -462,13 +392,11 @@ def build_interface_df(chain_df: pd.DataFrame, dataset_name: str) -> pd.DataFram
     # Bring example_id into a column if it's the index
     chain_df = chain_df.reset_index(drop=True)
 
-    # Get columns we'll need from the source df
-    chain_specific_cols = ["q_pn_unit_iid", "q_pn_unit_type", "q_pn_unit_sequence_length", "q_pn_unit_cluster_id", \
-                           'q_pn_unit_nucleic_acid_chain_cluster', \
-                           'q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster', \
-                           'q_pn_unit_is_RNA', 'q_pn_unit_is_DNA', 'q_pn_unit_is_RNA_DNA_hybrid', \
-                           'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_nuc_polymer', 'q_pn_unit_is_nuc_ligand', \
-                            'q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal']  #! columns we need for each chain 
+    # Get columns we'll need from the source df    
+    chain_specific_cols = ['q_pn_unit_id', 'q_pn_unit_iid', 'q_pn_unit_type', 'q_pn_unit_sequence_length', 
+                           'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_polymer', 'q_pn_unit_is_metal', 'q_pn_unit_is_loi',
+                           'q_pn_unit_cluster_id']
+        
     base_cols = [
         "example_id", "pdb_id", "assembly_id", "path", "q_pn_unit_contacting_pn_unit_iids",
         *chain_specific_cols,
@@ -550,43 +478,42 @@ def add_chain_counts_info(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add chain type and sequence length columns to the dataframe.
     Modifies the dataframe in place and returns it.
+    
+    Handles both chain_df (columns without suffix) and interface_df (columns with _1, _2 suffixes).
+    For interface_df, counts are summed across both chains.
     """
     
-    # Compute chain type counts        
-    prot_col = "q_pn_unit_is_protein"    
-    small_molecule_cols = [
-        "q_pn_unit_is_small_molecule",
-        "q_pn_unit_is_peptide",
-        "q_pn_unit_is_nuc_ligand",
-    ]
-    nuc_cols = [
-        "q_pn_unit_is_nuc_polymer",
-    ]
-    metal_col = "q_pn_unit_is_metal"
+    # Nucleic acid types
+    nuc_chain_type_enums = [chain_type.value for chain_type in aw_enums.ChainType.get_nucleic_acids()]
     
-    all_chain_type_cols = [prot_col, *small_molecule_cols, *nuc_cols, metal_col]
+    # Check if this is an interface_df (has _1, _2 suffixes) or chain_df
+    is_interface = 'q_pn_unit_type_1' in df.columns
     
-    def _detect_suffixes(df):
-        suffixes = []
-        for col in df.columns:
-            for chain_type_col in all_chain_type_cols:
-                if col.startswith(chain_type_col):
-                    suffixes.append(col[len(chain_type_col):])                    
-        return sorted(set(suffixes))
-    
-    suffixes = _detect_suffixes(df)
-    
-    df['n_prot'] = 0
-    df['n_nuc'] = 0
-    df['n_small_molecule'] = 0
-    df['n_metal'] = 0
-    
-    for suffix in suffixes:
-        df['n_prot'] += df.apply(lambda x: 1 if x[f'q_pn_unit_is_protein{suffix}'] else 0, axis=1)
-        df['n_nuc'] += df.apply(lambda x: 1 if any(x[f"{col}{suffix}"] for col in nuc_cols) else 0, axis=1)        
-        df['n_small_molecule'] += df.apply(lambda x: 1 if any(x[f"{col}{suffix}"] for col in small_molecule_cols) else 0, axis=1)
-        df['n_metal'] += df.apply(lambda x: 1 if x[f'q_pn_unit_is_metal{suffix}'] else 0, axis=1)
-    
+    if is_interface:
+        # Interface df: sum counts from both chains
+        df['n_prot'] = df.apply(
+            lambda x: (1 if x['q_pn_unit_is_protein_1'] else 0) + (1 if x['q_pn_unit_is_protein_2'] else 0), axis=1)
+        df['n_nuc'] = df.apply(
+            lambda x: (1 if x['q_pn_unit_is_polymer_1'] and x['q_pn_unit_type_1'] in nuc_chain_type_enums else 0) + 
+                      (1 if x['q_pn_unit_is_polymer_2'] and x['q_pn_unit_type_2'] in nuc_chain_type_enums else 0), axis=1)
+        df['n_peptide'] = df.apply(
+            lambda x: (1 if x['q_pn_unit_is_peptide_1'] else 0) + (1 if x['q_pn_unit_is_peptide_2'] else 0), axis=1)
+        df['n_small_molecule'] = df.apply(
+            lambda x: (1 if not x['q_pn_unit_is_polymer_1'] and not x['q_pn_unit_is_metal_1'] else 0) + 
+                      (1 if not x['q_pn_unit_is_polymer_2'] and not x['q_pn_unit_is_metal_2'] else 0), axis=1)
+        df['n_metal'] = df.apply(
+            lambda x: (1 if x['q_pn_unit_is_metal_1'] else 0) + (1 if x['q_pn_unit_is_metal_2'] else 0), axis=1)
+        df['n_loi'] = df.apply(
+            lambda x: (1 if x['q_pn_unit_is_loi_1'] else 0) + (1 if x['q_pn_unit_is_loi_2'] else 0), axis=1)
+    else:
+        # Chain df
+        df['n_prot'] = df.apply(lambda x: 1 if x['q_pn_unit_is_protein'] else 0, axis=1)
+        df['n_nuc'] = df.apply(lambda x: 1 if x['q_pn_unit_is_polymer'] and x['q_pn_unit_type'] in nuc_chain_type_enums else 0, axis=1)
+        df['n_peptide'] = df.apply(lambda x: 1 if x['q_pn_unit_is_peptide'] else 0, axis=1)
+        df['n_small_molecule'] = df.apply(lambda x: 1 if ~x['q_pn_unit_is_polymer'] and ~x['q_pn_unit_is_metal'] else 0, axis=1)
+        df['n_metal'] = df.apply(lambda x: 1 if x['q_pn_unit_is_metal'] else 0, axis=1)
+        df['n_loi'] = df.apply(lambda x: 1 if x['q_pn_unit_is_loi'] else 0, axis=1)
+            
     return df
 
 
@@ -604,8 +531,8 @@ def add_sampling_weights_info(df: pd.DataFrame,
     df["cluster_size"] = df["clusters"].map(cluster_id_to_size)
 
     # Compute weights
-    missing_alphas = set(alphas.keys()) - {"a_prot", "a_nuc", "a_small_molecule", "a_metal"}
-    missing_counts = {"n_prot", "n_nuc", "n_small_molecule", "n_metal"} - set(df.columns)
+    missing_alphas = set(alphas.keys()) - {"a_prot", "a_nuc", "a_peptide", "a_small_molecule", "a_metal", "a_loi"}
+    missing_counts = {"n_prot", "n_nuc", "n_peptide", "n_small_molecule", "n_metal", "n_loi"} - set(df.columns)
 
     if missing_alphas:
         logger.warning(f"Missing alphas from configuration file: {missing_alphas}; defaulting to 0")
@@ -617,55 +544,12 @@ def add_sampling_weights_info(df: pd.DataFrame,
 
     weights = (beta / df["cluster_size"]) * (
         alphas.get("a_prot", 0) * df["n_prot"]        
-        + alphas.get("a_small_molecule", 0) * df["n_small_molecule"]
         + alphas.get("a_nuc", 0) * df["n_nuc"]
+        + alphas.get("a_peptide", 0) * df["n_peptide"]
+        + alphas.get("a_small_molecule", 0) * df["n_small_molecule"]        
         + alphas.get("a_metal", 0) * df["n_metal"]
-        # + alphas.get("a_loi", 0) * df["n_loi"]  # always 0 for now
+        + alphas.get("a_loi", 0) * df["n_loi"]  # always 0 for now
     )
 
     df["sampling_weight"] = weights
     return df
-
-
-# def add_chain_counts_info(df: pd.DataFrame, chain_type_cols: list[str], \
-#                         seq_length_cols: list[str], is_metal_cols: list[str]) -> pd.DataFrame:
-#     """
-#     Add chain type and sequence length columns to the dataframe.
-#     Modifies the dataframe in place and returns it.
-#     # TODO (JH): faster way?
-#     """
-#     # Compute chain type counts
-#     chain_count_cols = ["n_prot", "n_nuc", "n_peptide", "n_small_molecule", "n_metal", "n_loi"]
-#     df["chain_types"] = df[chain_type_cols].apply(lambda x: tuple(x), axis=1)
-#     df["seq_lengths"] = df[seq_length_cols].apply(lambda x: tuple(x), axis=1)
-#     df["is_metal"] = df[is_metal_cols].apply(lambda x: tuple(x), axis=1) 
-
-#     def _get_chain_type_counts(row) -> dict[str, int]:
-#         chain_types: tuple[str] = row["chain_types"]
-#         seq_lengths: tuple[int] = row["seq_lengths"]        
-#         is_metal: tuple[bool] = row["is_metal"]
-#         chain_type_counts = {c: 0 for c in chain_count_cols}
-
-#         for t, l, m in zip(chain_types, seq_lengths, is_metal):
-#             if t in aw_enums.ChainTypeInfo.PROTEINS:
-#                 if l < aw_const.PEPTIDE_MAX_RESIDUES:
-#                     chain_type_counts["n_peptide"] += 1
-#                 else:
-#                     chain_type_counts["n_prot"] += 1
-#             elif t in aw_enums.ChainTypeInfo.NUCLEIC_ACIDS:
-#                 chain_type_counts["n_nuc"] += 1
-#             else:
-#                 if m:
-#                     chain_type_counts["n_metal"] += 1
-#                 else:
-#                     chain_type_counts["n_small_molecule"] += 1
-                        
-#         return pd.Series(chain_type_counts)
-    
-#     df[chain_count_cols] = df.apply(_get_chain_type_counts, axis=1)    
-
-#     # Delete intermediate columns
-#     del df["chain_types"]
-#     del df["seq_lengths"]
-#     del df["is_metal"] #! (JH) changed 250925
-#     return df

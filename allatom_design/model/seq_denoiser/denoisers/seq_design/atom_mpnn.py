@@ -16,6 +16,23 @@ from allatom_design.data.data import batched_gather
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
 from allatom_design.data.const import PERIODIC_TABLE_FEATURES
+from atomworks.constants import (
+    DNA_BACKBONE_ATOM_NAMES,
+    ELEMENT_NAME_TO_ATOMIC_NUMBER,
+    METAL_ELEMENTS,
+    NUCLEIC_ACID_BACKBONE_ATOM_NAMES,
+    PROTEIN_BACKBONE_ATOM_NAMES,
+    RNA_BACKBONE_ATOM_NAMES,
+    STANDARD_AA,
+    STANDARD_AA_TIP_ATOM_NAMES,
+    STANDARD_DNA,
+    STANDARD_PURINE_RESIDUES,
+    STANDARD_PYRIMIDINE_RESIDUES,
+    STANDARD_RNA,
+    UNKNOWN_AA,
+    UNKNOWN_DNA,
+    UNKNOWN_RNA,
+)
 # from allatom_design.utils.memscope import cuda_mem_scope #! For debugging memory usage
 
 class AtomMPNN(nn.Module):
@@ -129,11 +146,11 @@ class AtomMPNN(nn.Module):
         # Protein-only encoding
         h_V = h_V + h_S                
         h_E = self.W_e(h_E)
-        prot_token_mask =  batch["chain_is_protein"] * batch["is_protein"] * batch["token_pad_mask"] * batch["token_exists_mask"]
-        prot_token_mask_2d = gather_nodes(prot_token_mask.unsqueeze(-1), E_idx).squeeze(-1)
-        prot_token_mask_2d = prot_token_mask.unsqueeze(-1) * prot_token_mask_2d
+        prot_standard_aa_mask = batch["token_is_protein_chain"] * (1 - batch["is_atomized"].float()) * batch["token_exists_mask"] * batch["token_pad_mask"]
+        prot_standard_aa_mask_2d = gather_nodes(prot_standard_aa_mask.unsqueeze(-1), E_idx).squeeze(-1)
+        prot_standard_aa_mask_2d = prot_standard_aa_mask.unsqueeze(-1) * prot_standard_aa_mask_2d
         for layer in self.encoder_layers:
-            h_V, h_E = layer(h_V, h_E, E_idx, prot_token_mask, prot_token_mask_2d)
+            h_V, h_E = layer(h_V, h_E, E_idx, prot_standard_aa_mask, prot_standard_aa_mask_2d)
         
         #! DEBUG: Check h_V before context_module
         h_V_before_context = h_V.clone()
@@ -155,7 +172,7 @@ class AtomMPNN(nn.Module):
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
         for layer in self.decoder_layers:
-            h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = prot_token_mask, E_idx = E_idx, mask_attend = prot_token_mask_2d) #! (JH) changed, token_mask_2d is newly added
+            h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = prot_standard_aa_mask, E_idx = E_idx, mask_attend = prot_standard_aa_mask) #! (JH) changed, token_mask_2d is newly added
 
         # Potts model
         if self.use_potts:
@@ -168,13 +185,13 @@ class AtomMPNN(nn.Module):
                 E_idx = E_idx[:, :, :self.k_neighbors_potts]
                 prot_token_mask_2d = prot_token_mask_2d[:, :, :self.k_neighbors_potts]
 
-            h, J = self.decoder_S_potts(h_V, h_ESV, E_idx, prot_token_mask, prot_token_mask_2d)
+            h, J = self.decoder_S_potts(h_V, h_ESV, E_idx, prot_standard_aa_mask, prot_standard_aa_mask_2d)
             potts_decoder_aux = {
                 "h": h,
                 "J": J,
                 "edge_idx": E_idx,
-                "mask_i": prot_token_mask,
-                "mask_ij": prot_token_mask_2d,
+                "mask_i": prot_standard_aa_mask,
+                "mask_ij": prot_standard_aa_mask_2d,
             }
 
         logits = self.W_out(h_V)                
@@ -219,6 +236,8 @@ class TokenFeatures(nn.Module):
         self.num_positional_embeddings = cfg.num_positional_embeddings
         self.node_n_channel = cfg.node_n_channel
         self.edge_n_channel = cfg.edge_n_channel
+        
+        # Context-related parameters
         self.use_multichain_encoding = cfg.get("use_multichain_encoding", True)
         self.ligand_conditioning = cfg.ligand_conditioning
         self.use_sidechain_context = cfg.get("use_sidechain_context", True)
@@ -228,7 +247,7 @@ class TokenFeatures(nn.Module):
 
         # Layers
         self.embeddings = PositionalEncodings(self.num_positional_embeddings)
-        num_pairwise_dists = 1 if self.ca_only else const.MAX_NUM_ATOMS ** 2
+        num_pairwise_dists = 1 if self.ca_only else 5*5
         edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists
         # edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists + 1 #! (JH) removed 251009, to simplify the model
         self.edge_embedding = nn.Linear(edge_in, self.edge_n_channel, bias=False)
@@ -251,22 +270,16 @@ class TokenFeatures(nn.Module):
         """
         Extract token-level edge features and build KNN graph.
         """
-        X = self._get_token_coords(batch, protein_only = True) #! protein-c alpha atoms only        
-        D_neighbors, E_idx = self._dist(X, batch["chain_is_protein"] * batch["is_protein"] * batch["token_exists_mask"]) 
+        X = self._get_protein_token_center_coords(batch) # CA coordinates for protein tokens
+        prot_standard_aa_mask = batch["token_is_protein_chain"] * (1 - batch["is_atomized"].float()) * batch["token_exists_mask"] * batch["token_pad_mask"]
+        D_neighbors, E_idx = self._dist(X = X, mask = prot_standard_aa_mask) 
 
         # Get RBF features
         if self.ca_only:
             RBF_all = self._rbf(D_neighbors)
         else:            
-            X_backbone, tokenwise_backbone_mask = get_tokenwise_coords(batch, backbone_only = True, sidechain_only = False, all_atoms = False)
-            # X_all = torch.where(tokenwise_atom_cond_mask.unsqueeze(-1).bool(), X_all, X[..., None, :])  # replace all masked atoms with center atom for the residue
+            RBF_all = self.get_backbone_cb_rbf(batch = batch, D_neighbors = D_neighbors, E_idx = E_idx)
             
-            RBF_backbone = []
-            for i in range(X_backbone.shape[-2]):
-                for j in range(X_backbone.shape[-2]):
-                    RBF_backbone.append(self._get_rbf(X_backbone[..., i, :], X_backbone[..., j, :], E_idx))
-            RBF_backbone = torch.cat(RBF_backbone, dim=-1)
-
             # RBF_all = []
             # for i in range(X_all.shape[-2]):
             #     for j in range(X_all.shape[-2]):
@@ -300,8 +313,8 @@ class TokenFeatures(nn.Module):
         # token_bonds = gather_edges(token_bonds, E_idx)
 
         # Concatenate edge features and embed
-        E = torch.cat((E_positional, RBF_backbone), -1)
-        # E = torch.cat((E_positional, RBF_backbone, token_bonds), -1)
+        E = torch.cat((E_positional, RBF_all), -1)
+        # E = torch.cat((E_positional, RBF_all, token_bonds), -1)
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
         
@@ -442,26 +455,36 @@ class TokenFeatures(nn.Module):
         return E, E_idx, V, Y_nodes, Y_edges, Y_m, D_neighbors 
 
 
+    def _get_protein_token_center_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n 3", float]:
+        """
+        Get protein token-level center coordinates. Standard amino acid only.
+        """
+        B, N, _ = batch["coords"].shape
+        X = batch["coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token, ca for proteins                
+        X = X * batch["token_is_protein_chain"].unsqueeze(-1) * (1 - batch["is_atomized"].float()).unsqueeze(-1) # Mask out non-protein chain and non-standard amino acids
+        X = X * batch["token_exists_mask"].unsqueeze(-1) * batch["token_pad_mask"].unsqueeze(-1) # mask out padding and unresolved atoms
+        return X
+
     def _get_token_coords(self, batch: dict[str, TensorType["b ..."]], protein_only: bool = True) -> TensorType["b n 3", float]:
         """
         Get token-level coordinates as an average over all known, resolved atoms in the token.
         """
         B, N, _ = batch["coords"].shape
-        X = batch["coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token
-        X = X * batch["token_exists_mask"].unsqueeze(-1)  # mask out padding and unresolved atoms
+        X = batch["coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token        
         if protein_only:
-            X = X * batch["chain_is_protein"].unsqueeze(-1)
+            X = X * batch["token_is_protein_chain"].unsqueeze(-1)
+        X = X * batch["token_exists_mask"].unsqueeze(-1)  # mask out padding and unresolved atoms
         return X
 
-
-    def _dist(self, X, mask, eps=1E-6):
-        mask_2D = torch.unsqueeze(mask,1) * torch.unsqueeze(mask,2)
-        dX = torch.unsqueeze(X,1) - torch.unsqueeze(X,2)
+    def _dist(self, X = None, mask = None, eps=1E-6):
+        mask_2D = torch.unsqueeze(mask, 1) * torch.unsqueeze(mask, 2)
+        dX = torch.unsqueeze(X, 1) - torch.unsqueeze(X, 2)
         D = mask_2D * torch.sqrt(torch.sum(dX**2, 3) + eps)
         D_max, _ = torch.max(D, -1, keepdim=True)
-        D_adjust = D + (1. - mask_2D) * D_max        
-        D_neighbors, E_idx = torch.topk(D_adjust, self.k_neighbors, dim=-1, sorted=True, largest=False)
-        #! 251030 (JH) fixed, np.minimum(self.k_neighbors, X.shape[1]) => self.k_neighbors
+        D_adjust = D + (1.0 - mask_2D) * D_max
+        D_neighbors, E_idx = torch.topk(
+            D_adjust, np.minimum(self.k_neighbors, X.shape[1]), dim=-1, sorted=True, largest=False
+        )
         return D_neighbors, E_idx
 
     def _rbf(self, D):
@@ -474,24 +497,76 @@ class TokenFeatures(nn.Module):
         RBF = torch.exp(-((D_expand - D_mu) / D_sigma)**2)
         return RBF
 
-    def _get_rbf(self, A, B, E_idx): #! Assuming A and B are the coordinates of the single type atom (e.g. CA or CB)
-        """
-        (JH) Memory efficient version of _get_rbf. O(N^2) -> O(NK).
-        """
+    def _get_rbf(self, A, B, E_idx):
+        D_A_B = torch.sqrt(
+            torch.sum((A[:, :, None, :] - B[:, None, :, :]) ** 2, -1) + 1e-6
+        )  # [B, L, L]
+        D_A_B_neighbors = gather_edges(D_A_B[:, :, :, None], E_idx)[
+            :, :, :, 0
+        ]  # [B,L,K]
+        RBF_A_B = self._rbf(D_A_B_neighbors)
+        return RBF_A_B
+    
+    def get_backbone_cb_rbf(self, batch: dict[str, TensorType["b ..."]] = None,
+                            D_neighbors = None,
+                            E_idx = None) -> TensorType["b n_tokens n_tokens num_rbf", float]:
+        
+        ca_coords = batch["ca_coords"]
+        n_coords = batch["n_coords"]
+        c_coords = batch["c_coords"]
+        o_coords = batch["o_coords"]
+        pseudo_cb_coords = batch["pseudo_cb_coords"]                
+        
+        RBF_all = []
+        RBF_all.append(self._rbf(D_neighbors))  # Ca-Ca
+        RBF_all.append(self._get_rbf(n_coords, n_coords, E_idx))  # N-N
+        RBF_all.append(self._get_rbf(c_coords, c_coords, E_idx))  # C-C
+        RBF_all.append(self._get_rbf(o_coords, o_coords, E_idx))  # O-O
+        RBF_all.append(self._get_rbf(pseudo_cb_coords, pseudo_cb_coords, E_idx))  # Cb-Cb
+        RBF_all.append(self._get_rbf(ca_coords, n_coords, E_idx))  # Ca-N
+        RBF_all.append(self._get_rbf(ca_coords, c_coords, E_idx))  # Ca-C
+        RBF_all.append(self._get_rbf(ca_coords, o_coords, E_idx))  # Ca-O
+        RBF_all.append(self._get_rbf(ca_coords, pseudo_cb_coords, E_idx))  # Ca-Cb
+        RBF_all.append(self._get_rbf(n_coords, c_coords, E_idx))  # N-C
+        RBF_all.append(self._get_rbf(n_coords, o_coords, E_idx))  # N-O
+        RBF_all.append(self._get_rbf(n_coords, pseudo_cb_coords, E_idx))  # N-Cb
+        RBF_all.append(self._get_rbf(pseudo_cb_coords, c_coords, E_idx))  # Cb-C
+        RBF_all.append(self._get_rbf(pseudo_cb_coords, o_coords, E_idx))  # Cb-O
+        RBF_all.append(self._get_rbf(o_coords, c_coords, E_idx))  # O-C
+        RBF_all.append(self._get_rbf(n_coords, ca_coords, E_idx))  # N-Ca
+        RBF_all.append(self._get_rbf(c_coords, ca_coords, E_idx))  # C-Ca
+        RBF_all.append(self._get_rbf(o_coords, ca_coords, E_idx))  # O-Ca
+        RBF_all.append(self._get_rbf(pseudo_cb_coords, ca_coords, E_idx))  # Cb-Ca
+        RBF_all.append(self._get_rbf(c_coords, n_coords, E_idx))  # C-N
+        RBF_all.append(self._get_rbf(o_coords, n_coords, E_idx))  # O-N
+        RBF_all.append(self._get_rbf(pseudo_cb_coords, n_coords, E_idx))  # Cb-N
+        RBF_all.append(self._get_rbf(c_coords, pseudo_cb_coords, E_idx))  # C-Cb
+        RBF_all.append(self._get_rbf(o_coords, pseudo_cb_coords, E_idx))  # O-Cb
+        RBF_all.append(self._get_rbf(c_coords, o_coords, E_idx))  # C-O
+        RBF_all = torch.cat(tuple(RBF_all), dim=-1)
+        
+        return RBF_all
+        
+        
+
+    # def _get_rbf(self, A, B, E_idx): #! Assuming A and B are the coordinates of the single type atom (e.g. CA or CB)
+    #     """
+    #     (JH) Memory efficient version of _get_rbf. O(N^2) -> O(NK).
+    #     """
                 
-        K, C = E_idx.size(-1), A.size(-1)
+    #     K, C = E_idx.size(-1), A.size(-1)
         
-        B_neighbors = torch.gather(
-            B.unsqueeze(2).expand(-1, -1, K, -1),
-            dim=1,
-            index=E_idx.unsqueeze(-1).expand(-1, -1, -1, C)
-        )
+    #     B_neighbors = torch.gather(
+    #         B.unsqueeze(2).expand(-1, -1, K, -1),
+    #         dim=1,
+    #         index=E_idx.unsqueeze(-1).expand(-1, -1, -1, C)
+    #     )
         
-        diff = A.unsqueeze(2) - B_neighbors
-        D = torch.sqrt((diff*diff).sum(-1) + 1e-6)
-        RBF_A_B = self._rbf(D)
+    #     diff = A.unsqueeze(2) - B_neighbors
+    #     D = torch.sqrt((diff*diff).sum(-1) + 1e-6)
+    #     RBF_A_B = self._rbf(D)
             
-        return RBF_A_B                
+    #     return RBF_A_B                
     
     def _make_angle_features(self, A, B, C, Y): #! from ligandMPNN
         v1 = A - B
@@ -890,19 +965,20 @@ class EncLayer(nn.Module):
             h_V = mask_V * h_V
         
         # Edge updates
-        h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
-        h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
-        h_EV = torch.cat([h_V_expand, h_EV], -1)
-        h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
-        h_E = self.norm3(h_E + self.dropout3(h_message))
+        if not self.is_last_layer:
+            h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
+            h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
+            h_EV = torch.cat([h_V_expand, h_EV], -1)
+            h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
+            h_E = self.norm3(h_E + self.dropout3(h_message))
         
-        if mask_attend is not None: #! (JH) fixed 251009
-            h_E = mask_attend.unsqueeze(-1) * h_E
+        # if mask_attend is not None: #! (JH) fixed 251009
+        #     h_E = mask_attend.unsqueeze(-1) * h_E
                 
         return h_V, h_E
 
 
-def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]],
+def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]] = None,
                          backbone_only: bool = False,
                          sidechain_only: bool = False,
                          all_atoms: bool = False) -> tuple[TensorType["b n_tokens 23 3", float], TensorType["b n_tokens 23"]]:
@@ -918,11 +994,8 @@ def get_tokenwise_coords(batch: dict[str, TensorType["b ..."]],
     tokenwise_atom_idxs = batch["tokenwise_atom_idxs"]
     tokenwise_atom_idxs_mask = batch["tokenwise_atom_idxs_mask"]
     
-    atomwise_chain_is_protein = batch["chain_is_protein"].gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] # re-mask out pad atoms
-    
     # Gather coords    
     if backbone_only:
-        prot_bb_atom_mask = batch["prot_bb_atom_mask"] * batch["atom_resolved_mask"] * atomwise_chain_is_protein #! changed 251101 (JH)
         X_backbone = batch["coords"] * prot_bb_atom_mask.unsqueeze(-1)
         X_backbone = batched_gather(X_backbone, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask[..., None]
         tokenwise_backbone_mask = batched_gather(prot_bb_atom_mask, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask        

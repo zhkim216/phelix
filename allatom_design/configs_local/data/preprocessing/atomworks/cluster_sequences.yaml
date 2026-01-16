@@ -1,4 +1,4 @@
 pdb_path: /home/possu/jinho/datasets/atomworks_lmpnnval_ld
 parquet_path: /home/possu/jinho/datasets/atomworks_lmpnnval_ld/metadata.parquet
-exclude_chain_types: ["POLYPEPTIDE(D)", "PEPTIDE NUCLEIC ACID", "OTHER"]
-seq_id_threshold: 0.4 #! same as LMPNN
+exclude_chain_types: ["CYCLIC-PSEUDO-PEPTIDE", "OTHER", "PEPTIDE NUCLEIC ACID", "POLYPEPTIDE(D)"]
+seq_id_threshold: 0.4 #! LMPNN: 0.3

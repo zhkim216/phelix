@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from chroma.constants import AA20
 from chroma.layers.graph import collect_neighbors
 
-def compositions(S: torch.Tensor, C: torch.LongTensor, w: int = 30, expand_edge_idx_fix: bool = True):
+def compositions(S: torch.Tensor, C: torch.LongTensor, w: int = 30):
     """Compute local compositions per residue.
 
     Args:
@@ -54,11 +54,10 @@ def compositions(S: torch.Tensor, C: torch.LongTensor, w: int = 30, expand_edge_
     edge_idx = (
         torch.arange(S.shape[1], device=S.device)[None, :, None] + kx[None, None, :]
     )
-    #! BUG FIXED, 251112
-    if expand_edge_idx_fix:
-        edge_idx = edge_idx.expand(S.shape[0], -1, -1)
-    #!
     
+    #! BUG FIXED, 251112    
+    edge_idx = edge_idx.expand(S.shape[0], -1, -1)
+        
     mask_ij = (edge_idx > 0) & (edge_idx < S.shape[1])
     # select only the indices within the sequence length
     edge_idx = edge_idx.clamp(min=0, max=S.shape[1] - 1)
@@ -94,7 +93,6 @@ def complexity_lcp(
     min_coverage=0.9,
     # entropy_min: float = 2.52,
     # method = "chao-shen"
-    expand_edge_idx_fix: bool = True,
 ) -> torch.Tensor:
     """Compute the Local Composition Perplexity metric.
 
@@ -115,7 +113,7 @@ def complexity_lcp(
     if S.shape[1] < w:
         w = S.shape[1]
 
-    P, N, edge_idx, mask_i, mask_ij = compositions(S, C, w, expand_edge_idx_fix=expand_edge_idx_fix)
+    P, N, edge_idx, mask_i, mask_ij = compositions(S, C, w)
     #! C should be only for protein chains and tokens here
     # N: (b, n, 20), how many times each alphabet appears in the local window
     # P: (b, n, 20), probability of each alphabet in the local window
@@ -135,7 +133,6 @@ def complexity_lcp(
 
     
     # Compute entropy as a function of perturbed counts
-    # Todo: need to revisit this part, don't understand the logic yet
     if differentiable and len(S.shape) == 3:
         # Compute how a mutation changes entropy for each neighbor
         N_neighbors = collect_neighbors(N, edge_idx) # (b, n, w_neighbors, Q)

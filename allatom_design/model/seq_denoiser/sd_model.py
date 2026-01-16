@@ -58,10 +58,7 @@ class SeqDenoiser(nn.Module):
         with torch.no_grad():
             # Sample sequence and atom conditioning masks
             batch["seq_cond_mask"] = self.mask_selector.sample_seq_cond_mask(batch, t)  # 1 if we should condition on the restype, 0 otherwise
-            batch["atom_cond_mask"] = self.mask_selector.sample_atom_cond_mask(batch)  # 1 if we should condition on the atom, 0 otherwise
-            
-            if self.task == "lc_seq_des": #! (JH) changed
-                batch["pocket_token_mask"] = self.mask_selector.sample_pocket_mask(batch)  # 1 for residues in non-protein holding pocket, 0 otherwise
+            batch["atom_cond_mask"] = self.mask_selector.sample_atom_cond_mask(batch)  # 1 if we should condition on the atom, 0 otherwise            
 
         # Denoise sequence
         _, aux_preds = self.denoiser(batch)
