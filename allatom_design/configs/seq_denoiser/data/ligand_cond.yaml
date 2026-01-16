@@ -7,73 +7,68 @@ debug_num_ids: 10000 #! For debugging
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
 residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 exclude_val_cluster: true
-ligand_clustered: false
-keep_pn_unit_iids_in_extra_info: true #! (JH) changed 251031
-
-data_loader_cfg:
-  prefetch_factor: 1
-  prefetch_buffer_size: 1
-  train_pin_memory: true
-  train_persistent_workers: true
-  val_pin_memory: false
-  val_persistent_workers: false
 
 sampling_weights:
   alphas_chain:
     a_prot: 1.0
-    a_small_molecule: 0.0 #! should be 0
     a_nuc: 0.0
+    a_peptide: 0.0
+    a_small_molecule: 0.0 #! should be 0        
     a_metal: 0.0 #! should be 0
+    a_loi: 0.0
+    
   alphas_interface:
     a_prot: 1.0
-    a_small_molecule: 1.0
-    a_nuc: 1.0
-    a_metal: 1.0
+    a_nuc: 0.0
+    a_peptide: 0.0 
+    a_small_molecule: 0.0 #! should be 0        
+    a_metal: 0.0 #! should be 0
+    a_loi: 0.0
   betas:
     beta_chain: 1.0
-    beta_interface: 3.0
+    beta_interface: 1.0
 
 train_filters:
-  chain_filter_protein:
-    - "num_polymer_pn_units < 50" #! DEBUG      
-    - "deposition_date <= '2022-12-12'" #! LMPNN training data cutoff
-    - "resolution < 9.0"
-    - "16 < q_pn_unit_sequence_length < 2048" 
-  chain_filter_protein_ligand:
-    - "num_polymer_pn_units < 50" #! DEBUG      
-    - "resolution < 3.5"
-    - "not (q_pn_unit_is_nuc_ligand and q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster <= 3)"
-    - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
-  interface:
-    - "(n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_nuc == 1) or (n_prot == 1 and n_metal == 1)"
+  cif_filter:    
+    - "deposition_date <= '2022-12-16'"
+    - "resolution < 9.0" 
+    - "clash_severity != 'severe'"
+    - "~method.str.contains('NMR')"
+    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
+    - "num_polymer_pn_units < 4"
+  chain_filter:    
+    - "q_pn_unit_is_protein"
+    - "q_pn_unit_sequence_length < 384"
+    # - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
+    # - "(~q_pn_unit_is_polymer and ~q_pn_unit_is_metal and q_pn_unit_num_resolved_atoms >= 5)"
+  interface: null    
 
 val_filters:
-  chain_filter_protein:
-    - "num_polymer_pn_units < 50" #! DEBUG      
-    - "deposition_date <= '2022-12-12'" #! LMPNN training data cutoff
-    - "resolution < 9.0"
-    - "16 < q_pn_unit_sequence_length < 2048" 
-  chain_filter_protein_ligand:
-    - "num_polymer_pn_units < 50" #! DEBUG      
-    - "resolution < 3.5"
-    - "not (q_pn_unit_is_nuc_ligand and q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster <= 3)"
-    - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
-  interface:
-    - "(n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_nuc == 1) or (n_prot == 1 and n_metal == 1)"
-
+  cif_filter:    
+    - "deposition_date <= '2022-12-16'"
+    - "resolution < 3.5" 
+    - "clash_severity != 'severe'"
+    - "~method.str.contains('NMR')"
+    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
+    - "num_polymer_pn_units < 4"
+  chain_filter:
+    - "q_pn_unit_is_protein"
+    - "q_pn_unit_sequence_length < 384"
+  interface: null
+    
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: ['NA', 'CL', 'K', 'BR', 'UNL', 'UNX', 'UNL'] # SEP, TPO are excluded in this list, check atomworks/constants.py
+  remove_ccds: []
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
   hydrogen_policy: "remove"
 
 featurizer_cfg:
-  max_tokens: 512 #! DEBUG
-  max_atoms: 4608 #! DEBUG
+  max_tokens: 256 #! DEBUG
+  max_atoms: 2304 #! DEBUG
   crop_center_cutoff_distance: 15.0
   crop_spatial_p: 0.5
   remove_unresolved_tokens: false #! (JH) changed 250926,
@@ -82,7 +77,7 @@ featurizer_cfg:
   apply_random_augmentation: true
   translation_scale: 1.0
 
-samples_per_epoch: 1000
+samples_per_epoch: 100 #! DEBUG
 batch_size: ${train.batch_size}
 num_workers: ${num_workers}
 random_seed: ${train.seed}
