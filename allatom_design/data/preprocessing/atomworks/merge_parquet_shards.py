@@ -37,6 +37,14 @@ def merge_batch_parquets_for_shard(batch_dir: Path, shard_dir: Path, shard_id: i
     if df.empty:
         return None
     
+    # Deduplicate by example_id within shard (handles resume with different batch_size)
+    rows_before = len(df)
+    if 'example_id' in df.columns:
+        df = df.drop_duplicates(subset=['example_id'], keep='first')
+    duplicates_removed = rows_before - len(df)
+    if duplicates_removed > 0:
+        print(f"  Removed {duplicates_removed} duplicate rows (by example_id) in shard {shard_id}")
+    
     df.to_parquet(shard_parquet)
     print(f"  Created {shard_parquet} with {len(df)} rows")
     return shard_parquet
@@ -79,6 +87,14 @@ def main(out_dir: str, merge_batches: bool = True):
         raise SystemExit("No valid parquet files found")
     
     df = pd.concat(dfs, ignore_index=True)
+
+    # Deduplicate by example_id across all shards (safety net for cross-shard duplicates)
+    rows_before_final = len(df)
+    if 'example_id' in df.columns:
+        df = df.drop_duplicates(subset=['example_id'], keep='first')
+    duplicates_removed_final = rows_before_final - len(df)
+    if duplicates_removed_final > 0:
+        print(f"Removed {duplicates_removed_final} duplicate rows (by example_id) in final merge")
 
     # Write combined metadata
     meta_path = out / "metadata.parquet"
