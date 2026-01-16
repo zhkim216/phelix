@@ -12,7 +12,7 @@ exp_name: null  # Wandb exp name
 # Run settings
 overfit: -1 # Number of examples to overfit to, -1 to disable
 cuda: True
-num_workers: 8 # Dataloader num workers
+num_workers: 0 # Dataloader num workers (0 for debugging)
 
 # Finetuning options
 finetuning:
@@ -44,8 +44,8 @@ trainer:
 
 # Resuming training options
 resume:
-  ckpt_path: /home/possu/jinho/out_dir/debug_seq_denoiser/debug_ligand_seq_des/frosty-music-513/checkpoints/sd-step200-epoch07.ckpt  # Path to checkpoint to resume from, null to disable
-  use_current_cfg: true  # If false, load config from checkpoint directory; if true, use current config
+  ckpt_path: null  # Path to checkpoint to resume from, null to disable
+  use_current_cfg: false  # If false, load config from checkpoint directory; if true, use current config
   overrides: {}  # Specific overrides to apply (e.g., {train.batch_size: 8, optim.noam.factor: 1})
 
 # Model options

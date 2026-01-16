@@ -1,7 +1,7 @@
 task: ${model.task}
-pdb_path: /home/possu/jinho/datasets/debug_atomworks_lmpnn
-parquet_path: /home/possu/jinho/datasets/debug_atomworks_lmpnn/metadata_nuc_clustered_seq_clustered_03.parquet
-validation_ids_file: /home/possu/jinho/datasets/splits/lmpnn_val_list.csv 
+pdb_path: /home/possu/jinho/datasets/atomworks_lmpnnval_ld
+parquet_path: /home/possu/jinho/datasets/atomworks_lmpnnval_ld/metadata_seq_clustered_04.parquet
+validation_ids_file: /home/possu/jinho/datasets/splits/lmpnnval_small_molecule.txt
 debug: ${train.debug}
 debug_num_ids: 40 #! For debugging
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
@@ -21,45 +21,52 @@ data_loader_cfg:
 sampling_weights:
   alphas_chain:
     a_prot: 1.0
-    a_small_molecule: 0.0 #! should be 0
     a_nuc: 0.0
+    a_peptide: 0.0
+    a_small_molecule: 0.0 #! should be 0        
     a_metal: 0.0 #! should be 0
+    a_loi: 0.0
+    
   alphas_interface:
     a_prot: 1.0
-    a_small_molecule: 1.0
     a_nuc: 0.0
-    a_metal: 0.0
+    a_peptide: 0.0 
+    a_small_molecule: 0.0 #! should be 0        
+    a_metal: 0.0 #! should be 0
+    a_loi: 0.0
   betas:
-    beta_chain: 0.0
+    beta_chain: 1.0
     beta_interface: 1.0
 
 train_filters:
-  chain_filter_protein:
-    - "num_polymer_pn_units < 4" #! DEBUG, to exclude big examples
-    # - "deposition_date <= '2021-09-30'"
-    - "resolution < 9.0"
-    - "16 < q_pn_unit_sequence_length < 512" #! DEBUG      
-  chain_filter_protein_ligand:
+  cif_filter:    
+    - "deposition_date <= '2022-12-16'"
+    - "resolution < 9.0" 
+    - "clash_severity != 'severe'"
+    - "~method.str.contains('NMR')"
+    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
     - "num_polymer_pn_units < 4"
-    - "resolution < 3.5"
-    - "not (q_pn_unit_is_nuc_ligand and q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster <= 3)"
-    - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
-  interface:
-    - "(n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_nuc == 1) or (n_prot == 1 and n_metal == 1)"
+  chain_filter:    
+    - "q_pn_unit_is_protein"
+    - "q_pn_unit_sequence_length < 384"
+    # - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
+    # - "(~q_pn_unit_is_polymer and ~q_pn_unit_is_metal and q_pn_unit_num_resolved_atoms >= 5)"
+  interface: null
+    
 
 val_filters:
-  chain_filter_protein:
-    - "num_polymer_pn_units < 4" #! DEBUG, to exclude big examples
-    # - "deposition_date <= '2021-09-30'"
-    - "resolution < 9.0"
-    - "16 < q_pn_unit_sequence_length < 512" #! DEBUG      
-  chain_filter_protein_ligand:
+  cif_filter:    
+    - "deposition_date <= '2022-12-16'"
+    - "resolution < 3.5" 
+    - "clash_severity != 'severe'"
+    - "~method.str.contains('NMR')"
+    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
     - "num_polymer_pn_units < 4"
-    - "resolution < 3.5"
-    - "not (q_pn_unit_is_nuc_ligand and q_pn_unit_num_resolved_residues_in_nucleic_acid_chain_cluster <= 3)"
-    - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
-  interface:
-    - "(n_prot == 1 and n_small_molecule == 1) or (n_prot == 1 and n_nuc == 1) or (n_prot == 1 and n_metal == 1)"
+  chain_filter:
+    - "q_pn_unit_is_protein"
+    - "q_pn_unit_sequence_length < 384"
+  interface: null
+    
 
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:

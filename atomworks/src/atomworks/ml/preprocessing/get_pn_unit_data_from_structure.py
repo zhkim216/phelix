@@ -327,7 +327,7 @@ class DataPreprocessor:
             if query_pn_unit_type.is_non_polymer():
                 bonded_polymer_pn_units = dp.get_bonded_polymer_pn_units(query_pn_unit_iid, filtered_atom_array)
 
-                # ... check is SOI
+                # ... check is LOI
                 residue_names = np.unique(query_pn_unit_atom_array.res_name)
                 is_loi = len(loi_ligand_set.intersection(residue_names)) > 0
 

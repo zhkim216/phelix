@@ -1,7 +1,7 @@
 task: ${model.task}
-pdb_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_re
-parquet_path: ${data.pdb_path}/metadata_nuc_clustered_seq_clustered_03.parquet
-validation_ids_file: /scratch/users/zhkim216/datasets/splits/lmpnn_val_list.csv
+pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v2
+parquet_path: ${data.pdb_path}/metadata_seq_clustered_04.parquet
+validation_ids_file: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/small_molecule_val_monomer_512.txt
 debug: ${train.debug}
 debug_num_ids: 10000 #! For debugging
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
