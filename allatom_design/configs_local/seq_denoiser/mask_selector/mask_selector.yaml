@@ -2,14 +2,15 @@ name: mask_selector
 
 # Masking schedules
 restype_masking_schedule: "uniform_t"
+atom_masking_schedule: "uniform_t" 
 
-# Configs
-restype_masking_cfg:
-  uniform_t:
-    t_min: 0.0
-    t_max: 1.0
+# Configs (shared between restype and atom masking)
+masking_cfg:
   constant_t:
     t: 0.0
+  uniform_t:
+    t_min: 0.0
+    t_max: 1.0  
   uniform_squared_t:
     t_min: 0.0
     t_max: 1.0
@@ -25,34 +26,9 @@ restype_masking_cfg:
   uniform_cbrt_t:
     t_min: 0.0
     t_max: 1.0
+  
+scn_context_ratio: 0.02
 
-#! (JH) below are added. masking schedules for sidechains
-# Atom masking schedules
-atom_masking_schedule: null #! (JH) Now only None & uniform_t are implemented in the code
-
-# Atom masking configs
-atom_masking_cfg:
-  uniform_t:
-    t_min: 0.0
-    t_max: 1.0
-  constant_t:
-    t: 0.0
-  uniform_squared_t:
-    t_min: 0.0
-    t_max: 1.0
-  uniform_cubed_t:
-    t_min: 0.0
-    t_max: 1.0
-  uniform_cosine_t:
-    t_min: 0.0
-    t_max: 1.0
-  uniform_sqrt_t:
-    t_min: 0.0
-    t_max: 1.0
-  uniform_cbrt_t:
-    t_min: 0.0
-    t_max: 1.0
-
-# Ligand pocket distance cutoff
-ligand_pocket_dist_cutoff: ${loss.ligand_pocket_dist_cutoff} #! (JH) changed
-small_molecule_only: true #! (JH) changed
+# Reference to shared config (can be overridden separately if needed)
+restype_masking_cfg: ${.masking_cfg}
+atom_masking_cfg: ${.masking_cfg}

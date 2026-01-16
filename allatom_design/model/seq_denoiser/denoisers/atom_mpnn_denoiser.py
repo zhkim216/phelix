@@ -66,10 +66,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             "seq_cond_mask": batch["seq_cond_mask"],
             "atom_cond_mask": batch["atom_cond_mask"],
             "token_exists_mask": batch["token_exists_mask"],
-        }
-        
-        if self.task == "lc_seq_des": 
-            aux_preds["pocket_token_mask"] = batch["pocket_token_mask"]        
+        }        
 
         return seq_logits, aux_preds
 
@@ -88,7 +85,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         # Create atom-level mask which is 1 if the atom is part of an unmasked residue type, or 0 otherwise
         batch["atomwise_seq_cond_mask"] = batch["seq_cond_mask"].gather(dim=-1, index=batch["atom_to_token_map"])  # [b, n_atoms]
         #! seq_cond_mask already contains only non-pad, resolved entries        
-        batch["atomwise_seq_cond_mask"] = batch["atomwise_seq_cond_mask"] * batch["atom_pad_mask"]  # re-mask out pad atoms, since atom_to_token_map is 0 for pad atoms
+        batch["atomwise_seq_cond_mask"] = batch["atomwise_seq_cond_mask"] * batch["atom_pad_mask"] * batch["atom_resolved_mask"] # re-mask out pad atoms, since atom_to_token_map is 0 for pad atoms
 
         # Build mask for which tokens to include in the token-level grpah
         ## ensure center atom is present, since graph nodes are the center atom
@@ -198,12 +195,11 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         edge_idx_coloring = None
         if regularization == "LCP":
             C_complexity = batch["asym_id"] - torch.min(batch["asym_id"]) + 1  # renumber asym_id to have min value of 1
-            C_complexity = C_complexity * batch["chain_is_protein"] * batch["token_exists_mask"] * batch["token_pad_mask"]
+            C_complexity = C_complexity * batch["token_is_protein_chain"] * (~batch["is_atomized"]) * batch["token_exists_mask"] * batch["token_pad_mask"]
             #! fixed, 251110
             # mask out i) non-protein chains, ii) pad tokens, iii) tokens that don't exist in the graph            
-            # complexity is only calculated for the residues where C_complexity > 0
-            lcp_expand_fix = sampling_inputs.get("potts_sampling_cfg", {}).get("lcp_expand_edge_idx_fix", True)
-            penalty_func = lambda _S, _flag=lcp_expand_fix: complexity.complexity_lcp(_S, C_complexity, expand_edge_idx_fix=_flag)
+            # complexity is only calculated for the residues where C_complexity > 0        
+            penalty_func = lambda _S: complexity.complexity_lcp(_S, C_complexity)
 
         S = []  # keep track of sequences for each sample
         aux["U"] = []  # keep track of energies for each sample

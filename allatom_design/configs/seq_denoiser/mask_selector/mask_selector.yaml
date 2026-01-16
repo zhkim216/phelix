@@ -30,5 +30,5 @@ masking_cfg:
 scn_context_ratio: 0.02
 
 # Reference to shared config (can be overridden separately if needed)
-restype_masking_cfg: ${masking_cfg}
-atom_masking_cfg: ${masking_cfg}
+restype_masking_cfg: ${.masking_cfg}
+atom_masking_cfg: ${.masking_cfg}

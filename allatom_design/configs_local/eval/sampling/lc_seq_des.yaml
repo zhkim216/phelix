@@ -10,7 +10,7 @@ wandb:
   group: null
 
 # Basic settings
-debug: true
+debug: false
 num_debug_samples: 1
 seed: 0
 num_workers: 0 # for dataloading
