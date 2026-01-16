@@ -249,7 +249,6 @@ class GenericDFParser(MetadataRowParser):
         base_path: str = "",
         extension: str = "",
         attrs: dict | None = None,
-        keep_pn_unit_iids_in_extra_info: bool = False, #! (JH) changed 251031
     ):
         # Columns to extract
         self.example_id_colname = example_id_colname
@@ -271,7 +270,6 @@ class GenericDFParser(MetadataRowParser):
         if extension and "extension" not in self.attrs:
             self.attrs["extension"] = extension
 
-        self.keep_pn_unit_iids_in_extra_info = keep_pn_unit_iids_in_extra_info
 
     def _parse(self, row: pd.Series) -> dict[str, Any]:
         # Compose the metadata (extra_info) dictionary:
@@ -297,10 +295,8 @@ class GenericDFParser(MetadataRowParser):
 
         # (Exclude columns that we've already used from the extra_info dictionary)
 
-        #! (JH) changed 251031
-        excluded_pn_cols = [] if self.keep_pn_unit_iids_in_extra_info else self.pn_unit_iid_colnames
         exclude_cols = set(
-            excluded_pn_cols
+            self.pn_unit_iid_colnames
             + [self.example_id_colname, self.path_colname]
             + ([self.assembly_id_colname] if self.assembly_id_colname else [])
             + ["base_path", "extension"]
