@@ -209,12 +209,10 @@ class SDDataset(MolecularDataset):
     def _parse_dfs(self) -> pd.DataFrame:
         """
         Parses the chain and interface dataframes into a common format and concatenates them.
-        """
+        """                
         
-        keep_iids = getattr(self.cfg, "keep_pn_unit_iids_in_extra_info", False)
-        
-        chain_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid"], keep_pn_unit_iids_in_extra_info=keep_iids)
-        interface_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid_1", "q_pn_unit_iid_2"], keep_pn_unit_iids_in_extra_info=keep_iids)
+        chain_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid"])
+        interface_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid_1", "q_pn_unit_iid_2"])
 
         logger.info(f"Final {self.phase} dataset contains {len(self.chain_df)} chains and {len(self.interface_df)} interfaces")
         
