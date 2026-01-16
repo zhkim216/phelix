@@ -22,7 +22,7 @@ class MaskSelector:
         self.restype_masking_cfg = OmegaConf.to_container(cfg.restype_masking_cfg[self.restype_masking_schedule], resolve=True)  # to dict to avoid dataloader issues?
         self.atom_masking_schedule = cfg.atom_masking_schedule
         self.atom_masking_cfg = OmegaConf.to_container(cfg.atom_masking_cfg[self.atom_masking_schedule], resolve=True)  
-        self.max_scn_context_ratio = cfg.max_scn_context_ratio
+        self.scn_context_ratio = cfg.scn_context_ratio
         
 
     def sample_seq_cond_mask(self,
@@ -44,9 +44,9 @@ class MaskSelector:
         seq_cond_mask = torch.rand(B, N, device=device) < rearrange(t, "b -> b 1")
 
         # Non-protein and non-standard restypes are always kept
-        standard_prot_mask = batch["token_is_protein_chain"] * (~batch["is_atomized"])
+        standard_aa_prot_token_mask = batch["token_is_protein_chain"] * (~batch["is_atomized"]) * batch["token_resolved_mask"] * batch["token_pad_mask"]
         
-        seq_cond_mask = torch.where(~standard_prot_mask.bool(),
+        seq_cond_mask = torch.where(~standard_aa_prot_token_mask.bool(),
                                     torch.ones_like(seq_cond_mask),
                                     seq_cond_mask)
 
@@ -72,6 +72,7 @@ class MaskSelector:
         
         # Following LigandMPNN, sample sidechains only scn_context_ratio
         standard_aa_prot_token_mask = batch["token_is_protein_chain"] * (~batch["is_atomized"]) * batch["token_resolved_mask"] * batch["token_pad_mask"]
+        standard_aa_prot_atom_mask = batch["atom_is_protein_chain"] * (1 - batch["atom_is_atomized"]) * batch["atom_resolved_mask"] * batch["atom_pad_mask"]
         target_count = (standard_aa_prot_token_mask.sum(dim=-1) * self.scn_context_ratio).long()
         
         random_priority = torch.where(
@@ -79,18 +80,25 @@ class MaskSelector:
             torch.rand_like(standard_aa_prot_token_mask.float()),
             torch.full_like(standard_aa_prot_token_mask.float(), fill_value=-float("inf"))
         )
-        rank = random_priority.argsort(dim=-1, descending=True).argsort(dim=-1)
-        tok_keep_scn_mask = standard_aa_prot_token_mask & (rank < target_count.unsqueeze(-1))        
+        rank = random_priority.argsort(dim=-1, descending=True).argsort(dim=-1)        
+        tok_keep_scn_mask = standard_aa_prot_token_mask * (rank < target_count.unsqueeze(-1)).float()                              
         atomwise_tok_keep_scn_mask = tok_keep_scn_mask.gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
         
-        # Keep all atoms in non-protein chains or atoms in non-standard residues or covalent modifications in protein chains
-        standard_aa_prot_atom_mask = standard_aa_prot_token_mask.gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
-        atom_cond_mask = torch.where(standard_aa_prot_atom_mask.bool(),
-                                     atomwise_tok_keep_scn_mask,
-                                     atom_cond_mask
-                                     )
+        standard_aa_prot_bb_atom_mask = standard_aa_prot_atom_mask * batch["prot_bb_atom_mask"]
+        standard_aa_prot_scn_atom_mask = standard_aa_prot_atom_mask * batch["prot_scn_atom_mask"]
         
-        atom_cond_mask = atom_cond_mask * batch["atom_pad_mask"]
+        # Select sidechain atoms or backbone atoms from the standard amino acids in protein chains
+        prot_atom_mask = torch.where(atomwise_tok_keep_scn_mask.bool(),
+                                     standard_aa_prot_scn_atom_mask,
+                                     standard_aa_prot_bb_atom_mask)
+        prot_atom_mask = prot_atom_mask * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
+                
+        # Keep all atoms in non-protein chains or atoms in non-standard residues or covalent modifications in protein chains
+        atom_cond_mask = torch.where(standard_aa_prot_atom_mask.bool(),
+                                     prot_atom_mask,
+                                     atom_cond_mask)
+                    
+        atom_cond_mask = atom_cond_mask * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
         
         return atom_cond_mask    
             

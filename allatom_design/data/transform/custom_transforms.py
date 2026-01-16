@@ -52,22 +52,26 @@ FEAT_TO_TOKEN_DIM = {
     "is_protein": [0],
     "is_rna": [0],
     "is_dna": [0],
+    "is_nuc": [0],
     "is_ligand": [0],
     "is_atomized": [0],
-    "token_bonds": [0, 1],
-    "token_to_center_atom": [0],
-    "token_pad_mask": [0],
     "token_resolved_mask": [0],
+    "token_pad_mask": [0],
+    "token_chain_type": [0],
+    "token_is_polymer": [0],
+    "token_is_hetero": [0],
+    "token_is_covalent_modification": [0],
+    "token_is_ligand_pocket": [0],
+    "token_is_protein_chain": [0],
+    "token_to_center_atom": [0],
     "tokenwise_atom_idxs": [0],
     "tokenwise_atom_idxs_mask": [0],
+    "ca_coords": [0],
+    "n_coords": [0],
+    "c_coords": [0],
+    "o_coords": [0],
     "pseudo_cb_coords": [0],
-    
-    # Ligand related features    
-    "token_chain_type": [0], 
-    "chain_is_protein": [0],
-    "chain_is_small_molecule": [0],   
-    "chain_is_metal": [0],
-    "chain_is_nuc": [0],
+    "token_bonds": [0, 1],            
     
     # optional features that might not be present
     "seq_cond_mask": [0],
@@ -78,22 +82,23 @@ FEAT_TO_ATOM_DIM = {
     # Maps feature name to the atom dimension
     # atom features
     "coords": [0],
-    "atom_pad_mask": [0],
-    "atom_resolved_mask": [0],
     "atom_to_token_map": [0],
-
+    "atom_resolved_mask": [0],
+    "atom_pad_mask": [0],
+    "atom_chain_type": [0],
+    "atom_is_polymer": [0],
+    "atom_is_hetero": [0],
+    "atomic_number": [0],
+    "atom_charge": [0],
+    "atom_is_covalent_modification": [0],
+    "atom_is_ligand_pocket": [0],
+    "atom_is_protein_chain": [0],    
     "prot_bb_atom_mask": [0],
     "prot_scn_atom_mask": [0],
+    "atom_is_atomized": [0],
     
     # optional features that might not be present
     "atom_cond_mask": [0],
-    
-    # Ligand related features
-    "atomic_number": [0],
-    "atom_is_metal": [0],    
-    "atom_is_small_molecule": [0],
-    "atom_is_ligand": [0],
-    
     "ref_pos": [0],
     "ref_mask": [0],
     "ref_element": [0],
@@ -128,10 +133,13 @@ class FeaturizeCoordsAndMasks(Transform):
         # Get token and atom resolved masks                
         feats["token_resolved_mask"] = torch.tensor(apply_token_wise(atom_array, atom_array.occupancy > 0, np.any)).float()
         feats["atom_resolved_mask"] = torch.tensor(atom_array.occupancy > 0).float()
-
+        
         # Make pad masks
         feats["token_pad_mask"] = torch.ones_like(feats["token_resolved_mask"])
         feats["atom_pad_mask"] = torch.ones_like(feats["atom_resolved_mask"])
+
+        # atomized
+        feats["atom_is_atomized"] = torch.tensor(atom_array.atomize).float()
 
         # Get Chain type features        
         token_starts = get_token_starts(atom_array)
@@ -162,24 +170,39 @@ class FeaturizeCoordsAndMasks(Transform):
         non_polymer_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.NON_POLYMERS]
         
         # Protein chain flags
+        atom_is_protein_chain = np.zeros(len(atom_array), dtype=bool)        
+        atom_is_nucleic_acid_chain = np.zeros(len(atom_array), dtype=bool)
+        atom_is_metal_chain = np.zeros(len(atom_array), dtype=bool)
+        atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)
         for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
             pn_unit_mask = atom_array.pn_unit_iid == pn_unit_iid
             sel_atom_array = atom_array[pn_unit_mask]
             chain_type = np.unique(sel_atom_array.chain_type)
             if chain_type in polymer_chain_type_enums:
                 if chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value:                    
-                    feats["atom_is_protein_chain"] = torch.tensor(pn_unit_mask).float()
-                    feats["token_is_protein_chain"] = torch.tensor(apply_token_wise(atom_array, pn_unit_mask, np.any)).float()
+                    atom_is_protein_chain[pn_unit_mask] = True                                    
                 elif chain_type in nucleic_acid_chain_type_enums:
-                    feats["atom_is_nucleic_acid_chain"] = torch.tensor(pn_unit_mask).float()
-                    feats["token_is_nucleic_acid_chain"] = torch.tensor(apply_token_wise(atom_array, pn_unit_mask, np.any)).float()
+                    atom_is_nucleic_acid_chain[pn_unit_mask] = True
                 elif np.isin(sel_atom_array.chain_type, non_polymer_chain_type_enums):
                     if len(sel_atom_array) == 1 & np.isin(sel_atom_array.element, METAL_ELEMENTS):
-                        feats["atom_is_metal_chain"] = torch.tensor(pn_unit_mask).float()
-                        feats["token_is_metal_chain"] = torch.tensor(apply_token_wise(atom_array, pn_unit_mask, np.any)).float()
+                        atom_is_metal_chain[pn_unit_mask] = True
                     else:
-                        feats["atom_is_small_molecule_chain"] = torch.tensor(pn_unit_mask).float()
-                        feats["token_is_small_molecule_chain"] = torch.tensor(apply_token_wise(atom_array, pn_unit_mask, np.any)).float()                                                    
+                        atom_is_small_molecule_chain[pn_unit_mask] = True
+        
+        token_is_protein_chain = atom_is_protein_chain[get_token_starts(atom_array)]
+        token_is_nucleic_acid_chain = atom_is_nucleic_acid_chain[get_token_starts(atom_array)]
+        token_is_metal_chain = atom_is_metal_chain[get_token_starts(atom_array)]
+        token_is_small_molecule_chain = atom_is_small_molecule_chain[get_token_starts(atom_array)]
+        
+        feats["atom_is_protein_chain"] = torch.tensor(atom_is_protein_chain).float()
+        feats["token_is_protein_chain"] = torch.tensor(token_is_protein_chain).float()
+        feats["atom_is_nucleic_acid_chain"] = torch.tensor(atom_is_nucleic_acid_chain).float()
+        feats["token_is_nucleic_acid_chain"] = torch.tensor(token_is_nucleic_acid_chain).float()
+        feats["atom_is_metal_chain"] = torch.tensor(atom_is_metal_chain).float()
+        feats["token_is_metal_chain"] = torch.tensor(token_is_metal_chain).float()
+        feats["atom_is_small_molecule_chain"] = torch.tensor(atom_is_small_molecule_chain).float()
+        feats["token_is_small_molecule_chain"] = torch.tensor(token_is_small_molecule_chain).float()
+        
         
         # atom to tokens map and token to center atom map
         feats["atom_to_token_map"] = feats["atom_to_token_map"].long()
@@ -204,7 +227,7 @@ class FeaturizeCoordsAndMasks(Transform):
         
         feats["tokenwise_atom_idxs"] = tokenwise_atom_idxs
         feats["tokenwise_atom_idxs_mask"] = tokenwise_atom_idxs_mask                
-        feats["pseudo_cb_coords"] = self._get_pseudo_cb_coords(data)
+        feats["ca_coords"], feats["n_coords"], feats["c_coords"], feats["o_coords"], feats["pseudo_cb_coords"] = self._get_pseudo_cb_coords(data)        
 
         # Get ligand related features
         # try:
@@ -231,8 +254,8 @@ class FeaturizeCoordsAndMasks(Transform):
         # Get pseudo CB valid mask. For standard amino acids (not hetero) in protein chains, and all n, ca, c resolved.
         standard_aa_mask = np.isin(atom_array.res_name, STANDARD_AA)
         standard_aa_prot_mask = standard_aa_mask & (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value)
-        is_ncac_resolved = ((np.isin(atom_array.atom_name, ["N", "CA", "C"])) & (atom_array.occupancy > 0))
-        has_all_backbone = apply_and_spread_token_wise(atom_array, is_ncac_resolved, lambda x: np.sum(x) == 3)
+        is_ncaco_resolved = ((np.isin(atom_array.atom_name, [PROTEIN_BACKBONE_ATOM_NAMES])) & (atom_array.occupancy > 0))
+        has_all_backbone = apply_and_spread_token_wise(atom_array, is_ncaco_resolved, lambda x: np.sum(x) == len(PROTEIN_BACKBONE_ATOM_NAMES))
         pseudo_cb_valid_mask = standard_aa_prot_mask & has_all_backbone
         
         # token ids
@@ -242,11 +265,13 @@ class FeaturizeCoordsAndMasks(Transform):
         ca_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "CA")
         n_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "N")
         c_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "C")
+        o_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "O")
         
         # ca_coords, n_coords, c_coords and token ids
         ca_coords = atom_array.coord[ca_mask]
         n_coords = atom_array.coord[n_mask]
         c_coords = atom_array.coord[c_mask]
+        o_coords = atom_array.coord[o_mask]
         pseudo_cb_token_idxs = token_idxs[ca_mask]
         
         b = ca_coords - n_coords
@@ -254,10 +279,18 @@ class FeaturizeCoordsAndMasks(Transform):
         a = np.cross(b, c, axis=-1)
         np_cb_coords = -0.58273431 * a + 0.56802827 * b - 0.54067466 * c + ca_coords
         
+        torch_ca_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+        torch_ca_coords[pseudo_cb_token_idxs] = torch.from_numpy(ca_coords).float()
+        torch_n_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+        torch_n_coords[pseudo_cb_token_idxs] = torch.from_numpy(n_coords).float()
+        torch_c_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+        torch_c_coords[pseudo_cb_token_idxs] = torch.from_numpy(c_coords).float()
+        torch_o_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+        torch_o_coords[pseudo_cb_token_idxs] = torch.from_numpy(o_coords).float()
         torch_cb_coords = torch.zeros((token_len, 3), dtype=torch.float32)
         torch_cb_coords[pseudo_cb_token_idxs] = torch.from_numpy(np_cb_coords).float()        
         
-        return torch_cb_coords                    
+        return torch_ca_coords, torch_n_coords, torch_c_coords, torch_o_coords, torch_cb_coords                    
 
 class PadSDFeats(Transform):
     """Pad the token and atom features to the maximum number of tokens and atoms."""
@@ -595,7 +628,7 @@ class AddChainTypeFeaturesForInference(Transform):
 
 def annotate_ligand_pockets(
     atom_array: AtomArray = None,
-    pocket_distance: float = 6.0,
+    pocket_distance: float = 5.0,
     n_min_ligand_atoms: int = 5,
     annotation_name: str = "is_ligand_pocket",
     receptor_chain_iids: list[str] = None,

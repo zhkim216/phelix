@@ -80,8 +80,8 @@ def sd_featurizer(
     # Featurization that must be done before cropping
     featurization_transforms_pre_crop = [    
         MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={
-            aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_FRAME_ATOM_NAMES,
-            aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_FRAME_ATOM_NAMES,
+            aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_BACKBONE_ATOM_NAMES, #! fixed
+            aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_BACKBONE_ATOM_NAMES, #! fixed
         }),
         FilterToQueryPNUnits(),
         RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
@@ -130,8 +130,8 @@ def sd_featurizer(
         AnnotateLigandPockets(pocket_distance=pocket_distance), 
         ConvertToTorch(keys=["encoded", "feats"]),
         # Handle missing atoms and tokens
-        PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
-        PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"),        
+        # PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
+        # PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"),        
         # Add features from the atom_array
         FeaturizeCoordsAndMasks(),
         CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
