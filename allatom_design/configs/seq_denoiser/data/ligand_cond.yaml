@@ -27,11 +27,11 @@ sampling_weights:
   alphas_interface:
     a_prot: 1.0
     a_small_molecule: 1.0
-    a_nuc: 1.0
-    a_metal: 1.0
+    a_nuc: 0.0
+    a_metal: 0.0
   betas:
     beta_chain: 1.0
-    beta_interface: 3.0
+    beta_interface: 1.0
 
 train_filters:
   chain_filter_protein:
