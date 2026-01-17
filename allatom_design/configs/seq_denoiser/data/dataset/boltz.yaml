@@ -1,0 +1,30 @@
+# Boltz dataset configuration
+# Override validation_ids_file and filters for Boltz dataset
+
+validation_ids_file: /scratch/users/rshuai/datasets/atomworks/splits/validation_ids.txt
+
+train_filters:
+  cif_filter:    
+    - "release_date <= '2021-09-30'"
+    - "resolution < 9.0" 
+    - "clash_severity != 'severe'"
+    - "~method.str.contains('NMR')"
+    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
+    - "num_polymer_pn_units < 50"
+  chain_filter:    
+    - "q_pn_unit_is_protein"
+    - "20 < q_pn_unit_sequence_length < 2048"
+  interface: null    
+
+val_filters:
+  cif_filter:    
+    - "num_polymer_pn_units < 50"
+    - "'2021-09-30' < release_date <= '2023-01-13'" 
+    - "resolution < 4.5" 
+    - "clash_severity != 'severe'"
+    - "~method.str.contains('NMR')"
+    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"    
+  chain_filter:
+    - "q_pn_unit_is_protein"
+    - "20 < q_pn_unit_sequence_length < 2048"
+  interface: null
