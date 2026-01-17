@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=lp_exp1
+#SBATCH --job-name=lp_exp2
 #SBATCH -p possu
 #SBATCH --array=0-5
 #SBATCH --gres=gpu:1
-#SBATCH --mem=64G
+#SBATCH --mem=96G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-0:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/job_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/job_%A_%a.err
 
 # Define directories
-BASE_DIR=/home/users/zhkim216/code/allatom-design
 HYDRA_DIR=/scratch/users/zhkim216/hydra_outputs
 OUT_DIR=/scratch/users/zhkim216/out_dir
-
 mkdir -p /scratch/users/zhkim216/job_output "${HYDRA_DIR}" "${OUT_DIR}"
 
+# Torchinductor and triton cache directories - to avoid directory conflicts from torch.compile
+JOB_TAG="${SLURM_JOB_ID:-noid}_${SLURM_ARRAY_TASK_ID:-0}"
+export TORCHINDUCTOR_CACHE_DIR="/scratch/users/zhkim216/cache/inductor_cache_${JOB_TAG}"
+export TRITON_CACHE_DIR="/scratch/users/zhkim216/cache/triton_cache_${JOB_TAG}"
+
+# Base directory
+BASE_DIR=/home/users/zhkim216/code/allatom-design
 cd "${BASE_DIR}"
 
 # Wandb settings / experiment name
@@ -31,16 +36,24 @@ RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 DENOISER_TYPE="lc_atom_mpnn"
 
 CONFIGS=(
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=false"
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=true"
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.use_sidechain_context=true denoiser.mpnn.use_ligand_context=true"
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=false"
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=true"
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.use_sidechain_context=true denoiser.mpnn.use_ligand_context=true"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.token_features.use_sidechain_context=false denoiser.mpnn.token_features.use_ligand_context=false"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.token_features.use_sidechain_context=false denoiser.mpnn.token_features.use_ligand_context=true"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.token_features.use_sidechain_context=true denoiser.mpnn.token_features.use_ligand_context=true"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.token_features.use_sidechain_context=false denoiser.mpnn.token_features.use_ligand_context=false"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.token_features.use_sidechain_context=false denoiser.mpnn.token_features.use_ligand_context=true"
+  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.token_features.use_sidechain_context=true denoiser.mpnn.token_features.use_ligand_context=true"
 )
+
+RESUME_CHECKPOINTS=("/scratch/users/zhkim216/out_dir/ligand_seq_des/exp2_cfg0/checkpoints/sd-step37500-epoch23.ckpt"
+                    "/scratch/users/zhkim216/out_dir/ligand_seq_des/exp2_cfg1/checkpoints/sd-step37500-epoch23.ckpt"
+                    "/scratch/users/zhkim216/out_dir/ligand_seq_des/exp2_cfg2/checkpoints/sd-step42500-epoch27.ckpt"
+                    "/scratch/users/zhkim216/out_dir/ligand_seq_des/exp2_cfg3/checkpoints/sd-step22500-epoch14.ckpt"
+                    "/scratch/users/zhkim216/out_dir/ligand_seq_des/exp2_cfg4/checkpoints/sd-step37500-epoch23.ckpt"
+                    "/scratch/users/zhkim216/out_dir/ligand_seq_des/exp2_cfg5/checkpoints/sd-step45000-epoch28.ckpt")
 
 IDX=$((SLURM_ARRAY_TASK_ID))
 OVERRIDES="${CONFIGS[$IDX]}"
+RESUME_CKPT="${RESUME_CHECKPOINTS[$IDX]}"
 EXP_NAME="${EXP_NAME_BASE}_cfg${SLURM_ARRAY_TASK_ID}"
 
 # Run model
@@ -48,6 +61,8 @@ HYDRA_FULL_ERROR=1 WANDB__SERVICE_WAIT=300 \
 python3 allatom_design/train_seq_denoiser.py \
     --config-dir allatom_design/configs/seq_denoiser \
     --config-name seq_denoiser.yaml \
+    resume.ckpt_path="${RESUME_CKPT}" \
+    resume.use_current_cfg=true \
     wandb.wandb_id="${WANDB_ID}" \
     wandb.project="${PROJECT}" \
     wandb.group="${GROUP}" \
