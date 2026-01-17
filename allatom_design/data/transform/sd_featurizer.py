@@ -54,6 +54,7 @@ from allatom_design.data.transform.custom_transforms import (
     AddChainTypeFeaturesForTrain,
     AddChainTypeFeaturesForInference,
     AnnotateLigandPockets,
+    GetPseudoCBCoords,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ def sd_featurizer(
     apply_random_augmentation: bool = True,
     translation_scale: float = 1.0,
     pocket_distance: float = 8.0,
+    update_atom_array: bool = True,
     is_inference: bool = False,
 ) -> Transform:
     """
@@ -83,7 +85,7 @@ def sd_featurizer(
             aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_BACKBONE_ATOM_NAMES, #! fixed
             aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_BACKBONE_ATOM_NAMES, #! fixed
         }),
-        FilterToQueryPNUnits(),
+        FilterToQueryPNUnits(),        
         RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
         RemoveUnsupportedChainTypes(),
         ErrIfAllUnresolved(),
@@ -131,11 +133,14 @@ def sd_featurizer(
         ConvertToTorch(keys=["encoded", "feats"]),
         # Handle missing atoms and tokens
         # PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
-        # PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"),        
+        # PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"), 
         # Add features from the atom_array
         FeaturizeCoordsAndMasks(),
         CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
-                                translation_scale=translation_scale),
+                                translation_scale=translation_scale,
+                                update_atom_array=update_atom_array),
+        GetPseudoCBCoords(),
+        
     ]
     
     transforms = [

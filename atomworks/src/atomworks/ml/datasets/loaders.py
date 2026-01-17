@@ -163,7 +163,6 @@ def create_loader_with_query_pn_units(
     sharding_pattern: str | None = None,
     attrs: dict | None = None,
     parser_args: dict | None = None,
-    keep_pn_unit_iids_in_extra_info: bool = False, #! (JH) changed 251031
 ) -> Callable[[pd.Series], dict[str, Any]]:
     """Factory function that creates a generic loader for pipelines with query pn_units (chains).
 

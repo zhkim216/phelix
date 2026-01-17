@@ -349,7 +349,7 @@ def build_af3_transform_pipeline(
         # ... add placeholder coordinates for noising
         CopyAnnotation(annotation_to_copy="coord", new_annotation="coord_to_be_noised"),
         # ... handling of unresolved residues (note that these Transforms create the "atom_array_to_noise" dictionary, if not already present)
-        PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord_to_be_noised"),
+        (annotation_to_update="coord_to_be_noised"),
         PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(
             annotation_to_update="coord_to_be_noised",
             annotation_to_copy="coord_to_be_noised",
