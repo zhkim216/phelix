@@ -172,7 +172,7 @@ class AtomMPNN(nn.Module):
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
         for layer in self.decoder_layers:
-            h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = prot_standard_aa_mask, E_idx = E_idx, mask_attend = prot_standard_aa_mask) #! (JH) changed, token_mask_2d is newly added
+            h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = prot_standard_aa_mask, E_idx = E_idx, mask_attend = prot_standard_aa_mask_2d) #! (JH) changed, token_mask_2d is newly added
 
         # Potts model
         if self.use_potts:
@@ -699,7 +699,8 @@ class DecLayer(nn.Module):
         h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_E.size(-2),-1)
         h_EV = torch.cat([h_V_expand, h_E], -1)
         h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
-
+        
+        import ipdb; ipdb.set_trace()
         if mask_attend is not None:
             h_message = mask_attend.unsqueeze(-1) * h_message
 
