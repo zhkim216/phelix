@@ -1,7 +1,10 @@
+defaults:
+  - dataset: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
+
 task: ${model.task}
 pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v2
 parquet_path: ${data.pdb_path}/metadata_seq_clustered_04.parquet
-validation_ids_file: /scratch/users/rshuai/datasets/atomworks/splits/validation_ids.txt
+# validation_ids_file, train_filters, val_filters are set in dataset/*.yaml
 debug: ${train.debug}
 debug_num_ids: 1000 #! For debugging
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
@@ -27,34 +30,6 @@ sampling_weights:
   betas:
     beta_chain: 1.0
     beta_interface: 0.0
-
-train_filters:
-  cif_filter:    
-    - "deposition_date <= '2021-09-30'"
-    - "resolution < 9.0" 
-    - "clash_severity != 'severe'"
-    - "~method.str.contains('NMR')"
-    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
-    - "num_polymer_pn_units < 50"
-  chain_filter:    
-    - "q_pn_unit_is_protein"
-    - "20 < q_pn_unit_sequence_length < 2048"
-    # - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
-    # - "(~q_pn_unit_is_polymer and ~q_pn_unit_is_metal and q_pn_unit_num_resolved_atoms >= 5)"
-  interface: null    
-
-val_filters:
-  cif_filter:    
-    - "num_polymer_pn_units < 50"
-    - "'2021-09-30' < release_date <= '2023-01-13'" 
-    - "resolution < 4.5" 
-    - "clash_severity != 'severe'"
-    - "~method.str.contains('NMR')"
-    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"    
-  chain_filter:
-    - "q_pn_unit_is_protein"
-    - "20 < q_pn_unit_sequence_length < 2048"
-  interface: null
     
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:
