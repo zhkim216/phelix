@@ -5,7 +5,7 @@ wandb:
   group: null # Wandb group name
 
 # Outputs
-out_dir: "/scratch/users/zhkim216/out_dir/train_seq_denoiser"  # Output path for trained models
+out_dir: "/scratch/users/zhkim216/out_dir/debug_train_seq_denoiser"  # Output path for trained models
 exp_name: null  # Wandb exp name
 
 # Run settings
@@ -21,9 +21,9 @@ finetuning:
 train:
   seed: 0
   batch_size: 8
-  debug: false
+  debug: true
   compile:
-    compile_model: true  # Compile the model before running, speeds up training a lot
+    compile_model: false  # Compile the model before running, speeds up training a lot
     compile_backend: inductor #! default: inductor
     mode: "default" #! default: default
     fullgraph: false #! default: false
@@ -39,13 +39,13 @@ trainer:
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
   check_val_every_n_epoch: 1  # How often to run validation
-  num_sanity_val_steps: 0 # Skip sanity check validation batches before training #! default is 2
+  num_sanity_val_steps: 1 # Skip sanity check validation batches before training #! default is 2
 
 # Resuming training options
 resume:
   ckpt_path: null  # Path to checkpoint to resume from, null to disable
-  # use_current_cfg: false  # whether to override the config in the checkpoint with the current config
-  # overrides: {}  # add any specific overrides to apply to the config
+  use_current_cfg: true  # If false, load config from checkpoint directory; if true, use current config
+  overrides: {}  # Specific overrides to apply (e.g., {train.batch_size: 8, optim.noam.factor: 1})
 
 # Model options
 defaults:
@@ -53,15 +53,6 @@ defaults:
   - denoiser: lc_atom_mpnn
   - mask_selector: mask_selector
   - data: ligand_cond #! (JH) changed 250926
-
-data: 
-  data_loader_cfg:
-    prefetch_factor: 1
-    prefetch_buffer_size: 1
-    train_pin_memory: true
-    train_persistent_workers: true
-    val_pin_memory: true
-    val_persistent_workers: true
 
 model:
   task: "lc_seq_des"  # "seq_des"
