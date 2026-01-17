@@ -34,9 +34,9 @@ class SDLoss(nn.Module):
 
         # Define losses based on task
         if self.task == "seq_des":
-            self.loss_keys = {"seq_loss", "potts_composite_loss", "potts_composite_loss_msa"}
+            self.loss_keys = {"seq_loss", "potts_composite_loss"}
         elif self.task == "lc_seq_des":
-            self.loss_keys = {"seq_loss", "potts_composite_loss", "pocket_seq_loss", "pocket_seq_acc"}
+            self.loss_keys = {"seq_loss", "potts_composite_loss"}
         else:
             raise ValueError(f"Unrecognized task: {self.task}")
 
@@ -51,38 +51,51 @@ class SDLoss(nn.Module):
         if self.use_seq_pred and eval_seq:
             # compute sequence loss from sequence design module
             target_restype = batch["restype"].argmax(dim=-1)
-            seq_loss_mask = outputs["token_exists_mask"] * (1 - outputs["seq_cond_mask"])  # compute loss only on masked tokens
+            seq_loss_mask = outputs["protein_residue_node_mask"] * (1 - outputs["seq_cond_mask"])  # compute loss only on masked tokens
             seq_loss_mask = seq_loss_mask * (target_restype != const.AF3_ENCODING.token_to_idx["UNK"])  # mask out UNK tokens from loss
 
             # DEBUG: ensure that we're only computing over protein tokens
-            if (~batch["is_protein"][seq_loss_mask.bool()]).any():
-                logger.warning("WARNING: seq_loss is being computed over non-protein tokens")
+            if (~(outputs["protein_residue_node_mask"].bool()[seq_loss_mask.bool()])).any():
+                logger.warning("WARNING: seq_loss is being computed over non-standard amino acid protein tokens")
 
             aux["seq_loss"] = masked_cross_entropy(outputs["seq_logits"], target_restype, seq_loss_mask,
                                                    seq_loss_cfg=self.cfg.seq_loss)
+            
+            if torch.isnan(outputs["seq_logits"]).any():
+                logger.warning(f"seq_logits contains NaN!")
+            
             aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], target_restype, seq_loss_mask).mean().detach().clone()
             
             if self.task == "lc_seq_des": #! (JH) changed                                                                
-                pocket_seq_loss_mask = seq_loss_mask * outputs["pocket_token_mask"]            
+                ligand_pocket_seq_loss_mask = seq_loss_mask * batch["token_is_ligand_pocket"]            
                                             
-                # Select only samples that have non-protein holding pocket residues and tokens where the loss will be computed
-                has_close_ligands = pocket_seq_loss_mask.sum(dim=-1) > 0     
+                # Select only samples that have pocket residues holding ligands
+                has_close_ligands = ligand_pocket_seq_loss_mask.sum(dim=-1) > 0     
                                                             
                 if has_close_ligands.any():
-                    pocket_seq_loss = masked_cross_entropy(outputs["seq_logits"], target_restype, pocket_seq_loss_mask, seq_loss_cfg=self.cfg.seq_loss)
-                    pocket_seq_loss = pocket_seq_loss[has_close_ligands]
-                    aux_monitor["pocket_seq_loss"] = pocket_seq_loss.mean().detach().clone()
+                    ligand_pocket_seq_loss = masked_cross_entropy(outputs["seq_logits"], target_restype, ligand_pocket_seq_loss_mask, seq_loss_cfg=self.cfg.seq_loss)
+                    ligand_pocket_seq_loss = ligand_pocket_seq_loss[has_close_ligands]
+                    aux_monitor["ligand_pocket_seq_loss"] = ligand_pocket_seq_loss.mean().detach().clone()
                          
-                    pocket_seq_acc = masked_seq_accuracy(outputs["seq_logits"], target_restype, pocket_seq_loss_mask)
-                    pocket_seq_acc = pocket_seq_acc[has_close_ligands]                
-                    aux_monitor["pocket_seq_acc"] = pocket_seq_acc.mean().detach().clone()                
-                                        
+                    ligand_pocket_seq_acc = masked_seq_accuracy(outputs["seq_logits"], target_restype, ligand_pocket_seq_loss_mask)
+                    ligand_pocket_seq_acc = ligand_pocket_seq_acc[has_close_ligands]                
+                    aux_monitor["ligand_pocket_seq_acc"] = ligand_pocket_seq_acc.mean().detach().clone()                
+
+            else: 
+                ligand_pocket_seq_loss_mask = None
 
             if outputs.get("potts_decoder_aux") is not None:
                 potts_decoder_aux = outputs["potts_decoder_aux"]
-                aux["potts_composite_loss"] = potts_composite_loss(target_restype, potts_decoder_aux,
-                                                                   self.cfg.potts.label_smoothing,
-                                                                   self.cfg.potts.per_token_avg)
+                potts_loss, ligand_pocket_potts_loss = potts_composite_loss(S = target_restype, 
+                                                                   potts_decoder_aux = potts_decoder_aux,
+                                                                   label_smoothing = self.cfg.potts.label_smoothing,
+                                                                   per_token_avg = self.cfg.potts.per_token_avg,
+                                                                   compute_ligand_pocket_loss = self.task == "lc_seq_des",
+                                                                   ligand_pocket_seq_loss_mask = ligand_pocket_seq_loss_mask,
+                                                                   )
+                aux["potts_composite_loss"] = potts_loss
+                if ligand_pocket_potts_loss is not None:
+                    aux_monitor["ligand_pocket_potts_composite_loss"] = ligand_pocket_potts_loss.mean().detach().clone()
 
         # Aggregate losses
         total_loss = 0.0        
@@ -163,10 +176,12 @@ def masked_seq_accuracy(logits: TensorType["b n k", float],
     return (correct * mask).sum(dim=-1) / mask.sum(dim=-1).clamp(min=1e-8)
 
 
-def potts_composite_loss(S: TensorType["b n", int],
-                         potts_decoder_aux: dict[str, TensorType["b ...", float]],
-                         label_smoothing: float,
-                         per_token_avg: bool,
+def potts_composite_loss(S: TensorType["b n", int] = None,
+                         potts_decoder_aux: dict[str, TensorType["b ...", float]] = None,
+                         label_smoothing: float = 0.1,
+                         per_token_avg: bool = False,
+                         compute_ligand_pocket_loss: bool = False,
+                         ligand_pocket_seq_loss_mask: TensorType["b n", float] = None,
                          ) -> TensorType["b", float]:
 
     # Log composite likelihood
@@ -196,5 +211,16 @@ def potts_composite_loss(S: TensorType["b n", int],
         # divide by constant N to get loss on roughly the same scale as per_token_avg
         N = mask.shape[1]
         loss = -(logp_i * mask).sum(dim=-1) / N
+    
+    if not compute_ligand_pocket_loss:        
+        return loss, None        
+    else:
+        ligand_pocket_loss = (-logp_i * ligand_pocket_seq_loss_mask).sum(dim=-1) / ligand_pocket_seq_loss_mask.sum(dim=-1).clamp(min=1e-8)
+        has_close_ligands = ligand_pocket_seq_loss_mask.sum(dim=-1) > 0         
+        if has_close_ligands.any():
+            ligand_pocket_loss = ligand_pocket_loss[has_close_ligands]
+        else:
+            ligand_pocket_loss = torch.tensor(0.0, device=loss.device)
+        return loss, ligand_pocket_loss
 
-    return loss
+    

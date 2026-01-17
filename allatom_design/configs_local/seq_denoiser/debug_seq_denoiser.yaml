@@ -21,7 +21,7 @@ finetuning:
 
 train:
   seed: 0
-  batch_size: 4
+  batch_size: 1
   debug: true
   compile:
     compile_model: false  # Compile the model before running, speeds up training a lot
@@ -54,15 +54,6 @@ defaults:
   - denoiser: debug_lc_atom_mpnn
   - mask_selector: mask_selector
   - data: debug_ligand_cond
-
-data: 
-  data_loader_cfg:
-    prefetch_factor: 1
-    prefetch_buffer_size: 1
-    train_pin_memory: true
-    train_persistent_workers: true
-    val_pin_memory: false
-    val_persistent_workers: false
 
 model:
   task: "lc_seq_des"  # "seq_des"
@@ -98,9 +89,7 @@ loss:
     label_smoothing: 0.1
     per_token_avg: false
     compile_msa_loss: false
-  
-  ligand_pocket_dist_cutoff: 5.0 # distance cutoff for lc_pocket_seq_loss
-
+    
 optim:
   optimizer: "noam"
   adamw:

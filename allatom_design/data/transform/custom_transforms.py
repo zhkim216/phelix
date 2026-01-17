@@ -213,7 +213,7 @@ class FeaturizeCoordsAndMasks(Transform):
         is_prot_scn = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & ~np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
         feats["prot_bb_atom_mask"] = torch.tensor(is_prot_bb).float()
         feats["prot_scn_atom_mask"] = torch.tensor(is_prot_scn).float()        
-                        
+                                            
         # Calculate number of atoms per token
         device = feats["coords"].device
         N_tokens = feats["token_pad_mask"].shape[0]
@@ -226,8 +226,7 @@ class FeaturizeCoordsAndMasks(Transform):
         tokenwise_atom_idxs = torch.where(tokenwise_atom_idxs_mask, tokenwise_atom_idxs, -1 * torch.ones_like(tokenwise_atom_idxs, dtype=torch.long))
         
         feats["tokenwise_atom_idxs"] = tokenwise_atom_idxs
-        feats["tokenwise_atom_idxs_mask"] = tokenwise_atom_idxs_mask                
-        feats["ca_coords"], feats["n_coords"], feats["c_coords"], feats["o_coords"], feats["pseudo_cb_coords"] = self._get_pseudo_cb_coords(data)        
+        feats["tokenwise_atom_idxs_mask"] = tokenwise_atom_idxs_mask                        
 
         # Get ligand related features
         # try:
@@ -239,58 +238,7 @@ class FeaturizeCoordsAndMasks(Transform):
         #     print(f"Atom array has no attribute 'is_aromatic' for {data['example_id']}")            
                         
         return data
-    
-    def _get_pseudo_cb_coords(self, data: dict[str, Any]):
-        """
-        Get pseudo CB coordinates for the atom array.
-        """
-        atom_array = data["atom_array"]           
-        
-        # token_is_protein_standard_aa = data["feats"]["token_is_protein_chain"] * (1 - data["feats"]["token_is_hetero"])
-        # pseudo_cb_valid_mask = token_is_protein_standard_aa * data["feats"]["token_resolved_mask"]
-        
-        token_len = len(data["feats"]["token_is_protein_chain"])
-        
-        # Get pseudo CB valid mask. For standard amino acids (not hetero) in protein chains, and all n, ca, c resolved.
-        standard_aa_mask = np.isin(atom_array.res_name, STANDARD_AA)
-        standard_aa_prot_mask = standard_aa_mask & (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value)
-        is_ncaco_resolved = ((np.isin(atom_array.atom_name, [PROTEIN_BACKBONE_ATOM_NAMES])) & (atom_array.occupancy > 0))
-        has_all_backbone = apply_and_spread_token_wise(atom_array, is_ncaco_resolved, lambda x: np.sum(x) == len(PROTEIN_BACKBONE_ATOM_NAMES))
-        pseudo_cb_valid_mask = standard_aa_prot_mask & has_all_backbone
-        
-        # token ids
-        token_idxs = atom_array.token_id  # [n_atoms]
-        
-        # Get ca, n, c mask for pseudo CB calculation.
-        ca_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "CA")
-        n_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "N")
-        c_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "C")
-        o_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "O")
-        
-        # ca_coords, n_coords, c_coords and token ids
-        ca_coords = atom_array.coord[ca_mask]
-        n_coords = atom_array.coord[n_mask]
-        c_coords = atom_array.coord[c_mask]
-        o_coords = atom_array.coord[o_mask]
-        pseudo_cb_token_idxs = token_idxs[ca_mask]
-        
-        b = ca_coords - n_coords
-        c = c_coords - ca_coords
-        a = np.cross(b, c, axis=-1)
-        np_cb_coords = -0.58273431 * a + 0.56802827 * b - 0.54067466 * c + ca_coords
-        
-        torch_ca_coords = torch.zeros((token_len, 3), dtype=torch.float32)
-        torch_ca_coords[pseudo_cb_token_idxs] = torch.from_numpy(ca_coords).float()
-        torch_n_coords = torch.zeros((token_len, 3), dtype=torch.float32)
-        torch_n_coords[pseudo_cb_token_idxs] = torch.from_numpy(n_coords).float()
-        torch_c_coords = torch.zeros((token_len, 3), dtype=torch.float32)
-        torch_c_coords[pseudo_cb_token_idxs] = torch.from_numpy(c_coords).float()
-        torch_o_coords = torch.zeros((token_len, 3), dtype=torch.float32)
-        torch_o_coords[pseudo_cb_token_idxs] = torch.from_numpy(o_coords).float()
-        torch_cb_coords = torch.zeros((token_len, 3), dtype=torch.float32)
-        torch_cb_coords[pseudo_cb_token_idxs] = torch.from_numpy(np_cb_coords).float()        
-        
-        return torch_ca_coords, torch_n_coords, torch_c_coords, torch_o_coords, torch_cb_coords                    
+                    
 
 class PadSDFeats(Transform):
     """Pad the token and atom features to the maximum number of tokens and atoms."""
@@ -340,20 +288,30 @@ class FlattenFeatsDict(Transform):
 
 
 class CenterRandomAugmentation(Transform):
-    """Randomly augment the center of the atom array."""
-    def __init__(self, apply_random_augmentation: bool = True, translation_scale: float = 1.0):
+    """Center the atom array. If apply_random_augmentation is True, also randomly rotate and translate.
+    If update_atom_array is True, update the atom array in the data dict.
+    """
+
+    def __init__(self, apply_random_augmentation: bool, translation_scale: float, update_atom_array: bool):
         self.apply_random_augmentation = apply_random_augmentation
         self.translation_scale = translation_scale
+        self.update_atom_array = update_atom_array
 
     @override
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        coords = data["feats"]["coords"]
+        mask = data["feats"]["atom_resolved_mask"].bool()
+        centered_coords = coords.clone()
+        centered_coords = masked_center(centered_coords, mask)
         if self.apply_random_augmentation:
-            coords = data["feats"]["coords"]
-            mask = data["feats"]["atom_resolved_mask"].bool()
-            centered_coords = coords.clone()
-            centered_coords = masked_center(centered_coords, mask)
-            centered_coords = random_rigid_augmentation(centered_coords[None], batch_size=1, s=self.translation_scale).squeeze(0) #! dummy atom coords masked later?
-            data["feats"]["coords"] = centered_coords    
+            centered_coords = random_rigid_augmentation(
+                centered_coords[None], batch_size=1, s=self.translation_scale
+            ).squeeze(0)
+        data["feats"]["coords"] = centered_coords
+
+        if self.update_atom_array:
+            data["atom_array"].coord = centered_coords.numpy()
+
         return data
 
 
@@ -739,4 +697,80 @@ class AnnotateLigandPockets(Transform):
             receptor_chain_iids=receptor_chain_iids,
             ligand_chain_iids=ligand_chain_iids,
         )
+        return data
+    
+class GetPseudoCBCoords(Transform):
+    """
+    Get pseudo CB coordinates for the atom array.
+    """
+    def __init__(self):
+        pass
+    
+    @override
+    def check_input(self, data: dict) -> None:
+        check_contains_keys(data, ["atom_array"])
+        check_is_instance(data, "atom_array", AtomArray)
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        return self._get_pseudo_cb_coords(data)
+
+    def _get_pseudo_cb_coords(self, data: dict[str, Any]):
+        """
+        Get pseudo CB coordinates for the atom array.
+        """
+        atom_array = data["atom_array"]           
+        
+        # token_is_protein_standard_aa = data["feats"]["token_is_protein_chain"] * (1 - data["feats"]["token_is_hetero"])
+        # pseudo_cb_valid_mask = token_is_protein_standard_aa * data["feats"]["token_resolved_mask"]
+        
+        token_len = len(data["feats"]["token_is_protein_chain"])
+        
+        # Get pseudo CB valid mask. For standard amino acids (not hetero) in protein chains, and all n, ca, c resolved.
+        standard_aa_mask = np.isin(atom_array.res_name, STANDARD_AA)
+        standard_aa_prot_mask = standard_aa_mask & (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value)
+        is_ncaco_resolved = ((np.isin(atom_array.atom_name, [PROTEIN_BACKBONE_ATOM_NAMES])) & (atom_array.occupancy > 0))
+        has_all_backbone = apply_and_spread_token_wise(atom_array, is_ncaco_resolved, lambda x: np.sum(x) == len(PROTEIN_BACKBONE_ATOM_NAMES))
+        pseudo_cb_valid_mask = standard_aa_prot_mask & has_all_backbone
+        
+        # token ids
+        token_idxs = atom_array.token_id  # [n_atoms]
+        
+        # Get ca, n, c mask for pseudo CB calculation.
+        ca_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "CA")
+        n_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "N")
+        c_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "C")
+        o_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "O")
+        
+        # ca_coords, n_coords, c_coords and token ids
+        ca_coords = atom_array.coord[ca_mask]
+        n_coords = atom_array.coord[n_mask]
+        c_coords = atom_array.coord[c_mask]
+        o_coords = atom_array.coord[o_mask]
+        pseudo_cb_token_idxs = token_idxs[ca_mask]
+        
+        b = ca_coords - n_coords
+        c = c_coords - ca_coords
+        a = np.cross(b, c, axis=-1)
+        np_cb_coords = -0.58273431 * a + 0.56802827 * b - 0.54067466 * c + ca_coords
+        
+        torch_ca_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+        torch_ca_coords[pseudo_cb_token_idxs] = torch.from_numpy(ca_coords).float()
+        torch_n_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+        torch_n_coords[pseudo_cb_token_idxs] = torch.from_numpy(n_coords).float()
+        torch_c_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+        torch_c_coords[pseudo_cb_token_idxs] = torch.from_numpy(c_coords).float()
+        torch_o_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+        torch_o_coords[pseudo_cb_token_idxs] = torch.from_numpy(o_coords).float()
+        torch_cb_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+        torch_cb_coords[pseudo_cb_token_idxs] = torch.from_numpy(np_cb_coords).float()        
+        
+        data["feats"] |= {
+            "ca_coords": torch_ca_coords,
+            "n_coords": torch_n_coords,
+            "c_coords": torch_c_coords,
+            "o_coords": torch_o_coords,
+            "pseudo_cb_coords": torch_cb_coords,
+        }
+        
         return data
