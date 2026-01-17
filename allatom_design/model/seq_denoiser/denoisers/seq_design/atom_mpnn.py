@@ -125,8 +125,7 @@ class AtomMPNN(nn.Module):
         h_V = torch.zeros((B, N, self.node_features), device=batch["restype"].device)
 
         # Concatenate residue-level features to h_V
-        ## first, mask out residues using gap token
-        B, N, C = batch["restype"].shape
+        ## first, mask out residues using gap token        
         masked = F.one_hot(torch.full((B, N), const.AF3_ENCODING.token_to_idx["<G>"],
                                       device=batch["restype"].device), num_classes=C).float()
         
@@ -141,20 +140,23 @@ class AtomMPNN(nn.Module):
         #! (JH) h_E and E_idx are also considering ligand atoms here.
         #! (JH) but h_E and E_idx are masked out for padded tokens (token_exists_mask is 0 for padded tokens)        
                                         
-        # Pass through encoder layers
-        
-        # Protein-only encoding
+        # Pass through encoder layers        
+        # Residue-level encoding, for standard AAs in protein chains only
         h_V = h_V + h_S                
         h_E = self.W_e(h_E)
-        prot_standard_aa_mask = batch["token_is_protein_chain"] * (1 - batch["is_atomized"].float()) * batch["token_exists_mask"] * batch["token_pad_mask"]
-        prot_standard_aa_mask_2d = gather_nodes(prot_standard_aa_mask.unsqueeze(-1), E_idx).squeeze(-1)
-        prot_standard_aa_mask_2d = prot_standard_aa_mask.unsqueeze(-1) * prot_standard_aa_mask_2d
-        for layer in self.encoder_layers:
-            h_V, h_E = layer(h_V, h_E, E_idx, prot_standard_aa_mask, prot_standard_aa_mask_2d)
         
-        #! DEBUG: Check h_V before context_module
-        h_V_before_context = h_V.clone()
-            
+        print(f"h_V sum: {h_V.sum()}")
+        print(f"h_E sum: {h_E.sum()}")        
+                
+        protein_residue_node_mask = batch["protein_residue_node_mask"]
+        protein_residue_node_mask_2d = gather_nodes(protein_residue_node_mask.unsqueeze(-1), E_idx).squeeze(-1)
+        protein_residue_node_mask_2d = protein_residue_node_mask.unsqueeze(-1) * protein_residue_node_mask_2d
+        for layer in self.encoder_layers:
+            h_V, h_E = layer(h_V, h_E, E_idx, protein_residue_node_mask, protein_residue_node_mask_2d)
+        
+        print(f"h_V sum after encoder layers: {h_V.sum()}")
+        print(f"h_E sum after encoder layers: {h_E.sum()}")
+                    
         # Process ligand context features
         if self.ligand_conditioning:
             h_V = self.context_module(
@@ -171,27 +173,35 @@ class AtomMPNN(nn.Module):
         # Pass through decoder layers
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
+        
+        print(f"h_V sum before decoder layers: {h_V.sum()}")
+        print(f"h_ES sum before decoder layers: {h_ES.sum()}")
+        print(f"h_ESV sum before decoder layers: {h_ESV.sum()}")
+        
         for layer in self.decoder_layers:
-            h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = prot_standard_aa_mask, E_idx = E_idx, mask_attend = prot_standard_aa_mask) #! (JH) changed, token_mask_2d is newly added
+            h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = protein_residue_node_mask, E_idx = E_idx, mask_attend = protein_residue_node_mask_2d) #! (JH) changed, token_mask_2d is newly added
+
+        print(f"h_V sum after decoder layers: {h_V.sum()}")
+        print(f"h_ESV sum after decoder layers: {h_ESV.sum()}")
 
         # Potts model
         if self.use_potts:
             if self.max_dist_potts is not None:
-                prot_token_mask_2d = prot_token_mask_2d * (D_neighbors <= self.max_dist_potts)  # mask out edges that are too far away
+                protein_residue_node_mask_2d = protein_residue_node_mask_2d * (D_neighbors <= self.max_dist_potts)  # mask out edges that are too far away
 
             if self.k_neighbors_potts is not None:
                 # truncate to k_neighbors_potts
                 h_ESV = h_ESV[:, :, :self.k_neighbors_potts]
                 E_idx = E_idx[:, :, :self.k_neighbors_potts]
-                prot_token_mask_2d = prot_token_mask_2d[:, :, :self.k_neighbors_potts]
+                protein_residue_node_mask_2d = protein_residue_node_mask_2d[:, :, :self.k_neighbors_potts]
 
-            h, J = self.decoder_S_potts(h_V, h_ESV, E_idx, prot_standard_aa_mask, prot_standard_aa_mask_2d)
+            h, J = self.decoder_S_potts(h_V, h_ESV, E_idx, protein_residue_node_mask, protein_residue_node_mask_2d)
             potts_decoder_aux = {
                 "h": h,
                 "J": J,
                 "edge_idx": E_idx,
-                "mask_i": prot_standard_aa_mask,
-                "mask_ij": prot_standard_aa_mask_2d,
+                "mask_i": protein_residue_node_mask,
+                "mask_ij": protein_residue_node_mask_2d,
             }
 
         logits = self.W_out(h_V)                
@@ -271,8 +281,7 @@ class TokenFeatures(nn.Module):
         Extract token-level edge features and build KNN graph.
         """
         X = self._get_protein_token_center_coords(batch) # CA coordinates for protein tokens
-        prot_standard_aa_mask = batch["token_is_protein_chain"] * (1 - batch["is_atomized"].float()) * batch["token_exists_mask"] * batch["token_pad_mask"]
-        D_neighbors, E_idx = self._dist(X = X, mask = prot_standard_aa_mask) 
+        D_neighbors, E_idx = self._dist(X = X, mask = batch["protein_residue_node_mask"]) 
 
         # Get RBF features
         if self.ca_only:
@@ -315,6 +324,7 @@ class TokenFeatures(nn.Module):
         # Concatenate edge features and embed
         E = torch.cat((E_positional, RBF_all), -1)
         # E = torch.cat((E_positional, RBF_all, token_bonds), -1)
+        
         E = self.edge_embedding(E)
         E = self.norm_edges(E)
         
@@ -461,8 +471,7 @@ class TokenFeatures(nn.Module):
         """
         B, N, _ = batch["coords"].shape
         X = batch["coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token, ca for proteins                
-        X = X * batch["token_is_protein_chain"].unsqueeze(-1) * (1 - batch["is_atomized"].float()).unsqueeze(-1) # Mask out non-protein chain and non-standard amino acids
-        X = X * batch["token_exists_mask"].unsqueeze(-1) * batch["token_pad_mask"].unsqueeze(-1) # mask out padding and unresolved atoms
+        X = X * batch["protein_residue_node_mask"].unsqueeze(-1)
         return X
 
     def _get_token_coords(self, batch: dict[str, TensorType["b ..."]], protein_only: bool = True) -> TensorType["b n 3", float]:
@@ -515,7 +524,7 @@ class TokenFeatures(nn.Module):
         n_coords = batch["n_coords"]
         c_coords = batch["c_coords"]
         o_coords = batch["o_coords"]
-        pseudo_cb_coords = batch["pseudo_cb_coords"]                
+        pseudo_cb_coords = batch["pseudo_cb_coords"]
         
         RBF_all = []
         RBF_all.append(self._rbf(D_neighbors))  # Ca-Ca

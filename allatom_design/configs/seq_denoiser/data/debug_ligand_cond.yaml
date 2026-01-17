@@ -9,7 +9,6 @@ save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don
 residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 exclude_val_cluster: false
 ligand_clustered: false
-keep_pn_unit_iids_in_extra_info: true #! (JH) changed 251031
 
 data_loader_cfg:
   prefetch_factor: 1

@@ -44,8 +44,8 @@ trainer:
 # Resuming training options
 resume:
   ckpt_path: null  # Path to checkpoint to resume from, null to disable
-  # use_current_cfg: false  # whether to override the config in the checkpoint with the current config
-  # overrides: {}  # add any specific overrides to apply to the config
+  use_current_cfg: false  # whether to override the config in the checkpoint with the current config
+  overrides: {}  # add any specific overrides to apply to the config
 
 # Model options
 defaults:
@@ -53,15 +53,6 @@ defaults:
   - denoiser: lc_atom_mpnn
   - mask_selector: mask_selector
   - data: ligand_cond #! (JH) changed 250926
-
-data: 
-  data_loader_cfg:
-    prefetch_factor: 1
-    prefetch_buffer_size: 1
-    train_pin_memory: true
-    train_persistent_workers: true
-    val_pin_memory: true
-    val_persistent_workers: true
 
 model:
   task: "lc_seq_des"  # "seq_des"
@@ -97,9 +88,7 @@ loss:
     label_smoothing: 0.1
     per_token_avg: false
     compile_msa_loss: false
-  
-  ligand_pocket_dist_cutoff: 5.0 # distance cutoff for lc_pocket_seq_loss
-
+    
 optim:
   optimizer: "noam"
   adamw:
