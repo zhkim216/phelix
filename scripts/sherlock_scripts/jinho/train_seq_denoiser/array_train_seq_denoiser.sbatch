@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=lp_exp1
+#SBATCH --job-name=exp3
 #SBATCH -p possu
 #SBATCH --array=0-5
 #SBATCH --gres=gpu:1
-#SBATCH --mem=64G
+#SBATCH --mem=24G
 #SBATCH --cpus-per-task=8
-#SBATCH --time=2-0:00:00
+#SBATCH --time=1-0:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/job_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/job_%A_%a.err
 
@@ -22,7 +22,7 @@ cd "${BASE_DIR}"
 WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 GROUP="training"
-EXP_NAME_BASE="exp2"
+EXP_NAME_BASE="exp3"
 
 # Dataset paths
 RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
@@ -30,13 +30,16 @@ RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 # Experiment configs
 DENOISER_TYPE="lc_atom_mpnn"
 
+# Path where processed pdb files are stored
+PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v2"
+
 CONFIGS=(
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=false"
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=true"
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_lmpnn_re denoiser.mpnn.use_sidechain_context=true denoiser.mpnn.use_ligand_context=true"
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=false"
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.use_sidechain_context=false denoiser.mpnn.use_ligand_context=true"
-  "data.pdb_path=/scratch/users/zhkim216/datasets/atomworks_af3_re denoiser.mpnn.use_sidechain_context=true denoiser.mpnn.use_ligand_context=true"
+  "data/dataset=boltz denoiser.augment_eps=0.1"
+  "data/dataset=boltz denoiser.augment_eps=0.2"
+  "data/dataset=boltz denoiser.augment_eps=0.3"
+  "data/dataset=ligandmpnn denoiser.augment_eps=0.1"
+  "data/dataset=ligandmpnn denoiser.augment_eps=0.2"
+  "data/dataset=ligandmpnn denoiser.augment_eps=0.3"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
@@ -61,28 +64,26 @@ python3 allatom_design/train_seq_denoiser.py \
     train.debug=false \
     train.compile.compile_model=true \
     trainer.strategy="ddp_find_unused_parameters_true" \
-    data.validation_ids_file="/scratch/users/zhkim216/datasets/splits/lmpnn_val_list.csv" \
+    data.pdb_path="${PDB_PATH}" \
     data.residue_cache_dir="${RESIDUE_CACHE_DIR}" \
     data.exclude_val_cluster=true \
-    data.data_loader_cfg.prefetch_factor=1 \
-    data.data_loader_cfg.prefetch_buffer_size=1 \
-    data.data_loader_cfg.train_pin_memory=true \
-    data.data_loader_cfg.train_persistent_workers=true \
-    data.data_loader_cfg.val_pin_memory=false \
-    data.data_loader_cfg.val_persistent_workers=false \
     data.featurizer_cfg.remove_unresolved_tokens=true \
     data.featurizer_cfg.max_tokens=512 \
     data.featurizer_cfg.max_atoms=4608 \
     data.sampling_weights.alphas_chain.a_prot=1.0 \
-    data.sampling_weights.alphas_chain.a_small_molecule=0.0 \
     data.sampling_weights.alphas_chain.a_nuc=0.0 \
+    data.sampling_weights.alphas_chain.a_peptide=0.0 \
+    data.sampling_weights.alphas_chain.a_small_molecule=0.0 \
     data.sampling_weights.alphas_chain.a_metal=0.0 \
+    data.sampling_weights.alphas_chain.a_loi=0.0 \
     data.sampling_weights.alphas_interface.a_prot=1.0 \
-    data.sampling_weights.alphas_interface.a_small_molecule=1.0 \
     data.sampling_weights.alphas_interface.a_nuc=0.0 \
+    data.sampling_weights.alphas_interface.a_peptide=0.0 \
+    data.sampling_weights.alphas_interface.a_small_molecule=0.0 \
     data.sampling_weights.alphas_interface.a_metal=0.0 \
+    data.sampling_weights.alphas_interface.a_loi=0.0 \
     data.sampling_weights.betas.beta_chain=1.0 \
-    data.sampling_weights.betas.beta_interface=1.0 \
+    data.sampling_weights.betas.beta_interface=0.0 \
     data.samples_per_epoch=50000 \
     mask_selector.restype_masking_schedule=uniform_t \
     mask_selector.atom_masking_schedule=uniform_t \
