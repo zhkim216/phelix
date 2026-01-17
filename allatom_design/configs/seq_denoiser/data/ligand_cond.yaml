@@ -3,7 +3,7 @@ pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v2
 parquet_path: ${data.pdb_path}/metadata_seq_clustered_04.parquet
 validation_ids_file: /scratch/users/rshuai/datasets/atomworks/splits/validation_ids.txt
 debug: ${train.debug}
-debug_num_ids: 10000 #! For debugging
+debug_num_ids: 1000 #! For debugging
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
 residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 exclude_val_cluster: true
@@ -26,11 +26,11 @@ sampling_weights:
     a_loi: 0.0
   betas:
     beta_chain: 1.0
-    beta_interface: 1.0
+    beta_interface: 0.0
 
 train_filters:
   cif_filter:    
-    - "deposition_date <= '2022-12-16'"
+    - "deposition_date <= '2021-09-30'"
     - "resolution < 9.0" 
     - "clash_severity != 'severe'"
     - "~method.str.contains('NMR')"
@@ -38,7 +38,7 @@ train_filters:
     - "num_polymer_pn_units < 50"
   chain_filter:    
     - "q_pn_unit_is_protein"
-    - "16 < q_pn_unit_sequence_length < 2048"
+    - "20 < q_pn_unit_sequence_length < 2048"
     # - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
     # - "(~q_pn_unit_is_polymer and ~q_pn_unit_is_metal and q_pn_unit_num_resolved_atoms >= 5)"
   interface: null    
@@ -53,7 +53,7 @@ val_filters:
     - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"    
   chain_filter:
     - "q_pn_unit_is_protein"
-    - "16 < q_pn_unit_sequence_length < 2048"
+    - "20 < q_pn_unit_sequence_length < 2048"
   interface: null
     
 # CIF parser args. Not used during training since we've already cached the CIFs.
@@ -67,8 +67,8 @@ cif_parser_args:
   hydrogen_policy: "remove"
 
 featurizer_cfg:
-  max_tokens: 256 #! DEBUG
-  max_atoms: 2304 #! DEBUG
+  max_tokens: 512 #! DEBUG
+  max_atoms: 4608 #! DEBUG
   crop_center_cutoff_distance: 15.0
   crop_spatial_p: 0.0
   remove_unresolved_tokens: true 
@@ -76,8 +76,9 @@ featurizer_cfg:
   max_conformers_per_residue: 50
   apply_random_augmentation: true
   translation_scale: 1.0
+  update_atom_array: true
 
-samples_per_epoch: 100 #! DEBUG
+samples_per_epoch: 50000 #! DEBUG
 batch_size: ${train.batch_size}
 num_workers: ${num_workers}
 random_seed: ${train.seed}
