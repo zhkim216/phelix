@@ -50,7 +50,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 ) -> tuple[TensorType["b n c", float],  # seq_logits
                            dict[str, TensorType["b ..."]]]:
         # Build some helpful masks based on conditioning sequence and atoms
-        batch = self.build_masks(batch)
+        batch = self.build_masks(batch, is_sampling)
 
         # During training, add random noise to input coordinates
         if not is_sampling:
@@ -66,12 +66,13 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             "seq_cond_mask": batch["seq_cond_mask"],
             "atom_cond_mask": batch["atom_cond_mask"],
             "token_exists_mask": batch["token_exists_mask"],
+            "protein_residue_node_mask": batch["protein_residue_node_mask"],
         }        
 
         return seq_logits, aux_preds
 
 
-    def build_masks(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
+    def build_masks(self, batch: dict[str, TensorType["b ..."]], is_sampling) -> dict[str, TensorType["b ..."]]:
         """
         Build various masks for AtomMPNN.
 
@@ -80,20 +81,45 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         - atomwise_token_idx: Tensor["b n_atoms", int]: index of the token that the atom belongs to, 0 for pad atoms
         - atomwise_seq_cond_mask: Tensor["b n_atoms", float]: 1 if the atom is part of an unmasked residue type, or 0 otherwise
         - token_exists_mask: Tensor["b n_tokens", float]: 1 if there exists any unmasked atom in the token, or 0 otherwise
-        """
+        """            
     
-        # Create atom-level mask which is 1 if the atom is part of an unmasked residue type, or 0 otherwise
-        batch["atomwise_seq_cond_mask"] = batch["seq_cond_mask"].gather(dim=-1, index=batch["atom_to_token_map"])  # [b, n_atoms]
-        #! seq_cond_mask already contains only non-pad, resolved entries        
-        batch["atomwise_seq_cond_mask"] = batch["atomwise_seq_cond_mask"] * batch["atom_pad_mask"] * batch["atom_resolved_mask"] # re-mask out pad atoms, since atom_to_token_map is 0 for pad atoms
-
+        # Ensure the conditioning masks only contain non-pad, resolved entries.
+        batch["seq_cond_mask"] = batch["seq_cond_mask"] * batch["token_resolved_mask"] * batch["token_pad_mask"]
+        batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_resolved_mask"] * batch["atom_pad_mask"]
+    
         # Build mask for which tokens to include in the token-level grpah
         ## ensure center atom is present, since graph nodes are the center atom
         batch["token_exists_mask"] = batch["token_resolved_mask"].float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
 
-        ## sometimes, it's helpful to mask out certain tokens from the graph (e.g. for protein-only design)
+        ## sometimes, it's helpful to mask out certain tokens from the graph (e.g. for protein-only design in lcaliby or exclude hetero residues in sampling)
         token_exists_override = batch.get("token_exists_override", torch.ones_like(batch["token_exists_mask"]))
         batch["token_exists_mask"] = batch["token_exists_mask"] * token_exists_override
+        
+        # Mask out hetero residues in protein residue graphs for sampling, if specified. 
+        #Todo: Need to implement functionality for redesigning hetero residues into standard AA in the future.
+        residuewise_hetero_mask = batch.get("residuewise_hetero_mask", torch.ones_like(batch["token_exists_mask"]))
+        atomwise_hetero_mask = batch.get("atomwise_hetero_mask", torch.ones_like(batch["token_exists_mask"]))
+        
+        if not is_sampling:
+            # Encode mask: standard AA only (N, CA, C, O resolved)
+            batch["protein_residue_node_mask"] = (
+                batch["token_is_protein_chain"] *
+                (1 - batch["is_atomized"].float()) * 
+                batch["token_exists_mask"] *
+                batch["token_pad_mask"]
+            )
+            
+        else:
+            #Todo: Need to implement functionality for redesigning hetero residues into standard AA in the future.            
+            batch["protein_residue_node_mask"] = (
+                batch["token_is_protein_chain"] * 
+                (1 - batch["is_atomized"].float()) * 
+                residuewise_hetero_mask *              
+                batch["token_exists_mask"] *
+                batch["token_pad_mask"]
+            )                    
+            
+            batch["atom_cond_mask"] = batch["atom_cond_mask"] * atomwise_hetero_mask
 
         return batch
 
@@ -224,13 +250,13 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 mask_ij_coloring=mask_ij_coloring,
             )
             # Set all tokens that don't exist in the graph to unknown
-            S_sample = torch.where(~batch["token_exists_mask"].bool() & (batch["is_protein"] | batch["is_ligand"]),
+            S_sample = torch.where(~batch["protein_residue_node_mask"].bool() & (batch["is_protein"] | batch["is_ligand"]),
                                    const.AF3_ENCODING.token_to_idx[const.UNKNOWN_AA],
                                    S_sample)
-            S_sample = torch.where(~batch["token_exists_mask"].bool() & batch["is_rna"],
+            S_sample = torch.where(~batch["protein_residue_node_mask"].bool() & batch["is_rna"],
                                     const.AF3_ENCODING.token_to_idx[const.UNKNOWN_RNA],
                                     S_sample)
-            S_sample = torch.where(~batch["token_exists_mask"].bool() & batch["is_dna"],
+            S_sample = torch.where(~batch["protein_residue_node_mask"].bool() & batch["is_dna"],
                                     const.AF3_ENCODING.token_to_idx[const.UNKNOWN_DNA],
                                     S_sample)
 
@@ -305,7 +331,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         # Run model and collect potts parameters
         potts_decoder_aux = {}  # potts parameters
-        token_exists_mask = []  # keep track of the tokens that exist in the graph
+        protein_residue_node_mask = []  # keep track of the residues that exist in the graph
         for bi in tqdm(range(0, B, subbatch_size), desc="Computing potts parameters", leave=False):
             subbatch = slice_feats(batch, slice(bi, bi + subbatch_size))
 
@@ -313,10 +339,10 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
             for k, v in aux_preds_i["potts_decoder_aux"].items():
                 potts_decoder_aux.setdefault(k, []).append(v)
-            token_exists_mask.append(aux_preds_i["token_exists_mask"])
+            protein_residue_node_mask.append(aux_preds_i["protein_residue_node_mask"])
         potts_decoder_aux = {k: torch.cat(v, dim=0) for k, v in potts_decoder_aux.items()}
-        token_exists_mask = torch.cat(token_exists_mask, dim=0)
-        batch["token_exists_mask"] = token_exists_mask  # store in batch for downstream use
+        protein_residue_node_mask = torch.cat(protein_residue_node_mask, dim=0)
+        batch["protein_residue_node_mask"] = protein_residue_node_mask  # store in batch for downstream use
 
         # Handle tied sampling
         if "tied_sampling_ids" in batch:
