@@ -181,7 +181,7 @@ struct_pred_cfg:
       base:
         model_dir: /home/possu/jinho/model_params/af3
         db_dir: /home/possu/jinho/af3_databases
-        flash_attention_implementation: "xla"
+        flash_attention_implementation: "triton"
       ss:  # Single-sequence prediction config
         num_recycles: 1
         num_diffusion_samples: 1
@@ -200,4 +200,4 @@ struct_pred_cfg:
 
 hydra:
   run:
-    dir: /scratch/users/zhkim216/hydra_outputs
+    dir: /home/possu/jinho/hydra_outputs
