@@ -98,7 +98,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         # Mask out hetero residues in protein residue graphs for sampling, if specified. 
         #Todo: Need to implement functionality for redesigning hetero residues into standard AA in the future.
         residuewise_hetero_mask = batch.get("residuewise_hetero_mask", torch.ones_like(batch["token_exists_mask"]))
-        atomwise_hetero_mask = batch.get("atomwise_hetero_mask", torch.ones_like(batch["token_exists_mask"]))
+        atomwise_hetero_mask = batch.get("atomwise_hetero_mask", torch.ones_like(batch["atom_resolved_mask"]))
         
         if not is_sampling:
             # Encode mask: standard AA only (N, CA, C, O resolved)
@@ -221,7 +221,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         edge_idx_coloring = None
         if regularization == "LCP":
             C_complexity = batch["asym_id"] - torch.min(batch["asym_id"]) + 1  # renumber asym_id to have min value of 1
-            C_complexity = C_complexity * batch["token_is_protein_chain"] * (~batch["is_atomized"]) * batch["token_exists_mask"] * batch["token_pad_mask"]
+            C_complexity = C_complexity * batch["protein_residue_node_mask"]
             #! fixed, 251110
             # mask out i) non-protein chains, ii) pad tokens, iii) tokens that don't exist in the graph            
             # complexity is only calculated for the residues where C_complexity > 0        
@@ -331,6 +331,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         # Run model and collect potts parameters
         potts_decoder_aux = {}  # potts parameters
+        token_exists_mask = []
         protein_residue_node_mask = []  # keep track of the residues that exist in the graph
         for bi in tqdm(range(0, B, subbatch_size), desc="Computing potts parameters", leave=False):
             subbatch = slice_feats(batch, slice(bi, bi + subbatch_size))
@@ -340,10 +341,14 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             for k, v in aux_preds_i["potts_decoder_aux"].items():
                 potts_decoder_aux.setdefault(k, []).append(v)
             protein_residue_node_mask.append(aux_preds_i["protein_residue_node_mask"])
+            token_exists_mask.append(aux_preds_i["token_exists_mask"])
         potts_decoder_aux = {k: torch.cat(v, dim=0) for k, v in potts_decoder_aux.items()}
+        
+        token_exists_mask = torch.cat(token_exists_mask, dim=0)
         protein_residue_node_mask = torch.cat(protein_residue_node_mask, dim=0)
         batch["protein_residue_node_mask"] = protein_residue_node_mask  # store in batch for downstream use
-
+        batch["token_exists_mask"] = token_exists_mask  # store in batch for downstream use
+        
         # Handle tied sampling
         if "tied_sampling_ids" in batch:
             tied_sampling_inputs = _construct_tied_sampling_inputs(batch)

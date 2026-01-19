@@ -17,15 +17,6 @@ noise_labels: null  # per-residue noise labels, float for same noise for each re
 add_noise: false  # add noise equal to noise_labels to the input backbone
 t: null  # timestep to condition on for chroma polymer diffusion
 
-# Ligand-conditioned sequence design options
-ligand_conditioning: true  # if true, also sample ligand pocket residue masks
-ligand_pocket_dist_cutoff: 5.0  # distance cutoff for the ligand pocket
-small_molecule_only: true  # if true, only sample small molecules
-
-# Ablation options
-use_protein_only: false  # only condition on protein for sequence design
-save_protein_only: false  # save CIFs with only protein sequence
-
 potts_sampling_cfg:
   regularization: "LCP"
   potts_sweeps: 500
