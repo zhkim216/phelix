@@ -96,6 +96,10 @@ FEAT_TO_ATOM_DIM = {
     "prot_bb_atom_mask": [0],
     "prot_scn_atom_mask": [0],
     "atom_is_atomized": [0],
+    "ca_mask": [0],
+    "n_mask": [0],
+    "c_mask": [0],
+    "o_mask": [0],
     
     # optional features that might not be present
     "atom_cond_mask": [0],
@@ -109,6 +113,7 @@ FEAT_TO_ATOM_DIM = {
 }
 
 # Keep track of data dict keys only included at inference time
+# INFERENCE_ONLY_KEYS = ["crop_info", "atom_array", "feat_metadata"]
 INFERENCE_ONLY_KEYS = ["crop_info", "atom_array", "feat_metadata"]
 
 class CheckCoordinatesAreNan(Transform):
@@ -129,6 +134,9 @@ class FeaturizeCoordsAndMasks(Transform):
 
         # Get coordinates
         feats["coords"] = torch.tensor(atom_array.coord)
+
+        # Add atom array
+        feats["atom_array"] = atom_array
 
         # Get token and atom resolved masks                
         feats["token_resolved_mask"] = torch.tensor(apply_token_wise(atom_array, atom_array.occupancy > 0, np.any)).float()
@@ -213,6 +221,16 @@ class FeaturizeCoordsAndMasks(Transform):
         is_prot_scn = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & ~np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
         feats["prot_bb_atom_mask"] = torch.tensor(is_prot_bb).float()
         feats["prot_scn_atom_mask"] = torch.tensor(is_prot_scn).float()        
+
+        # Masks for N, CA, C, O for pseudo CB calculation
+        ca_mask = atom_array.atom_name == "CA"
+        n_mask = atom_array.atom_name == "N"
+        c_mask = atom_array.atom_name == "C"
+        o_mask = atom_array.atom_name == "O"
+        feats["ca_mask"] = torch.tensor(ca_mask).float()
+        feats["n_mask"] = torch.tensor(n_mask).float()
+        feats["c_mask"] = torch.tensor(c_mask).float()
+        feats["o_mask"] = torch.tensor(o_mask).float()        
                                             
         # Calculate number of atoms per token
         device = feats["coords"].device
@@ -223,7 +241,7 @@ class FeaturizeCoordsAndMasks(Transform):
         tokenwise_atom_idxs = torch.cat([torch.zeros((1,), device=device), n_atoms_per_token.cumsum(dim=-1)[:-1]], dim=-1).long()
         tokenwise_atom_idxs = tokenwise_atom_idxs[..., None] + torch.arange(const.MAX_NUM_ATOMS, device=device)[None, :]
         tokenwise_atom_idxs_mask = torch.arange(const.MAX_NUM_ATOMS, device=device)[None, :] < n_atoms_per_token[..., None]
-        tokenwise_atom_idxs = torch.where(tokenwise_atom_idxs_mask, tokenwise_atom_idxs, -1 * torch.ones_like(tokenwise_atom_idxs, dtype=torch.long))
+        tokenwise_atom_idxs = torch.where(tokenwise_atom_idxs_mask, tokenwise_atom_idxs, torch.zeros_like(tokenwise_atom_idxs, dtype=torch.long))
         
         feats["tokenwise_atom_idxs"] = tokenwise_atom_idxs
         feats["tokenwise_atom_idxs_mask"] = tokenwise_atom_idxs_mask                        
@@ -698,6 +716,55 @@ class AnnotateLigandPockets(Transform):
             ligand_chain_iids=ligand_chain_iids,
         )
         return data
+    
+def get_NCACO_pseudo_CB_coords(atom_array: AtomArray) -> np.ndarray:
+    """
+    Get N, CA, C, O and pseudo CB coordinates for the atom array.
+    """
+    
+    token_len = len(np.unique(atom_array.token_id))    
+    
+    # Get pseudo CB valid mask. For standard amino acids (not hetero) in protein chains, and all n, ca, c resolved.
+    standard_aa_mask = np.isin(atom_array.res_name, STANDARD_AA)
+    standard_aa_prot_mask = standard_aa_mask & (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value)
+    is_ncaco_resolved = ((np.isin(atom_array.atom_name, [PROTEIN_BACKBONE_ATOM_NAMES])) & (atom_array.occupancy > 0))
+    has_all_backbone = apply_and_spread_token_wise(atom_array, is_ncaco_resolved, lambda x: np.sum(x) == len(PROTEIN_BACKBONE_ATOM_NAMES))
+    pseudo_cb_valid_mask = standard_aa_prot_mask & has_all_backbone
+    
+    # token ids
+    token_idxs = atom_array.token_id  # [n_atoms]
+    
+    # Get ca, n, c mask for pseudo CB calculation.
+    ca_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "CA")
+    n_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "N")
+    c_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "C")
+    o_mask = pseudo_cb_valid_mask & (atom_array.atom_name == "O")
+    
+    # ca_coords, n_coords, c_coords and token ids
+    ca_coords = atom_array.coord[ca_mask]
+    n_coords = atom_array.coord[n_mask]
+    c_coords = atom_array.coord[c_mask]
+    o_coords = atom_array.coord[o_mask]
+    pseudo_cb_token_idxs = token_idxs[ca_mask]
+    
+    b = ca_coords - n_coords
+    c = c_coords - ca_coords
+    a = np.cross(b, c, axis=-1)
+    np_cb_coords = -0.58273431 * a + 0.56802827 * b - 0.54067466 * c + ca_coords
+    
+    torch_ca_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+    torch_ca_coords[pseudo_cb_token_idxs] = torch.from_numpy(ca_coords).float()
+    torch_n_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+    torch_n_coords[pseudo_cb_token_idxs] = torch.from_numpy(n_coords).float()
+    torch_c_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+    torch_c_coords[pseudo_cb_token_idxs] = torch.from_numpy(c_coords).float()
+    torch_o_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+    torch_o_coords[pseudo_cb_token_idxs] = torch.from_numpy(o_coords).float()
+    torch_cb_coords = torch.zeros((token_len, 3), dtype=torch.float32)
+    torch_cb_coords[pseudo_cb_token_idxs] = torch.from_numpy(np_cb_coords).float()   
+    
+    return torch_ca_coords, torch_n_coords, torch_c_coords, torch_o_coords, torch_cb_coords
+    
     
 class GetPseudoCBCoords(Transform):
     """

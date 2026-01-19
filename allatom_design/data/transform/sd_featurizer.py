@@ -74,6 +74,7 @@ def sd_featurizer(
     translation_scale: float = 1.0,
     pocket_distance: float = 8.0,
     update_atom_array: bool = True,
+    calc_pseudo_cb_coords: bool = False,
     is_inference: bool = False,
 ) -> Transform:
     """
@@ -138,7 +139,7 @@ def sd_featurizer(
         CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
                                 translation_scale=translation_scale,
                                 update_atom_array=update_atom_array),
-        GetPseudoCBCoords(),
+        GetPseudoCBCoords() if calc_pseudo_cb_coords else Identity(),
         
     ]
     
