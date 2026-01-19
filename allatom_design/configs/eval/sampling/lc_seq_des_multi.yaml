@@ -200,4 +200,4 @@ struct_pred_cfg:
 
 hydra:
   run:
-    dir: /scratch/users/zhkim216/hydra_outputs
+    dir: /home/possu/jinho/hydra_outputs

@@ -118,7 +118,7 @@ def _compute_self_consistency_metrics_atomworks_af3(*, pred_example: dict[str, A
     
     # Extract CA atoms from both structures (handles different atom counts)
     # For proteins, select CA atoms; for other chain types, this will be empty
-    sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) # 6: polypeptide-l chain type
+    sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)# 6: polypeptide-l chain type
     sample_ca = sample_atom_array[sample_ca_mask]
     
     # Delete UNK residues from pred_atom_array, it's from the sample sequence for the gaps between the actual residues.
@@ -193,7 +193,7 @@ def _compute_self_consistency_metrics_atomarray(*, pred_atom_array: AtomArray,
     # Designed sequence don't output UNK residues, so we can safely delete them.
     pred_ca_mask = (pred_atom_array.atom_name == "CA") & (pred_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (pred_atom_array.res_name != "UNK")
     pred_ca = pred_atom_array[pred_ca_mask]
-        
+            
     assert (sample_ca.res_name == pred_ca.res_name).all(), "Sample and pred CA residues must match"            
     
     # Align pred CA to sample CA using atomworks align_atom_arrays
@@ -286,7 +286,7 @@ def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
     sample_ca = sample_atom_array[sample_ca_mask]
     pred_ca = pred_atom_array[pred_ca_mask]
     
-    # Check if the number of CA atoms in sample and pred match
+    # Check if the number of CA atoms in sample and pred match    
     assert len(sample_ca) == len(pred_ca), "Number of CA atoms in sample and pred must match"
     
     if len(sample_ca) == 0 or len(pred_ca) == 0:

@@ -2116,6 +2116,7 @@ def prepare_sample_dict(cfg: DictConfig = None,
     if cfg.debug:
         input_sample_paths = input_sample_paths[:cfg.num_debug_samples]
         
+        
     # Initialize dictionary for storing sample information
     sample_dict = create_sample_dict(input_sample_paths=input_sample_paths)
                     
