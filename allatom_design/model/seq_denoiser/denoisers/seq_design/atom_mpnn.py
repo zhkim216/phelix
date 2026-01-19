@@ -144,18 +144,13 @@ class AtomMPNN(nn.Module):
         # Residue-level encoding, for standard AAs in protein chains only
         h_V = h_V + h_S                
         h_E = self.W_e(h_E)
-        
-        print(f"h_V sum: {h_V.sum()}")
-        print(f"h_E sum: {h_E.sum()}")        
-                
+                                
         protein_residue_node_mask = batch["protein_residue_node_mask"]
         protein_residue_node_mask_2d = gather_nodes(protein_residue_node_mask.unsqueeze(-1), E_idx).squeeze(-1)
         protein_residue_node_mask_2d = protein_residue_node_mask.unsqueeze(-1) * protein_residue_node_mask_2d
         for layer in self.encoder_layers:
             h_V, h_E = layer(h_V, h_E, E_idx, protein_residue_node_mask, protein_residue_node_mask_2d)
         
-        print(f"h_V sum after encoder layers: {h_V.sum()}")
-        print(f"h_E sum after encoder layers: {h_E.sum()}")
                     
         # Process ligand context features
         if self.ligand_conditioning:
@@ -173,16 +168,9 @@ class AtomMPNN(nn.Module):
         # Pass through decoder layers
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
-        
-        print(f"h_V sum before decoder layers: {h_V.sum()}")
-        print(f"h_ES sum before decoder layers: {h_ES.sum()}")
-        print(f"h_ESV sum before decoder layers: {h_ESV.sum()}")
-        
+                
         for layer in self.decoder_layers:
             h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = protein_residue_node_mask, E_idx = E_idx, mask_attend = protein_residue_node_mask_2d) 
-
-        print(f"h_V sum after decoder layers: {h_V.sum()}")
-        print(f"h_ESV sum after decoder layers: {h_ESV.sum()}")
 
         # Potts model
         if self.use_potts:
@@ -709,7 +697,6 @@ class DecLayer(nn.Module):
         h_EV = torch.cat([h_V_expand, h_E], -1)
         h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
         
-        import ipdb; ipdb.set_trace()
         if mask_attend is not None:
             h_message = mask_attend.unsqueeze(-1) * h_message
 

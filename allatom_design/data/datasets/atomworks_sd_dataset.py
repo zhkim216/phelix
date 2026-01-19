@@ -85,19 +85,20 @@ class SDDataset(MolecularDataset):
                             
         # Process chain df
         self.chain_df = self._process_chain_df()
-        
+                
         # Build interface df from contacts in chain df
         self.interface_df = self._process_interface_df()
-
+                
         # Parse dfs into a common format and concatenate
         self.parsed_df = self._parse_dfs()
-        self.data = self.parsed_df
+        self.data = self.parsed_df                
         
         # Initialize per-worker random number generator
         if phase == "train":
             self._sampler = Sampler(self.get_sampling_weights())
             self._rng, self._samples = None, None
 
+        
 
     @override
     def __getitem__(self, idx: int):       
@@ -114,8 +115,7 @@ class SDDataset(MolecularDataset):
             example = self._load_cached_example(parsed_row["extra_info"]["pdb_id"])
         except FileNotFoundError:
             logger.warning(f"Cached example for {parsed_row['extra_info']['pdb_id']} not found in {self.cfg.pdb_path}/cached_examples in {self.phase} dataset, skipping...")                        
-            return self.__getitem__(idx + 1)
-            
+            return self.__getitem__(idx + 1)            
             
         example.update(parsed_row)  # add in query_pn_unit_iids
                     
@@ -148,7 +148,7 @@ class SDDataset(MolecularDataset):
     
         # Load in validation IDs and hold out based on phase. Case insensitive, no extension.                    
         with open(self.cfg.validation_ids_file, "r") as f:                
-            val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}
+            val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}        
         logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_file}...")
             
         if self.cfg.debug:
@@ -160,13 +160,13 @@ class SDDataset(MolecularDataset):
         else:                                            
             chain_df.loc[~chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "train"
             chain_df.loc[chain_df["pdb_id"].str.lower().isin(val_split), "phase"] = "val"        
-            
+                                 
         if self.cfg.exclude_val_cluster: #Todo: This is a strategy used in ligandmpnn, need to be revisited later (JH)
             self.val_cluster_ids = list(set(chain_df[(chain_df['q_pn_unit_is_protein'] == True) & (chain_df['phase'] == 'val')]['q_pn_unit_cluster_id']))
-        
+
         # Subset chain_df to the current phase
         chain_df = chain_df[chain_df["phase"] == self.phase]
-                                                
+        
         # Apply cif filters
         chain_df = self._apply_filters(self.cfg.train_filters.cif_filter if self.phase == "train" else self.cfg.val_filters.cif_filter, chain_df)
         

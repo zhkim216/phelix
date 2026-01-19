@@ -1,5 +1,5 @@
 defaults:
-  - dataset: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
+  - dataset@_here_: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
 
 task: ${model.task}
 pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v2
@@ -11,7 +11,7 @@ train_filters: ???  # Required, set by dataset/*.yaml
 val_filters: ???  # Required, set by dataset/*.yaml
 
 debug: ${train.debug}
-debug_num_ids: 1000 #! For debugging
+debug_num_ids: 100 #! For debugging
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
 residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 exclude_val_cluster: true

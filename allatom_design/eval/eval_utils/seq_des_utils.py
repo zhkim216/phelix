@@ -1160,7 +1160,7 @@ def get_sd_example(*,
                                  cif_parse_cfg = cif_parse_cfg,
                                  preprocess_cfg = preprocess_cfg,
                                  sample_is_designed = sample_is_designed)
-        pdb_id = (Path(pdb_path).stem).split("_")[0]
+        pdb_id = (Path(pdb_path).stem).split("_")[0]    
     
     if not sample_is_designed:
         metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)        
