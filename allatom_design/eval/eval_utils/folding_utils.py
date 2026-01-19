@@ -25,7 +25,8 @@ from allatom_design.data.residue_constants import STANDARD_ATOM_MASK
 from atomworks.io.utils.atom_array_plus import AtomArray
 from atomworks.io.utils.selection import get_residue_starts
 from atomworks.io.utils.sequence import aa_chem_comp_3to1
-
+from atomworks.constants import (AF3_EXCLUDED_LIGANDS, STANDARD_AA,
+                                    STANDARD_DNA, STANDARD_RNA)
 
 # ============================================================================
 # AF3 In-Process Runner Utils (Internal)
@@ -290,8 +291,30 @@ def make_af3_json(af3_ss_input_dir: str = None,
                 # Replace residues with actual sequence
                 chain_seq = designed_sample_atom_array[chain_mask].res_name[_res_starts]            
                 chain_seq_with_gaps[_res_ids_0based] = chain_seq
-                processed_entity_canonical_sequence_with_gaps = "".join(aa_chem_comp_3to1(standard_only=False).get(res_name, "X") for res_name in chain_seq_with_gaps)            
-                # processed_entity_canonical_sequence = "".join(aa_chem_comp_3to1(standard_only=False).get(res_name, "X") for res_name in chain_seq)
+                
+                # Detect modified residues
+                # Get hetero flag
+                chain_hetero = designed_sample_atom_array[chain_mask].hetero[_res_starts]
+                hetero_flags_with_gaps = np.full(full_length, False)
+                hetero_flags_with_gaps[_res_ids_0based] = chain_hetero
+                
+                # Make a list of modified residues                
+                modifications = []
+                sequence_letters = []
+                aa_3to1_dict = aa_chem_comp_3to1(standard_only=False)
+                
+                for idx, (res_name, is_hetero) in enumerate(zip(chain_seq_with_gaps, hetero_flags_with_gaps)):
+                    one_letter = aa_3to1_dict.get(res_name, "X")
+                    sequence_letters.append(one_letter)
+                    
+                    if is_hetero and res_name not in STANDARD_AA and res_name != "UNK":
+                        modifications.append({
+                            "ptmType": res_name, # CCD code
+                            "ptmPosition": idx + 1 # 1-based index
+                        })
+                                                    
+                
+                sequence_with_gaps = "".join(sequence_letters)                
                 
                 if make_tc_input:
                     # Make template indices for the actual sequence. 0-based
@@ -300,9 +323,10 @@ def make_af3_json(af3_ss_input_dir: str = None,
                 ss_sequences.append({
                     "protein": {
                         "id": protein_chain_iid.split("_")[0], 
-                        "sequence": processed_entity_canonical_sequence_with_gaps,
+                        "sequence": sequence_with_gaps,
+                        "modifications": modifications if modifications else [],
                         "unpairedMsa": "",
-                        "pairedMsa": ""
+                        "pairedMsa": "",                    
                         }
                     }                
                 )
@@ -311,7 +335,8 @@ def make_af3_json(af3_ss_input_dir: str = None,
                     tc_sequences.append({
                         "protein": {
                             "id": protein_chain_iid.split("_")[0],
-                            "sequence": processed_entity_canonical_sequence_with_gaps, 
+                            "sequence": sequence_with_gaps, 
+                            "modifications": modifications if modifications else [],
                             "unpairedMsa": "",
                             "pairedMsa": "",
                             "templates": [
