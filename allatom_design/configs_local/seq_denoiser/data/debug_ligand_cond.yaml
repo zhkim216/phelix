@@ -56,6 +56,7 @@ featurizer_cfg:
   apply_random_augmentation: true
   translation_scale: 1.0
   update_atom_array: true
+  calc_pseudo_cb_coords: false
   
 samples_per_epoch: 100 #! DEBUG
 batch_size: ${train.batch_size}
