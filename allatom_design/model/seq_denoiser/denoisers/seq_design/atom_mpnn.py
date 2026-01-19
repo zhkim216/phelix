@@ -143,14 +143,13 @@ class AtomMPNN(nn.Module):
         # Pass through encoder layers        
         # Residue-level encoding, for standard AAs in protein chains only
         h_V = h_V + h_S                
-        h_E = self.W_e(h_E)
-                                
+        h_E = self.W_e(h_E)        
+                
         protein_residue_node_mask = batch["protein_residue_node_mask"]
         protein_residue_node_mask_2d = gather_nodes(protein_residue_node_mask.unsqueeze(-1), E_idx).squeeze(-1)
         protein_residue_node_mask_2d = protein_residue_node_mask.unsqueeze(-1) * protein_residue_node_mask_2d
         for layer in self.encoder_layers:
-            h_V, h_E = layer(h_V, h_E, E_idx, protein_residue_node_mask, protein_residue_node_mask_2d)
-        
+            h_V, h_E = layer(h_V, h_E, E_idx, protein_residue_node_mask, protein_residue_node_mask_2d)        
                     
         # Process ligand context features
         if self.ligand_conditioning:
@@ -168,7 +167,7 @@ class AtomMPNN(nn.Module):
         # Pass through decoder layers
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
-                
+        
         for layer in self.decoder_layers:
             h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = protein_residue_node_mask, E_idx = E_idx, mask_attend = protein_residue_node_mask_2d) 
 

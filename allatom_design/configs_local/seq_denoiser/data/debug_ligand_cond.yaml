@@ -1,7 +1,14 @@
+defaults:
+  - dataset@_here_: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
+
 task: ${model.task}
 pdb_path: /home/possu/jinho/datasets/atomworks_lmpnnval_ld
 parquet_path: /home/possu/jinho/datasets/atomworks_lmpnnval_ld/metadata_seq_clustered_04.parquet
-validation_ids_file: /home/possu/jinho/datasets/splits/lmpnnval_small_molecule.txt
+
+validation_ids_file: ??? #! Required, set by dataset/*.yaml
+train_filters: ??? #! Required, set by dataset/*.yaml
+val_filters: ??? #! Required, set by dataset/*.yaml
+
 debug: ${train.debug}
 debug_num_ids: 40 #! For debugging
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
@@ -27,34 +34,6 @@ sampling_weights:
   betas:
     beta_chain: 1.0
     beta_interface: 0.0
-
-train_filters:
-  cif_filter:    
-    - "deposition_date <= '2022-12-16'"
-    - "resolution < 9.0" 
-    - "clash_severity != 'severe'"
-    - "~method.str.contains('NMR')"
-    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
-    - "num_polymer_pn_units < 4"
-  chain_filter:    
-    - "q_pn_unit_is_protein"
-    - "q_pn_unit_sequence_length < 384"
-    # - "not (q_pn_unit_is_peptide and q_pn_unit_num_resolved_residues <= 3)"
-    # - "(~q_pn_unit_is_polymer and ~q_pn_unit_is_metal and q_pn_unit_num_resolved_atoms >= 5)"
-  interface: null    
-
-val_filters:
-  cif_filter:    
-    - "deposition_date <= '2022-12-16'"
-    - "resolution < 3.5" 
-    - "clash_severity != 'severe'"
-    - "~method.str.contains('NMR')"
-    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
-    - "num_polymer_pn_units < 4"
-  chain_filter:
-    - "q_pn_unit_is_protein"
-    - "q_pn_unit_sequence_length < 384"
-  interface: null
     
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:
