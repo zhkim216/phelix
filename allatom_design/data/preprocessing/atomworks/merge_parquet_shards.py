@@ -16,6 +16,12 @@ from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
 
+def get_file_size(pdb_id: str = None, cached_examples_dir: str = None) -> int | None:
+    pt_path = Path(cached_examples_dir) / f"{pdb_id}.pt"
+    if pt_path.exists():
+        return pt_path.stat().st_size
+    return None
+
 
 def merge_batch_parquets_for_shard(batch_dir: Path, shard_dir: Path, shard_id: int) -> Path | None:
     """Merge batch parquets for a single shard if final parquet doesn't exist."""
@@ -50,9 +56,11 @@ def merge_batch_parquets_for_shard(batch_dir: Path, shard_dir: Path, shard_id: i
     return shard_parquet
 
 
-def main(out_dir: str, merge_batches: bool = True):
+def main(out_dir: str, merge_batches: bool = True):        
+    
     out = Path(out_dir)
     shard_dir = out / "shards"
+    cached_examples_dir = out / "cached_examples"
     
     if not shard_dir.exists():
         raise SystemExit(f"Shard directory not found: {shard_dir}")
@@ -95,6 +103,9 @@ def main(out_dir: str, merge_batches: bool = True):
     duplicates_removed_final = rows_before_final - len(df)
     if duplicates_removed_final > 0:
         print(f"Removed {duplicates_removed_final} duplicate rows (by example_id) in final merge")
+    
+    # Add file_size column
+    df["cached_file_size"] = df["pdb_id"].apply(lambda x: get_file_size(x, cached_examples_dir))
 
     # Write combined metadata
     meta_path = out / "metadata.parquet"
