@@ -39,6 +39,7 @@ mpnn:
     use_ligand_context: false
     ligand_atom_context_num: 16  
     sidechain_context_token_num: 16
+    calc_pseudo_cb_coords: true
 
   potts:
     k_neighbors_potts: 48

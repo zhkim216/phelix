@@ -33,7 +33,7 @@ from atomworks.constants import (
     UNKNOWN_DNA,
     UNKNOWN_RNA,
 )
-# from allatom_design.utils.memscope import cuda_mem_scope #! For debugging memory usage
+from allatom_design.data.transform.custom_transforms import get_NCACO_pseudo_CB_coords
 
 class AtomMPNN(nn.Module):
     """Modified ProteinMPNN network to predict sequence from full atom structure."""
@@ -211,9 +211,10 @@ class AtomMPNN(nn.Module):
         # TODO: implement support for noise labels / per-residue noise
         if batch["noise_labels"] is not None:
             raise NotImplementedError("Per-residue noise not yet implemented for AtomMPNN")
-
+        
         # Add noise to input coordinates
         noised_coords = batch["coords"] + batch["noise"]
+                
         return noised_coords
 
 
@@ -225,6 +226,9 @@ class TokenFeatures(nn.Module):
         """
         super().__init__()
         self.cfg = cfg
+
+        #! for ablation study (260118), to compare calculating pseudo CB coordiantes calculated from noised atom array vs from original atom arra and noising
+        self.calc_pseudo_cb_coords = cfg.get("calc_pseudo_cb_coords", False)
 
         # Parameters
         self.ca_only = cfg.get("ca_only", True)  # backwards compatibility
@@ -267,9 +271,16 @@ class TokenFeatures(nn.Module):
         """
         Extract token-level edge features and build KNN graph.
         """
+        # calculate n, ca, c, o and pseudo CB coordinates
+        if self.calc_pseudo_cb_coords:
+            batch = self._get_NCACO_pseudo_CB_coords(batch)
+            
         X = self._get_protein_token_center_coords(batch) # CA coordinates for protein tokens
         D_neighbors, E_idx = self._dist(X = X, mask = batch["protein_residue_node_mask"]) 
 
+        
+        
+        
         # Get RBF features
         if self.ca_only:
             RBF_all = self._rbf(D_neighbors)
@@ -470,7 +481,68 @@ class TokenFeatures(nn.Module):
         if protein_only:
             X = X * batch["token_is_protein_chain"].unsqueeze(-1)
         X = X * batch["token_exists_mask"].unsqueeze(-1)  # mask out padding and unresolved atoms
-        return X
+        return X        
+    
+    def _get_NCACO_pseudo_CB_coords(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b n 3", float]]:
+        
+        B, N_tokens, MAX_ATOMS = batch["tokenwise_atom_idxs"].shape
+        device = batch["coords"].device
+        
+        coords = batch["coords"]  # [B, N_atoms, 3]
+        tokenwise_atom_idxs = batch["tokenwise_atom_idxs"]  # [B, N_tokens, MAX_ATOMS]
+        tokenwise_atom_idxs_mask = batch["tokenwise_atom_idxs_mask"]  # [B, N_tokens, MAX_ATOMS]
+        
+        # atom-wise mask
+        n_mask = batch["n_mask"]   # [B, N_atoms]
+        ca_mask = batch["ca_mask"]
+        c_mask = batch["c_mask"]
+        o_mask = batch["o_mask"]
+                
+        flat_idxs = tokenwise_atom_idxs.reshape(B, -1)  # [B, N_tokens * MAX_ATOMS]
+    
+        token_n_mask = n_mask.gather(dim=1, index=flat_idxs).reshape(B, N_tokens, MAX_ATOMS) * tokenwise_atom_idxs_mask
+        token_ca_mask = ca_mask.gather(dim=1, index=flat_idxs).reshape(B, N_tokens, MAX_ATOMS) * tokenwise_atom_idxs_mask
+        token_c_mask = c_mask.gather(dim=1, index=flat_idxs).reshape(B, N_tokens, MAX_ATOMS) * tokenwise_atom_idxs_mask
+        token_o_mask = o_mask.gather(dim=1, index=flat_idxs).reshape(B, N_tokens, MAX_ATOMS) * tokenwise_atom_idxs_mask        
+        
+        # get N, CA, C, O positions in each token (argmax of the first True position)
+        n_pos = token_n_mask.argmax(dim=-1)   # [B, N_tokens]
+        ca_pos = token_ca_mask.argmax(dim=-1)
+        c_pos = token_c_mask.argmax(dim=-1)
+        o_pos = token_o_mask.argmax(dim=-1)
+        
+        # get atom index at the corresponding positions
+        n_atom_idx = tokenwise_atom_idxs.gather(dim=-1, index=n_pos.unsqueeze(-1)).squeeze(-1)   # [B, N_tokens]
+        ca_atom_idx = tokenwise_atom_idxs.gather(dim=-1, index=ca_pos.unsqueeze(-1)).squeeze(-1)
+        c_atom_idx = tokenwise_atom_idxs.gather(dim=-1, index=c_pos.unsqueeze(-1)).squeeze(-1)
+        o_atom_idx = tokenwise_atom_idxs.gather(dim=-1, index=o_pos.unsqueeze(-1)).squeeze(-1)
+        
+        # gather coords
+        n_coords = coords.gather(dim=1, index=n_atom_idx.unsqueeze(-1).expand(-1, -1, 3))    # [B, N_tokens, 3]
+        ca_coords = coords.gather(dim=1, index=ca_atom_idx.unsqueeze(-1).expand(-1, -1, 3))
+        c_coords = coords.gather(dim=1, index=c_atom_idx.unsqueeze(-1).expand(-1, -1, 3))
+        o_coords = coords.gather(dim=1, index=o_atom_idx.unsqueeze(-1).expand(-1, -1, 3))
+                        
+        n_coords = n_coords * batch["protein_residue_node_mask"].unsqueeze(-1)
+        ca_coords = ca_coords * batch["protein_residue_node_mask"].unsqueeze(-1)
+        c_coords = c_coords * batch["protein_residue_node_mask"].unsqueeze(-1)
+        o_coords = o_coords * batch["protein_residue_node_mask"].unsqueeze(-1)
+        
+        # pseudo CB calculation
+        b = ca_coords - n_coords
+        c = c_coords - ca_coords
+        a = torch.cross(b, c, dim=-1)
+        pseudo_cb_coords = -0.58273431 * a + 0.56802827 * b - 0.54067466 * c + ca_coords
+        
+        batch["ca_coords"] = ca_coords 
+        batch["n_coords"] = n_coords 
+        batch["c_coords"] = c_coords 
+        batch["o_coords"] = o_coords 
+        batch["pseudo_cb_coords"] = pseudo_cb_coords 
+            
+        return batch
+        
+        
 
     def _dist(self, X = None, mask = None, eps=1E-6):
         mask_2D = torch.unsqueeze(mask, 1) * torch.unsqueeze(mask, 2)
