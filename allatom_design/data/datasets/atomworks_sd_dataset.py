@@ -379,8 +379,6 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
         # Stack the values
         collated[key] = values
         
-    # mb = _approx_bytes(collated) / (1024**2)
-    # logging.info(f"[DBG] batch_cpu_mem≈{mb:.1f} MB")
 
     return collated
 
