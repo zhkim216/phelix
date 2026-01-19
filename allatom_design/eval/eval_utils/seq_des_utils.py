@@ -8,7 +8,7 @@ from collections import defaultdict
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
-
+import ast
 import hydra
 import numpy as np
 import pandas as pd
@@ -37,6 +37,7 @@ from allatom_design.data.data import to
 from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
 from allatom_design.data.transform.preprocess import preprocess_transform, preprocess_transform_designed_samples
 from allatom_design.data.transform.sd_featurizer import (sd_featurizer, 
+                                                         sd_featurizer_for_design,
                                                          featurizer_af3_prediction, 
                                                          featurizer_designed_samples)
 from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets
@@ -446,13 +447,13 @@ def extract_ligand_from_structure(
 def run_lc_seq_des(
     *,
     model: SeqDenoiser = None,
-    sample_is_designed: bool = False,
+    input_sample_is_designed: bool = False,
     cif_parse_cfg: DictConfig = None,
     preprocess_cfg: DictConfig = None,
     featurizer_cfg: DictConfig = None,
     cif_save_cfg: DictConfig = None,
     sampling_cfg: DictConfig = None,
-    metadata: pd.DataFrame = None,
+    input_sample_metadata: pd.DataFrame = None,
     pdb_paths: list[str] = None,
     device: str = None,
     out_dir: str = None,
@@ -500,6 +501,8 @@ def run_lc_seq_des(
     if sampling_cfg.verbose and sampling_cfg.omit_aas is not None:
         print(f"Omitting aatype sampling for: {sampling_cfg.omit_aas}")
 
+
+
     # Process PDBs in parallel.
     parallel_context = Parallel(n_jobs=sampling_cfg.num_workers) if sampling_cfg.num_workers > 1 else nullcontext()
 
@@ -515,13 +518,13 @@ def run_lc_seq_des(
             B = len(batch_pdb_paths)                            
                                      
             batch = get_sd_batch(pdb_paths = batch_pdb_paths, 
-                                 sample_is_designed = sample_is_designed,
+                                 sample_is_designed = input_sample_is_designed,
                                  cif_parse_cfg = cif_parse_cfg,
                                  preprocess_cfg = preprocess_cfg,
                                  featurizer_cfg = featurizer_cfg, 
                                  device=device, 
                                  parallel_pool=parallel_pool, 
-                                 metadata=metadata)
+                                 input_sample_metadata=input_sample_metadata)                                                
                                                                                                    
             # Initialize seq_cond and atom_cond masks.
             batch = initialize_sampling_masks(batch)                        
@@ -554,8 +557,7 @@ def run_lc_seq_des(
                     outputs[example_id]["designed_sample_id"].append(designed_sample_id)
                     outputs[example_id]["U"].append(aux[ai]["U"])
                     
-                    # Save atom_array and sequence
-                    outputs[example_id]["designed_sample_atom_array"].append(designed_atom_array)                                        
+                    # Save atom_array and sequence                                        
                     chain_info = non_rcsb.initialize_chain_info_from_atom_array(designed_atom_array)
                     outputs[example_id]["designed_sample_seq"].append(
                         ":".join(info["processed_entity_canonical_sequence"] for info in chain_info.values())
@@ -563,36 +565,39 @@ def run_lc_seq_des(
                     
                     # Process atom arrays for af3 template conditioning
                     designed_prot_atom_array = designed_atom_array[designed_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
-                    designed_ligand_atom_array = designed_atom_array[np.isin(designed_atom_array.chain_type, list(aw_enums.ChainTypeInfo.NON_POLYMERS))]
-                    designed_prot_bb_atom_array = designed_prot_atom_array[designed_prot_atom_array.is_backbone_atom]                                                                                                                
+                    valid_coords_mask = ~np.isnan(designed_prot_atom_array.coord).any(axis=1)
                     
+                    #! mask out atoms with NaN coordiantes (sidechain atoms). But atomized residues (hetero, covalent, etc.) could be included
+                    designed_prot_atom_array = designed_prot_atom_array[valid_coords_mask]                    
+                    designed_ligand_atom_array = designed_atom_array[np.isin(designed_atom_array.chain_type, list(aw_enums.ChainTypeInfo.NON_POLYMERS))]
+                                                                                                                                                           
                     # Combine protein backbone and ligand atoms                    
-                    designed_atom_array_no_sidechain = designed_prot_bb_atom_array + designed_ligand_atom_array #! biotite use + operator to concatenate atom arrays                                       
+                    designed_atom_array_to_save = designed_prot_atom_array + designed_ligand_atom_array #! biotite use + operator to concatenate atom arrays                                       
                     
                     # Renumber atom_id sequentially (1-indexed)
-                    designed_atom_array_no_sidechain.atom_id = np.arange(1, len(designed_atom_array_no_sidechain) + 1)
+                    designed_atom_array_to_save.atom_id = np.arange(1, len(designed_atom_array_to_save) + 1)
                     
                     # Save samp_atom_array_no_sidechain to outputs
-                    outputs[example_id]["designed_sample_bb_ligand_atom_array"].append(designed_atom_array_no_sidechain)
+                    outputs[example_id]["designed_sample_atom_array"].append(designed_atom_array_to_save)
                     
                     # atom_array with gaps for af3 template conditioning
-                    designed_prot_bb_atom_array_with_gaps = designed_prot_bb_atom_array.copy()
+                    designed_prot_atom_array_with_gaps = designed_prot_atom_array.copy()
                                                                                                                                                                 
                     # Insert UNK atoms for gaps in protein backbone atom array
-                    designed_atom_array_no_sidechain_with_gaps = insert_unk_residues_for_gaps_in_atom_array(designed_prot_bb_atom_array_with_gaps)
-                    designed_atom_array_no_sidechain_with_gaps = designed_atom_array_no_sidechain_with_gaps + designed_ligand_atom_array
+                    designed_prot_atom_array_with_gaps = insert_unk_residues_for_gaps_in_atom_array(designed_prot_atom_array_with_gaps)
+                    designed_atom_array_with_gaps_to_save = designed_prot_atom_array_with_gaps + designed_ligand_atom_array
                     
                     # Renumber atom_id sequentially (1-indexed)
-                    designed_atom_array_no_sidechain_with_gaps.atom_id = np.arange(1, len(designed_atom_array_no_sidechain_with_gaps) + 1)
+                    designed_atom_array_with_gaps_to_save.atom_id = np.arange(1, len(designed_atom_array_with_gaps_to_save) + 1)
                     
                     # Save designed atom array to cif file
                     out_file = f"{sample_out_dir}/{designed_sample_id}.cif"                        
-                    out_file = to_cif_file(designed_atom_array_no_sidechain, out_file, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)                        
+                    out_file = to_cif_file(designed_atom_array_to_save, out_file, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)                        
                     _fix_cif_formal_charge(out_file)                        
                     outputs[example_id]["designed_sample_path"].append(out_file)                        
                     
                     out_file_for_af3_tc = f"{sample_out_dir_for_af3_tc}/{designed_sample_id}.cif"
-                    out_file_for_af3_tc = to_cif_file(designed_atom_array_no_sidechain_with_gaps, out_file_for_af3_tc, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)
+                    out_file_for_af3_tc = to_cif_file(designed_atom_array_with_gaps_to_save, out_file_for_af3_tc, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)
                     _fix_cif_formal_charge(out_file_for_af3_tc)
                     outputs[example_id]["designed_sample_path_for_af3_tc"].append(out_file_for_af3_tc)                                                                                                                               
             pbar.update(B)
@@ -604,7 +609,10 @@ def run_lc_seq_des(
             if isinstance(v, list) and len(v) > 0 and isinstance(v[0], torch.Tensor):
                 example_outputs[k] = [t.detach().cpu().item() for t in v]
             elif isinstance(v, torch.Tensor):
-                example_outputs[k] = v.detach().cpu().item()
+                example_outputs[k] = v.detach().cpu().item()                    
+
+    
+      
 
     # Save sample_metadata.pt for later use 
     sample_metadata = {}
@@ -1095,7 +1103,7 @@ def get_sd_batch(
     featurizer_cfg: DictConfig = None,
     device: str = None, 
     parallel_pool: Parallel = None, 
-    metadata: pd.DataFrame = None,
+    input_sample_metadata: pd.DataFrame = None,
 ) -> dict[str, Any]:
     """
     Given a list of pdb file paths, return a batch of sequence design model features.
@@ -1108,7 +1116,7 @@ def get_sd_batch(
                                          cif_parse_cfg=cif_parse_cfg,
                                          preprocess_cfg=preprocess_cfg,
                                          featurizer_cfg=featurizer_cfg,  
-                                         metadata=metadata,
+                                         input_sample_metadata=input_sample_metadata,
                                          sample_is_designed=sample_is_designed) for pdb_path in pdb_paths]                                       
                                                                                                                                                                      
     else:
@@ -1117,7 +1125,7 @@ def get_sd_batch(
                                                                cif_parse_cfg=cif_parse_cfg, 
                                                                preprocess_cfg=preprocess_cfg,
                                                                featurizer_cfg=featurizer_cfg,                                         
-                                                               metadata=metadata,
+                                                               input_sample_metadata=input_sample_metadata,
                                                                sample_is_designed=sample_is_designed) for pdb_path in pdb_paths)
                                                                
 
@@ -1133,7 +1141,7 @@ def get_sd_example(*,
                    cif_parse_cfg: DictConfig = None,
                    preprocess_cfg: DictConfig = None,
                    featurizer_cfg: DictConfig = None,
-                   metadata: pd.DataFrame = None,       
+                   input_sample_metadata: pd.DataFrame = None,       
                    load_from_cache: bool = False,                     
                    ) -> dict[str, Any]:
     """
@@ -1162,19 +1170,16 @@ def get_sd_example(*,
                                  sample_is_designed = sample_is_designed)
         pdb_id = (Path(pdb_path).stem).split("_")[0]
     
-    if not sample_is_designed:
-        metadata_example = metadata[metadata["pdb_id"] == pdb_id].reset_index(drop=True)        
-            
-        example['example_id'] = metadata_example["example_id"].iloc[0]                            
-        query_pn_unit_iids = metadata_example["q_pn_unit_iid_1"].tolist() + metadata_example["q_pn_unit_iid_2"].tolist()
-        example["query_pn_unit_iids"] = query_pn_unit_iids
-        
-        example['extra_info'] = {} #! delete all the information preexisting in the example
-        row_dict = metadata_example.iloc[0].to_dict() # To series to ignore the index
-        example['extra_info'] = row_dict
-                        
+    if input_sample_metadata is not None:
+        query_pn_unit_iids = input_sample_metadata[input_sample_metadata['pdb_id'] == pdb_id]['query_pn_unit_iids'].iloc[0]
+        example['query_pn_unit_iids'] = ast.literal_eval(query_pn_unit_iids)
+    else:
+        atom_array = example['atom_array']        
+        unique_pn_unit_iids = np.unique(atom_array.pn_unit_iid).tolist()
+        example['query_pn_unit_iids'] = unique_pn_unit_iids
+                                                
     # Featurize the example.
-    featurizer = sd_featurizer(**featurizer_cfg, is_inference=True)                                                                                    
+    featurizer = sd_featurizer_for_design(**featurizer_cfg, sample_is_designed=sample_is_designed, is_inference=True)                                                                                    
         
     example = featurizer(example)
 
@@ -1365,62 +1370,30 @@ def _fix_cif_annotation_types(atom_array) -> "AtomArray":
 def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str, torch.Tensor]:
     """
     Initialize the sampling masks for the batch. Modifies batch in place and returns it.
-    """
+    """        
     # Initialize sequence mask: always condition on non-protein or non-standard residues.
-    standard_prot_mask = batch["chain_is_protein"] & ~batch["is_atomized"]
+    seq_cond_mask = torch.zeros_like(batch["token_pad_mask"])
+    standard_aa_prot_token_mask = batch["token_is_protein_chain"] * (~batch["is_atomized"]) * batch["token_resolved_mask"] * batch["token_pad_mask"]
     
-    batch["seq_cond_mask"] = torch.zeros_like(batch["token_pad_mask"])
-    batch["seq_cond_mask"] = torch.where(
-        standard_prot_mask, torch.zeros_like(batch["seq_cond_mask"]), batch["token_resolved_mask"]
-    )
-    batch["seq_cond_mask"] *= batch["token_pad_mask"]
+    seq_cond_mask = torch.where(standard_aa_prot_token_mask.bool(),
+                                    seq_cond_mask,
+                                    batch["token_resolved_mask"])
+    
+    batch["seq_cond_mask"] = seq_cond_mask * batch["token_pad_mask"] * batch["token_resolved_mask"]
 
-    # Initialize atom mask: 
-    # masks for protein backbone atoms
-    atomwise_chain_is_protein = batch["chain_is_protein"].gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] # re-mask out pad atoms
-    prot_bb_atom_mask = batch["prot_bb_atom_mask"] * batch["atom_resolved_mask"] * atomwise_chain_is_protein 
-
-    # atom_cond_mask
-    batch["atom_cond_mask"] = torch.where(atomwise_chain_is_protein.bool(), prot_bb_atom_mask.bool(), batch["atom_resolved_mask"].bool())
-    batch["atom_cond_mask"] = batch["atom_cond_mask"] & batch["atom_pad_mask"].bool()
-
+    # Initialize atom mask: condition on backbone atoms of standard amino acids in protein chains or all atoms in non-standard residues and non-protein chains            
+    standard_aa_prot_atom_mask = batch["atom_is_protein_chain"] * (1 - batch["atom_is_atomized"]) * batch["atom_resolved_mask"] * batch["atom_pad_mask"]    
+    standard_aa_prot_bb_atom_mask = standard_aa_prot_atom_mask * batch["prot_bb_atom_mask"]
+    
+    batch["atom_cond_mask"] = torch.where(standard_aa_prot_atom_mask.bool(),
+                                          standard_aa_prot_bb_atom_mask,
+                                          batch["atom_resolved_mask"])
+    
+    # Ensure that all atoms in atom_cond_mask are resolved and atom_cond_mask is masked out the padding atoms
+    batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
+                                          
     return batch
-
-def initialize_pocket_mask(batch: dict[str, TensorType["b ..."]],
-                                  ligand_pocket_dist_cutoff: float = None,
-                                  small_molecule_only: bool = True) -> dict[str, torch.Tensor]:
-        
-    if ligand_pocket_dist_cutoff is None:
-        ligand_pocket_dist_cutoff = 5.0
-        
-    B, N, _ = batch["coords"].shape
-    coords = batch["coords"] * batch["atom_resolved_mask"].unsqueeze(-1) * batch["atom_pad_mask"].unsqueeze(-1)
-    atom_mask = batch["atom_resolved_mask"] * batch["atom_pad_mask"]
     
-    # Compute protein coords
-    protein_token_mask = batch["chain_is_protein"] * batch["is_protein"] * batch["token_resolved_mask"] * batch["token_pad_mask"] # [B, N_tokens]
-    protein_atom_mask = torch.gather(protein_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]                
-    protein_coords = coords * protein_atom_mask.unsqueeze(-1)
-    
-    # Compute ligand coords
-    non_protein_token_mask = ~batch["chain_is_protein"] * batch["token_resolved_mask"] * batch["token_pad_mask"]
-    non_protein_atom_mask = torch.gather(non_protein_token_mask, dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"]
-    non_protein_coords = coords * non_protein_atom_mask.unsqueeze(-1)
-    dist_mat_mask = protein_atom_mask[:, :, None] * non_protein_atom_mask[:, None, :] 
-    
-    pocket_atom_mask = torch.cdist(protein_coords, non_protein_coords) 
-    pocket_atom_mask = torch.where(dist_mat_mask.bool(), pocket_atom_mask, torch.ones_like(pocket_atom_mask, device=coords.device) * torch.inf)
-    pocket_atom_mask = pocket_atom_mask < ligand_pocket_dist_cutoff # [B, N_atoms, N_atoms]
-    
-    pocket_atom_mask = torch.any(pocket_atom_mask, dim=-1) # [B, N_atoms]
-    pocket_token_mask = torch.zeros_like(batch["token_pad_mask"], device=coords.device, dtype=torch.bool) # [B, N_tokens]
-    pocket_token_mask.scatter_(dim=-1, index=batch["atom_to_token_map"], src=pocket_atom_mask.bool()) # [B, N_tokens]        
-    pocket_token_mask = pocket_token_mask * batch["token_pad_mask"].bool() * batch["token_resolved_mask"].bool()
-    
-    batch["pocket_token_mask"] = pocket_token_mask
-    
-    return batch
-
 
 ###########################################################
 # Position Constraint Parsing
@@ -2124,8 +2097,8 @@ def create_sample_dict(*,
     return sample_dict
 
 
-def prepare_samples(cfg: DictConfig = None,
-                    metadata: pd.DataFrame = None) -> dict:
+def prepare_sample_dict(cfg: DictConfig = None,
+                    input_sample_metadata: pd.DataFrame = None) -> dict:
                             
     """
     Prepare sample_dict with ligand extraction and designed structure loading.
@@ -2145,27 +2118,7 @@ def prepare_samples(cfg: DictConfig = None,
         
     # Initialize dictionary for storing sample information
     sample_dict = create_sample_dict(input_sample_paths=input_sample_paths)
-    
-    # Load ligand atom arrays from ligand source path
-    if cfg.ligand_source_cfg.add_ligands_to_designed_samples:
-        if not cfg.ligand_source_cfg.source_is_designed:
-            cif_parse_cfg = cfg.cif_cfg.parse.native
-            preprocess_cfg = cfg.preprocess_cfg.native
-            featurizer_cfg = cfg.featurizer_cfg.design
-        else:
-            cif_parse_cfg = cfg.cif_cfg.parse.designed_samples
-            preprocess_cfg = cfg.preprocess_cfg.designed_samples
-            featurizer_cfg = cfg.featurizer_cfg.prepare_designed_samples
-            
-        sample_dict = _load_ligand_atom_arrays_from_ligand_source_samples(sample_dict=sample_dict,
-                                                                   source_is_designed=cfg.ligand_source_cfg.source_is_designed,
-                                                                   ligand_source_path=cfg.ligand_source_cfg.ligand_source_path,
-                                                                   cif_parse_cfg = cif_parse_cfg,
-                                                                   preprocess_cfg = preprocess_cfg,
-                                                                   featurizer_cfg = featurizer_cfg,
-                                                                   metadata = metadata)
-        
-                
+                    
     return sample_dict
 
 def _load_ligand_atom_arrays_from_ligand_source_samples(sample_dict: dict = None,
@@ -2174,7 +2127,7 @@ def _load_ligand_atom_arrays_from_ligand_source_samples(sample_dict: dict = None
                                                      cif_parse_cfg: DictConfig = None,
                                                      preprocess_cfg: DictConfig = None,
                                                      featurizer_cfg: DictConfig = None,
-                                                     metadata: pd.DataFrame = None) -> dict:
+                                                     input_sample_metadata: pd.DataFrame = None) -> dict:
     """
     Load ligand atom arrays from ligand source path.
     """
@@ -2189,7 +2142,7 @@ def _load_ligand_atom_arrays_from_ligand_source_samples(sample_dict: dict = None
                                      cif_parse_cfg = cif_parse_cfg,
                                      preprocess_cfg = preprocess_cfg,
                                      featurizer_cfg = featurizer_cfg,
-                                     metadata = metadata)
+                                     input_sample_metadata = input_sample_metadata)
             # Todo(260106): Need to take a look at whether this part works fine
                         
         else:
@@ -2256,13 +2209,10 @@ def _extract_ligand_atom_array_from_cached_examples(sample_dict: dict = None,
     return sample_dict
 
 
-def load_designed_samples(sample_dict: dict = None,
-                          cif_parse_cfg: DictConfig = None,
-                          preprocess_cfg: DictConfig = None,
-                          featurizer_cfg: DictConfig = None,
-                          is_all_atom_sample: bool = False,
-                          add_ligands_to_designed_samples: bool = False,
-                          save_dir: Path = None) -> dict:
+def load_and_save_input_samples(sample_dict: dict = None,
+                                cfg: DictConfig = None,
+                                save_dir: Path = None,                                
+                          ) -> dict:
     """
     Load designed structures from caliby codebase and combine with ligand.
     
@@ -2317,6 +2267,30 @@ def load_designed_samples(sample_dict: dict = None,
         save_dir.mkdir(parents=True, exist_ok=True)
         
     sample_ids = list(sample_dict.keys())
+    
+    if not cfg.input_sample_is_designed: 
+        input_cif_parse_cfg = cfg.cif_cfg.parse.native
+        input_preprocess_cfg = cfg.preprocess_cfg.native
+    else:
+        input_cif_parse_cfg = cfg.cif_cfg.parse.designed_samples
+        input_preprocess_cfg = cfg.preprocess_cfg.designed_samples
+    
+    # Process PDBs in parallel.
+    parallel_context = Parallel(n_jobs=cfg.num_workers) if cfg.num_workers > 1 else nullcontext()
+    pbar = tqdm(total=len(sample_ids), desc="Loading input samples and saving to the output directory")
+    
+    with parallel_context as parallel_pool:
+        for sample_id in sample_ids:
+            example = get_sd_example(pdb_path = sample_dict[sample_id]['input_sample_path'],
+                                     sample_is_designed = cfg.input_sample_is_designed,
+                                     cif_parse_cfg = input_cif_parse_cfg,
+                                     preprocess_cfg = input_preprocess_cfg,
+                                     featurizer_cfg = cfg.featurizer_cfg.design,
+                                     input_sample_metadata = cfg.input_sample_metadata)
+            
+            input_sample_atom_array = example["atom_array"]   
+            
+
             
     for sample_id in tqdm(sample_ids, desc="Loading designed samples"):        
         
@@ -2495,14 +2469,14 @@ def redesign_with_native(sample_dict: dict,
 
 
 def redesign_with_lcaliby(seed: int = 0,
-                        sample_is_designed: bool = False,
+                        input_sample_is_designed: bool = False,
                         sample_dict: dict = None,
                         seq_des_cfg: DictConfig = None,
                         cif_parse_cfg: DictConfig = None,
                         preprocess_cfg: DictConfig = None,
                         featurizer_cfg: DictConfig = None,
                         cif_save_cfg: DictConfig = None,                          
-                        metadata: pd.DataFrame = None,
+                        input_sample_metadata: pd.DataFrame = None,
                         log_dir: Path = None,
                         pos_constraint_df: pd.DataFrame = None) -> list[tuple[dict, Path, dict]]:
     """
@@ -2553,19 +2527,19 @@ def redesign_with_lcaliby(seed: int = 0,
         
         outputs = run_lc_seq_des(
             model=seq_des_model["model"], 
-            sample_is_designed = sample_is_designed,
+            input_sample_is_designed = input_sample_is_designed,
             cif_parse_cfg=cif_parse_cfg,
             preprocess_cfg=preprocess_cfg,
             featurizer_cfg=featurizer_cfg,
             cif_save_cfg=cif_save_cfg,                                     
             sampling_cfg=seq_des_model["sampling_cfg"],                          
-            metadata=metadata,
+            input_sample_metadata=input_sample_metadata,
             pdb_paths=input_sample_paths, 
             device=device,             
             out_dir=str(log_dir_per_ckpt),
             pos_constraint_df=pos_constraint_df,
         )
-        
+                
         sample_dict_per_ckpt = copy.deepcopy(sample_dict)
                 
         for example_id, output in outputs.items():  
@@ -2575,6 +2549,26 @@ def redesign_with_lcaliby(seed: int = 0,
             sample_dict_per_ckpt[example_id]['designed_sample_seq'] = output["designed_sample_seq"]
             sample_dict_per_ckpt[example_id]['designed_sample_path'] = output["designed_sample_path"]
             sample_dict_per_ckpt[example_id]['designed_sample_path_for_af3_tc'] = output["designed_sample_path_for_af3_tc"]
+            
+        # Extract pdb_chain_info from outputs for af3 prediction
+        for example_id in sample_dict_per_ckpt.keys():
+            pdb_chain_info = defaultdict(list)
+            designed_sample_atom_array = sample_dict_per_ckpt[example_id]["designed_sample_atom_array"][0]
+            desgiend_sample_prot_atom_array = designed_sample_atom_array[designed_sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+            desgiend_sample_ligand_atom_array = designed_sample_atom_array[np.isin(designed_sample_atom_array.chain_type, list(aw_enums.ChainTypeInfo.NON_POLYMERS))]
+            protein_chain_iids = [str(chain_iid) for chain_iid in np.unique(desgiend_sample_prot_atom_array.chain_iid)]    
+            ligand_chain_iids = [str(chain_iid) for chain_iid in np.unique(desgiend_sample_ligand_atom_array.chain_iid)]
+            ligand_ccd_codes = [str(desgiend_sample_ligand_atom_array[desgiend_sample_ligand_atom_array.chain_iid == chain_iid].res_name[0]) for chain_iid in ligand_chain_iids]
+            ligand_chain_iids_ccd_codes = list(zip(ligand_chain_iids, ligand_ccd_codes))    
+            
+            for chain_iid in protein_chain_iids:
+                pdb_chain_info["protein_chain_iids"].append(str(chain_iid))
+            
+            for chain_iid, ccd_code in ligand_chain_iids_ccd_codes:
+                pdb_chain_info["ligand_chain_iids"].append(str(chain_iid))
+                pdb_chain_info["ligand_ccd_codes"].append(str(ccd_code))            
+
+            sample_dict_per_ckpt[example_id]["pdb_chain_info"] = pdb_chain_info  
                     
         results.append((sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info))
     

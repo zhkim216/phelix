@@ -1,85 +1,202 @@
-# Wandb configuration
+########### Basic settings #########
+# Wandb settings
 wandb:
-  no_wandb: false  # Disable wandb logging
-  project: "ligand_seq_des"  # Wandb project name
+  no_wandb: true  # Disable wandb logging
+  project: "ligand_seq_des"
   wandb_id: "zhkim216"  # Wandb username
-  group: "debug" # Wandb group name
+  group: null
 
-# Run settings
-seed: 0
-num_workers: 8  # for dataloading
+# Basic settings
 debug: true
-num_sample_debug: 4
+num_debug_samples: 2
+seed: 0
+num_workers: 0 # for dataloading
 
-# Metadata
-metadata_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/interface_df_ver1.parquet
+# Outputs
+exp_name: debug_eval_exp3_cfg0_boltzval # experiment name; used for wandb and output directory
+base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
-# Inputs
-ckpt_path: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp1_cfg0/checkpoints/sd-step25000-epoch15.ckpt
-base_out_dir: /scratch/users/zhkim216/out_dir/eval_lc_seq_des
-exp_name: eval_seq_acc_exp1_cfg0  # experiment name; used for wandb and output directory
+# Sequence design config
+seq_des_cfg:  
+  model_name: "lc_atom_mpnn"
+  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp3_cfg0
+  ckpt_cfg:
+    start_step: 22500
+    end_step: 22500
+    eval_every_n_ckpts: 1
+    eval_last_ckpt: false
+    use_ema: true
+  atom_mpnn:
+    ckpt_path: null
+    sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
+    overrides:
+      batch_size: 2
+      num_seqs_per_pdb: 2  # number of sequences to sample per pdb
+      omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
+      noise_labels: null
+      num_workers: ${num_workers}
+      use_potts_sampling: true      
+      potts_sampling_cfg:
+        potts_sweeps: 500
+        lcp_expand_edge_idx_fix: true
 
-# input_cfg
-# PDB file inputs
-input_cfg:
-  load_from_cache: true
-  load_cache_cfg:
-    cached_example_path: "/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples"
-    pdb_name_ext: ".pt"
-    n_subsample: null
-  pdb_cfg:
-    pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/pdbs
-    pdb_name_ext: ".cif"  # if pdb_name_list does not have extensions, add this extension
-    n_subsample: null  # randomly sample this many pdb keys, null to use all
-  
-featurizer_cfg:
-  max_tokens: null
-  max_atoms: null
-  crop_center_cutoff_distance: 15.0
-  crop_spatial_p: 0.5
-  remove_keys: []
-  remove_unresolved_tokens: true
-  residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
-  max_conformers_per_residue: 50
-  apply_random_augmentation: false
-  translation_scale: 1.0
+# Metadata for input samples
+input_sample_metadata_csv: /home/possu/jinho/datasets/val_cifs/boltz_val_cifs/metadata_boltzval_protein_monomer.csv
 
 # Positional constraints: supports columns in [pdb_key,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
 # e.g. 2fyzA,"A1-100,B1-100","A1-100"
 pos_constraint_csv: null
 
-# Sampling config
-sampling_cfg_overrides:
-  batch_size: 2
-  num_seqs_per_pdb: 2  # number of sequences to sample per pdb
-  omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
-  noise_labels: null
-  num_workers: ${num_workers}
-  use_potts_sampling: true
-  ligand_conditioning: true
-  ligand_pocket_dist_cutoff: 5.0
-  small_molecule_only: true
-  potts_sampling_cfg:
-    potts_sweeps: 50
-    lcp_expand_edge_idx_fix: false
+# Redesign pocket sequence options
+redesign_cfg:
+  use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
+  pocket_distance: 5.0
 
+# Docking metrics configuration
+docking_metrics_cfg:
+  pocket_distance_for_metrics: 8.0
 
+######### Data & Transform configurations #########
+input_sample_is_all_atom: false
+input_sample_is_designed: false
+load_from_cache: false
 
-# Checkpoint sweep control
-sweep_cfg:
-  enabled: true  # true로 하면 ckpt 디렉토리 스윕 실행
-  ckpt_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp1_cfg0/checkpoints
-  ckpt_glob: "sd-step*-epoch*.ckpt"  # 스윕 대상 패턴
-  max_ckpts: null  # 스윕할 최대 개수 제한 (null이면 전부)
-  wandb_log: true  # 스윕 시 wandb 로깅 활성화 (no_wandb를 오버라이드)
+# Configurations for getting native or designed structures' paths
+pdb_cfg:
+  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/boltz_val_cifs/cifs
+  pdb_name_list: /scratch/users/zhkim216/datasets/val_cifs/boltz_val_cifs/boltzval_protein_monomer_validation_ids.txt
+  pdb_name_ext: ".cif"
+  n_subsample: null  # null to use all samples
 
-# Sampling config
-seq_des_cfg:
-  model_name: "lc_atom_mpnn"
-  atom_mpnn:
-    ckpt_path: ${ckpt_path}
-    sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
-    overrides: ${sampling_cfg_overrides}
+# Configurations for loading ligand atom arrays from ligand source path
+ligand_source_cfg:
+  ligand_source_path: /home/possu/jinho/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
+  add_ligands_to_designed_samples: false
+  source_is_designed: true
+
+#### For designing samples ####
+# Configurations for cif files
+cif_cfg:
+  parse:
+    native:
+      add_missing_atoms: true
+      remove_waters: true
+      remove_ccds: []
+      fix_ligands_at_symmetry_centers: true
+      fix_arginines: true
+      convert_mse_to_met: true
+      hydrogen_policy: "remove"
+      extra_fields: "all"      
+    designed_samples:
+      add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
+      remove_waters: false
+      remove_ccds: []
+      fix_ligands_at_symmetry_centers: false
+      fix_arginines: false
+      convert_mse_to_met: false
+      hydrogen_policy: "remove"
+      extra_fields: null  
+    af3_predictions:
+      add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
+      remove_waters: false
+      remove_ccds: []
+      fix_ligands_at_symmetry_centers: false
+      fix_arginines: false
+      convert_mse_to_met: false
+      hydrogen_policy: "remove"
+      extra_fields: null  
+  save:
+    date: "1959-01-07" #! Young-Ae Lee's birthday
+    include_entity_poly: True
+    include_entity_nonpoly: True
+    include_nan_coords: False #! designed structures should not have nan coords
+    include_bonds: True
+    extra_fields: "all"
+    exclude_field_keys: ["token_id", "is_ligand_pocket"]
+    extra_categories:
+      pdbx_audit_revision_history:
+        ordinal: [1]
+        revision_id: [1]
+        revision_date: ["1959-01-07"]
+        major_revision: [1]
+        minor_revision: [0]
+        revision_description: ["Dummy date for template-conditioning AF3"]
+
+preprocess_cfg:
+  native:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: true
+    remove_terminal_oxygen_nucleic_acid: true
+  designed_samples:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: true
+    remove_terminal_oxygen_nucleic_acid: true
+  af3_predictions:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: false #! AF3 prediction CIF files have OXT atoms, so need to preserve them
+    remove_terminal_oxygen_nucleic_acid: false #! AF3 prediction CIF files have OXT atoms, so need to preserve them
+
+featurizer_cfg:
+  design:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []    
+    remove_unresolved_tokens: true
+    residue_cache_dir: "/scratch/users/zhkim216/datasets/atomworks_cached_residue_data"
+    max_conformers_per_residue: 50
+    apply_random_augmentation: false
+    translation_scale: 1.0
+    pocket_distance: 8.0
+  prepare_designed_samples:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []    
+    remove_unresolved_tokens: true
+  prepare_af3_predictions:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []    
+    remove_unresolved_tokens: true
+
+######### Structure prediction model configuration (AF3) #########
+struct_pred_cfg:
+  model_name: "af3"
+  evaluate_self_consistency: true
+  calculate_metrics_only: false
+  af3:
+    runner_path: /home/users/zhkim216/code/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
+    json_config:
+      model_seeds: [42]
+      version: 2
+    inference_config:
+      base:
+        model_dir: /home/possu/jinho/model_params/af3
+        db_dir: /home/possu/jinho/af3_databases
+        flash_attention_implementation: "xla"
+      ss:  # Single-sequence prediction config
+        num_recycles: 1
+        num_diffusion_samples: 1
+        max_templates: 0
+        ligand_protein_template_conditioning_mode: 0
+        mask_template_sidechains: true
+        mask_template_sequence: true
+      tc:  # Template-conditioned prediction config
+        num_recycles: 1
+        num_diffusion_samples: 1
+        max_templates: 1
+        ligand_protein_template_conditioning_mode: 1
+        mask_template_sidechains: true
+        mask_template_sequence: true
+        max_template_date: "2021-09-30"
 
 hydra:
   run:

@@ -1,5 +1,5 @@
 defaults:
-  - dataset: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
+  - dataset@_here_: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
 
 task: ${model.task}
 pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v2

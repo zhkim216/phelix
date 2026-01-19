@@ -118,8 +118,7 @@ def sd_featurizer(
     # NOTE: for now, we ignore ref pos features because they are too slow to compute
     featurization_transforms_post_crop = [
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
-        EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
-        # AddChainTypeFeaturesForTrain() if not is_inference else AddChainTypeFeaturesForInference(),
+        EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),        
         # AddCachedResidueData(residue_cache_dir=residue_cache_dir),
         # GetAF3ReferenceMoleculeFeatures(
         #     save_rdkit_mols=False,
@@ -147,6 +146,77 @@ def sd_featurizer(
         *featurization_transforms_pre_crop,
         check_coordinates_are_nan,
         cropping_transform,
+        *featurization_transforms_post_crop,
+        PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
+        SubsetToKeys(keys=["example_id", "feats", *INFERENCE_ONLY_KEYS]),
+        FlattenFeatsDict(),
+        RemoveKeys(keys=remove_keys),
+    ]
+
+    return Compose(transforms)
+
+def sd_featurizer_for_design(
+    # cropping
+    max_tokens: int | None = None,
+    max_atoms: int | None = None,
+    remove_keys: list[str] = [],
+    remove_unresolved_tokens: bool = False,
+    residue_cache_dir: str | None = "/scratch/users/zhkim216/datasets/atomworks/cached_residue_data",
+    max_conformers_per_residue: int | None = 50,
+    apply_random_augmentation: bool = True,
+    translation_scale: float = 1.0,
+    pocket_distance: float = 8.0,
+    update_atom_array: bool = True,
+    sample_is_designed: bool = False,
+    is_inference: bool = False,
+) -> Transform:
+    """
+    Build a transform pipeline that transforms a featurized structure into an example for designing samples.
+    """
+    # Featurization that must be done before cropping
+    featurization_transforms_pre_crop = [    
+        MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={
+            aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_BACKBONE_ATOM_NAMES, #! fixed
+            aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_BACKBONE_ATOM_NAMES, #! fixed
+        }) if not sample_is_designed else Identity(),
+        FilterToQueryPNUnits(),        
+        RemoveUnresolvedTokens() if remove_unresolved_tokens and not sample_is_designed else Identity(),
+        RemoveUnsupportedChainTypes(),
+        ErrIfAllUnresolved(),
+    ]
+        
+    check_coordinates_are_nan = CheckCoordinatesAreNan()
+    
+    # Featurization    
+    featurization_transforms_post_crop = [
+        AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
+        EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),        
+        # AddCachedResidueData(residue_cache_dir=residue_cache_dir),
+        # GetAF3ReferenceMoleculeFeatures(
+        #     save_rdkit_mols=False,
+        #     use_cached_conformers=True,
+        #     conformer_generation_timeout=5.0,
+        #     use_element_for_atom_names_of_atomized_tokens=False,
+        #     max_conformers_per_residue=max_conformers_per_residue,
+        # ),
+        ComputeAtomToTokenMap(),        
+        AnnotateLigandPockets(pocket_distance=pocket_distance), 
+        ConvertToTorch(keys=["encoded", "feats"]),
+        # Handle missing atoms and tokens
+        # PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
+        # PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"), 
+        # Add features from the atom_array
+        FeaturizeCoordsAndMasks(),
+        CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
+                                translation_scale=translation_scale,
+                                update_atom_array=update_atom_array),
+        GetPseudoCBCoords(),
+        
+    ]
+    
+    transforms = [
+        *featurization_transforms_pre_crop,
+        check_coordinates_are_nan,        
         *featurization_transforms_post_crop,
         PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
         SubsetToKeys(keys=["example_id", "feats", *INFERENCE_ONLY_KEYS]),

@@ -90,8 +90,7 @@ class SDDataset(MolecularDataset):
         self.interface_df = self._process_interface_df()
 
         # Parse dfs into a common format and concatenate
-        self.parsed_df = self._parse_dfs()
-        self.data = self.parsed_df
+        self.parsed_df = self._parse_dfs()        
         
         # Initialize per-worker random number generator
         if phase == "train":
