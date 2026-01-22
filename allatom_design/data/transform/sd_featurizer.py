@@ -74,7 +74,7 @@ def sd_featurizer(
     translation_scale: float = 1.0,
     pocket_distance: float = 8.0,
     update_atom_array: bool = True,
-    calc_pseudo_cb_coords: bool = False,
+    calc_pseudo_cb_coords: bool = True,
     is_inference: bool = False,
 ) -> Transform:
     """

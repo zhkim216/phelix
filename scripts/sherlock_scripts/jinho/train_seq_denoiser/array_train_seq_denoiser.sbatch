@@ -1,33 +1,28 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=exp3
-#SBATCH -p possu
+#SBATCH --job-name=exp4
+#SBATCH -p possu,bioe
 #SBATCH --array=0-5
 #SBATCH --gres=gpu:1
-#SBATCH --mem=24G
+#SBATCH --mem=48G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=1-0:00:00
-#SBATCH --output=/scratch/users/zhkim216/job_output/job_%A_%a.out
-#SBATCH --error=/scratch/users/zhkim216/job_output/job_%A_%a.err
+#SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/job_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/train_seq_denoiser/job_%A_%a.err
 
 # Define directories
+BASE_DIR=/home/users/zhkim216/code/allatom-design
 HYDRA_DIR=/scratch/users/zhkim216/hydra_outputs
 OUT_DIR=/scratch/users/zhkim216/out_dir
-mkdir -p /scratch/users/zhkim216/job_output "${HYDRA_DIR}" "${OUT_DIR}"
 
-# Torchinductor and triton cache directories - to avoid directory conflicts from torch.compile
-JOB_TAG="${SLURM_JOB_ID:-noid}_${SLURM_ARRAY_TASK_ID:-0}"
-export TORCHINDUCTOR_CACHE_DIR="/scratch/users/zhkim216/cache/inductor_cache_${JOB_TAG}"
-export TRITON_CACHE_DIR="/scratch/users/zhkim216/cache/triton_cache_${JOB_TAG}"
+mkdir -p /scratch/users/zhkim216/job_output/train_seq_denoiser "${HYDRA_DIR}" "${OUT_DIR}"
 
-# Base directory
-BASE_DIR=/home/users/zhkim216/code/allatom-design
 cd "${BASE_DIR}"
 
 # Wandb settings / experiment name
 WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 GROUP="training"
-EXP_NAME_BASE="exp3"
+EXP_NAME_BASE="exp4"
 
 # Dataset paths
 RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
@@ -36,15 +31,15 @@ RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 DENOISER_TYPE="lc_atom_mpnn"
 
 # Path where processed pdb files are stored
-PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v2"
+PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3"
 
 CONFIGS=(
-  "data/dataset=boltz denoiser.augment_eps=0.1"
-  "data/dataset=boltz denoiser.augment_eps=0.2"
-  "data/dataset=boltz denoiser.augment_eps=0.3"
-  "data/dataset=ligandmpnn denoiser.augment_eps=0.1"
-  "data/dataset=ligandmpnn denoiser.augment_eps=0.2"
-  "data/dataset=ligandmpnn denoiser.augment_eps=0.3"
+  "data/dataset@data=boltz denoiser.augment_eps=0.1"
+  "data/dataset@data=boltz denoiser.augment_eps=0.2"
+  "data/dataset@data=boltz denoiser.augment_eps=0.3"
+  "data/dataset@data=ligandmpnn denoiser.augment_eps=0.1"
+  "data/dataset@data=ligandmpnn denoiser.augment_eps=0.2"
+  "data/dataset@data=ligandmpnn denoiser.augment_eps=0.3"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
@@ -69,12 +64,14 @@ python3 allatom_design/train_seq_denoiser.py \
     train.debug=false \
     train.compile.compile_model=true \
     trainer.strategy="ddp_find_unused_parameters_true" \
+    resume.use_current_cfg=true \
     data.pdb_path="${PDB_PATH}" \
     data.residue_cache_dir="${RESIDUE_CACHE_DIR}" \
     data.exclude_val_cluster=true \
     data.featurizer_cfg.remove_unresolved_tokens=true \
     data.featurizer_cfg.max_tokens=512 \
     data.featurizer_cfg.max_atoms=4608 \
+    data.featurizer_cfg.calc_pseudo_cb_coords=false \
     data.sampling_weights.alphas_chain.a_prot=1.0 \
     data.sampling_weights.alphas_chain.a_nuc=0.0 \
     data.sampling_weights.alphas_chain.a_peptide=0.0 \
@@ -92,6 +89,7 @@ python3 allatom_design/train_seq_denoiser.py \
     data.samples_per_epoch=50000 \
     mask_selector.restype_masking_schedule=uniform_t \
     mask_selector.atom_masking_schedule=uniform_t \
+    denoiser.mpnn.token_features.calc_pseudo_cb_coords=true \
     logging.log_every_n_steps=100 \
     logging.wandb_watch_freq=500 \
     checkpointing.save_latest_every_n_steps=2500 \
