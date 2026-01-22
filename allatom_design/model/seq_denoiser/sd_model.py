@@ -93,10 +93,7 @@ class SeqDenoiser(nn.Module):
 
         if batch["noise_labels"] is not None:
             raise NotImplementedError("Noise labels are not implemented yet")
-
-        if sampling_inputs["add_noise"]:
-            raise NotImplementedError("Adding noise is not implemented yet")
-
+        
         if sampling_inputs.get("t", None) is not None:
             batch["t"] = torch.full((batch["token_pad_mask"].shape[0],), fill_value=sampling_inputs["t"], device=batch["token_pad_mask"].device)
 

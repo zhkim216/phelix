@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=lc_seq_des_multi
 #SBATCH -p bioe,possu
-#SBATCH --array=0-53
+#SBATCH --array=0-17
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
@@ -26,29 +26,19 @@ WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 
 # Model names and steps
-MODEL_NAMES=("exp3_cfg0" "exp3_cfg1" "exp3_cfg2" "exp3_cfg3" "exp3_cfg4" "exp3_cfg5")
+MODEL_NAMES=("exp4_cfg0" "exp4_cfg1" "exp4_cfg2")
 STEPS=(2500 12500 22500 32500 42500 52500 62500 72500 82500)
-MODEL_IDX=$((SLURM_ARRAY_TASK_ID % 6))  
-STEP_IDX=$((SLURM_ARRAY_TASK_ID / 6))   
+MODEL_IDX=$((SLURM_ARRAY_TASK_ID % 3))  
+STEP_IDX=$((SLURM_ARRAY_TASK_ID / 3))   
 
 MODEL_NAME=${MODEL_NAMES[$MODEL_IDX]}
 STEP=${STEPS[$STEP_IDX]}
 
 # Input paths
-if [[ "$MODEL_NAME" == "exp3_cfg0" || "$MODEL_NAME" == "exp3_cfg1" || "$MODEL_NAME" == "exp3_cfg2" ]]; then
-    PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/boltz_val_cifs/cifs
-    METADATA_CSV_PATH=/scratch/users/zhkim216/datasets/val_cifs/boltz_val_cifs/metadata_boltzval_protein_monomer.csv
-    PDB_NAME_LIST=/scratch/users/zhkim216/datasets/val_cifs/boltz_val_cifs/boltzval_protein_monomer_validation_ids.txt
-    VALSET_NAME="boltzval"
-elif [[ "$MODEL_NAME" == "exp3_cfg3" || "$MODEL_NAME" == "exp3_cfg4" || "$MODEL_NAME" == "exp3_cfg5" ]]; then
-    PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
-    METADATA_CSV_PATH=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/metadata_small_molecule_val_monomer_512_cluster_rep.csv
-    PDB_NAME_LIST=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/small_molecule_val_monomer_512_cluster_rep.txt
-    VALSET_NAME="lmpnnval"
-else
-    echo "Invalid model name: ${MODEL_NAME}" >&2
-    exit 1
-fi
+PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
+METADATA_CSV_PATH=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/metadata_small_molecule_val_monomer_512_cluster_rep.csv
+PDB_NAME_LIST=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/small_molecule_val_monomer_512_cluster_rep.txt
+VALSET_NAME="lmpnnval"
 
 POS_CONSTRAINT_CSV=null
 LIGAND_SOURCE_PATH=/scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
