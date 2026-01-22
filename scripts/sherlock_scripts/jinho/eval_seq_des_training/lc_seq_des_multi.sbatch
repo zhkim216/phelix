@@ -37,8 +37,8 @@ STEP=${STEPS[$STEP_IDX]}
 # Input paths
 if [[ "$MODEL_NAME" == "exp3_cfg0" || "$MODEL_NAME" == "exp3_cfg1" || "$MODEL_NAME" == "exp3_cfg2" ]]; then
     PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/boltz_val_cifs/cifs
-    METADATA_CSV_PATH=/scratch/users/zhkim216/datasets/val_cifs/boltz_val_cifs/metadata_boltzval_protein_monomer.csv
-    PDB_NAME_LIST=/scratch/users/zhkim216/datasets/val_cifs/boltz_val_cifs/boltzval_protein_monomer_validation_ids.txt
+    METADATA_CSV_PATH=/scratch/users/zhkim216/datasets/val_cifs/boltz_val_cifs/metadata_boltz_protein_monomer_len384_selected.csv
+    PDB_NAME_LIST=/scratch/users/zhkim216/datasets/val_cifs/boltz_val_cifs/boltzval_protein_monomer_len384_selected_validation_ids.txt
     VALSET_NAME="boltzval"
 elif [[ "$MODEL_NAME" == "exp3_cfg3" || "$MODEL_NAME" == "exp3_cfg4" || "$MODEL_NAME" == "exp3_cfg5" ]]; then
     PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
@@ -64,7 +64,7 @@ EXP_NAME=eval_${MODEL_NAME}_${VALSET_NAME}_af3
 echo "Starting evaluation for model=${MODEL_NAME} (idx=${MODEL_IDX}), step=${STEP} (idx=${STEP_IDX}), valset=${VALSET_NAME}"
 
 # Run evaluation script
-WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des.py \
+WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py \
     wandb.no_wandb=false \
     wandb.project=${PROJECT} \
     wandb.wandb_id=${WANDB_ID} \
