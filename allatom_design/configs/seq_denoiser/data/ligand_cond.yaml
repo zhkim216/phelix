@@ -47,17 +47,20 @@ cif_parser_args:
   hydrogen_policy: "remove"
 
 featurizer_cfg:
-  max_tokens: 512 #! DEBUG
-  max_atoms: 4608 #! DEBUG
+  is_inference: false
+  occupancy_threshold_protein_backbone: 0.8
+  training_structure_noise: 0.3
+  undesired_res_names: []
+  remove_unresolved_tokens: true
+  max_tokens: 256 #! DEBUG
+  max_atoms: 2304 #! DEBUG
   crop_center_cutoff_distance: 15.0
   crop_spatial_p: 0.0
-  remove_unresolved_tokens: true 
+  pocket_distance: 8.0
   residue_cache_dir: ${data.residue_cache_dir}
   max_conformers_per_residue: 50
   apply_random_augmentation: true
   translation_scale: 1.0
-  update_atom_array: true
-  calc_pseudo_cb_coords: false
 
 samples_per_epoch: 50000 #! DEBUG
 batch_size: ${train.batch_size}

@@ -34,11 +34,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         self.bb_sigma_data, self.scn_sigma_data = sigma_data
         self.task = cfg.task
 
-        # Random Gaussian noise
-        self.augment_eps = cfg.augment_eps
-        self.per_residue_eps = cfg.per_residue_eps
-        self.max_eps = cfg.max_eps
-
         # Sequence design model: AtomMPNN
         self.atom_mpnn = AtomMPNN(cfg.mpnn)
 
@@ -51,11 +46,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                            dict[str, TensorType["b ..."]]]:
         # Build some helpful masks based on conditioning sequence and atoms
         batch = self.build_masks(batch, is_sampling)
-
-        # During training, add random noise to input coordinates
-        if not is_sampling:
-            batch = self.get_training_random_noise(batch)
-
+        
         # Run model
         seq_logits, mpnn_feats = self.atom_mpnn(batch, is_sampling)
 
@@ -123,44 +114,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         return batch
 
-    def get_training_random_noise(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b ..."]]:
-        """
-        During training, adds random noise and noise labels for input coordinates.
-
-        Updates batch (in place) with:
-        - noise: Tensor["b n_atoms 3", float]: random noise for each atom
-        - noise_labels: Tensor["b n_tokens", float]: noise label for each token
-        """
-        if not self.training or self.augment_eps <= 0:
-            # if not training or no noise, and not provided, then we assume no noise
-            batch["noise"] = batch.get("noise", None)
-            batch["noise_labels"] = batch.get("noise_labels", None)
-            return batch
-
-        ## Training: choose random backbone noise ##
-        B, N_atoms = batch["atom_pad_mask"].shape
-        N_tokens = batch["token_pad_mask"].shape[1]
-        device = batch["atom_pad_mask"].device
-
-        if self.per_residue_eps:
-            # per-residue noise. Unlike Cho et al., we sample noise stds from a uniform distribution and apply different noise to each atom in a residue
-            # randomly sample noise labels
-            noise_labels = torch.rand((B, N_tokens), device=device) * self.augment_eps  # sample std for each residue from uniform [0, augment_eps]
-            atomwise_noise_labels = noise_labels.gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] # [b, n_atoms]
-            noise = torch.randn((B, N_atoms, 3), device=device) * atomwise_noise_labels.unsqueeze(-1)
-            noise = noise * batch["atom_cond_mask"].unsqueeze(-1)
-        else:
-            # global noise, similar to ProteinMPNN
-            # add randomly sampled noise to input
-            noise = self.augment_eps * torch.randn((B, N_atoms, 3), device=device)
-            noise_labels = None
-
-        batch["noise"] = noise
-        batch["noise_labels"] = noise_labels
-
-        return batch
-
-
     def potts_sample(self,
                      batch: dict[str, TensorType["b ..."]],
                      sampling_inputs: dict[str, Any]
@@ -173,12 +126,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             aux: dict[str, Any]: auxiliary outputs
         """
         aux = {}
-
-        # If specified, add noise to inputs
-        noise_std = sampling_inputs["potts_sampling_cfg"].get("noise_std", 0.0)
-        if noise_std > 0:
-            batch["coords"] = batch["coords"] + torch.randn_like(batch["coords"]) * noise_std
-            batch["coords"] = batch["coords"] * batch["atom_pad_mask"].unsqueeze(-1) * batch["atom_resolved_mask"].unsqueeze(-1)
 
         # If specified, condition on sequence only in the potts model
         batch["seq_cond_mask_potts"] = batch["seq_cond_mask"].clone()
