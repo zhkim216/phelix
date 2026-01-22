@@ -8,7 +8,7 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 2
+num_debug_samples: 10
 seed: 0
 num_workers: 0 # for dataloading
 
@@ -21,17 +21,17 @@ seq_des_cfg:
   model_name: "lc_atom_mpnn"
   denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp3_cfg0
   ckpt_cfg:
-    start_step: 32500
-    end_step: 32500
-    eval_every_n_ckpts: 4
+    start_step: 52500 
+    end_step: 52500
+    eval_every_n_ckpts: 1
     eval_last_ckpt: false
     use_ema: true
   atom_mpnn:
     ckpt_path: null
     sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides:
-      batch_size: 2
-      num_seqs_per_pdb: 2  # number of sequences to sample per pdb
+      batch_size: 4
+      num_seqs_per_pdb: 1  # number of sequences to sample per pdb
       omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
       noise_labels: null
       num_workers: ${num_workers}
@@ -200,4 +200,4 @@ struct_pred_cfg:
 
 hydra:
   run:
-    dir: /home/possu/jinho/hydra_outputs
+    dir: /scratch/users/zhkim216/jinho/hydra_outputs
