@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=exp3
-#SBATCH -p possu
-#SBATCH --array=0-5
+#SBATCH --job-name=exp4
+#SBATCH -p possu,bioe
+#SBATCH --array=0-9
 #SBATCH --gres=gpu:1
-#SBATCH --mem=24G
+#SBATCH --mem=48G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=1-0:00:00
-#SBATCH --output=/scratch/users/zhkim216/job_output/job_%A_%a.out
-#SBATCH --error=/scratch/users/zhkim216/job_output/job_%A_%a.err
+#SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/job_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/train_seq_denoiser/job_%A_%a.err
 
 # Define directories
 BASE_DIR=/home/users/zhkim216/code/allatom-design
 HYDRA_DIR=/scratch/users/zhkim216/hydra_outputs
 OUT_DIR=/scratch/users/zhkim216/out_dir
 
-mkdir -p /scratch/users/zhkim216/job_output "${HYDRA_DIR}" "${OUT_DIR}"
+mkdir -p /scratch/users/zhkim216/job_output/train_seq_denoiser "${HYDRA_DIR}" "${OUT_DIR}"
 
 cd "${BASE_DIR}"
 
@@ -22,7 +22,7 @@ cd "${BASE_DIR}"
 WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 GROUP="training"
-EXP_NAME_BASE="exp3"
+EXP_NAME_BASE="exp4"
 
 # Dataset paths
 RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
@@ -31,15 +31,19 @@ RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 DENOISER_TYPE="lc_atom_mpnn"
 
 # Path where processed pdb files are stored
-PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v2"
+PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3"
 
-CONFIGS=(
-  "data/dataset=boltz denoiser.augment_eps=0.1"
-  "data/dataset=boltz denoiser.augment_eps=0.2"
-  "data/dataset=boltz denoiser.augment_eps=0.3"
-  "data/dataset=ligandmpnn denoiser.augment_eps=0.1"
-  "data/dataset=ligandmpnn denoiser.augment_eps=0.2"
-  "data/dataset=ligandmpnn denoiser.augment_eps=0.3"
+CONFIGS=(  
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ca"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ncaco"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ncacocb"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.3 denoiser.mpnn.token_features.rbf_type=ncacocb"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.5 denoiser.mpnn.token_features.rbf_type=ncacocb"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.8 denoiser.mpnn.token_features.rbf_type=ncacocb"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=1.0 denoiser.mpnn.token_features.rbf_type=ncacocb"  
+  "data/dataset@data=ligandmpnn_ab1 data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ca"
+  "data/dataset@data=ligandmpnn_ab2 data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ca"
+  "data/dataset@data=ligandmpnn_ab3 data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ca"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
@@ -67,9 +71,14 @@ python3 allatom_design/train_seq_denoiser.py \
     data.pdb_path="${PDB_PATH}" \
     data.residue_cache_dir="${RESIDUE_CACHE_DIR}" \
     data.exclude_val_cluster=true \
+    data.featurizer_cfg.is_inference=false \
+    data.featurizer_cfg.training_structure_noise=0.3 \
     data.featurizer_cfg.remove_unresolved_tokens=true \
     data.featurizer_cfg.max_tokens=512 \
     data.featurizer_cfg.max_atoms=4608 \
+    data.featurizer_cfg.crop_center_cutoff_distance=15.0 \
+    data.featurizer_cfg.crop_spatial_p=0.0 \
+    data.featurizer_cfg.pocket_distance=8.0 \
     data.sampling_weights.alphas_chain.a_prot=1.0 \
     data.sampling_weights.alphas_chain.a_nuc=0.0 \
     data.sampling_weights.alphas_chain.a_peptide=0.0 \

@@ -24,7 +24,8 @@ from allatom_design.data import data
 from allatom_design.data.residue_constants import STANDARD_ATOM_MASK
 from atomworks.io.utils.atom_array_plus import AtomArray
 from atomworks.io.utils.selection import get_residue_starts
-from atomworks.io.utils.sequence import aa_chem_comp_3to1
+from atomworks.io.utils.sequence import get_1_from_3_letter_code
+from atomworks.enums import ChainType
 from atomworks.constants import (AF3_EXCLUDED_LIGANDS, STANDARD_AA,
                                     STANDARD_DNA, STANDARD_RNA)
 
@@ -298,13 +299,15 @@ def make_af3_json(af3_ss_input_dir: str = None,
                 hetero_flags_with_gaps = np.full(full_length, False)
                 hetero_flags_with_gaps[_res_ids_0based] = chain_hetero
                 
-                # Make a list of modified residues                
+                # Make a list of modified residues and a list of sequence letters
                 modifications = []
-                sequence_letters = []
-                aa_3to1_dict = aa_chem_comp_3to1(standard_only=False)
-                
+                sequence_letters = []                
                 for idx, (res_name, is_hetero) in enumerate(zip(chain_seq_with_gaps, hetero_flags_with_gaps)):
-                    one_letter = aa_3to1_dict.get(res_name, "X")
+                    one_letter = get_1_from_3_letter_code(
+                        res_name, 
+                        chain_type=ChainType.POLYPEPTIDE_L,
+                        use_closest_canonical=False
+                    )
                     sequence_letters.append(one_letter)
                     
                     if is_hetero and res_name not in STANDARD_AA and res_name != "UNK":
