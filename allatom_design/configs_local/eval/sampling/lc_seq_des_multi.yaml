@@ -8,21 +8,21 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 1
+num_debug_samples: 2
 seed: 0
 num_workers: 0 # for dataloading
 
 # Outputs
-exp_name: debug_eval_exp3_cfg0_boltzval # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260118
+exp_name: debug_eval_exp4_cfg2_lmpnnval # experiment name; used for wandb and output directory
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260122
 
 # Sequence design config
 seq_des_cfg:  
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp3_cfg0
+  denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp4_cfg2
   ckpt_cfg:
-    start_step: 42500
-    end_step: 42500
+    start_step: 22500
+    end_step: 22500
     eval_every_n_ckpts: 1
     eval_last_ckpt: false
     use_ema: true
@@ -30,8 +30,8 @@ seq_des_cfg:
     ckpt_path: null
     sampling_cfg: /home/possu/jinho/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
     overrides:
-      batch_size: 1
-      num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+      batch_size: 2
+      num_seqs_per_pdb: 2  # number of sequences to sample per pdb
       omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
       noise_labels: null
       num_workers: ${num_workers}
@@ -41,7 +41,7 @@ seq_des_cfg:
         lcp_expand_edge_idx_fix: true
 
 # Metadata for input samples
-input_sample_metadata_csv: /home/possu/jinho/datasets/val_cifs/boltz_val_cifs/metadata_boltzval_protein_monomer.csv
+input_sample_metadata_csv: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/metadata_small_molecule_val_monomer_512_cluster_rep.csv
 
 # Positional constraints: supports columns in [pdb_key,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
 # e.g. 2fyzA,"A1-100,B1-100","A1-100"
@@ -63,8 +63,8 @@ load_from_cache: false
 
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /home/possu/jinho/datasets/val_cifs/boltz_val_cifs/cifs
-  pdb_name_list: /home/possu/jinho/datasets/val_cifs/boltz_val_cifs/boltzval_protein_monomer_validation_ids.txt
+  pdb_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs
+  pdb_name_list: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/small_molecule_val_monomer_512_cluster_rep.txt
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
 
@@ -147,15 +147,19 @@ preprocess_cfg:
 
 featurizer_cfg:
   design:
-    max_tokens: null
-    max_atoms: null
+    is_inference: true
+    occupancy_threshold_protein_backbone: 0.0
+    training_structure_noise: 0.0
+    undesired_res_names: []
     remove_keys: []    
     remove_unresolved_tokens: true
+    max_tokens: null
+    max_atoms: null  
+    pocket_distance: 8.0
     residue_cache_dir: "/home/possu/jinho/datasets/atomworks_cached_residue_data"
     max_conformers_per_residue: 50
-    apply_random_augmentation: false
-    translation_scale: 1.0
-    pocket_distance: 8.0
+    apply_random_augmentation: true
+    translation_scale: 1.0    
   prepare_designed_samples:
     max_tokens: null
     max_atoms: null

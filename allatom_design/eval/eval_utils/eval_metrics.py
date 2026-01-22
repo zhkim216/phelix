@@ -47,6 +47,7 @@ from biotite.structure import AtomArray
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdMolAlign
 
+
 def compute_self_consistency_metrics_atomworks(sample_path: str = None,
                         pred_sample_paths: list[str] = None,
                         data_cfg_for_af3_prediction: DictConfig = None,

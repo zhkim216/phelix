@@ -13,9 +13,6 @@ skip_sampling: false  # if true, skip sampling and just return potts parameters
 save_potts_params: false
 
 omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
-noise_labels: null  # per-residue noise labels, float for same noise for each residue  # TODO: implement user-provided per-residue noise labels
-add_noise: false  # add noise equal to noise_labels to the input backbone
-t: null  # timestep to condition on for chroma polymer diffusion
 
 potts_sampling_cfg:
   regularization: "LCP"
