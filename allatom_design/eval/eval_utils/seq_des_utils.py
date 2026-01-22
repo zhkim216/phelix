@@ -22,6 +22,7 @@ from atomworks.io.utils import non_rcsb
 from atomworks.io.utils.io_utils import to_cif_string, to_cif_file, load_any
 from atomworks.ml.utils.token import apply_token_wise, get_token_starts, spread_token_wise
 from atomworks.ml.transforms.atom_array import apply_and_spread_residue_wise
+from atomworks.constants import STANDARD_AA
 import atomworks.enums as aw_enums
 from biotite.structure import AtomArray, AtomArrayStack, get_residue_starts
 from biotite.structure.filter import filter_amino_acids
@@ -599,10 +600,54 @@ def run_lc_seq_des(
                     out_file_for_af3_tc = f"{sample_out_dir_for_af3_tc}/{designed_sample_id}.cif"
                     out_file_for_af3_tc = to_cif_file(designed_atom_array_with_gaps_to_save, out_file_for_af3_tc, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)
                     _fix_cif_formal_charge(out_file_for_af3_tc)
-                    outputs[example_id]["designed_sample_path_for_af3_tc"].append(out_file_for_af3_tc)                                                                                                                               
+                    outputs[example_id]["designed_sample_path_for_af3_tc"].append(out_file_for_af3_tc)  
+                    
+                    #### Calculate sequence recovery metrics ####
+                    input_atom_array = batch["atom_array"][example_id_to_batch_idx[example_id]]
+                    
+                    # Annotate ligand pockets for pocket sequence recovery metrics
+                    annotated_atom_array = input_atom_array.copy()
+                    annotated_atom_array = annotate_ligand_pockets(annotated_atom_array, pocket_distance=4.0, annotation_name="is_ligand_pocket_4")                    
+                    annotated_atom_array = annotate_ligand_pockets(annotated_atom_array, pocket_distance=5.0, annotation_name="is_ligand_pocket_5")                    
+                    annotated_atom_array = annotate_ligand_pockets(annotated_atom_array, pocket_distance=6.0, annotation_name="is_ligand_pocket_6")                    
+                    pocket_residue_mask_4 = apply_and_spread_residue_wise(annotated_atom_array, annotated_atom_array.get_annotation("is_ligand_pocket_4"), function=np.any)
+                    pocket_residue_mask_5 = apply_and_spread_residue_wise(annotated_atom_array, annotated_atom_array.get_annotation("is_ligand_pocket_5"), function=np.any)
+                    pocket_residue_mask_6 = apply_and_spread_residue_wise(annotated_atom_array, annotated_atom_array.get_annotation("is_ligand_pocket_6"), function=np.any)
+                                        
+                    seq_rec_mask = (annotated_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (np.isin(annotated_atom_array.res_name, STANDARD_AA)) & ~(annotated_atom_array.hetero) 
+                    seq_rec_mask = seq_rec_mask & ~(np.isnan(annotated_atom_array.coord).any(axis=1))
+                    pocket_seq_rec_mask_4 = seq_rec_mask & pocket_residue_mask_4
+                    pocket_seq_rec_mask_5 = seq_rec_mask & pocket_residue_mask_5
+                    pocket_seq_rec_mask_6 = seq_rec_mask & pocket_residue_mask_6
+                                                                                            
+                    token_start_idxs = get_token_starts(annotated_atom_array)                    
+                    is_token_start_mask = np.isin(np.arange(len(annotated_atom_array)), token_start_idxs)                                                            
+                                                                                
+                    input_res_names = annotated_atom_array[(is_token_start_mask) & (seq_rec_mask)].res_name
+                    designed_res_names = designed_atom_array[(is_token_start_mask) & (seq_rec_mask)].res_name
+                    seq_recovery_ratio = (input_res_names == designed_res_names).mean()
+                    
+                    input_pocket_res_names_4 = annotated_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_4)].res_name
+                    designed_pocket_res_names_4 = designed_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_4)].res_name
+                    pocket_seq_recovery_ratio_4 = (input_pocket_res_names_4 == designed_pocket_res_names_4).mean()
+                    
+                    input_pocket_res_names_5 = annotated_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_5)].res_name
+                    designed_pocket_res_names_5 = designed_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_5)].res_name
+                    pocket_seq_recovery_ratio_5 = (input_pocket_res_names_5 == designed_pocket_res_names_5).mean()
+                    
+                    input_pocket_res_names_6 = annotated_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_6)].res_name
+                    designed_pocket_res_names_6 = designed_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_6)].res_name
+                    pocket_seq_recovery_ratio_6 = (input_pocket_res_names_6 == designed_pocket_res_names_6).mean()
+                    
+                    outputs[example_id]["seq_recovery_ratio"].append(seq_recovery_ratio)
+                    outputs[example_id]["pocket_seq_recovery_ratio_4"].append(pocket_seq_recovery_ratio_4)
+                    outputs[example_id]["pocket_seq_recovery_ratio_5"].append(pocket_seq_recovery_ratio_5)
+                    outputs[example_id]["pocket_seq_recovery_ratio_6"].append(pocket_seq_recovery_ratio_6)
+                                                                                                                                                                                                             
             pbar.update(B)
     pbar.close()
     
+        
     # Convert tensors to CPU values
     for example_id, example_outputs in outputs.items():
         for k, v in example_outputs.items():
@@ -611,9 +656,7 @@ def run_lc_seq_des(
             elif isinstance(v, torch.Tensor):
                 example_outputs[k] = v.detach().cpu().item()                    
 
-    
-      
-
+          
     # Save sample_metadata.pt for later use 
     sample_metadata = {}
     for example_id, example_outputs in outputs.items():
@@ -1179,7 +1222,7 @@ def get_sd_example(*,
         example['query_pn_unit_iids'] = unique_pn_unit_iids
                                                 
     # Featurize the example.
-    featurizer = sd_featurizer_for_design(**featurizer_cfg, sample_is_designed=sample_is_designed, is_inference=True)                                                                                    
+    featurizer = sd_featurizer_for_design(**featurizer_cfg, sample_is_designed=sample_is_designed)                                                                                    
         
     example = featurizer(example)
 
@@ -2542,15 +2585,37 @@ def redesign_with_lcaliby(seed: int = 0,
         )
                 
         sample_dict_per_ckpt = copy.deepcopy(sample_dict)
-                
+        
+        # Save sequence recovery metrics into .csv file (one row per sample)
+        seq_recovery_metrics_list = []
+        for example_id, output in outputs.items():
+            sample_ids = output["designed_sample_id"]
+            seq_recoveries = output["seq_recovery_ratio"]
+            pocket_4 = output["pocket_seq_recovery_ratio_4"]
+            pocket_5 = output["pocket_seq_recovery_ratio_5"]
+            pocket_6 = output["pocket_seq_recovery_ratio_6"]
+            
+            for i in range(len(sample_ids)):
+                seq_recovery_metrics_list.append({
+                    "example_id": example_id,
+                    "designed_sample_id": sample_ids[i],
+                    "seq_recovery_ratio": float(seq_recoveries[i]),
+                    "pocket_seq_recovery_ratio_4": float(pocket_4[i]),
+                    "pocket_seq_recovery_ratio_5": float(pocket_5[i]),
+                    "pocket_seq_recovery_ratio_6": float(pocket_6[i])
+                })
+        seq_recovery_metrics_df = pd.DataFrame(seq_recovery_metrics_list)
+        seq_recovery_metrics_df.to_csv(Path(log_dir_per_ckpt, "seq_recovery_metrics.csv"), index=False)
+        
+        # Store outputs in sample_dict_per_ckpt
         for example_id, output in outputs.items():  
             sample_dict_per_ckpt[example_id]['designed_sample_id'] = output["designed_sample_id"]
             sample_dict_per_ckpt[example_id]['designed_sample_atom_array'] = output["designed_sample_atom_array"]
             sample_dict_per_ckpt[example_id]['designed_sample_bb_ligand_atom_array'] = output["designed_sample_bb_ligand_atom_array"]
             sample_dict_per_ckpt[example_id]['designed_sample_seq'] = output["designed_sample_seq"]
             sample_dict_per_ckpt[example_id]['designed_sample_path'] = output["designed_sample_path"]
-            sample_dict_per_ckpt[example_id]['designed_sample_path_for_af3_tc'] = output["designed_sample_path_for_af3_tc"]
-            
+            sample_dict_per_ckpt[example_id]['designed_sample_path_for_af3_tc'] = output["designed_sample_path_for_af3_tc"]                                            
+                        
         # Extract pdb_chain_info from outputs for af3 prediction
         for example_id in sample_dict_per_ckpt.keys():
             pdb_chain_info = defaultdict(list)

@@ -40,7 +40,6 @@ from allatom_design.eval.eval_utils.folding_utils import (
 
 
 
-
 ###########################################################
 # Main
 ###########################################################
@@ -144,6 +143,8 @@ def main(cfg: DictConfig):
                                         log_dir = log_dir,
                                         pos_constraint_df = pos_constraint_df)
         
+        
+                    
         # Evaluate each checkpoint
         if cfg.struct_pred_cfg.evaluate_self_consistency:
             print("\n" + "="*80)

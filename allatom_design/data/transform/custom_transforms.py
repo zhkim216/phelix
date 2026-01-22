@@ -430,9 +430,7 @@ def annotate_ligand_pockets(
         # Todo: handling covalently linked non-polymers
         valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
         valid_ligand_iids = ligand_pn_unit_iids[valid_ligand_mask] #! in this case, pn_unit_iids are used        
-        all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_iids)
-        
-        
+        all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_iids)                
                             
     else:        
         ligand_chain_iids, ligand_counts = np.unique(atom_array.chain_iid[np.isin(atom_array.chain_iid, ligand_chain_iids)], return_counts=True)                

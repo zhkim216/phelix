@@ -13,13 +13,13 @@ seed: 0
 num_workers: 0 # for dataloading
 
 # Outputs
-exp_name: debug_eval_exp3_cfg0_boltzval # experiment name; used for wandb and output directory
+exp_name: eval_exp4_cfg2_lmpnnval # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
 seq_des_cfg:  
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp3_cfg0
+  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp4_cfg2
   ckpt_cfg:
     start_step: 52500 
     end_step: 52500
@@ -57,7 +57,7 @@ docking_metrics_cfg:
   pocket_distance_for_metrics: 8.0
 
 ######### Data & Transform configurations #########
-input_sample_is_all_atom: false
+input_sample_is_all_atom: true
 input_sample_is_designed: false
 load_from_cache: false
 
@@ -147,15 +147,19 @@ preprocess_cfg:
 
 featurizer_cfg:
   design:
-    max_tokens: null
-    max_atoms: null
+    is_inference: true
+    occupancy_threshold_protein_backbone: 0.0
+    training_structure_noise: 0.0
+    undesired_res_names: []
     remove_keys: []    
     remove_unresolved_tokens: true
+    max_tokens: null
+    max_atoms: null  
+    pocket_distance: 8.0
     residue_cache_dir: "/scratch/users/zhkim216/datasets/atomworks_cached_residue_data"
     max_conformers_per_residue: 50
-    apply_random_augmentation: false
-    translation_scale: 1.0
-    pocket_distance: 8.0
+    apply_random_augmentation: true
+    translation_scale: 1.0    
   prepare_designed_samples:
     max_tokens: null
     max_atoms: null
