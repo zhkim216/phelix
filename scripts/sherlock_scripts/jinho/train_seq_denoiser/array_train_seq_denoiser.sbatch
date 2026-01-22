@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=exp4
 #SBATCH -p possu,bioe
-#SBATCH --array=0-5
+#SBATCH --array=0-9
 #SBATCH --gres=gpu:1
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=8
@@ -33,13 +33,17 @@ DENOISER_TYPE="lc_atom_mpnn"
 # Path where processed pdb files are stored
 PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3"
 
-CONFIGS=(
-  "data/dataset@data=boltz denoiser.augment_eps=0.1"
-  "data/dataset@data=boltz denoiser.augment_eps=0.2"
-  "data/dataset@data=boltz denoiser.augment_eps=0.3"
-  "data/dataset@data=ligandmpnn denoiser.augment_eps=0.1"
-  "data/dataset@data=ligandmpnn denoiser.augment_eps=0.2"
-  "data/dataset@data=ligandmpnn denoiser.augment_eps=0.3"
+CONFIGS=(  
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ca"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ncaco"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ncacocb"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.3 denoiser.mpnn.token_features.rbf_type=ncacocb"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.5 denoiser.mpnn.token_features.rbf_type=ncacocb"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=0.8 denoiser.mpnn.token_features.rbf_type=ncacocb"
+  "data/dataset@data=ligandmpnn data.featurizer_cfg.occupancy_threshold_protein_backbone=1.0 denoiser.mpnn.token_features.rbf_type=ncacocb"  
+  "data/dataset@data=ligandmpnn_ab1 data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ca"
+  "data/dataset@data=ligandmpnn_ab2 data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ca"
+  "data/dataset@data=ligandmpnn_ab3 data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 denoiser.mpnn.token_features.rbf_type=ca"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
@@ -68,10 +72,14 @@ python3 allatom_design/train_seq_denoiser.py \
     data.pdb_path="${PDB_PATH}" \
     data.residue_cache_dir="${RESIDUE_CACHE_DIR}" \
     data.exclude_val_cluster=true \
+    data.featurizer_cfg.is_inference=false \
+    data.featurizer_cfg.training_structure_noise=0.3 \
     data.featurizer_cfg.remove_unresolved_tokens=true \
     data.featurizer_cfg.max_tokens=512 \
     data.featurizer_cfg.max_atoms=4608 \
-    data.featurizer_cfg.calc_pseudo_cb_coords=false \
+    data.featurizer_cfg.crop_center_cutoff_distance=15.0 \
+    data.featurizer_cfg.crop_spatial_p=0.0 \
+    data.featurizer_cfg.pocket_distance=8.0 \
     data.sampling_weights.alphas_chain.a_prot=1.0 \
     data.sampling_weights.alphas_chain.a_nuc=0.0 \
     data.sampling_weights.alphas_chain.a_peptide=0.0 \

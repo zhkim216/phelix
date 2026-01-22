@@ -33,7 +33,7 @@ from atomworks.ml.transforms.filters import (FilterToProteins,
                                              filter_to_specified_pn_units)
 
 import allatom_design.data.const as const
-
+from allatom_design.data.transform.preprocess import AtomizeByCCDName
 # Import custom transforms and constants from custom_transforms
 from allatom_design.data.transform.custom_transforms import (
     # Constants
@@ -50,43 +50,74 @@ from allatom_design.data.transform.custom_transforms import (
     MaskAtomizedTokensInProtein,
     ErrIfAllUnresolved,
     AddCachedResidueData,
-    AtomizeShortPolymers,
-    AddChainTypeFeaturesForTrain,
-    AddChainTypeFeaturesForInference,
     AnnotateLigandPockets,
-    GetPseudoCBCoords,
+    GetNCACOAndPseudoCBCoords,
+    AddTrainingRandomNoise,
 )
 
 logger = logging.getLogger(__name__)
 
+def TrainingRoute(transform):
+    return ConditionalRoute(
+        condition_func=lambda data: data["is_inference"],
+        transform_map={True: Identity(), False: transform},
+    )
 
-def sd_featurizer(
+
+def InferenceRoute(transform):
+    return ConditionalRoute(
+        condition_func=lambda data: data["is_inference"],
+        transform_map={False: Identity(), True: transform},
+    )
+
+def sd_featurizer(    
+    # Model type and inference flag    
+    is_inference: bool = False,    
+    # Occupancy thresholds for sidechain and backbone atoms
+    # occupancy_threshold_sidechain: float = 0.5,
+    occupancy_threshold_protein_backbone: float = 0.8,                
+    
+    # For training random noise
+    training_structure_noise: float = 0.1,
+        
+    undesired_res_names: list[str] = [],
+    remove_keys: list[str] = [],
+    
+    # For removing unresolved tokens
+    remove_unresolved_tokens: bool = False,
+    
     # cropping
     max_tokens: int | None = None,
     max_atoms: int | None = None,
     crop_center_cutoff_distance: float = 15.0,
     crop_spatial_p: float = 0.0,
-    remove_keys: list[str] = [],
-    remove_unresolved_tokens: bool = False,
+    
+    # For pocket annotation
+    pocket_distance: float = 8.0,    
+    
+    # For reference molecule features
     residue_cache_dir: str | None = "/scratch/users/zhkim216/datasets/atomworks/cached_residue_data",
     max_conformers_per_residue: int | None = 50,
+    
+    # For center random augmentation
     apply_random_augmentation: bool = True,
     translation_scale: float = 1.0,
-    pocket_distance: float = 8.0,
-    update_atom_array: bool = True,
-    calc_pseudo_cb_coords: bool = True,
-    is_inference: bool = False,
+            
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
     """
     # Featurization that must be done before cropping
-    featurization_transforms_pre_crop = [    
+    featurization_transforms_pre_crop = [
+        # InferenceRoute(StrtoBoolforIsXFeatures()), # Todo: need this later if we want to use load_any
+        AddData({"is_inference": is_inference}),
+        FilterToQueryPNUnits(),    
         MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={
-            aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_BACKBONE_ATOM_NAMES, #! fixed
-            aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_BACKBONE_ATOM_NAMES, #! fixed
-        }),
-        FilterToQueryPNUnits(),        
+            aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_BACKBONE_ATOM_NAMES,            
+        }, occupancy_threshold=occupancy_threshold_protein_backbone), # Todo: do some experiment with different occupancy thresholds
+        MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={            
+            aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_BACKBONE_ATOM_NAMES,
+        }, occupancy_threshold=0.0), # Todo: do some experiment with different occupancy thresholds        
         RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
         RemoveUnsupportedChainTypes(),
         ErrIfAllUnresolved(),
@@ -113,11 +144,12 @@ def sd_featurizer(
             probs=[crop_contiguous_p, crop_spatial_p],
         )            
     
-    check_coordinates_are_nan = CheckCoordinatesAreNan()
+    
     
     # Featurization
     # NOTE: for now, we ignore ref pos features because they are too slow to compute
     featurization_transforms_post_crop = [
+        CheckCoordinatesAreNan(),
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),        
         # AddCachedResidueData(residue_cache_dir=residue_cache_dir),
@@ -131,21 +163,19 @@ def sd_featurizer(
         ComputeAtomToTokenMap(),        
         AnnotateLigandPockets(pocket_distance=pocket_distance), 
         ConvertToTorch(keys=["encoded", "feats"]),
+        TrainingRoute(CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
+                            translation_scale=translation_scale)),                                            
+        TrainingRoute(AddTrainingRandomNoise(noise_scale=training_structure_noise)),       
         # Handle missing atoms and tokens
         # PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
         # PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"), 
-        # Add features from the atom_array
-        FeaturizeCoordsAndMasks(),
-        CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
-                                translation_scale=translation_scale,
-                                update_atom_array=update_atom_array),
-        GetPseudoCBCoords() if calc_pseudo_cb_coords else Identity(),
-        
+        # Add features from the atom_array                            
+        FeaturizeCoordsAndMasks(),        
+        GetNCACOAndPseudoCBCoords(),        
     ]
     
     transforms = [
         *featurization_transforms_pre_crop,
-        check_coordinates_are_nan,
         cropping_transform,
         *featurization_transforms_post_crop,
         PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
@@ -166,8 +196,7 @@ def sd_featurizer_for_design(
     max_conformers_per_residue: int | None = 50,
     apply_random_augmentation: bool = True,
     translation_scale: float = 1.0,
-    pocket_distance: float = 8.0,
-    update_atom_array: bool = True,
+    pocket_distance: float = 8.0,    
     sample_is_designed: bool = False,
     is_inference: bool = False,
 ) -> Transform:
@@ -181,6 +210,7 @@ def sd_featurizer_for_design(
             aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_BACKBONE_ATOM_NAMES, #! fixed
         }) if not sample_is_designed else Identity(),
         FilterToQueryPNUnits(),        
+        
         RemoveUnresolvedTokens() if remove_unresolved_tokens and not sample_is_designed else Identity(),
         RemoveUnsupportedChainTypes(),
         ErrIfAllUnresolved(),
@@ -210,9 +240,7 @@ def sd_featurizer_for_design(
         FeaturizeCoordsAndMasks(),
         CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
                                 translation_scale=translation_scale,
-                                update_atom_array=update_atom_array),
-        GetPseudoCBCoords(),
-        
+                                update_atom_array=update_atom_array),                
     ]
     
     transforms = [
