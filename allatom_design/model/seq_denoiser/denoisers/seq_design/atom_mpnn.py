@@ -33,7 +33,7 @@ from atomworks.constants import (
     UNKNOWN_DNA,
     UNKNOWN_RNA,
 )
-from allatom_design.data.transform.custom_transforms import get_NCACO_pseudo_CB_coords
+
 
 class AtomMPNN(nn.Module):
     """Modified ProteinMPNN network to predict sequence from full atom structure."""
@@ -116,10 +116,7 @@ class AtomMPNN(nn.Module):
                 nn.init.xavier_uniform_(p)
 
 
-    def forward(self, batch: dict[str, TensorType["b ..."]], is_sampling: bool):
-        # If provided, add noise to input coordinates
-        batch["coords"] = self._add_noise(batch)
-
+    def forward(self, batch: dict[str, TensorType["b ..."]], is_sampling: bool):        
         # Get token-level features
         B, N, C = batch["restype"].shape
         h_V = torch.zeros((B, N, self.node_features), device=batch["restype"].device)
@@ -201,23 +198,6 @@ class AtomMPNN(nn.Module):
         return logits, mpnn_feature_dict
 
 
-    def _add_noise(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_atoms 3", float]:
-        """
-        If provided, add noise to input coordinates
-        """
-        if batch["noise"] is None:
-            return batch["coords"]
-
-        # TODO: implement support for noise labels / per-residue noise
-        if batch["noise_labels"] is not None:
-            raise NotImplementedError("Per-residue noise not yet implemented for AtomMPNN")
-        
-        # Add noise to input coordinates
-        noised_coords = batch["coords"] + batch["noise"]
-                
-        return noised_coords
-
-
 class TokenFeatures(nn.Module):
     def __init__(self, cfg: DictConfig):
         """
@@ -226,9 +206,6 @@ class TokenFeatures(nn.Module):
         """
         super().__init__()
         self.cfg = cfg
-
-        #! for ablation study (260118), to compare calculating pseudo CB coordiantes calculated from noised atom array vs from original atom arra and noising
-        self.calc_pseudo_cb_coords = cfg.get("calc_pseudo_cb_coords", False)
 
         # Parameters
         self.ca_only = cfg.get("ca_only", True)  # backwards compatibility
@@ -248,7 +225,14 @@ class TokenFeatures(nn.Module):
 
         # Layers
         self.embeddings = PositionalEncodings(self.num_positional_embeddings)
-        num_pairwise_dists = 1 if self.ca_only else 5*5
+        
+        self.rbf_type = cfg.rbf_type
+        if self.rbf_type == "ca":
+            num_pairwise_dists = 1
+        elif self.rbf_type == "ncaco":
+            num_pairwise_dists = 4*4
+        elif self.rbf_type == "ncacocb":
+            num_pairwise_dists = 5*5
         edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists
         # edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists + 1 #! (JH) removed 251009, to simplify the model
         self.edge_embedding = nn.Linear(edge_in, self.edge_n_channel, bias=False)
@@ -271,21 +255,15 @@ class TokenFeatures(nn.Module):
         """
         Extract token-level edge features and build KNN graph.
         """
-        # calculate n, ca, c, o and pseudo CB coordinates
-        if self.calc_pseudo_cb_coords:
-            batch = self._get_NCACO_pseudo_CB_coords(batch)
-            
+        # calculate n, ca, c, o and pseudo CB coordinates                            
         X = self._get_protein_token_center_coords(batch) # CA coordinates for protein tokens
         D_neighbors, E_idx = self._dist(X = X, mask = batch["protein_residue_node_mask"]) 
-
-        
-        
-        
+                        
         # Get RBF features
-        if self.ca_only:
-            RBF_all = self._rbf(D_neighbors)
+        if self.rbf_type == "ca":
+            RBF_backbone = self._rbf(D_neighbors)
         else:            
-            RBF_all = self.get_backbone_cb_rbf(batch = batch, D_neighbors = D_neighbors, E_idx = E_idx)
+            RBF_backbone = self.get_backbone_cb_rbf(batch = batch, D_neighbors = D_neighbors, E_idx = E_idx, rbf_type = self.rbf_type)
             
             # RBF_all = []
             # for i in range(X_all.shape[-2]):
@@ -299,10 +277,9 @@ class TokenFeatures(nn.Module):
         offset = gather_edges(offset[:,:,:,None], E_idx)[:,:,:,0]  # [B, L, K]
         #! (JH) fixed 251009, now gathering only edges between protein tokens
 
-        chain_labels = torch.zeros_like(batch["asym_id"])
-        if self.use_multichain_encoding:
-            # only use multichain encoding if the model has been trained with it TODO: need to also handle residue index
-            chain_labels = batch["asym_id"]
+        # Chain information
+        chain_labels = torch.zeros_like(batch["asym_id"])        
+        chain_labels = batch["asym_id"]
         d_chains = ((chain_labels[:, :, None] - chain_labels[:,None,:])==0).long()  # find self vs non-self interaction
         E_chains = gather_edges(d_chains[:,:,:,None], E_idx)[:,:,:,0]
         #! (JH) fixed 251009, now gathering only edges between protein tokens
@@ -320,7 +297,7 @@ class TokenFeatures(nn.Module):
         # token_bonds = gather_edges(token_bonds, E_idx)
 
         # Concatenate edge features and embed
-        E = torch.cat((E_positional, RBF_all), -1)
+        E = torch.cat((E_positional, RBF_backbone), -1)
         # E = torch.cat((E_positional, RBF_all, token_bonds), -1)
         
         E = self.edge_embedding(E)
@@ -467,8 +444,8 @@ class TokenFeatures(nn.Module):
         """
         Get protein token-level center coordinates. Standard amino acid only.
         """
-        B, N, _ = batch["coords"].shape
-        X = batch["coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token, ca for proteins                
+        B, N, _ = batch["noised_coords"].shape
+        X = batch["noised_coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token, ca for proteins                
         X = X * batch["protein_residue_node_mask"].unsqueeze(-1)
         return X
 
@@ -483,65 +460,6 @@ class TokenFeatures(nn.Module):
         X = X * batch["token_exists_mask"].unsqueeze(-1)  # mask out padding and unresolved atoms
         return X        
     
-    def _get_NCACO_pseudo_CB_coords(self, batch: dict[str, TensorType["b ..."]]) -> dict[str, TensorType["b n 3", float]]:
-        
-        B, N_tokens, MAX_ATOMS = batch["tokenwise_atom_idxs"].shape
-        device = batch["coords"].device
-        
-        coords = batch["coords"]  # [B, N_atoms, 3]
-        tokenwise_atom_idxs = batch["tokenwise_atom_idxs"]  # [B, N_tokens, MAX_ATOMS]
-        tokenwise_atom_idxs_mask = batch["tokenwise_atom_idxs_mask"]  # [B, N_tokens, MAX_ATOMS]
-        
-        # atom-wise mask
-        n_mask = batch["n_mask"]   # [B, N_atoms]
-        ca_mask = batch["ca_mask"]
-        c_mask = batch["c_mask"]
-        o_mask = batch["o_mask"]
-                
-        flat_idxs = tokenwise_atom_idxs.reshape(B, -1)  # [B, N_tokens * MAX_ATOMS]
-    
-        token_n_mask = n_mask.gather(dim=1, index=flat_idxs).reshape(B, N_tokens, MAX_ATOMS) * tokenwise_atom_idxs_mask
-        token_ca_mask = ca_mask.gather(dim=1, index=flat_idxs).reshape(B, N_tokens, MAX_ATOMS) * tokenwise_atom_idxs_mask
-        token_c_mask = c_mask.gather(dim=1, index=flat_idxs).reshape(B, N_tokens, MAX_ATOMS) * tokenwise_atom_idxs_mask
-        token_o_mask = o_mask.gather(dim=1, index=flat_idxs).reshape(B, N_tokens, MAX_ATOMS) * tokenwise_atom_idxs_mask        
-        
-        # get N, CA, C, O positions in each token (argmax of the first True position)
-        n_pos = token_n_mask.argmax(dim=-1)   # [B, N_tokens]
-        ca_pos = token_ca_mask.argmax(dim=-1)
-        c_pos = token_c_mask.argmax(dim=-1)
-        o_pos = token_o_mask.argmax(dim=-1)
-        
-        # get atom index at the corresponding positions
-        n_atom_idx = tokenwise_atom_idxs.gather(dim=-1, index=n_pos.unsqueeze(-1)).squeeze(-1)   # [B, N_tokens]
-        ca_atom_idx = tokenwise_atom_idxs.gather(dim=-1, index=ca_pos.unsqueeze(-1)).squeeze(-1)
-        c_atom_idx = tokenwise_atom_idxs.gather(dim=-1, index=c_pos.unsqueeze(-1)).squeeze(-1)
-        o_atom_idx = tokenwise_atom_idxs.gather(dim=-1, index=o_pos.unsqueeze(-1)).squeeze(-1)
-        
-        # gather coords
-        n_coords = coords.gather(dim=1, index=n_atom_idx.unsqueeze(-1).expand(-1, -1, 3))    # [B, N_tokens, 3]
-        ca_coords = coords.gather(dim=1, index=ca_atom_idx.unsqueeze(-1).expand(-1, -1, 3))
-        c_coords = coords.gather(dim=1, index=c_atom_idx.unsqueeze(-1).expand(-1, -1, 3))
-        o_coords = coords.gather(dim=1, index=o_atom_idx.unsqueeze(-1).expand(-1, -1, 3))
-                        
-        n_coords = n_coords * batch["protein_residue_node_mask"].unsqueeze(-1)
-        ca_coords = ca_coords * batch["protein_residue_node_mask"].unsqueeze(-1)
-        c_coords = c_coords * batch["protein_residue_node_mask"].unsqueeze(-1)
-        o_coords = o_coords * batch["protein_residue_node_mask"].unsqueeze(-1)
-        
-        # pseudo CB calculation
-        b = ca_coords - n_coords
-        c = c_coords - ca_coords
-        a = torch.cross(b, c, dim=-1)
-        pseudo_cb_coords = -0.58273431 * a + 0.56802827 * b - 0.54067466 * c + ca_coords
-        
-        batch["ca_coords"] = ca_coords 
-        batch["n_coords"] = n_coords 
-        batch["c_coords"] = c_coords 
-        batch["o_coords"] = o_coords 
-        batch["pseudo_cb_coords"] = pseudo_cb_coords 
-            
-        return batch
-        
         
 
     def _dist(self, X = None, mask = None, eps=1E-6):
@@ -577,39 +495,45 @@ class TokenFeatures(nn.Module):
     
     def get_backbone_cb_rbf(self, batch: dict[str, TensorType["b ..."]] = None,
                             D_neighbors = None,
-                            E_idx = None) -> TensorType["b n_tokens n_tokens num_rbf", float]:
+                            E_idx = None,
+                            rbf_type = "ncacocb") -> TensorType["b n_tokens n_tokens num_rbf", float]:
         
-        ca_coords = batch["ca_coords"]
-        n_coords = batch["n_coords"]
-        c_coords = batch["c_coords"]
-        o_coords = batch["o_coords"]
-        pseudo_cb_coords = batch["pseudo_cb_coords"]
+        ca_coords = batch["noised_ca_coords"]
+        n_coords = batch["noised_n_coords"]
+        c_coords = batch["noised_c_coords"]
+        o_coords = batch["noised_o_coords"]
+        pseudo_cb_coords = batch["noised_pseudo_cb_coords"]
         
         RBF_all = []
         RBF_all.append(self._rbf(D_neighbors))  # Ca-Ca
         RBF_all.append(self._get_rbf(n_coords, n_coords, E_idx))  # N-N
         RBF_all.append(self._get_rbf(c_coords, c_coords, E_idx))  # C-C
         RBF_all.append(self._get_rbf(o_coords, o_coords, E_idx))  # O-O
-        RBF_all.append(self._get_rbf(pseudo_cb_coords, pseudo_cb_coords, E_idx))  # Cb-Cb
+        if rbf_type == "ncacocb":
+            RBF_all.append(self._get_rbf(pseudo_cb_coords, pseudo_cb_coords, E_idx))  # Cb-Cb
         RBF_all.append(self._get_rbf(ca_coords, n_coords, E_idx))  # Ca-N
         RBF_all.append(self._get_rbf(ca_coords, c_coords, E_idx))  # Ca-C
         RBF_all.append(self._get_rbf(ca_coords, o_coords, E_idx))  # Ca-O
-        RBF_all.append(self._get_rbf(ca_coords, pseudo_cb_coords, E_idx))  # Ca-Cb
+        if rbf_type == "ncacocb":
+            RBF_all.append(self._get_rbf(ca_coords, pseudo_cb_coords, E_idx))  # Ca-Cb
         RBF_all.append(self._get_rbf(n_coords, c_coords, E_idx))  # N-C
         RBF_all.append(self._get_rbf(n_coords, o_coords, E_idx))  # N-O
-        RBF_all.append(self._get_rbf(n_coords, pseudo_cb_coords, E_idx))  # N-Cb
-        RBF_all.append(self._get_rbf(pseudo_cb_coords, c_coords, E_idx))  # Cb-C
-        RBF_all.append(self._get_rbf(pseudo_cb_coords, o_coords, E_idx))  # Cb-O
+        if rbf_type == "ncacocb":
+            RBF_all.append(self._get_rbf(n_coords, pseudo_cb_coords, E_idx))  # N-Cb
+            RBF_all.append(self._get_rbf(pseudo_cb_coords, c_coords, E_idx))  # Cb-C
+            RBF_all.append(self._get_rbf(pseudo_cb_coords, o_coords, E_idx))  # Cb-O
         RBF_all.append(self._get_rbf(o_coords, c_coords, E_idx))  # O-C
         RBF_all.append(self._get_rbf(n_coords, ca_coords, E_idx))  # N-Ca
         RBF_all.append(self._get_rbf(c_coords, ca_coords, E_idx))  # C-Ca
         RBF_all.append(self._get_rbf(o_coords, ca_coords, E_idx))  # O-Ca
-        RBF_all.append(self._get_rbf(pseudo_cb_coords, ca_coords, E_idx))  # Cb-Ca
+        if rbf_type == "ncacocb":
+            RBF_all.append(self._get_rbf(pseudo_cb_coords, ca_coords, E_idx))  # Cb-Ca
         RBF_all.append(self._get_rbf(c_coords, n_coords, E_idx))  # C-N
         RBF_all.append(self._get_rbf(o_coords, n_coords, E_idx))  # O-N
-        RBF_all.append(self._get_rbf(pseudo_cb_coords, n_coords, E_idx))  # Cb-N
-        RBF_all.append(self._get_rbf(c_coords, pseudo_cb_coords, E_idx))  # C-Cb
-        RBF_all.append(self._get_rbf(o_coords, pseudo_cb_coords, E_idx))  # O-Cb
+        if rbf_type == "ncacocb":
+            RBF_all.append(self._get_rbf(pseudo_cb_coords, n_coords, E_idx))  # Cb-N
+            RBF_all.append(self._get_rbf(c_coords, pseudo_cb_coords, E_idx))  # C-Cb
+            RBF_all.append(self._get_rbf(o_coords, pseudo_cb_coords, E_idx))  # O-Cb
         RBF_all.append(self._get_rbf(c_coords, o_coords, E_idx))  # C-O
         RBF_all = torch.cat(tuple(RBF_all), dim=-1)
         
