@@ -21,8 +21,8 @@ seq_des_cfg:
   model_name: "lc_atom_mpnn"
   denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp4_cfg2
   ckpt_cfg:
-    start_step: 52500 
-    end_step: 52500
+    start_step: 22500 
+    end_step: 22500
     eval_every_n_ckpts: 1
     eval_last_ckpt: false
     use_ema: true
