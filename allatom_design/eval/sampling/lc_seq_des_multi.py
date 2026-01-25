@@ -67,10 +67,10 @@ def main(cfg: DictConfig):
         yaml.safe_dump(cfg_dict, f)
     
     # Load metadata for input samples
-    if cfg.input_sample_metadata_csv is not None:
-        input_sample_metadata = pd.read_csv(cfg.input_sample_metadata_csv)
+    if cfg.sampling_inputs_csv is not None:
+        sampling_inputs_df = pd.read_csv(cfg.sampling_inputs_csv)
     else:
-        input_sample_metadata = None
+        sampling_inputs_df = None
         
     # Load pos_constraint_df
     if cfg.pos_constraint_csv is not None:
@@ -88,7 +88,7 @@ def main(cfg: DictConfig):
     print("="*80 + "\n")
     
     sample_dict = prepare_sample_dict(cfg = cfg, 
-                                  input_sample_metadata = input_sample_metadata)
+                                  sampling_inputs_df = sampling_inputs_df)
             
     # Todo: implement adding ligands to input samples if needed later
     
@@ -139,7 +139,7 @@ def main(cfg: DictConfig):
                                         preprocess_cfg = preprocess_cfg_lcaliby,
                                         featurizer_cfg = cfg.featurizer_cfg.design,
                                         cif_save_cfg = cfg.cif_cfg.save,                                            
-                                        input_sample_metadata = input_sample_metadata,
+                                        sampling_inputs_df = sampling_inputs_df,
                                         log_dir = log_dir,
                                         pos_constraint_df = pos_constraint_df)
         

@@ -257,6 +257,7 @@ def sd_featurizer_for_design(
         # PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
         # PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"), 
         # Add features from the atom_array
+        # AddAF3TokenBondFeatures(distance_cutoff=2.4),
         TrainingRoute(CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
                             translation_scale=translation_scale)),     
         TrainingRoute(AddTrainingRandomNoise(noise_scale=training_structure_noise)),       

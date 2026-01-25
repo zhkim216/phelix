@@ -292,7 +292,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
                 # Replace residues with actual sequence
                 chain_seq = designed_sample_atom_array[chain_mask].res_name[_res_starts]            
                 chain_seq_with_gaps[_res_ids_0based] = chain_seq
-                
+                                                
                 # Detect modified residues
                 # Get hetero flag
                 chain_hetero = designed_sample_atom_array[chain_mask].hetero[_res_starts]
