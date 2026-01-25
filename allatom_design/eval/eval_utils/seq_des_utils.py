@@ -2157,9 +2157,7 @@ def prepare_sample_dict(cfg: DictConfig = None,
     input_sample_paths = get_pdb_files(**cfg.pdb_cfg)
     
     if cfg.debug:
-        # input_sample_paths = input_sample_paths[:cfg.num_debug_samples]
-        input_sample_paths = ['/home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs/1f0r.cif']
-        
+        input_sample_paths = input_sample_paths[:cfg.num_debug_samples]                
         
     # Initialize dictionary for storing sample information
     sample_dict = create_sample_dict(input_sample_paths=input_sample_paths)
