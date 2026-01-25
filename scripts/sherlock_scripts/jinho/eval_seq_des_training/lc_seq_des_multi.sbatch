@@ -39,7 +39,7 @@ STEP=${STEPS[$STEP_IDX]}
 PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
 METADATA_CSV_PATH=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/metadata_small_molecule_val_monomer_512_cluster_rep.csv
 PDB_NAME_LIST=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/small_molecule_val_monomer_512_cluster_rep.txt
-VALSET_NAME="lmpnnval"
+VALSET_NAME="lmpnnval_sm_filt_full"
 
 POS_CONSTRAINT_CSV=null
 LIGAND_SOURCE_PATH=/scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
