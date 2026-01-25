@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=lc_seq_des_multi
 #SBATCH -p bioe,possu
-#SBATCH --array=0-17
+#SBATCH --array=0-20
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
@@ -26,8 +26,9 @@ WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 
 # Model names and steps
-MODEL_NAMES=("exp4_cfg0" "exp4_cfg1" "exp4_cfg2")
-STEPS=(2500 12500 22500 32500 42500 52500 62500 72500 82500)
+MODEL_NAMES=("exp5_cfg4" "exp5_cfg7" "exp5_cfg10")
+STEPS=(2500 12500 22500 32500 42500 52500 62500)
+# STEPS=(2500 12500 22500 32500 42500 52500 62500 72500 82500)
 MODEL_IDX=$((SLURM_ARRAY_TASK_ID % 3))  
 STEP_IDX=$((SLURM_ARRAY_TASK_ID / 3))   
 
