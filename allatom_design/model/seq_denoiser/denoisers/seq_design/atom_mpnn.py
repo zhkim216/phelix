@@ -284,12 +284,11 @@ class TokenFeatures(nn.Module):
         E_chains = gather_edges(d_chains[:,:,:,None], E_idx)[:,:,:,0]
         #! (JH) fixed 251009, now gathering only edges between protein tokens
         E_positional = self.embeddings(offset.long(), E_chains)
-
-        #! (JH) removed 251009, to simplify the model
+    
         # # AF3 token_bond feature
         # token_bonds = batch["token_bonds"]
 
-        # # (JH): fix to remove polymer-polymer bonds
+        # # (JH): 
         # token_bonds_mask = batch["is_ligand"]  # [B, L]
         # token_bonds_mask = (token_bonds_mask[:,:,None] | token_bonds_mask[:,None,:])  # [B, L, L]
         # token_bonds = (token_bonds * token_bonds_mask)[..., None]  # [B, L, L, 1]

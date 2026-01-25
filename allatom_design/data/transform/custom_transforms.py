@@ -33,7 +33,19 @@ from atomworks.ml.transforms.filters import filter_to_specified_pn_units
 from atomworks.ml.utils.geometry import masked_center, random_rigid_augmentation
 from atomworks.ml.utils.token import apply_token_wise, get_af3_token_center_idxs, apply_and_spread_token_wise
 from atomworks.ml.conditions.annotator import is_protein_backbone, is_protein_sidechain
-from atomworks.ml.utils.token import get_af3_token_representative_masks
+from atomworks.ml.utils.token import (
+    get_token_count,
+    get_token_starts,
+    is_glycine,
+    is_protein_unknown,
+    is_standard_aa_not_glycine,
+    is_unknown_nucleotide,
+    spread_token_wise,
+)
+from atomworks.io.utils.sequence import (
+    is_purine,
+    is_pyrimidine,
+)
 
 import allatom_design.data.const as const
 from allatom_design.data.transform.pad import pad_dim
@@ -604,3 +616,46 @@ class AddTrainingRandomNoise(Transform):
         data["feats"]["noise"] = noise
         
         return data
+    
+
+def get_af3_token_representative_masks(
+    atom_array: AtomArray, central_atom: str = "CA"
+) -> np.ndarray:
+    """
+    Adapted from foundry/models/rfd3/src/rfd3/transforms/util_transforms.py
+    Changed to use CA as the centeral atom, as we're doing backbone-conditioned sequence design.
+    """
+    
+    pyrimidine_representative_atom = is_pyrimidine(atom_array.res_name) & (
+        atom_array.atom_name == "C2"
+    )
+    purine_representative_atom = is_purine(atom_array.res_name) & (
+        atom_array.atom_name == "C4"
+    )
+    unknown_na_representative_atom = is_unknown_nucleotide(atom_array.res_name) & (
+        atom_array.atom_name == "C4"
+    )
+
+    glycine_representative_atom = is_glycine(atom_array.res_name) & (
+        atom_array.atom_name == "CA"
+    )
+    protein_residue_not_glycine_representative_atom = is_standard_aa_not_glycine(
+        atom_array.res_name
+    ) & (
+        atom_array.atom_name == central_atom  # only change
+    )
+    unknown_protein_residue_representative_atom = (
+        is_protein_unknown(atom_array.res_name)
+    ) & (atom_array.atom_name == "CA")
+    atoms = atom_array.atomize
+
+    _token_rep_mask = (
+        pyrimidine_representative_atom
+        | purine_representative_atom
+        | unknown_na_representative_atom
+        | glycine_representative_atom
+        | protein_residue_not_glycine_representative_atom
+        | unknown_protein_residue_representative_atom
+        | atoms
+    )
+    return _token_rep_mask

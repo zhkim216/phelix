@@ -454,7 +454,7 @@ def run_lc_seq_des(
     featurizer_cfg: DictConfig = None,
     cif_save_cfg: DictConfig = None,
     sampling_cfg: DictConfig = None,
-    input_sample_metadata: pd.DataFrame = None,
+    sampling_inputs_df: pd.DataFrame = None,
     pdb_paths: list[str] = None,
     device: str = None,
     out_dir: str = None,
@@ -525,7 +525,7 @@ def run_lc_seq_des(
                                  featurizer_cfg = featurizer_cfg, 
                                  device=device, 
                                  parallel_pool=parallel_pool, 
-                                 input_sample_metadata=input_sample_metadata)                                                
+                                 sampling_inputs_df=sampling_inputs_df)                                                
                                                                                                    
             # Initialize seq_cond and atom_cond masks.
             batch = initialize_sampling_masks(batch)                        
@@ -1146,7 +1146,7 @@ def get_sd_batch(
     featurizer_cfg: DictConfig = None,
     device: str = None, 
     parallel_pool: Parallel = None, 
-    input_sample_metadata: pd.DataFrame = None,
+    sampling_inputs_df: pd.DataFrame = None,
 ) -> dict[str, Any]:
     """
     Given a list of pdb file paths, return a batch of sequence design model features.
@@ -1159,7 +1159,7 @@ def get_sd_batch(
                                          cif_parse_cfg=cif_parse_cfg,
                                          preprocess_cfg=preprocess_cfg,
                                          featurizer_cfg=featurizer_cfg,  
-                                         input_sample_metadata=input_sample_metadata,
+                                         sampling_inputs_df=sampling_inputs_df,
                                          sample_is_designed=sample_is_designed) for pdb_path in pdb_paths]                                       
                                                                                                                                                                      
     else:
@@ -1168,7 +1168,7 @@ def get_sd_batch(
                                                                cif_parse_cfg=cif_parse_cfg, 
                                                                preprocess_cfg=preprocess_cfg,
                                                                featurizer_cfg=featurizer_cfg,                                         
-                                                               input_sample_metadata=input_sample_metadata,
+                                                               sampling_inputs_df=sampling_inputs_df,
                                                                sample_is_designed=sample_is_designed) for pdb_path in pdb_paths)
                                                                
 
@@ -1184,7 +1184,7 @@ def get_sd_example(*,
                    cif_parse_cfg: DictConfig = None,
                    preprocess_cfg: DictConfig = None,
                    featurizer_cfg: DictConfig = None,
-                   input_sample_metadata: pd.DataFrame = None,       
+                   sampling_inputs_df: pd.DataFrame = None,       
                    load_from_cache: bool = False,                     
                    ) -> dict[str, Any]:
     """
@@ -1213,8 +1213,8 @@ def get_sd_example(*,
                                  sample_is_designed = sample_is_designed)
         pdb_id = (Path(pdb_path).stem).split("_")[0]    
     
-    if input_sample_metadata is not None:
-        query_pn_unit_iids = input_sample_metadata[input_sample_metadata['pdb_id'] == pdb_id]['query_pn_unit_iids'].iloc[0]
+    if sampling_inputs_df is not None:
+        query_pn_unit_iids = sampling_inputs_df[sampling_inputs_df['pdb_id'] == pdb_id]['query_pn_unit_iids'].iloc[0]
         example['query_pn_unit_iids'] = ast.literal_eval(query_pn_unit_iids)
     else:
         atom_array = example['atom_array']        
@@ -2141,7 +2141,7 @@ def create_sample_dict(*,
 
 
 def prepare_sample_dict(cfg: DictConfig = None,
-                    input_sample_metadata: pd.DataFrame = None) -> dict:
+                    sampling_inputs_df: pd.DataFrame = None) -> dict:
                             
     """
     Prepare sample_dict with ligand extraction and designed structure loading.
@@ -2157,7 +2157,8 @@ def prepare_sample_dict(cfg: DictConfig = None,
     input_sample_paths = get_pdb_files(**cfg.pdb_cfg)
     
     if cfg.debug:
-        input_sample_paths = input_sample_paths[:cfg.num_debug_samples]
+        # input_sample_paths = input_sample_paths[:cfg.num_debug_samples]
+        input_sample_paths = ['/home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs/1f0r.cif']
         
         
     # Initialize dictionary for storing sample information
@@ -2520,7 +2521,7 @@ def redesign_with_lcaliby(seed: int = 0,
                         preprocess_cfg: DictConfig = None,
                         featurizer_cfg: DictConfig = None,
                         cif_save_cfg: DictConfig = None,                          
-                        input_sample_metadata: pd.DataFrame = None,
+                        sampling_inputs_df: pd.DataFrame = None,
                         log_dir: Path = None,
                         pos_constraint_df: pd.DataFrame = None) -> list[tuple[dict, Path, dict]]:
     """
@@ -2534,7 +2535,7 @@ def redesign_with_lcaliby(seed: int = 0,
         preprocess_cfg: Preprocessing configuration.
         featurizer_cfg: Featurizer configuration.
         cif_save_cfg: CIF save configuration.
-        metadata: Metadata DataFrame.
+        sampling_inputs_df: Sampling inputs DataFrame.
         log_dir: Log directory.
         pos_constraint_df: Positional constraints DataFrame.
     Returns:
@@ -2577,7 +2578,7 @@ def redesign_with_lcaliby(seed: int = 0,
             featurizer_cfg=featurizer_cfg,
             cif_save_cfg=cif_save_cfg,                                     
             sampling_cfg=seq_des_model["sampling_cfg"],                          
-            input_sample_metadata=input_sample_metadata,
+            sampling_inputs_df=sampling_inputs_df,
             pdb_paths=input_sample_paths, 
             device=device,             
             out_dir=str(log_dir_per_ckpt),
