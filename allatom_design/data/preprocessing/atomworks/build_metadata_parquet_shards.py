@@ -16,7 +16,7 @@ import itertools
 import json
 import signal
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, TimeoutError as FuturesTimeoutError
 
 import hydra
 import pandas as pd
@@ -210,19 +210,26 @@ def main(cfg: DictConfig):
                     initargs=(preprocessor_args, timeout),
                     max_tasks_per_child=max_tasks_per_child
                 ) as executor:
-                    for idx, res in enumerate(tqdm(
-                        executor.map(_process_cif_worker, batch_paths, chunksize=1),
+                    futures = []
+                    for cif_path in batch_paths:
+                        futures.append(executor.submit(_process_cif_worker, cif_path))
+                    for idx, fut in enumerate(tqdm(
+                        futures,
                         total=len(batch_paths), 
                         desc=f"Processing mmCIFs (shard {cfg.shard_id}, batch {batch_num}/{total_batches})"
                     )):
-                        status, payload = res
+                        try:
+                            status, payload = fut.result(timeout=timeout + 30)
+                        except FuturesTimeoutError:
+                            skipped_with_reason.append((batch_paths[idx], 'parent_timeout', f'Parent timed out after {timeout + 30}s'))
+                            batch_results.append([])
+                            continue
                         if status == 'ok':
                             batch_results.append(payload)
                         else:
                             message = payload if isinstance(payload, str) else repr(payload)
                             skipped_with_reason.append((batch_paths[idx], status, message))
                             batch_results.append([])
-                            
             except Exception as e:
                 print(f"WARNING: Batch {batch_num} failed with error: {repr(e)}")
                 print(f"Falling back to sequential processing for this batch...")
