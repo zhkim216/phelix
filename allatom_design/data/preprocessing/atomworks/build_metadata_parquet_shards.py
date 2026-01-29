@@ -227,16 +227,30 @@ def main(cfg: DictConfig):
                 print(f"WARNING: Batch {batch_num} failed with error: {repr(e)}")
                 print(f"Falling back to sequential processing for this batch...")
                 
+                def _fallback_timeout_handler(signum, frame):
+                    raise TimeoutError("Fallback processing timeout")
+                
                 for idx, cif_path in enumerate(batch_paths):
                     if idx < len(batch_results):
                         continue
+                    
+                    # Apply timeout to fallback processing
+                    old_handler = signal.signal(signal.SIGALRM, _fallback_timeout_handler)
+                    signal.alarm(timeout)
                     try:
                         fallback_processor = DataPreprocessor(**preprocessor_args)
                         res = fallback_processor.get_rows(cif_path)
+                        signal.alarm(0)
                         batch_results.append(res)
+                    except TimeoutError:
+                        skipped_with_reason.append((cif_path, 'fallback_timeout', 'Fallback processing timeout'))
+                        batch_results.append([])
                     except Exception as fallback_e:
                         skipped_with_reason.append((cif_path, 'fallback_error', repr(fallback_e)))
                         batch_results.append([])
+                    finally:
+                        signal.alarm(0)
+                        signal.signal(signal.SIGALRM, old_handler)
             
             # Save batch parquet immediately
             batch_df = pd.DataFrame(itertools.chain(*batch_results))
