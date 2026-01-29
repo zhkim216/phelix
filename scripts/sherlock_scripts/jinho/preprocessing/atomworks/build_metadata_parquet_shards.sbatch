@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=metadata_atomworks_pdb_full
-#SBATCH -p possu,normal,owners
+#SBATCH --job-name=metadata_atomworks_pdb_full_v5
+#SBATCH -p normal,owners,bigmem
 #SBATCH --array=0-99
-#SBATCH --cpus-per-task=8
-#SBATCH --time=4:00:00
-#SBATCH --mem=128GB
+#SBATCH --cpus-per-task=16
+#SBATCH --time=8:00:00
+#SBATCH --mem=256GB
 
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/users/zhkim216/job_output/data_preprocessing/build_metadata_parquet_shards_%A_%a.out
@@ -37,5 +37,6 @@ python3 allatom_design/data/preprocessing/atomworks/build_metadata_parquet_shard
     max_file_size=5000000 \
     data_preprocessor_cfg.polymer_pn_unit_limit=500 \
     data_preprocessor_cfg.contact_distance=6 \
-    batch_size=100 \
-    max_tasks_per_child=50
+    processing_timeout=600 \
+    batch_size=256 \
+    max_tasks_per_child=16
