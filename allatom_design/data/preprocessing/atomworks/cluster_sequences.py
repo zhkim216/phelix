@@ -103,6 +103,9 @@ def main(cfg: DictConfig) -> None:
     df['q_pn_unit_is_protein'] = is_polypeptide_l & (protein_seq_len >= aw_const.PEPTIDE_MAX_RESIDUES)
     df['q_pn_unit_is_peptide'] = is_polypeptide_l & (protein_seq_len < aw_const.PEPTIDE_MAX_RESIDUES)
     
+    # Sort non_polymer_res_names to ensure consistent clustering
+    df['q_pn_unit_non_polymer_res_names_sorted'] = df['q_pn_unit_non_polymer_res_names'].apply(lambda x: ",".join(sorted(x.split(","))))
+    
     # Seq threshold for clustering
     seq_id_threshold = cfg.seq_id_threshold
     print(f"Using sequence identity threshold: {seq_id_threshold}")
@@ -128,9 +131,8 @@ def main(cfg: DictConfig) -> None:
         elif row["q_pn_unit_type"] in nucleic_acid_type_values:
             nucleic_acids.add(row["q_pn_unit_processed_entity_canonical_sequence"])
         elif row["q_pn_unit_type"] in nonpolymer_type_values:
-            res_names = row["q_pn_unit_non_polymer_res_names"]
-            normalized_res_names = "".join(sorted(res_names.split(",")))
-            nonpolymer_seqs.add(normalized_res_names)        
+            res_names = row["q_pn_unit_non_polymer_res_names_sorted"]
+            nonpolymer_seqs.add(res_names)        
             
     # Run mmseqs on the protein data
     proteins = [f">{hash_sequence(seq)}\n{seq}" for seq in proteins]
@@ -185,7 +187,7 @@ def main(cfg: DictConfig) -> None:
         df['q_pn_unit_processed_entity_canonical_sequence_hash'].map(clustering),
         df['q_pn_unit_processed_entity_canonical_sequence_hash'].map(clustering),
         df['q_pn_unit_processed_entity_canonical_sequence_hash'].map(clustering),
-        df['q_pn_unit_non_polymer_res_names'].apply(hash_sequence).map(clustering),
+        df['q_pn_unit_non_polymer_res_names_sorted'].apply(hash_sequence).map(clustering),
     ]
         
     df["q_pn_unit_cluster_id"] = np.select(conditions, choices)
@@ -195,6 +197,10 @@ def main(cfg: DictConfig) -> None:
         print(f"WARNING: {df['q_pn_unit_cluster_id'].isna().sum()} missing values in q_pn_unit_cluster_id")
 
     df["q_pn_unit_cluster_id"] = df["q_pn_unit_cluster_id"].fillna(-1).astype(np.int32)  # fill missing cluster IDs with -1
+    
+    # Drop q_pn_unit_non_polymer_res_names_sorted
+    df = df.drop(columns=["q_pn_unit_non_polymer_res_names_sorted"])
+    
     df.to_parquet(cfg.parquet_path.replace(".parquet", f"_seq_clustered_{str(seq_id_threshold).replace(".", "")}.parquet"))
     print(f"Saved clustered metadata to {cfg.parquet_path.replace('.parquet', f'_seq_clustered_{str(seq_id_threshold).replace(".", "")}.parquet')}")
 
