@@ -128,7 +128,9 @@ def main(cfg: DictConfig) -> None:
         elif row["q_pn_unit_type"] in nucleic_acid_type_values:
             nucleic_acids.add(row["q_pn_unit_processed_entity_canonical_sequence"])
         elif row["q_pn_unit_type"] in nonpolymer_type_values:
-            nonpolymer_seqs.add(row["q_pn_unit_non_polymer_res_names"])        
+            res_names = row["q_pn_unit_non_polymer_res_names"]
+            normalized_res_names = "".join(sorted(res_names.split(",")))
+            nonpolymer_seqs.add(normalized_res_names)        
             
     # Run mmseqs on the protein data
     proteins = [f">{hash_sequence(seq)}\n{seq}" for seq in proteins]
