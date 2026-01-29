@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=metadata_atomworks_pdb_full
+#SBATCH --job-name=metadata_atomworks_pdb_full_v5
 #SBATCH -p possu,normal,owners
 #SBATCH --array=0-99
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --time=6:00:00
-#SBATCH --mem=16GB
+#SBATCH --mem=128GB
 
 # Send stdout and stderr to logs
-#SBATCH --output=/scratch/users/zhkim216/job_output/data_preprocessing/job_%A_%a.out
-#SBATCH --error=/scratch/users/zhkim216/job_output/data_preprocessing/job_%A_%a.err
+#SBATCH --output=/scratch/users/zhkim216/job_output/data_preprocessing/build_metadata_parquet_shards_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/data_preprocessing/build_metadata_parquet_shards_%A_%a.err
 
 ## Load modules and set environment variables:
 BASE_DIR=/home/users/zhkim216/code/allatom-design
@@ -30,11 +30,13 @@ python3 allatom_design/data/preprocessing/atomworks/build_metadata_parquet_shard
     --config-path=/home/users/zhkim216/code/allatom-design/allatom_design/configs/data/preprocessing/atomworks \
     --config-name=build_metadata_parquet_shards \
     mmcif_dir=/scratch/users/zhkim216/datasets/pdb_mirror \
-    out_dir=/scratch/users/zhkim216/datasets/atomworks_pdb_full \
+    out_dir=/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5 \
     num_workers=${SLURM_CPUS_PER_TASK} \
     num_shards=${NUM_SHARDS} \
     shard_id=${SLURM_ARRAY_TASK_ID} \
     max_file_size=5000000 \
     data_preprocessor_cfg.polymer_pn_unit_limit=500 \
-    batch_size=50 \
+    data_preprocessor_cfg.contact_distance=6 \
+    processing_timeout=300 \
+    batch_size=200 \
     max_tasks_per_child=25
