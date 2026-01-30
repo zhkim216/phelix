@@ -1,13 +1,13 @@
 mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
-out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v2
+out_dir: /scratch/users/zhkim216/datasets/debug_atomworks_pdb_full_v5
 
-num_workers: 16
+num_workers: 8
 max_file_size: 5000000
 
 # OOM resilience settings
 processing_timeout: 300       # Per-file timeout in seconds
-batch_size: 2000               # Save intermediate results every N files (enables resume)
-max_tasks_per_child: 1000       # Restart workers periodically to prevent memory leaks
+batch_size: 256               # Save intermediate results every N files (enables resume)
+max_tasks_per_child: 16       # Restart workers periodically to prevent memory leaks
 
 # Data preprocessor args
 data_preprocessor_cfg:
@@ -16,7 +16,7 @@ data_preprocessor_cfg:
 
   # Cutoff distances
   close_distance: 30.0
-  contact_distance: 5
+  contact_distance: 6
   clash_distance: 1.0
   # Misc
   ignore_residues: ["UNL", "UNX"] #! unknown ligands, and atoms
@@ -35,5 +35,5 @@ cif_parser_args:
   add_bond_types_from_struct_conn: ["covale"]
 
 # --- sharding for multi-node runs ---
-num_shards: 100     # total number of shards
-shard_id: 44   # per-job shard id
+num_shards: 1000     # total number of shards
+shard_id: 0   # per-job shard id
