@@ -36,6 +36,4 @@ python3 allatom_design/data/preprocessing/atomworks/preprocess_examples.py \
     out_dir=/scratch/users/zhkim216/datasets/atomworks_pdb_full_v2 \
     num_workers=${SLURM_CPUS_PER_TASK} \
     num_shards=${NUM_SHARDS} \
-    shard_id=${SLURM_ARRAY_TASK_ID} \
-    batch_size=64 \
-    max_tasks_per_child=64
+    shard_id=${SLURM_ARRAY_TASK_ID}

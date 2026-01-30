@@ -3,10 +3,6 @@ out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full
 
 num_workers: 8
 
-# OOM resilience settings
-batch_size: 50                # Save progress every N examples (enables resume)
-max_tasks_per_child: 25       # Restart workers periodically to prevent memory leaks
-
 dataset:
   _target_: atomworks.ml.datasets.PandasDataset
   data: ${out_dir}/metadata_for_caching.parquet

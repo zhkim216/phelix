@@ -1,11 +1,7 @@
-mmcif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs
-out_dir: /home/possu/jinho/datasets/atomworks_lmpnnval_ld
+mmcif_dir: /home/possu/jinho/datasets/pdb_mirror
+out_dir: /home/possu/jinho/datasets/atomworks_pdb_full_v3
 
 num_workers: 20
-
-# OOM resilience settings
-batch_size: 50                # Save progress every N examples (enables resume)
-max_tasks_per_child: 25       # Restart workers periodically to prevent memory leaks
 
 dataset:
   _target_: atomworks.ml.datasets.PandasDataset
@@ -34,7 +30,7 @@ dataset:
 cif_parser_args:
   add_missing_atoms: true
   remove_waters: true
-  remove_ccds: ["UNX", "N", "DN", "UNL", "UNK"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
+  remove_ccds: ["UNX", "UNL"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
   fix_ligands_at_symmetry_centers: true
   fix_arginines: true
   convert_mse_to_met: true
@@ -42,7 +38,7 @@ cif_parser_args:
   add_bond_types_from_struct_conn: ["covale"]
 
 preprocess_cfg:
-  undesired_res_names: ["UNX", "N", "DN", "UNL", "UNK"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
+  undesired_res_names: ["UNX", "UNL"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
   b_factor_min: null
   b_factor_max: null
   min_residues_for_polymers: 1
