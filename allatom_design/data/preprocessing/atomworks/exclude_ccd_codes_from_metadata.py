@@ -153,9 +153,8 @@ def get_deleted_chain_df(
 def _parse_exclusion_ccd_codes(args: argparse.Namespace) -> list[str]:
     """
     Priority:
-      1) --exclude-ccd-codes-txt
-      2) --exclude-ccd-codes (comma-separated or repeated)
-      3) default fallback
+      1) --exclude-ccd-codes-txt (if provided)
+      2) --exclude-ccd-codes (direct list)
     """
     if args.exclude_ccd_codes_txt:
         p = Path(args.exclude_ccd_codes_txt)
@@ -171,19 +170,7 @@ def _parse_exclusion_ccd_codes(args: argparse.Namespace) -> list[str]:
             raise ValueError(f"No CCD codes found in txt: {p}")
         return codes
 
-    if args.exclude_ccd_codes:
-        # Support repeated flags and comma-separated values.
-        out: list[str] = []
-        for item in args.exclude_ccd_codes:
-            for s in str(item).split(","):
-                s = s.strip()
-                if s:
-                    out.append(s)
-        if out:
-            return out
-
-    # Default fallback
-    return ["NA", "K", "CL", "BR"]
+    return args.exclude_ccd_codes
 
 
 def _save_df(df: pd.DataFrame, out_path: str) -> None:
@@ -233,9 +220,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--exclude-ccd-codes",
-        action="append",
-        default='NA,K,CL,BR',
-        help="CCD codes to exclude. Example: --exclude-ccd-codes NA --exclude-ccd-codes CL or --exclude-ccd-codes NA,K,CL",
+        nargs="*",
+        default=['NA', 'K', 'CL', 'BR'],
+        help="CCD codes to exclude. Example: --exclude-ccd-codes NA CL BR",
     )
     parser.add_argument(
         "--exclude-ccd-codes-txt",
@@ -244,17 +231,17 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--input-parquet",
-        default="/home/possu/jinho/datasets/atomworks_pdb_full_v5/debug_metadata_seq_clustered_04.parquet",
+        default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5/metadata_seq_clustered_04.parquet",
         help="Input parquet path.",
     )
     parser.add_argument(
         "--output-parquet",
-        default="/home/possu/jinho/datasets/atomworks_pdb_full_v5/debug_metadata_seq_clustered_04_lmpnn.parquet",
+        default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5/metadata_seq_clustered_04_lmpnn.parquet",
         help="Output parquet path (if suffix is .csv, writes CSV).",
     )
     parser.add_argument(
         "--deleted-chains-out",
-        default="/home/possu/jinho/datasets/atomworks_pdb_full_v5/debug_metadata_seq_clustered_04_deleted_chains.parquet",
+        default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5/metadata_seq_clustered_04_deleted_chains.parquet",
         help="Output path for the deleted-chain list (parquet/csv).",
     )
     args = parser.parse_args()
