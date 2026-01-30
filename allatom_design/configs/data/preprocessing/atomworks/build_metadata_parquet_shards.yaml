@@ -1,8 +1,16 @@
 mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
 out_dir: /scratch/users/zhkim216/datasets/debug_atomworks_pdb_full_v5
 
-num_workers: 8
+# Optional: newline-delimited list of mmCIF paths to process (overrides mmcif_dir scan)
+cif_list_path: null
+
+num_workers: 31
 max_file_size: 5000000
+
+# IMPORTANT: Ligand validity scores require RCSB network access (GraphQL).
+# On clusters this is a frequent source of timeouts/hangs, so keep it off for bulk preprocessing
+# and compute it later in a separate, cacheable step.
+fetch_ligand_validity_scores: false
 
 # OOM resilience settings
 processing_timeout: 300       # Per-file timeout in seconds
@@ -11,6 +19,8 @@ max_tasks_per_child: 16       # Restart workers periodically to prevent memory l
 
 # Data preprocessor args
 data_preprocessor_cfg:
+  # Keep true to preserve PDB-derived metadata fields (pdb_id, deposition_date, etc).
+  # Network calls for ligand validity are controlled by `fetch_ligand_validity_scores`.
   from_rcsb: true
   build_assembly: "first"
 

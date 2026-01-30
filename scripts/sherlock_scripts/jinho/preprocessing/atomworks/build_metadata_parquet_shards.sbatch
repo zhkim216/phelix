@@ -35,8 +35,10 @@ python3 allatom_design/data/preprocessing/atomworks/build_metadata_parquet_shard
     num_shards=${NUM_SHARDS} \
     shard_id=${SLURM_ARRAY_TASK_ID} \
     max_file_size=5000000 \
+    fetch_ligand_validity_scores=false \
     data_preprocessor_cfg.polymer_pn_unit_limit=500 \
     data_preprocessor_cfg.contact_distance=6 \
-    processing_timeout=300 \
-    batch_size=128 \
-    max_tasks_per_child=16
+    data_preprocessor_cfg.from_rcsb=true \
+    processing_timeout=600 \
+    batch_size=200 \
+    max_tasks_per_child=25
