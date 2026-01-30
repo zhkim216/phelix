@@ -1,11 +1,11 @@
-mmcif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
-out_dir: /scratch/users/zhkim216/datasets/atomworks_lmpnnval
+mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
+out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v3
 
-num_workers: 24
+num_workers: 32
 
 # OOM resilience settings
-batch_size: 50                # Save progress every N examples (enables resume)
-max_tasks_per_child: 25       # Restart workers periodically to prevent memory leaks
+batch_size: 1024                # Save progress every N examples (enables resume)
+max_tasks_per_child: 32       # Restart workers periodically to prevent memory leaks
 
 dataset:
   _target_: atomworks.ml.datasets.PandasDataset

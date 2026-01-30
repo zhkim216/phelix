@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=preprocess_examples_atomworks_pdb_full
-#SBATCH -p possu,normal,owners
+#SBATCH -p normal,owners
 #SBATCH --array=0-99
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --time=1-0:00:00
-#SBATCH --mem=16GB
+#SBATCH --mem=32GB
 #
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/users/zhkim216/job_output/job_%A_%a.out
@@ -33,9 +33,9 @@ python3 allatom_design/data/preprocessing/atomworks/preprocess_examples.py \
     --config-path=/home/users/zhkim216/code/allatom-design/allatom_design/configs/data/preprocessing/atomworks \
     --config-name=preprocess_examples \
     mmcif_dir=${PDB_MIRROR_PATH} \
-    out_dir=/scratch/users/zhkim216/datasets/atomworks_pdb_full_v2 \
+    out_dir=/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5 \
     num_workers=${SLURM_CPUS_PER_TASK} \
     num_shards=${NUM_SHARDS} \
     shard_id=${SLURM_ARRAY_TASK_ID} \
-    batch_size=64 \
-    max_tasks_per_child=64
+    batch_size=128 \
+    max_tasks_per_child=16
