@@ -222,6 +222,8 @@ class FeaturizeCoordsAndMasks(Transform):
                     if np.isin(chain_type, non_polymer_chain_type_enums).any():
                         atom_is_small_molecule_chain[pn_unit_mask] = True                    
         except Exception as e:
+            logger.info(f"example_id: {data['example_id']}")
+            logger.info(f"chain_type: {chain_type}")
             logger.info(f"Error in FeaturizeCoordsAndMasks: {e}")
             
         
@@ -376,22 +378,22 @@ class AddDataCategory(Transform):
             raise ValueError(f"Invalid example_id: {data['example_id']}")
         return data
 
-class DropOutNonProteinChains(Transform):
-    """Randomly drop out non-protein chains."""
-    def __init__(self, drop_prob: float = 0.1):
-        self.drop_prob = drop_prob
+# class DropOutNonProteinChains(Transform):
+#     """Randomly drop out non-protein chains."""
+#     def __init__(self, drop_prob: float = 0.1):
+#         self.drop_prob = drop_prob
 
-    @override
-    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+#     @override
+#     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
                 
-        s = data["example_id"]
-        import re
-        match = re.search(r"\['[^']+',\s*'([^']+)'\]", s)
-        if match:
-            dataset_type = match.group(1)  # 'protein_chains' 또는 'complex'
-            if dataset_type == "complexes":
-                if len(data["chain_info"].keys()) >= 2:
-                    print(1)
+#         s = data["example_id"]
+#         import re
+#         match = re.search(r"\['[^']+',\s*'([^']+)'\]", s)
+#         if match:
+#             dataset_type = match.group(1)  # 'protein_chains' 또는 'complex'
+#             if dataset_type == "complexes":
+#                 if len(data["chain_info"].keys()) >= 2:
+#                     print(1)
         
         
         
