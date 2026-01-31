@@ -144,11 +144,7 @@ class SDDataset(MolecularDataset):
         #         if dataset_type == "interface":
         #             if len(example["chain_info"].keys()) >= 2:
         #                 print(1)
-<<<<<<< HEAD
-                          
-=======
                            
->>>>>>> refs/remotes/origin/jinho/AAA
         # Add metadata info and phase info     
         example.update(parsed_row)                                  
         example["phase"] = self.phase
