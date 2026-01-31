@@ -39,8 +39,8 @@ trainer:
   detect_anomaly: false  # Slower; enable for debugging nans in gradients
   gradient_clip_val: 0.0
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
-  check_val_every_n_epoch: 10  # How often to run validation
-  num_sanity_val_steps: 2 # Skip sanity check validation batches before training #! default is 2
+  check_val_every_n_epoch: 2  # How often to run validation
+  num_sanity_val_steps: 1 # Skip sanity check validation batches before training #! default is 2
 
 # Resuming training options
 resume:

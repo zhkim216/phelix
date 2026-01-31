@@ -575,8 +575,7 @@ class EncodeAF3TokenLevelFeatures(Transform):
         # ...one-hot encode the restype (NOTE: We one-hot encode here, since we have access to the sequence encoding object)
         restype = F.one_hot(torch.tensor(restype), num_classes=self.sequence_encoding.n_tokens).numpy()
 
-        # ... molecule type #! (JH) changed to use information from metadata        
-                    
+        # ... molecule type                     
         _aa_like_res_names = self.sequence_encoding.all_res_names[self.sequence_encoding.is_aa_like]
         is_protein = np.isin(token_level_array.res_name, _aa_like_res_names)
 
@@ -588,7 +587,7 @@ class EncodeAF3TokenLevelFeatures(Transform):
         
         is_nuc = is_dna | is_rna
                     
-        is_ligand = ~(is_protein | is_rna | is_dna)
+        is_ligand = ~(is_protein | is_rna | is_dna)                
                 
         # ... add to data dict
         if "feats" not in data:

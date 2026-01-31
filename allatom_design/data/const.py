@@ -117,7 +117,7 @@ class AF3SequenceEncoding:
 
 AF3_ENCODING: Final[AF3SequenceEncoding] = AF3SequenceEncoding()
 
-MAX_NUM_ATOMS: Final[int] = 14 #! changed 260121
+MAX_NUM_ATOMS: Final[int] = 23 
 PROT_BB_ATOMS: Final[list[str]] = ["N", "CA", "C", "O"]
 PROT_LETTER_TO_TOKEN: Final[dict[str, str]] = {**aw_sequence.aa_chem_comp_1to3(), "X": "UNK"}  # include "X" for unknown amino acids
 PROT_TOKEN_TO_LETTER: Final[dict[str, str]] = {v: k for k, v in PROT_LETTER_TO_TOKEN.items()}
