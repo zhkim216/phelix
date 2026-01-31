@@ -31,7 +31,6 @@ from atomworks.ml.transforms.featurize_unresolved_residues import (
     PlaceUnresolvedTokenOnClosestResolvedTokenInSequence)
 from atomworks.ml.transforms.filters import (FilterToProteins,
                                              RemoveUnresolvedTokens,
-                                             RemoveUnsupportedChainTypes,
                                              filter_to_specified_pn_units)
 import allatom_design.data.const as const
 from allatom_design.data.transform.preprocess import AtomizeByCCDName
@@ -57,6 +56,7 @@ from allatom_design.data.transform.custom_transforms import (
     AddTrainingRandomNoise,
     DropOutNonProteinChains,
     AddDataCategory,
+    RemoveUnsupportedChainTypes,
 )
 
 logger = logging.getLogger(__name__)
