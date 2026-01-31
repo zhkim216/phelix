@@ -51,6 +51,8 @@ from atomworks.io.utils.sequence import (
 import allatom_design.data.const as const
 from allatom_design.data.transform.pad import pad_dim
 
+import logging
+logger = logging.getLogger(__name__)
 
 # Keep track of the token/atom dimensions of the features for padding & cropping
 FEAT_TO_TOKEN_DIM = {
@@ -197,6 +199,7 @@ class FeaturizeCoordsAndMasks(Transform):
         atom_is_nucleic_acid_chain = np.zeros(len(atom_array), dtype=bool)
         atom_is_metal_chain = np.zeros(len(atom_array), dtype=bool)
         atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)
+        
         try:
             for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
                 pn_unit_mask = atom_array.pn_unit_iid == pn_unit_iid
@@ -215,10 +218,10 @@ class FeaturizeCoordsAndMasks(Transform):
                             atom_is_small_molecule_chain[pn_unit_mask] = True
                 elif len(chain_type) > 1: # covalent modification case, e.g. [6, 8]
                     if np.isin(chain_type, non_polymer_chain_type_enums).any():
-                        atom_is_small_molecule_chain[pn_unit_mask] = True
-                    
-        except:
-            print(1)
+                        atom_is_small_molecule_chain[pn_unit_mask] = True                    
+        except Exception as e:
+            logger.info(f"Error in FeaturizeCoordsAndMasks: {e}")
+            
         
         token_is_protein_chain = atom_is_protein_chain[repr_mask]
         token_is_nucleic_acid_chain = atom_is_nucleic_acid_chain[repr_mask]
