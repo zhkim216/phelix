@@ -24,7 +24,7 @@ train:
   batch_size: 8  
   debug: true
   compile:
-    compile_model: true  # Compile the model before running, speeds up training a lot
+    compile_model: false  # Compile the model before running, speeds up training a lot
     compile_backend: inductor #! default: inductor
     mode: "default" #! default: default
     fullgraph: false #! default: false

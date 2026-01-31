@@ -8,7 +8,7 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 10
+num_debug_samples: 2
 seed: 0
 num_workers: 0 # for dataloading
 
@@ -19,10 +19,10 @@ base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 # Sequence design config
 seq_des_cfg:  
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp4_cfg2
+  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp5_cfg10
   ckpt_cfg:
-    start_step: 22500 
-    end_step: 22500
+    start_step: 82500 
+    end_step: 82500
     eval_every_n_ckpts: 1
     eval_last_ckpt: false
     use_ema: true

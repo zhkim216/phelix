@@ -1,7 +1,7 @@
 # ligandmpnn dataset configuration
 # Override validation_ids_file and filters for ligandmpnn dataset
 
-validation_ids_file: /home/possu/jinho/datasets/splits/lmpnn_validation_ids.txt
+validation_ids_file: /scratch/users/zhkim216/datasets/splits/lmpnn_validation_ids.txt
 
 train_filters:
   cif_filter:    

@@ -1,7 +1,7 @@
 # ligandmpnn dataset configuration
 # Override validation_ids_file and filters for Boltz dataset
 
-validation_ids_file: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/small_molecule_val_monomer_512.txt
+validation_ids_file: /scratch/users/zhkim216/datasets/splits/lmpnn_validation_ids.txt
 
 train_filters:
   cif_filter:    

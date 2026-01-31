@@ -21,7 +21,7 @@ finetuning:
 train:
   seed: 0
   batch_size: 8
-  debug: true
+  debug: false
   compile:
     compile_model: false  # Compile the model before running, speeds up training a lot
     compile_backend: inductor #! default: inductor
