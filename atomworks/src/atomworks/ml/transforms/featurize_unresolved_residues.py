@@ -57,7 +57,7 @@ def mask_residues_with_specific_unresolved_atoms(
     # ... subset to backbone atoms within polymers with unresolved coordinates
     # (We treat partially occupied atoms as occupied; e.g., those resolved from "altlocs")
     if "chain_type" in atom_array.get_annotation_categories():
-        # Process each chain type group and its required atoms
+        # Process each chain type group and its required atoms        
         for chain_types, atom_names in chain_type_to_atom_names.items():
             # Handle both single chain types and tuples/lists of chain types
             if not isinstance(chain_types, tuple | list):

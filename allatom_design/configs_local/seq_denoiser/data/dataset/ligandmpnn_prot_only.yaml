@@ -7,6 +7,8 @@ train_filters:
   cif_filter:    
     - "release_date <= '2022-12-16'"
     - "resolution < 9.0" 
+    - "clash_severity != 'severe'"
+    - "~method.str.contains('NMR')"
     - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
     - "num_polymer_pn_units < 50"
   chain_filter:    

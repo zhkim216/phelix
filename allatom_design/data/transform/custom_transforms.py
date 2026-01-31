@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from pathlib import Path
+import re
 
 import biotite.structure as struc
 from biotite.structure import AtomArray
@@ -82,8 +83,7 @@ FEAT_TO_TOKEN_DIM = {
     "noised_n_coords": [0],
     "noised_c_coords": [0],
     "noised_o_coords": [0],
-    "noised_pseudo_cb_coords": [0],
-    "token_bonds": [0, 1],            
+    "noised_pseudo_cb_coords": [0],                
     
     # optional features that might not be present
     "seq_cond_mask": [0],
@@ -109,7 +109,9 @@ FEAT_TO_ATOM_DIM = {
     "atom_is_protein_chain": [0],    
     "prot_bb_atom_mask": [0],
     "prot_scn_atom_mask": [0],
+    "prot_scn_wo_cb_atom_mask": [0],
     "atom_is_atomized": [0],
+    
     
     # optional features that might not be present
     "atom_cond_mask": [0],
@@ -195,20 +197,28 @@ class FeaturizeCoordsAndMasks(Transform):
         atom_is_nucleic_acid_chain = np.zeros(len(atom_array), dtype=bool)
         atom_is_metal_chain = np.zeros(len(atom_array), dtype=bool)
         atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)
-        for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
-            pn_unit_mask = atom_array.pn_unit_iid == pn_unit_iid
-            sel_atom_array = atom_array[pn_unit_mask]
-            chain_type = np.unique(sel_atom_array.chain_type)
-            if chain_type in polymer_chain_type_enums:
-                if chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value:                    
-                    atom_is_protein_chain[pn_unit_mask] = True                                    
-                elif chain_type in nucleic_acid_chain_type_enums:
-                    atom_is_nucleic_acid_chain[pn_unit_mask] = True
-                elif np.isin(sel_atom_array.chain_type, non_polymer_chain_type_enums):
-                    if len(sel_atom_array) == 1 & np.isin(sel_atom_array.element, METAL_ELEMENTS):
-                        atom_is_metal_chain[pn_unit_mask] = True
-                    else:
+        try:
+            for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
+                pn_unit_mask = atom_array.pn_unit_iid == pn_unit_iid
+                sel_atom_array = atom_array[pn_unit_mask]
+                chain_type = np.unique(sel_atom_array.chain_type)
+                if len(chain_type) == 1:
+                    if chain_type in polymer_chain_type_enums:
+                        if chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value:                    
+                            atom_is_protein_chain[pn_unit_mask] = True                                    
+                        elif chain_type in nucleic_acid_chain_type_enums:
+                            atom_is_nucleic_acid_chain[pn_unit_mask] = True
+                    elif np.isin(sel_atom_array.chain_type, non_polymer_chain_type_enums):
+                        if len(sel_atom_array) == 1 & np.isin(sel_atom_array.element, METAL_ELEMENTS):
+                            atom_is_metal_chain[pn_unit_mask] = True
+                        else:
+                            atom_is_small_molecule_chain[pn_unit_mask] = True
+                elif len(chain_type) > 1: # covalent modification case, e.g. [6, 8]
+                    if np.isin(chain_type, non_polymer_chain_type_enums).any():
                         atom_is_small_molecule_chain[pn_unit_mask] = True
+                    
+        except:
+            print(1)
         
         token_is_protein_chain = atom_is_protein_chain[repr_mask]
         token_is_nucleic_acid_chain = atom_is_nucleic_acid_chain[repr_mask]
@@ -231,8 +241,10 @@ class FeaturizeCoordsAndMasks(Transform):
         # protein backbone and sidechain atom masks
         is_prot_bb = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
         is_prot_scn = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & ~np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
+        is_prot_scn_wo_cb = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & ~np.isin(atom_array.atom_name, ["N", "CA", "C", "O", "OXT", "CB"])
         feats["prot_bb_atom_mask"] = torch.tensor(is_prot_bb).float()
-        feats["prot_scn_atom_mask"] = torch.tensor(is_prot_scn).float()        
+        feats["prot_scn_atom_mask"] = torch.tensor(is_prot_scn).float()
+        feats["prot_scn_wo_cb_atom_mask"] = torch.tensor(is_prot_scn_wo_cb).float()        
                                                                 
         # Calculate number of atoms per token
         device = feats["coords"].device
@@ -247,6 +259,10 @@ class FeaturizeCoordsAndMasks(Transform):
         
         feats["tokenwise_atom_idxs"] = tokenwise_atom_idxs
         feats["tokenwise_atom_idxs_mask"] = tokenwise_atom_idxs_mask                        
+
+        # Get bond features        
+        feats["token_bonds"] = torch.tensor(feats["token_bonds"]).float()
+        
 
         # Get ligand related features
         # try:
@@ -336,6 +352,48 @@ class CenterRandomAugmentation(Transform):
         return data
 
 
+class AddDataCategory(Transform):
+    """Add the sub dataset name to the data dict."""
+    def __init__(self):
+        pass
+    
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        s = data["example_id"]        
+        match = re.search(r"\['[^']+',\s*'([^']+)'\]", s)
+        if match:
+            dataset_type = match.group(1)  # 'protein_chains' 또는 'complex'
+            if dataset_type == "interface":
+                data["data_category"] = "interface"
+            else:
+                data["data_category"] = "protein_monomer_chain"
+        else:
+            raise ValueError(f"Invalid example_id: {data['example_id']}")
+        return data
+
+class DropOutNonProteinChains(Transform):
+    """Randomly drop out non-protein chains."""
+    def __init__(self, drop_prob: float = 0.1):
+        self.drop_prob = drop_prob
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+                
+        s = data["example_id"]
+        import re
+        match = re.search(r"\['[^']+',\s*'([^']+)'\]", s)
+        if match:
+            dataset_type = match.group(1)  # 'protein_chains' 또는 'complex'
+            if dataset_type == "complexes":
+                if len(data["chain_info"].keys()) >= 2:
+                    print(1)
+        
+        
+        
+        
+        atom_array = data["atom_array"]
+        return data
+
 class FilterToQueryPNUnits(Transform):
     """Filter the atom array to the query PN units."""
 
@@ -348,6 +406,7 @@ class FilterToQueryPNUnits(Transform):
             atom_array = filter_to_specified_pn_units(atom_array, data["query_pn_unit_iids"])
 
         data["atom_array"] = atom_array
+        
         return data
 
 class MaskAtomizedTokensInProtein(Transform):

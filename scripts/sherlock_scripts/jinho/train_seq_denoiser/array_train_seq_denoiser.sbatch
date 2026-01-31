@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=exp6
 #SBATCH -p possu
-#SBATCH --array=0,1
+#SBATCH --array=0-2
 #SBATCH --gres=gpu:1
-#SBATCH --mem=48G
+#SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=1-0:00:00
-#SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/job_%A_%a.out
-#SBATCH --error=/scratch/users/zhkim216/job_output/train_seq_denoiser/job_%A_%a.err
+#SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp6_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp6_%A_%a.err
 
 # Define directories
 BASE_DIR=/home/users/zhkim216/code/allatom-design
@@ -31,11 +31,12 @@ RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 DENOISER_TYPE="lc_atom_mpnn"
 
 # Path where processed pdb files are stored
-PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3"
+PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5"
 
 CONFIGS=(  
-  "data.featurizer_cfg.crop_spatial_p=0.5"
-  "data.featurizer_cfg.crop_spatial_p=1.0"
+  "denoiser.mpnn.ligand_conditioning=false denoiser.mpnn.token_features.protein_graph_rbf_type=ca"
+  "denoiser.mpnn.ligand_conditioning=true denoiser.mpnn.token_features.protein_graph_rbf_type=ca"
+  "denoiser.mpnn.ligand_conditioning=true denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
@@ -72,25 +73,23 @@ python3 allatom_design/train_seq_denoiser.py \
     data.featurizer_cfg.max_tokens=512 \
     data.featurizer_cfg.max_atoms=4608 \
     data.featurizer_cfg.crop_center_cutoff_distance=15.0 \
-    data.featurizer_cfg.pocket_distance=8.0 \
-    data.sampling_weights.alphas_chain.a_prot=1.0 \
-    data.sampling_weights.alphas_chain.a_nuc=0.0 \
-    data.sampling_weights.alphas_chain.a_peptide=0.0 \
-    data.sampling_weights.alphas_chain.a_small_molecule=0.0 \
-    data.sampling_weights.alphas_chain.a_metal=0.0 \
-    data.sampling_weights.alphas_chain.a_loi=0.0 \
+    data.featurizer_cfg.pocket_distance=6.0 \
+    data.sampling_weights.alphas_protein_monomer_chain.a_prot=1.0 \
+    data.sampling_weights.alphas_protein_monomer_chain.a_nuc=0.0 \
+    data.sampling_weights.alphas_protein_monomer_chain.a_peptide=0.0 \
+    data.sampling_weights.alphas_protein_monomer_chain.a_small_molecule=0.0 \
+    data.sampling_weights.alphas_protein_monomer_chain.a_metal=0.0 \
+    data.sampling_weights.alphas_protein_monomer_chain.a_loi=0.0 \
     data.sampling_weights.alphas_interface.a_prot=1.0 \
-    data.sampling_weights.alphas_interface.a_nuc=0.0 \
-    data.sampling_weights.alphas_interface.a_peptide=0.0 \
-    data.sampling_weights.alphas_interface.a_small_molecule=0.0 \
-    data.sampling_weights.alphas_interface.a_metal=0.0 \
-    data.sampling_weights.alphas_interface.a_loi=0.0 \
-    data.sampling_weights.betas.beta_chain=1.0 \
-    data.sampling_weights.betas.beta_interface=0.0 \
+    data.sampling_weights.alphas_interface.a_nuc=1.0 \
+    data.sampling_weights.alphas_interface.a_peptide=1.0 \
+    data.sampling_weights.alphas_interface.a_small_molecule=1.0 \
+    data.sampling_weights.alphas_interface.a_metal=1.0 \
+    data.sampling_weights.alphas_interface.a_loi=1.0 \
+    data.sampling_weights.betas.beta_protein_monomer_chain=0.5 \
+    data.sampling_weights.betas.beta_interface=0.5 \
     data.samples_per_epoch=50000 \
-    denoiser.mpnn.token_features.rbf_type=ca \
-    mask_selector.restype_masking_schedule=uniform_t \
-    mask_selector.atom_masking_schedule=uniform_t \
+    mask_selector.atom_masking_schedule=uniform_cosine_t \
     logging.log_every_n_steps=100 \
     logging.wandb_watch_freq=500 \
     checkpointing.save_latest_every_n_steps=2500 \
