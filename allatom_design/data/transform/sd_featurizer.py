@@ -54,7 +54,7 @@ from allatom_design.data.transform.custom_transforms import (
     AnnotateLigandPockets,
     GetNCACOAndPseudoCBCoords,
     AddTrainingRandomNoise,
-    DropOutNonProteinChains,
+    # DropOutNonProteinChains,
     AddDataCategory,
     RemoveUnsupportedChainTypes,
 )
