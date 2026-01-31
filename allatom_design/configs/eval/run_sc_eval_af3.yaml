@@ -21,9 +21,6 @@ metadata_path: null
 exp_name: caliby_rfd3val_af3 # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
-# Cached examples (original structures with ligands)
-cached_example_path: /scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
-
 ######### Data & Transform configurations #########
 # Configurations for loading ligand atom arrays from ligand source path
 ligand_source_cfg:
