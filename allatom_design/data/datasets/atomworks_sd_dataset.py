@@ -144,9 +144,7 @@ class SDDataset(MolecularDataset):
         #         if dataset_type == "interface":
         #             if len(example["chain_info"].keys()) >= 2:
         #                 print(1)
-        
-        if self.phase == "val":
-            print(1)                                
+                           
         # Add metadata info and phase info     
         example.update(parsed_row)                                  
         example["phase"] = self.phase
@@ -269,9 +267,7 @@ class SDDataset(MolecularDataset):
         
             current_len = len(complex_df)
             logger.info(f"Excluded {prev_len - current_len} chains in {dataset_name} dataset, because of cluster exclusion")
-
-        
-        print(1)
+                
 
         # Aggregate rows by (pdb_id, assembly_id) so each complex is one row
         complex_df = self._aggregate_complex_df(complex_df, dataset_name)
@@ -392,7 +388,7 @@ class SDDataset(MolecularDataset):
         else: 
             val_parser = GenericDFParser(pn_unit_iid_colnames=['query_pn_unit_iids'])
             parsed_df = self.metadata_df.apply(val_parser.parse, axis=1)
-            logger.info(f"Final {self.phase} dataset contains {len(parsed_df)} chains in {len(self.metadata_df['pdb_id'].unique().tolist())} pdbs")                
+            logger.info(f"Final {self.phase} dataset contains {len(self.metadata_df['pdb_id'].unique().tolist())} pdbs")                
 
         return parsed_df
 
