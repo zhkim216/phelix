@@ -398,8 +398,8 @@ class AddDataCategory(Transform):
         
         
         
-        atom_array = data["atom_array"]
-        return data
+        # atom_array = data["atom_array"]
+        # return data
 
 class FilterToQueryPNUnits(Transform):
     """Filter the atom array to the query PN units."""
