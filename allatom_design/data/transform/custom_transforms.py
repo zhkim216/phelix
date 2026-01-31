@@ -217,8 +217,9 @@ class FeaturizeCoordsAndMasks(Transform):
                     if np.isin(chain_type, non_polymer_chain_type_enums).any():
                         atom_is_small_molecule_chain[pn_unit_mask] = True
                     
-        except:
+        except
             print(1)
+            import ipdb; ipdb.set_trace()
         
         token_is_protein_chain = atom_is_protein_chain[repr_mask]
         token_is_nucleic_acid_chain = atom_is_nucleic_acid_chain[repr_mask]
