@@ -25,7 +25,6 @@ CUDA_BIND_OPT="--bind ${CUDA_HOST}:${CUDA_HOME}:ro"
     --bind "$PROJECT_ROOT" \
     --bind "$UV_CACHE_DIR:/uv/cache" \
     --bind "$UV_PYTHON_INSTALL_DIR:/uv/python" \
-    --env PATH=$VENV/bin:$PATH \
     --env PYTHONPATH=$PROJECT_ROOT:$PYTHONPATH \
     --env PS1="\[\033[01;35m\][singularity]\[\033[00m\] \[\033[01;34m\]\w\[\033[00m\] $ " \
     --env TORCH_HOME=$TORCH_HOME \
