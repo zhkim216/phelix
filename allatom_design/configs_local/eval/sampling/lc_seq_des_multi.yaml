@@ -14,7 +14,7 @@ num_workers: 0 # for dataloading
 
 # Outputs
 exp_name: debug_eval_exp4_cfg2_lmpnnval # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260124
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260125
 
 # Sequence design config
 seq_des_cfg:  
@@ -40,7 +40,7 @@ seq_des_cfg:
         potts_sweeps: 500
         lcp_expand_edge_idx_fix: true
 
-# Metadata for input samples
+# sampling inputs
 sampling_inputs_csv: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/sampling_inputs_lmpnnval_small_molecule_filtered.csv
 
 # Positional constraints: supports columns in [pdb_key,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
@@ -52,9 +52,10 @@ redesign_cfg:
   use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
   pocket_distance: 5.0
 
-# Docking metrics configuration
-docking_metrics_cfg:
-  pocket_distance_for_metrics: 8.0
+# Pocket configuration
+pocket_cfg:
+  pocket_distance_list_for_metrics: [4.0, 5.0, 6.0]
+  pocket_distance_for_align: 6.0
 
 ######### Data & Transform configurations #########
 input_sample_is_all_atom: true
