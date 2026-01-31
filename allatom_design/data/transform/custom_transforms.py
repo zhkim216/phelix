@@ -1,4 +1,5 @@
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, ClassVar
 from typing_extensions import override
 from torch import Tensor as TensorType
 import torch
@@ -26,6 +27,7 @@ from atomworks.constants import (
     UNKNOWN_DNA,
     UNKNOWN_RNA,
 )
+
 import atomworks.enums as aw_enums
 from atomworks.ml.utils.token import get_token_starts
 from atomworks.ml.transforms.base import Transform
@@ -50,7 +52,7 @@ from atomworks.io.utils.sequence import (
 
 import allatom_design.data.const as const
 from allatom_design.data.transform.pad import pad_dim
-
+from allatom_design.data.const import TRAINING_SUPPORTED_CHAIN_TYPES
 import logging
 logger = logging.getLogger(__name__)
 
@@ -721,3 +723,87 @@ def get_af3_token_representative_masks(
         | atoms
     )
     return _token_rep_mask
+
+
+## Remove unsupported chain types transform
+def exists(obj: Any) -> bool:
+    """Check that obj is not None.
+
+    Args:
+        obj: The object to check.
+
+    Returns:
+        True if obj is not None, False otherwise.
+    """
+    return obj is not None
+
+def remove_unsupported_chain_types(
+    atom_array: AtomArray,
+    query_pn_unit_iids: Sequence[str] | None = None,
+    supported_chain_types: Sequence[aw_enums.ChainType] = TRAINING_SUPPORTED_CHAIN_TYPES,
+) -> AtomArray:
+    """Filter out chains with unsupported chain types from the AtomArray.
+
+    Additionally, asserts that none of the query pn_units are of an unsupported chain type if given.
+    (in which case they should have been filtered out upstream, otherwise our example is not valid).
+
+    Args:
+        query_pn_unit_iids (Sequence[str] | None): The PN unit IDs to check for unsupported chain types.
+        supported_chain_types (Sequence[ChainType]): The chain types to filter out.
+
+    Returns:
+        AtomArray: The filtered AtomArray.
+    """
+    # Convert chain_type to int if stored as string (e.g., from saved cif files) #! (JH) 251201 fixed
+    chain_types = atom_array.chain_type
+    if chain_types.dtype.kind in ('U', 'S', 'O'):  # Unicode, byte string, or object
+        chain_types = np.array([int(ct) if str(ct).isdigit() else ct for ct in chain_types])
+    
+    # Convert supported_chain_types to int values for comparison
+    supported_chain_type_values = [int(ct) for ct in supported_chain_types]
+    
+    # We first assert that none of the query pn_units are of an unsupported chain type, which means the example should have been filtered out upstream
+    if exists(query_pn_unit_iids):
+        query_pn_unit_chain_types = np.unique(
+            chain_types[np.isin(atom_array.pn_unit_iid, query_pn_unit_iids)]
+        )
+        assert np.all(
+            np.isin(query_pn_unit_chain_types, supported_chain_type_values)
+        ), f"Query PN unit has an unsupported chain type: {query_pn_unit_chain_types}"
+
+    # Then, we filter out chains with unsupported chain types
+    is_supported_chain_type = np.isin(chain_types, supported_chain_type_values)
+    return atom_array[is_supported_chain_type]
+
+class RemoveUnsupportedChainTypes(Transform):
+    """Filter out chains with unsupported chain types from the AtomArray.
+
+    Additionally, asserts that none of the query pn_units are of an unsupported chain type if given.
+    (in which case they should have been filtered out upstream, otherwise our example is not valid).
+    """
+
+    requires_previous_transforms: ClassVar[list[str | Transform]] = []
+
+    def __init__(self, supported_chain_types: Sequence[aw_enums.ChainType] = TRAINING_SUPPORTED_CHAIN_TYPES):
+        """
+        Initialize the RemoveUnsupportedChainTypes transform.
+
+        Args:
+            supported_chain_types (Sequence[ChainType]): The chain types to keep in the AtomArray.
+        """
+        self.supported_chain_types = supported_chain_types
+
+    def check_input(self, data: dict) -> None:
+        check_atom_array_annotation(data, ["chain_type", "pn_unit_iid"])
+
+    def forward(self, data: dict) -> dict:
+        atom_array = data["atom_array"]
+        query_pn_unit_iids = data.get("query_pn_unit_iids")
+
+        # Apply transform
+        atom_array = remove_unsupported_chain_types(atom_array, query_pn_unit_iids, self.supported_chain_types)
+
+        # Update data
+        data["atom_array"] = atom_array
+
+        return data
