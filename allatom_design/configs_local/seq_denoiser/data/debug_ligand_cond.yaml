@@ -2,38 +2,39 @@ defaults:
   - dataset@_here_: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
 
 task: ${model.task}
-pdb_path: /home/possu/jinho/datasets/atomworks_lmpnnval_ld
-parquet_path: /home/possu/jinho/datasets/atomworks_lmpnnval_ld/metadata_seq_clustered_04.parquet
+pdb_path: /home/possu/jinho/datasets/atomworks_pdb_full_v5
+train_metadata_path: /home/possu/jinho/datasets/atomworks_pdb_full_v5/debug_metadata_seq_clustered_04_lmpnn.parquet
+plinder_ccd_list_path: 
 
 validation_ids_file: ??? #! Required, set by dataset/*.yaml
 train_filters: ??? #! Required, set by dataset/*.yaml
 val_filters: ??? #! Required, set by dataset/*.yaml
+val_metadata_path: ??? #! Required, set by dataset/*.yaml
 
 debug: ${train.debug}
-debug_num_ids: 40 #! For debugging
+debug_num_ids: 10000 #! For debugging
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
 residue_cache_dir: /home/possu/jinho/datasets/atomworks_cached_residue_data
 exclude_val_cluster: true
   
 sampling_weights:
-  alphas_chain:
+  alphas_protein_monomer_chain:
     a_prot: 1.0
     a_nuc: 0.0
     a_peptide: 0.0
     a_small_molecule: 0.0 
     a_metal: 0.0 
-    a_loi: 0.0
-    
+    a_loi: 0.0    
   alphas_interface:
-    a_prot: 1.0
-    a_nuc: 0.0
-    a_peptide: 0.0 
-    a_small_molecule: 0.0 
-    a_metal: 0.0 
-    a_loi: 0.0
+    a_prot: 3.0
+    a_nuc: 1.0
+    a_peptide: 1.0 
+    a_small_molecule: 1.0 
+    a_metal: 1.0 
+    a_loi: 1.0
   betas:
-    beta_chain: 1.0
-    beta_interface: 0.0
+    beta_protein_monomer_chain: 0.5
+    beta_interface: 0.5
     
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:
@@ -47,15 +48,18 @@ cif_parser_args:
 
 featurizer_cfg:
   is_inference: false
-  occupancy_threshold_protein_backbone: 0.8
+  occupancy_threshold_protein_backbone: 0.0
   training_structure_noise: 0.3
   undesired_res_names: []
   remove_unresolved_tokens: true
-  max_tokens: 256 #! DEBUG
-  max_atoms: 2304 #! DEBUG
+  max_tokens: 256 #! DEBUG (min)
+  max_atoms: 2304 #! DEBUG (min)
   crop_center_cutoff_distance: 15.0
-  crop_spatial_p: 0.5  
-  pocket_distance: 8.0
+  # crop_spatial_p: 0.5  
+  # Interface crop constraints
+  # Ensure at least N protein tokens from the nearest protein pn_unit (chain) to the crop center.
+  min_protein_tokens_in_interface_crop: 20
+  pocket_distance: 6.0
   residue_cache_dir: ${data.residue_cache_dir}
   max_conformers_per_residue: 50
   apply_random_augmentation: true

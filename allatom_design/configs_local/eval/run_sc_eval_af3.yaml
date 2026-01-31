@@ -1,5 +1,4 @@
 # Self-consistency evaluation config for AF3
-# This config is for evaluating pre-designed samples using AF3
 
 # Wandb settings
 wandb:
@@ -18,41 +17,58 @@ seed: 0
 metadata_path: null
 
 # Outputs
-exp_name: caliby_rfd3val_af3 # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260106_rfd3_af3eval
+exp_name: run_sc_eval_af3 # experiment name; used for wandb and output directory
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260124_run_sc_eval_af3
 
 ######### Data & Transform configurations #########
-# Configurations for loading ligand atom arrays from ligand source path
-ligand_source_cfg:
-  ligand_source_path: /home/possu/jinho/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
-  add_ligands_to_designed_samples: true
-  source_is_designed: true
+# Configurations for getting reference samples' paths
+ref_sample_is_all_atom: false
+ref_sample_is_designed: true
+load_from_cache: false
 
-# Whether the sample is all-atom sample
-is_all_atom_sample: false
-
-# Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /home/possu/jinho/allatom-design/debug/260106_rfd3_eval/samples
+  pdb_dir: /home/possu/jinho/allatom-design/debug/260124_run_sc_eval_af3/eval_caliby_lmpnnval_sm_filt_full_af3/samples
   pdb_name_list: null  # null to use all files in pdb_dir
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples  
 
-#### For designing samples ####
-# Data configuration for design samples
-data_cfg_for_design:
-  load_from_cache: false
-  use_load_any: false
-  cif_parser_args:
-    add_missing_atoms: true
-    remove_waters: true
-    remove_ccds: []
-    fix_ligands_at_symmetry_centers: true
-    fix_arginines: true
-    convert_mse_to_met: true
-    hydrogen_policy: "remove"
-    extra_fields: "all"  
-  cif_save_args:
+# Configurations for adding ligand atom arrays to reference samples
+ligand_source_cfg:
+  ligand_source_path: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs
+  add_ligands_to_designed_samples: true
+  source_is_designed: false
+
+# Configurations for cif files
+cif_cfg:
+  parse:
+    native:
+      add_missing_atoms: true
+      remove_waters: true
+      remove_ccds: []
+      fix_ligands_at_symmetry_centers: true
+      fix_arginines: true
+      convert_mse_to_met: true
+      hydrogen_policy: "remove"
+      extra_fields: "all"      
+    designed_samples:
+      add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
+      remove_waters: false
+      remove_ccds: []
+      fix_ligands_at_symmetry_centers: false
+      fix_arginines: false
+      convert_mse_to_met: false
+      hydrogen_policy: "remove"
+      extra_fields: null  
+    af3_predictions:
+      add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
+      remove_waters: false
+      remove_ccds: []
+      fix_ligands_at_symmetry_centers: false
+      fix_arginines: false
+      convert_mse_to_met: false
+      hydrogen_policy: "remove"
+      extra_fields: null  
+  save:
     date: "1959-01-07" #! Young-Ae Lee's birthday
     include_entity_poly: True
     include_entity_nonpoly: True
@@ -69,87 +85,58 @@ data_cfg_for_design:
         minor_revision: [0]
         revision_description: ["Dummy date for template-conditioning AF3"]
 
-# Transform configuration for design samples
-transform_cfg_for_design:
-  featurizer_cfg:
-    max_tokens: null
-    max_atoms: null
-    remove_keys: []    
-    remove_unresolved_tokens: true
-    residue_cache_dir: "/home/possu/jinho/datasets/atomworks_cached_residue_data"
-    max_conformers_per_residue: 50
-    apply_random_augmentation: false
-    translation_scale: 1.0
-    pocket_distance: 8.0
-  preprocess_cfg:
+preprocess_cfg:
+  native:
     undesired_res_names: []
     b_factor_min: null
     b_factor_max: null
     min_residues_for_polymers: 0
     remove_terminal_oxygen_protein: true
     remove_terminal_oxygen_nucleic_acid: true
-  
-
-#### For loading designed samples ####
-# Data configuration for loading designed structures
-data_cfg_for_designed_samples:
-  cif_parser_args:
-    add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
-    remove_waters: false
-    remove_ccds: []
-    fix_ligands_at_symmetry_centers: false
-    fix_arginines: false
-    convert_mse_to_met: false
-    hydrogen_policy: "remove"
-    extra_fields: null  
-
-# Transform configuration for featurizing designed structures
-transform_cfg_for_designed_samples:
-  preprocess_cfg:
+  designed_samples:
     undesired_res_names: []
     b_factor_min: null
     b_factor_max: null
     min_residues_for_polymers: 0
-    remove_terminal_oxygen_protein: true #! OXT atoms are nan coords because of add_missing_atoms=true
-    remove_terminal_oxygen_nucleic_acid: true #! OXT atoms are nan coords because of add_missing_atoms=true
-  featurizer_cfg:
+    remove_terminal_oxygen_protein: true
+    remove_terminal_oxygen_nucleic_acid: true
+  af3_predictions:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: false #! AF3 prediction CIF files have OXT atoms, so need to preserve them
+    remove_terminal_oxygen_nucleic_acid: false #! AF3 prediction CIF files have OXT atoms, so need to preserve them
+
+featurizer_cfg:
+  design:
+    is_inference: true
+    occupancy_threshold_protein_backbone: 0.0
+    training_structure_noise: 0.0
+    undesired_res_names: []
+    remove_keys: []    
+    remove_unresolved_tokens: true
+    max_tokens: null
+    max_atoms: null  
+    pocket_distance: 8.0
+    residue_cache_dir: "/home/possu/jinho/datasets/atomworks_cached_residue_data"
+    max_conformers_per_residue: 50
+    apply_random_augmentation: true
+    translation_scale: 1.0    
+  prepare_designed_samples:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []    
+    remove_unresolved_tokens: true
+  prepare_af3_predictions:
     max_tokens: null
     max_atoms: null
     remove_keys: []    
     remove_unresolved_tokens: true
 
-#### For AF3 predicted samples ####
-# Data configuration for loading AF3 predictions (for self-consistency evaluation)
-data_cfg_for_af3_prediction:
-  use_load_any: false
-  cif_parser_args:
-    add_missing_atoms: true  # For charge annotation
-    remove_waters: false
-    remove_ccds: []
-    fix_ligands_at_symmetry_centers: false  # Keep AF3's original ligand predictions
-    fix_arginines: false
-    convert_mse_to_met: false
-    hydrogen_policy: "remove"
-    extra_fields: []  # AF3 CIF files don't have custom annotations
-
-# Transform configuration for AF3 predictions
-transform_cfg_for_af3_prediction:
-  featurizer_cfg:
-    max_tokens: null
-    max_atoms: null
-    remove_keys: []
-    remove_unresolved_tokens: true  # Remove atoms with NaN coords
-  preprocess_cfg:
-    undesired_res_names: []
-    b_factor_min: null
-    b_factor_max: null
-    min_residues_for_polymers: 0
-    remove_terminal_oxygen_protein: false #! AF3 predictions have OXT atoms, removing it will give mismatch in confidence metrics
-    remove_terminal_oxygen_nucleic_acid: false #! AF3 predictions have OXT atoms, removing it will give mismatch in confidence metrics
-
 # Docking metrics configuration
 docking_metrics_cfg:
-  pocket_distance_for_metrics: 8.0
+  pocket_distance_for_metrics: 6.0
 
 # Structure prediction model configuration (AF3)
 struct_pred_cfg:

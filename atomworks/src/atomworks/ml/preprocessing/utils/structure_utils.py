@@ -384,12 +384,19 @@ def get_soi_ligands_from_pdb_id(pdb_id: str) -> set[str]:
     return set(soi_ligand_names)
 
 
-def get_ligand_validity_scores_from_pdb_id(pdb_id: str) -> list[dict[str, str | int | float | None]]:
+def get_ligand_validity_scores_from_pdb_id(
+    pdb_id: str,
+    *,
+    timeout: float | tuple[float, float] = (5.0, 30.0),
+    num_retries: int = 2,
+) -> list[dict[str, str | int | float | None]]:
     """
     Query the RCSB PDB for ligand validity scores for a given PDB ID.
 
     Args:
         pdb_id (str): The PDB ID to query.
+        timeout: requests timeout in seconds. If a tuple, interpreted as (connect, read).
+        num_retries: number of retries on network errors.
 
     Returns:
         records: (list[dict[str, str | int | float | None]]): A list of dictionaries, each containing
@@ -449,8 +456,26 @@ def get_ligand_validity_scores_from_pdb_id(pdb_id: str) -> list[dict[str, str | 
     }
     """
 
-    # Perform the actual query for the target PDB ID
-    response = requests.post(pdb_graphql_url, json={"query": ligand_validity_query, "variables": {"id": pdb_id}})
+    # Perform the actual query for the target PDB ID.
+    # NOTE: Use an explicit timeout + small retry count to avoid indefinite hangs on clusters.
+    last_exc: Exception | None = None
+    response = None
+    for _ in range(max(1, int(num_retries) + 1)):
+        try:
+            response = requests.post(
+                pdb_graphql_url,
+                json={"query": ligand_validity_query, "variables": {"id": pdb_id}},
+                timeout=timeout,
+            )
+            last_exc = None
+            break
+        except Exception as e:
+            last_exc = e
+            continue
+
+    if response is None:
+        logger.debug(f"Query failed for PDB ID {pdb_id}: {repr(last_exc)}")
+        return []
 
     # Extract the records from the response
     records = []
