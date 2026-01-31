@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=exp6
 #SBATCH -p possu
-#SBATCH --array=0-2
+#SBATCH --array=0-3
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
@@ -26,6 +26,7 @@ EXP_NAME_BASE="exp6"
 
 # Dataset paths
 RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
+TRAIN_METADATA_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5/metadata_seq_clustered_04_lmpnn.parquet"
 
 # Experiment configs
 DENOISER_TYPE="lc_atom_mpnn"
@@ -34,9 +35,10 @@ DENOISER_TYPE="lc_atom_mpnn"
 PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5"
 
 CONFIGS=(  
-  "denoiser.mpnn.ligand_conditioning=false denoiser.mpnn.token_features.protein_graph_rbf_type=ca"
-  "denoiser.mpnn.ligand_conditioning=true denoiser.mpnn.token_features.protein_graph_rbf_type=ca"
-  "denoiser.mpnn.ligand_conditioning=true denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb"
+  "denoiser.mpnn.ligand_conditioning=false denoiser.mpnn.token_features.protein_graph_rbf_type=ca data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=0.0"
+  "denoiser.mpnn.ligand_conditioning=true denoiser.mpnn.token_features.protein_graph_rbf_type=ca data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=0.0"
+  "denoiser.mpnn.ligand_conditioning=true denoiser.mpnn.token_features.protein_graph_rbf_type=ca data.sampling_weights.betas.beta_protein_monomer_chain=0.5 data.sampling_weights.betas.beta_interface=0.5"
+  "denoiser.mpnn.ligand_conditioning=true denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb data.sampling_weights.betas.beta_protein_monomer_chain=0.5 data.sampling_weights.betas.beta_interface=0.5"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
@@ -64,6 +66,7 @@ python3 allatom_design/train_seq_denoiser.py \
     resume.use_current_cfg=true \
     data/dataset@data=ligandmpnn \
     data.pdb_path="${PDB_PATH}" \
+    data.train_metadata_path="${TRAIN_METADATA_PATH}" \
     data.residue_cache_dir="${RESIDUE_CACHE_DIR}" \
     data.exclude_val_cluster=true \
     data.featurizer_cfg.is_inference=false \
@@ -86,8 +89,6 @@ python3 allatom_design/train_seq_denoiser.py \
     data.sampling_weights.alphas_interface.a_small_molecule=1.0 \
     data.sampling_weights.alphas_interface.a_metal=1.0 \
     data.sampling_weights.alphas_interface.a_loi=1.0 \
-    data.sampling_weights.betas.beta_protein_monomer_chain=0.5 \
-    data.sampling_weights.betas.beta_interface=0.5 \
     data.samples_per_epoch=50000 \
     mask_selector.atom_masking_schedule=uniform_cosine_t \
     logging.log_every_n_steps=100 \
