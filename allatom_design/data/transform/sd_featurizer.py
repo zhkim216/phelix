@@ -54,7 +54,6 @@ from allatom_design.data.transform.custom_transforms import (
     AnnotateLigandPockets,
     GetNCACOAndPseudoCBCoords,
     AddTrainingRandomNoise,
-    DropOutNonProteinChains,
     AddDataCategory,
     RemoveUnsupportedChainTypes,
 )
@@ -217,8 +216,7 @@ def sd_featurizer_for_design(
     # cropping
     max_tokens: int | None = None,
     max_atoms: int | None = None,
-    crop_center_cutoff_distance: float = 15.0,
-    crop_spatial_p: float = 0.0,
+    crop_center_cutoff_distance: float = 15.0,    
     
     # For pocket annotation
     pocket_distance: float = 8.0,    
@@ -243,8 +241,7 @@ def sd_featurizer_for_design(
             aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_BACKBONE_ATOM_NAMES, #! fixed
             aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_BACKBONE_ATOM_NAMES, #! fixed
         }) if not sample_is_designed else Identity(),
-        RemoveUnresolvedTokens() if remove_unresolved_tokens and not sample_is_designed else Identity(),
-        RemoveUnsupportedChainTypes(),
+        RemoveUnresolvedTokens() if remove_unresolved_tokens and not sample_is_designed else Identity(),        
         ErrIfAllUnresolved(),
     ]
         
@@ -269,7 +266,7 @@ def sd_featurizer_for_design(
         # PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
         # PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"), 
         # Add features from the atom_array
-        # AddAF3TokenBondFeatures(distance_cutoff=2.4),
+        AddAF3TokenBondFeatures(distance_cutoff=2.4),
         TrainingRoute(CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
                             translation_scale=translation_scale)),     
         TrainingRoute(AddTrainingRandomNoise(noise_scale=training_structure_noise)),       
