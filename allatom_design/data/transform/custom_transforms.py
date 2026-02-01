@@ -200,8 +200,7 @@ class FeaturizeCoordsAndMasks(Transform):
         atom_is_protein_chain = np.zeros(len(atom_array), dtype=bool)        
         atom_is_nucleic_acid_chain = np.zeros(len(atom_array), dtype=bool)
         atom_is_metal_chain = np.zeros(len(atom_array), dtype=bool)
-        atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)
-        
+        atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)        
         try:
             for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
                 pn_unit_mask = atom_array.pn_unit_iid == pn_unit_iid
@@ -213,18 +212,17 @@ class FeaturizeCoordsAndMasks(Transform):
                             atom_is_protein_chain[pn_unit_mask] = True                                    
                         elif chain_type in nucleic_acid_chain_type_enums:
                             atom_is_nucleic_acid_chain[pn_unit_mask] = True
-                    elif np.isin(sel_atom_array.chain_type, non_polymer_chain_type_enums):
-                        if len(sel_atom_array) == 1 & np.isin(sel_atom_array.element, METAL_ELEMENTS):
-                            atom_is_metal_chain[pn_unit_mask] = True
+                    elif np.isin(chain_type, non_polymer_chain_type_enums):
+                        if (len(sel_atom_array) == 1):
+                            if np.isin(sel_atom_array.element, METAL_ELEMENTS):
+                                atom_is_metal_chain[pn_unit_mask] = True
                         else:
-                            atom_is_small_molecule_chain[pn_unit_mask] = True
+                            atom_is_small_molecule_chain[pn_unit_mask] = True                
                 elif len(chain_type) > 1: # covalent modification case, e.g. [6, 8]
                     if np.isin(chain_type, non_polymer_chain_type_enums).any():
                         atom_is_small_molecule_chain[pn_unit_mask] = True                    
         except Exception as e:
-            logger.info(f"example_id: {data['example_id']}")
-            logger.info(f"chain_type: {chain_type}")
-            logger.info(f"Error in FeaturizeCoordsAndMasks: {e}")
+            print(f"example_id: {data["example_id"]}, {e}")                        
             
         
         token_is_protein_chain = atom_is_protein_chain[repr_mask]

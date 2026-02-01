@@ -74,7 +74,7 @@ python3 allatom_design/train_seq_denoiser.py \
     data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 \
     data.featurizer_cfg.remove_unresolved_tokens=true \
     data.featurizer_cfg.max_tokens=512 \
-    data.featurizer_cfg.max_atoms=4608 \
+    data.featurizer_cfg.max_atoms=6000 \
     data.featurizer_cfg.crop_center_cutoff_distance=15.0 \
     data.featurizer_cfg.pocket_distance=6.0 \
     data.sampling_weights.alphas_protein_monomer_chain.a_prot=1.0 \
