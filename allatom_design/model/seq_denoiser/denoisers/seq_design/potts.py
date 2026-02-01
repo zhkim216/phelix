@@ -159,9 +159,9 @@ class GraphPotts(nn.Module):
         mask_i: torch.Tensor,
         mask_ij: torch.Tensor,
     ):
-        #! (JH) 251110 Note
+        #! (JH) 260131Note
         # edge_idx: E_idx between only protein tokens in protein chains, 
-        # mask_i: prot_token_mask, mask_ij: prot_token_mask_2d
+        # mask_i: protein_residue_node_mask, mask_ij: protein_residue_edge_mask_2d
         mask_J = _mask_J(edge_idx, mask_i, mask_ij)
 
         if self.parameterization == "linear":
