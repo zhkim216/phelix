@@ -66,7 +66,7 @@ class SDLoss(nn.Module):
             
             aux_monitor["seq_acc"] = masked_seq_accuracy(outputs["seq_logits"], target_restype, seq_loss_mask).mean().detach().clone()
             
-            if self.task == "lc_seq_des": #! (JH) changed                                                                
+            if self.task == "lc_seq_des": 
                 ligand_pocket_seq_loss_mask = seq_loss_mask * batch["token_is_ligand_pocket"]            
                                             
                 # Select only samples that have pocket residues holding ligands

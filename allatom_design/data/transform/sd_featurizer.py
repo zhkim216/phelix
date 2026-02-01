@@ -21,6 +21,7 @@ from atomworks.ml.transforms.bonds import AddAF3TokenBondFeatures
 from allatom_design.data.transform.crop import (
     CropContiguousLikeAF3,
     CropSpatialLikeAF3Constrained,
+    CropSpatialLikeAF3,
 )
 from atomworks.ml.transforms.af3_reference_molecule import GetAF3ReferenceMoleculeFeatures
 from atomworks.ml.transforms.encoding import (EncodeAF3TokenLevelFeatures,
@@ -96,7 +97,7 @@ def sd_featurizer(
     max_tokens: int | None = None,
     max_atoms: int | None = None,
     crop_center_cutoff_distance: float = 15.0,
-    # crop_spatial_p: float = 0.0,
+    crop_spatial_p: float = 0.5,
     # interface crop constraints
     min_protein_tokens_in_interface_crop: int | None = None,
     
@@ -136,11 +137,22 @@ def sd_featurizer(
     cropping_transform = ConditionalRoute(
         condition_func=lambda data: data.get("data_category"),                        
                 transform_map={
-                    "protein_monomer_chain": CropContiguousLikeAF3(
-                        crop_size=max_tokens,
-                        keep_uncropped_atom_array=True,
-                        max_atoms_in_crop=max_atoms,
-                    ),
+                    "protein_monomer_chain": RandomRoute(
+                        transforms = [
+                            CropContiguousLikeAF3(
+                                crop_size=max_tokens,
+                                keep_uncropped_atom_array=True,
+                                max_atoms_in_crop=max_atoms,
+                            ),
+                            CropSpatialLikeAF3(
+                                crop_size=max_tokens,
+                                crop_center_cutoff_distance=crop_center_cutoff_distance,
+                                keep_uncropped_atom_array=True,
+                                max_atoms_in_crop=max_atoms,
+                            )
+                        ],
+                        probs = [1.0 - crop_spatial_p, crop_spatial_p]
+                    ),                    
                     "interface": CropSpatialLikeAF3Constrained(
                         crop_size=max_tokens,
                         crop_center_cutoff_distance=crop_center_cutoff_distance,

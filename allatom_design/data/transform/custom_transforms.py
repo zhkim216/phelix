@@ -29,6 +29,7 @@ from atomworks.constants import (
 )
 
 import atomworks.enums as aw_enums
+from atomworks.enums import ChainType
 from atomworks.ml.utils.token import get_token_starts
 from atomworks.ml.transforms.base import Transform
 from atomworks.ml.transforms._checks import check_contains_keys, check_is_instance, check_atom_array_annotation
@@ -200,7 +201,8 @@ class FeaturizeCoordsAndMasks(Transform):
         atom_is_protein_chain = np.zeros(len(atom_array), dtype=bool)        
         atom_is_nucleic_acid_chain = np.zeros(len(atom_array), dtype=bool)
         atom_is_metal_chain = np.zeros(len(atom_array), dtype=bool)
-        atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)        
+        atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)
+
         try:
             for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
                 pn_unit_mask = atom_array.pn_unit_iid == pn_unit_iid
@@ -246,7 +248,7 @@ class FeaturizeCoordsAndMasks(Transform):
         # protein backbone and sidechain atom masks
         is_prot_bb = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
         is_prot_scn = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & ~np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
-        is_prot_scn_wo_cb = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & ~np.isin(atom_array.atom_name, ["N", "CA", "C", "O", "OXT", "CB"])
+        is_prot_scn_wo_cb = ((atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & ~np.isin(atom_array.atom_name, ["N", "CA", "C", "O", "OXT", "CB"]))
         feats["prot_bb_atom_mask"] = torch.tensor(is_prot_bb).float()
         feats["prot_scn_atom_mask"] = torch.tensor(is_prot_scn).float()
         feats["prot_scn_wo_cb_atom_mask"] = torch.tensor(is_prot_scn_wo_cb).float()        
@@ -740,7 +742,7 @@ def exists(obj: Any) -> bool:
 def remove_unsupported_chain_types(
     atom_array: AtomArray,
     query_pn_unit_iids: Sequence[str] | None = None,
-    supported_chain_types: Sequence[aw_enums.ChainType] = TRAINING_SUPPORTED_CHAIN_TYPES,
+    supported_chain_types: Sequence[ChainType] = TRAINING_SUPPORTED_CHAIN_TYPES,
 ) -> AtomArray:
     """Filter out chains with unsupported chain types from the AtomArray.
 
@@ -784,7 +786,7 @@ class RemoveUnsupportedChainTypes(Transform):
 
     requires_previous_transforms: ClassVar[list[str | Transform]] = []
 
-    def __init__(self, supported_chain_types: Sequence[aw_enums.ChainType] = TRAINING_SUPPORTED_CHAIN_TYPES):
+    def __init__(self, supported_chain_types: Sequence[ChainType] = TRAINING_SUPPORTED_CHAIN_TYPES):
         """
         Initialize the RemoveUnsupportedChainTypes transform.
 
