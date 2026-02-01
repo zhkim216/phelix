@@ -128,8 +128,8 @@ class AtomMPNN(nn.Module):
         #! (JH) During sampling, seq_cond_mask is also 1 for padded tokens
         #! (JH) So padded parts are also considered as gaps here, but I guess it's okay.        
         restype = torch.where(batch["seq_cond_mask"].unsqueeze(-1).bool(), batch["restype"], masked)
-        h_S = self.W_s(restype) 
-        #! (JH) different from the original LMPNN, but I think it's okay, could be better, as initiating as learnable param
+        h_S = self.W_s(restype) #! (JH) different from the original lmpnn (zero-initialized)
+        
 
         # Build graph and get edge features
         h_E, E_idx, V, Y_nodes, Y_edges, Y_m, D_neighbors = self.token_features(batch)
@@ -206,30 +206,21 @@ class TokenFeatures(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        # Parameters
-        self.ca_only = cfg.get("ca_only", True)  # backwards compatibility
+        # Parameters        
         self.k_neighbors = cfg.k_neighbors        
         self.num_positional_embeddings = cfg.num_positional_embeddings
         self.node_n_channel = cfg.node_n_channel
         self.edge_n_channel = cfg.edge_n_channel    
         
-        # Context-related parameters
-        self.use_multichain_encoding = cfg.get("use_multichain_encoding", True)
-        self.ligand_conditioning = cfg.ligand_conditioning
-        self.use_sidechain_context = cfg.get("use_sidechain_context", True)
-        self.use_ligand_context = cfg.get("use_ligand_context", True)
-        self.sidechain_context_token_num = cfg.get("sidechain_context_token_num", 16)
-        self.ligand_atom_context_num = cfg.get("ligand_atom_context_num", 16)
+        # Positional embeddings
+        self.positional_embeddings = PositionalEncodings(self.num_positional_embeddings)
         
         # RBF-related parameters
         self.num_rbf = cfg.num_rbf
         self.min_rbf_mean = cfg.min_rbf_mean
         self.max_rbf_mean = cfg.max_rbf_mean
-
-        # Positional embeddings
-        self.positional_embeddings = PositionalEncodings(self.num_positional_embeddings)
         
-        # Protein graph edge-related parameters
+        # Protein graph-related parameters
         self.protein_graph_rbf_type = cfg.protein_graph_rbf_type
         if self.protein_graph_rbf_type == "ca":
             num_pairwise_dists = 1
@@ -240,6 +231,14 @@ class TokenFeatures(nn.Module):
         protein_graph_edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists                
         self.protein_edge_embedding = nn.Linear(protein_graph_edge_in, self.edge_n_channel, bias=False)                                
         self.norm_protein_edges = nn.LayerNorm(self.edge_n_channel)
+                
+        # Context-related parameters
+        self.use_multichain_encoding = cfg.get("use_multichain_encoding", True)
+        self.ligand_conditioning = cfg.ligand_conditioning
+        self.use_sidechain_context = cfg.get("use_sidechain_context", True)
+        self.use_ligand_context = cfg.get("use_ligand_context", True)
+        self.sidechain_context_token_num = cfg.get("sidechain_context_token_num", 16)
+        self.ligand_atom_context_num = cfg.get("ligand_atom_context_num", 16)                                
         
         # Ligand conditioning-related layers
         if self.ligand_conditioning:
@@ -285,8 +284,7 @@ class TokenFeatures(nn.Module):
         # Positional encodings
         residue_index = batch["residue_index"]
         offset = residue_index[:,:,None] - residue_index[:,None,:]
-        offset = gather_edges(offset[:,:,:,None], E_idx)[:,:,:,0]  # [B, L, K]
-        #! (JH) fixed 251009, now gathering only edges between protein tokens
+        offset = gather_edges(offset[:,:,:,None], E_idx)[:,:,:,0]  # [B, L, K] # Gathering only edges between protein tokens        
 
         # Chain information
         chain_labels = torch.zeros_like(batch["asym_id"])        

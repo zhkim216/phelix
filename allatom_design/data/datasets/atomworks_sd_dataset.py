@@ -141,9 +141,11 @@ class SDDataset(MolecularDataset):
         #     match = re.search(r"\['[^']+',\s*'([^']+)'\]", s)
         #     if match:
         #         dataset_type = match.group(1)  # Either of protein_monomer_chain or interface
-        #         if dataset_type == "interface":
-        #             if len(example["chain_info"].keys()) >= 2:
-        #                 print(1)
+        #         if dataset_type == "protein_monomer_chain":
+        #             print(1)
+        #         # if dataset_type == "interface":
+        #         #     if len(example["chain_info"].keys()) >= 2:
+        #         #         print(1)
                            
         # Add metadata info and phase info     
         example.update(parsed_row)                                  
@@ -219,7 +221,7 @@ class SDDataset(MolecularDataset):
             prev_len = len(protein_monomer_chain_df)
             protein_monomer_chain_df = protein_monomer_chain_df[~protein_monomer_chain_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids)]
             current_len = len(protein_monomer_chain_df)
-            logger.info(f"Excluded {prev_len - current_len} chains in {dataset_name} dataset, because of cluster exclusion")
+            logger.info(f"Excluded {prev_len - current_len} chains in {dataset_name} protein monomer chain dataset, because of cluster exclusion")
                                                                         
         # Add chain counts info
         protein_monomer_chain_df = add_chain_counts_info(protein_monomer_chain_df)
@@ -335,29 +337,69 @@ class SDDataset(MolecularDataset):
         
         return aggregated_df
 
-    def _process_interface_df(self, metadata_df: pd.DataFrame = None, metadata_path: str = None) -> pd.DataFrame:
+    def _process_interface_df(self, metadata_df: pd.DataFrame = None, metadata_path: str = None,
+                              dataset_name: str = None) -> pd.DataFrame:
         """
         Processes the interface dataframe based on the filtered chain dataframe. Adds chain counts info and sampling weights.
         """                
         # Apply the general filters for interface df first
         metadata_df = self._apply_filters(self.cfg.train_filters.interface_filter["1"], metadata_df)
         
+        # Convert all_pn_unit_iids_after_processing to list
+        metadata_df["all_pn_unit_iids_after_processing"] = metadata_df["all_pn_unit_iids_after_processing"].apply(json.loads)
+        
+        # Delete excluded chains by filters in all_pn_unit_iids_after_processing
+        iids_by_pdb = metadata_df.groupby(['pdb_id', 'assembly_id'])['q_pn_unit_iid'].apply(list).to_dict()
+        metadata_df['all_pn_unit_iids_after_processing'] = metadata_df.apply(lambda row: iids_by_pdb[(row['pdb_id'], row['assembly_id'])], axis=1)
+                        
+        # Build interface df
         interface_df = build_interface_df(metadata_df=metadata_df, dataset_name=Path(metadata_path).parent.name)
+                        
+        # Filter out invalid iids in interface df based on cluster exclusion
+        if self.cfg.exclude_val_cluster:                        
+            # Filter out invalid iids in all_pn_unit_iids_after_processing
+            iid_to_cluster = metadata_df.set_index(['pdb_id', 'assembly_id', 'q_pn_unit_iid'])['q_pn_unit_cluster_id'].to_dict()            
+            def filter_valid_iids(row):                
+                pdb_id = row['pdb_id']
+                assembly_id = row['assembly_id']
+                iids = row['all_pn_unit_iids_after_processing']
+                
+                filtered_iids = []
+                for iid in iids:
+                    if iid_to_cluster[(pdb_id, assembly_id, iid)] not in self.val_cluster_ids:
+                        filtered_iids.append(iid)
+                                
+                return filtered_iids
+            
+            interface_df['all_pn_unit_iids_after_processing'] = interface_df.apply(filter_valid_iids, axis=1)
+            
+            # Filter out interfaces that have invalid iids
+            prev_len = len(interface_df)
+            interface_df = interface_df[~interface_df['q_pn_unit_cluster_id_1'].isin(self.val_cluster_ids)]
+            interface_df = interface_df[~interface_df['q_pn_unit_cluster_id_2'].isin(self.val_cluster_ids)]                                    
+            current_len = len(interface_df)
+            logger.info("--------------------------------")
+            logger.info(f"Started with: {prev_len} interfaces")
+            logger.info(f"Excluded {prev_len - current_len} interfaces in {dataset_name} interface dataset, because of cluster exclusion")
+            logger.info(f"Ended with: {current_len} interfaces")
+            logger.info("--------------------------------")
+            
+            # prev_len = len(metadata_df)
+            # metadata_df = metadata_df[~metadata_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids)]
+            # current_len = len(metadata_df)
+            # logger.info(f"Excluded {prev_len - current_len} chains in {dataset_name} interface dataset, because of cluster exclusion")
                     
         interface_df = add_chain_counts_info(interface_df)
+        
+        # Apply the specific filters for the interface                          
+        interface_df = self._apply_filters(self.cfg.train_filters.interface_filter["2"] if self.phase == "train" else self.cfg.val_filters.interface_filter["2"], interface_df)            
                 
         alphas = self.cfg.sampling_weights["alphas_interface"] 
             
         interface_df = add_sampling_weights_info(interface_df,
                                                  alphas=alphas,
                                                  beta=self.cfg.sampling_weights["betas"]["beta_interface"],
-                                                 cluster_cols=["q_pn_unit_cluster_id_1", "q_pn_unit_cluster_id_2"])
-        
-        # Apply the specific filters for the interface                          
-        interface_df = self._apply_filters(self.cfg.train_filters.interface_filter["2"] if self.phase == "train" else self.cfg.val_filters.interface_filter["2"], interface_df)            
-        
-        # Convert all_pn_unit_iids_after_processing to list
-        interface_df["all_pn_unit_iids_after_processing"] = interface_df["all_pn_unit_iids_after_processing"].apply(json.loads)
+                                                 cluster_cols=["q_pn_unit_cluster_id_1", "q_pn_unit_cluster_id_2"])                        
         
         return interface_df
             
