@@ -4,6 +4,8 @@
 validation_ids_file: /home/possu/jinho/datasets/splits/lmpnn_validation_ids.txt
 val_metadata_path: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/metadata_lmpnnval_small_molecule_filtered_for_training.parquet
 
+grouping_scheme: "interface"
+
 train_filters:
   metadata_filter:    
     - "release_date <= '2022-12-16'"

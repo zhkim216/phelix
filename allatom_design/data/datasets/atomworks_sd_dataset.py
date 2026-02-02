@@ -78,6 +78,8 @@ class SDDataset(MolecularDataset):
         self.phase = phase
         self.save_failed_examples_to_dir = cfg.save_failed_examples_to_dir                
 
+        self.scheme = cfg.get("grouping_scheme", "all")
+
         # Initialize featurizer
         # Note: We remove INFERENCE_ONLY_KEYS to avoid cuda initialization issues during training.
         self.featurizer = sd_featurizer.sd_featurizer(**cfg.featurizer_cfg,
@@ -95,7 +97,7 @@ class SDDataset(MolecularDataset):
             self.protein_monomer_chain_df = self._process_protein_monomer_chain_df(dataset_name=Path(self.metadata_path).parent.name)                                                                
         
             # Process interface df
-            self.interface_df = self._process_interface_df(metadata_df=self.metadata_df, metadata_path=self.metadata_path)
+            self.interface_df = self._process_interface_df(metadata_path=self.metadata_path)
         
             # # Process complex df
             # self.complex_df = self._process_complex_df(filters=self.cfg.train_filters.complex_filter, dataset_name=Path(self.cfg.train_metadata_path).parent.name)
@@ -141,11 +143,11 @@ class SDDataset(MolecularDataset):
         #     match = re.search(r"\['[^']+',\s*'([^']+)'\]", s)
         #     if match:
         #         dataset_type = match.group(1)  # Either of protein_monomer_chain or interface
-        #         if dataset_type == "protein_monomer_chain":
-        #             print(1)
-        #         # if dataset_type == "interface":
-        #         #     if len(example["chain_info"].keys()) >= 2:
-        #         #         print(1)
+        #         # if dataset_type == "protein_monomer_chain":
+        #         #     print(1)
+        #         if dataset_type == "interface":
+        #             if len(example["chain_info"].keys()) >= 2:
+        #                 print(1)
                            
         # Add metadata info and phase info     
         example.update(parsed_row)                                  
@@ -213,9 +215,11 @@ class SDDataset(MolecularDataset):
     def _process_protein_monomer_chain_df(self, dataset_name: str = None) -> pd.DataFrame:
         """
         Processes the protein monomer chain dataframe. Adds chain counts info and sampling weights, and applies filters.
-        """                                                    
+        """           
+        
+        metadata_df = self.metadata_df.copy()                                         
 
-        protein_monomer_chain_df = self._apply_filters(self.cfg.train_filters.protein_monomer_chain_filter, self.metadata_df)                        
+        protein_monomer_chain_df = self._apply_filters(self.cfg.train_filters.protein_monomer_chain_filter, metadata_df)                        
         
         if self.cfg.exclude_val_cluster:
             prev_len = len(protein_monomer_chain_df)
@@ -337,11 +341,14 @@ class SDDataset(MolecularDataset):
         
         return aggregated_df
 
-    def _process_interface_df(self, metadata_df: pd.DataFrame = None, metadata_path: str = None,
+    def _process_interface_df(self, metadata_path: str = None,
                               dataset_name: str = None) -> pd.DataFrame:
         """
         Processes the interface dataframe based on the filtered chain dataframe. Adds chain counts info and sampling weights.
         """                
+        # Copy the metadata dataframe to avoid modifying the original dataframe
+        metadata_df = self.metadata_df.copy()
+        
         # Apply the general filters for interface df first
         metadata_df = self._apply_filters(self.cfg.train_filters.interface_filter["1"], metadata_df)
         
@@ -351,7 +358,7 @@ class SDDataset(MolecularDataset):
         # Delete excluded chains by filters in all_pn_unit_iids_after_processing
         iids_by_pdb = metadata_df.groupby(['pdb_id', 'assembly_id'])['q_pn_unit_iid'].apply(list).to_dict()
         metadata_df['all_pn_unit_iids_after_processing'] = metadata_df.apply(lambda row: iids_by_pdb[(row['pdb_id'], row['assembly_id'])], axis=1)
-                        
+                                    
         # Build interface df
         interface_df = build_interface_df(metadata_df=metadata_df, dataset_name=Path(metadata_path).parent.name)
                         
@@ -400,7 +407,7 @@ class SDDataset(MolecularDataset):
                                                  alphas=alphas,
                                                  beta=self.cfg.sampling_weights["betas"]["beta_interface"],
                                                  cluster_cols=["q_pn_unit_cluster_id_1", "q_pn_unit_cluster_id_2"])                        
-        
+                                            
         return interface_df
             
     def _parse_dfs(self) -> pd.DataFrame:
@@ -420,7 +427,11 @@ class SDDataset(MolecularDataset):
             #         self.complex_df.apply(complex_parser.parse, axis=1)
             #     ], axis=0)
             
-            interface_parser = GenericDFParser(pn_unit_iid_colnames=['all_pn_unit_iids_after_processing'])
+            if self.scheme == "all":
+                interface_parser = GenericDFParser(pn_unit_iid_colnames=['all_pn_unit_iids_after_processing'])
+            elif self.scheme == "interface":
+                interface_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_iid_1', 'q_pn_unit_iid_2'])            
+                
             
             parsed_df = pd.concat([
                 self.protein_monomer_chain_df.apply(chain_parser.parse, axis=1),
@@ -703,7 +714,7 @@ def add_chain_counts_info(df: pd.DataFrame = None) -> pd.DataFrame:
         df['n_prot'] = df.apply(lambda x: 1 if x['q_pn_unit_is_protein'] else 0, axis=1)
         df['n_nuc'] = df.apply(lambda x: 1 if x['q_pn_unit_is_nuc'] else 0, axis=1)
         df['n_peptide'] = df.apply(lambda x: 1 if x['q_pn_unit_is_peptide'] else 0, axis=1)
-        df['n_small_molecule'] = df.apply(lambda x: 1 if ~x['q_pn_unit_is_polymer'] and ~x['q_pn_unit_is_metal'] else 0, axis=1)
+        df['n_small_molecule'] = df.apply(lambda x: 1 if (not x['q_pn_unit_is_polymer']) and (not x['q_pn_unit_is_metal']) else 0, axis=1)
         df['n_metal'] = df.apply(lambda x: 1 if x['q_pn_unit_is_metal'] else 0, axis=1)
         df['n_loi'] = df.apply(lambda x: 1 if x['q_pn_unit_is_loi'] else 0, axis=1)
     else: 

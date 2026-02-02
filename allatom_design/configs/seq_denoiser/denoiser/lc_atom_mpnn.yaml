@@ -29,7 +29,7 @@ mpnn:
     node_n_channel: ${denoiser.mpnn.n_channel}
     edge_n_channel: ${denoiser.mpnn.n_channel}
     protein_ligand_interaction_rbf_type: "ncacocb" # "cb", "ncacocb"
-
+    add_angle_features: true # true or false
     use_multichain_encoding: true
     ligand_conditioning: ${denoiser.mpnn.ligand_conditioning}
     use_sidechain_context: true

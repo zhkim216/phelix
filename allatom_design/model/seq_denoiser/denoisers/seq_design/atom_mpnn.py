@@ -165,7 +165,7 @@ class AtomMPNN(nn.Module):
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
         
         for layer in self.decoder_layers:
-            h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = protein_residue_node_mask, E_idx = E_idx, mask_attend = protein_residue_node_mask_2d) #! (JH) changed, token_mask_2d is newly added
+            h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = protein_residue_node_mask, E_idx = E_idx, mask_attend = protein_residue_node_mask_2d) 
 
         # Potts model
         if self.use_potts:
@@ -242,18 +242,21 @@ class TokenFeatures(nn.Module):
         
         # Ligand conditioning-related layers
         if self.ligand_conditioning:
-            self.protein_ligand_interaction_rbf_type = cfg.protein_ligand_interaction_rbf_type
+            self.protein_ligand_interaction_rbf_type = cfg.get("protein_ligand_interaction_rbf_type", "ncacocb")
             if self.protein_ligand_interaction_rbf_type == "cb":
                 num_prot_anchor_atoms = 1
             elif self.protein_ligand_interaction_rbf_type == "ncacocb":
                 num_prot_anchor_atoms = 5
             
             # Linear layer for atom type information embedding
-            self.type_linear = torch.nn.Linear(147, 64) # 
+            self.type_linear = torch.nn.Linear(147, 64) 
 
             # Parameters for Ligand-protein interaction layers
+            self.add_angle_features = cfg.get("add_angle_features", True)            
+            num_angle_features = 4 if self.add_angle_features else 0
+            
             self.node_project_down = torch.nn.Linear(
-            self.num_rbf * num_prot_anchor_atoms + 64 + 4, self.node_n_channel, bias=True
+            self.num_rbf * num_prot_anchor_atoms + 64 + num_angle_features, self.node_n_channel, bias=True
         )
             self.norm_nodes = torch.nn.LayerNorm(self.node_n_channel)
             
@@ -310,11 +313,11 @@ class TokenFeatures(nn.Module):
             noised_c_coords = batch["noised_c_coords"]
             noised_o_coords = batch["noised_o_coords"]
             noised_pseudo_cb_coords = batch["noised_pseudo_cb_coords"]            
-            noised_backbone_pseudo_cb_coords = torch.cat((noised_ca_coords[:, :, None, :]
-                                                          , noised_n_coords[:, :, None, :]
-                                                          , noised_c_coords[:, :, None, :]
-                                                          , noised_o_coords[:, :, None, :]
-                                                          , noised_pseudo_cb_coords[:, :, None, :]), dim=2)
+            noised_backbone_pseudo_cb_coords = torch.cat((noised_n_coords[:, :, None, :],                                                          
+                                                          noised_ca_coords[:, :, None, :],
+                                                          noised_c_coords[:, :, None, :],
+                                                          noised_o_coords[:, :, None, :],
+                                                          noised_pseudo_cb_coords[:, :, None, :]), dim=2)
             
             # Token-level coordinates
             tokenwise_noised_coords = get_tokenwise_coords(noised_coords, batch["tokenwise_atom_idxs"], batch["tokenwise_atom_idxs_mask"])
@@ -407,8 +410,19 @@ class TokenFeatures(nn.Module):
             Y_t_1hot_ = torch.cat([Y_t_1hot_, Y_t_g_1hot_, Y_t_p_1hot_], -1)  # [B, L, M, 147]
             Y_t_1hot = self.type_linear(Y_t_1hot_.float())
             
-            # Generate RBF features for backbone (+ pseudo CB) and ligands                                    
-            D_ligand_to_backbone_or_pseudocb = torch.sqrt(
+            # Generate RBF features for backbone (+ pseudo CB) and ligands      
+            if self.protein_ligand_interaction_rbf_type == "cb":
+                D_ligand_to_backbone_or_pseudocb = torch.sqrt(
+                torch.sum(
+                    (Y[:, :, :, None, :]
+                     - noised_backbone_pseudo_cb_coords[:, :, 4:, :][:, :, None, :, :]) 
+                    ** 2,
+                    dim=-1,
+                )
+                + 1e-6
+            )         
+            else:
+                D_ligand_to_backbone_or_pseudocb = torch.sqrt(
                 torch.sum(
                     (Y[:, :, :, None, :]
                      - noised_backbone_pseudo_cb_coords[:, :, None, :, :]) 
@@ -416,16 +430,22 @@ class TokenFeatures(nn.Module):
                     dim=-1,
                 )
                 + 1e-6
-            )            
+            )    
+                
+                    
             RBF_ligand_to_backbone_or_pseudocb = self.compute_rbf_embedding_from_distances(D = D_ligand_to_backbone_or_pseudocb)
             RBF_ligand_to_backbone_or_pseudocb = RBF_ligand_to_backbone_or_pseudocb.view(RBF_ligand_to_backbone_or_pseudocb.shape[0], RBF_ligand_to_backbone_or_pseudocb.shape[1], RBF_ligand_to_backbone_or_pseudocb.shape[2], -1)                                    
                                 
             # Make angle features between backbone and ligand atoms
-            angle_features = self._make_angle_features(noised_backbone_pseudo_cb_coords[:, :, 0, :], noised_backbone_pseudo_cb_coords[:, :, 1, :], noised_backbone_pseudo_cb_coords[:, :, 2, :], Y) # N, Ca, C / # [B, L, M, 4]                
+            if self.add_angle_features:
+                angle_features = self._make_angle_features(noised_backbone_pseudo_cb_coords[:, :, 0, :], noised_backbone_pseudo_cb_coords[:, :, 1, :], noised_backbone_pseudo_cb_coords[:, :, 2, :], Y) # N, Ca, C / # [B, L, M, 4]                
 
             # Make ligand-protein interaction features by concatenating RBF features, ligand atom type information, and angle features.
             #! (JH) Not sure why Y_t_1hot is concatenated here, maybe let the model know each of the atom types so that the model learn the "interaction" between different types of atoms?
-            D_all = torch.cat((RBF_ligand_to_backbone_or_pseudocb, Y_t_1hot, angle_features), dim=-1)  # [B,L,M,5*num_bins+5]
+            if self.add_angle_features:
+                D_all = torch.cat((RBF_ligand_to_backbone_or_pseudocb, Y_t_1hot, angle_features), dim=-1) # [B, L, M, num_bins + 64 + 4] or [B, L, M, 5 * num_bins + 64 + 4]
+            else:                
+                D_all = torch.cat((RBF_ligand_to_backbone_or_pseudocb, Y_t_1hot), dim=-1)  # [B,L,M,num_bins+64] or [B,L,M,5*num_bins+64] 
             V = self.node_project_down(D_all)  # [B, L, M, node_features]
             V = self.norm_nodes(V) 
 
