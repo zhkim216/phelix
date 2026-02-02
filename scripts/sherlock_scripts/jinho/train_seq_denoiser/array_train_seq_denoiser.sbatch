@@ -6,8 +6,8 @@
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=1-0:00:00
-#SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp7_%A_%a.out
-#SBATCH --error=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp7_%A_%a.err
+#SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp8_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp8_%A_%a.err
 
 # Define directories
 BASE_DIR=/home/users/zhkim216/code/allatom-design
