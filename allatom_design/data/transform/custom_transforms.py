@@ -193,37 +193,11 @@ class FeaturizeCoordsAndMasks(Transform):
         feats["token_is_ligand_pocket"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_ligand_pocket, np.any)).float()
 
 
-<<<<<<< HEAD
-        try:
-            for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
-                pn_unit_mask = atom_array.pn_unit_iid == pn_unit_iid
-                sel_atom_array = atom_array[pn_unit_mask]
-                chain_type = np.unique(sel_atom_array.chain_type)
-                if len(chain_type) == 1:
-                    if chain_type in polymer_chain_type_enums:
-                        if chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value:                    
-                            atom_is_protein_chain[pn_unit_mask] = True                                    
-                        elif chain_type in nucleic_acid_chain_type_enums:
-                            atom_is_nucleic_acid_chain[pn_unit_mask] = True
-                    elif np.isin(chain_type, non_polymer_chain_type_enums):
-                        if (len(sel_atom_array) == 1):
-                            if np.isin(sel_atom_array.element, METAL_ELEMENTS):
-                                atom_is_metal_chain[pn_unit_mask] = True
-                        else:
-                            atom_is_small_molecule_chain[pn_unit_mask] = True                
-                elif len(chain_type) > 1: # covalent modification case, e.g. [6, 8]
-                    if np.isin(chain_type, non_polymer_chain_type_enums).any():
-                        atom_is_small_molecule_chain[pn_unit_mask] = True                    
-        except Exception as e:
-            print(f"example_id: {data["example_id"]}, {e}")                        
-            
-=======
         # chain type flags
         atom_is_protein_chain = atom_array.get_annotation("atom_is_protein_chain")
         atom_is_nucleic_acid_chain = atom_array.get_annotation("atom_is_nucleic_acid_chain")
         atom_is_metal_chain = atom_array.get_annotation("atom_is_metal_chain")
         atom_is_small_molecule_chain = atom_array.get_annotation("atom_is_small_molecule_chain")
->>>>>>> refs/remotes/origin/jinho/AAA
         
         token_is_protein_chain = atom_is_protein_chain[repr_mask]
         token_is_nucleic_acid_chain = atom_is_nucleic_acid_chain[repr_mask]
@@ -386,30 +360,6 @@ class AnnotateChainTypes(Transform):
         check_contains_keys(data, ["atom_array"])
         check_is_instance(data, "atom_array", AtomArray)
 
-<<<<<<< HEAD
-# class DropOutNonProteinChains(Transform):
-#     """Randomly drop out non-protein chains."""
-#     def __init__(self, drop_prob: float = 0.1):
-#         self.drop_prob = drop_prob
-
-#     @override
-#     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
-                
-#         s = data["example_id"]
-#         import re
-#         match = re.search(r"\['[^']+',\s*'([^']+)'\]", s)
-#         if match:
-#             dataset_type = match.group(1)  # 'protein_chains' 또는 'complex'
-#             if dataset_type == "complexes":
-#                 if len(data["chain_info"].keys()) >= 2:
-#                     print(1)
-        
-        
-        
-        
-        # atom_array = data["atom_array"]
-        # return data
-=======
     @override
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
         atom_array = data["atom_array"]
@@ -472,7 +422,6 @@ class DropOutNonProteinChains(Transform):
                 atom_array = atom_array[~np.isin(atom_array.pn_unit_iid, pn_unit_iids_to_drop)]
             data["atom_array"] = atom_array
         return data
->>>>>>> refs/remotes/origin/jinho/AAA
 
 class FilterToQueryPNUnits(Transform):
     """Filter the atom array to the query PN units."""
