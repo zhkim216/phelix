@@ -55,7 +55,8 @@ featurizer_cfg:
   max_tokens: 256 #! DEBUG (min)
   max_atoms: 2304 #! DEBUG (min)
   crop_center_cutoff_distance: 15.0
-  # crop_spatial_p: 0.5  
+  crop_spatial_p: 0.5  
+  drop_prob_non_protein_chains: 0.1
   # Interface crop constraints
   # Ensure at least N protein tokens from the nearest protein pn_unit (chain) to the crop center.
   min_protein_tokens_in_interface_crop: 20

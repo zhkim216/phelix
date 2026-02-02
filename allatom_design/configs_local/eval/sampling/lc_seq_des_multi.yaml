@@ -13,16 +13,16 @@ seed: 0
 num_workers: 0 # for dataloading
 
 # Outputs
-exp_name: debug_eval_exp4_cfg2_lmpnnval # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260125
+exp_name: debug_eval_exp6_cfg0_lmpnnval_nogaphetero # experiment name; used for wandb and output directory
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260131
 
 # Sequence design config
 seq_des_cfg:  
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp4_cfg2
+  denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp6_cfg0
   ckpt_cfg:
-    start_step: 22500
-    end_step: 22500
+    start_step: 42500
+    end_step: 42500
     eval_every_n_ckpts: 1
     eval_last_ckpt: false
     use_ema: true
@@ -65,7 +65,7 @@ load_from_cache: false
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
   pdb_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs
-  pdb_name_list: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/lmpnnval_small_molecule_filtered.txt
+  pdb_name_list: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/lmpnnval_small_molecule_filtered_nogaphetero.txt
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
 

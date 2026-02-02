@@ -192,17 +192,8 @@ class FeaturizeCoordsAndMasks(Transform):
         feats["atom_is_ligand_pocket"] = torch.tensor(atom_array.is_ligand_pocket).float()
         feats["token_is_ligand_pocket"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_ligand_pocket, np.any)).float()
 
-        # Get chain type flags
-        polymer_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.POLYMERS]
-        nucleic_acid_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.NUCLEIC_ACIDS]
-        non_polymer_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.NON_POLYMERS]
-        
-        # Protein chain flags
-        atom_is_protein_chain = np.zeros(len(atom_array), dtype=bool)        
-        atom_is_nucleic_acid_chain = np.zeros(len(atom_array), dtype=bool)
-        atom_is_metal_chain = np.zeros(len(atom_array), dtype=bool)
-        atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)
 
+<<<<<<< HEAD
         try:
             for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
                 pn_unit_mask = atom_array.pn_unit_iid == pn_unit_iid
@@ -226,6 +217,13 @@ class FeaturizeCoordsAndMasks(Transform):
         except Exception as e:
             print(f"example_id: {data["example_id"]}, {e}")                        
             
+=======
+        # chain type flags
+        atom_is_protein_chain = atom_array.get_annotation("atom_is_protein_chain")
+        atom_is_nucleic_acid_chain = atom_array.get_annotation("atom_is_nucleic_acid_chain")
+        atom_is_metal_chain = atom_array.get_annotation("atom_is_metal_chain")
+        atom_is_small_molecule_chain = atom_array.get_annotation("atom_is_small_molecule_chain")
+>>>>>>> refs/remotes/origin/jinho/AAA
         
         token_is_protein_chain = atom_is_protein_chain[repr_mask]
         token_is_nucleic_acid_chain = atom_is_nucleic_acid_chain[repr_mask]
@@ -377,7 +375,18 @@ class AddDataCategory(Transform):
         else:
             raise ValueError(f"Invalid example_id: {data['example_id']}")
         return data
+    
+class AnnotateChainTypes(Transform):
+    """Annotate the chain types to the atom array."""
+    def __init__(self):
+        pass
+    
+    @override
+    def check_input(self, data: dict[str, Any]) -> None:
+        check_contains_keys(data, ["atom_array"])
+        check_is_instance(data, "atom_array", AtomArray)
 
+<<<<<<< HEAD
 # class DropOutNonProteinChains(Transform):
 #     """Randomly drop out non-protein chains."""
 #     def __init__(self, drop_prob: float = 0.1):
@@ -400,6 +409,70 @@ class AddDataCategory(Transform):
         
         # atom_array = data["atom_array"]
         # return data
+=======
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        atom_array = data["atom_array"]
+        
+        # Get chain type flags
+        polymer_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.POLYMERS]
+        nucleic_acid_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.NUCLEIC_ACIDS]
+        non_polymer_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.NON_POLYMERS]
+        
+        # Protein chain flags
+        atom_is_protein_chain = np.zeros(len(atom_array), dtype=bool)        
+        atom_is_nucleic_acid_chain = np.zeros(len(atom_array), dtype=bool)
+        atom_is_metal_chain = np.zeros(len(atom_array), dtype=bool)
+        atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)
+
+        try:
+            for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
+                pn_unit_mask = atom_array.pn_unit_iid == pn_unit_iid
+                sel_atom_array = atom_array[pn_unit_mask]
+                chain_type = np.unique(sel_atom_array.chain_type)
+                if len(chain_type) == 1:
+                    if chain_type in polymer_chain_type_enums:
+                        if chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value:                    
+                            atom_is_protein_chain[pn_unit_mask] = True                                    
+                        elif chain_type in nucleic_acid_chain_type_enums:
+                            atom_is_nucleic_acid_chain[pn_unit_mask] = True
+                    elif np.isin(chain_type, non_polymer_chain_type_enums):
+                        if (len(sel_atom_array) == 1):
+                            if np.isin(sel_atom_array.element, METAL_ELEMENTS):
+                                atom_is_metal_chain[pn_unit_mask] = True
+                        else:
+                            atom_is_small_molecule_chain[pn_unit_mask] = True                
+                elif len(chain_type) > 1: # covalent modification case, e.g. [6, 8] => can select this case using small_molecule & is_covalent_modification
+                    if np.isin(chain_type, non_polymer_chain_type_enums).any():
+                        atom_is_small_molecule_chain[pn_unit_mask] = True                    
+        except Exception as e:
+            print(f"example_id: {data["example_id"]}, {e}")                       
+        
+        data["atom_array"].set_annotation("atom_is_protein_chain", atom_is_protein_chain)
+        data["atom_array"].set_annotation("atom_is_nucleic_acid_chain", atom_is_nucleic_acid_chain)
+        data["atom_array"].set_annotation("atom_is_metal_chain", atom_is_metal_chain)
+        data["atom_array"].set_annotation("atom_is_small_molecule_chain", atom_is_small_molecule_chain)
+        
+        return data
+    
+class DropOutNonProteinChains(Transform):
+    """Randomly drop out non-protein chains."""
+    def __init__(self, drop_prob: float = 0.1):
+        self.drop_prob = drop_prob
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        if data.get("data_category") == "interface":
+            atom_array = data["atom_array"]
+            non_protein_chain_mask = ~atom_array.get_annotation("atom_is_protein_chain")
+            non_protein_pn_unit_iids = np.unique(atom_array[non_protein_chain_mask].pn_unit_iid)
+            if len(non_protein_pn_unit_iids) > 0:
+                mask = np.random.rand(len(non_protein_pn_unit_iids)) < self.drop_prob
+                pn_unit_iids_to_drop = non_protein_pn_unit_iids[mask]
+                atom_array = atom_array[~np.isin(atom_array.pn_unit_iid, pn_unit_iids_to_drop)]
+            data["atom_array"] = atom_array
+        return data
+>>>>>>> refs/remotes/origin/jinho/AAA
 
 class FilterToQueryPNUnits(Transform):
     """Filter the atom array to the query PN units."""
