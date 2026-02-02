@@ -3,6 +3,7 @@
 
 validation_ids_file: /scratch/users/zhkim216/datasets/splits/lmpnn_validation_ids.txt
 val_metadata_path: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/metadata_lmpnnval_small_molecule_filtered_for_training.parquet
+grouping_scheme: "interface"
 
 train_filters:
   metadata_filter:    
