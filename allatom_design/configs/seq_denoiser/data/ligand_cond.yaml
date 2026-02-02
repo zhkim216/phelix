@@ -2,8 +2,8 @@ defaults:
   - dataset@_here_: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
 
 task: ${model.task}
-pdb_path: /home/possu/jinho/datasets/atomworks_pdb_full_v3
-train_metadata_path: /home/possu/jinho/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_lmpnn.parquet
+pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v3
+train_metadata_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_lmpnn.parquet
 plinder_ccd_list_path: 
 
 validation_ids_file: ??? #! Required, set by dataset/*.yaml
