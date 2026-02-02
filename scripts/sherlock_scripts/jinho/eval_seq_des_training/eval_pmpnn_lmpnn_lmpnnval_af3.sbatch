@@ -29,7 +29,7 @@ PROJECT=ligand_seq_des
 CACHED_EXAMPLE_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
 METADATA_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
 
-EXP_NAMES=("eval_pmpnn_lmpnn_lmpnnval_af3"
+EXP_NAMES=("eval_pmpnn_lmpnnval_af3"
         "eval_lmpnn005_lmpnnval_af3"
         "eval_lmpnn010_lmpnnval_af3"
         "eval_lmpnn020_lmpnnval_af3"

@@ -16,11 +16,21 @@ from pathlib import Path
 import pandas as pd
 from tqdm import tqdm
 
-def get_file_size(pdb_id: str = None, cached_examples_dir: str = None) -> int | None:
-    pt_path = Path(cached_examples_dir) / f"{pdb_id}.pt"
-    if pt_path.exists():
-        return pt_path.stat().st_size
-    return None
+def build_file_size_map(cached_examples_dir: Path) -> dict[str, int]:
+    """Scan directory once and build pdb_id -> file_size mapping."""
+    size_map = {}
+    cached_dir = Path(cached_examples_dir)
+    
+    if not cached_dir.exists():
+        return size_map
+    
+    print("Scanning cached_examples directory...")
+    for entry in tqdm(os.scandir(cached_dir), desc="Building file size map"):
+        if entry.name.endswith(".pt") and entry.is_file():
+            pdb_id = entry.name[:-3]  # Remove .pt extension
+            size_map[pdb_id] = entry.stat().st_size
+    
+    return size_map
 
 
 def merge_batch_parquets_for_shard(batch_dir: Path, shard_dir: Path, shard_id: int) -> Path | None:
@@ -60,7 +70,6 @@ def main(out_dir: str, merge_batches: bool = True):
     
     out = Path(out_dir)
     shard_dir = out / "shards"
-    cached_examples_dir = out / "cached_examples"
     
     if not shard_dir.exists():
         raise SystemExit(f"Shard directory not found: {shard_dir}")
@@ -105,7 +114,8 @@ def main(out_dir: str, merge_batches: bool = True):
         print(f"Removed {duplicates_removed_final} duplicate rows (by example_id) in final merge")
     
     # Add file_size column
-    df["cached_file_size"] = df["pdb_id"].apply(lambda x: get_file_size(x, cached_examples_dir))
+    # file_size_map = build_file_size_map(cached_examples_dir)
+    # df["cached_file_size"] = df["pdb_id"].map(file_size_map)
 
     # Write combined metadata
     meta_path = out / "metadata.parquet"
@@ -127,7 +137,7 @@ def main(out_dir: str, merge_batches: bool = True):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Merge parquet shards into a single metadata file")
-    ap.add_argument("--out_dir", default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v2",
+    ap.add_argument("--out_dir", default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v6",
                     help="Output directory containing shards/ subdirectory")
     ap.add_argument("--no-merge-batches", action="store_true",
                     help="Skip merging batch parquets for incomplete shards")

@@ -47,7 +47,7 @@ from allatom_design.eval.eval_utils.folding_utils import (
 # Main
 ###########################################################
 
-@hydra.main(config_path="../../configs_local/eval/sampling", config_name="lc_seq_des", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/sampling", config_name="lc_seq_des", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Redesign sequence using native sequence or lcaliby.

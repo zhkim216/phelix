@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=run_sc_eval_caliby_redesign_lmpnn_rfd3val_af3
-#SBATCH -p possu
+#SBATCH -p possu,bioe
 #SBATCH --array=0-11
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -38,7 +38,7 @@ PROJECT=ligand_seq_des
 
 # Input paths
 METADATA_PATH=null
-PDB_DIR=${BASE_OUT_DIR}/eval_caliby_${MODEL_NAME}_redesign_${POCKET_DISTANCE}_rfd3val_af3/samples
+PDB_DIR=${BASE_OUT_DIR}/eval_caliby_${MODEL_NAME}_redesign_${POCKET_DISTANCE}_rfd3val_af3/samples/backbones
 PDB_NAME_LIST=null
 PDB_NAME_EXT=.pdb
 LIGAND_SOURCE_PATH=null

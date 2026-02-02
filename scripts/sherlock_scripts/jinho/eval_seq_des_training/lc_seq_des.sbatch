@@ -4,8 +4,8 @@
 #SBATCH --array=0-17
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH --time=1-0:00:00
+#SBATCH --mem=16G
+#SBATCH --time=0-6:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/job_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/job_%A_%a.err
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=redesign_pocket_seq
-#SBATCH -p bioe,possu
+#SBATCH -p possu
 #SBATCH --array=0-7
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8

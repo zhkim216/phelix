@@ -231,17 +231,17 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--input-parquet",
-        default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5/metadata_seq_clustered_04.parquet",
+        default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v6/metadata_seq_clustered_04.parquet",
         help="Input parquet path.",
     )
     parser.add_argument(
         "--output-parquet",
-        default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5/metadata_seq_clustered_04_lmpnn.parquet",
+        default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v6/metadata_seq_clustered_04_lmpnn.parquet",
         help="Output parquet path (if suffix is .csv, writes CSV).",
     )
     parser.add_argument(
         "--deleted-chains-out",
-        default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5/metadata_seq_clustered_04_deleted_chains.parquet",
+        default="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v6/metadata_seq_clustered_04_deleted_chains.parquet",
         help="Output path for the deleted-chain list (parquet/csv).",
     )
     args = parser.parse_args()

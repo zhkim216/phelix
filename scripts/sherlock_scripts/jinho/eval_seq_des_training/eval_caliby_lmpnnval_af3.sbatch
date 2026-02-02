@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=eval_caliby_lmpnnval_af3
-#SBATCH -p bioe,possu
+#SBATCH -p possu,bioe
 #SBATCH --array=0
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
@@ -49,7 +49,6 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/eval_caliby_lmpnnval_af3.py 
     base_out_dir=${BASE_OUT_DIR} \
     cached_example_path=${CACHED_EXAMPLE_PATH} \
     pdb_cfg.pdb_dir=${PDB_DIR} \
-    struct_pred_cfg.af3.inference_config.base.flash_attention_implementation=triton \
     struct_pred_cfg.af3.inference_config.ss.num_recycles=10 \
     struct_pred_cfg.af3.inference_config.ss.num_diffusion_samples=5 \
     hydra.run.dir=${HYDRA_DIR}

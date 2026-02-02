@@ -53,7 +53,6 @@ import jax
 from jax import numpy as jnp
 import numpy as np
 
-
 _HOME_DIR = pathlib.Path(os.environ.get('HOME'))
 _DEFAULT_MODEL_DIR = _HOME_DIR / 'models'
 _DEFAULT_DB_DIR = _HOME_DIR / 'public_databases'
@@ -62,7 +61,7 @@ _DEFAULT_DB_DIR = _HOME_DIR / 'public_databases'
 # Input and output paths.
 _JSON_PATH = flags.DEFINE_string(
     'json_path',
-    '/home/users/zhkim216/code/allatom-design/alphafold3/input_examples/json_examples_sherlock/ligand_protein_template_conditioning/7B56_ANP.json',  # FIXME: For debugging
+    '/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_af3_exp1_cfg0/step_40000_epoch_25/af3_tc_inputs/1a28_1_A1_C1_sample0.json',  # FIXME: For debugging
     'Path to the input JSON file.',
 )
 _INPUT_DIR = flags.DEFINE_string(
@@ -72,7 +71,7 @@ _INPUT_DIR = flags.DEFINE_string(
 )
 _OUTPUT_DIR = flags.DEFINE_string(
     'output_dir',
-    '/scratch/users/zhkim216/debug_out_dir/251124_lullaby_env_setup',  # FIXME: For debugging
+    '/scratch/users/zhkim216/debug_out_dir/251129_af3_debugging',  # FIXME: For debugging
     'Path to a directory where the results will be saved.',
 )
 MODEL_DIR = flags.DEFINE_string(
@@ -259,13 +258,13 @@ _FLASH_ATTENTION_IMPLEMENTATION = flags.DEFINE_enum(
 )
 _NUM_RECYCLES = flags.DEFINE_integer(
     'num_recycles',
-    1,
+    3,
     'Number of recycles to use during inference.',
     lower_bound=1,
 )
 _NUM_DIFFUSION_SAMPLES = flags.DEFINE_integer(
     'num_diffusion_samples',
-    2,
+    5,
     'Number of diffusion samples to generate.',
     lower_bound=1,
 )

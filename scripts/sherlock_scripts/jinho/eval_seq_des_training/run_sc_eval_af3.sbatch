@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=run_sc_eval_af3
 #SBATCH -p bioe,possu
-#SBATCH --array=0-3
+#SBATCH --array=0-19
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -29,13 +29,28 @@ PROJECT=ligand_seq_des
 CACHED_EXAMPLE_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
 METADATA_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
 
-# Model names
+# 4 distances x 5 models = 20 combinations
+POCKET_DISTANCES=(4.0 5.0 6.0 8.0)
 MODEL_NAMES=("pmpnn" "lmpnn005" "lmpnn010" "lmpnn020" "lmpnn030")
-MODEL_NAME=${MODEL_NAMES[$SLURM_ARRAY_TASK_ID]}
+
+# Calculate indices from SLURM_ARRAY_TASK_ID
+DISTANCE_IDX=$((SLURM_ARRAY_TASK_ID % 4))
+MODEL_IDX=$((SLURM_ARRAY_TASK_ID / 4))
+
+POCKET_DISTANCE=${POCKET_DISTANCES[$DISTANCE_IDX]}
+MODEL_NAME=${MODEL_NAMES[$MODEL_IDX]}
 
 # Exp names and output paths
-EXP_NAME=caliby_wocenter_lmpnnval_redesign_${MODEL_NAME}
+EXP_NAME=caliby_wocenter_lmpnnval_redesign_${MODEL_NAME}_${POCKET_DISTANCE}
 PDB_DIR="${BASE_OUT_DIR}/${EXP_NAME}/samples/backbones"
+
+echo "=========================================="
+echo "SLURM_ARRAY_TASK_ID: ${SLURM_ARRAY_TASK_ID}"
+echo "POCKET_DISTANCE: ${POCKET_DISTANCE}"
+echo "MODEL_NAME: ${MODEL_NAME}"
+echo "EXP_NAME: ${EXP_NAME}"
+echo "PDB_DIR: ${PDB_DIR}"
+echo "=========================================="
 
 echo "Starting evaluation..."
 
@@ -47,7 +62,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/run_sc_eval_af3.py \
     wandb.group=baseline \
     seed=0 \
     debug=false \
-    evaluate_self_consistency=true \
+    calculate_metrics_only=false \
     metadata_path=${METADATA_PATH} \
     exp_name=${EXP_NAME} \
     base_out_dir=${BASE_OUT_DIR} \
@@ -59,3 +74,4 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/run_sc_eval_af3.py \
     hydra.run.dir=${HYDRA_DIR}
 
 echo "Evaluation complete for ${EXP_NAME}"
+

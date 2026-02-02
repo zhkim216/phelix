@@ -33,8 +33,8 @@ sampling_weights:
     a_metal: 1.0 
     a_loi: 1.0
   betas:
-    beta_protein_monomer_chain: 0.5
-    beta_interface: 0.5
+    beta_protein_monomer_chain: 1.0
+    beta_interface: 1.0
     
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:

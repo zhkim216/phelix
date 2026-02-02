@@ -4,9 +4,9 @@
 
 # Set paths
 export IMG="$GROUP_HOME/containers/pytorch_24.12.sif"
-export UV_CACHE_DIR="$SCRATCH/cache"
-export REPO_DIR="/home/users/rshuai/code/allatom-design"
-export ENV_DIR="$SCRATCH/envs"
+export UV_CACHE_DIR="$SCRATCH/uv/cache"
+export REPO_DIR="/home/users/zhkim216/code/allatom-design"
+export ENV_DIR="$SCRATCH/venv"
 mkdir -p "$ENV_DIR"
 
 # Install dependencies within apptainer
