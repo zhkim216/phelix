@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=run_sc_eval_rfd3_af3
+#SBATCH --job-name=pmpnn_lmpnn_rfd3val_af3
 #SBATCH -p possu,bioe
 #SBATCH --array=0-4
 #SBATCH --gpus-per-node=1
@@ -31,7 +31,7 @@ PROJECT=ligand_seq_des
 
 # Input paths
 CACHED_EXAMPLE_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered/cached_examples
-METADATA_PATH=/scratch/users/zhkim216/datasets/atomworks_lmpnn_valset_filtered_re/interface_df_full.parquet
+METADATA_PATH=null
 
 # Exp names and output paths
 EXP_NAME=${MODEL_NAME}_rfd3val_af3
@@ -49,7 +49,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/run_sc_eval_af3.py \
     wandb.group=baseline \
     seed=0 \
     debug=false \
-    evaluate_self_consistency=true \
+    calculate_metrics_only=false \
     metadata_path=${METADATA_PATH} \
     exp_name=${EXP_NAME} \
     base_out_dir=${BASE_OUT_DIR} \

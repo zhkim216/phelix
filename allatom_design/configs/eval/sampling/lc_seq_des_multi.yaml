@@ -7,22 +7,22 @@ wandb:
   group: null
 
 # Basic settings
-debug: true
+debug: false
 num_debug_samples: 2
 seed: 0
-num_workers: 0 # for dataloading
+num_workers: 8 # for dataloading
 
 # Outputs
-exp_name: eval_exp4_cfg2_lmpnnval # experiment name; used for wandb and output directory
+exp_name: eval_exp6_cfg2_lmpnnval # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
 seq_des_cfg:  
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp5_cfg10
+  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp6_cfg2
   ckpt_cfg:
-    start_step: 82500 
-    end_step: 82500
+    start_step: 62500 
+    end_step: 62500
     eval_every_n_ckpts: 1
     eval_last_ckpt: false
     use_ema: true
@@ -30,7 +30,7 @@ seq_des_cfg:
     ckpt_path: null
     sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides:
-      batch_size: 4
+      batch_size: 8
       num_seqs_per_pdb: 1  # number of sequences to sample per pdb
       omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
       noise_labels: null
@@ -64,7 +64,7 @@ load_from_cache: false
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
   pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
-  pdb_name_list: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/lmpnnval_small_molecule_filtered.txt
+  pdb_name_list: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/lmpnnval_small_molecule_filtered_nogaphetero.txt
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
 

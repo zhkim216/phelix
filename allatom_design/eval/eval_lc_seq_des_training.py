@@ -140,6 +140,7 @@ def main(cfg: DictConfig):
         cfg.exp_name = f"{cfg.exp_name}_protein_only"
     
     if cfg.fix_pocket_seq:
+        assert not cfg.protein_only, "protein_only cannot be used with fix_pocket_seq"
         cfg.exp_name = f"{cfg.exp_name}_ps_fix_{cfg.pocket_distance}"
 
     if cfg.debug:
@@ -152,7 +153,7 @@ def main(cfg: DictConfig):
     log_dir = wandb_setup(base_out_dir=cfg.base_out_dir, exp_name=cfg.exp_name, cfg_dict=cfg_dict, **cfg.wandb)
 
     # Load in metadata
-    metadata = pd.read_parquet(cfg.metadata_path)    
+    metadata = pd.read_parquet(cfg.metadata_path)   
     pdb_keys = metadata['pdb_id'].tolist()
     
     if cfg.debug:
@@ -430,7 +431,7 @@ def main(cfg: DictConfig):
                                 data_cfg_for_af3_prediction=cfg.data_cfg_for_af3_prediction,
                                 transform_cfg_for_af3_prediction=cfg.transform_cfg_for_af3_prediction,
                                 metadata=metadata,
-                                pocket_distance=cfg.pocket_distance,                                
+                                pocket_distance=cfg.docking_metrics_cfg.get("pocket_distance_for_align", 8.0),                                
                             )
                         except Exception as e:
                             print(f"AF3 docking metrics computation failed for {job_name}: {e}")

@@ -7,8 +7,8 @@
 #SBATCH --mem=32GB
 #
 # Send stdout and stderr to logs
-#SBATCH --output=/scratch/users/zhkim216/job_output/job_%A_%a.out
-#SBATCH --error=/scratch/users/zhkim216/job_output/job_%A_%a.err
+#SBATCH --output=/scratch/users/zhkim216/job_output/data_preprocessing/preprocess_examples_v6_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/data_preprocessing/preprocess_examples_v6_%A_%a.err
 #
 ## Write batch script to logs
 scontrol write batch_script $SLURM_JOB_ID /scratch/users/zhkim216/slurm_log_files/job_$SLURM_JOB_ID.sh
@@ -33,13 +33,7 @@ python3 allatom_design/data/preprocessing/atomworks/preprocess_examples.py \
     --config-path=/home/users/zhkim216/code/allatom-design/allatom_design/configs/data/preprocessing/atomworks \
     --config-name=preprocess_examples \
     mmcif_dir=${PDB_MIRROR_PATH} \
-    out_dir=/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5 \
+    out_dir=/scratch/users/zhkim216/datasets/atomworks_pdb_full_v6 \
     num_workers=${SLURM_CPUS_PER_TASK} \
     num_shards=${NUM_SHARDS} \
-<<<<<<< HEAD
-    shard_id=${SLURM_ARRAY_TASK_ID} \
-    batch_size=128 \
-    max_tasks_per_child=16
-=======
     shard_id=${SLURM_ARRAY_TASK_ID}
->>>>>>> refs/remotes/origin/jinho/AAA
