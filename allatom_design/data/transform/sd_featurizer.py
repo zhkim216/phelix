@@ -137,33 +137,50 @@ def sd_featurizer(
     ]
 
     # Cropping        
-    cropping_transform = ConditionalRoute(
-        condition_func=lambda data: data.get("data_category"),                        
-                transform_map={
-                    "protein_monomer_chain": RandomRoute(
-                        transforms = [
-                            CropContiguousLikeAF3(
-                                crop_size=max_tokens,
-                                keep_uncropped_atom_array=True,
-                                max_atoms_in_crop=max_atoms,
-                            ),
-                            CropSpatialLikeAF3(
-                                crop_size=max_tokens,
-                                crop_center_cutoff_distance=crop_center_cutoff_distance,
-                                keep_uncropped_atom_array=True,
-                                max_atoms_in_crop=max_atoms,
-                            )
-                        ],
-                        probs = [1.0 - crop_spatial_p, crop_spatial_p]
-                    ),                    
-                    "interface": CropSpatialLikeAF3(
-                                crop_size=max_tokens,
-                                crop_center_cutoff_distance=crop_center_cutoff_distance,
-                                keep_uncropped_atom_array=True,
-                                max_atoms_in_crop=max_atoms,
-                            )
-                }
+    cropping_transform = RandomRoute(
+        transforms = [
+            CropContiguousLikeAF3(
+                crop_size=max_tokens,
+                keep_uncropped_atom_array=True,
+                max_atoms_in_crop=max_atoms,
+            ),
+            CropSpatialLikeAF3(
+                crop_size=max_tokens,
+                crop_center_cutoff_distance=crop_center_cutoff_distance,
+                keep_uncropped_atom_array=True,
+                max_atoms_in_crop=max_atoms,
             )
+        ],
+        probs = [1.0 - crop_spatial_p, crop_spatial_p]
+    )
+        
+    # cropping_transform = ConditionalRoute(
+    #     condition_func=lambda data: data.get("data_category"),                        
+    #             transform_map={
+    #                 "protein_monomer_chain": RandomRoute(
+    #                     transforms = [
+    #                         CropContiguousLikeAF3(
+    #                             crop_size=max_tokens,
+    #                             keep_uncropped_atom_array=True,
+    #                             max_atoms_in_crop=max_atoms,
+    #                         ),
+    #                         CropSpatialLikeAF3(
+    #                             crop_size=max_tokens,
+    #                             crop_center_cutoff_distance=crop_center_cutoff_distance,
+    #                             keep_uncropped_atom_array=True,
+    #                             max_atoms_in_crop=max_atoms,
+    #                         )
+    #                     ],
+    #                     probs = [1.0 - crop_spatial_p, crop_spatial_p]
+    #                 ),                    
+    #                 "interface": CropSpatialLikeAF3(
+    #                             crop_size=max_tokens,
+    #                             crop_center_cutoff_distance=crop_center_cutoff_distance,
+    #                             keep_uncropped_atom_array=True,
+    #                             max_atoms_in_crop=max_atoms,
+    #                         )
+    #             }
+    #         )
     # cropping_transform = ConditionalRoute(
     #     condition_func=lambda data: data.get("data_category"),                        
     #             transform_map={
