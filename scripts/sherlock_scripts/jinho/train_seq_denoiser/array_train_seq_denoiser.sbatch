@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=exp7
+#SBATCH --job-name=exp8
 #SBATCH -p possu
-#SBATCH --array=0-9
+#SBATCH --array=0-2
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
@@ -22,29 +22,24 @@ cd "${BASE_DIR}"
 WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 GROUP="training"
-EXP_NAME_BASE="exp7"
+EXP_NAME_BASE="exp8"
 
 # Dataset paths
 RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
-TRAIN_METADATA_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5/metadata_seq_clustered_04_lmpnn.parquet"
+TRAIN_METADATA_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_lmpnn.parquet"
 
 # Experiment configs
 DENOISER_TYPE="lc_atom_mpnn"
 
 # Path where processed pdb files are stored
-PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v5"
+PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3"
 
 CONFIGS=(  
-  "data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=0.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ca denoiser.mpnn.ligand_conditioning=false mask_selector.restype_masking_schedule=uniform_t"
-  "data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=0.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ca denoiser.mpnn.ligand_conditioning=false mask_selector.restype_masking_schedule=uniform_cosine_t"
-  "data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=0.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ncaco denoiser.mpnn.ligand_conditioning=false mask_selector.restype_masking_schedule=uniform_cosine_t"
-  "data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=0.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb denoiser.mpnn.ligand_conditioning=false mask_selector.restype_masking_schedule=uniform_cosine_t"
-  "data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=1.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ca denoiser.mpnn.ligand_conditioning=false mask_selector.restype_masking_schedule=uniform_cosine_t"
-  "data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=1.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ncaco denoiser.mpnn.ligand_conditioning=false mask_selector.restype_masking_schedule=uniform_cosine_t"
-  "data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=1.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb denoiser.mpnn.ligand_conditioning=false mask_selector.restype_masking_schedule=uniform_cosine_t"
-  "data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=1.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ca denoiser.mpnn.ligand_conditioning=True mask_selector.restype_masking_schedule=uniform_cosine_t"
-  "data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=1.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ncaco denoiser.mpnn.ligand_conditioning=True mask_selector.restype_masking_schedule=uniform_cosine_t"
-  "data.sampling_weights.betas.beta_protein_monomer_chain=1.0 data.sampling_weights.betas.beta_interface=1.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb denoiser.mpnn.ligand_conditioning=True mask_selector.restype_masking_schedule=uniform_cosine_t"
+  "denoiser.mpnn.token_features.protein_graph_rbf_type=ca denoiser.mpnn.ligand_conditioning=false data/dataset@data=ligandmpnn_ppionly"
+  "denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb denoiser.mpnn.ligand_conditioning=false data/dataset@data=ligandmpnn_ppionly"
+  "denoiser.mpnn.token_features.protein_graph_rbf_type=ca denoiser.mpnn.ligand_conditioning=true data/dataset@data=ligandmpnn"
+  "denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb denoiser.mpnn.ligand_conditioning=true data/dataset@data=ligandmpnn"
+
   
 )
 
@@ -71,7 +66,6 @@ python3 allatom_design/train_seq_denoiser.py \
     train.compile.compile_model=true \
     trainer.strategy="ddp_find_unused_parameters_true" \
     resume.use_current_cfg=true \
-    data/dataset@data=ligandmpnn \
     data.pdb_path="${PDB_PATH}" \
     data.train_metadata_path="${TRAIN_METADATA_PATH}" \
     data.residue_cache_dir="${RESIDUE_CACHE_DIR}" \
@@ -97,7 +91,10 @@ python3 allatom_design/train_seq_denoiser.py \
     data.sampling_weights.alphas_interface.a_small_molecule=1.0 \
     data.sampling_weights.alphas_interface.a_metal=1.0 \
     data.sampling_weights.alphas_interface.a_loi=1.0 \
+    data.sampling_weights.betas.beta_protein_monomer_chain=1.0 \
+    data.sampling_weights.betas.beta_interface=1.0 \
     data.samples_per_epoch=50000 \
+    mask_selector.restype_masking_schedule="uniform_cosine_t" \
     logging.log_every_n_steps=100 \
     logging.wandb_watch_freq=500 \
     checkpointing.save_latest_every_n_steps=2500 \

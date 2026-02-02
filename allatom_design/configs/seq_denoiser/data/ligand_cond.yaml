@@ -2,8 +2,13 @@ defaults:
   - dataset@_here_: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
 
 task: ${model.task}
+<<<<<<< HEAD
 pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v5
 train_metadata_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v5/metadata_seq_clustered_04_lmpnn.parquet
+=======
+pdb_path: /home/possu/jinho/datasets/atomworks_pdb_full_v3
+train_metadata_path: /home/possu/jinho/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_lmpnn.parquet
+>>>>>>> refs/remotes/origin/jinho/AAA
 plinder_ccd_list_path: 
 
 validation_ids_file: ??? #! Required, set by dataset/*.yaml
@@ -56,6 +61,7 @@ featurizer_cfg:
   max_atoms: 2304 #! DEBUG (min)
   crop_center_cutoff_distance: 15.0
   crop_spatial_p: 0.5 # For monomer chain, 50% of the time, we crop spatially
+  drop_prob_non_protein_chains: 0.0
   # Interface crop constraints  
   min_protein_tokens_in_interface_crop: 20 # Ensure at least N protein tokens from the nearest protein pn_unit (chain) to the crop center.
   pocket_distance: 6.0

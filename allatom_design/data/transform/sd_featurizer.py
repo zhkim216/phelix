@@ -57,6 +57,9 @@ from allatom_design.data.transform.custom_transforms import (
     AddTrainingRandomNoise,
     AddDataCategory,
     RemoveUnsupportedChainTypes,
+    AnnotateChainTypes,
+    DropOutNonProteinChains,
+    
 )
 
 logger = logging.getLogger(__name__)
@@ -133,7 +136,7 @@ def sd_featurizer(
         ErrIfAllUnresolved(),
     ]
 
-    # Cropping    
+    # Cropping        
     cropping_transform = ConditionalRoute(
         condition_func=lambda data: data.get("data_category"),                        
                 transform_map={
@@ -153,24 +156,54 @@ def sd_featurizer(
                         ],
                         probs = [1.0 - crop_spatial_p, crop_spatial_p]
                     ),                    
-                    "interface": CropSpatialLikeAF3Constrained(
-                        crop_size=max_tokens,
-                        crop_center_cutoff_distance=crop_center_cutoff_distance,
-                        keep_uncropped_atom_array=True,
-                        max_atoms_in_crop=max_atoms,
-                        min_protein_tokens_in_crop=min_protein_tokens_in_interface_crop,
-                        constrain_on_interface_protein_chain=True,
-                    )
+                    "interface": CropSpatialLikeAF3(
+                                crop_size=max_tokens,
+                                crop_center_cutoff_distance=crop_center_cutoff_distance,
+                                keep_uncropped_atom_array=True,
+                                max_atoms_in_crop=max_atoms,
+                            )
                 }
             )
+    # cropping_transform = ConditionalRoute(
+    #     condition_func=lambda data: data.get("data_category"),                        
+    #             transform_map={
+    #                 "protein_monomer_chain": RandomRoute(
+    #                     transforms = [
+    #                         CropContiguousLikeAF3(
+    #                             crop_size=max_tokens,
+    #                             keep_uncropped_atom_array=True,
+    #                             max_atoms_in_crop=max_atoms,
+    #                         ),
+    #                         CropSpatialLikeAF3(
+    #                             crop_size=max_tokens,
+    #                             crop_center_cutoff_distance=crop_center_cutoff_distance,
+    #                             keep_uncropped_atom_array=True,
+    #                             max_atoms_in_crop=max_atoms,
+    #                         )
+    #                     ],
+    #                     probs = [1.0 - crop_spatial_p, crop_spatial_p]
+    #                 ),                    
+    #                 "interface": CropSpatialLikeAF3Constrained(
+    #                     crop_size=max_tokens,
+    #                     crop_center_cutoff_distance=crop_center_cutoff_distance,
+    #                     keep_uncropped_atom_array=True,
+    #                     max_atoms_in_crop=max_atoms,
+    #                     min_protein_tokens_in_crop=min_protein_tokens_in_interface_crop,
+    #                     constrain_on_interface_protein_chain=True,
+    #                 )
+    #             }
+    #         )
                     
                 
         
             
     # Featurization
     # NOTE: for now, we ignore ref pos features because they are too slow to compute
-    featurization_transforms_post_crop = [    
-        # TrainingRoute(DropOutNonProteinChains(drop_prob=drop_prob_non_protein_chains)),
+    featurization_transforms_post_crop = [
+        AnnotateChainTypes(), 
+        ConditionalRoute(
+            condition_func=lambda data: data.get("phase") == "train",
+            transform_map={True: DropOutNonProteinChains(drop_prob=drop_prob_non_protein_chains), False: Identity()}),    
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),        
         # AddCachedResidueData(residue_cache_dir=residue_cache_dir),
@@ -261,6 +294,7 @@ def sd_featurizer_for_design(
     
     # Featurization    
     featurization_transforms_post_crop = [
+        AnnotateChainTypes(), 
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),        
         # AddCachedResidueData(residue_cache_dir=residue_cache_dir),
