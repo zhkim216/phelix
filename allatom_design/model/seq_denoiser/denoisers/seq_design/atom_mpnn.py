@@ -171,8 +171,6 @@ class AtomMPNN(nn.Module):
             if self.max_dist_potts is not None:
                 protein_residue_node_mask_2d = protein_residue_node_mask_2d * (D_neighbors <= self.max_dist_potts)  # mask out edges that are too far away
 
-            if batch["token_is_small_molecule_chain"].sum() != 0:
-                print(1)
             if self.k_neighbors_potts is not None:
                 # truncate to k_neighbors_potts
                 h_ESV = h_ESV[:, :, :self.k_neighbors_potts]

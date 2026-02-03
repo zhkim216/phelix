@@ -391,7 +391,7 @@ class AnnotateChainTypes(Transform):
                             # Same as how build_metadata_parquet_shards.py gets len(residues). Because cached structures contain nan coords (non-resolved residues)                            
                             if len(res_names) < aw_const.PEPTIDE_MAX_RESIDUES:
                                 atom_is_peptide_chain[pn_unit_mask] = True
-                                print(1)
+                                logger.info(f"example_id: {data["example_id"]}, peptide chain with {len(res_names)} residues") # Todo: remove                                
                             else:
                                 atom_is_protein_chain[pn_unit_mask] = True         
                         elif np.isin(chain_type, nucleic_acid_chain_type_enums):
