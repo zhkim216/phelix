@@ -171,6 +171,8 @@ class AtomMPNN(nn.Module):
             if self.max_dist_potts is not None:
                 protein_residue_node_mask_2d = protein_residue_node_mask_2d * (D_neighbors <= self.max_dist_potts)  # mask out edges that are too far away
 
+            if batch["token_is_small_molecule_chain"].sum() != 0:
+                print(1)
             if self.k_neighbors_potts is not None:
                 # truncate to k_neighbors_potts
                 h_ESV = h_ESV[:, :, :self.k_neighbors_potts]
@@ -291,7 +293,7 @@ class TokenFeatures(nn.Module):
         # Chain information
         chain_labels = torch.zeros_like(batch["asym_id"])        
         chain_labels = batch["asym_id"]
-        d_chains = ((chain_labels[:, :, None] - chain_labels[:,None,:])==0).long()  # find self vs non-self interaction
+        d_chains = ((chain_labels[:, :, None] - chain_labels[:, None, :])==0).long()  # find self vs non-self interaction
         
         E_chains = gather_edges(d_chains[:,:,:,None], E_idx)[:,:,:,0]        
         E_positional = self.positional_embeddings(offset.long(), E_chains) # Get positional encodings for edges only between protein tokens

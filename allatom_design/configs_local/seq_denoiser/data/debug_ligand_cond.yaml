@@ -27,8 +27,8 @@ sampling_weights:
     a_loi: 0.0    
   alphas_interface:
     a_prot: 3.0
-    a_nuc: 1.0
-    a_peptide: 1.0 
+    a_nuc: 0.0
+    a_peptide: 0.0
     a_small_molecule: 1.0 
     a_metal: 1.0 
     a_loi: 5.0
@@ -56,7 +56,7 @@ featurizer_cfg:
   max_atoms: 2304 #! DEBUG (min)
   crop_center_cutoff_distance: 15.0
   crop_spatial_p_protein_monomer_chain: 0.5  
-  drop_prob_non_protein_chains: 0.0
+  drop_prob_non_protein_chains: 1.0
   # Interface crop constraints
   # Ensure at least N protein tokens from the nearest protein pn_unit (chain) to the crop center.
   min_protein_tokens_in_interface_crop: 20
@@ -64,7 +64,7 @@ featurizer_cfg:
   residue_cache_dir: ${data.residue_cache_dir}
   max_conformers_per_residue: 50
   apply_random_augmentation: true
-  translation_scale: 1.0
+  translation_scale: 1.0  
   
 samples_per_epoch: 100 #! DEBUG
 batch_size: ${train.batch_size}
