@@ -15,11 +15,11 @@ train_filters:
     - "num_polymer_pn_units < 50"
   protein_monomer_chain_filter:    
     - "q_pn_unit_is_protein"
-    - "q_pn_unit_sequence_length < 2048"
+    - "20 <= q_pn_unit_num_resolved_residues < 2048"
   interface_filter:
     "1": 
       - "resolution < 3.5" 
-      - "(~q_pn_unit_is_protein or (q_pn_unit_is_protein and (q_pn_unit_sequence_length < 2048)))"
+      - "((not q_pn_unit_is_protein) or (q_pn_unit_is_protein and (20 <= q_pn_unit_num_resolved_residues < 2048)))"
     "2":
       - "n_prot == 2"
       
