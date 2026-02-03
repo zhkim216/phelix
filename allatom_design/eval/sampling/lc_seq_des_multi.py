@@ -11,7 +11,7 @@ import wandb
 import yaml
 
 from allatom_design.eval.eval_utils.eval_setup_utils import (
-    get_cached_example_files, get_pdb_files, get_training_checkpoints, wandb_setup)
+    get_pdb_files, get_training_checkpoints, wandb_setup)
 from allatom_design.eval.eval_utils.seq_des_utils import (
     get_sd_example, 
     load_example_with_load_any,                                                          
@@ -77,9 +77,7 @@ def main(cfg: DictConfig):
         pos_constraint_df = pd.read_csv(cfg.pos_constraint_csv)
     else:
         pos_constraint_df = None
-        
-    
-    
+                
     ###########################################################
     # Phase 1: Prepare samples (common)
     ###########################################################
@@ -117,7 +115,7 @@ def main(cfg: DictConfig):
                 cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
                 preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
                 featurizer_cfg=cfg.featurizer_cfg.prepare_af3_predictions,
-                docking_metrics_cfg=cfg.docking_metrics_cfg,
+                pocket_cfg=cfg.pocket_cfg,
                 no_wandb=cfg.wandb.no_wandb,
                 ckpt_info=None,
                 calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only
@@ -141,7 +139,8 @@ def main(cfg: DictConfig):
                                         cif_save_cfg = cfg.cif_cfg.save,                                            
                                         sampling_inputs_df = sampling_inputs_df,
                                         log_dir = log_dir,
-                                        pos_constraint_df = pos_constraint_df)
+                                        pos_constraint_df = pos_constraint_df,
+                                        protein_only = cfg.get("protein_only", False))
         
         
                     
@@ -161,7 +160,7 @@ def main(cfg: DictConfig):
                     cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
                     preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
                     featurizer_cfg=cfg.featurizer_cfg.prepare_af3_predictions,
-                    docking_metrics_cfg=cfg.docking_metrics_cfg,
+                    pocket_cfg=cfg.pocket_cfg,
                     no_wandb=cfg.wandb.no_wandb,
                     ckpt_info=ckpt_info,
                     calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only

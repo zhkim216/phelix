@@ -11,6 +11,7 @@ debug: true
 num_debug_samples: 2
 seed: 0
 num_workers: 0 # for dataloading
+protein_only: true #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 
 # Outputs
 exp_name: eval_exp4_cfg2_lmpnnval # experiment name; used for wandb and output directory
@@ -53,8 +54,8 @@ redesign_cfg:
   pocket_distance: 5.0
 
 # Docking metrics configuration
-docking_metrics_cfg:
-  pocket_distance_for_metrics: 8.0
+pocket_cfg:
+  pocket_distance_for_metrics: 6.0
 
 ######### Data & Transform configurations #########
 input_sample_is_all_atom: true

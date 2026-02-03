@@ -459,6 +459,7 @@ def run_lc_seq_des(
     device: str = None,
     out_dir: str = None,
     pos_constraint_df: pd.DataFrame | None = None,
+    protein_only: bool = False,
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
     """
     Given a list of processed structure files, run sequence design on them.
@@ -470,9 +471,7 @@ def run_lc_seq_des(
         
     Args:
         ...
-        ligand_chain_ids: Chain ID(s) of the ligand(s) to extract when protein_only=True.
-                          Can be a single chain ID string (e.g., "B") or a list of chain IDs.
-                          If None, falls back to extracting non-amino acid atoms.
+        protein_only: If True, condition only on protein atoms (exclude ligands from atom_cond_mask).
     """
     # Set up outputs.
     outputs = {}
@@ -528,7 +527,7 @@ def run_lc_seq_des(
                                  sampling_inputs_df=sampling_inputs_df)                                                
                                                                                                    
             # Initialize seq_cond and atom_cond masks.
-            batch = initialize_sampling_masks(batch)                        
+            batch = initialize_sampling_masks(batch, protein_only=protein_only)                        
                                         
             # Parse fixed positions.
             batch = parse_fixed_pos_info(batch, pos_constraint_df, verbose=sampling_cfg.verbose)
@@ -1410,7 +1409,7 @@ def _fix_cif_annotation_types(atom_array) -> "AtomArray":
 # Sampling Mask Initialization
 ###########################################################
 
-def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str, torch.Tensor]:
+def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]], protein_only: bool = False) -> dict[str, torch.Tensor]:
     """
     Initialize the sampling masks for the batch. Modifies batch in place and returns it.
     """        
@@ -1431,6 +1430,10 @@ def initialize_sampling_masks(batch: dict[str, TensorType["b ..."]]) -> dict[str
     batch["atom_cond_mask"] = torch.where(standard_aa_prot_atom_mask.bool(),
                                           standard_aa_prot_bb_atom_mask,
                                           batch["atom_resolved_mask"])
+    
+    if protein_only:
+        batch["seq_cond_mask"] = batch["seq_cond_mask"] * batch["token_is_protein_chain"]
+        batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_is_protein_chain"]
     
     # Ensure that all atoms in atom_cond_mask are resolved and atom_cond_mask is masked out the padding atoms
     batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
@@ -2123,25 +2126,27 @@ def create_pos_constraint_dict_from_atom_array(
 ###########################################################
 
 def create_sample_dict(*,
-                       input_sample_paths: list[str] = None,                        
-                       input_sample_ids: list[str] = None) -> dict:
+                       sample_paths: list[str] = None,                        
+                       sample_ids: list[str] = None,
+                       prefix: str = "input") -> dict:
                        
     """
     Create a dictionary of sample information.
     """
-    if input_sample_ids is None:
-        input_sample_ids = [Path(input_sample_path).stem for input_sample_path in input_sample_paths]        
+    if sample_ids is None:
+        sample_ids = [Path(sample_path).stem for sample_path in sample_paths]        
     
     sample_dict = defaultdict(dict)
-    for i, input_sample_id in enumerate(input_sample_ids):
-        sample_dict[input_sample_id] = {}
-        sample_dict[input_sample_id]['input_sample_path'] = input_sample_paths[i]
-        sample_dict[input_sample_id]['input_sample_id'] = input_sample_ids[i]
+    for i, sample_id in enumerate(sample_ids):
+        sample_dict[sample_id] = {}
+        sample_dict[sample_id][f'{prefix}_sample_path'] = sample_paths[i]
+        sample_dict[sample_id][f'{prefix}_sample_id'] = sample_ids[i]
     return sample_dict
 
 
 def prepare_sample_dict(cfg: DictConfig = None,
-                    sampling_inputs_df: pd.DataFrame = None) -> dict:
+                    sampling_inputs_df: pd.DataFrame = None,
+                    prefix: str = "input") -> dict:
                             
     """
     Prepare sample_dict with ligand extraction and designed structure loading.
@@ -2154,13 +2159,13 @@ def prepare_sample_dict(cfg: DictConfig = None,
         sample_dict: Dictionary containing sample information.
     """
     # Get PDB files
-    input_sample_paths = get_pdb_files(**cfg.pdb_cfg)
+    sample_paths = get_pdb_files(**cfg.pdb_cfg)
     
     if cfg.debug:
-        input_sample_paths = input_sample_paths[:cfg.num_debug_samples]                
+        sample_paths = sample_paths[:cfg.num_debug_samples]                
         
     # Initialize dictionary for storing sample information
-    sample_dict = create_sample_dict(input_sample_paths=input_sample_paths)
+    sample_dict = create_sample_dict(sample_paths=sample_paths, prefix=prefix)
                     
     return sample_dict
 
@@ -2521,7 +2526,8 @@ def redesign_with_lcaliby(seed: int = 0,
                         cif_save_cfg: DictConfig = None,                          
                         sampling_inputs_df: pd.DataFrame = None,
                         log_dir: Path = None,
-                        pos_constraint_df: pd.DataFrame = None) -> list[tuple[dict, Path, dict]]:
+                        pos_constraint_df: pd.DataFrame = None,
+                        protein_only: bool = False) -> list[tuple[dict, Path, dict]]:
     """
     Redesign pocket sequence using lcaliby model for each checkpoint.
     
@@ -2536,6 +2542,7 @@ def redesign_with_lcaliby(seed: int = 0,
         sampling_inputs_df: Sampling inputs DataFrame.
         log_dir: Log directory.
         pos_constraint_df: Positional constraints DataFrame.
+        protein_only: If True, condition only on protein atoms (exclude ligands from atom_cond_mask).
     Returns:
         List of tuples: (sample_dict, output_dir, ckpt_info) for each checkpoint.
     """
@@ -2581,6 +2588,7 @@ def redesign_with_lcaliby(seed: int = 0,
             device=device,             
             out_dir=str(log_dir_per_ckpt),
             pos_constraint_df=pos_constraint_df,
+            protein_only=protein_only,
         )
                 
         sample_dict_per_ckpt = copy.deepcopy(sample_dict)

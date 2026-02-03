@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=lc_seq_des_multi
-#SBATCH -p bioe,possu
-#SBATCH --array=0-43
+#SBATCH -p possu,bioe
+#SBATCH --array=0-9
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
@@ -26,10 +26,10 @@ WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 
 # Model names and steps
-MODEL_NAMES=("exp4_cfg0" "exp5_cfg4" "exp5_cfg7" "exp5_cfg10")
-STEPS=(2500 12500 22500 32500 42500 52500 62500 72500 82500 92500 102500)
-MODEL_IDX=$((SLURM_ARRAY_TASK_ID % 4))  
-STEP_IDX=$((SLURM_ARRAY_TASK_ID / 4))   
+MODEL_NAMES=("exp7_cfg0" "exp7_cfg1" "exp7_cfg4" "exp7_cfg7" "exp7_cfg8" "exp7_cfg9")
+STEPS=(2500 12500 22500 32500 42500 52500)
+MODEL_IDX=$((SLURM_ARRAY_TASK_ID % 2))  
+STEP_IDX=$((SLURM_ARRAY_TASK_ID / 2))   
 
 MODEL_NAME=${MODEL_NAMES[$MODEL_IDX]}
 STEP=${STEPS[$STEP_IDX]}
@@ -38,7 +38,7 @@ STEP=${STEPS[$STEP_IDX]}
 PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
 SAMPLING_INPUTS_CSV=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/sampling_inputs_lmpnnval_small_molecule_filtered.csv
 PDB_NAME_LIST=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/lmpnnval_small_molecule_filtered.txt
-VALSET_NAME="lmpnnval"
+VALSET_NAME="lmpnnval_sm_filt_nogaphetero"
 
 POS_CONSTRAINT_CSV=null
 LIGAND_SOURCE_PATH=/scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
@@ -75,7 +75,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des.py \
     sampling_inputs_csv=${SAMPLING_INPUTS_CSV} \
     pos_constraint_csv=${POS_CONSTRAINT_CSV} \
     redesign_cfg.use_native_seq=false \
-    docking_metrics_cfg.pocket_distance_for_metrics=8.0 \
+    docking_metrics_cfg.pocket_distance_for_metrics=6.0 \
     input_sample_is_all_atom=true \
     input_sample_is_designed=false \
     load_from_cache=false \
