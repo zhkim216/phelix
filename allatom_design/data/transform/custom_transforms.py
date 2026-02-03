@@ -197,17 +197,21 @@ class FeaturizeCoordsAndMasks(Transform):
 
         # chain type flags
         atom_is_protein_chain = atom_array.get_annotation("atom_is_protein_chain")
+        atom_is_peptide_chain = atom_array.get_annotation("atom_is_peptide_chain")
         atom_is_nucleic_acid_chain = atom_array.get_annotation("atom_is_nucleic_acid_chain")
         atom_is_metal_chain = atom_array.get_annotation("atom_is_metal_chain")
         atom_is_small_molecule_chain = atom_array.get_annotation("atom_is_small_molecule_chain")
         
         token_is_protein_chain = atom_is_protein_chain[repr_mask]
+        token_is_peptide_chain = atom_is_peptide_chain[repr_mask]
         token_is_nucleic_acid_chain = atom_is_nucleic_acid_chain[repr_mask]
         token_is_metal_chain = atom_is_metal_chain[repr_mask]
         token_is_small_molecule_chain = atom_is_small_molecule_chain[repr_mask]
         
         feats["atom_is_protein_chain"] = torch.tensor(atom_is_protein_chain).float()
         feats["token_is_protein_chain"] = torch.tensor(token_is_protein_chain).float()
+        feats["atom_is_peptide_chain"] = torch.tensor(atom_is_peptide_chain).float()
+        feats["token_is_peptide_chain"] = torch.tensor(token_is_peptide_chain).float()
         feats["atom_is_nucleic_acid_chain"] = torch.tensor(atom_is_nucleic_acid_chain).float()
         feats["token_is_nucleic_acid_chain"] = torch.tensor(token_is_nucleic_acid_chain).float()
         feats["atom_is_metal_chain"] = torch.tensor(atom_is_metal_chain).float()
@@ -220,9 +224,9 @@ class FeaturizeCoordsAndMasks(Transform):
         feats["token_to_center_atom"] = torch.tensor(get_af3_token_center_idxs(atom_array))        
 
         # protein backbone and sidechain atom masks
-        is_prot_bb = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
-        is_prot_scn = (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & ~np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
-        is_prot_scn_wo_cb = ((atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value) & ~np.isin(atom_array.atom_name, ["N", "CA", "C", "O", "OXT", "CB"]))
+        is_prot_bb = (atom_is_protein_chain) & np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
+        is_prot_scn = (atom_is_protein_chain) & ~np.isin(atom_array.atom_name, PROTEIN_BACKBONE_ATOM_NAMES)
+        is_prot_scn_wo_cb = ((atom_is_protein_chain) & ~np.isin(atom_array.atom_name, ["N", "CA", "C", "O", "OXT", "CB"]))
         feats["prot_bb_atom_mask"] = torch.tensor(is_prot_bb).float()
         feats["prot_scn_atom_mask"] = torch.tensor(is_prot_scn).float()
         feats["prot_scn_wo_cb_atom_mask"] = torch.tensor(is_prot_scn_wo_cb).float()        
@@ -387,19 +391,17 @@ class AnnotateChainTypes(Transform):
                 if len(chain_type) == 1:
                     if chain_type in polymer_chain_type_enums:
                         if chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value:                                                          
-                            _, res_names = struc.get_residues(sel_atom_array) 
-                            # Same as how build_metadata_parquet_shards.py gets len(residues). Because cached structures contain nan coords (non-resolved residues)                            
-                            if len(res_names) < aw_const.PEPTIDE_MAX_RESIDUES:
+                            _, res_names = struc.get_residues(sel_atom_array)                             
+                            if len(res_names) < aw_const.PEPTIDE_MAX_RESIDUES: # Same as how build_metadata_parquet_shards.py gets len(residues). Because cached structures contain nan coords (non-resolved residues)                            
                                 atom_is_peptide_chain[pn_unit_mask] = True
-                                logger.info(f"example_id: {data["example_id"]}, peptide chain with {len(res_names)} residues") # Todo: remove                                
+                                logger.info(f"example_id: {data["example_id"]}, peptide chain with {len(res_names)} residues") #!FIXME: remove                                
                             else:
                                 atom_is_protein_chain[pn_unit_mask] = True         
                         elif np.isin(chain_type, nucleic_acid_chain_type_enums):
                             atom_is_nucleic_acid_chain[pn_unit_mask] = True
                     elif np.isin(chain_type, non_polymer_chain_type_enums):
-                        if (len(sel_atom_array) == 1):
-                            if np.isin(sel_atom_array.element, METAL_ELEMENTS):
-                                atom_is_metal_chain[pn_unit_mask] = True
+                        if (len(sel_atom_array) == 1) and np.isin(sel_atom_array.element, METAL_ELEMENTS):                            
+                            atom_is_metal_chain[pn_unit_mask] = True
                         else:
                             atom_is_small_molecule_chain[pn_unit_mask] = True                
                 elif len(chain_type) > 1: # covalent modification case, e.g. [6, 8] => can select this case using small_molecule & is_covalent_modification
