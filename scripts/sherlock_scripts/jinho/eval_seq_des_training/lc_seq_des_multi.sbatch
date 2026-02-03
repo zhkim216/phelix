@@ -26,7 +26,7 @@ WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 
 # Model names and steps
-MODEL_NAMES=("exp6_cfg0" "exp6_cfg1")
+MODEL_NAMES=("exp7_cfg0" "exp7_cfg1" "exp7_cfg4" "exp7_cfg7" "exp7_cfg8" "exp7_cfg9")
 STEPS=(2500 12500 22500 32500 42500 52500)
 MODEL_IDX=$((SLURM_ARRAY_TASK_ID % 2))  
 STEP_IDX=$((SLURM_ARRAY_TASK_ID / 2))   

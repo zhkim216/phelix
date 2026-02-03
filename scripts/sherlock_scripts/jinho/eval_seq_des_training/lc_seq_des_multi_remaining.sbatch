@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=lc_seq_des_multi
-#SBATCH -p bioe,possu
-#SBATCH --array=0-7
+#SBATCH -p possu
+#SBATCH --array=0-1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
@@ -27,18 +27,12 @@ PROJECT=ligand_seq_des
 
 # Define combinations of models & steps
 COMBINATIONS=(
-    "exp9_cfg0,2500"
-    "exp9_cfg0,10000"
-    "exp9_cfg1,2500"
-    "exp9_cfg1,10000"
-    "exp9_cfg2,2500"
-    "exp9_cfg2,10000"
-    "exp9_cfg3,2500"
-    "exp9_cfg3,10000"   
+    "exp9_cfg2,10000,false"    
+    "exp9_cfg2,10000,true"    
 )
 
 # Parse the current combination
-IFS=',' read -r MODEL_NAME STEP <<< "${COMBINATIONS[$SLURM_ARRAY_TASK_ID]}"
+IFS=',' read -r MODEL_NAME STEP PROTEIN_ONLY <<< "${COMBINATIONS[$SLURM_ARRAY_TASK_ID]}"
 
 # Input paths
 PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
@@ -56,9 +50,13 @@ SOURCE_IS_DESIGNED=false
 DENOISER_TRAIN_DIR=/scratch/users/zhkim216/out_dir/ligand_seq_des/${MODEL_NAME}
 
 # Experiment name 
-EXP_NAME=eval_${MODEL_NAME}_${VALSET_NAME}_af3
+if [ "${PROTEIN_ONLY}" = "true" ]; then
+    EXP_NAME=eval_${MODEL_NAME}_${VALSET_NAME}_af3_protonly
+else
+    EXP_NAME=eval_${MODEL_NAME}_${VALSET_NAME}_af3
+fi
 
-echo "Starting evaluation for model=${MODEL_NAME} (idx=${MODEL_IDX}), step=${STEP} (idx=${STEP_IDX}), valset=${VALSET_NAME}"
+echo "Starting evaluation for model=${MODEL_NAME}, step=${STEP}, protein_only=${PROTEIN_ONLY}, valset=${VALSET_NAME}"
 
 # Run evaluation script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py \
@@ -69,6 +67,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     debug=false \
     seed=0 \
     num_workers=${SLURM_CPUS_PER_TASK} \
+    protein_only=${PROTEIN_ONLY} \
     exp_name=${EXP_NAME} \
     base_out_dir=${BASE_OUT_DIR} \
     seq_des_cfg.denoiser_train_dir=${DENOISER_TRAIN_DIR} \

@@ -53,8 +53,8 @@ redesign_cfg:
   pocket_distance: 5.0
 
 # Docking metrics configuration
-docking_metrics_cfg:
-  pocket_distance_for_metrics: 8.0
+pocket_cfg:
+  pocket_distance_for_metrics: 6.0
 
 ######### Data & Transform configurations #########
 input_sample_is_all_atom: true
