@@ -1,0 +1,101 @@
+#!/bin/bash
+#SBATCH --job-name=lc_seq_des_multi
+#SBATCH -p bioe,possu
+#SBATCH --array=0-7
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=16G
+#SBATCH --time=1-0:00:00
+#SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_%A_%a.err
+
+# Define directories
+BASE_DIR=/home/users/zhkim216/code/allatom-design
+HYDRA_DIR=/scratch/users/zhkim216/hydra_outputs
+BASE_OUT_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des
+
+mkdir -p /scratch/users/zhkim216/job_output "${HYDRA_DIR}" "${BASE_OUT_DIR}"
+
+cd "${BASE_DIR}"
+
+# Ignore warnings
+export PYTHONWARNINGS="ignore"
+
+# Wandb settings
+WANDB_ID=zhkim216
+PROJECT=ligand_seq_des
+
+# Define combinations of models & steps
+COMBINATIONS=(
+    "exp9_cfg0,2500"
+    "exp9_cfg0,10000"
+    "exp9_cfg1,2500"
+    "exp9_cfg1,10000"
+    "exp9_cfg2,2500"
+    "exp9_cfg2,10000"
+    "exp9_cfg3,2500"
+    "exp9_cfg3,10000"   
+)
+
+# Parse the current combination
+IFS=',' read -r MODEL_NAME STEP <<< "${COMBINATIONS[$SLURM_ARRAY_TASK_ID]}"
+
+# Input paths
+PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
+SAMPLING_INPUTS_CSV=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/sampling_inputs_lmpnnval_small_molecule_filtered.csv
+PDB_NAME_LIST=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/lmpnnval_small_molecule_filtered_nogaphetero.txt
+VALSET_NAME="lmpnnval_sm_filt_nogaphetero"
+# "lmpnnval_sm_filt_full" or "lmpnnval_sm_filt_nogaphetero"
+
+POS_CONSTRAINT_CSV=null
+LIGAND_SOURCE_PATH=/scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
+ADD_LIGANDS_TO_DESIGNED_SAMPLES=false
+SOURCE_IS_DESIGNED=false
+
+# Denoiser train directory
+DENOISER_TRAIN_DIR=/scratch/users/zhkim216/out_dir/ligand_seq_des/${MODEL_NAME}
+
+# Experiment name 
+EXP_NAME=eval_${MODEL_NAME}_${VALSET_NAME}_af3
+
+echo "Starting evaluation for model=${MODEL_NAME} (idx=${MODEL_IDX}), step=${STEP} (idx=${STEP_IDX}), valset=${VALSET_NAME}"
+
+# Run evaluation script
+WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py \
+    wandb.no_wandb=false \
+    wandb.project=${PROJECT} \
+    wandb.wandb_id=${WANDB_ID} \
+    wandb.group=baseline \
+    debug=false \
+    seed=0 \
+    num_workers=${SLURM_CPUS_PER_TASK} \
+    exp_name=${EXP_NAME} \
+    base_out_dir=${BASE_OUT_DIR} \
+    seq_des_cfg.denoiser_train_dir=${DENOISER_TRAIN_DIR} \
+    seq_des_cfg.ckpt_cfg.start_step=${STEP} \
+    seq_des_cfg.ckpt_cfg.end_step=${STEP} \
+    seq_des_cfg.ckpt_cfg.eval_every_n_ckpts=1 \
+    seq_des_cfg.ckpt_cfg.eval_last_ckpt=false \
+    seq_des_cfg.ckpt_cfg.use_ema=true \
+    seq_des_cfg.atom_mpnn.overrides.batch_size=8 \
+    seq_des_cfg.atom_mpnn.overrides.num_seqs_per_pdb=1 \
+    sampling_inputs_csv=${SAMPLING_INPUTS_CSV} \
+    pos_constraint_csv=${POS_CONSTRAINT_CSV} \
+    redesign_cfg.use_native_seq=false \
+    docking_metrics_cfg.pocket_distance_for_metrics=6.0 \
+    input_sample_is_all_atom=true \
+    input_sample_is_designed=false \
+    load_from_cache=false \
+    pdb_cfg.pdb_dir=${PDB_DIR} \
+    pdb_cfg.pdb_name_list=${PDB_NAME_LIST} \
+    pdb_cfg.pdb_name_ext=".cif" \
+    ligand_source_cfg.ligand_source_path=${LIGAND_SOURCE_PATH} \
+    ligand_source_cfg.add_ligands_to_designed_samples=${ADD_LIGANDS_TO_DESIGNED_SAMPLES} \
+    ligand_source_cfg.source_is_designed=${SOURCE_IS_DESIGNED} \
+    featurizer_cfg.design.residue_cache_dir="/scratch/users/zhkim216/datasets/atomworks_cached_residue_data" \
+    struct_pred_cfg.af3.inference_config.base.flash_attention_implementation=triton \
+    struct_pred_cfg.af3.inference_config.ss.num_recycles=10 \
+    struct_pred_cfg.af3.inference_config.ss.num_diffusion_samples=5 \
+    hydra.run.dir=${HYDRA_DIR}
+
+echo "Evaluation complete for model=${MODEL_NAME}"
