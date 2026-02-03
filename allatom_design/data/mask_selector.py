@@ -85,12 +85,12 @@ class MaskSelector:
         atomwise_tok_keep_scn_mask = tok_keep_scn_mask.gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
         
         standard_aa_prot_bb_atom_mask = standard_aa_prot_atom_mask * batch["prot_bb_atom_mask"]
-        standard_aa_prot_scn_atom_mask = standard_aa_prot_atom_mask * batch["prot_scn_wo_cb_atom_mask"] 
+        standard_aa_prot_scn_wo_cb_atom_mask = standard_aa_prot_atom_mask * batch["prot_scn_wo_cb_atom_mask"] 
         #! (JH) Following LigandMPNN, we mask out the CB atoms of the sidechain, as we use pseudo CB coordinates in the ligand & interaction module
         
         # Select sidechain atoms or backbone atoms from the standard amino acids in protein chains
         prot_atom_mask = torch.where(atomwise_tok_keep_scn_mask.bool(),
-                                     standard_aa_prot_scn_atom_mask,
+                                     standard_aa_prot_scn_wo_cb_atom_mask,
                                      standard_aa_prot_bb_atom_mask)
         prot_atom_mask = prot_atom_mask * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
                 

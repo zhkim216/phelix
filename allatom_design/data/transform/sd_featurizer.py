@@ -113,7 +113,7 @@ def sd_featurizer(
     
     # For center random augmentation
     apply_random_augmentation: bool = True,
-    translation_scale: float = 1.0,
+    translation_scale: float = 1.0,    
             
 ) -> Transform:
     """
@@ -124,7 +124,8 @@ def sd_featurizer(
         # InferenceRoute(StrtoBoolforIsXFeatures()), # Todo: need this later if we want to use load_any
         AddData({"is_inference": is_inference}),    
         AddDataCategory(),    
-        FilterToQueryPNUnits(),    
+        FilterToQueryPNUnits(),       
+        AnnotateChainTypes(),
         MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={
             aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_BACKBONE_ATOM_NAMES,            
         }, occupancy_threshold=occupancy_threshold_protein_backbone), # Todo: do some experiment with different occupancy thresholds
@@ -199,8 +200,7 @@ def sd_featurizer(
             
     # Featurization
     # NOTE: for now, we ignore ref pos features because they are too slow to compute
-    featurization_transforms_post_crop = [
-        AnnotateChainTypes(), 
+    featurization_transforms_post_crop = [        
         ConditionalRoute(
             condition_func=lambda data: data.get("phase") == "train",
             transform_map={True: DropOutNonProteinChains(drop_prob=drop_prob_non_protein_chains), False: Identity()}),    

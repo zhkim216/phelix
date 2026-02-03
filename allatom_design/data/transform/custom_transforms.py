@@ -51,7 +51,9 @@ from atomworks.io.utils.sequence import (
     is_pyrimidine,
 )
 
+import atomworks.ml.preprocessing.constants as aw_const
 import allatom_design.data.const as const
+
 from allatom_design.data.transform.pad import pad_dim
 from allatom_design.data.const import TRAINING_SUPPORTED_CHAIN_TYPES
 import logging
@@ -362,6 +364,7 @@ class AnnotateChainTypes(Transform):
 
     @override
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+
         atom_array = data["atom_array"]
         
         # Get chain type flags
@@ -370,21 +373,28 @@ class AnnotateChainTypes(Transform):
         non_polymer_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.NON_POLYMERS]
         
         # Protein chain flags
-        atom_is_protein_chain = np.zeros(len(atom_array), dtype=bool)        
+        atom_is_protein_chain = np.zeros(len(atom_array), dtype=bool)     
+        atom_is_peptide_chain = np.zeros(len(atom_array), dtype=bool)   
         atom_is_nucleic_acid_chain = np.zeros(len(atom_array), dtype=bool)
         atom_is_metal_chain = np.zeros(len(atom_array), dtype=bool)
         atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)
 
         try:
             for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
-                pn_unit_mask = atom_array.pn_unit_iid == pn_unit_iid
+                pn_unit_mask = (atom_array.pn_unit_iid == pn_unit_iid)
                 sel_atom_array = atom_array[pn_unit_mask]
                 chain_type = np.unique(sel_atom_array.chain_type)
                 if len(chain_type) == 1:
                     if chain_type in polymer_chain_type_enums:
-                        if chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value:                    
-                            atom_is_protein_chain[pn_unit_mask] = True                                    
-                        elif chain_type in nucleic_acid_chain_type_enums:
+                        if chain_type == aw_enums.ChainType.POLYPEPTIDE_L.value:                                                          
+                            _, res_names = struc.get_residues(sel_atom_array) 
+                            # Same as how build_metadata_parquet_shards.py gets len(residues). Because cached structures contain nan coords (non-resolved residues)                            
+                            if len(res_names) < aw_const.PEPTIDE_MAX_RESIDUES:
+                                atom_is_peptide_chain[pn_unit_mask] = True
+                                print(1)
+                            else:
+                                atom_is_protein_chain[pn_unit_mask] = True         
+                        elif np.isin(chain_type, nucleic_acid_chain_type_enums):
                             atom_is_nucleic_acid_chain[pn_unit_mask] = True
                     elif np.isin(chain_type, non_polymer_chain_type_enums):
                         if (len(sel_atom_array) == 1):
@@ -399,6 +409,7 @@ class AnnotateChainTypes(Transform):
             print(f"example_id: {data["example_id"]}, {e}")                       
         
         data["atom_array"].set_annotation("atom_is_protein_chain", atom_is_protein_chain)
+        data["atom_array"].set_annotation("atom_is_peptide_chain", atom_is_peptide_chain)
         data["atom_array"].set_annotation("atom_is_nucleic_acid_chain", atom_is_nucleic_acid_chain)
         data["atom_array"].set_annotation("atom_is_metal_chain", atom_is_metal_chain)
         data["atom_array"].set_annotation("atom_is_small_molecule_chain", atom_is_small_molecule_chain)
@@ -435,7 +446,7 @@ class FilterToQueryPNUnits(Transform):
             atom_array = filter_to_specified_pn_units(atom_array, data["query_pn_unit_iids"])
 
         data["atom_array"] = atom_array
-        
+                        
         return data
 
 class MaskAtomizedTokensInProtein(Transform):
