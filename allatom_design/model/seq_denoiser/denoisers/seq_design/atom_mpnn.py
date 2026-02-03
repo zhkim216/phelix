@@ -291,7 +291,7 @@ class TokenFeatures(nn.Module):
         # Chain information
         chain_labels = torch.zeros_like(batch["asym_id"])        
         chain_labels = batch["asym_id"]
-        d_chains = ((chain_labels[:, :, None] - chain_labels[:,None,:])==0).long()  # find self vs non-self interaction
+        d_chains = ((chain_labels[:, :, None] - chain_labels[:, None, :])==0).long()  # find self vs non-self interaction
         
         E_chains = gather_edges(d_chains[:,:,:,None], E_idx)[:,:,:,0]        
         E_positional = self.positional_embeddings(offset.long(), E_chains) # Get positional encodings for edges only between protein tokens
