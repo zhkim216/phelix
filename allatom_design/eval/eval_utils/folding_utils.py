@@ -292,7 +292,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
                 # Replace residues with actual sequence
                 chain_seq = designed_sample_atom_array[chain_mask].res_name[_res_starts]            
                 chain_seq_with_gaps[_res_ids_0based] = chain_seq
-                                                
+                
                 # Detect modified residues
                 # Get hetero flag
                 chain_hetero = designed_sample_atom_array[chain_mask].hetero[_res_starts]
@@ -543,7 +543,7 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
                                   cif_parse_cfg: DictConfig = None,
                                   preprocess_cfg: DictConfig = None,
                                   featurizer_cfg: DictConfig = None,                             
-                                  docking_metrics_cfg: DictConfig = None,
+                                  pocket_cfg: DictConfig = None,
                                   ckpt_info: dict = None,
                                   no_wandb: bool = False,
                                   calculate_metrics_only: bool = False) -> None:
@@ -663,7 +663,7 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
                                 sample_atom_array=designed_sample_atom_array,
                                 pred_sample_path=pred_ss_sample_path,
                                 return_aligned_atom_array=False,
-                                pocket_distance_for_metrics=docking_metrics_cfg.pocket_distance_for_metrics,
+                                pocket_distance_for_metrics=pocket_cfg.pocket_distance_for_metrics,
                                 receptor_chain_iid=protein_chain_iids[0], #! FIXME
                                 ligand_chain_iid=ligand_chain_iids[0] #! FIXME
                         )
@@ -902,200 +902,4 @@ def _save_metrics_results(out_dir: Path = None,
             print(f"Logged metrics to wandb: {wandb_metrics}")
 
 
-# ============================================================================
-# ESMFold Utils
-# ============================================================================
 
-def create_batched_seq_dataset(all_sequences: list[str],
-                               all_residue_indices: list[TensorType["n_s", int]],
-                               all_chain_indices: list[TensorType["n_s", int]],
-                               max_tokens_per_batch: int = 1024,
-                               ) -> Generator[dict, None, None]:
-    """
-    Create a batched dataset of sequences for ESMFold, sorting by sequence length and limiting batch size.
-
-    Loosely based on https://github.com/facebookresearch/esm/blob/c9c7d4f0fec964ce10c3e11dccec6c16edaa5144/scripts/fold.py#L66
-    """
-    # Sort by sequence length
-    B = len(all_sequences)
-    examples = [(seq, residx, chain_idx, id) for seq, residx, chain_idx, id in zip(all_sequences, all_residue_indices, all_chain_indices, range(B))]
-    examples = sorted(examples, key=lambda x: len(x[0]))
-
-    # Define collator
-    def collate_fn(examples: list[tuple[str, TensorType["n", int], int]]) -> dict[str, List]:
-        """
-        Given a list of examples, collate them into a batch with keys:
-        - sequence: (b) sequence
-        - residue_index: (b n) residue index
-        - id: (b) unique identifier for each sequence
-        """
-        batch = {"sequence": [], "residue_index": [], "id": [], "chain_index": []}
-
-        N = max(len(seq) for seq, _, _, _ in examples)
-        for seq, residx, chain_idx, id in examples:
-            batch["sequence"].append(seq)
-            batch["residue_index"].append(data.make_fixed_size_1d(residx, fixed_size=N, start_idx=None))
-            batch["chain_index"].append(data.make_fixed_size_1d(chain_idx, fixed_size=N, start_idx=None))
-            batch["id"].append(id)
-
-        batch["residue_index"] = torch.stack(batch["residue_index"], dim=0).to(torch.long)
-        batch["chain_index"] = torch.stack(batch["chain_index"], dim=0).to(torch.long)
-        return batch
-
-    # Yield batches
-    batch_examples, num_tokens = [], 0
-
-    total_tokens = sum(len(seq) for seq in all_sequences)
-    pbar = tqdm(total=total_tokens, desc="Number of ESMFold tokens processed", leave=False)
-
-    for seq, residx, chain_idx, id in examples:
-        # If adding this sequence would exceed the token limit, yield the current batch
-        if num_tokens + len(seq) > max_tokens_per_batch and num_tokens > 0:
-            yield collate_fn(batch_examples)
-            batch_examples, num_tokens = [], 0
-
-        # Add this sequence to the current batch
-        batch_examples.append((seq, residx, chain_idx, id))
-        num_tokens += len(seq)
-        pbar.update(len(seq))
-
-    yield collate_fn(batch_examples)
-
-
-# ============================================================================
-# Legacy Code (AF2/ESMFold - commented out)
-# ============================================================================
-
-# def run_af2(sequences_list: list[str],
-#             residue_index_list: list[TensorType["n_s", int]],
-#             chain_index_list: list[TensorType["n_s", int]],
-#             pdbs: list[str],  # used for extracting residue index. TODO remove dependence on pdb file
-#             af_model: "mk_af_model",
-#             out_dir: str,
-#             num_models: int,
-#             sample_models: bool,
-#             num_recycles: int,
-#             save_best: bool = True,
-#             rm_template_interchain: bool = False,
-#             chains: str | None = None,
-#             **kwargs) -> tuple[dict[str, torch.Tensor], list[str]]:
-#     """
-#     Predict sequences with AlphaFold2.
-
-#     Return a tuple (dictionary of outputs, output filenames).
-#     """
-#     Path(out_dir).mkdir(exist_ok=True, parents=True)
-#     output_files = []
-
-#     # Predict structures
-#     for _, (seq, pdb, residue_index, chain_index) in enumerate(zip(sequences_list, pdbs, residue_index_list, chain_index_list)):
-#         output_pdb = f"{out_dir}/af2_{Path(pdb).stem}.pdb"
-#         assert len(chain_index_list[0].unique()) == 1, "Multi-chain prediction not supported yet"
-#         # af_model.prep_inputs(pdb, chains, ignore_missing=False)
-#         _prep_struct_pred(af_model, residue_index)
-
-#         af_model.restart()
-#         af_model.set_opt("template", rm_ic=rm_template_interchain)
-#         af_model.predict(seq=seq,
-#                          num_models=num_models,
-#                          sample_models=sample_models,
-#                          num_recycles=num_recycles,
-#                          verbose=False)
-
-#         af_model._save_results(save_best=save_best, best_metric="plddt", verbose=False)
-
-#         if save_best:
-#             save_best_model(af_model, output_pdb)
-#         else:
-#             af_model.save_current_pdb(output_pdb)
-
-#         output_files.append(output_pdb)
-
-#     preds = [data.load_feats_from_pdb(pdb) for pdb in output_files]
-
-#     # Preprocess plddt-CA
-#     plddt = [pred["b_factors"] for pred in preds]
-#     ca_plddt = [pred["b_factors"][:, 1] for pred in preds]
-#     avg_ca_plddt = [torch.mean(ca_plddt, dim=0, keepdim=True) for ca_plddt in ca_plddt]  # keep sequence dim for consistency
-
-#     # Prepare AF2 outputs
-#     af2_outputs = {
-#         "pred_coords": [pred["all_atom_positions"] for pred in preds],
-#         "plddt": plddt,
-#         "ca_plddt": ca_plddt,
-#         "seq_mask": [pred["seq_mask"] for pred in preds],
-#         "aatype": [pred["aatype"] for pred in preds],
-#         "residue_index": [pred["residue_index"].long() for pred in preds],
-#         "avg_ca_plddt": avg_ca_plddt,
-#         "atom_mask": [pred["all_atom_mask"] for pred in preds],
-#     }
-
-#     return af2_outputs, output_files
-
-
-# def get_esmfold_model(device: str):
-#     # Set up ESMFold
-#     esmfold = EsmForProteinFolding.from_pretrained("facebook/esmfold_v1").eval()
-#     esmfold.esm = esmfold.esm.half()
-#     esmfold = esmfold.to(device)
-#     tokenizer = AutoTokenizer.from_pretrained("facebook/esmfold_v1")
-#     return esmfold, tokenizer
-
-
-# def get_struct_pred_model(cfg: DictConfig,
-#                           device: str) -> dict[str, Any]:
-#     """
-#     Get structure prediction model components as a dictionary based on config.
-
-#     Example config:
-#     struct_pred_cfg:
-#         model_name: "esmfold"  # ["esmfold", "boltz1"]
-#         boltz1:
-#         esmfold:
-#             max_tokens_per_batch: 1024
-#         af2_interface:
-#             data_dir: # directory containing "params/" with af2 model params
-#             num_models: 1
-#             num_recycles: 3
-#             use_multimer: false
-#     """
-#     model_name = cfg.model_name
-#     base_cfg = OmegaConf.load(cfg.base_cfg)
-#     cfg = OmegaConf.merge(base_cfg, cfg)
-
-#     struct_pred_model = {"model_name": model_name, "cfg": cfg, "device": device}
-#     if model_name == "boltz1":
-#         struct_pred_model["boltz1"] = get_boltz_model(cfg.boltz1, device=device)
-#         struct_pred_model["trainer_fn"] = partial(make_boltz_trainer,
-#                                                   num_workers=cfg.boltz1.num_workers)
-#         struct_pred_model["data_cfg"] = hydra.utils.instantiate(cfg.boltz1.data_cfg)
-
-#     elif model_name == "esmfold":
-#         esmfold, tokenizer = get_esmfold_model(device=device)
-#         struct_pred_model["esmfold"] = esmfold
-#         struct_pred_model["tokenizer"] = tokenizer
-#         struct_pred_model["data_cfg"] = hydra.utils.instantiate(cfg.boltz1.data_cfg)  # useful to have boltz tokenizer/featurizer
-#     elif model_name == "af2_interface":
-#         clear_mem()
-#         af2_cfg = cfg.af2_interface
-
-#         # get AF2 model for predicting complex
-#         if af2_cfg.hard_target:
-#             complex_prediction_model = mk_afdesign_model(protocol="binder", num_recycles=af2_cfg.num_recycles, data_dir=af2_cfg.data_dir,
-#                                                          use_multimer=False, use_initial_guess=True, use_initial_atom_pos=False)
-#         else:
-#             complex_prediction_model = mk_afdesign_model(protocol="binder", num_recycles=af2_cfg.num_recycles, data_dir=af2_cfg.data_dir,
-#                                                          use_multimer=False, use_initial_guess=False, use_initial_atom_pos=False)
-
-#         # get AF2 model for predicting binder in isolation
-#         af_model = mk_af_model(use_multimer=False,
-#                                use_templates=False,
-#                                best_metric="ptm",
-#                                data_dir=af2_cfg.data_dir)
-
-#         struct_pred_model["af_model_complex"] = complex_prediction_model
-#         struct_pred_model["af_model_binder"] = af_model
-#     else:
-#         raise ValueError(f"Invalid model name: {model_name}")
-
-#     return struct_pred_model

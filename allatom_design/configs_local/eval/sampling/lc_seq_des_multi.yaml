@@ -11,18 +11,19 @@ debug: true
 num_debug_samples: 1
 seed: 0
 num_workers: 0 # for dataloading
+protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 
 # Outputs
-exp_name: debug_eval_exp6_cfg0_lmpnnval_nogaphetero # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260131
+exp_name: debug_eval_exp9_cfg2_lmpnnval_nogaphetero # experiment name; used for wandb and output directory
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260202
 
 # Sequence design config
 seq_des_cfg:  
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp6_cfg0
+  denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp9_cfg2
   ckpt_cfg:
-    start_step: 42500
-    end_step: 42500
+    start_step: 10000
+    end_step: 10000
     eval_every_n_ckpts: 1
     eval_last_ckpt: false
     use_ema: true
@@ -50,12 +51,11 @@ pos_constraint_csv: null
 # Redesign pocket sequence options
 redesign_cfg:
   use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
-  pocket_distance: 5.0
+  pocket_distance: 5.0  
 
 # Pocket configuration
 pocket_cfg:
-  pocket_distance_list_for_metrics: [4.0, 5.0, 6.0]
-  pocket_distance_for_align: 6.0
+  pocket_distance_for_metrics: 8.0
 
 ######### Data & Transform configurations #########
 input_sample_is_all_atom: true
