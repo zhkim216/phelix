@@ -34,6 +34,7 @@ from allatom_design.eval.eval_utils.seq_des_utils import get_sd_example, prepare
 from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets
 
 # Atomworks imports
+from atomworks.ml.transforms.atom_array import apply_and_spread_residue_wise
 from atomworks.io.utils.io_utils import to_cif_string
 from atomworks.io.parser import parse as aw_parse
 from atomworks.io.tools.rdkit import atom_array_to_rdkit
@@ -41,7 +42,7 @@ from atomworks.ml.utils.geometry import align_atom_arrays
 from atomworks.io.utils.io_utils import to_cif_file
 import atomworks.enums as aw_enums
 
-from biotite.structure import AtomArray
+from biotite.structure import AtomArray, get_residue_count, spread_residue_wise
 # from ost import io, mol
 # from ost.mol.alg.ligand_scoring_scrmsd import SCRMSDScorer
 from rdkit import Chem
@@ -250,7 +251,7 @@ def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
                                        sample_atom_array: AtomArray,
                                        pred_sample_path: str = None,
                                        return_aligned_atom_array: bool = False,
-                                       pocket_distance_for_metrics: float = 8.0,
+                                       pocket_distance_for_metrics: float = 6.0,
                                        receptor_chain_iid: str = "A_1",
                                        ligand_chain_iid: str = "C_1",
                                        save_aligned: bool = True,
@@ -436,10 +437,7 @@ def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
         "iptm": iptm,
         "interface_min_pae": interface_min_pae,
     }
-    
-    
-    
-
+            
 def _extract_af3_confidence_metrics(confidence_file_path: str = None,
                                     atom_array: AtomArray = None,
                                     mask: TensorType["n", bool] = None,

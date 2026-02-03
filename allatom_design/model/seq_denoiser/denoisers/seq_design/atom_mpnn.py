@@ -128,8 +128,7 @@ class AtomMPNN(nn.Module):
         #! (JH) During sampling, seq_cond_mask is also 1 for padded tokens
         #! (JH) So padded parts are also considered as gaps here, but I guess it's okay.        
         restype = torch.where(batch["seq_cond_mask"].unsqueeze(-1).bool(), batch["restype"], masked)
-        h_S = self.W_s(restype) #! (JH) different from the original lmpnn (zero-initialized)
-        
+        h_S = self.W_s(restype) #! (JH) different from the original lmpnn (zero-initialized)        
 
         # Build graph and get edge features
         h_E, E_idx, V, Y_nodes, Y_edges, Y_m, D_neighbors = self.token_features(batch)
