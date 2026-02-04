@@ -174,9 +174,10 @@ class SDDataset(MolecularDataset):
         """                                                    
         metadata_df = read_parquet_with_metadata(metadata_path)
         
-        # Add q_pn_unit_is_nuc column
+        # Add q_pn_unit_is_nuc & q_pn_unit_is_small_molecule columns
         nuc_chain_type_enums = [chain_type.value for chain_type in aw_enums.ChainType.get_nucleic_acids()]
-        metadata_df["q_pn_unit_is_nuc"] = metadata_df["q_pn_unit_is_polymer"] & (metadata_df["q_pn_unit_type"].isin(nuc_chain_type_enums))            
+        metadata_df["q_pn_unit_is_nuc"] = metadata_df["q_pn_unit_is_polymer"].astype(bool) & (metadata_df["q_pn_unit_type"].isin(nuc_chain_type_enums))            
+        metadata_df["q_pn_unit_is_small_molecule"] = (~metadata_df["q_pn_unit_is_polymer"].astype(bool)) & (~metadata_df["q_pn_unit_is_metal"].astype(bool))
         
         # Set index to example_id        
         metadata_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
@@ -223,7 +224,7 @@ class SDDataset(MolecularDataset):
         
         if self.cfg.exclude_val_cluster:
             prev_len = len(protein_monomer_chain_df)
-            protein_monomer_chain_df = protein_monomer_chain_df[~protein_monomer_chain_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids)]
+            protein_monomer_chain_df = protein_monomer_chain_df[~(protein_monomer_chain_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids))]
             current_len = len(protein_monomer_chain_df)
             logger.info(f"Excluded {prev_len - current_len} chains in {dataset_name} protein monomer chain dataset, because of cluster exclusion")
                                                                         
@@ -260,7 +261,7 @@ class SDDataset(MolecularDataset):
         
         if self.cfg.exclude_val_cluster:
             prev_len = len(complex_df)            
-            complex_df = complex_df[~complex_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids)]
+            complex_df = complex_df[~(complex_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids))]
             
             remaining_chains = complex_df.groupby(['pdb_id', 'assembly_id'])['q_pn_unit_iid'].apply(set).to_dict()
             def update_pn_unit_iids(row):
@@ -382,8 +383,8 @@ class SDDataset(MolecularDataset):
             
             # Filter out interfaces that have invalid iids
             prev_len = len(interface_df)
-            interface_df = interface_df[~interface_df['q_pn_unit_cluster_id_1'].isin(self.val_cluster_ids)]
-            interface_df = interface_df[~interface_df['q_pn_unit_cluster_id_2'].isin(self.val_cluster_ids)]                                    
+            interface_df = interface_df[~(interface_df['q_pn_unit_cluster_id_1'].isin(self.val_cluster_ids))]
+            interface_df = interface_df[~(interface_df['q_pn_unit_cluster_id_2'].isin(self.val_cluster_ids))]
             current_len = len(interface_df)
             logger.info("--------------------------------")
             logger.info(f"Started with: {prev_len} interfaces")
@@ -600,8 +601,8 @@ def build_interface_df(metadata_df: pd.DataFrame = None, dataset_name: str = Non
 
     # Get columns we'll need from the source df    
     chain_specific_cols = ['q_pn_unit_id', 'q_pn_unit_iid', 'q_pn_unit_type', 'q_pn_unit_sequence_length', 
-                           'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_nuc', 'q_pn_unit_is_metal', 'q_pn_unit_is_loi', 
-                           'q_pn_unit_is_polymer', 'q_pn_unit_cluster_id']
+                           'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_nuc', 'q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal', 
+                           'q_pn_unit_is_loi', 'q_pn_unit_is_polymer', 'q_pn_unit_cluster_id']
         
     base_cols = [
         "example_id", "pdb_id", "assembly_id", "path", "all_pn_unit_iids_after_processing", "q_pn_unit_contacting_pn_unit_iids",
@@ -714,7 +715,7 @@ def add_chain_counts_info(df: pd.DataFrame = None) -> pd.DataFrame:
         df['n_prot'] = df.apply(lambda x: 1 if x['q_pn_unit_is_protein'] else 0, axis=1)
         df['n_nuc'] = df.apply(lambda x: 1 if x['q_pn_unit_is_nuc'] else 0, axis=1)
         df['n_peptide'] = df.apply(lambda x: 1 if x['q_pn_unit_is_peptide'] else 0, axis=1)
-        df['n_small_molecule'] = df.apply(lambda x: 1 if (not x['q_pn_unit_is_polymer']) and (not x['q_pn_unit_is_metal']) else 0, axis=1)
+        df['n_small_molecule'] = df.apply(lambda x: 1 if x['q_pn_unit_is_small_molecule'] else 0, axis=1)
         df['n_metal'] = df.apply(lambda x: 1 if x['q_pn_unit_is_metal'] else 0, axis=1)
         df['n_loi'] = df.apply(lambda x: 1 if x['q_pn_unit_is_loi'] else 0, axis=1)
     else: 
@@ -726,8 +727,8 @@ def add_chain_counts_info(df: pd.DataFrame = None) -> pd.DataFrame:
         df['n_peptide'] = df.apply(
             lambda x: (1 if x['q_pn_unit_is_peptide_1'] else 0) + (1 if x['q_pn_unit_is_peptide_2'] else 0), axis=1)
         df['n_small_molecule'] = df.apply(
-            lambda x: (1 if not x['q_pn_unit_is_polymer_1'] and not x['q_pn_unit_is_metal_1'] else 0) + 
-                      (1 if not x['q_pn_unit_is_polymer_2'] and not x['q_pn_unit_is_metal_2'] else 0), axis=1)
+            lambda x: (1 if x['q_pn_unit_is_small_molecule_1'] else 0) + 
+                      (1 if x['q_pn_unit_is_small_molecule_2'] else 0), axis=1)
         df['n_metal'] = df.apply(
             lambda x: (1 if x['q_pn_unit_is_metal_1'] else 0) + (1 if x['q_pn_unit_is_metal_2'] else 0), axis=1)
         df['n_loi'] = df.apply(
