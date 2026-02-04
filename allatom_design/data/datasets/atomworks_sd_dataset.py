@@ -430,7 +430,7 @@ class SDDataset(MolecularDataset):
             if self.scheme == "all":
                 interface_parser = GenericDFParser(pn_unit_iid_colnames=['all_pn_unit_iids_after_processing'])
             elif self.scheme == "interface":
-                interface_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_iid_1', 'q_pn_unit_iid_2'])            
+                interface_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_iid_1', 'q_pn_unit_iid_2'])                          
                 
             
             parsed_df = pd.concat([
