@@ -94,8 +94,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         if not is_sampling:
             # Encode mask: standard AA only (N, CA, C, O resolved)
             batch["protein_residue_node_mask"] = (
-                batch["token_is_protein_chain"] *
-                (1 - batch["is_atomized"].float()) * 
+                batch["token_is_prot_std_aa"] *
                 batch["token_exists_mask"] *
                 batch["token_pad_mask"]
             )
@@ -103,8 +102,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         else:
             #Todo: Need to implement functionality for redesigning hetero residues into standard AA in the future.            
             batch["protein_residue_node_mask"] = (
-                batch["token_is_protein_chain"] * 
-                (1 - batch["is_atomized"].float()) * 
+                batch["token_is_prot_std_aa"] *                 
                 residuewise_hetero_mask *              
                 batch["token_exists_mask"] *
                 batch["token_pad_mask"]
