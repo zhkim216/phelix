@@ -282,6 +282,7 @@ def sd_featurizer_for_design(
     featurization_transforms_pre_crop = [    
         AddData({"is_inference": is_inference}),        
         FilterToQueryPNUnits(),                
+        AnnotateChainTypes(), 
         MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={
             aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_BACKBONE_ATOM_NAMES, #! fixed
             aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_BACKBONE_ATOM_NAMES, #! fixed
@@ -294,7 +295,7 @@ def sd_featurizer_for_design(
     
     # Featurization    
     featurization_transforms_post_crop = [
-        AnnotateChainTypes(), 
+        
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),        
         # AddCachedResidueData(residue_cache_dir=residue_cache_dir),

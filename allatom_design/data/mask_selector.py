@@ -44,7 +44,7 @@ class MaskSelector:
         seq_cond_mask = torch.rand(B, N, device=device) < rearrange(t, "b -> b 1")
 
         # Non-protein and non-standard restypes are always kept
-        standard_aa_prot_token_mask = batch["token_is_protein_chain"] * (~batch["is_atomized"]) * batch["token_resolved_mask"] * batch["token_pad_mask"]
+        standard_aa_prot_token_mask = batch["token_is_prot_std_aa"] * batch["token_resolved_mask"] * batch["token_pad_mask"]
         
         seq_cond_mask = torch.where(~standard_aa_prot_token_mask.bool(),
                                     torch.ones_like(seq_cond_mask),
@@ -71,8 +71,8 @@ class MaskSelector:
         # tok_keep_scn_mask = torch.rand_like(batch["seq_cond_mask"]) < rearrange(tok_keep_scn_p, "b -> b 1")
         
         # Following LigandMPNN, sample sidechains only scn_context_ratio
-        standard_aa_prot_token_mask = batch["token_is_protein_chain"] * (~batch["is_atomized"]) * batch["token_resolved_mask"] * batch["token_pad_mask"]
-        standard_aa_prot_atom_mask = batch["atom_is_protein_chain"] * (1 - batch["atom_is_atomized"]) * batch["atom_resolved_mask"] * batch["atom_pad_mask"]
+        standard_aa_prot_token_mask = batch["token_is_prot_std_aa"] * batch["token_resolved_mask"] * batch["token_pad_mask"]
+        standard_aa_prot_atom_mask = batch["atom_is_prot_std_aa"] * batch["atom_resolved_mask"] * batch["atom_pad_mask"]
         target_count = (standard_aa_prot_token_mask.sum(dim=-1) * self.scn_context_ratio).long()
         
         random_priority = torch.where(
