@@ -15,14 +15,16 @@ train_filters:
     - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
     - "num_polymer_pn_units < 50"
   protein_monomer_chain_filter:    
-    - "(q_pn_unit_is_protein and 20 <= q_pn_unit_num_resolved_residues < 2048)"    
+    - "q_pn_unit_is_protein"
+    - "20 <= q_pn_unit_num_resolved_residues < 2048"
   interface_filter:
     "1": 
       - "resolution < 3.5"       
-      - "(q_pn_unit_is_small_molecule) or (q_pn_unit_is_protein and (20 <= q_pn_unit_num_resolved_residues < 2048))"      
+      - "(not q_pn_unit_is_peptide)"
+      - "(not q_pn_unit_is_protein) or (q_pn_unit_is_protein and (20 <= q_pn_unit_num_resolved_residues < 2048))"      
     "2":
       - "n_prot == 1"
-      - "(n_small_molecule == 1) and (contact_num_contacts >= 2) and (2.4 <= contact_min_distance <= 5.0)"      
+      - "((n_small_molecule == 1) and (contact_num_contacts >= 2) and (2.4 <= contact_min_distance <= 5.0)) or ((n_metal == 1) and (contact_num_contacts >= 2) and (contact_min_distance <= 3.2))"      
 
 val_filters:
   metadata_filter:    
@@ -30,4 +32,4 @@ val_filters:
     - "resolution < 3.5"         
     - "clash_severity != 'severe'"
     - "~method.str.contains('NMR')"
-    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"            
+    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"         
