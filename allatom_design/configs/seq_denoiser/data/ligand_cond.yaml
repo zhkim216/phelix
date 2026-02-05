@@ -27,15 +27,17 @@ sampling_weights:
     a_loi: 0.0    
   alphas_interface:
     a_prot: 3.0
-    a_nuc: 1.0
-    a_peptide: 1.0 
-    a_small_molecule: 1.0 
-    a_metal: 1.0 
-    a_loi: 5.0
+    a_nuc: 0.0
+    a_peptide: 0.0 
+    a_small_molecule: 0.0 
+    a_metal: 0.0 
+    a_loi: 0.0
   betas:
     beta_protein_monomer_chain: 0.5
-    beta_interface: 1.0
+    beta_interface: 0.5
     
+normalizing_sampling_weights: true
+
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:
   add_missing_atoms: true
