@@ -1,5 +1,5 @@
 defaults:
-  - dataset@_here_: ligandmpnn_small_molecule_metal_only_len450  # Default: ligandmpnn, change to boltz for boltz dataset
+  - dataset@_here_: ligandmpnn # Default: ligandmpnn, change to boltz for boltz dataset
 
 task: ${model.task}
 pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v3
