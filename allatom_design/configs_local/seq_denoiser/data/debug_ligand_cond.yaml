@@ -29,13 +29,15 @@ sampling_weights:
     a_prot: 3.0
     a_nuc: 0.0
     a_peptide: 0.0
-    a_small_molecule: 1.0 
-    a_metal: 1.0 
-    a_loi: 5.0
+    a_small_molecule: 0.0 
+    a_metal: 0.0 
+    a_loi: 0.0
   betas:
     beta_protein_monomer_chain: 0.5
-    beta_interface: 1.0
-    
+    beta_interface: 0.5
+
+normalizing_sampling_weights: true
+
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:
   add_missing_atoms: true
@@ -56,7 +58,7 @@ featurizer_cfg:
   max_atoms: 2304 #! DEBUG (min)
   crop_center_cutoff_distance: 15.0
   crop_spatial_p_protein_monomer_chain: 0.5  
-  drop_prob_non_protein_chains: 1.0
+  drop_prob_non_protein_chains: 0.0
   # Interface crop constraints
   # Ensure at least N protein tokens from the nearest protein pn_unit (chain) to the crop center.
   min_protein_tokens_in_interface_crop: 20

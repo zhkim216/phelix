@@ -259,9 +259,7 @@ class FeaturizeCoordsAndMasks(Transform):
         # Add protein_standard_residue mask
         feats["atom_is_prot_std_aa"] = feats["atom_is_protein_chain"] * (1 - feats["atom_is_atomized"])
         feats["token_is_prot_std_aa"] = feats["token_is_protein_chain"] * (1 - feats["is_atomized"].float())
-        
-
-
+                
         # Get ligand related features
         # try:
         #     feats["atom_is_aromatic"] = torch.tensor(atom_array.is_aromatic).float()
@@ -428,7 +426,7 @@ class AnnotateChainTypes(Transform):
         data["atom_array"].set_annotation("atom_is_peptide_chain", atom_is_peptide_chain)
         data["atom_array"].set_annotation("atom_is_nucleic_acid_chain", atom_is_nucleic_acid_chain)
         data["atom_array"].set_annotation("atom_is_metal_chain", atom_is_metal_chain)
-        data["atom_array"].set_annotation("atom_is_small_molecule_chain", atom_is_small_molecule_chain)
+        data["atom_array"].set_annotation("atom_is_small_molecule_chain", atom_is_small_molecule_chain)        
         
         return data
     

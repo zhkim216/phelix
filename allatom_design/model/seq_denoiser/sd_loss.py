@@ -51,12 +51,11 @@ class SDLoss(nn.Module):
         if self.use_seq_pred and eval_seq:
             # compute sequence loss from sequence design module
             target_restype = batch["restype"].argmax(dim=-1)
-            seq_loss_mask = outputs["protein_residue_node_mask"] * (1 - outputs["seq_cond_mask"])  # compute loss only on masked tokens
-            seq_loss_mask = seq_loss_mask * (target_restype != const.AF3_ENCODING.token_to_idx["UNK"])  # mask out UNK tokens from loss
+            seq_loss_mask = outputs["protein_residue_node_mask"] * (1 - outputs["seq_cond_mask"])  # compute loss only on masked tokens. protein_residue_node_mask is already for standard AA only.                        
 
-            # DEBUG: ensure that we're only computing over protein tokens
-            if (~(outputs["protein_residue_node_mask"].bool()[seq_loss_mask.bool()])).any():
-                logger.warning("WARNING: seq_loss is being computed over non-standard amino acid protein tokens")
+            # DEBUG: ensure that we're only computing over resolved standard AA protein tokens
+            if (~outputs["protein_residue_node_mask"].bool())[seq_loss_mask.bool()].any().item():
+                logger.warning("WARNING: seq_loss is being computed over non-standard amino acid protein tokens")            
 
             aux["seq_loss"] = masked_cross_entropy(outputs["seq_logits"], target_restype, seq_loss_mask,
                                                    seq_loss_cfg=self.cfg.seq_loss)
