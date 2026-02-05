@@ -1,5 +1,5 @@
 defaults:
-  - dataset@_here_: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
+  - dataset@_here_: ligandmpnn_small_molecule_metal_only_len450  # Default: ligandmpnn, change to boltz for boltz dataset
 
 task: ${model.task}
 pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v3
@@ -33,11 +33,7 @@ sampling_weights:
     a_metal: 1.0 
     a_loi: 5.0
   betas:
-<<<<<<< HEAD
-    beta_protein_monomer_chain: 1.0
-=======
     beta_protein_monomer_chain: 0.5
->>>>>>> refs/remotes/origin/jinho/AAA
     beta_interface: 1.0
     
 # CIF parser args. Not used during training since we've already cached the CIFs.
@@ -59,7 +55,7 @@ featurizer_cfg:
   max_tokens: 256 #! DEBUG (min)
   max_atoms: 2304 #! DEBUG (min)
   crop_center_cutoff_distance: 15.0
-  crop_spatial_p_protein_monomer_chain: 0.5 # For monomer chain, 50% of the time, we crop spatially
+  crop_spatial_p_protein_monomer_chain: 0.25 # For monomer chain, 50% of the time, we crop spatially
   drop_prob_non_protein_chains: 0.0
   # Interface crop constraints  
   min_protein_tokens_in_interface_crop: 20 # Ensure at least N protein tokens from the nearest protein pn_unit (chain) to the crop center.
