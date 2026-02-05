@@ -99,32 +99,15 @@ class SDDataset(MolecularDataset):
             # Process interface df
             self.interface_df = self._process_interface_df(metadata_path=self.metadata_path)
         
-            # Add sampling weights with combined clusters if normalizing_sampling_weights is True
-            if self.cfg.normalizing_sampling_weights:
-                self.protein_monomer_chain_df, self.interface_df = add_sampling_weights_with_combined_clusters(
-                    df1=self.protein_monomer_chain_df,
-                    df2=self.interface_df,
-                    alphas1=self.cfg.sampling_weights["alphas_protein_monomer_chain"],
-                    alphas2=self.cfg.sampling_weights["alphas_interface"],
-                    beta1=self.cfg.sampling_weights["betas"]["beta_protein_monomer_chain"],
-                    beta2=self.cfg.sampling_weights["betas"]["beta_interface"],
-                    cluster_col="q_pn_unit_cluster_id"
-                )
-        
-            # # Process complex df
-            # self.complex_df = self._process_complex_df(filters=self.cfg.train_filters.complex_filter, dataset_name=Path(self.cfg.train_metadata_path).parent.name)
-            
-            # #! FIXME
-            # pdb_id_in_monomer = self.protein_monomer_chain_df["pdb_id"].unique().tolist()
-            # pdb_id_in_interface = self.interface_df["pdb_id"].unique().tolist()
-            # common_pdb_ids = set(pdb_id_in_monomer) & set(pdb_id_in_interface)
-            
-            # target_pdb_ids = ['105m']
-            # # target_pdb_ids = ['105m','7a12']
-            
-            # self.protein_monomer_chain_df = self.protein_monomer_chain_df[self.protein_monomer_chain_df["pdb_id"].isin(target_pdb_ids)]
-            # self.interface_df = self.interface_df[self.interface_df["pdb_id"].isin(target_pdb_ids)]                        
-            
+            # Compute sampling weights for cluster-balanced sampling across both dataframes
+            self.protein_monomer_chain_df, self.interface_df = add_cluster_balanced_sampling_weights(
+                monomer_df=self.protein_monomer_chain_df,
+                interface_df=self.interface_df,
+                alphas_interface=self.cfg.sampling_weights["alphas_interface"],
+                beta_interface=self.cfg.sampling_weights["beta_interface"],
+                cluster_col="q_pn_unit_cluster_id"
+            )
+
             # Parse dfs into a common format and concatenate
             self.parsed_df = self._parse_dfs()        
 
@@ -255,14 +238,7 @@ class SDDataset(MolecularDataset):
         # Add chain counts info
         protein_monomer_chain_df = add_chain_counts_info(protein_monomer_chain_df)
         
-        # Add sampling weights
-        alphas = self.cfg.sampling_weights["alphas_protein_monomer_chain"] #! (JH) changed 250925
-        
-        if not self.cfg.normalizing_sampling_weights:                    
-            protein_monomer_chain_df = add_sampling_weights_info(protein_monomer_chain_df,
-                                                alphas=alphas,
-                                                beta=self.cfg.sampling_weights["betas"]["beta_protein_monomer_chain"],
-                                                cluster_cols=["q_pn_unit_cluster_id"])                                        
+        # Note: Sampling weights are computed later in add_sampling_weights_with_combined_clusters
         
         def _get_protein_monomer_chain_example_id(row):
             dataset_names = [dataset_name, "protein_monomer_chain"]
@@ -272,103 +248,9 @@ class SDDataset(MolecularDataset):
             return generate_example_id(dataset_names, pdb_id, assembly_id, query_pn_unit_iids)
         
         protein_monomer_chain_df["example_id"] = protein_monomer_chain_df.apply(_get_protein_monomer_chain_example_id, axis=1)
+        protein_monomer_chain_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
         
-        if self.cfg.normalizing_sampling_weights:            
-            protein_monomer_chain_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
-        
-        return protein_monomer_chain_df
-        
-    def _process_complex_df(self, filters = None, dataset_name: str = None) -> pd.DataFrame:
-        """
-        Processes the dataframe for complexes. In L-caliby, we give all the ligands to the model, so we don't need to build interface df.
-        After processing, each row represents one complex (pdb_id + assembly_id), not one chain.
-        """
-        
-        # Apply the general filters for cif files first            
-        complex_df = self._apply_filters(filters["1"], self.metadata_df)
-        
-        if self.cfg.exclude_val_cluster:
-            prev_len = len(complex_df)            
-            complex_df = complex_df[~(complex_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids))]
-            
-            remaining_chains = complex_df.groupby(['pdb_id', 'assembly_id'])['q_pn_unit_iid'].apply(set).to_dict()
-            def update_pn_unit_iids(row):
-                key = (row['pdb_id'], row['assembly_id'])
-                remaining = remaining_chains.get(key, set())
-                original_iids = json.loads(row['all_pn_unit_iids_after_processing'])
-                filtered_iids = [iid for iid in original_iids if iid in remaining]
-                return json.dumps(filtered_iids)
-            complex_df['all_pn_unit_iids_after_processing'] = complex_df.apply(update_pn_unit_iids, axis=1)
-        
-            current_len = len(complex_df)
-            logger.info(f"Excluded {prev_len - current_len} chains in {dataset_name} dataset, because of cluster exclusion")
-                
-
-        # Aggregate rows by (pdb_id, assembly_id) so each complex is one row
-        complex_df = self._aggregate_complex_df(complex_df, dataset_name)
-
-        # Calculate the chain counts for the complex (now operating on aggregated df)
-        complex_df = add_chain_counts_info_aggregated(complex_df)
-
-        # Apply the specific filters for the complex                          
-        complex_df = self._apply_filters(filters["2"], complex_df)
-                        
-        complex_df = add_sampling_weights_info_aggregated(
-            df=complex_df,
-            alphas=self.cfg.sampling_weights["alphas_complex"],
-            beta=self.cfg.sampling_weights["betas"]["beta_complex"],
-        )
-        
-        def _get_complex_example_id(row):
-            dataset_names = [dataset_name, "complexes"]
-            pdb_id = row["pdb_id"]
-            assembly_id = row["assembly_id"]            
-            query_pn_unit_iids = row["q_pn_unit_iid"]  # Now a list like ['A_1', 'B_1']
-            return generate_example_id(dataset_names, pdb_id, assembly_id, query_pn_unit_iids)
-        
-        complex_df["example_id"] = complex_df.apply(_get_complex_example_id, axis=1)
-        complex_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
-        
-        return complex_df
-
-    def _aggregate_complex_df(self, complex_df: pd.DataFrame, dataset_name: str) -> pd.DataFrame:
-        """
-        Aggregate complex_df so that each (pdb_id, assembly_id) becomes a single row.
-        
-        - Columns that are the same across all chains in a complex are kept as-is (first value).
-        - Chain-specific columns (q_pn_unit_*) are aggregated into lists.
-        - The order of chains in lists follows alphabetical order of q_pn_unit_iid.
-        """
-        # Columns that should remain as single values (same across all chains in a complex)
-        keep_first_cols = [
-            'pdb_id', 'assembly_id', 'clash_severity', 'resolution', 
-            'deposition_date', 'release_date', 'method', 'num_polymer_pn_units',
-            'num_resolved_atoms_in_processed_assembly', 'total_num_atoms_in_unprocessed_assembly',
-            'all_pn_unit_iids_after_processing', 'path', 'rel_path', 'phase'
-        ]
-        
-        # Columns that should be aggregated into lists (chain-specific)
-        list_agg_cols = [col for col in complex_df.columns 
-                         if col.startswith('q_pn_unit_') and col in complex_df.columns]
-        
-        # Sort by q_pn_unit_iid within each group to ensure consistent ordering
-        complex_df = complex_df.sort_values(['pdb_id', 'assembly_id', 'q_pn_unit_iid'])
-        
-        # Build aggregation dictionary
-        agg_dict = {}
-        for col in keep_first_cols:
-            if col in complex_df.columns:
-                agg_dict[col] = 'first'
-        for col in list_agg_cols:
-            if col in complex_df.columns:
-                agg_dict[col] = list
-        
-        # Group by (pdb_id, assembly_id) and aggregate
-        aggregated_df = complex_df.groupby(['pdb_id', 'assembly_id'], as_index=False).agg(agg_dict)
-        
-        logger.info(f"Aggregated {len(complex_df)} chain rows into {len(aggregated_df)} complex rows in {dataset_name} dataset")
-        
-        return aggregated_df
+        return protein_monomer_chain_df        
 
     def _process_interface_df(self, metadata_path: str = None,
                               dataset_name: str = None) -> pd.DataFrame:
@@ -389,8 +271,7 @@ class SDDataset(MolecularDataset):
         metadata_df['all_pn_unit_iids_after_processing'] = metadata_df.apply(lambda row: iids_by_pdb[(row['pdb_id'], row['assembly_id'])], axis=1)
                                     
         # Build interface df
-        interface_df = build_interface_df(metadata_df=metadata_df, dataset_name=Path(metadata_path).parent.name,
-                                          normalizing_sampling_weights=self.cfg.normalizing_sampling_weights)
+        interface_df = build_interface_df(metadata_df=metadata_df, dataset_name=Path(metadata_path).parent.name)
                         
         # Filter out invalid iids in interface df based on cluster exclusion
         if self.cfg.exclude_val_cluster:                        
@@ -410,40 +291,24 @@ class SDDataset(MolecularDataset):
             
             interface_df['all_pn_unit_iids_after_processing'] = interface_df.apply(filter_valid_iids, axis=1)
             
-            # Filter out interfaces that have invalid iids
-            if not self.cfg.normalizing_sampling_weights:
-                prev_len = len(interface_df)
-                interface_df = interface_df[~(interface_df['q_pn_unit_cluster_id_1'].isin(self.val_cluster_ids))]
-                interface_df = interface_df[~(interface_df['q_pn_unit_cluster_id_2'].isin(self.val_cluster_ids))]
-                current_len = len(interface_df)
-                logger.info("--------------------------------")
-                logger.info(f"Started with: {prev_len} interfaces")
-                logger.info(f"Excluded {prev_len - current_len} interfaces in {dataset_name} interface dataset, because of cluster exclusion")
-                logger.info(f"Ended with: {current_len} interfaces")
-                logger.info("--------------------------------")
-            else:
-                prev_len = len(interface_df)
-                interface_df = interface_df[~(interface_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids))]
-                current_len = len(interface_df)
-                logger.info(f"Excluded {prev_len - current_len} interfaces in {dataset_name} interface dataset, because of cluster exclusion")
+            # Filter out interfaces that have invalid iids (always use cluster_id_1 and cluster_id_2)
+            prev_len = len(interface_df)
+            interface_df = interface_df[~(interface_df['q_pn_unit_cluster_id_1'].isin(self.val_cluster_ids))]
+            interface_df = interface_df[~(interface_df['q_pn_unit_cluster_id_2'].isin(self.val_cluster_ids))]
+            current_len = len(interface_df)
+            logger.info("--------------------------------")
+            logger.info(f"Started with: {prev_len} interfaces")
+            logger.info(f"Excluded {prev_len - current_len} interfaces in {dataset_name} interface dataset, because of cluster exclusion")
+            logger.info(f"Ended with: {current_len} interfaces")
+            logger.info("--------------------------------")
             
-            # prev_len = len(metadata_df)
-            # metadata_df = metadata_df[~metadata_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids)]
-            # current_len = len(metadata_df)
-            # logger.info(f"Excluded {prev_len - current_len} chains in {dataset_name} interface dataset, because of cluster exclusion")
                     
         interface_df = add_chain_counts_info(interface_df)
         
         # Apply the specific filters for the interface                          
         interface_df = self._apply_filters(self.cfg.train_filters.interface_filter["2"] if self.phase == "train" else self.cfg.val_filters.interface_filter["2"], interface_df)            
-                
-        alphas = self.cfg.sampling_weights["alphas_interface"] 
         
-        if not self.cfg.normalizing_sampling_weights:
-            interface_df = add_sampling_weights_info(interface_df,
-                                                    alphas=alphas,
-                                                    beta=self.cfg.sampling_weights["betas"]["beta_interface"],
-                                                    cluster_cols=["q_pn_unit_cluster_id_1", "q_pn_unit_cluster_id_2"])                        
+        # Note: Sampling weights are computed later in add_sampling_weights_with_combined_clusters
                                             
         return interface_df
             
@@ -454,21 +319,11 @@ class SDDataset(MolecularDataset):
                         
         if self.phase == "train":
             chain_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid"])
-            # if self.complex_df is not None:
-            #     complex_parser = GenericDFParser(pn_unit_iid_colnames=['all_pn_unit_iids_after_processing'])
-            #     n_complexes = len(self.complex_df)
-            #     n_chains_in_complexes = self.complex_df['n_chains'].sum() if 'n_chains' in self.complex_df.columns else n_complexes
-            #     logger.info(f"Final {self.phase} dataset contains {len(self.protein_chain_df)} protein monomer chains and {n_chains_in_complexes} chains in {n_complexes} complexes")                
-            #     parsed_df = pd.concat([
-            #         self.protein_chain_df.apply(chain_parser.parse, axis=1),
-            #         self.complex_df.apply(complex_parser.parse, axis=1)
-            #     ], axis=0)
             
             if self.scheme == "all":
                 interface_parser = GenericDFParser(pn_unit_iid_colnames=['all_pn_unit_iids_after_processing'])
             elif self.scheme == "interface":
-                interface_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_iid_1', 'q_pn_unit_iid_2'])            
-                
+                interface_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_iid_1', 'q_pn_unit_iid_2'])                            
             
             parsed_df = pd.concat([
                 self.protein_monomer_chain_df.apply(chain_parser.parse, axis=1),
@@ -631,7 +486,7 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     return collated
 
 
-def build_interface_df(metadata_df: pd.DataFrame = None, dataset_name: str = None, normalizing_sampling_weights: bool = False) -> pd.DataFrame:
+def build_interface_df(metadata_df: pd.DataFrame, dataset_name: str) -> pd.DataFrame:
     # Bring example_id into a column if it's the index
     metadata_df = metadata_df.reset_index(drop=True)
 
@@ -700,13 +555,41 @@ def build_interface_df(metadata_df: pd.DataFrame = None, dataset_name: str = Non
     ].reset_index(drop=True)
     interface_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
 
-    if normalizing_sampling_weights:
-        # Use protein chain's cluster_id as q_pn_unit_cluster_id
-        interface_df["q_pn_unit_cluster_id"] = interface_df.apply(
-            lambda row: row["q_pn_unit_cluster_id_1"] if row["q_pn_unit_is_protein_1"] else row["q_pn_unit_cluster_id_2"],
-            axis=1
-        )
-        interface_df = interface_df.drop(columns=["q_pn_unit_cluster_id_1", "q_pn_unit_cluster_id_2"])
+    # Add interface_type column for determining alpha weights
+    # Types: protein_protein, protein_nuc, protein_peptide, protein_small_molecule, protein_metal
+    def get_interface_type(row):
+        is_protein_1 = row["q_pn_unit_is_protein_1"]
+        is_protein_2 = row["q_pn_unit_is_protein_2"]
+        
+        if is_protein_1 and is_protein_2:
+            return "protein_protein"
+        
+        # Determine the non-protein side
+        if is_protein_1:
+            # Chain 2 is the non-protein
+            if row.get("q_pn_unit_is_nuc_2", False):
+                return "protein_nuc"
+            elif row.get("q_pn_unit_is_peptide_2", False):
+                return "protein_peptide"
+            elif row.get("q_pn_unit_is_metal_2", False):
+                return "protein_metal"
+            elif row.get("q_pn_unit_is_small_molecule_2", False):
+                return "protein_small_molecule"
+        else:
+            # Chain 1 is the non-protein (chain 2 is protein)
+            if row.get("q_pn_unit_is_nuc_1", False):
+                return "protein_nuc"
+            elif row.get("q_pn_unit_is_peptide_1", False):
+                return "protein_peptide"
+            elif row.get("q_pn_unit_is_metal_1", False):
+                return "protein_metal"
+            elif row.get("q_pn_unit_is_small_molecule_1", False):
+                return "protein_small_molecule"
+        
+        # Default fallback
+        return "protein_small_molecule"
+    
+    interface_df["interface_type"] = interface_df.apply(get_interface_type, axis=1)
 
     return interface_df
 
@@ -740,8 +623,6 @@ def _canonicalize_pair_columns(
         out[f"{base}{out_suffixes[1]}"] = np.where(swap, a, b)
 
     return out
-
-
 
 def add_chain_counts_info(df: pd.DataFrame = None) -> pd.DataFrame:
     """
@@ -777,44 +658,8 @@ def add_chain_counts_info(df: pd.DataFrame = None) -> pd.DataFrame:
             lambda x: (1 if x['q_pn_unit_is_metal_1'] else 0) + (1 if x['q_pn_unit_is_metal_2'] else 0), axis=1)
         df['n_loi'] = df.apply(
             lambda x: (1 if x['q_pn_unit_is_loi_1'] else 0) + (1 if x['q_pn_unit_is_loi_2'] else 0), axis=1)
-    
-        # # First, compute per-row indicators (0 or 1)
-        # df['_is_prot'] = df['q_pn_unit_is_protein'].astype(int)
-        # df['_is_nuc'] = ((df['q_pn_unit_is_polymer']) & (df['q_pn_unit_type'].isin(nuc_chain_type_enums))).astype(int)
-        # df['_is_peptide'] = df['q_pn_unit_is_peptide'].astype(int)
-        # df['_is_small_molecule'] = ((~df['q_pn_unit_is_polymer']) & (~df['q_pn_unit_is_metal'])).astype(int)
-        # df['_is_metal'] = df['q_pn_unit_is_metal'].astype(int)
-        # df['_is_loi'] = df['q_pn_unit_is_loi'].astype(int)
-    
-        # # Aggregate by pdb_id
-        # pdb_counts = df.groupby('pdb_id').agg({
-        #     '_is_prot': 'sum',
-        #     '_is_nuc': 'sum',
-        #     '_is_peptide': 'sum',
-        #     '_is_small_molecule': 'sum',
-        #     '_is_metal': 'sum',
-        #     '_is_loi': 'sum'
-        # }).rename(columns={
-        #     '_is_prot': 'n_prot',
-        #     '_is_nuc': 'n_nuc',
-        #     '_is_peptide': 'n_peptide',
-        #     '_is_small_molecule': 'n_small_molecule',
-        #     '_is_metal': 'n_metal',
-        #     '_is_loi': 'n_loi'
-        # })
-        # # Map aggregated counts back to each row
-        # df['n_prot'] = df['pdb_id'].map(pdb_counts['n_prot'])
-        # df['n_nuc'] = df['pdb_id'].map(pdb_counts['n_nuc'])
-        # df['n_peptide'] = df['pdb_id'].map(pdb_counts['n_peptide'])
-        # df['n_small_molecule'] = df['pdb_id'].map(pdb_counts['n_small_molecule'])
-        # df['n_metal'] = df['pdb_id'].map(pdb_counts['n_metal'])
-        # df['n_loi'] = df['pdb_id'].map(pdb_counts['n_loi'])
-            
-        # # Drop temporary columns
-        # df.drop(columns=['_is_prot', '_is_nuc', '_is_peptide', '_is_small_molecule', '_is_metal', '_is_loi'], inplace=True)
             
     return df
-
 
 def add_sampling_weights_info(df: pd.DataFrame,
                               alphas: dict[str, float],
@@ -854,144 +699,143 @@ def add_sampling_weights_info(df: pd.DataFrame,
     df["sampling_weight"] = weights
     return df
 
-
-def add_sampling_weights_with_combined_clusters(
-    df1: pd.DataFrame,
-    df2: pd.DataFrame,
-    alphas1: dict[str, float],
-    alphas2: dict[str, float],
-    beta1: float,
-    beta2: float,
+def add_cluster_balanced_sampling_weights(
+    monomer_df: pd.DataFrame,
+    interface_df: pd.DataFrame,
+    alphas_interface: dict[str, float],
+    beta_interface: float,
     cluster_col: str = "q_pn_unit_cluster_id"
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Compute cluster sizes from combined dataframes and add sampling weights.
-    Both dfs should have the same cluster_col name.
+    Compute sampling weights for cluster-balanced sampling across monomer and interface dataframes.
+    
+    Ensures two levels of equalization:
+    1. Interface pair cluster equalization: each (c1, c2) pair in interface_df is sampled equally
+    2. Overall protein cluster equalization: each protein cluster C is sampled equally across monomer_df + interface_df
+    
+    Algorithm:
+    - Step 1: Compute interface weights (pair cluster equalization) with beta_interface scaling
+    - Step 2: Compute each protein cluster's interface contribution
+    - Step 3: Adjust monomer weights to achieve overall protein cluster equalization (auto-computed)
+    
+    Note: Monomer weights are automatically computed to ensure protein cluster equalization.
+          Higher beta_interface means more interface sampling relative to monomer.
+    
+    Args:
+        monomer_df: Protein monomer chain dataframe with cluster_col
+        interface_df: Interface dataframe with q_pn_unit_cluster_id_1, q_pn_unit_cluster_id_2, interface_type
+        alphas_interface: Dict with keys like a_protein_protein, a_protein_small_molecule, etc.
+        beta_interface: Weight multiplier for interface samples (higher = more interface sampling)
+        cluster_col: Column name for protein cluster ID in monomer_df
     """
-    # Combine cluster IDs from both dfs to compute global cluster sizes
-    combined_clusters = pd.concat([df1[cluster_col], df2[cluster_col]], ignore_index=True)
-    cluster_id_to_size = combined_clusters.value_counts()
+    # ===== Step 1: Compute interface weights (pair cluster equalization) =====
     
-    # Add cluster_size to each df
-    df1["cluster_size"] = df1[cluster_col].map(cluster_id_to_size)
-    df2["cluster_size"] = df2[cluster_col].map(cluster_id_to_size)
-    
-    # Compute weights for df1
-    weights1 = (beta1 / df1["cluster_size"]) * (
-        alphas1.get("a_prot", 0) * df1.get("n_prot", 0)
-        + alphas1.get("a_nuc", 0) * df1.get("n_nuc", 0)
-        + alphas1.get("a_peptide", 0) * df1.get("n_peptide", 0)
-        + alphas1.get("a_small_molecule", 0) * df1.get("n_small_molecule", 0)
-        + alphas1.get("a_metal", 0) * df1.get("n_metal", 0)
-        + alphas1.get("a_loi", 0) * df1.get("n_loi", 0)
+    # Compute pair cluster sizes for interface_df
+    interface_df["pair_cluster"] = interface_df.apply(
+        lambda row: tuple(sorted([row["q_pn_unit_cluster_id_1"], row["q_pn_unit_cluster_id_2"]])),
+        axis=1
     )
-    df1["sampling_weight"] = weights1
+    pair_cluster_sizes = interface_df["pair_cluster"].value_counts()
+    interface_df["pair_cluster_size"] = interface_df["pair_cluster"].map(pair_cluster_sizes)
     
-    # Compute weights for df2
-    weights2 = (beta2 / df2["cluster_size"]) * (
-        alphas2.get("a_prot", 0) * df2.get("n_prot", 0)
-        + alphas2.get("a_nuc", 0) * df2.get("n_nuc", 0)
-        + alphas2.get("a_peptide", 0) * df2.get("n_peptide", 0)
-        + alphas2.get("a_small_molecule", 0) * df2.get("n_small_molecule", 0)
-        + alphas2.get("a_metal", 0) * df2.get("n_metal", 0)
-        + alphas2.get("a_loi", 0) * df2.get("n_loi", 0)
+    # Compute alpha for each interface based on interface_type
+    def get_interface_alpha(row):
+        interface_type = row["interface_type"]
+        base_alpha = alphas_interface.get(f"a_{interface_type}", 0.0)
+        
+        # Add a_protein_loi if the non-protein chain is loi
+        loi_alpha = 0.0
+        if row.get("q_pn_unit_is_loi_1", False) or row.get("q_pn_unit_is_loi_2", False):
+            loi_alpha = alphas_interface.get("a_protein_loi", 0.0)
+        
+        return base_alpha + loi_alpha
+    
+    interface_df["alpha"] = interface_df.apply(get_interface_alpha, axis=1)
+    
+    # Interface weight: β_i × alpha / pair_cluster_size
+    interface_df["sampling_weight"] = beta_interface * interface_df["alpha"] / interface_df["pair_cluster_size"]
+    
+    # ===== Step 2: Compute each protein cluster's interface contribution =====
+    
+    # For each interface, identify which protein clusters are involved
+    # protein-protein: both c1 and c2 contribute
+    # protein-X (where X is not protein): only the protein side contributes
+    
+    # Create a mapping: protein_cluster -> total interface contribution
+    interface_contrib = {}
+    
+    for _, row in interface_df.iterrows():
+        weight = row["sampling_weight"]
+        c1, c2 = row["q_pn_unit_cluster_id_1"], row["q_pn_unit_cluster_id_2"]
+        is_protein_1 = row.get("q_pn_unit_is_protein_1", False)
+        is_protein_2 = row.get("q_pn_unit_is_protein_2", False)
+        
+        if is_protein_1:
+            interface_contrib[c1] = interface_contrib.get(c1, 0.0) + weight
+        if is_protein_2:
+            interface_contrib[c2] = interface_contrib.get(c2, 0.0) + weight
+    
+    # ===== Step 3: Adjust monomer weights for overall protein cluster equalization =====
+    
+    # Count monomer rows per cluster
+    monomer_cluster_counts = monomer_df[cluster_col].value_counts().to_dict()
+    
+    # Get all protein clusters (from both monomer and interface)
+    all_protein_clusters = set(monomer_df[cluster_col].unique())
+    for c in interface_contrib.keys():
+        all_protein_clusters.add(c)
+    
+    # Compute K: target total contribution per cluster
+    # K should be large enough so that monomer contribution is non-negative
+    # K = max(interface_contrib) + 1.0 (constant baseline for monomer-only clusters)
+    max_interface_contrib = max(interface_contrib.values()) if interface_contrib else 0.0
+    K = max_interface_contrib + 1.0
+    
+    logger.info(f"Normalized sampling: K={K:.4f}, max_interface_contrib={max_interface_contrib:.4f}")
+    
+    # Compute monomer weight for each cluster
+    # monomer_contrib[C] = K - interface_contrib[C]
+    # weight per row = monomer_contrib[C] / monomer_count[C]
+    
+    def compute_monomer_weight(row):
+        c = row[cluster_col]
+        i_contrib = interface_contrib.get(c, 0.0)
+        m_count = monomer_cluster_counts.get(c, 1)
+        
+        # Target monomer contribution for this cluster
+        target_monomer_contrib = K - i_contrib
+        
+        # Ensure non-negative weight
+        if target_monomer_contrib < 0:
+            logger.warning(f"Cluster {c} has interface_contrib ({i_contrib:.4f}) > K ({K:.4f}), setting monomer weight to 0")
+            target_monomer_contrib = 0.0
+        
+        # Weight per row (auto-computed for equalization, no beta_monomer)
+        weight = target_monomer_contrib / m_count
+        return weight
+    
+    monomer_df["sampling_weight"] = monomer_df.apply(compute_monomer_weight, axis=1)
+    
+    # Log statistics        
+    protein_clusters_in_monomer_df = set(monomer_df[cluster_col].unique())
+    protein_clusters_in_interface_df = set(interface_contrib.keys())
+    protein_clusters_only_in_monomer_df = protein_clusters_in_monomer_df - protein_clusters_in_interface_df
+    protein_clusters_only_in_interface_df = protein_clusters_in_interface_df - protein_clusters_in_monomer_df
+    protein_clusters_in_both_df = protein_clusters_in_monomer_df & protein_clusters_in_interface_df
+    
+    
+    n_monomer_clusters = len(protein_clusters_in_monomer_df)
+    n_interface_clusters = len(interface_df["pair_cluster"].unique())
+    
+    logger.info(
+        f"Combined cluster sampling weights:\n"
+        f"  - Protein monomer df: {len(monomer_df)} samples, {n_monomer_clusters} unique protein clusters\n"
+        f"  - Interface df: {len(interface_df)} samples, {len(pair_cluster_sizes)} unique pair clusters\n"
+        f"  - Total protein clusters: {len(all_protein_clusters)} clusters in total\n"
+        f"  - Protein clusters in both: {len(protein_clusters_in_both_df)} clusters in both\n"
+        f"  - Protein clusters only in monomer df: {len(protein_clusters_only_in_monomer_df)} clusters only in monomer df\n"
+        f"  - Protein clusters only in interface df: {len(protein_clusters_only_in_interface_df)} clusters only in interface df"
     )
-    df2["sampling_weight"] = weights2
     
-    logger.info(f"Combined cluster sampling weights: df1 has {len(df1)} samples, df2 has {len(df2)} samples, {len(cluster_id_to_size)} unique clusters")
-    
-    return df1, df2
+    return monomer_df, interface_df
 
-
-def add_chain_counts_info_aggregated(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Add chain type count columns to the aggregated complex dataframe.
-    
-    In the aggregated df, q_pn_unit_* columns are lists (one value per chain).
-    We count how many chains of each type exist by summing the boolean lists.
-    """
-    # Nucleic acid types
-    nuc_chain_type_enums = [chain_type.value for chain_type in aw_enums.ChainType.get_nucleic_acids()]
-    
-    # Count proteins: sum of True values in q_pn_unit_is_protein list
-    df['n_prot'] = df['q_pn_unit_is_protein'].apply(lambda x: sum(x) if isinstance(x, list) else int(x))
-    
-    # Count nucleic acids: need to check both q_pn_unit_is_polymer and q_pn_unit_type
-    def count_nuc(row):
-        is_polymer_list = row['q_pn_unit_is_polymer']
-        type_list = row['q_pn_unit_type']
-        if isinstance(is_polymer_list, list):
-            return sum(1 for is_poly, chain_type in zip(is_polymer_list, type_list) 
-                      if is_poly and chain_type in nuc_chain_type_enums)
-        else:
-            return int(is_polymer_list and type_list in nuc_chain_type_enums)
-    df['n_nuc'] = df.apply(count_nuc, axis=1)
-    
-    # Count peptides
-    df['n_peptide'] = df['q_pn_unit_is_peptide'].apply(lambda x: sum(x) if isinstance(x, list) else int(x))
-    
-    # Count small molecules: not polymer and not metal
-    def count_small_molecule(row):
-        is_polymer_list = row['q_pn_unit_is_polymer']
-        is_metal_list = row['q_pn_unit_is_metal']
-        if isinstance(is_polymer_list, list):
-            return sum(1 for is_poly, is_metal in zip(is_polymer_list, is_metal_list) 
-                      if not is_poly and not is_metal)
-        else:
-            return int(not is_polymer_list and not is_metal_list)
-    df['n_small_molecule'] = df.apply(count_small_molecule, axis=1)
-    
-    # Count metals
-    df['n_metal'] = df['q_pn_unit_is_metal'].apply(lambda x: sum(x) if isinstance(x, list) else int(x))
-    
-    # Count LOI (ligand of interest)
-    df['n_loi'] = df['q_pn_unit_is_loi'].apply(lambda x: sum(x) if isinstance(x, list) else int(x))
-    
-    # Count total chains
-    df['n_chains'] = df['q_pn_unit_iid'].apply(lambda x: len(x) if isinstance(x, list) else 1)
-    
-    return df
-
-
-def add_sampling_weights_info_aggregated(
-    df: pd.DataFrame,
-    alphas: dict[str, float],
-    beta: float,
-) -> pd.DataFrame:
-    """
-    Add sampling weights to the aggregated complex dataframe.
-    
-    In the aggregated df, q_pn_unit_cluster_id is a list of cluster IDs.
-    We create a tuple of sorted cluster IDs to represent the complex's clusters.
-    """
-    # Create clusters tuple from the list of cluster IDs (keep duplicates, just sort)
-    df["clusters"] = df['q_pn_unit_cluster_id'].apply(lambda x: tuple(sorted(x)) if isinstance(x, list) else (x,))
-    
-    # Count how many complexes have each unique cluster tuple
-    cluster_id_to_size = df["clusters"].value_counts()
-    df["cluster_size"] = df["clusters"].map(cluster_id_to_size)
-    
-    # Compute weights
-    missing_alphas = set(alphas.keys()) - {"a_prot", "a_nuc", "a_peptide", "a_small_molecule", "a_metal", "a_loi"}
-    missing_counts = {"n_prot", "n_nuc", "n_peptide", "n_small_molecule", "n_metal", "n_loi"} - set(df.columns)
-
-    if missing_alphas:
-        logger.warning(f"Missing alphas from configuration file: {missing_alphas}; defaulting to 0")
-    if missing_counts:
-        logger.warning(f"Missing chain within dataframe counts: {missing_counts}; defaulting to 0")
-        logger.warning(f"Columns in dataframe: {df.columns}")
-
-    logger.info(f"Calculating weights for aggregated complexes using alphas={alphas}, beta={beta}")
-
-    # For aggregated complexes, we don't need to divide by n_chains since each row is already one complex
-    weights = (beta / df["cluster_size"]) * (
-        alphas.get("a_prot", 0) * df["n_prot"]        
-        + alphas.get("a_nuc", 0) * df["n_nuc"]
-        + alphas.get("a_peptide", 0) * df["n_peptide"]
-        + alphas.get("a_small_molecule", 0) * df["n_small_molecule"]        
-        + alphas.get("a_metal", 0) * df["n_metal"]
-        + alphas.get("a_loi", 0) * df["n_loi"]
-    )
-
-    df["sampling_weight"] = weights
-    return df
