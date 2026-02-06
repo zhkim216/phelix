@@ -1,4 +1,5 @@
 # Self-consistency evaluation config for AF3
+# For evaluating pre-designed samples (e.g. caliby-designed structures)
 
 # Wandb settings
 wandb:
@@ -10,46 +11,36 @@ wandb:
 # Basic settings
 debug: true
 num_debug_samples: 2
-calculate_metrics_only: false
 seed: 0
-
-# Metadata
-metadata_path: null
+protein_only: false
 
 # Outputs
-exp_name: run_sc_eval_af3 # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260124_run_sc_eval_af3
+exp_name: debug_run_sc_eval_af3
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260206_run_sc_eval_af3
+
+# Configurations for getting designed sample paths
+pdb_cfg:
+  pdb_dir: /home/possu/jinho/datasets/val_cifs/caliby_samples/rfd3_val_cifs/samples
+  pdb_name_list: null
+  pdb_name_ext: ".cif"
+  n_subsample: null
+  # Recursive search (not needed for flat directories)
+  recursive: false
+  split_by_subfolder: false
+  # Sample index filtering
+  sample_indices: null
+  # Slurm array job parameters (set via CLI override in sbatch)
+  array_id: null
+  num_arrays: null
+
+# Pocket configuration
+pocket_cfg:
+  pocket_distance_for_metrics: 6.0
 
 ######### Data & Transform configurations #########
-# Configurations for getting reference samples' paths
-ref_sample_is_all_atom: false
-ref_sample_is_designed: true
-load_from_cache: false
-
-pdb_cfg:
-  pdb_dir: /home/possu/jinho/allatom-design/debug/260124_run_sc_eval_af3/eval_caliby_lmpnnval_sm_filt_full_af3/samples
-  pdb_name_list: null  # null to use all files in pdb_dir
-  pdb_name_ext: ".cif"
-  n_subsample: null  # null to use all samples  
-
-# Configurations for adding ligand atom arrays to reference samples
-ligand_source_cfg:
-  ligand_source_path: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs
-  add_ligands_to_designed_samples: true
-  source_is_designed: false
-
 # Configurations for cif files
 cif_cfg:
   parse:
-    native:
-      add_missing_atoms: true
-      remove_waters: true
-      remove_ccds: []
-      fix_ligands_at_symmetry_centers: true
-      fix_arginines: true
-      convert_mse_to_met: true
-      hydrogen_policy: "remove"
-      extra_fields: "all"      
     designed_samples:
       add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
@@ -58,7 +49,7 @@ cif_cfg:
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null  
+      extra_fields: null
     af3_predictions:
       add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
@@ -67,32 +58,9 @@ cif_cfg:
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null  
-  save:
-    date: "1959-01-07" #! Young-Ae Lee's birthday
-    include_entity_poly: True
-    include_entity_nonpoly: True
-    include_nan_coords: False #! designed structures should not have nan coords
-    include_bonds: True
-    extra_fields: "all"
-    exclude_field_keys: ["token_id", "is_ligand_pocket"]
-    extra_categories:
-      pdbx_audit_revision_history:
-        ordinal: [1]
-        revision_id: [1]
-        revision_date: ["1959-01-07"]
-        major_revision: [1]
-        minor_revision: [0]
-        revision_description: ["Dummy date for template-conditioning AF3"]
+      extra_fields: null
 
 preprocess_cfg:
-  native:
-    undesired_res_names: []
-    b_factor_min: null
-    b_factor_max: null
-    min_residues_for_polymers: 0
-    remove_terminal_oxygen_protein: true
-    remove_terminal_oxygen_nucleic_acid: true
   designed_samples:
     undesired_res_names: []
     b_factor_min: null
@@ -106,41 +74,25 @@ preprocess_cfg:
     b_factor_max: null
     min_residues_for_polymers: 0
     remove_terminal_oxygen_protein: false #! AF3 prediction CIF files have OXT atoms, so need to preserve them
-    remove_terminal_oxygen_nucleic_acid: false #! AF3 prediction CIF files have OXT atoms, so need to preserve them
+    remove_terminal_oxygen_nucleic_acid: false
 
 featurizer_cfg:
-  design:
-    is_inference: true
-    occupancy_threshold_protein_backbone: 0.0
-    training_structure_noise: 0.0
-    undesired_res_names: []
-    remove_keys: []    
-    remove_unresolved_tokens: true
-    max_tokens: null
-    max_atoms: null  
-    pocket_distance: 8.0
-    residue_cache_dir: "/home/possu/jinho/datasets/atomworks_cached_residue_data"
-    max_conformers_per_residue: 50
-    apply_random_augmentation: true
-    translation_scale: 1.0    
   prepare_designed_samples:
     max_tokens: null
     max_atoms: null
-    remove_keys: []    
+    remove_keys: []
     remove_unresolved_tokens: true
   prepare_af3_predictions:
     max_tokens: null
     max_atoms: null
-    remove_keys: []    
+    remove_keys: []
     remove_unresolved_tokens: true
 
-# Docking metrics configuration
-docking_metrics_cfg:
-  pocket_distance_for_metrics: 6.0
-
-# Structure prediction model configuration (AF3)
+######### Structure prediction model configuration (AF3) #########
 struct_pred_cfg:
   model_name: "af3"
+  evaluate_self_consistency: true
+  calculate_metrics_only: false
   af3:
     runner_path: /home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py
     json_config:
