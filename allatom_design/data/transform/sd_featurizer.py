@@ -341,8 +341,8 @@ def featurizer_af3_prediction(
     """
     Build a transform pipeline for AF3 prediction.
     """
-    transforms = [        
-        RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
+    transforms = [       
+        AnnotateChainTypes(),
         AddGlobalTokenIdAnnotation(),
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
         ComputeAtomToTokenMap(),        
@@ -360,7 +360,7 @@ def featurizer_designed_samples(
     """
     
     transforms = [
-        RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
+        AnnotateChainTypes(),
         AddGlobalTokenIdAnnotation(),            
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),              
         ComputeAtomToTokenMap(),                           

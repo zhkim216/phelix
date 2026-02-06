@@ -122,9 +122,9 @@ def get_pdb_files(pdb_dir: str | None,
         skip_pdb_names = set(skip_pdb_names)
         pdb_files = [f for f in pdb_files if Path(f).name not in skip_pdb_names]
 
-    # Filter by sample indices (for files with pattern {PREFIX}_{IDX}_model_{M}.ext)
+    # Filter by sample indices (for files with pattern {PREFIX}_{IDX}_model_{M}...)
     if sample_indices is not None:
-        sample_idx_pattern = re.compile(r"_(\d+)_model_\d+\.\w+$")
+        sample_idx_pattern = re.compile(r"_(\d+)_model_\d+")
         filtered_files = []
         for f in pdb_files:
             match = sample_idx_pattern.search(Path(f).name)
