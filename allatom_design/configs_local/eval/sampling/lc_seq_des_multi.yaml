@@ -55,7 +55,7 @@ redesign_cfg:
 
 # Pocket configuration
 pocket_cfg:
-  pocket_distance_for_metrics: 8.0
+  pocket_distance_for_metrics: 6.0
 
 ######### Data & Transform configurations #########
 input_sample_is_all_atom: true
@@ -164,7 +164,7 @@ featurizer_cfg:
     remove_unresolved_tokens: true
     max_tokens: null
     max_atoms: null  
-    pocket_distance: 8.0
+    pocket_distance: 6.0
     residue_cache_dir: "/home/possu/jinho/datasets/atomworks_cached_residue_data"
     max_conformers_per_residue: 50
     apply_random_augmentation: true
