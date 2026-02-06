@@ -96,15 +96,15 @@ class SDDataset(MolecularDataset):
             self.protein_monomer_chain_df = self._process_protein_monomer_chain_df(dataset_name=Path(self.metadata_path).parent.name)                                                                
         
             # Process interface df
-            self.interface_df = self._process_interface_df(metadata_path=self.metadata_path)
+            self.interface_df = self._process_interface_df(metadata_path=self.metadata_path, dataset_name=Path(self.metadata_path).parent.name)
         
             # Compute sampling weights for cluster-balanced sampling across both dataframes
             self.protein_monomer_chain_df, self.interface_df = add_cluster_balanced_sampling_weights(
                 monomer_df=self.protein_monomer_chain_df,
                 interface_df=self.interface_df,
-                alphas_interface=self.cfg.sampling_weights["alphas_interface"],
-                beta_interface=self.cfg.sampling_weights["beta_interface"],
-                cluster_col="q_pn_unit_cluster_id"
+                alphas_interface=self.cfg.sampling_weights["alphas_interface"],                
+                cluster_col="q_pn_unit_cluster_id",
+                k_percentile=self.cfg.sampling_weights["k_percentile"]
             )
 
             # Parse dfs into a common format and concatenate
@@ -184,7 +184,14 @@ class SDDataset(MolecularDataset):
         # Add q_pn_unit_is_nuc & q_pn_unit_is_small_molecule columns
         nuc_chain_type_enums = [chain_type.value for chain_type in aw_enums.ChainType.get_nucleic_acids()]
         metadata_df["q_pn_unit_is_nuc"] = metadata_df["q_pn_unit_is_polymer"].astype(bool) & (metadata_df["q_pn_unit_type"].isin(nuc_chain_type_enums))            
-        metadata_df["q_pn_unit_is_small_molecule"] = (~metadata_df["q_pn_unit_is_polymer"].astype(bool)) & (~metadata_df["q_pn_unit_is_metal"].astype(bool))
+        
+        # q_pn_unit_is_small_molecule: config option으로 biologically meaningful 버전 사용 가능
+        if self.cfg.get("use_biologically_meaningful_small_molecule", False) and \
+           "q_pn_unit_is_biologically_meaningful_small_molecule" in metadata_df.columns:
+            metadata_df["q_pn_unit_is_small_molecule"] = metadata_df["q_pn_unit_is_biologically_meaningful_small_molecule"]
+            logger.info("Using q_pn_unit_is_biologically_meaningful_small_molecule as q_pn_unit_is_small_molecule")
+        else:
+            metadata_df["q_pn_unit_is_small_molecule"] = (~metadata_df["q_pn_unit_is_polymer"].astype(bool)) & (~metadata_df["q_pn_unit_is_metal"].astype(bool))
         
         # Set index to example_id        
         metadata_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
@@ -262,6 +269,13 @@ class SDDataset(MolecularDataset):
         
         # Apply the general filters for interface df first
         metadata_df = self._apply_filters(self.cfg.train_filters.interface_filter["1"], metadata_df)
+                
+        # Exclude small molecules that are covalently linked to proteins
+        if self.cfg.exclude_small_molecules_covalently_linked_to_protein and metadata_df.get("q_pn_unit_is_maybe_covalently_linked_to_protein", False).sum() > 0:
+            len_before = len(metadata_df)
+            metadata_df = metadata_df[~metadata_df['q_pn_unit_is_maybe_covalently_linked_to_protein']]        
+            len_after = len(metadata_df)
+            logger.info(f"Excluded {len_before - len_after} small molecules in {dataset_name} interface dataset, because of covalently linked to protein")
         
         # Convert all_pn_unit_iids_after_processing to list
         metadata_df["all_pn_unit_iids_after_processing"] = metadata_df["all_pn_unit_iids_after_processing"].apply(json.loads)
@@ -489,10 +503,10 @@ def build_interface_df(metadata_df: pd.DataFrame, dataset_name: str) -> pd.DataF
     # Bring example_id into a column if it's the index
     metadata_df = metadata_df.reset_index(drop=True)
 
-    # Get columns we'll need from the source df    
+    # Get columns we'll need from the source df        
     chain_specific_cols = ['q_pn_unit_id', 'q_pn_unit_iid', 'q_pn_unit_type', 'q_pn_unit_sequence_length', 
-                           'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_nuc', 'q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal', 
-                           'q_pn_unit_is_loi', 'q_pn_unit_is_polymer', 'q_pn_unit_cluster_id']    
+                        'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_nuc', 'q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal', 
+                        'q_pn_unit_is_loi', 'q_pn_unit_is_polymer', 'q_pn_unit_cluster_id']    
         
     base_cols = [
         "example_id", "pdb_id", "assembly_id", "path", "all_pn_unit_iids_after_processing", "q_pn_unit_contacting_pn_unit_iids",
@@ -701,9 +715,9 @@ def add_sampling_weights_info(df: pd.DataFrame,
 def add_cluster_balanced_sampling_weights(
     monomer_df: pd.DataFrame,
     interface_df: pd.DataFrame,
-    alphas_interface: dict[str, float],
-    beta_interface: float,
-    cluster_col: str = "q_pn_unit_cluster_id"
+    alphas_interface: dict[str, float],    
+    cluster_col: str = "q_pn_unit_cluster_id",
+    k_percentile: float = 100.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Compute sampling weights for cluster-balanced sampling across monomer and interface dataframes.
@@ -713,19 +727,26 @@ def add_cluster_balanced_sampling_weights(
     2. Overall protein cluster equalization: each protein cluster C is sampled equally across monomer_df + interface_df
     
     Algorithm:
-    - Step 1: Compute interface weights (pair cluster equalization) with beta_interface scaling
+    - Step 1: Compute interface weights (pair cluster equalization)
     - Step 2: Compute each protein cluster's interface contribution
     - Step 3: Adjust monomer weights to achieve overall protein cluster equalization (auto-computed)
     
     Note: Monomer weights are automatically computed to ensure protein cluster equalization.
-          Higher beta_interface means more interface sampling relative to monomer.
+    k_percentile: Adjust this value to control the balance between interface and monomer sampling
+          
+    K Calculation:
+    - K is the target total contribution per protein cluster
+    - K = percentile(interface_contrib, k_percentile)
+    - If k_percentile=100.0 (default): K = max(interface_contrib)
+    - If k_percentile=80.0: K = 80th percentile of interface_contrib
+    - Clusters with interface_contrib > K will have monomer_weight = 0 (interface-only sampling)
     
     Args:
         monomer_df: Protein monomer chain dataframe with cluster_col
         interface_df: Interface dataframe with q_pn_unit_cluster_id_1, q_pn_unit_cluster_id_2, interface_type
-        alphas_interface: Dict with keys like a_protein_protein, a_protein_small_molecule, etc.
-        beta_interface: Weight multiplier for interface samples (higher = more interface sampling)
+        alphas_interface: Dict with keys like a_protein_protein, a_protein_small_molecule, etc.        
         cluster_col: Column name for protein cluster ID in monomer_df
+        k_percentile: Percentile of interface_contrib to use for K calculation (default: 100.0 = max)
     """
     # ===== Step 1: Compute interface weights (pair cluster equalization) =====
     
@@ -752,7 +773,7 @@ def add_cluster_balanced_sampling_weights(
     interface_df["alpha"] = interface_df.apply(get_interface_alpha, axis=1)
     
     # Interface weight: β_i × alpha / pair_cluster_size
-    interface_df["sampling_weight"] = beta_interface * interface_df["alpha"] / interface_df["pair_cluster_size"]
+    interface_df["sampling_weight"] = interface_df["alpha"] / interface_df["pair_cluster_size"]
     
     # ===== Step 2: Compute each protein cluster's interface contribution =====
     
@@ -785,12 +806,23 @@ def add_cluster_balanced_sampling_weights(
         all_protein_clusters.add(c)
     
     # Compute K: target total contribution per cluster
-    # K should be large enough so that monomer contribution is non-negative
-    # K = max(interface_contrib) + 1.0 (constant baseline for monomer-only clusters)
-    max_interface_contrib = max(interface_contrib.values()) if interface_contrib else 0.0
-    K = max_interface_contrib + 1.0
+    # K = percentile(interface_contrib, k_percentile)
+    # Clusters with interface_contrib > K will have monomer_weight = 0 (interface-only sampling)
+    if interface_contrib:
+        contrib_values = list(interface_contrib.values())
+        max_interface_contrib = max(contrib_values)
+        K = np.percentile(contrib_values, k_percentile)
+        n_clusters_exceeding_k = sum(1 for v in contrib_values if v > K)
+    else:
+        max_interface_contrib = 0.0
+        K = 1.0  # Default K for no interfaces
+        n_clusters_exceeding_k = 0
     
-    logger.info(f"Normalized sampling: K={K:.4f}, max_interface_contrib={max_interface_contrib:.4f}")
+    logger.info(
+        f"Normalized sampling: K={K:.4f} (k_percentile={k_percentile}), "
+        f"max_interface_contrib={max_interface_contrib:.4f}, "
+        f"clusters_exceeding_K={n_clusters_exceeding_k}"
+    )
     
     # Compute monomer weight for each cluster
     # monomer_contrib[C] = K - interface_contrib[C]
@@ -805,8 +837,7 @@ def add_cluster_balanced_sampling_weights(
         target_monomer_contrib = K - i_contrib
         
         # Ensure non-negative weight
-        if target_monomer_contrib < 0:
-            logger.warning(f"Cluster {c} has interface_contrib ({i_contrib:.4f}) > K ({K:.4f}), setting monomer weight to 0")
+        if target_monomer_contrib < 0:            
             target_monomer_contrib = 0.0
         
         # Weight per row (auto-computed for equalization, no beta_monomer)
