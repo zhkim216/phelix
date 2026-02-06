@@ -8,7 +8,7 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 1
+num_debug_samples: 2
 seed: 0
 num_workers: 0 # for dataloading
 protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
@@ -42,7 +42,7 @@ seq_des_cfg:
         lcp_expand_edge_idx_fix: true
 
 # sampling inputs
-sampling_inputs_csv: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/sampling_inputs_lmpnnval_small_molecule_filtered.csv
+sampling_inputs_csv: null
 
 # Positional constraints: supports columns in [pdb_key,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
 # e.g. 2fyzA,"A1-100,B1-100","A1-100"
@@ -59,15 +59,23 @@ pocket_cfg:
 
 ######### Data & Transform configurations #########
 input_sample_is_all_atom: true
-input_sample_is_designed: false
+input_sample_is_designed: true
 load_from_cache: false
 
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs
-  pdb_name_list: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/lmpnnval_small_molecule_filtered_nogaphetero.txt
+  pdb_dir: /home/possu/jinho/datasets/val_cifs/rfd3_val_cifs/samples_uncompressed
+  pdb_name_list: null
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
+  # Recursive search for nested directory structures (e.g. CCD code subfolders)
+  recursive: true
+  split_by_subfolder: true  # if true, array job splits by subfolder instead of flat file list
+  # Sample index filtering: matches pattern {PREFIX}_{IDX}_model_{M}.ext
+  sample_indices: [0,1,2,3,4]  # null = use all; e.g. [0,1,2,3,4] to select specific indices
+  # Slurm array job parameters (set via CLI override in sbatch)
+  array_id: 1
+  num_arrays: 50
 
 # Configurations for loading ligand atom arrays from ligand source path
 ligand_source_cfg:

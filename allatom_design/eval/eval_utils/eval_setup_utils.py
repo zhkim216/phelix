@@ -30,6 +30,11 @@ def get_pdb_files(pdb_dir: str | None,
                   array_id: int | None = None,
                   num_arrays: int | None = None,
                   skip_pdb_names: list[str] | None = None,
+                  # recursive search for nested directory structures (e.g. CCD code subfolders)
+                  recursive: bool = False,
+                  split_by_subfolder: bool = False,
+                  # sample index filtering (for files with pattern {CCD}_len_{L}_{IDX}_model_{M}.cif)
+                  sample_indices: list[int] | None = None,
                   ) -> list[str]:
     """
     Retrieve a list of PDB files from a directory, either by specifying a list of pdb_names or by getting all files.
@@ -41,11 +46,14 @@ def get_pdb_files(pdb_dir: str | None,
         array_id: Set by Slurm array job. Null means run all.
         num_arrays: Number of total arrays. If array_id is null, this can remain 1.
         skip_pdb_names: List of PDB names to skip
-
-        # if providing a pdb manifest, set options here
-        manifest_kwargs:
-            pdb_manifest_csv: Optional path to a CSV file containing PDB keys and other metadata
-
+        recursive: If True, recursively search subdirectories for files.
+            Useful for nested directory structures (e.g. CCD code subfolders).
+        split_by_subfolder: If True and array_id is set, split by top-level subfolder
+            instead of splitting the flat file list. Each array task gets one or more
+            subfolders. Only used when recursive=True.
+        sample_indices: Optional list of sample indices to keep. Filters files whose
+            filename matches pattern {PREFIX}_{IDX}_model_{M}.ext, keeping only those
+            where IDX is in sample_indices.
 
     Returns:
         List of PDB file paths, naturally sorted if retrieving all files
@@ -69,6 +77,39 @@ def get_pdb_files(pdb_dir: str | None,
                 pdb_names = [f"{Path(name).with_suffix(pdb_name_ext)}" for name in pdb_names]
             pdb_files = [f"{pdb_dir}/{name}" for name in pdb_names]
             print(f"Found {len(pdb_files)} PDB files from key list")
+    elif recursive:
+        # Recursively search subdirectories for files
+        if split_by_subfolder and array_id is not None:
+            # Split by top-level subfolder: each array task processes one or more subfolders
+            subfolders = natsorted([
+                d for d in Path(pdb_dir).iterdir() if d.is_dir()
+            ])
+            print(f"Found {len(subfolders)} subfolders in {pdb_dir}")
+            
+            chunk_size = math.ceil(len(subfolders) / num_arrays)
+            start_idx = array_id * chunk_size
+            end_idx = min(start_idx + chunk_size, len(subfolders))
+            selected_subfolders = subfolders[start_idx:end_idx]
+            print(f"Array {array_id}/{num_arrays}: processing subfolders {[s.name for s in selected_subfolders]}")
+            
+            # Collect all files from selected subfolders
+            pdb_files = []
+            for subfolder in selected_subfolders:
+                files = natsorted([str(f) for f in subfolder.iterdir() if f.is_file()])
+                pdb_files.extend(files)
+        else:
+            # Flat recursive search across all subdirectories
+            pdb_files = natsorted([
+                str(f) for f in Path(pdb_dir).rglob("*") if f.is_file()
+            ])
+        
+        # Filter by extension if pdb_name_ext is provided
+        if pdb_name_ext:
+            pdb_files = [f for f in pdb_files if f.endswith(pdb_name_ext)]
+        
+        print(f"Found {len(pdb_files)} PDB files recursively in {pdb_dir}")
+        if len(pdb_files) == 0:
+            raise ValueError(f"No PDB files found recursively in directory {pdb_dir}")
     else:
         # get all PDBs in the directory
         pdb_files = natsorted(list(glob.glob(f"{pdb_dir}/*")))
@@ -81,10 +122,20 @@ def get_pdb_files(pdb_dir: str | None,
         skip_pdb_names = set(skip_pdb_names)
         pdb_files = [f for f in pdb_files if Path(f).name not in skip_pdb_names]
 
+    # Filter by sample indices (for files with pattern {PREFIX}_{IDX}_model_{M}.ext)
+    if sample_indices is not None:
+        sample_idx_pattern = re.compile(r"_(\d+)_model_\d+\.\w+$")
+        filtered_files = []
+        for f in pdb_files:
+            match = sample_idx_pattern.search(Path(f).name)
+            if match and int(match.group(1)) in sample_indices:
+                filtered_files.append(f)
+        print(f"Filtered by sample_indices {sample_indices}: {len(pdb_files)} -> {len(filtered_files)} files")
+        pdb_files = filtered_files
+
     # Parallelization: split PDB files into chunks based on array id
-    if array_id is not None:
-        array_id = array_id
-        num_arrays = num_arrays
+    # (skip if already split by subfolder above)
+    if array_id is not None and not (recursive and split_by_subfolder):
         chunk_size = math.ceil(len(pdb_files) / num_arrays)
 
         start_idx = array_id * chunk_size
