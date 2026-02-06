@@ -90,6 +90,10 @@ def main(cfg: DictConfig):
             
     # Todo: implement adding ligands to input samples if needed later
     
+    # Compute CSV suffix for array jobs (to avoid overwriting across array tasks)
+    array_id = cfg.pdb_cfg.get("array_id", None)
+    csv_suffix = f"_array_{array_id}" if array_id is not None else ""
+    
     ###########################################################
     # Phase 2: Design sequence (redesign partial sequence or full design)
     ###########################################################
@@ -118,7 +122,8 @@ def main(cfg: DictConfig):
                 pocket_cfg=cfg.pocket_cfg,
                 no_wandb=cfg.wandb.no_wandb,
                 ckpt_info=None,
-                calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only
+                calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
+                csv_suffix=csv_suffix
             )
     else:
         # Lcaliby mode - iterate over checkpoints     
@@ -140,7 +145,8 @@ def main(cfg: DictConfig):
                                         sampling_inputs_df = sampling_inputs_df,
                                         log_dir = log_dir,
                                         pos_constraint_df = pos_constraint_df,
-                                        protein_only = cfg.get("protein_only", False))
+                                        protein_only = cfg.get("protein_only", False),
+                                        csv_suffix = csv_suffix)
         
         
                     
@@ -163,7 +169,8 @@ def main(cfg: DictConfig):
                     pocket_cfg=cfg.pocket_cfg,
                     no_wandb=cfg.wandb.no_wandb,
                     ckpt_info=ckpt_info,
-                    calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only
+                    calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
+                    csv_suffix=csv_suffix
                 )    
     print("\n" + "="*80)
     print("All phases complete!")

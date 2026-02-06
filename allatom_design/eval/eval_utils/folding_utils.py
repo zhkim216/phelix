@@ -546,7 +546,8 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
                                   pocket_cfg: DictConfig = None,
                                   ckpt_info: dict = None,
                                   no_wandb: bool = False,
-                                  calculate_metrics_only: bool = False) -> None:
+                                  calculate_metrics_only: bool = False,
+                                  csv_suffix: str = "") -> None:
     """
     Run AF3 self-consistency and docking evaluation.
     
@@ -693,7 +694,8 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
         input_sample_id_best_sc_metrics=input_sample_id_best_sc_metrics,
         input_sample_id_best_docking_metrics=input_sample_id_best_docking_metrics,
         no_wandb=no_wandb,
-        ckpt_info=ckpt_info
+        ckpt_info=ckpt_info,
+        csv_suffix=csv_suffix
     )
     
     print("\n" + "="*80)
@@ -825,38 +827,43 @@ def _save_metrics_results(out_dir: Path = None,
                           input_sample_id_best_sc_metrics: dict = None,
                           input_sample_id_best_docking_metrics: dict = None,
                           no_wandb: bool = False,
-                          ckpt_info: dict = None) -> None:
-    """Save metrics results to CSV and log to wandb."""
+                          ckpt_info: dict = None,
+                          csv_suffix: str = "") -> None:
+    """Save metrics results to CSV and log to wandb.
+    
+    Args:
+        csv_suffix: Optional suffix for CSV filenames (e.g. "_array_0" for array jobs).
+    """
     
     # All self-consistency metrics per designed_sample_id (with all diffusion samples)
     all_sc_metrics_df = pd.DataFrame.from_dict(designed_sample_id_to_per_pred_sc_metrics, orient='index')
     all_sc_metrics_df = all_sc_metrics_df.reset_index().rename(columns={'index': 'designed_sample_id'})
-    all_sc_metrics_df.to_csv(Path(out_dir, "all_sc_metrics_per_designed_sample.csv"), index=False)
+    all_sc_metrics_df.to_csv(Path(out_dir, f"all_sc_metrics_per_designed_sample{csv_suffix}.csv"), index=False)
     
     # All docking metrics per designed_sample_id (with all diffusion samples)
     all_docking_metrics_df = pd.DataFrame.from_dict(designed_sample_id_to_per_pred_docking_metrics, orient='index')
     all_docking_metrics_df = all_docking_metrics_df.reset_index().rename(columns={'index': 'designed_sample_id'})
-    all_docking_metrics_df.to_csv(Path(out_dir, "all_docking_metrics_per_designed_sample.csv"), index=False)
+    all_docking_metrics_df.to_csv(Path(out_dir, f"all_docking_metrics_per_designed_sample{csv_suffix}.csv"), index=False)
     
     # Best self-consistency metrics per designed_sample_id (best diffusion sample)
     best_sc_per_designed_df = pd.DataFrame.from_dict(designed_sample_id_best_sc_metrics, orient='index')
     best_sc_per_designed_df = best_sc_per_designed_df.reset_index().rename(columns={'index': 'designed_sample_id'})
-    best_sc_per_designed_df.to_csv(Path(out_dir, "best_sc_metrics_per_designed_sample.csv"), index=False)
+    best_sc_per_designed_df.to_csv(Path(out_dir, f"best_sc_metrics_per_designed_sample{csv_suffix}.csv"), index=False)
     
     # Best docking metrics per designed_sample_id (best diffusion sample)
     best_docking_per_designed_df = pd.DataFrame.from_dict(designed_sample_id_best_docking_metrics, orient='index')
     best_docking_per_designed_df = best_docking_per_designed_df.reset_index().rename(columns={'index': 'designed_sample_id'})
-    best_docking_per_designed_df.to_csv(Path(out_dir, "best_docking_metrics_per_designed_sample.csv"), index=False)
+    best_docking_per_designed_df.to_csv(Path(out_dir, f"best_docking_metrics_per_designed_sample{csv_suffix}.csv"), index=False)
     
     # Best self-consistency metrics per input_sample_id (best designed sample)
     best_sc_per_input_df = pd.DataFrame.from_dict(input_sample_id_best_sc_metrics, orient='index')
     best_sc_per_input_df = best_sc_per_input_df.reset_index().rename(columns={'index': 'input_sample_id'})
-    best_sc_per_input_df.to_csv(Path(out_dir, "best_sc_metrics_per_input_sample.csv"), index=False)
+    best_sc_per_input_df.to_csv(Path(out_dir, f"best_sc_metrics_per_input_sample{csv_suffix}.csv"), index=False)
     
     # Best docking metrics per input_sample_id (best designed sample)
     best_docking_per_input_df = pd.DataFrame.from_dict(input_sample_id_best_docking_metrics, orient='index')
     best_docking_per_input_df = best_docking_per_input_df.reset_index().rename(columns={'index': 'input_sample_id'})
-    best_docking_per_input_df.to_csv(Path(out_dir, "best_docking_metrics_per_input_sample.csv"), index=False)
+    best_docking_per_input_df.to_csv(Path(out_dir, f"best_docking_metrics_per_input_sample{csv_suffix}.csv"), index=False)
     
     # Log summary metrics to wandb (using input_sample_id level for final reporting)
     if input_sample_id_best_sc_metrics:
