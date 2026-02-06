@@ -2527,7 +2527,8 @@ def redesign_with_lcaliby(seed: int = 0,
                         sampling_inputs_df: pd.DataFrame = None,
                         log_dir: Path = None,
                         pos_constraint_df: pd.DataFrame = None,
-                        protein_only: bool = False) -> list[tuple[dict, Path, dict]]:
+                        protein_only: bool = False,
+                        csv_suffix: str = "") -> list[tuple[dict, Path, dict]]:
     """
     Redesign pocket sequence using lcaliby model for each checkpoint.
     
@@ -2612,7 +2613,7 @@ def redesign_with_lcaliby(seed: int = 0,
                     "pocket_seq_recovery_ratio_6": float(pocket_6[i])
                 })
         seq_recovery_metrics_df = pd.DataFrame(seq_recovery_metrics_list)
-        seq_recovery_metrics_df.to_csv(Path(log_dir_per_ckpt, "seq_recovery_metrics.csv"), index=False)
+        seq_recovery_metrics_df.to_csv(Path(log_dir_per_ckpt, f"seq_recovery_metrics{csv_suffix}.csv"), index=False)
         
         # Store outputs in sample_dict_per_ckpt
         for example_id, output in outputs.items():  
