@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=exp17
+#SBATCH --job-name=exp18
 #SBATCH -p possu
+<<<<<<< HEAD
 #SBATCH --array=6-8
+=======
+#SBATCH --nodelist=sh04-10n01
+#SBATCH --array=0-4
+>>>>>>> refs/remotes/origin/jinho/AAA
 #SBATCH --gres=gpu:1
 #SBATCH --mem=96G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=1-0:00:00
-#SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp17_%A_%a.out
-#SBATCH --error=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp17_%A_%a.err
+#SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp18_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp18_%A_%a.err
 
 # Define directories
 BASE_DIR=/home/users/zhkim216/code/allatom-design
@@ -22,7 +27,7 @@ cd "${BASE_DIR}"
 WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 GROUP="training"
-EXP_NAME_BASE="exp17"
+EXP_NAME_BASE="exp18"
 
 # Dataset paths
 RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
@@ -33,10 +38,10 @@ PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3"
 # Experiment configs
 DENOISER_TYPE="lc_atom_mpnn"
 
-TRAIN_METADATA_PATH_1="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04.parquet"
-TRAIN_METADATA_PATH_2="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_filtered_250205.parquet"
+TRAIN_METADATA_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_filtered_grouped_250205.parquet"
 
 CONFIGS=(      
+<<<<<<< HEAD
   "denoiser.mpnn.ligand_conditioning=false data.use_biologically_meaningful_small_molecule=false data.exclude_small_molecules_covalently_linked_to_protein=false data.sampling_weights.k_percentile=80.0 data.train_metadata_path=${TRAIN_METADATA_PATH_1}"
   "denoiser.mpnn.ligand_conditioning=true data.use_biologically_meaningful_small_molecule=false data.exclude_small_molecules_covalently_linked_to_protein=false data.sampling_weights.k_percentile=80.0 data.train_metadata_path=${TRAIN_METADATA_PATH_1}"
   "denoiser.mpnn.ligand_conditioning=false data.use_biologically_meaningful_small_molecule=true data.exclude_small_molecules_covalently_linked_to_protein=false data.sampling_weights.k_percentile=70.0 data.train_metadata_path=${TRAIN_METADATA_PATH_2}"
@@ -46,6 +51,12 @@ CONFIGS=(
   "denoiser.mpnn.ligand_conditioning=true data.use_biologically_meaningful_small_molecule=true data.exclude_small_molecules_covalently_linked_to_protein=false data.sampling_weights.k_percentile=85.0 data.train_metadata_path=${TRAIN_METADATA_PATH_2}" 
   "denoiser.mpnn.ligand_conditioning=true data.use_biologically_meaningful_small_molecule=true data.exclude_small_molecules_covalently_linked_to_protein=true data.sampling_weights.k_percentile=70.0 data.train_metadata_path=${TRAIN_METADATA_PATH_2}"  
   "denoiser.mpnn.ligand_conditioning=true data.use_biologically_meaningful_small_molecule=true data.exclude_small_molecules_covalently_linked_to_protein=true data.sampling_weights.k_percentile=85.0 data.train_metadata_path=${TRAIN_METADATA_PATH_2}"  
+=======
+  "denoiser.mpnn.ligand_conditioning=false data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.0"
+  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.0"
+  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.1"
+  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.2"  
+>>>>>>> refs/remotes/origin/jinho/AAA
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
@@ -73,9 +84,10 @@ python3 allatom_design/train_seq_denoiser.py \
     resume.use_current_cfg=true \
     data/dataset@data=ligandmpnn \
     data.pdb_path="${PDB_PATH}" \
+    data.train_metadata_path="${TRAIN_METADATA_PATH}" \
     data.residue_cache_dir="${RESIDUE_CACHE_DIR}" \
     data.exclude_val_cluster=true \
-    data.grouping_scheme="interface" \
+    data.grouping_scheme="neighbor" \
     data.featurizer_cfg.is_inference=false \
     data.featurizer_cfg.training_structure_noise=0.3 \
     data.featurizer_cfg.occupancy_threshold_protein_backbone=0.0 \
@@ -87,10 +99,12 @@ python3 allatom_design/train_seq_denoiser.py \
     data.sampling_weights.alphas_interface.a_protein_peptide=0.0 \
     data.sampling_weights.alphas_interface.a_protein_small_molecule=1.0 \
     data.sampling_weights.alphas_interface.a_protein_metal=0.0 \
-    data.sampling_weights.alphas_interface.a_protein_loi=0.0  \
+    data.sampling_weights.alphas_interface.a_protein_loi=1.0  \
     data.featurizer_cfg.crop_center_cutoff_distance=15.0 \
     data.featurizer_cfg.crop_spatial_p_protein_monomer_chain=0.25 \
     data.featurizer_cfg.pocket_distance=6.0 \
+    data.use_biologically_meaningful_small_molecule=true \
+    data.exclude_small_molecules_covalently_linked_to_protein=true \
     data.samples_per_epoch=50000 \
     denoiser.mpnn.token_features.protein_graph_rbf_type=ca \
     mask_selector.restype_masking_schedule="uniform_cosine_t" \
