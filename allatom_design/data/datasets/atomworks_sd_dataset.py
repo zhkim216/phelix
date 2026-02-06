@@ -301,8 +301,7 @@ class SDDataset(MolecularDataset):
             logger.info(f"Excluded {prev_len - current_len} interfaces in {dataset_name} interface dataset, because of cluster exclusion")
             logger.info(f"Ended with: {current_len} interfaces")
             logger.info("--------------------------------")
-            
-                    
+                                
         interface_df = add_chain_counts_info(interface_df)
         
         # Apply the specific filters for the interface                          
