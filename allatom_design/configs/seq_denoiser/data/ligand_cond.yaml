@@ -3,8 +3,7 @@ defaults:
 
 task: ${model.task}
 pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v3
-train_metadata_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_filtered_250205.parquet
-plinder_ccd_list_path: 
+train_metadata_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_filtered_grouped_250205.parquet
 
 validation_ids_file: ??? #! Required, set by dataset/*.yaml
 train_filters: ??? #! Required, set by dataset/*.yaml
@@ -18,7 +17,7 @@ residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_dat
 exclude_val_cluster: true
 exclude_small_molecules_covalently_linked_to_protein: true
 use_biologically_meaningful_small_molecule: true
-grouping_scheme: "interface"
+grouping_scheme: "neighbor"
 
 sampling_weights:
   alphas_interface:
