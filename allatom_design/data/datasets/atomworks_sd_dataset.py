@@ -198,7 +198,10 @@ class SDDataset(MolecularDataset):
         
         # Convert q_pn_unit_contacting_pn_unit_iids to list. It was saved as a json string.
         if self.phase == "train":
-            metadata_df["q_pn_unit_contacting_pn_unit_iids"] = metadata_df["q_pn_unit_contacting_pn_unit_iids"].apply(json.loads)
+            try:
+                metadata_df["q_pn_unit_contacting_pn_unit_iids"] = metadata_df["q_pn_unit_contacting_pn_unit_iids"].apply(json.loads)
+            except:
+                logger.info("q_pn_unit_contacting_pn_unit_iids is already a list, skipping...")
     
         # Load in validation IDs and hold out based on phase. Case insensitive, no extension.                    
         with open(self.cfg.validation_ids_file, "r") as f:                
@@ -269,41 +272,49 @@ class SDDataset(MolecularDataset):
         
         # Apply the general filters for interface df first
         metadata_df = self._apply_filters(self.cfg.train_filters.interface_filter["1"], metadata_df)
-                
+                        
         # Exclude small molecules that are covalently linked to proteins
         if self.cfg.exclude_small_molecules_covalently_linked_to_protein and metadata_df.get("q_pn_unit_is_maybe_covalently_linked_to_protein", False).sum() > 0:
             len_before = len(metadata_df)
             metadata_df = metadata_df[~metadata_df['q_pn_unit_is_maybe_covalently_linked_to_protein']]        
             len_after = len(metadata_df)
             logger.info(f"Excluded {len_before - len_after} small molecules in {dataset_name} interface dataset, because of covalently linked to protein")
-        
-        # Convert all_pn_unit_iids_after_processing to list
-        metadata_df["all_pn_unit_iids_after_processing"] = metadata_df["all_pn_unit_iids_after_processing"].apply(json.loads)
-        
-        # Delete excluded chains by filters in all_pn_unit_iids_after_processing
-        iids_by_pdb = metadata_df.groupby(['pdb_id', 'assembly_id'])['q_pn_unit_iid'].apply(list).to_dict()
-        metadata_df['all_pn_unit_iids_after_processing'] = metadata_df.apply(lambda row: iids_by_pdb[(row['pdb_id'], row['assembly_id'])], axis=1)
+                        
+        if self.scheme == "neighbor":
+            # Remove chain iids from q_pn_unit_context_group_iids that were excluded by filters
+            valid_iids_per_assembly = metadata_df.groupby(['pdb_id', 'assembly_id'])['q_pn_unit_iid'].apply(set).to_dict()
+            metadata_df['q_pn_unit_context_group_iids'] = metadata_df.apply(
+                lambda row: [
+                    iid for iid in row['q_pn_unit_context_group_iids']
+                    if iid in valid_iids_per_assembly.get((row['pdb_id'], row['assembly_id']), set())
+                ] if row['q_pn_unit_context_group_iids'] is not None else None,
+                axis=1
+            )
                                     
         # Build interface df
         interface_df = build_interface_df(metadata_df=metadata_df, dataset_name=Path(metadata_path).parent.name)
                         
         # Filter out invalid iids in interface df based on cluster exclusion
         if self.cfg.exclude_val_cluster:                        
-            # Filter out invalid iids in all_pn_unit_iids_after_processing
+            # Filter out invalid iids in all_pn_unit_iids_after_processing and q_pn_unit_context_group_iids
             iid_to_cluster = metadata_df.set_index(['pdb_id', 'assembly_id', 'q_pn_unit_iid'])['q_pn_unit_cluster_id'].to_dict()            
-            def filter_valid_iids(row):                
+            def filter_valid_iids(row, colname):                
                 pdb_id = row['pdb_id']
                 assembly_id = row['assembly_id']
-                iids = row['all_pn_unit_iids_after_processing']
+                iids = row[colname]
+                
+                if iids is None:
+                    return None
                 
                 filtered_iids = []
                 for iid in iids:
-                    if iid_to_cluster[(pdb_id, assembly_id, iid)] not in self.val_cluster_ids:
+                    if iid_to_cluster.get((pdb_id, assembly_id, iid)) not in self.val_cluster_ids:
                         filtered_iids.append(iid)
                                 
                 return filtered_iids
-            
-            interface_df['all_pn_unit_iids_after_processing'] = interface_df.apply(filter_valid_iids, axis=1)
+                                    
+            if self.scheme == "neighbor":
+                interface_df['q_pn_unit_context_group_iids'] = interface_df.apply(filter_valid_iids, axis=1, colname='q_pn_unit_context_group_iids')
             
             # Filter out interfaces that have invalid iids (always use cluster_id_1 and cluster_id_2)
             prev_len = len(interface_df)
@@ -334,8 +345,8 @@ class SDDataset(MolecularDataset):
         if self.phase == "train":
             chain_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid"])
             
-            if self.scheme == "all":
-                interface_parser = GenericDFParser(pn_unit_iid_colnames=['all_pn_unit_iids_after_processing'])
+            if self.scheme == "neighbor":
+                interface_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_context_group_iids'])
             elif self.scheme == "interface":
                 interface_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_iid_1', 'q_pn_unit_iid_2'])                            
             
@@ -510,7 +521,7 @@ def build_interface_df(metadata_df: pd.DataFrame, dataset_name: str) -> pd.DataF
                         'q_pn_unit_is_loi', 'q_pn_unit_is_polymer', 'q_pn_unit_cluster_id']    
         
     base_cols = [
-        "example_id", "pdb_id", "assembly_id", "path", "all_pn_unit_iids_after_processing", "q_pn_unit_contacting_pn_unit_iids",
+        "example_id", "pdb_id", "assembly_id", "path", "q_pn_unit_contacting_pn_unit_iids", "q_pn_unit_context_group_iids",
         *chain_specific_cols,
     ]
     interface_df = metadata_df[base_cols].copy()
@@ -543,7 +554,12 @@ def build_interface_df(metadata_df: pd.DataFrame, dataset_name: str) -> pd.DataF
     interface_df = _canonicalize_pair_columns(interface_df, order_by="q_pn_unit_iid", paired_cols=chain_specific_cols)
 
     # Drop exact duplicate interfaces within (pdb_id, assembly_id)
+    # Sort so that rows with non-None q_pn_unit_context_group_iids come first,
+    # ensuring dedup keeps the row with neighbor chain info (e.g., from the small molecule side)
+    interface_df['_neighbor_is_none'] = interface_df['q_pn_unit_context_group_iids'].isna()
+    interface_df = interface_df.sort_values('_neighbor_is_none', kind='stable')
     interface_df = interface_df.drop_duplicates(subset=["pdb_id", "assembly_id", "q_pn_unit_iid_1", "q_pn_unit_iid_2"], keep="first")
+    interface_df = interface_df.drop(columns=['_neighbor_is_none'])
 
     # Build example_id for interfaces by appending 'interfaces' to the source dataset_names
     def _get_interface_example_id(row):
@@ -559,8 +575,8 @@ def build_interface_df(metadata_df: pd.DataFrame, dataset_name: str) -> pd.DataF
             "example_id",
             "pdb_id",
             "assembly_id",
-            "path",
-            "all_pn_unit_iids_after_processing",
+            "path",            
+            "q_pn_unit_context_group_iids",
             "contact_min_distance",
             "contact_num_contacts",
         ]
@@ -796,7 +812,7 @@ def add_cluster_balanced_sampling_weights(
         if is_protein_2:
             interface_contrib[c2] = interface_contrib.get(c2, 0.0) + weight
     
-    # ===== Step 3: Adjust monomer weights for overall protein cluster equalization =====
+    # ===== Step 3: Compute K and scale interface weights for equalization =====
     
     # Count monomer rows per cluster
     monomer_cluster_counts = monomer_df[cluster_col].value_counts().to_dict()
@@ -808,7 +824,6 @@ def add_cluster_balanced_sampling_weights(
     
     # Compute K: target total contribution per cluster
     # K = percentile(interface_contrib, k_percentile)
-    # Clusters with interface_contrib > K will have monomer_weight = 0 (interface-only sampling)
     if interface_contrib:
         contrib_values = list(interface_contrib.values())
         max_interface_contrib = max(contrib_values)
@@ -824,6 +839,64 @@ def add_cluster_balanced_sampling_weights(
         f"max_interface_contrib={max_interface_contrib:.4f}, "
         f"clusters_exceeding_K={n_clusters_exceeding_k}"
     )
+    
+    # ===== Step 3b: Scale down interface weights for clusters exceeding K =====
+    # For clusters with interface_contrib > K, scale their interface weights
+    # so that the total interface contribution becomes exactly K.
+    # This ensures all protein clusters have equal total contribution.
+    
+    # Compute per-cluster scaling factors
+    scaling_factors = {}
+    for c, contrib in interface_contrib.items():
+        if contrib > K:
+            scaling_factors[c] = K / contrib
+        # else: no scaling needed (factor = 1.0)
+    
+    if scaling_factors:
+        logger.info(
+            f"Scaling interface weights for {len(scaling_factors)} clusters exceeding K. "
+            f"Min scaling factor: {min(scaling_factors.values()):.6f}, "
+            f"Max scaling factor: {max(scaling_factors.values()):.6f}"
+        )
+        
+        # Apply scaling to interface_df rows
+        def scale_interface_weight(row):
+            weight = row["sampling_weight"]
+            if weight == 0.0:
+                return 0.0
+            
+            c1, c2 = row["q_pn_unit_cluster_id_1"], row["q_pn_unit_cluster_id_2"]
+            is_protein_1 = row.get("q_pn_unit_is_protein_1", False)
+            is_protein_2 = row.get("q_pn_unit_is_protein_2", False)
+            
+            # Collect scaling factors from protein sides
+            factors = []
+            if is_protein_1 and c1 in scaling_factors:
+                factors.append(scaling_factors[c1])
+            if is_protein_2 and c2 in scaling_factors:
+                factors.append(scaling_factors[c2])
+            
+            if factors:
+                # Use min factor to ensure neither cluster exceeds K
+                return weight * min(factors)
+            return weight
+        
+        interface_df["sampling_weight"] = interface_df.apply(scale_interface_weight, axis=1)
+        
+        # Recompute interface_contrib after scaling
+        interface_contrib = {}
+        for _, row in interface_df.iterrows():
+            weight = row["sampling_weight"]
+            c1, c2 = row["q_pn_unit_cluster_id_1"], row["q_pn_unit_cluster_id_2"]
+            is_protein_1 = row.get("q_pn_unit_is_protein_1", False)
+            is_protein_2 = row.get("q_pn_unit_is_protein_2", False)
+            
+            if is_protein_1:
+                interface_contrib[c1] = interface_contrib.get(c1, 0.0) + weight
+            if is_protein_2:
+                interface_contrib[c2] = interface_contrib.get(c2, 0.0) + weight
+    
+    # ===== Step 4: Compute monomer weights for overall protein cluster equalization =====
     
     # Compute monomer weight for each cluster
     # monomer_contrib[C] = K - interface_contrib[C]
@@ -841,7 +914,7 @@ def add_cluster_balanced_sampling_weights(
         if target_monomer_contrib < 0:            
             target_monomer_contrib = 0.0
         
-        # Weight per row (auto-computed for equalization, no beta_monomer)
+        # Weight per row (auto-computed for equalization)
         weight = target_monomer_contrib / m_count
         return weight
     
