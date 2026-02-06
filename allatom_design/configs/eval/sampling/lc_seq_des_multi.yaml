@@ -68,6 +68,14 @@ pdb_cfg:
   pdb_name_list: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/lmpnnval_small_molecule_filtered.txt
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
+  # Recursive search for nested directory structures (e.g. CCD code subfolders)
+  recursive: false
+  split_by_subfolder: false  # if true, array job splits by subfolder instead of flat file list
+  # Sample index filtering: matches pattern {PREFIX}_{IDX}_model_{M}.ext
+  sample_indices: null  # null = use all; e.g. [0,1,2,3,4] to select specific indices
+  # Slurm array job parameters (set via CLI override in sbatch)
+  array_id: null
+  num_arrays: null
 
 # Configurations for loading ligand atom arrays from ligand source path
 ligand_source_cfg:
