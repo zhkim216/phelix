@@ -266,11 +266,20 @@ def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
                                            annotation_name="is_ligand_pocket_for_metrics",
                                            receptor_chain_iids=[receptor_chain_iid],
                                            ligand_chain_iids=[ligand_chain_iid])
+    
+    # Apply and spread residue-wise to get pocket mask
+    sample_atom_array_pocket_mask = apply_and_spread_residue_wise(sample_atom_array, sample_atom_array.get_annotation("is_ligand_pocket_for_metrics"), function=np.any)
+    sample_atom_array.set_annotation("is_ligand_pocket_for_metrics", sample_atom_array_pocket_mask)
+    
     pred_atom_array = annotate_ligand_pockets(atom_array=pred_atom_array, 
                                          pocket_distance=pocket_distance_for_metrics,
                                          annotation_name="is_ligand_pocket_for_metrics",
                                          receptor_chain_iids=[receptor_chain_iid],
                                          ligand_chain_iids=[ligand_chain_iid])
+    
+    # Apply and spread residue-wise to get pocket mask
+    pred_atom_array_pocket_mask = apply_and_spread_residue_wise(pred_atom_array, pred_atom_array.get_annotation("is_ligand_pocket_for_metrics"), function=np.any)
+    pred_atom_array.set_annotation("is_ligand_pocket_for_metrics", pred_atom_array_pocket_mask)
     
     # Get binding site CA atoms for superposition
     # Use sequential residue index (order in chain) instead of res_id for matching
