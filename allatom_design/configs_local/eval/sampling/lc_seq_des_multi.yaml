@@ -14,8 +14,8 @@ num_workers: 0 # for dataloading
 protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 
 # Outputs
-exp_name: debug_eval_exp9_cfg2_lmpnnval_nogaphetero # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260202
+exp_name: debug_eval_exp9_cfg2_rfd3val # experiment name; used for wandb and output directory
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260205
 
 # Sequence design config
 seq_des_cfg:  
