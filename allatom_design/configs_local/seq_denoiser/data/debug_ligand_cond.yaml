@@ -2,9 +2,9 @@ defaults:
   - dataset@_here_: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
 
 task: ${model.task}
-pdb_path: /home/possu/jinho/datasets/atomworks_pdb_full_v5
-train_metadata_path: /home/possu/jinho/datasets/atomworks_pdb_full_v5/debug_metadata_seq_clustered_04_lmpnn.parquet
-plinder_ccd_list_path: 
+pdb_path: /home/possu/jinho/datasets/atomworks_pdb_full_v3
+train_metadata_path: /home/possu/jinho/datasets/atomworks_pdb_full_v3/debug_metadata_seq_clustered_04_250205.parquet
+# /home/possu/jinho/datasets/atomworks_pdb_full_v3/debug_metadata_seq_clustered_04_filtered_250205.parquet
 
 validation_ids_file: ??? #! Required, set by dataset/*.yaml
 train_filters: ??? #! Required, set by dataset/*.yaml
@@ -16,6 +16,9 @@ debug_num_ids: 10000 #! For debugging
 save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
 residue_cache_dir: /home/possu/jinho/datasets/atomworks_cached_residue_data
 exclude_val_cluster: true
+exclude_small_molecules_covalently_linked_to_protein: false
+use_biologically_meaningful_small_molecule: false  # true면 q_pn_unit_is_biologically_meaningful_small_molecule 사용 (filtered parquet용)
+grouping_scheme: "interface"
   
 sampling_weights:
   alphas_interface:
@@ -24,8 +27,8 @@ sampling_weights:
     a_protein_peptide: 0.0
     a_protein_small_molecule: 1.0 
     a_protein_metal: 0.0 
-    a_protein_loi: 1.0    
-  beta_interface: 1.0  # Higher = more interface sampling relative to monomer
+    a_protein_loi: 1.0      
+  k_percentile: 55.0 # Adjust this value to control the balance between interface and monomer sampling
 
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:
