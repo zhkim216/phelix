@@ -35,7 +35,7 @@ pdb_cfg:
 
 # Pocket configuration
 pocket_cfg:
-  pocket_distance_for_metrics: 8.0
+  pocket_distance_for_metrics: 6.0
 
 ######### Data & Transform configurations #########
 # Configurations for cif files

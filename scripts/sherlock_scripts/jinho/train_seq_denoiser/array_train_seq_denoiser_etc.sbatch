@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=exp18
+#SBATCH --job-name=exp19
 #SBATCH -p possu
+#SBATCH --array=0-6
 #SBATCH --nodelist=sh04-10n01
-#SBATCH --array=0-4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=96G
 #SBATCH --cpus-per-task=8
@@ -23,7 +23,7 @@ cd "${BASE_DIR}"
 WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 GROUP="training"
-EXP_NAME_BASE="exp18"
+EXP_NAME_BASE="exp19"
 
 # Dataset paths
 RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
@@ -37,10 +37,13 @@ DENOISER_TYPE="lc_atom_mpnn"
 TRAIN_METADATA_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_filtered_grouped_250205.parquet"
 
 CONFIGS=(      
-  "denoiser.mpnn.ligand_conditioning=false data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.0"
-  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.0"
-  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.1"
-  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.2"  
+  "denoiser.mpnn.token_features.use_pocket_rbf=false"
+  "denoiser.mpnn.token_features.use_pocket_rbf=true denoiser.mpnn.token_features.pocket_rbf_type=ncaco denoiser.mpnn.token_features.pocket_rbf_distance=4.0"
+  "denoiser.mpnn.token_features.use_pocket_rbf=true denoiser.mpnn.token_features.pocket_rbf_type=ncacocb denoiser.mpnn.token_features.pocket_rbf_distance=4.0"
+  "denoiser.mpnn.token_features.use_pocket_rbf=true denoiser.mpnn.token_features.pocket_rbf_type=ncaco denoiser.mpnn.token_features.pocket_rbf_distance=4.5"
+  "denoiser.mpnn.token_features.use_pocket_rbf=true denoiser.mpnn.token_features.pocket_rbf_type=ncacocb denoiser.mpnn.token_features.pocket_rbf_distance=4.5"
+  "denoiser.mpnn.token_features.use_pocket_rbf=true denoiser.mpnn.token_features.pocket_rbf_type=ncaco denoiser.mpnn.token_features.pocket_rbf_distance=5.0"
+  "denoiser.mpnn.token_features.use_pocket_rbf=true denoiser.mpnn.token_features.pocket_rbf_type=ncacocb denoiser.mpnn.token_features.pocket_rbf_distance=5.0"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
@@ -90,7 +93,10 @@ python3 allatom_design/train_seq_denoiser.py \
     data.use_biologically_meaningful_small_molecule=true \
     data.exclude_small_molecules_covalently_linked_to_protein=true \
     data.samples_per_epoch=50000 \
+    data.sampling_weights.k_percentile=90.0 \
+    data.featurizer_cfg.drop_prob_non_protein_chains=0.0 \
     denoiser.mpnn.token_features.protein_graph_rbf_type=ca \
+    denoiser.mpnn.ligand_conditioning=true \
     mask_selector.restype_masking_schedule="uniform_cosine_t" \
     logging.log_every_n_steps=100 \
     logging.wandb_watch_freq=500 \

@@ -28,7 +28,7 @@ sampling_weights:
     a_protein_small_molecule: 1.0 
     a_protein_metal: 0.0 
     a_protein_loi: 1.0      
-  k_percentile: 0.0 # Adjust this value to control the balance between interface and monomer sampling
+  k_percentile: 90.0 # Adjust this value to control the balance between interface and monomer sampling
 
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:
@@ -55,6 +55,8 @@ featurizer_cfg:
   # Ensure at least N protein tokens from the nearest protein pn_unit (chain) to the crop center.
   min_protein_tokens_in_interface_crop: 20
   pocket_distance: 6.0
+  use_pocket_rbf: ${denoiser.mpnn.token_features.use_pocket_rbf}
+  pocket_rbf_distance: ${denoiser.mpnn.token_features.pocket_rbf_distance}
   residue_cache_dir: ${data.residue_cache_dir}
   max_conformers_per_residue: 50
   apply_random_augmentation: true
