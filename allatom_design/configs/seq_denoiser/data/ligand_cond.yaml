@@ -17,7 +17,7 @@ residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_dat
 exclude_val_cluster: true
 exclude_small_molecules_covalently_linked_to_protein: true
 use_biologically_meaningful_small_molecule: true
-grouping_scheme: "neighbor"
+grouping_scheme: "interface" # interface, neighbor
 
 sampling_weights:
   alphas_interface:

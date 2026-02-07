@@ -1,12 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=exp18
 #SBATCH -p possu
-<<<<<<< HEAD
-#SBATCH --array=6-8
-=======
-#SBATCH --nodelist=sh04-10n01
-#SBATCH --array=0-4
->>>>>>> refs/remotes/origin/jinho/AAA
+#SBATCH --array=3
 #SBATCH --gres=gpu:1
 #SBATCH --mem=96G
 #SBATCH --cpus-per-task=8
@@ -41,22 +36,15 @@ DENOISER_TYPE="lc_atom_mpnn"
 TRAIN_METADATA_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_filtered_grouped_250205.parquet"
 
 CONFIGS=(      
-<<<<<<< HEAD
-  "denoiser.mpnn.ligand_conditioning=false data.use_biologically_meaningful_small_molecule=false data.exclude_small_molecules_covalently_linked_to_protein=false data.sampling_weights.k_percentile=80.0 data.train_metadata_path=${TRAIN_METADATA_PATH_1}"
-  "denoiser.mpnn.ligand_conditioning=true data.use_biologically_meaningful_small_molecule=false data.exclude_small_molecules_covalently_linked_to_protein=false data.sampling_weights.k_percentile=80.0 data.train_metadata_path=${TRAIN_METADATA_PATH_1}"
-  "denoiser.mpnn.ligand_conditioning=false data.use_biologically_meaningful_small_molecule=true data.exclude_small_molecules_covalently_linked_to_protein=false data.sampling_weights.k_percentile=70.0 data.train_metadata_path=${TRAIN_METADATA_PATH_2}"
-  "denoiser.mpnn.ligand_conditioning=true data.use_biologically_meaningful_small_molecule=true data.exclude_small_molecules_covalently_linked_to_protein=false data.sampling_weights.k_percentile=70.0 data.train_metadata_path=${TRAIN_METADATA_PATH_2}"
-  "denoiser.mpnn.ligand_conditioning=false data.use_biologically_meaningful_small_molecule=true data.exclude_small_molecules_covalently_linked_to_protein=true data.sampling_weights.k_percentile=55.0 data.train_metadata_path=${TRAIN_METADATA_PATH_2}"
-  "denoiser.mpnn.ligand_conditioning=true data.use_biologically_meaningful_small_molecule=true data.exclude_small_molecules_covalently_linked_to_protein=true data.sampling_weights.k_percentile=55.0 data.train_metadata_path=${TRAIN_METADATA_PATH_2}" 
-  "denoiser.mpnn.ligand_conditioning=true data.use_biologically_meaningful_small_molecule=true data.exclude_small_molecules_covalently_linked_to_protein=false data.sampling_weights.k_percentile=85.0 data.train_metadata_path=${TRAIN_METADATA_PATH_2}" 
-  "denoiser.mpnn.ligand_conditioning=true data.use_biologically_meaningful_small_molecule=true data.exclude_small_molecules_covalently_linked_to_protein=true data.sampling_weights.k_percentile=70.0 data.train_metadata_path=${TRAIN_METADATA_PATH_2}"  
-  "denoiser.mpnn.ligand_conditioning=true data.use_biologically_meaningful_small_molecule=true data.exclude_small_molecules_covalently_linked_to_protein=true data.sampling_weights.k_percentile=85.0 data.train_metadata_path=${TRAIN_METADATA_PATH_2}"  
-=======
-  "denoiser.mpnn.ligand_conditioning=false data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.0"
-  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.0"
-  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.1"
-  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.2"  
->>>>>>> refs/remotes/origin/jinho/AAA
+  "denoiser.mpnn.ligand_conditioning=false data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ca"
+  "denoiser.mpnn.ligand_conditioning=false data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ncaco"
+  "denoiser.mpnn.ligand_conditioning=false data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb"
+  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.0 denoiser.mpnn.token_features.protein_graph_rbf_type=ca resume.ckpt_path=/scratch/users/zhkim216/out_dir/ligand_seq_des/exp18_cfg3/checkpoints/sd-step52500-epoch33.ckpt"
+  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.1 denoiser.mpnn.token_features.protein_graph_rbf_type=ca"
+  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.1 denoiser.mpnn.token_features.protein_graph_rbf_type=ncaco"
+  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.1 denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb"
+  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.2 denoiser.mpnn.token_features.protein_graph_rbf_type=ca" 
+  "denoiser.mpnn.ligand_conditioning=true data.sampling_weights.k_percentile=90.0 data.featurizer_cfg.drop_prob_non_protein_chains=0.1 denoiser.mpnn.token_features.protein_graph_rbf_type=ca data.grouping_scheme=interface" 
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
