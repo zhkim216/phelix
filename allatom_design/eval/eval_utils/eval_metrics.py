@@ -230,11 +230,12 @@ def _compute_self_consistency_metrics_atomarray(*, pred_atom_array: AtomArray,
             # Compute average pLDDT across all CA atoms.
             confidence_dir = str(pred_sample_path.parent)
             confidence_file_name = re.sub(r'_model$', '_confidences', str(pred_sample_path.stem)) + '.json'
+            
             avg_ca_plddt = _extract_af3_confidence_metrics(confidence_file_path=f"{confidence_dir}/{confidence_file_name}",
-                                                           atom_array=pred_atom_array,
-                                                           mask=ca_atom_mask,
-                                                           metrics_to_extract="atom_plddts",
-                                                           return_mean=True)
+                                                        atom_array=pred_atom_array,
+                                                        mask=ca_atom_mask,
+                                                        metrics_to_extract="atom_plddts",
+                                                        return_mean=True)
             metrics[metric] = avg_ca_plddt
 
         # elif metric == "tmalign_score":
@@ -464,13 +465,22 @@ def _extract_af3_confidence_metrics(confidence_file_path: str = None,
         
     if metrics_to_extract == "atom_plddts":        
         metric = torch.tensor(confidence_data["atom_plddts"], dtype=torch.float16)
-                                
-        assert len(metric) == len(atom_array), f"Number of pLDDTs ({len(metric)}) != number of atoms in atom_array ({len(atom_array)})"            
-                
+        
+        # Filter out NaN coordinate atoms: aw_parse with add_missing_atoms=True
+        # adds unresolved atoms with NaN coordinates that don't exist in AF3 output.
+        valid_coords_mask = ~np.isnan(atom_array.coord).any(axis=1)
+        num_valid_atoms = int(valid_coords_mask.sum())
+        
+        assert len(metric) == num_valid_atoms, (
+            f"Number of pLDDTs ({len(metric)}) != number of valid (non-NaN) atoms ({num_valid_atoms}). "
+            f"Total atoms in atom_array: {len(atom_array)}, NaN atoms: {len(atom_array) - num_valid_atoms}"
+        )
+        
+        # Filter mask to only valid (non-NaN) atoms so it aligns with metric
         if isinstance(mask, np.ndarray):
-            mask_torch = torch.tensor(mask, dtype=torch.bool)
+            mask_torch = torch.tensor(mask[valid_coords_mask], dtype=torch.bool)
         else:
-            mask_torch = mask.bool()
+            mask_torch = mask[torch.tensor(valid_coords_mask, dtype=torch.bool)].bool()
         
         # Apply mask to pLDDTs        
         metric = metric[mask_torch]
