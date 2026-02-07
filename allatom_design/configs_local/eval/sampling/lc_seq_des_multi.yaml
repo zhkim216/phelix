@@ -8,14 +8,14 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 2
+num_debug_samples: 10
 seed: 0
 num_workers: 0 # for dataloading
 protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 
 # Outputs
 exp_name: debug_eval_exp9_cfg2_rfd3val # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260205
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260206
 
 # Sequence design config
 seq_des_cfg:  
@@ -50,38 +50,33 @@ pos_constraint_csv: null
   
 # Redesign pocket sequence options
 redesign_cfg:
-  use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
-  pocket_distance: 5.0  
+  use_native_seq: true #! If false, automatically redesign the pocket sequence using lcaliby
+  pocket_distance: 5.0
+  native_cif_dir: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/cifs  #! Directory containing native CIF files (needed when use_native_seq: true)  
 
 # Pocket configuration
 pocket_cfg:
-  pocket_distance_for_metrics: 8.0
+  pocket_distance_for_metrics: 6.0
 
 ######### Data & Transform configurations #########
-input_sample_is_all_atom: true
+input_sample_is_all_atom: false
 input_sample_is_designed: true
 load_from_cache: false
 
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /home/possu/jinho/datasets/val_cifs/rfd3_val_cifs/samples_uncompressed
+  pdb_dir: /home/possu/jinho/allatom-design/debug/260206_lmpnn_inputs_debugging/eval_exp16_cfg0_lmpnnval_sm_filt_full_af3/step_62500_epoch_39/samples
   pdb_name_list: null
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
   # Recursive search for nested directory structures (e.g. CCD code subfolders)
-  recursive: true
-  split_by_subfolder: true  # if true, array job splits by subfolder instead of flat file list
+  recursive: false
+  split_by_subfolder: false  # if true, array job splits by subfolder instead of flat file list
   # Sample index filtering: matches pattern {PREFIX}_{IDX}_model_{M}.ext
-  sample_indices: [0,1,2,3,4]  # null = use all; e.g. [0,1,2,3,4] to select specific indices
+  sample_indices: null  # null = use all; e.g. [0,1,2,3,4] to select specific indices
   # Slurm array job parameters (set via CLI override in sbatch)
-  array_id: 1
-  num_arrays: 50
-
-# Configurations for loading ligand atom arrays from ligand source path
-ligand_source_cfg:
-  ligand_source_path: /home/possu/jinho/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
-  add_ligands_to_designed_samples: false
-  source_is_designed: true
+  array_id: null
+  num_arrays: null
 
 #### For designing samples ####
 # Configurations for cif files
@@ -183,7 +178,7 @@ featurizer_cfg:
 ######### Structure prediction model configuration (AF3) #########
 struct_pred_cfg:
   model_name: "af3"
-  evaluate_self_consistency: true
+  evaluate_self_consistency: false
   calculate_metrics_only: false
   af3:
     runner_path: /home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py
