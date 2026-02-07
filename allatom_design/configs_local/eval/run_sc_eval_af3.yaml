@@ -9,18 +9,18 @@ wandb:
   group: null
 
 # Basic settings
-debug: true
+debug: false
 num_debug_samples: 2
 seed: 0
 protein_only: false
 
 # Outputs
-exp_name: debug_run_sc_eval_af3
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260206_run_sc_eval_af3
+exp_name: eval_caliby_lmpnnval_af3
+base_out_dir: /home/possu/jinho/allatom-design/debug/260206_caliby_lmpnnval_af3_debugging/
 
 # Configurations for getting designed sample paths
 pdb_cfg:
-  pdb_dir: /home/possu/jinho/datasets/val_cifs/caliby_samples/rfd3_val_cifs/samples
+  pdb_dir: /home/possu/jinho/datasets/val_cifs/caliby_samples/lmpnn_val_cifs/samples
   pdb_name_list: null
   pdb_name_ext: ".cif"
   n_subsample: null
@@ -92,7 +92,7 @@ featurizer_cfg:
 struct_pred_cfg:
   model_name: "af3"
   evaluate_self_consistency: true
-  calculate_metrics_only: false
+  calculate_metrics_only: true
   af3:
     runner_path: /home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py
     json_config:
