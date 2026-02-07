@@ -53,6 +53,8 @@ featurizer_cfg:
   # Interface crop constraints  
   min_protein_tokens_in_interface_crop: 20 # Ensure at least N protein tokens from the nearest protein pn_unit (chain) to the crop center.
   pocket_distance: 6.0
+  use_pocket_rbf: ${denoiser.mpnn.token_features.use_pocket_rbf}
+  pocket_rbf_distance: ${denoiser.mpnn.token_features.pocket_rbf_distance}
   residue_cache_dir: ${data.residue_cache_dir}
   max_conformers_per_residue: 50
   apply_random_augmentation: true

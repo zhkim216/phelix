@@ -221,12 +221,28 @@ class TokenFeatures(nn.Module):
         
         # Protein graph-related parameters
         self.protein_graph_rbf_type = cfg.protein_graph_rbf_type
-        if self.protein_graph_rbf_type == "ca":
-            num_pairwise_dists = 1
-        elif self.protein_graph_rbf_type == "ncaco":
-            num_pairwise_dists = 4*4
-        elif self.protein_graph_rbf_type == "ncacocb":
-            num_pairwise_dists = 5*5
+        
+        # Pocket-aware RBF: full backbone RBF for pocket residues, CA-only for others
+        self.use_pocket_rbf = cfg.get("use_pocket_rbf", False)
+        self.pocket_rbf_type = cfg.get("pocket_rbf_type", "ncaco")
+        
+        if self.use_pocket_rbf:
+            # When pocket_rbf is enabled, edge dimension is determined by pocket_rbf_type
+            # (non-pocket edges will have zeros for non-CA features)
+            if self.pocket_rbf_type == "ncaco":
+                num_pairwise_dists = 4*4
+            elif self.pocket_rbf_type == "ncacocb":
+                num_pairwise_dists = 5*5
+            else:
+                raise ValueError(f"Invalid pocket_rbf_type: {self.pocket_rbf_type}. Must be 'ncaco' or 'ncacocb'.")
+        else:
+            # Original behavior
+            if self.protein_graph_rbf_type == "ca":
+                num_pairwise_dists = 1
+            elif self.protein_graph_rbf_type == "ncaco":
+                num_pairwise_dists = 4*4
+            elif self.protein_graph_rbf_type == "ncacocb":
+                num_pairwise_dists = 5*5
         protein_graph_edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists                
         self.protein_edge_embedding = nn.Linear(protein_graph_edge_in, self.edge_n_channel, bias=False)                                
         self.norm_protein_edges = nn.LayerNorm(self.edge_n_channel)
@@ -278,7 +294,24 @@ class TokenFeatures(nn.Module):
         D_neighbors, E_idx = self._dist(X = X, mask = batch["protein_residue_node_mask"]) 
                         
         # Get RBF features
-        if self.protein_graph_rbf_type == "ca":
+        if self.use_pocket_rbf:
+            # Pocket-aware RBF: full backbone RBF for pocket edges, CA-only for others
+            RBF_backbone = self.get_backbone_pseudocb_rbf(
+                batch=batch, D_neighbors=D_neighbors, E_idx=E_idx, rbf_type=self.pocket_rbf_type
+            )
+            
+            # Build 2D pocket mask: True only when BOTH i and j are pocket residues
+            pocket_mask = batch["pocket_rbf_mask"]  # [B, N]
+            pocket_mask_j = gather_nodes(pocket_mask.unsqueeze(-1), E_idx).squeeze(-1)  # [B, N, K]
+            pocket_mask_2d = pocket_mask.unsqueeze(-1) * pocket_mask_j  # [B, N, K]
+            
+            # CA-CA RBF is the first num_rbf features - always keep
+            # Zero out non-CA features for non-pocket edges
+            ca_rbf = RBF_backbone[:, :, :, :self.num_rbf]  # [B, N, K, num_rbf]
+            non_ca_rbf = RBF_backbone[:, :, :, self.num_rbf:]  # [B, N, K, remaining]
+            non_ca_rbf = non_ca_rbf * pocket_mask_2d.unsqueeze(-1)  # zero out non-pocket
+            RBF_backbone = torch.cat([ca_rbf, non_ca_rbf], dim=-1)
+        elif self.protein_graph_rbf_type == "ca":
             RBF_backbone = self._rbf(D_neighbors)
         else:            
             RBF_backbone = self.get_backbone_pseudocb_rbf(batch = batch, D_neighbors = D_neighbors, E_idx = E_idx, rbf_type = self.protein_graph_rbf_type)
