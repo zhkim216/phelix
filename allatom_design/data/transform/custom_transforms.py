@@ -860,9 +860,11 @@ class GetNCACOAndPseudoCBCoords(Transform):
     
 class AddTrainingRandomNoise(Transform):
     """Add training random noise to the atom array."""
-    def __init__(self, noise_scale: float = 0.1):
+    def __init__(self, noise_scale: float = 0.1, asymmetric_noise: bool = False, protein_noise_scale: float = 0.1, context_noise_scale: float = 0.1):
         self.noise_scale = noise_scale
-    
+        self.asymmetric_noise = asymmetric_noise
+        self.protein_noise_scale = protein_noise_scale
+        self.context_noise_scale = context_noise_scale
     @override
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
         return self._add_training_random_noise(data)
@@ -870,7 +872,16 @@ class AddTrainingRandomNoise(Transform):
     def _add_training_random_noise(self, data: dict[str, Any]):
         """Add training random noise to the atom array."""
         N_atoms = len(data["atom_array"])
-        if self.noise_scale <= 0:
+        if self.asymmetric_noise:
+            atom_array = data["atom_array"]
+            protein_std_aa_mask = torch.tensor(
+                atom_array.atom_is_protein_chain & ~(atom_array.atomize), dtype=torch.float32
+            ).unsqueeze(-1)  # (N_atoms, 1)
+            context_mask = 1.0 - protein_std_aa_mask  # (N_atoms, 1)
+            protein_noise = self.protein_noise_scale * torch.randn((N_atoms, 3), dtype=torch.float32) * protein_std_aa_mask
+            context_noise = self.context_noise_scale * torch.randn((N_atoms, 3), dtype=torch.float32) * context_mask
+            noise = protein_noise + context_noise
+        elif self.noise_scale <= 0:
             noise = torch.zeros((N_atoms, 3), dtype=torch.float32)
         else: 
             noise = self.noise_scale * torch.randn((N_atoms, 3), dtype=torch.float32)

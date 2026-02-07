@@ -118,6 +118,11 @@ def sd_featurizer(
     # For center random augmentation
     apply_random_augmentation: bool = True,
     translation_scale: float = 1.0,    
+    
+    # For asymmetric training noise
+    asymmetric_noise: bool = False,
+    protein_noise_scale: float = 0.1,
+    context_noise_scale: float = 0.1,
             
 ) -> Transform:
     """
@@ -195,7 +200,12 @@ def sd_featurizer(
         AddAF3TokenBondFeatures(distance_cutoff=2.4),
         TrainingRoute(CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
                             translation_scale=translation_scale)),                                            
-        TrainingRoute(AddTrainingRandomNoise(noise_scale=training_structure_noise)),       
+        TrainingRoute(AddTrainingRandomNoise(
+            noise_scale=training_structure_noise,
+            asymmetric_noise=asymmetric_noise,
+            protein_noise_scale=protein_noise_scale,
+            context_noise_scale=context_noise_scale,
+        )),       
         # Handle missing atoms and tokens
         # PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
         # PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"), 
@@ -251,7 +261,12 @@ def sd_featurizer_for_design(
     # For center random augmentation
     apply_random_augmentation: bool = True,
     translation_scale: float = 1.0,
-    sample_is_designed: bool = False,    
+    sample_is_designed: bool = False,
+    
+    # For asymmetric training noise
+    asymmetric_noise: bool = False,
+    protein_noise_scale: float = 0.1,
+    context_noise_scale: float = 0.1,
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure into an example for designing samples.
@@ -293,9 +308,6 @@ def sd_featurizer_for_design(
         # PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"), 
         # Add features from the atom_array
         AddAF3TokenBondFeatures(distance_cutoff=2.4),
-        TrainingRoute(CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
-                            translation_scale=translation_scale)),     
-        TrainingRoute(AddTrainingRandomNoise(noise_scale=training_structure_noise)),       
         FeaturizeCoordsAndMasks(),                
         GetNCACOAndPseudoCBCoords(),        
     ]
