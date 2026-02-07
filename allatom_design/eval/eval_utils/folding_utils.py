@@ -884,20 +884,20 @@ def _save_metrics_results(out_dir: Path = None,
             print(f"Logged metrics to wandb: {wandb_metrics}")
     
     if input_sample_id_best_docking_metrics:
-        best_ligand_rmsd = [m["ligand_rmsd"] for m in input_sample_id_best_docking_metrics.values()]
-        best_binding_site_rmsd = [m["binding_site_rmsd"] for m in input_sample_id_best_docking_metrics.values()]
-        best_ligand_plddt = [m["ligand_plddt"] for m in input_sample_id_best_docking_metrics.values()]
-        best_binding_site_plddt = [m["binding_site_plddt"] for m in input_sample_id_best_docking_metrics.values()]
-        best_iptm = [m["iptm"] for m in input_sample_id_best_docking_metrics.values()]
-        best_interface_min_pae = [m["interface_min_pae"] for m in input_sample_id_best_docking_metrics.values()]
+        best_ligand_rmsd = [m["ligand_rmsd"] for m in input_sample_id_best_docking_metrics.values() if m["ligand_rmsd"] is not None]
+        best_binding_site_rmsd = [m["binding_site_rmsd"] for m in input_sample_id_best_docking_metrics.values() if m["binding_site_rmsd"] is not None]
+        best_ligand_plddt = [m["ligand_plddt"] for m in input_sample_id_best_docking_metrics.values() if m["ligand_plddt"] is not None]
+        best_binding_site_plddt = [m["binding_site_plddt"] for m in input_sample_id_best_docking_metrics.values() if m["binding_site_plddt"] is not None]
+        best_iptm = [m["iptm"] for m in input_sample_id_best_docking_metrics.values() if m["iptm"] is not None]
+        best_interface_min_pae = [m["interface_min_pae"] for m in input_sample_id_best_docking_metrics.values() if m["interface_min_pae"] is not None]
         
         wandb_metrics = {                
-            "eval/median/ligand_rmsd": np.median(best_ligand_rmsd),
-            "eval/median/binding_site_rmsd": np.median(best_binding_site_rmsd),
-            "eval/median/ligand_plddt": np.median(best_ligand_plddt),
-            "eval/median/binding_site_plddt": np.median(best_binding_site_plddt),
-            "eval/median/iptm": np.median(best_iptm),
-            "eval/median/interface_min_pae": np.median(best_interface_min_pae),
+            "eval/median/ligand_rmsd": np.median(best_ligand_rmsd) if best_ligand_rmsd else None,
+            "eval/median/binding_site_rmsd": np.median(best_binding_site_rmsd) if best_binding_site_rmsd else None,
+            "eval/median/ligand_plddt": np.median(best_ligand_plddt) if best_ligand_plddt else None,
+            "eval/median/binding_site_plddt": np.median(best_binding_site_plddt) if best_binding_site_plddt else None,
+            "eval/median/iptm": np.median(best_iptm) if best_iptm else None,
+            "eval/median/interface_min_pae": np.median(best_interface_min_pae) if best_interface_min_pae else None,
         }
         
         if ckpt_info:

@@ -28,6 +28,7 @@ from allatom_design.eval.eval_utils.seq_des_utils import (
     _replace_pocket_sequence_with_native,
     create_pos_constraint_dict_from_atom_array,
     # Redesign Functions
+    load_samples_for_native_redesign,
     redesign_with_native,
     redesign_with_lcaliby,
 )
@@ -87,9 +88,7 @@ def main(cfg: DictConfig):
     
     sample_dict = prepare_sample_dict(cfg = cfg, 
                                   sampling_inputs_df = sampling_inputs_df)
-            
-    # Todo: implement adding ligands to input samples if needed later
-    
+                    
     # Compute CSV suffix for array jobs (to avoid overwriting across array tasks)
     array_id = cfg.pdb_cfg.get("array_id", None)
     csv_suffix = f"_array_{array_id}" if array_id is not None else ""
@@ -102,8 +101,10 @@ def main(cfg: DictConfig):
     print("="*80 + "\n")
         
     if cfg.redesign_cfg.get("use_native_seq", False):
-        # Native replace mode
-        redesign_out_dir = log_dir / "redesigned_samples"
+        # Native replace mode: load atom arrays and chain info first
+        sample_dict = load_samples_for_native_redesign(sample_dict, cfg)
+        
+        redesign_out_dir = log_dir / "samples_redesigned_with_native"
         sample_dict = redesign_with_native(sample_dict, cfg, redesign_out_dir)
         
         # Evaluate if needed
@@ -146,9 +147,7 @@ def main(cfg: DictConfig):
                                         log_dir = log_dir,
                                         pos_constraint_df = pos_constraint_df,
                                         protein_only = cfg.get("protein_only", False),
-                                        csv_suffix = csv_suffix)
-        
-        
+                                        csv_suffix = csv_suffix)                
                     
         # Evaluate each checkpoint
         if cfg.struct_pred_cfg.evaluate_self_consistency:

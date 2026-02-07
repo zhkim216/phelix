@@ -2454,14 +2454,103 @@ def _replace_pocket_sequence_with_native(native_atom_array: AtomArray = None,
     }
     
     # Replace pocket sequence with native pocket sequence
-    num_replaced_pocket_residues = 0
+    replaced_residue_keys = set()
     for i in range(len(sample_atom_array)):
         key = (sample_atom_array.chain_id[i], sample_atom_array.res_id[i])
         if key in pocket_residue_to_name:
             sample_atom_array.res_name[i] = pocket_residue_to_name[key]
-            num_replaced_pocket_residues += 1
-            
+            replaced_residue_keys.add(key)
+    
+    num_replaced_pocket_residues = len(replaced_residue_keys)
     return sample_atom_array, num_replaced_pocket_residues
+
+def load_samples_for_native_redesign(sample_dict: dict,
+                                     cfg: DictConfig) -> dict:
+    """
+    Load designed sample atom arrays and native atom arrays for native sequence redesign.
+    Populates sample_dict with keys required by redesign_with_native:
+        - sample_atom_array: designed sample atom array
+        - native_atom_array: native atom array
+        - pdb_chain_info: dict with protein_chain_iids, ligand_chain_iids, ligand_ccd_codes
+    
+    Args:
+        sample_dict: Dictionary of sample information (from prepare_sample_dict).
+        cfg: Configuration object.
+        
+    Returns:
+        sample_dict: Updated dictionary with loaded atom arrays and chain info.
+    """
+    native_cif_dir = Path(cfg.redesign_cfg.native_cif_dir)
+    
+    # Determine parse/preprocess configs for designed samples
+    if not cfg.input_sample_is_designed:
+        designed_cif_parse_cfg = cfg.cif_cfg.parse.native
+        designed_preprocess_cfg = cfg.preprocess_cfg.native
+    else:
+        designed_cif_parse_cfg = cfg.cif_cfg.parse.designed_samples
+        designed_preprocess_cfg = cfg.preprocess_cfg.designed_samples
+    
+    sample_ids = list(sample_dict.keys())
+    for sample_id in tqdm(sample_ids, desc="Loading samples for native redesign"):
+        # 1. Load designed sample atom array
+        designed_example = prepare_designed_sample(
+            pdb_path=sample_dict[sample_id]['input_sample_path'],
+            cif_parse_cfg=designed_cif_parse_cfg,
+            preprocess_cfg=designed_preprocess_cfg,
+            featurizer_cfg=cfg.featurizer_cfg.prepare_designed_samples,
+        )
+        sample_atom_array = designed_example["atom_array"]
+        sample_dict[sample_id]["sample_atom_array"] = sample_atom_array
+        
+        # 2. Extract pdb_id from sample_id (e.g., "1bzc" from "1bzc_sample0")
+        pdb_id = sample_id.rsplit("_sample", 1)[0]
+        sample_dict[sample_id]["pdb_id"] = pdb_id
+        
+        # 3. Load native atom array
+        native_cif_path = native_cif_dir / f"{pdb_id}.cif"
+        if not native_cif_path.exists():
+            print(f"Warning: Native CIF not found for {pdb_id} at {native_cif_path}, skipping.")
+            continue
+            
+        native_example = preprocess_pdb(
+            pdb_path=str(native_cif_path),
+            cif_parse_cfg=cfg.cif_cfg.parse.native,
+            preprocess_cfg=cfg.preprocess_cfg.native,
+            sample_is_designed=False
+        )
+        sample_dict[sample_id]["native_atom_array"] = native_example["atom_array"]
+        
+        # 4. Extract pdb_chain_info from designed sample atom array
+        pdb_chain_info = {
+            "protein_chain_iids": [],
+            "ligand_chain_iids": [],
+            "ligand_ccd_codes": []
+        }
+        
+        prot_atom_array = sample_atom_array[sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+        ligand_atom_array = sample_atom_array[np.isin(sample_atom_array.chain_type, list(aw_enums.ChainTypeInfo.NON_POLYMERS))]
+        
+        protein_chain_iids = [str(chain_iid) for chain_iid in np.unique(prot_atom_array.chain_iid)]
+        ligand_chain_iids = [str(chain_iid) for chain_iid in np.unique(ligand_atom_array.chain_iid)]
+        ligand_ccd_codes = [str(ligand_atom_array[ligand_atom_array.chain_iid == chain_iid].res_name[0]) 
+                           for chain_iid in ligand_chain_iids]
+        
+        for chain_iid in protein_chain_iids:
+            pdb_chain_info["protein_chain_iids"].append(str(chain_iid))
+        for chain_iid, ccd_code in zip(ligand_chain_iids, ligand_ccd_codes):
+            pdb_chain_info["ligand_chain_iids"].append(str(chain_iid))
+            pdb_chain_info["ligand_ccd_codes"].append(str(ccd_code))
+        
+        sample_dict[sample_id]["pdb_chain_info"] = pdb_chain_info
+    
+    # Remove samples that failed to load native atom arrays
+    failed_ids = [sid for sid in sample_dict if "native_atom_array" not in sample_dict[sid]]
+    for sid in failed_ids:
+        print(f"Removing {sid} from sample_dict (failed to load native atom array)")
+        del sample_dict[sid]
+    
+    return sample_dict
+
 
 def redesign_with_native(sample_dict: dict, 
                          cfg: DictConfig, 
@@ -2471,6 +2560,7 @@ def redesign_with_native(sample_dict: dict,
     
     Args:
         sample_dict: Dictionary of sample information.
+            Required keys per sample: native_atom_array, pdb_chain_info, sample_atom_array
         cfg: Configuration object.
         out_dir: Output directory for redesigned samples.
         
@@ -2489,11 +2579,11 @@ def redesign_with_native(sample_dict: dict,
         native_atom_array = sample_dict[sample_id]["native_atom_array"]
         protein_chain_iids = sample_dict[sample_id]["pdb_chain_info"]["protein_chain_iids"]
         ligand_chain_iids = sample_dict[sample_id]["pdb_chain_info"]["ligand_chain_iids"]
-        sample_atom_array_with_ligand = sample_dict[sample_id]["sample_atom_array_with_ligand"]
+        sample_atom_array = sample_dict[sample_id]["sample_atom_array"]
         
         redesigned_sample_atom_array, num_redesigned_pocket_residues = _replace_pocket_sequence_with_native(
             native_atom_array=native_atom_array,
-            sample_atom_array=sample_atom_array_with_ligand,
+            sample_atom_array=sample_atom_array,
             pocket_distance=pocket_distance,
             protein_chain_iids=protein_chain_iids,
             ligand_chain_iids=ligand_chain_iids
@@ -2512,6 +2602,22 @@ def redesign_with_native(sample_dict: dict,
         sample_dict[sample_id]["num_redesigned_pocket_residues"] = num_redesigned_pocket_residues   
         
         print(f"Redesigned {num_redesigned_pocket_residues} pocket residues for {sample_id} with native pocket sequence, within {pocket_distance} Å of the ligand")
+    
+    # Save redesign summary CSV
+    redesign_metrics_list = []
+    for sample_id in sample_ids:
+        redesign_metrics_list.append({
+            "sample_id": sample_id,
+            "pdb_id": sample_dict[sample_id].get("pdb_id", ""),
+            "designed_sample_id": sample_dict[sample_id]["designed_sample_id"][0],
+            "num_redesigned_pocket_residues": sample_dict[sample_id]["num_redesigned_pocket_residues"],
+            "pocket_distance": pocket_distance,
+            "designed_sample_path": sample_dict[sample_id]["designed_sample_path"][0],
+        })
+    redesign_metrics_df = pd.DataFrame(redesign_metrics_list)
+    csv_path = Path(out_dir, "redesign_with_native_summary.csv")
+    redesign_metrics_df.to_csv(csv_path, index=False)
+    print(f"Saved redesign summary to {csv_path}")
     
     return sample_dict
 

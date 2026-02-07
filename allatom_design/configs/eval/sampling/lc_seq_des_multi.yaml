@@ -10,11 +10,11 @@ wandb:
 debug: true
 num_debug_samples: 2
 seed: 0
-num_workers: 8 # for dataloading
-protein_only: false
+num_workers: 0 # for dataloading
+protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 
 # Outputs
-exp_name: eval_exp16_cfg0_rfd3val_2 # experiment name; used for wandb and output directory
+exp_name: eval_exp16_cfg0_rwn_lmpnnval_af3 # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
@@ -58,13 +58,13 @@ pocket_cfg:
   pocket_distance_for_metrics: 6.0
 
 ######### Data & Transform configurations #########
-input_sample_is_all_atom: true
+input_sample_is_all_atom: false
 input_sample_is_designed: true
 load_from_cache: false
 
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/rfd3_val_cifs/samples_uncompressed
+  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp16_cfg0_lmpnnval_sm_filt_full_af3/step_62500_epoch_39/samples
   pdb_name_list: null
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
@@ -76,12 +76,6 @@ pdb_cfg:
   # Slurm array job parameters (set via CLI override in sbatch)
   array_id: 0
   num_arrays: 50
-
-# Configurations for loading ligand atom arrays from ligand source path
-ligand_source_cfg:
-  ligand_source_path: null
-  add_ligands_to_designed_samples: false
-  source_is_designed: true
 
 #### For designing samples ####
 # Configurations for cif files
