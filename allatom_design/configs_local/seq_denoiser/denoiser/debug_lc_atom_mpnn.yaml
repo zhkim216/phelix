@@ -35,7 +35,11 @@ mpnn:
     use_sidechain_context: true
     use_ligand_context: true
     ligand_atom_context_num: 16  
-    sidechain_context_token_num: 16    
+    sidechain_context_token_num: 16
+    # Pocket-aware RBF: use full backbone RBF for ligand pocket residues, CA-only for others
+    use_pocket_rbf: true  # false for backward compat; set true to enable pocket-aware RBF
+    pocket_rbf_type: "ncaco"  # "ncaco" or "ncacocb" - RBF type for pocket residue edges
+    pocket_rbf_distance: 4.0  # distance threshold (Å) for pseudo-CB pocket definition
 
   potts:
     k_neighbors_potts: 48

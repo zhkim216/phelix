@@ -82,6 +82,7 @@ FEAT_TO_TOKEN_DIM = {
     "token_is_hetero": [0],
     "token_is_covalent_modification": [0],
     "token_is_ligand_pocket": [0],
+    "pocket_rbf_mask": [0],
     "token_is_protein_chain": [0],
     "token_is_peptide_chain": [0],
     "token_is_small_molecule_chain": [0],
@@ -202,6 +203,13 @@ class FeaturizeCoordsAndMasks(Transform):
         # is_ligand_pocket flags
         feats["atom_is_ligand_pocket"] = torch.tensor(atom_array.is_ligand_pocket).float()
         feats["token_is_ligand_pocket"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_ligand_pocket, np.any)).float()
+
+        # pocket_rbf_mask (pseudo-CB based pocket annotation for pocket-aware RBF)
+        if hasattr(atom_array, "is_pocket_rbf"):
+            feats["pocket_rbf_mask"] = torch.tensor(apply_token_wise(atom_array, atom_array.is_pocket_rbf, np.any)).float()
+        else:
+            # Default: all zeros (no pocket residues) for backward compatibility
+            feats["pocket_rbf_mask"] = torch.zeros(len(feats["token_is_ligand_pocket"]), dtype=torch.float32)
 
         # chain type flags
         atom_is_protein_chain = atom_array.get_annotation("atom_is_protein_chain")
@@ -458,7 +466,6 @@ class FilterToQueryPNUnits(Transform):
         #* From atomworks.ml.datasets.parsers.GenericDFParser: "During VALIDATION, then we do not crop, and query_pn_unit_iids should be None."
         if "query_pn_unit_iids" in data:
             atom_array = filter_to_specified_pn_units(atom_array, data["query_pn_unit_iids"])
-
         data["atom_array"] = atom_array
                         
         return data
@@ -628,6 +635,148 @@ class AnnotateLigandPockets(Transform):
             ligand_chain_iids=ligand_chain_iids,
         )
         return data
+
+
+def annotate_ligand_pockets_pseudocb(
+    atom_array: AtomArray,
+    pocket_distance: float = 5.0,
+    n_min_ligand_atoms: int = 5,
+    annotation_name: str = "is_pocket_rbf",
+) -> AtomArray:
+    """
+    Identify protein residues whose pseudo-CB is within pocket_distance of any ligand atom.
+    Uses un-noised coordinates from atom_array.coord (original structure).
+    
+    Unlike annotate_ligand_pockets which uses all-atom distances, this function
+    uses a single pseudo-CB representative point per residue, making it slightly
+    more conservative (fewer residues marked as pocket at the same distance).
+    
+    Args:
+        atom_array: Input structure with original (un-noised) coordinates
+        pocket_distance: Distance threshold for pocket identification (Angstroms)
+        n_min_ligand_atoms: Minimum atoms required for a ligand to define pockets
+        annotation_name: Name for the boolean annotation (token-level)
+    Returns:
+        AtomArray with pocket annotation added
+    """
+    atom_array = atom_array.copy()
+    
+    # --- Identify valid ligands ---
+    ligand_pn_unit_iids, ligand_counts = np.unique(
+        atom_array.pn_unit_iid[atom_array.atom_is_small_molecule_chain], return_counts=True
+    )
+    valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
+    valid_ligand_iids = ligand_pn_unit_iids[valid_ligand_mask]
+    
+    # Initialize token-level annotation (spread to all atoms in residue)
+    pocket_annotation = np.zeros(len(atom_array), dtype=bool)
+    
+    if len(valid_ligand_iids) == 0:
+        atom_array.set_annotation(annotation_name, pocket_annotation)
+        return atom_array
+    
+    # --- Compute pseudo-CB from un-noised backbone coords ---
+    # Get standard AA protein atoms with all backbone resolved
+    is_atomized = atom_array.atomize
+    standard_aa_prot_mask = ~is_atomized & atom_array.atom_is_protein_chain
+    
+    is_ncaco_resolved = (
+        np.isin(atom_array.atom_name, ["N", "CA", "C", "O"]) & 
+        (atom_array.occupancy > 0)
+    ) #! OXT is deleted in preprocessing
+    has_all_backbone = apply_and_spread_token_wise(
+        atom_array, is_ncaco_resolved, lambda x: np.sum(x) == 4
+    )
+    valid_residue_mask = standard_aa_prot_mask & has_all_backbone
+    
+    # Extract backbone coords for valid residues
+    ca_mask = valid_residue_mask & (atom_array.atom_name == "CA")
+    n_mask = valid_residue_mask & (atom_array.atom_name == "N")
+    c_mask = valid_residue_mask & (atom_array.atom_name == "C")
+    
+    if ca_mask.sum() == 0:
+        atom_array.set_annotation(annotation_name, pocket_annotation)
+        return atom_array
+    
+    ca_coords = atom_array.coord[ca_mask]  # un-noised
+    n_coords = atom_array.coord[n_mask]
+    c_coords = atom_array.coord[c_mask]
+    
+    # Compute pseudo-CB: same formula as GetNCACOAndPseudoCBCoords
+    b = ca_coords - n_coords
+    c_vec = c_coords - ca_coords
+    a = np.cross(b, c_vec)
+    pseudo_cb_coords = -0.58273431 * a + 0.56802827 * b - 0.54067466 * c_vec + ca_coords
+    
+    # Token indices for each pseudo-CB
+    token_ids_for_cb = atom_array.token_id[ca_mask]
+    
+    # --- Compute distances from pseudo-CB to ligand atoms ---
+    all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_iids)
+    ligand_coords = atom_array.coord[all_valid_ligands_mask]
+    
+    # Filter out NaN coordinates
+    valid_ligand_coords_mask = ~np.isnan(ligand_coords).any(axis=1)
+    ligand_coords = ligand_coords[valid_ligand_coords_mask]
+    
+    valid_cb_coords_mask = ~np.isnan(pseudo_cb_coords).any(axis=1)
+    
+    if len(ligand_coords) == 0 or valid_cb_coords_mask.sum() == 0:
+        atom_array.set_annotation(annotation_name, pocket_annotation)
+        return atom_array
+    
+    # Use CellList for efficient distance computation
+    cell_list = struc.CellList(ligand_coords, cell_size=pocket_distance)
+    
+    # For each valid pseudo-CB, check if any ligand atom is within distance
+    valid_cb_indices = np.where(valid_cb_coords_mask)[0]
+    valid_cb_points = pseudo_cb_coords[valid_cb_indices]
+    
+    distance_mask = cell_list.get_atoms(valid_cb_points, pocket_distance, as_mask=True)
+    near_ligand = np.any(distance_mask, axis=1)  # [num_valid_cb]
+    
+    # Map back: mark all atoms in pocket residues
+    pocket_token_ids = token_ids_for_cb[valid_cb_indices[near_ligand]]
+    pocket_annotation = np.isin(atom_array.token_id, pocket_token_ids)
+    
+    # Only atoms in protein chains can be pocket atoms
+    pocket_annotation = pocket_annotation & atom_array.atom_is_protein_chain
+    
+    atom_array.set_annotation(annotation_name, pocket_annotation)
+    return atom_array
+
+
+class AnnotateLigandPocketsPseudoCB(Transform):
+    """Identify protein residues whose pseudo-CB is near ligand atoms.
+    
+    Uses un-noised pseudo-CB coordinates for pocket definition.
+    Designed for pocket-aware RBF features in the protein graph.
+    """
+
+    def __init__(
+        self, 
+        pocket_distance: float = 5.0, 
+        n_min_ligand_atoms: int = 5, 
+        annotation_name: str = "is_pocket_rbf",
+    ):
+        self.pocket_distance = pocket_distance
+        self.n_min_ligand_atoms = n_min_ligand_atoms
+        self.annotation_name = annotation_name
+
+    @override
+    def check_input(self, data: dict) -> None:
+        check_contains_keys(data, ["atom_array"])
+        check_is_instance(data, "atom_array", AtomArray)
+
+    @override
+    def forward(self, data: dict) -> dict:
+        data["atom_array"] = annotate_ligand_pockets_pseudocb(
+            atom_array=data["atom_array"],
+            pocket_distance=self.pocket_distance,
+            n_min_ligand_atoms=self.n_min_ligand_atoms,
+            annotation_name=self.annotation_name,
+        )
+        return data
         
 class GetNCACOAndPseudoCBCoords(Transform):
     """
@@ -648,6 +797,7 @@ class GetNCACOAndPseudoCBCoords(Transform):
     def _get_ncaco_and_pseudo_cb_coords(self, data: dict[str, Any]):
         """
         Get N, CA, C, O and pseudo CB coordinates for the atom array.
+        Pseudo CB is calculated from the noised backbone coordinates.
         """
         atom_array = data["atom_array"]           
         

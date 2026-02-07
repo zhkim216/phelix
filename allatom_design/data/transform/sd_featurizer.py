@@ -53,6 +53,7 @@ from allatom_design.data.transform.custom_transforms import (
     ErrIfAllUnresolved,
     AddCachedResidueData,
     AnnotateLigandPockets,
+    AnnotateLigandPocketsPseudoCB,
     GetNCACOAndPseudoCBCoords,
     AddTrainingRandomNoise,
     AddDataCategory,
@@ -105,7 +106,10 @@ def sd_featurizer(
     min_protein_tokens_in_interface_crop: int | None = None,
     
     # For pocket annotation
-    pocket_distance: float = 8.0,    
+    pocket_distance: float = 8.0,
+    # For pocket-aware RBF (pseudo-CB based pocket annotation)
+    use_pocket_rbf: bool = False,
+    pocket_rbf_distance: float = 5.0,  # e.g. 3.5, 4.5, 5.5
     
     # For reference molecule features
     residue_cache_dir: str | None = "/scratch/users/zhkim216/datasets/atomworks/cached_residue_data",
@@ -165,39 +169,9 @@ def sd_featurizer(
                             )
                 }
             )
-    # cropping_transform = ConditionalRoute(
-    #     condition_func=lambda data: data.get("data_category"),                        
-    #             transform_map={
-    #                 "protein_monomer_chain": RandomRoute(
-    #                     transforms = [
-    #                         CropContiguousLikeAF3(
-    #                             crop_size=max_tokens,
-    #                             keep_uncropped_atom_array=True,
-    #                             max_atoms_in_crop=max_atoms,
-    #                         ),
-    #                         CropSpatialLikeAF3(
-    #                             crop_size=max_tokens,
-    #                             crop_center_cutoff_distance=crop_center_cutoff_distance,
-    #                             keep_uncropped_atom_array=True,
-    #                             max_atoms_in_crop=max_atoms,
-    #                         )
-    #                     ],
-    #                     probs = [1.0 - crop_spatial_p, crop_spatial_p]
-    #                 ),                    
-    #                 "interface": CropSpatialLikeAF3Constrained(
-    #                     crop_size=max_tokens,
-    #                     crop_center_cutoff_distance=crop_center_cutoff_distance,
-    #                     keep_uncropped_atom_array=True,
-    #                     max_atoms_in_crop=max_atoms,
-    #                     min_protein_tokens_in_crop=min_protein_tokens_in_interface_crop,
-    #                     constrain_on_interface_protein_chain=True,
-    #                 )
-    #             }
-    #         )
                     
                 
-        
-            
+                    
     # Featurization
     # NOTE: for now, we ignore ref pos features because they are too slow to compute
     featurization_transforms_post_crop = [        
@@ -215,7 +189,8 @@ def sd_featurizer(
         #     max_conformers_per_residue=max_conformers_per_residue,
         # ),
         ComputeAtomToTokenMap(),        
-        AnnotateLigandPockets(pocket_distance=pocket_distance), 
+        AnnotateLigandPockets(pocket_distance=pocket_distance),
+        AnnotateLigandPocketsPseudoCB(pocket_distance=pocket_rbf_distance) if use_pocket_rbf else Identity(),
         ConvertToTorch(keys=["encoded", "feats"]),
         AddAF3TokenBondFeatures(distance_cutoff=2.4),
         TrainingRoute(CenterRandomAugmentation(apply_random_augmentation=apply_random_augmentation, 
@@ -264,7 +239,10 @@ def sd_featurizer_for_design(
     crop_center_cutoff_distance: float = 15.0,    
     
     # For pocket annotation
-    pocket_distance: float = 8.0,    
+    pocket_distance: float = 8.0,
+    # For pocket-aware RBF (pseudo-CB based pocket annotation)
+    use_pocket_rbf: bool = False,
+    pocket_rbf_distance: float = 5.0,  # e.g. 3.5, 4.5, 5.5
     
     # For reference molecule features
     residue_cache_dir: str | None = "/scratch/users/zhkim216/datasets/atomworks/cached_residue_data",
@@ -307,7 +285,8 @@ def sd_featurizer_for_design(
         #     max_conformers_per_residue=max_conformers_per_residue,
         # ),
         ComputeAtomToTokenMap(),        
-        AnnotateLigandPockets(pocket_distance=pocket_distance), 
+        AnnotateLigandPockets(pocket_distance=pocket_distance),
+        AnnotateLigandPocketsPseudoCB(pocket_distance=pocket_rbf_distance) if use_pocket_rbf else Identity(),
         ConvertToTorch(keys=["encoded", "feats"]),
         # Handle missing atoms and tokens
         # PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
