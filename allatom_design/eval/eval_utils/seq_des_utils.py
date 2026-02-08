@@ -590,6 +590,13 @@ def run_lc_seq_des(
                     # Renumber atom_id sequentially (1-indexed)
                     designed_atom_array_with_gaps_to_save.atom_id = np.arange(1, len(designed_atom_array_with_gaps_to_save) + 1)
                     
+                    # Ensure b_factor annotation exists for AF3 template conditioning
+                    # AF3 requires _atom_site.B_iso_or_equiv in template CIF files
+                    if "b_factor" not in designed_atom_array_with_gaps_to_save.get_annotation_categories():
+                        designed_atom_array_with_gaps_to_save.set_annotation(
+                            "b_factor", np.zeros(len(designed_atom_array_with_gaps_to_save))
+                        )
+                    
                     # Save designed atom array to cif file
                     out_file = f"{sample_out_dir}/{designed_sample_id}.cif"                        
                     out_file = to_cif_file(designed_atom_array_to_save, out_file, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)                        
