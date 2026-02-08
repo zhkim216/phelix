@@ -37,6 +37,7 @@ from allatom_design.eval.eval_utils.folding_utils import (
     find_pred_sample_path_af3,
     make_af3_json,
     evaluate_af3_self_consistency,
+    evaluate_af3_docking_consistency,
 )
 
 
@@ -110,12 +111,31 @@ def main(cfg: DictConfig):
         # Evaluate if needed
         if cfg.struct_pred_cfg.evaluate_self_consistency:
             print("\n" + "="*80)
-            print("Phase 3: AF3 Evaluation")
+            print("Phase 3a: AF3 Self-Consistency Evaluation")
             print("="*80 + "\n")
             evaluate_af3_self_consistency(
                 sample_dict=sample_dict,
                 num_redesigned_pocket_residue_list=None, 
                 out_dir=log_dir, 
+                struct_pred_cfg=cfg.struct_pred_cfg,
+                cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
+                preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
+                featurizer_cfg=cfg.featurizer_cfg.prepare_af3_predictions,
+                pocket_cfg=cfg.pocket_cfg,
+                no_wandb=cfg.wandb.no_wandb,
+                ckpt_info=None,
+                calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
+                csv_suffix=csv_suffix
+            )
+        
+        if cfg.struct_pred_cfg.evaluate_docking_consistency:
+            print("\n" + "="*80)
+            print("Phase 3b: AF3 Docking Consistency Evaluation (Template-Conditioned)")
+            print("="*80 + "\n")
+            evaluate_af3_docking_consistency(
+                sample_dict=sample_dict,
+                num_redesigned_pocket_residue_list=None,
+                out_dir=log_dir,
                 struct_pred_cfg=cfg.struct_pred_cfg,
                 cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
                 preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
@@ -152,7 +172,7 @@ def main(cfg: DictConfig):
         # Evaluate each checkpoint
         if cfg.struct_pred_cfg.evaluate_self_consistency:
             print("\n" + "="*80)
-            print("Phase 3: AF3 Evaluation (per checkpoint)")
+            print("Phase 3a: AF3 Self-Consistency Evaluation (per checkpoint)")
             print("="*80 + "\n")
             for sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info in results:                                                            
                 print(f"\nEvaluating checkpoint: step_{ckpt_info['global_step']}_epoch_{ckpt_info['epoch']}")
@@ -161,6 +181,27 @@ def main(cfg: DictConfig):
                     sample_dict = sample_dict_per_ckpt,                         
                     num_redesigned_pocket_residue_list=None, 
                     out_dir=log_dir_per_ckpt, 
+                    struct_pred_cfg=cfg.struct_pred_cfg,
+                    cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
+                    preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
+                    featurizer_cfg=cfg.featurizer_cfg.prepare_af3_predictions,
+                    pocket_cfg=cfg.pocket_cfg,
+                    no_wandb=cfg.wandb.no_wandb,
+                    ckpt_info=ckpt_info,
+                    calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
+                    csv_suffix=csv_suffix
+                )
+        
+        if cfg.struct_pred_cfg.evaluate_docking_consistency:
+            print("\n" + "="*80)
+            print("Phase 3b: AF3 Docking Consistency Evaluation (per checkpoint)")
+            print("="*80 + "\n")
+            for sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info in results:                                                            
+                print(f"\nEvaluating checkpoint (TC): step_{ckpt_info['global_step']}_epoch_{ckpt_info['epoch']}")
+                
+                evaluate_af3_docking_consistency(
+                    sample_dict=sample_dict_per_ckpt,                    
+                    out_dir=log_dir_per_ckpt,
                     struct_pred_cfg=cfg.struct_pred_cfg,
                     cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
                     preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
