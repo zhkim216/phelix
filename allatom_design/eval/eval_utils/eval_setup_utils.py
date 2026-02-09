@@ -113,6 +113,15 @@ def get_pdb_files(pdb_dir: str | None,
     else:
         # get all PDBs in the directory
         pdb_files = natsorted(list(glob.glob(f"{pdb_dir}/*")))
+        
+        # Filter by extension if pdb_name_ext is provided
+        if pdb_name_ext:
+            pdb_files = [f for f in pdb_files if f.endswith(pdb_name_ext)]
+        else:
+            # Filter out non-structure files (e.g. .pt, .pkl, .json)
+            supported_exts = {".pdb", ".cif", ".mmcif", ".ent"}
+            pdb_files = [f for f in pdb_files if Path(f).suffix.lower() in supported_exts]
+        
         print(f"Found {len(pdb_files)} PDB files in {pdb_dir}")
         if len(pdb_files) == 0:
             raise ValueError(f"No PDB files found in directory {pdb_dir}")
