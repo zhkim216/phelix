@@ -61,7 +61,7 @@ featurizer_cfg:
   max_conformers_per_residue: 50
   apply_random_augmentation: true
   translation_scale: 1.0  
-  asymmetric_noise: true
+  asymmetric_noise: false
   protein_noise_scale: 0.3
   context_noise_scale: 0.05
   
