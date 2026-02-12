@@ -827,8 +827,14 @@ def add_cluster_balanced_sampling_weights(
     if interface_contrib:
         contrib_values = list(interface_contrib.values())
         max_interface_contrib = max(contrib_values)
-        K = np.percentile(contrib_values, k_percentile)
-        n_clusters_exceeding_k = sum(1 for v in contrib_values if v > K)
+        # If all interface contributions are 0 (all alphas are 0), use default K
+        # This ensures monomer sampling still works when interface sampling is disabled
+        if max_interface_contrib == 0.0:
+            K = 1.0
+            n_clusters_exceeding_k = 0
+        else:
+            K = np.percentile(contrib_values, k_percentile)
+            n_clusters_exceeding_k = sum(1 for v in contrib_values if v > K)
     else:
         max_interface_contrib = 0.0
         K = 1.0  # Default K for no interfaces
