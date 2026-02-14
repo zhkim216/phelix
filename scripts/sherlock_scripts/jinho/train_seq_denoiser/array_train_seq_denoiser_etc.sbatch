@@ -21,6 +21,10 @@ mkdir -p "${TORCHINDUCTOR_CACHE_DIR}"
 
 mkdir -p /scratch/users/zhkim216/job_output/train_seq_denoiser "${HYDRA_DIR}" "${OUT_DIR}"
 
+# Separate inductor cache per array task to avoid concurrent write corruption
+export TORCHINDUCTOR_CACHE_DIR="/scratch/users/zhkim216/cache/inductor_cache_${SLURM_ARRAY_TASK_ID}"
+mkdir -p "${TORCHINDUCTOR_CACHE_DIR}"
+
 cd "${BASE_DIR}"
 
 # Wandb settings / experiment name

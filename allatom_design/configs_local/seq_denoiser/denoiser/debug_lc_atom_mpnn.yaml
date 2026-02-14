@@ -23,7 +23,7 @@ mpnn:
     num_rbf: 16
     min_rbf_mean: 2.0
     max_rbf_mean: 22.0
-    protein_graph_rbf_type: "ca" # "ca", "ncaco", "ncacocb"
+    protein_graph_rbf_type: "ncacocb" # "ca", "ncaco", "ncacocb"
     k_neighbors: ${denoiser.mpnn.k_neighbors}    
     num_positional_embeddings: 16
     node_n_channel: ${denoiser.mpnn.n_channel}
@@ -34,7 +34,7 @@ mpnn:
     ligand_conditioning: ${denoiser.mpnn.ligand_conditioning}
     use_sidechain_context: true
     use_ligand_context: true
-    ligand_atom_context_num: 16  
+    ligand_atom_context_num: 25  
     sidechain_context_token_num: 16
     # Pocket-aware RBF: use full backbone RBF for ligand pocket residues, CA-only for others
     use_pocket_rbf: true  # false for backward compat; set true to enable pocket-aware RBF
