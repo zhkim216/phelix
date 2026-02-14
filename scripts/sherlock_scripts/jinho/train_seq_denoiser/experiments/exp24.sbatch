@@ -84,6 +84,7 @@ python3 allatom_design/train_seq_denoiser.py \
     data.pocket_featurizer_cfg.remove_unresolved_tokens=true \
     data.pocket_featurizer_cfg.max_tokens=512 \
     data.pocket_featurizer_cfg.max_atoms=4608 \
+    data.pocket_featurizer_cfg.spatial_crop_radius=15.0 \
     data.pocket_featurizer_cfg.training_structure_noise=0.1 \
     data.pocket_featurizer_cfg.asymmetric_noise=false \
     data.samples_per_epoch=50000 \
