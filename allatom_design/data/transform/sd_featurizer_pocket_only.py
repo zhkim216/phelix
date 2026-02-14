@@ -32,7 +32,7 @@ from atomworks.ml.transforms.filters import RemoveUnresolvedTokens
 
 import allatom_design.data.const as const
 from allatom_design.data.transform.bonds import AddAF3TokenBondFeatures
-from allatom_design.data.transform.crop import CropToPocket
+from allatom_design.data.transform.crop import CropToPocket, CropSpatialAroundTargetLigand
 from allatom_design.data.transform.custom_transforms import (
     # Constants (re-exported so the dataset module can import them)
     FEAT_TO_TOKEN_DIM,
@@ -95,6 +95,8 @@ def sd_featurizer_pocket_only(
     max_tokens: int = 100,
     max_atoms: int | None = 1500,
     pocket_crop_distance: float = 5.0,
+    # ----- Spatial pre-crop around target ligand -----
+    spatial_crop_radius: float = 15.0,
     # ----- Pocket annotation for model features -----    
     # For pocket-aware RBF (pseudo-CB based pocket annotation)
     use_pocket_rbf: bool = False,
@@ -111,13 +113,17 @@ def sd_featurizer_pocket_only(
 
     Pipeline overview
     -----------------
-    1. Pre-crop: filter to query PN units, annotate chain types, mask
-       unresolved residues, annotate ligand pockets with
-       ``pocket_crop_distance``.
-    2. Crop: ``CropToPocket`` keeps all non-protein tokens and only the
-       protein tokens within the pocket.  Truncates to ``max_tokens`` by
-       distance to ligand centre if needed.
-    3. Post-crop: mark all remaining protein residues as pocket, encode
+    1. Pre-crop: filter to query PN units, annotate chain types and target
+       ligand, mask unresolved residues.
+    2. Spatial pre-crop: ``CropSpatialAroundTargetLigand`` picks a random
+       atom from the target ligand and keeps all tokens within
+       ``spatial_crop_radius`` angstroms.  This reduces large structures
+       to a local region and provides data augmentation.
+    3. Pocket crop: ``AnnotateLigandPockets`` marks pocket residues, then
+       ``CropToPocket`` keeps only pocket protein tokens + all non-protein
+       tokens.  Truncates to ``max_tokens`` by distance to the target
+       ligand if needed.
+    4. Post-crop: mark all remaining protein residues as pocket, encode
        features, add noise, featurize coordinates, pad.
     """
 
@@ -144,14 +150,22 @@ def sd_featurizer_pocket_only(
         RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
         RemoveUnsupportedChainTypes(),
         ErrIfAllUnresolved(),
-        # Pocket annotation for cropping (using pocket_crop_distance)
-        AnnotateLigandPockets(pocket_distance=pocket_crop_distance),
     ]
 
     # ------------------------------------------------------------------
-    # Crop
+    # Stage 1: Spatial pre-crop around a random target-ligand atom
     # ------------------------------------------------------------------
-    cropping_transform = CropToPocket(
+    spatial_pre_crop = CropSpatialAroundTargetLigand(
+        crop_radius=spatial_crop_radius,
+        keep_uncropped_atom_array=True,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 2: Pocket annotation + pocket crop
+    # ------------------------------------------------------------------
+    pocket_annotation = AnnotateLigandPockets(pocket_distance=pocket_crop_distance)
+
+    pocket_crop = CropToPocket(
         max_tokens=max_tokens,
         keep_uncropped_atom_array=True,
     )
@@ -190,7 +204,9 @@ def sd_featurizer_pocket_only(
 
     transforms = [
         *featurization_transforms_pre_crop,
-        cropping_transform,
+        spatial_pre_crop,       # Stage 1: coarse radius crop around target ligand
+        pocket_annotation,      # Annotate pocket residues on the reduced structure
+        pocket_crop,            # Stage 2: keep only pocket protein + non-protein
         *featurization_transforms_post_crop,
         PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
         SubsetToKeys(keys=["example_id", "feats", *INFERENCE_ONLY_KEYS]),

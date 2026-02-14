@@ -466,7 +466,7 @@ class FilterToQueryPNUnits(Transform):
         #* From atomworks.ml.datasets.parsers.GenericDFParser: "During VALIDATION, then we do not crop, and query_pn_unit_iids should be None."
         if "query_pn_unit_iids" in data:
             atom_array = filter_to_specified_pn_units(atom_array, data["query_pn_unit_iids"])
-        data["atom_array"] = atom_array
+        data["atom_array"] = atom_array                
                         
         return data
 
@@ -805,6 +805,7 @@ class AnnotateTargetLigandChains(Transform):
             target_ligand_iids = [target_ligand_iids]                
         
         target_ligand_mask = np.isin(atom_array.pn_unit_iid, target_ligand_iids)
+        
         atom_array.set_annotation("atom_is_target_ligand_chain", target_ligand_mask)
         return data
 

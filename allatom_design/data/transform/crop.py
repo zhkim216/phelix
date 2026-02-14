@@ -1186,6 +1186,93 @@ class CropToPocket(CropTransformBase):
         data["crop_info"] = crop_info
         if self.keep_uncropped_atom_array:
             data["crop_info"]["atom_array"] = atom_array
+        data["atom_array"] = atom_array[crop_info["crop_atom_idxs"]]        
+        
+        return data
+
+
+class CropSpatialAroundTargetLigand(CropTransformBase):
+    """Spatial pre-crop around the target ligand.
+
+    Randomly selects one resolved atom from the target ligand chain and
+    keeps all tokens whose centre coordinate is within ``crop_radius``
+    angstroms of that atom.  Target-ligand tokens are always retained
+    regardless of distance.
+
+    Using a random ligand atom (instead of the ligand centroid) as the
+    crop centre provides data augmentation: each training pass sees a
+    slightly different local neighbourhood.
+
+    This is intended as a coarse first pass before the finer-grained
+    ``CropToPocket`` transform, to reduce very large structures to a local
+    region around the ligand of interest.
+
+    Requires:
+        - ``AnnotateTargetLigandChains`` (provides
+          ``atom_is_target_ligand_chain``).
+    """
+
+    def __init__(
+        self,
+        crop_radius: float = 15.0,
+        keep_uncropped_atom_array: bool = False,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.crop_radius = crop_radius
+        self.keep_uncropped_atom_array = keep_uncropped_atom_array
+
+    def check_input(self, data: dict) -> None:
+        check_contains_keys(data, ["atom_array"])
+        check_is_instance(data, "atom_array", AtomArray)
+        check_atom_array_annotation(data, ["atomize", "atom_is_target_ligand_chain"])
+
+    def forward(self, data: dict) -> dict:
+        atom_array = data["atom_array"]
+
+        # --- Pick a random resolved target-ligand atom as crop centre ---------        
+        target_mask = atom_array.atom_is_target_ligand_chain
+        valid_target_mask = target_mask & ~np.isnan(atom_array.coord).any(axis=1)        
+
+        if not valid_target_mask.any():
+            logger.warning(
+                f"No valid target ligand atoms for spatial pre-crop in "
+                f"{data.get('example_id', 'unknown')}; skipping."
+            )
+            return data
+
+        valid_target_idxs = np.where(valid_target_mask)[0]
+        crop_center_idx = np.random.choice(valid_target_idxs)
+        crop_center_coord = atom_array.coord[crop_center_idx]  # (3,)
+
+        # --- Token-level distance to the crop centre --------------------------
+        token_coords = get_af3_token_center_coords(atom_array)  # (n_tokens, 3)
+        dists = np.linalg.norm(token_coords - crop_center_coord, axis=1)
+        dists = np.where(np.isfinite(dists), dists, np.inf)
+
+        is_token_in_crop = dists <= self.crop_radius
+
+        # Always keep every target-ligand token
+        is_target_ligand_token = apply_token_wise(
+            atom_array, atom_array.atom_is_target_ligand_chain, np.any
+        )
+        is_token_in_crop = is_token_in_crop | is_target_ligand_token
+
+        # --- Spread to atom level and build crop_info -------------------------
+        is_atom_in_crop = spread_token_wise(atom_array, is_token_in_crop)
+
+        crop_info = {
+            "type": self.__class__.__name__,
+            "requires_crop": True,
+            "crop_center_atom_idx": int(crop_center_idx),
+            "crop_radius": self.crop_radius,
+            "crop_token_idxs": np.where(is_token_in_crop)[0],
+            "crop_atom_idxs": np.where(is_atom_in_crop)[0],
+        }
+
+        data["crop_info"] = crop_info
+        if self.keep_uncropped_atom_array:
+            data["crop_info"]["atom_array"] = atom_array
         data["atom_array"] = atom_array[crop_info["crop_atom_idxs"]]
 
         return data
