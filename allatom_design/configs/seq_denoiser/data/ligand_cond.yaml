@@ -17,7 +17,7 @@ residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_dat
 exclude_val_cluster: true
 exclude_small_molecules_covalently_linked_to_protein: true
 use_biologically_meaningful_small_molecule: true
-grouping_scheme: "interface" # interface, neighbor
+grouping_scheme: "neighbor" # interface, neighbor
 
 sampling_weights:
   alphas_interface:
@@ -71,7 +71,7 @@ pocket_featurizer_cfg:
   training_structure_noise: 0.1
   remove_unresolved_tokens: true
   # Pocket crop parameters
-  max_tokens: 256          # Max tokens after pocket crop (also used for padding)
+  max_tokens: 384          # Max tokens after pocket crop (also used for padding)
   max_atoms: 4608          # Max atoms for padding
   pocket_crop_distance: 5.0  # Distance (A) for identifying pocket residues
   use_pocket_rbf: ${denoiser.mpnn.token_features.use_pocket_rbf}
@@ -82,7 +82,7 @@ pocket_featurizer_cfg:
   protein_noise_scale: 0.3
   context_noise_scale: 0.05
 
-samples_per_epoch: 100 #! DEBUG
+samples_per_epoch: 1000 #! DEBUG
 batch_size: ${train.batch_size}
 num_workers: ${num_workers}
 random_seed: ${train.seed}
