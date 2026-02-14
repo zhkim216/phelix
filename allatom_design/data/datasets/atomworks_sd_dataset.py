@@ -26,6 +26,7 @@ from torch.utils.data import DataLoader
 from allatom_design.data.sampler import Sampler
 from allatom_design.data.transform.pad import pad_to_max
 from allatom_design.data.transform import sd_featurizer
+from allatom_design.data.transform import sd_featurizer_pocket_only
 
 logger = logging.getLogger(__name__)
 
@@ -79,12 +80,19 @@ class SDDataset(MolecularDataset):
         self.save_failed_examples_to_dir = cfg.save_failed_examples_to_dir                
 
         self.scheme = cfg.get("grouping_scheme", "all")
+        self.pocket_only_training = cfg.get("pocket_only_training", False)
 
         # Initialize featurizer
         # Note: We remove INFERENCE_ONLY_KEYS to avoid cuda initialization issues during training.
-        self.featurizer = sd_featurizer.sd_featurizer(**cfg.featurizer_cfg,
-                                                      remove_keys=sd_featurizer.INFERENCE_ONLY_KEYS,
-                                                      ) #! (JH) changed
+        if self.pocket_only_training:
+            self.featurizer = sd_featurizer_pocket_only.sd_featurizer_pocket_only(
+                **cfg.pocket_featurizer_cfg,
+                remove_keys=sd_featurizer.INFERENCE_ONLY_KEYS,
+            )
+        else:
+            self.featurizer = sd_featurizer.sd_featurizer(**cfg.featurizer_cfg,
+                                                          remove_keys=sd_featurizer.INFERENCE_ONLY_KEYS,
+                                                          ) #! (JH) changed
 
         
         # Process dataframes for training
@@ -93,21 +101,26 @@ class SDDataset(MolecularDataset):
             # Initialize metadata df
             self.metadata_df = self._process_metadata_df(metadata_path=self.metadata_path)        
             
-            # Process protein chain df
-            self.protein_monomer_chain_df = self._process_protein_monomer_chain_df(dataset_name=Path(self.metadata_path).parent.name)                                                                
+            if not self.pocket_only_training:
+                # Process protein chain df (skipped in pocket-only training)
+                self.protein_monomer_chain_df = self._process_protein_monomer_chain_df(dataset_name=Path(self.metadata_path).parent.name)                                                                
         
-            # Process interface df
-            self.interface_df = self._process_interface_df(metadata_path=self.metadata_path, dataset_name=Path(self.metadata_path).parent.name)
+                # Process interface df
+                self.interface_df = self._process_interface_df(metadata_path=self.metadata_path, dataset_name=Path(self.metadata_path).parent.name)
+            
+            else:
+                self.pocket_df = self._process_pocket_df(metadata_path=self.metadata_path, dataset_name=Path(self.metadata_path).parent.name)
         
-            # Compute sampling weights for cluster-balanced sampling across both dataframes
-            self.protein_monomer_chain_df, self.interface_df = add_cluster_balanced_sampling_weights(
-                monomer_df=self.protein_monomer_chain_df,
-                interface_df=self.interface_df,
-                alphas_interface=self.cfg.sampling_weights["alphas_interface"],                
-                cluster_col="q_pn_unit_cluster_id",
-                k_percentile=self.cfg.sampling_weights["k_percentile"]
-            )
-
+            # Compute sampling weights
+            if not self.pocket_only_training:
+                # Cluster-balanced sampling across both dataframes
+                self.protein_monomer_chain_df, self.interface_df = add_cluster_balanced_sampling_weights(
+                    monomer_df=self.protein_monomer_chain_df,
+                    interface_df=self.interface_df,
+                    alphas_interface=self.cfg.sampling_weights["alphas_interface"],                
+                    cluster_col="q_pn_unit_cluster_id",
+                    k_percentile=self.cfg.sampling_weights["k_percentile"]
+                )            
             # Parse dfs into a common format and concatenate
             self.parsed_df = self._parse_dfs()        
 
@@ -116,10 +129,12 @@ class SDDataset(MolecularDataset):
             self.metadata_path = self.cfg.val_metadata_path
             # Initialize metadata df
             self.metadata_df = pd.read_parquet(self.metadata_path)
-            
-            self.metadata_df["query_pn_unit_iids"] = self.metadata_df["query_pn_unit_iids"].apply(ast.literal_eval)
-            # self.metadata_df = self._process_metadata_df(self.cfg.val_metadata_path)        
-            self.parsed_df = self._parse_dfs()
+            if not self.pocket_only_training:                        
+                self.metadata_df["query_pn_unit_iids"] = self.metadata_df["query_pn_unit_iids"].apply(ast.literal_eval)
+                self.parsed_df = self._parse_dfs()                        
+                
+            else:
+                self.parsed_df = self._parse_dfs()
                     
         # Initialize per-worker random number generator
         if phase == "train":
@@ -336,6 +351,49 @@ class SDDataset(MolecularDataset):
         # Note: Sampling weights are computed later in add_sampling_weights_with_combined_clusters
                                             
         return interface_df
+    
+    def _process_pocket_df(self, metadata_path: str = None,
+                           dataset_name: str = None) -> pd.DataFrame:
+        """
+        Processes the pocket dataframe.
+        """
+        metadata_df = self.metadata_df.copy()
+        metadata_df = self._apply_filters(self.cfg.train_filters.pocket_filter["1"], metadata_df)
+        
+        # Exclude small molecules that are covalently linked to proteins
+        if self.cfg.exclude_small_molecules_covalently_linked_to_protein and metadata_df.get("q_pn_unit_is_maybe_covalently_linked_to_protein", False).sum() > 0:
+            len_before = len(metadata_df)
+            mask = (metadata_df['q_pn_unit_is_biologically_meaningful_small_molecule'] & ~metadata_df['q_pn_unit_is_maybe_covalently_linked_to_protein']) | (~metadata_df['q_pn_unit_is_biologically_meaningful_small_molecule'])
+            metadata_df = metadata_df[mask]        
+            len_after = len(metadata_df)
+            logger.info(f"Excluded {len_before - len_after} small molecules in {dataset_name} interface dataset, because of covalently linked to protein")
+            
+        if self.scheme == "neighbor":
+            # Remove chain iids from q_pn_unit_context_group_iids that were excluded by filters
+            valid_iids_per_assembly = metadata_df.groupby(['pdb_id', 'assembly_id'])['q_pn_unit_iid'].apply(set).to_dict()
+            metadata_df['q_pn_unit_context_group_iids'] = metadata_df.apply(
+                lambda row: [
+                    iid for iid in row['q_pn_unit_context_group_iids']
+                    if iid in valid_iids_per_assembly.get((row['pdb_id'], row['assembly_id']), set())
+                ] if row['q_pn_unit_context_group_iids'] is not None else None,
+                axis=1
+            )
+        
+        pocket_df = self._apply_filters(self.cfg.train_filters.pocket_filter["2"], metadata_df)  
+        pocket_df['q_pn_unit_target_ligand_iids'] = pocket_df['q_pn_unit_iid'].apply(lambda x: x.split(','))
+        
+        #########################################################
+        # Add sampling weights info
+        #########################################################
+        pocket_df["clusters"] = pocket_df[['q_pn_unit_cluster_id']].apply(lambda x: tuple(sorted(tuple(x))), axis=1) 
+        cluster_id_to_size = pocket_df["clusters"].value_counts()
+        pocket_df["cluster_size"] = pocket_df["clusters"].map(cluster_id_to_size)
+        
+        weights = 1 / pocket_df["cluster_size"]
+        
+        pocket_df["sampling_weight"] = weights
+        
+        return pocket_df
             
     def _parse_dfs(self) -> pd.DataFrame:
         """
@@ -346,18 +404,30 @@ class SDDataset(MolecularDataset):
             chain_parser = GenericDFParser(pn_unit_iid_colnames=["q_pn_unit_iid"])
             
             if self.scheme == "neighbor":
-                interface_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_context_group_iids'])
+                if self.pocket_only_training:
+                    pocket_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_context_group_iids'], target_ligand_iids_colname=['q_pn_unit_target_ligand_iids'])
+                else:
+                    interface_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_context_group_iids'])
             elif self.scheme == "interface":
                 interface_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_iid_1', 'q_pn_unit_iid_2'])                            
             
-            parsed_df = pd.concat([
-                self.protein_monomer_chain_df.apply(chain_parser.parse, axis=1),
-                self.interface_df.apply(interface_parser.parse, axis=1)
-            ], axis=0)
+            if self.pocket_only_training:
+                # Pocket-only: only use interface_df (no monomer data)
+                parsed_df = self.pocket_df.apply(pocket_parser.parse, axis=1)
+            else:
+                parsed_df = pd.concat([
+                    self.protein_monomer_chain_df.apply(chain_parser.parse, axis=1),
+                    self.interface_df.apply(interface_parser.parse, axis=1)
+                ], axis=0)
 
-        else: 
-            val_parser = GenericDFParser(pn_unit_iid_colnames=['query_pn_unit_iids'])
-            parsed_df = self.metadata_df.apply(val_parser.parse, axis=1)
+        else:           
+            if not self.pocket_only_training:
+                val_parser = GenericDFParser(pn_unit_iid_colnames=['query_pn_unit_iids'])
+                parsed_df = self.metadata_df.apply(val_parser.parse, axis=1)
+            else:
+                val_parser = GenericDFParser(pn_unit_iid_colnames=['q_pn_unit_context_group_iids'], target_ligand_iids_colname=['q_pn_unit_target_ligand_iids'])
+                parsed_df = self.metadata_df.apply(val_parser.parse, axis=1)
+            
             logger.info(f"Final {self.phase} dataset contains {len(self.metadata_df['pdb_id'].unique().tolist())} pdbs")                
 
         return parsed_df
