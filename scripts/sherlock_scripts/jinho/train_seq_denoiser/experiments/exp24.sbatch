@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
-#SBATCH --time=1-0:00:00
+#SBATCH --time=2-0:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp24_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp24_%A_%a.err
 
