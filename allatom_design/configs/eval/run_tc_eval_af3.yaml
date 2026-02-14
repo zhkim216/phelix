@@ -16,7 +16,7 @@ protein_only: false
 
 # Outputs
 exp_name: eval_exp16_cfg0_lmpnnval_af3_tc
-base_out_dir: base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
+base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Configurations for getting designed sample paths
 pdb_cfg:
@@ -137,4 +137,4 @@ struct_pred_cfg:
 
 hydra:
   run:
-    dir: /home/possu/jinho/hydra_outputs
+    dir: /scratch/users/zhkim216/hydra_outputs

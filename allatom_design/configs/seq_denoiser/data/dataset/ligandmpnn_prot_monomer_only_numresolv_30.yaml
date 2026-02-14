@@ -15,12 +15,12 @@ train_filters:
     - "num_polymer_pn_units < 50"
   protein_monomer_chain_filter:    
     - "q_pn_unit_is_protein"
-    - "20 <= q_pn_unit_num_resolved_residues < 2048"
+    - "30 <= q_pn_unit_num_resolved_residues < 2048"
   interface_filter:
     "1": 
       - "resolution < 3.5" 
       - "(not q_pn_unit_is_peptide)"
-      - "(q_pn_unit_is_protein and (20 <= q_pn_unit_num_resolved_residues < 2048)) or q_pn_unit_is_small_molecule or q_pn_unit_is_metal"      
+      - "(q_pn_unit_is_protein and (20 <= q_pn_unit_num_resolved_residues < 2048)) or (not q_pn_unit_is_protein)"      
     "2":
       - "n_prot == 1"
       - "((n_small_molecule == 1) and (contact_num_contacts >= 2) and (2.4 <= contact_min_distance <= 5.0)) or ((n_metal == 1) and (contact_num_contacts >= 2) and (contact_min_distance <= 3.2))"      

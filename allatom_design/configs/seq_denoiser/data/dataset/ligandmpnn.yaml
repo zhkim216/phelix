@@ -21,11 +21,7 @@ train_filters:
       - "(q_pn_unit_is_small_molecule and num_contacting_protein_chains == 1) or (q_pn_unit_is_protein and (20 <= q_pn_unit_num_resolved_residues < 2048))"      
     "2":
       - "n_prot == 1"
-<<<<<<< HEAD
-      - "(n_small_molecule == 1) and (contact_num_contacts >= 3)"      
-=======
       - "(n_small_molecule == 1) and (contact_num_contacts >= 5)"          
->>>>>>> refs/remotes/origin/jinho/AAA
 
 val_filters:
   metadata_filter:    
