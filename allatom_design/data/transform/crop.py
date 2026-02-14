@@ -1052,3 +1052,141 @@ class CropSpatialLikeAF3Constrained(CropTransformBase):
 
         return data
 
+
+class CropToPocket(CropTransformBase):
+    """Crop the atom array to pocket residues and non-protein tokens.
+
+    Keeps all non-protein tokens (ligands, metals, nucleic acids, peptides, etc.)
+    and only retains protein tokens whose atoms are annotated as ligand pocket
+    (``is_ligand_pocket``).  When the total number of tokens exceeds
+    ``max_tokens``, pocket protein tokens are pruned by min distance to the
+    nearest target ligand atom (``atom_is_target_ligand_chain``), keeping the
+    closest ones.
+
+    Requires:
+        - ``AnnotateChainTypes`` must have been applied (provides
+          ``atom_is_protein_chain``).
+        - ``AnnotateLigandPockets`` must have been applied (provides
+          ``is_ligand_pocket`` annotation on the atom array).
+        - ``AnnotateTargetLigandChains`` must have been applied (provides
+          ``atom_is_target_ligand_chain`` annotation on the atom array).
+    """
+
+    def __init__(
+        self,
+        max_tokens: int = 100,
+        keep_uncropped_atom_array: bool = False,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.max_tokens = max_tokens
+        self.keep_uncropped_atom_array = keep_uncropped_atom_array
+
+    def check_input(self, data: dict) -> None:
+        check_contains_keys(data, ["atom_array"])
+        check_is_instance(data, "atom_array", AtomArray)
+        check_atom_array_annotation(data, ["atomize", "is_ligand_pocket", "atom_is_protein_chain", "atom_is_small_molecule_chain", "atom_is_target_ligand_chain"])
+
+    def forward(self, data: dict = None) -> dict:
+        atom_array = data["atom_array"]
+
+        # --- Token-level masks ------------------------------------------------                
+        is_protein_token = apply_token_wise(
+            atom_array, atom_array.atom_is_protein_chain, np.any
+        ) #! Include hetero atoms
+        is_pocket_token = apply_token_wise(
+            atom_array, atom_array.is_ligand_pocket, np.any
+        )
+
+        # Keep: all non-protein tokens  +  pocket protein tokens
+        is_token_in_crop = ~is_protein_token | (is_protein_token & is_pocket_token)
+
+        # --- Truncate if exceeding max_tokens ---------------------------------
+        if is_token_in_crop.sum() > self.max_tokens:
+            n_non_protein = int((~is_protein_token).sum())
+            n_pocket_budget = max(self.max_tokens - n_non_protein, 0)
+
+            if n_pocket_budget > 0:
+                # Get target ligand atom coordinates
+                target_ligand_coords = atom_array.coord[
+                    atom_array.atom_is_target_ligand_chain
+                ]
+                valid_lig_mask = ~np.isnan(target_ligand_coords).any(axis=1)
+                target_ligand_coords = target_ligand_coords[valid_lig_mask]  # (N_lig, 3)
+
+                # Pocket protein token center coordinates
+                token_coords = get_af3_token_center_coords(atom_array)
+                pocket_protein_idxs = np.where(
+                    is_protein_token & is_pocket_token
+                )[0]
+                pocket_token_coords = token_coords[pocket_protein_idxs]  # (N_pocket, 3)
+
+                if len(target_ligand_coords) > 0:
+                    # Per-atom min distance from each pocket token to
+                    # the nearest target ligand atom
+                    diffs = (
+                        pocket_token_coords[:, None, :]
+                        - target_ligand_coords[None, :, :]
+                    )  # (N_pocket, N_lig, 3)
+                    dists = np.linalg.norm(diffs, axis=2)  # (N_pocket, N_lig)
+                    min_dists = np.min(dists, axis=1)  # (N_pocket,)
+                else:
+                    # Fallback: no valid target ligand coords, use distance
+                    # to mean of all non-protein atom coordinates
+                    non_protein_mask = ~atom_array.atom_is_protein_chain
+                    valid_coords_mask = (
+                        ~np.isnan(atom_array.coord).any(axis=1)
+                        & non_protein_mask
+                    )
+                    if valid_coords_mask.any():
+                        fallback_center = np.mean(
+                            atom_array.coord[valid_coords_mask], axis=0
+                        )
+                    else:
+                        valid_any = ~np.isnan(atom_array.coord).any(axis=1)
+                        fallback_center = np.mean(
+                            atom_array.coord[valid_any], axis=0
+                        )
+                    min_dists = np.linalg.norm(
+                        pocket_token_coords - fallback_center, axis=1
+                    )
+
+                # Handle NaN distances (push to end)
+                min_dists = np.where(
+                    np.isfinite(min_dists), min_dists, np.inf
+                )
+                closest_idxs = pocket_protein_idxs[
+                    np.argsort(min_dists)[:n_pocket_budget]
+                ]
+
+                # Rebuild crop mask: all non-protein + closest pocket protein
+                is_token_in_crop = ~is_protein_token.copy()
+                is_token_in_crop[closest_idxs] = True
+            else:
+                # Budget exhausted by non-protein tokens alone
+                is_token_in_crop = ~is_protein_token
+
+        # --- Validate that at least one pocket protein residue remains --------
+        if not np.any(is_token_in_crop & is_protein_token):
+            raise ValueError(
+                f"No pocket protein residues found after crop for "
+                f"{data.get('example_id', 'unknown')}"
+            )
+
+        # --- Spread to atom level and build crop_info -------------------------
+        is_atom_in_crop = spread_token_wise(atom_array, is_token_in_crop)
+
+        crop_info = {
+            "type": self.__class__.__name__,
+            "requires_crop": True,
+            "crop_token_idxs": np.where(is_token_in_crop)[0],
+            "crop_atom_idxs": np.where(is_atom_in_crop)[0],
+        }
+
+        data["crop_info"] = crop_info
+        if self.keep_uncropped_atom_array:
+            data["crop_info"]["atom_array"] = atom_array
+        data["atom_array"] = atom_array[crop_info["crop_atom_idxs"]]
+
+        return data
+

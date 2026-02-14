@@ -395,13 +395,13 @@ class AnnotateChainTypes(Transform):
         nucleic_acid_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.NUCLEIC_ACIDS]
         non_polymer_chain_type_enums = [x.value for x in aw_enums.ChainTypeInfo.NON_POLYMERS]
         
-        # Protein chain flags
+        # chain flags
         atom_is_protein_chain = np.zeros(len(atom_array), dtype=bool)     
         atom_is_peptide_chain = np.zeros(len(atom_array), dtype=bool)   
         atom_is_nucleic_acid_chain = np.zeros(len(atom_array), dtype=bool)
         atom_is_metal_chain = np.zeros(len(atom_array), dtype=bool)
-        atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)
-        
+        atom_is_small_molecule_chain = np.zeros(len(atom_array), dtype=bool)        
+                                
         for pn_unit_iid in np.unique(atom_array.pn_unit_iid):
             try:
                 pn_unit_mask = (atom_array.pn_unit_iid == pn_unit_iid)
@@ -520,9 +520,7 @@ class AddCachedResidueData(Transform): #! (JH) changed 251001
             data["cached_residue_level_data"] = {"residues": self._residue_cache}
         return data
 
-
-#! (JH) 251128 added: Binding site annotation for docking metrics
-
+### Binding site annotation
 def annotate_ligand_pockets(
     atom_array: AtomArray = None,
     pocket_distance: float = 5.0,
@@ -557,9 +555,9 @@ def annotate_ligand_pockets(
     assert hasattr(atom_array, 'chain_iid') or hasattr(atom_array, 'pn_unit_iid'), "atom_array must have chain_iid or pn_unit_iid"
         
     if (receptor_chain_iids is None) or (ligand_chain_iids is None):
-        # Used in training time or when there is no specified receptor and ligand chains        
-        ligand_pn_unit_iids, ligand_counts = np.unique(atom_array.pn_unit_iid[~atom_array.is_polymer], return_counts=True)
-        # Todo: handling covalently linked non-polymers
+        # Used in training time or when there is no specified receptor and ligand chains      
+        ligand_mask = (~atom_array.is_covalent_modification) & (~atom_array.is_polymer)        
+        ligand_pn_unit_iids, ligand_counts = np.unique(atom_array.pn_unit_iid[ligand_mask], return_counts=True)                        
         valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
         valid_ligand_iids = ligand_pn_unit_iids[valid_ligand_mask] #! in this case, pn_unit_iids are used        
         all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_iids)                
@@ -635,7 +633,7 @@ class AnnotateLigandPockets(Transform):
             ligand_chain_iids=ligand_chain_iids,
         )
         return data
-
+    
 
 def annotate_ligand_pockets_pseudocb(
     atom_array: AtomArray,
@@ -777,7 +775,41 @@ class AnnotateLigandPocketsPseudoCB(Transform):
             annotation_name=self.annotation_name,
         )
         return data
+
+class AnnotateTargetLigandChains(Transform):
+    """Annotate the target ligand chains to the atom array.
+    #! WARNING: This transform is only compatible with pocket-only training where target_ligand_iids is defined in the metadata.
+    """
+    def __init__(self, n_min_ligand_atoms: int = 1):
+        super().__init__()
+        self.n_min_ligand_atoms = n_min_ligand_atoms
+    
+    @override
+    def check_input(self, data: dict[str, Any]) -> None:
+        check_contains_keys(data, ["atom_array"])
+        check_is_instance(data, "atom_array", AtomArray)
+    
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:        
+        target_ligand_iids = data.get('target_ligand_iids', None)
+        atom_array = data["atom_array"]
+        if target_ligand_iids is None:
+            ligand_mask = (~atom_array.is_covalent_modification) & (~atom_array.is_polymer)
+            ligand_pn_unit_iids, ligand_counts = np.unique(atom_array.pn_unit_iid[ligand_mask], return_counts=True)
+            valid_ligand_mask = ligand_counts >= self.n_min_ligand_atoms
+            valid_ligand_iids = ligand_pn_unit_iids[valid_ligand_mask]
+            target_ligand_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_iids)
+            target_ligand_iids = np.unique(atom_array.pn_unit_iid[target_ligand_mask])
+            
+        if isinstance(target_ligand_iids, str):
+            target_ligand_iids = [target_ligand_iids]                
         
+        target_ligand_mask = np.isin(atom_array.pn_unit_iid, target_ligand_iids)
+        atom_array.set_annotation("atom_is_target_ligand_chain", target_ligand_mask)
+        return data
+
+
+
 class GetNCACOAndPseudoCBCoords(Transform):
     """
     Get N, CA, C, O and pseudo CB coordinates for the atom array.
@@ -1015,4 +1047,31 @@ class RemoveUnsupportedChainTypes(Transform):
         # Update data
         data["atom_array"] = atom_array
 
+        return data
+
+
+class MarkAllProteinAsPocket(Transform):
+    """Mark all protein chain atoms as ligand pocket.
+
+    Used in pocket-only training where the atom array has already been cropped
+    to pocket residues via ``CropToPocket``.  After cropping, all remaining
+    protein residues are, by construction, pocket residues.  This transform
+    simply sets ``is_ligand_pocket = atom_is_protein_chain`` so that downstream
+    features (``token_is_ligand_pocket``, ``atom_is_ligand_pocket``) and
+    metrics (``ligand_pocket_seq_acc``) work correctly.
+    """
+
+    @override
+    def check_input(self, data: dict[str, Any]) -> None:
+        check_contains_keys(data, ["atom_array"])
+        check_is_instance(data, "atom_array", AtomArray)
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        atom_array = data["atom_array"]
+        atom_array.set_annotation(
+            "is_ligand_pocket",
+            atom_array.atom_is_protein_chain.copy(),
+        )
+        data["atom_array"] = atom_array
         return data

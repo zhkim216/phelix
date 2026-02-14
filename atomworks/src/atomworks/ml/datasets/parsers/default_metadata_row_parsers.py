@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from atomworks.common import as_list
@@ -245,6 +246,7 @@ class GenericDFParser(MetadataRowParser):
         example_id_colname: str = "example_id",
         path_colname: str = "path",
         pn_unit_iid_colnames: str | list[str] | None = None,
+        target_ligand_iids_colname: str | list[str] | None = None, #! changed (JH)
         assembly_id_colname: str | None = None,
         base_path: str = "",
         extension: str = "",
@@ -262,6 +264,14 @@ class GenericDFParser(MetadataRowParser):
             self.pn_unit_iid_colnames = pn_unit_iid_colnames
 
         self.assembly_id_colname = assembly_id_colname
+
+        # target_ligand_iids_colname (JH)
+        if isinstance(target_ligand_iids_colname, str):
+            self.target_ligand_iids_colname = [target_ligand_iids_colname]
+        elif target_ligand_iids_colname is None:
+            self.target_ligand_iids_colname = []
+        else:
+            self.target_ligand_iids_colname = target_ligand_iids_colname
 
         self.attrs = attrs.copy() if attrs else {}
         # (For clarity, we explicitly expose base_path and extension, but just treat them as additional attributes)
@@ -283,6 +293,17 @@ class GenericDFParser(MetadataRowParser):
         # Assemble input pn_units (to inform cropping)
         query_pn_unit_iids = [row[colname] for colname in self.pn_unit_iid_colnames]
 
+        # Assemble target ligand iids (JH)
+        # Note: Each column value is already an array/list, so we need to flatten them
+        target_ligand_iids = []
+        for colname in self.target_ligand_iids_colname:
+            val = row[colname]
+            if isinstance(val, (list, np.ndarray)):
+                target_ligand_iids.extend(val)
+            else:
+                target_ligand_iids.append(val)
+        target_ligand_iids = np.array(target_ligand_iids)
+
         # Get the assembly ID if specified, otherwise default to "1"
         assembly_id = row[self.assembly_id_colname] if self.assembly_id_colname is not None else "1"
 
@@ -300,6 +321,7 @@ class GenericDFParser(MetadataRowParser):
             + [self.example_id_colname, self.path_colname]
             + ([self.assembly_id_colname] if self.assembly_id_colname else [])
             + ["base_path", "extension"]
+            + self.target_ligand_iids_colname
         )
 
         return {
@@ -307,5 +329,6 @@ class GenericDFParser(MetadataRowParser):
             "path": path,
             "assembly_id": assembly_id,
             "query_pn_unit_iids": query_pn_unit_iids,
+            "target_ligand_iids": target_ligand_iids,
             "extra_info": {k: v for k, v in extra_info.items() if k not in exclude_cols},
         }
