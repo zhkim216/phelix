@@ -49,7 +49,6 @@ featurizer_cfg:
   remove_unresolved_tokens: true
   max_tokens: 256 #! DEBUG (min)
   max_atoms: 2304 #! DEBUG (min)
-  crop_center_cutoff_distance: 15.0
   crop_spatial_p_protein_monomer_chain: 0.5 # For monomer chain, 50% of the time, we crop spatially
   drop_prob_non_protein_chains: 0.0
   # Interface crop constraints  
