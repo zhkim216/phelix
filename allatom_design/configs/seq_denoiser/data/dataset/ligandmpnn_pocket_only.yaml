@@ -19,6 +19,7 @@ train_filters:
       - "resolution < 3.5"       
     "2":
       - "q_pn_unit_is_biologically_meaningful_small_molecule == True"
+      - "q_pn_unit_resolution_ratio >= 0.8"
       - "q_pn_unit_expected_heavy_atoms_non_polymer <= 150"
       - "num_contacting_protein_chains == 1"
     
