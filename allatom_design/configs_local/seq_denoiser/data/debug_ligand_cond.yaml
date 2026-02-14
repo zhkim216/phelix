@@ -75,6 +75,7 @@ pocket_featurizer_cfg:
   # Pocket crop parameters
   max_tokens: 256          # Max tokens after pocket crop (also used for padding)
   max_atoms: 4608          # Max atoms for padding
+  spatial_crop_radius: 15.0
   pocket_crop_distance: 5.0  # Distance (A) for identifying pocket residues
   use_pocket_rbf: ${denoiser.mpnn.token_features.use_pocket_rbf}
   pocket_rbf_distance: ${denoiser.mpnn.token_features.pocket_rbf_distance}
