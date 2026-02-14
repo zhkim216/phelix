@@ -59,7 +59,7 @@ class AtomworksSDDataModule(L.LightningDataModule):
                                 num_workers=self.cfg.num_workers,
                                 shuffle=False,
                                 pin_memory=True,
-                                drop_last=True,
+                                drop_last=False,
                                 collate_fn=sd_collator,
                                 worker_init_fn=worker_init_fn)
 
@@ -380,7 +380,18 @@ class SDDataset(MolecularDataset):
             )
         
         pocket_df = self._apply_filters(self.cfg.train_filters.pocket_filter["2"], metadata_df)  
-        pocket_df['q_pn_unit_target_ligand_iids'] = pocket_df['q_pn_unit_iid'].apply(lambda x: x.split(','))
+        # Keep target ligand IDs at pn_unit granularity (e.g., "A_1,B_1"), not per-chain IDs.
+        pocket_df['q_pn_unit_target_ligand_iids'] = pocket_df['q_pn_unit_iid'].apply(
+            lambda x: [x] if isinstance(x, str) else (list(x) if isinstance(x, (list, tuple, np.ndarray)) else [])
+        )
+        # Exclude unexpected multi-target entries (e.g., ["A_1,B_1", "C_1,D_1"]).
+        single_target_mask = pocket_df['q_pn_unit_target_ligand_iids'].apply(lambda x: len(x) == 1)
+        if (~single_target_mask).any():
+            n_excluded = int((~single_target_mask).sum())
+            pocket_df = pocket_df[single_target_mask]
+            logger.info(
+                f"Excluded {n_excluded} pocket examples in {dataset_name} interface dataset, because of multiple target ligands"
+            )
         
         #########################################################
         # Add sampling weights info
