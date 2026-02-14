@@ -1,5 +1,5 @@
 defaults:
-  - dataset@_here_: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
+  - dataset@_here_: ligandmpnn_pocket_only  # Default: ligandmpnn, change to boltz for boltz dataset
 
 task: ${model.task}
 pdb_path: /home/possu/jinho/datasets/atomworks_pdb_full_v3
@@ -39,6 +39,8 @@ cif_parser_args:
   convert_mse_to_met: true
   hydrogen_policy: "remove"
 
+pocket_only_training: true  # Set to true for pocket-only training (interface data only, pocket crop)
+
 featurizer_cfg:
   is_inference: false
   occupancy_threshold_protein_backbone: 0.0
@@ -57,6 +59,24 @@ featurizer_cfg:
   pocket_rbf_distance: ${denoiser.mpnn.token_features.pocket_rbf_distance}
   residue_cache_dir: ${data.residue_cache_dir}
   max_conformers_per_residue: 50
+  apply_random_augmentation: true
+  translation_scale: 1.0
+  asymmetric_noise: false
+  protein_noise_scale: 0.3
+  context_noise_scale: 0.05
+
+# Pocket-only featurizer config (used when pocket_only_training is true)
+pocket_featurizer_cfg:
+  is_inference: false
+  occupancy_threshold_protein_backbone: 0.0
+  training_structure_noise: 0.1
+  remove_unresolved_tokens: true
+  # Pocket crop parameters
+  max_tokens: 256          # Max tokens after pocket crop (also used for padding)
+  max_atoms: 4608          # Max atoms for padding
+  pocket_crop_distance: 5.0  # Distance (A) for identifying pocket residues
+  use_pocket_rbf: ${denoiser.mpnn.token_features.use_pocket_rbf}
+  pocket_rbf_distance: ${denoiser.mpnn.token_features.pocket_rbf_distance}
   apply_random_augmentation: true
   translation_scale: 1.0
   asymmetric_noise: false
