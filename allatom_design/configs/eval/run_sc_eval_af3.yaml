@@ -9,20 +9,20 @@ wandb:
   group: null
 
 # Basic settings
-debug: true
+debug: false
 num_debug_samples: 2
 seed: 0
 protein_only: false
 
 # Outputs
-exp_name: debug_run_sc_eval_af3
-base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
+exp_name: eval_lmpnn010_lmpnnval_af3
+base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des
 
 # Configurations for getting designed sample paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/caliby_samples/rfd3_val_cifs/samples
+  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_lmpnn010_lmpnnval_af3/samples/backbones
   pdb_name_list: null
-  pdb_name_ext: ".cif"
+  pdb_name_ext: ".pdb"
   n_subsample: null
   # Recursive search (not needed for flat directories)
   recursive: false
@@ -92,7 +92,7 @@ featurizer_cfg:
 struct_pred_cfg:
   model_name: "af3"
   evaluate_self_consistency: true
-  calculate_metrics_only: false
+  calculate_metrics_only: true
   af3:
     runner_path: /home/users/zhkim216/code/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
     json_config:

@@ -15,6 +15,10 @@ BASE_DIR=/home/users/zhkim216/code/allatom-design
 HYDRA_DIR=/scratch/users/zhkim216/hydra_outputs
 OUT_DIR=/scratch/users/zhkim216/out_dir
 
+# Separate inductor cache per array task to avoid concurrent write corruption
+export TORCHINDUCTOR_CACHE_DIR="/scratch/users/zhkim216/cache/inductor_cache_${SLURM_ARRAY_TASK_ID}"
+mkdir -p "${TORCHINDUCTOR_CACHE_DIR}"
+
 mkdir -p /scratch/users/zhkim216/job_output/train_seq_denoiser "${HYDRA_DIR}" "${OUT_DIR}"
 
 cd "${BASE_DIR}"
@@ -96,6 +100,7 @@ python3 allatom_design/train_seq_denoiser.py \
     data.sampling_weights.k_percentile=90.0 \
     data.featurizer_cfg.drop_prob_non_protein_chains=0.0 \
     denoiser.mpnn.token_features.protein_graph_rbf_type=ca \
+    denoiser.mpnn.token_features.ligand_atom_context_num=25 \
     denoiser.mpnn.ligand_conditioning=true \
     mask_selector.restype_masking_schedule="uniform_cosine_t" \
     logging.log_every_n_steps=100 \
