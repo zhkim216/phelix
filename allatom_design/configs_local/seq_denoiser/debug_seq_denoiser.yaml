@@ -89,6 +89,10 @@ loss:
     label_smoothing: 0.1
     per_token_avg: false
     compile_msa_loss: false
+  
+  # Main training loss scope
+  main_seq_loss_pocket_only: false
+  main_potts_loss_pocket_only: false
     
 optim:
   optimizer: "noam"
