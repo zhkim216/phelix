@@ -155,17 +155,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         ban_S = ban_S + const.AF3_ENCODING.encode(const.AF3_ENCODING.non_protein_tokens)  # ban all non-protein tokens
 
         # Initialize random sequence and sampling masks
-        mask_sample = (1 - batch["seq_cond_mask_potts"]) * batch["token_pad_mask"]  # 1 where we can sample, 0 where we can't
-
-        # Pocket-only sampling: restrict design to pocket residues only
-        pocket_radius = sampling_inputs.get("pocket_radius", None)
-        if pocket_radius is not None:
-            pocket_mask = batch.get("token_is_ligand_pocket", None)
-            if pocket_mask is not None:
-                mask_sample = mask_sample * pocket_mask
-                print(f"Pocket-only sampling: restricting design to {int(mask_sample.sum().item())} pocket residues (pocket_radius={pocket_radius})")
-            else:
-                print("WARNING: pocket_radius specified but token_is_ligand_pocket not found in batch. Designing all residues.")
+        mask_sample = (1 - batch["seq_cond_mask_potts"]) * batch["token_pad_mask"]  # 1 where we can sample, 0 where we can't        
 
         mask_sample, _, S_init = potts.init_sampling_masks(
             logits_init, mask_sample=mask_sample, S=batch["restype"].argmax(dim=-1), ban_S=ban_S, pos_restrict_aatype=sampling_inputs.get("pos_restrict_aatype", None)

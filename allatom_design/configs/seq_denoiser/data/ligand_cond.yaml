@@ -1,5 +1,5 @@
 defaults:
-  - dataset@_here_: ligandmpnn_pocket_only  # Default: ligandmpnn, change to boltz for boltz dataset
+  - dataset@_here_: ligandmpnn  # Default: ligandmpnn, change to boltz for boltz dataset
 
 task: ${model.task}
 pdb_path: /home/possu/jinho/datasets/atomworks_pdb_full_v3
@@ -39,7 +39,8 @@ cif_parser_args:
   convert_mse_to_met: true
   hydrogen_policy: "remove"
 
-pocket_only_training: true  # Set to true for pocket-only training (interface data only, pocket crop)
+pocket_only_training: false
+interface_only_training: false  # Standard featurizer + interface-only sampling (exclude monomer)
 
 featurizer_cfg:
   is_inference: false
@@ -51,6 +52,7 @@ featurizer_cfg:
   max_atoms: 2304 #! DEBUG (min)
   crop_spatial_p_protein_monomer_chain: 0.5 # For monomer chain, 50% of the time, we crop spatially
   drop_prob_non_protein_chains: 0.0
+  crop_center_cutoff_distance: 15.0
   # Interface crop constraints  
   min_protein_tokens_in_interface_crop: 20 # Ensure at least N protein tokens from the nearest protein pn_unit (chain) to the crop center.
   pocket_distance: 6.0
