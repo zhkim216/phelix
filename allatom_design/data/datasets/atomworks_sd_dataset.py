@@ -359,6 +359,12 @@ class SDDataset(MolecularDataset):
         """
         metadata_df = self.metadata_df.copy()
         metadata_df = self._apply_filters(self.cfg.train_filters.pocket_filter["1"], metadata_df)
+
+        if self.cfg.exclude_val_cluster:
+            prev_len = len(metadata_df)
+            metadata_df = metadata_df[~(metadata_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids))]
+            current_len = len(metadata_df)
+            logger.info(f"Excluded {prev_len - current_len} pockets in {dataset_name} pocket dataset, because of cluster exclusion")
         
         # Exclude small molecules that are covalently linked to proteins
         if self.cfg.exclude_small_molecules_covalently_linked_to_protein and metadata_df.get("q_pn_unit_is_maybe_covalently_linked_to_protein", False).sum() > 0:
