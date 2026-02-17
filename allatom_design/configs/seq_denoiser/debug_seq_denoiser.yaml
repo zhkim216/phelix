@@ -91,6 +91,10 @@ loss:
     label_smoothing: 0.1
     per_token_avg: false
     compile_msa_loss: false
+  
+  # Main training loss scope
+  main_seq_loss_pocket_only: true
+  main_potts_loss_pocket_only: true
 
   ligand_pocket_dist_cutoff: 5.0 # distance cutoff for lc_pocket_seq_loss
 

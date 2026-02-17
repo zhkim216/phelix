@@ -81,6 +81,10 @@ class SDDataset(MolecularDataset):
 
         self.scheme = cfg.get("grouping_scheme", "all")
         self.pocket_only_training = cfg.get("pocket_only_training", False)
+        self.interface_only_training = cfg.get("interface_only_training", False)
+        if self.pocket_only_training and self.interface_only_training:
+            logger.warning("interface_only_training is ignored when pocket_only_training=True")
+            self.interface_only_training = False
 
         # Initialize featurizer
         # Note: We remove INFERENCE_ONLY_KEYS to avoid cuda initialization issues during training.
@@ -102,25 +106,39 @@ class SDDataset(MolecularDataset):
             self.metadata_df = self._process_metadata_df(metadata_path=self.metadata_path)        
             
             if not self.pocket_only_training:
-                # Process protein chain df (skipped in pocket-only training)
-                self.protein_monomer_chain_df = self._process_protein_monomer_chain_df(dataset_name=Path(self.metadata_path).parent.name)                                                                
-        
                 # Process interface df
                 self.interface_df = self._process_interface_df(metadata_path=self.metadata_path, dataset_name=Path(self.metadata_path).parent.name)
+                if self.interface_only_training:
+                    # Keep API compatibility for downstream code paths.
+                    self.protein_monomer_chain_df = self.metadata_df.iloc[0:0].copy()
+                else:
+                    # Process protein chain df (skipped in pocket-only/interface-only training)
+                    self.protein_monomer_chain_df = self._process_protein_monomer_chain_df(dataset_name=Path(self.metadata_path).parent.name)                                                                
             
             else:
                 self.pocket_df = self._process_pocket_df(metadata_path=self.metadata_path, dataset_name=Path(self.metadata_path).parent.name)
         
             # Compute sampling weights
             if not self.pocket_only_training:
-                # Cluster-balanced sampling across both dataframes
-                self.protein_monomer_chain_df, self.interface_df = add_cluster_balanced_sampling_weights(
-                    monomer_df=self.protein_monomer_chain_df,
-                    interface_df=self.interface_df,
-                    alphas_interface=self.cfg.sampling_weights["alphas_interface"],                
-                    cluster_col="q_pn_unit_cluster_id",
-                    k_percentile=self.cfg.sampling_weights["k_percentile"]
-                )            
+                if self.interface_only_training:
+                    # Preserve existing interface weighting logic while excluding monomer samples.
+                    empty_monomer_df = self.metadata_df.iloc[0:0].copy()
+                    _, self.interface_df = add_cluster_balanced_sampling_weights(
+                        monomer_df=empty_monomer_df,
+                        interface_df=self.interface_df,
+                        alphas_interface=self.cfg.sampling_weights["alphas_interface"],
+                        cluster_col="q_pn_unit_cluster_id",
+                        k_percentile=self.cfg.sampling_weights["k_percentile"],
+                    )
+                else:
+                    # Cluster-balanced sampling across both dataframes
+                    self.protein_monomer_chain_df, self.interface_df = add_cluster_balanced_sampling_weights(
+                        monomer_df=self.protein_monomer_chain_df,
+                        interface_df=self.interface_df,
+                        alphas_interface=self.cfg.sampling_weights["alphas_interface"],                
+                        cluster_col="q_pn_unit_cluster_id",
+                        k_percentile=self.cfg.sampling_weights["k_percentile"]
+                    )            
             # Parse dfs into a common format and concatenate
             self.parsed_df = self._parse_dfs()        
 
@@ -366,6 +384,12 @@ class SDDataset(MolecularDataset):
             current_len = len(metadata_df)
             logger.info(f"Excluded {prev_len - current_len} pockets in {dataset_name} pocket dataset, because of cluster exclusion")
         
+        if self.cfg.exclude_val_cluster:
+            prev_len = len(metadata_df)
+            metadata_df = metadata_df[~(metadata_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids))]
+            current_len = len(metadata_df)
+            logger.info(f"Excluded {prev_len - current_len} pockets in {dataset_name} pocket dataset, because of cluster exclusion")
+        
         # Exclude small molecules that are covalently linked to proteins
         if self.cfg.exclude_small_molecules_covalently_linked_to_protein and metadata_df.get("q_pn_unit_is_maybe_covalently_linked_to_protein", False).sum() > 0:
             len_before = len(metadata_df)
@@ -431,6 +455,8 @@ class SDDataset(MolecularDataset):
             if self.pocket_only_training:
                 # Pocket-only: only use interface_df (no monomer data)
                 parsed_df = self.pocket_df.apply(pocket_parser.parse, axis=1)
+            elif self.interface_only_training:
+                parsed_df = self.interface_df.apply(interface_parser.parse, axis=1)
             else:
                 parsed_df = pd.concat([
                     self.protein_monomer_chain_df.apply(chain_parser.parse, axis=1),
