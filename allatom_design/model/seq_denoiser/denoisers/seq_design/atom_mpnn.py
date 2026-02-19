@@ -49,6 +49,7 @@ class AtomMPNN(nn.Module):
         self.k_neighbors = cfg.k_neighbors
         self.n_tokens = const.AF3_ENCODING.n_tokens        
                         
+        self.masked_distance_fill = cfg.get("masked_distance_fill", 1000.0)
         self.token_features = TokenFeatures(cfg.token_features)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=False)
         self.W_s = nn.Linear(self.n_tokens, self.hidden_dim, bias=False)
@@ -695,7 +696,7 @@ class TokenFeatures(nn.Module):
         
         mask_CBY = mask[:, :, None] * Y_m[:, None, :]  # [A,B]
         L2_AB = torch.sum((CB[:, :, None, :] - Y[:, None, :, :]) ** 2, -1)
-        L2_AB = L2_AB * mask_CBY + (1 - mask_CBY) * 1000.0
+        L2_AB = L2_AB * mask_CBY + (1 - mask_CBY) * self.masked_distance_fill
 
         nn_idx = torch.argsort(L2_AB, -1)[:, :, :number_of_ligand_atoms]
         L2_AB_nn = torch.gather(L2_AB, -1, nn_idx)
