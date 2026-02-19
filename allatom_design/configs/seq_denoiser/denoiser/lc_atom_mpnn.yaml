@@ -8,7 +8,7 @@ task: ${model.task}
 
 mpnn:
   n_channel: 128
-  k_neighbors: 48
+  k_neighbors: 32
   n_layers: 3
   dropout_p: 0.1
   ligand_conditioning: true
@@ -42,7 +42,7 @@ mpnn:
     pocket_rbf_distance: 5.0  # distance threshold (Å) for pseudo-CB pocket definition
 
   potts:
-    k_neighbors_potts: 48
+    k_neighbors_potts: 32
     max_dist_potts: null
     use_potts: true
     parameterization: "factor"
