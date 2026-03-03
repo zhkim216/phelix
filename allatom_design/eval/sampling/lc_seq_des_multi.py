@@ -155,6 +155,13 @@ def main(cfg: DictConfig):
             cif_parse_cfg_lcaliby = cfg.cif_cfg.parse.designed_samples
             preprocess_cfg_lcaliby = cfg.preprocess_cfg.designed_samples
                                     
+        _pocket_only = cfg.get("pocket_only", False)
+        _pocket_featurizer_cfg = (
+            OmegaConf.to_container(cfg.pocket_featurizer_cfg, resolve=True)
+            if _pocket_only and cfg.get("pocket_featurizer_cfg", None) is not None
+            else None
+        )
+        
         results = redesign_with_lcaliby(seed = cfg.seed,
                                         input_sample_is_designed = cfg.input_sample_is_designed,
                                         sample_dict = sample_dict,
@@ -167,6 +174,8 @@ def main(cfg: DictConfig):
                                         log_dir = log_dir,
                                         pos_constraint_df = pos_constraint_df,
                                         protein_only = cfg.get("protein_only", False),
+                                        pocket_only = _pocket_only,
+                                        pocket_featurizer_cfg = _pocket_featurizer_cfg,
                                         csv_suffix = csv_suffix)                
                     
         # Evaluate each checkpoint
