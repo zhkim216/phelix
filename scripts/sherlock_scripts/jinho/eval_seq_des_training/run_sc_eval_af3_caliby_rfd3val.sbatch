@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=sc_eval_caliby_rfd3val
-#SBATCH -p possu,bioe
-#SBATCH --array=0-49
+#SBATCH -p possu,bioe,owners,gpu
+#SBATCH --array=24-49
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
-#SBATCH --time=1-0:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/sc_eval_caliby_rfd3val_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/sc_eval_caliby_rfd3val_%A_%a.err
 

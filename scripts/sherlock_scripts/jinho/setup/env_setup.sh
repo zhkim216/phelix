@@ -32,8 +32,8 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=true
 export XLA_CLIENT_MEM_FRACTION=0.95
 
 # Paths
-export SIF=/scratch/users/zhkim216/containers/lullaby.sif
-export VENV=/scratch/users/zhkim216/venv/lullaby
+export SIF=/scratch/users/zhkim216/containers/lcaliby.sif
+export VENV=/scratch/users/zhkim216/venv/lcaliby
 export SCRATCH=/scratch/users/zhkim216
 
 # Project root (Parent directory of the scripts)

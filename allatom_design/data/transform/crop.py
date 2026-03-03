@@ -1074,7 +1074,7 @@ class CropToPocket(CropTransformBase):
 
     def __init__(
         self,
-        max_tokens: int = 100,
+        max_tokens: int | None = 100,
         keep_uncropped_atom_array: bool = False,
         **kwargs,
     ):
@@ -1102,7 +1102,7 @@ class CropToPocket(CropTransformBase):
         is_token_in_crop = ~is_protein_token | (is_protein_token & is_pocket_token)
 
         # --- Truncate if exceeding max_tokens ---------------------------------
-        if is_token_in_crop.sum() > self.max_tokens:
+        if self.max_tokens is not None and is_token_in_crop.sum() > self.max_tokens:
             n_non_protein = int((~is_protein_token).sum())
             n_pocket_budget = max(self.max_tokens - n_non_protein, 0)
 

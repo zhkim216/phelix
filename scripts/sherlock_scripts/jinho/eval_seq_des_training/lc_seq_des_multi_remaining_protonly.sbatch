@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=lc_seq_des_multi_rwn
-#SBATCH -p possu
-#SBATCH --array=0-0
+#SBATCH --job-name=lc_seq_des_multi
+#SBATCH -p possu,bioe
+#SBATCH --array=0-9
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
@@ -27,26 +27,40 @@ PROJECT=ligand_seq_des
 
 # Define combinations of models & steps
 COMBINATIONS=(
-    "exp16_cfg0,62500,false"        
+    "exp9_cfg5,2500,true"        
+    "exp9_cfg5,10000,true"    
+    "exp9_cfg12,2500,true"    
+    "exp9_cfg12,12500,true"    
+    "exp9_cfg12,22500,true"    
+    "exp9_cfg12,32500,true"    
+    "exp9_cfg12,42500,true"    
+    "exp9_cfg12,52500,true"    
 )
 
 # Parse the current combination
 IFS=',' read -r MODEL_NAME STEP PROTEIN_ONLY <<< "${COMBINATIONS[$SLURM_ARRAY_TASK_ID]}"
 
 # Input paths
-PDB_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp16_cfg0_lmpnnval_sm_filt_full_af3/step_62500_epoch_39/samples
-SAMPLING_INPUTS_CSV=null
-PDB_NAME_LIST=null
-VALSET_NAME="lmpnnval_sm_filt_full"
+PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
+SAMPLING_INPUTS_CSV=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/sampling_inputs_lmpnnval_small_molecule_filtered_protonly.csv
+PDB_NAME_LIST=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/lmpnnval_small_molecule_filtered_nogaphetero.txt
+VALSET_NAME="lmpnnval_sm_filt_nogaphetero"
+# "lmpnnval_sm_filt_full" or "lmpnnval_sm_filt_nogaphetero"
+
 POS_CONSTRAINT_CSV=null
-NATIVE_CIF_DIR=/scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
+LIGAND_SOURCE_PATH=/scratch/users/zhkim216/datasets/val_cifs/rfd3_ligand_conditional/lig_binder
+ADD_LIGANDS_TO_DESIGNED_SAMPLES=false
+SOURCE_IS_DESIGNED=false
 
 # Denoiser train directory
 DENOISER_TRAIN_DIR=/scratch/users/zhkim216/out_dir/ligand_seq_des/${MODEL_NAME}
 
 # Experiment name 
-
-EXP_NAME=eval_${MODEL_NAME}_rwn_${VALSET_NAME}_af3
+if [ "${PROTEIN_ONLY}" = "true" ]; then
+    EXP_NAME=eval_${MODEL_NAME}_${VALSET_NAME}_af3_protonly
+else
+    EXP_NAME=eval_${MODEL_NAME}_${VALSET_NAME}_af3
+fi
 
 echo "Starting evaluation for model=${MODEL_NAME}, step=${STEP}, protein_only=${PROTEIN_ONLY}, valset=${VALSET_NAME}"
 
@@ -72,24 +86,18 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     seq_des_cfg.atom_mpnn.overrides.num_seqs_per_pdb=1 \
     sampling_inputs_csv=${SAMPLING_INPUTS_CSV} \
     pos_constraint_csv=${POS_CONSTRAINT_CSV} \
-    redesign_cfg.use_native_seq=true \
-    redesign_cfg.native_cif_dir=${NATIVE_CIF_DIR} \
+    redesign_cfg.use_native_seq=false \
     pocket_cfg.pocket_distance_for_metrics=6.0 \
-    input_sample_is_all_atom=false \
-    input_sample_is_designed=true \
+    input_sample_is_all_atom=true \
+    input_sample_is_designed=false \
     load_from_cache=false \
     pdb_cfg.pdb_dir=${PDB_DIR} \
     pdb_cfg.pdb_name_list=${PDB_NAME_LIST} \
     pdb_cfg.pdb_name_ext=".cif" \
-    pdb_cfg.recursive=false \
-    pdb_cfg.split_by_subfolder=false \
-    pdb_cfg.sample_indices=null \
-    pdb_cfg.array_id=null \
-    pdb_cfg.num_arrays=null \
+    ligand_source_cfg.ligand_source_path=${LIGAND_SOURCE_PATH} \
+    ligand_source_cfg.add_ligands_to_designed_samples=${ADD_LIGANDS_TO_DESIGNED_SAMPLES} \
+    ligand_source_cfg.source_is_designed=${SOURCE_IS_DESIGNED} \
     featurizer_cfg.design.residue_cache_dir="/scratch/users/zhkim216/datasets/atomworks_cached_residue_data" \
-    struct_pred_cfg.af3.runner_path=/home/users/zhkim216/code/allatom-design/alphafold3/run_alphafold_debug_sherlock.py \
-    struct_pred_cfg.af3.inference_config.base.model_dir=/scratch/users/zhkim216/model_params/af3 \
-    struct_pred_cfg.af3.inference_config.base.db_dir=/scratch/users/zhkim216/af3_databases \
     struct_pred_cfg.af3.inference_config.base.flash_attention_implementation=triton \
     struct_pred_cfg.af3.inference_config.ss.num_recycles=10 \
     struct_pred_cfg.af3.inference_config.ss.num_diffusion_samples=5 \

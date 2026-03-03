@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=exp27
-#SBATCH -p possu,bioe
-#SBATCH --array=0-4
+#SBATCH -p possu
+#SBATCH --array=5
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
@@ -39,12 +39,13 @@ DENOISER_TYPE="lc_atom_mpnn"
 
 TRAIN_METADATA_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_filtered_grouped_250205.parquet"
 
-CONFIGS=(      
-  "data.featurizer_cfg.pocket_distance=5.0"   
+CONFIGS=(
+  "data.featurizer_cfg.pocket_distance=5.0"
   "data.featurizer_cfg.pocket_distance=6.0"
   "data.featurizer_cfg.pocket_distance=6.0 loss.seq_loss.per_token_avg=false loss.potts.per_token_avg=false"
   "data.featurizer_cfg.pocket_distance=7.0"
   "data.featurizer_cfg.pocket_distance=8.0"
+  "data.featurizer_cfg.pocket_distance=6.0 loss.main_seq_loss_pocket_only=false loss.main_potts_loss_pocket_only=false loss.seq_loss.per_token_avg=false loss.potts.per_token_avg=false data.interface_only_training=false data.sampling_weights.k_percentile=90.0"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
@@ -102,9 +103,13 @@ python3 allatom_design/train_seq_denoiser.py \
     data.sampling_weights.alphas_interface.a_protein_loi=1.0  \
     data.samples_per_epoch=50000 \
     data.sampling_weights.k_percentile=100.0 \
+    denoiser.mpnn.k_neighbors=32 \
     denoiser.mpnn.ligand_conditioning=true \
     denoiser.mpnn.token_features.use_pocket_rbf=false \
     denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb \
+    denoiser.mpnn.token_features.ligand_atom_context_num=25 \
+    denoiser.mpnn.token_features.sidechain_context_token_num=16 \
+    denoiser.mpnn.potts.k_neighbors_potts=32 \
     mask_selector.restype_masking_schedule="uniform_cosine_t" \
     logging.log_every_n_steps=100 \
     logging.wandb_watch_freq=500 \
