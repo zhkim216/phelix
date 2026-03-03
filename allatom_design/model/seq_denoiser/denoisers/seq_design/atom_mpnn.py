@@ -48,8 +48,7 @@ class AtomMPNN(nn.Module):
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
         self.n_tokens = const.AF3_ENCODING.n_tokens        
-                        
-        self.masked_distance_fill = cfg.get("masked_distance_fill", 1000.0)
+                                
         self.token_features = TokenFeatures(cfg.token_features)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=False)
         self.W_s = nn.Linear(self.n_tokens, self.hidden_dim, bias=False)
@@ -207,6 +206,7 @@ class TokenFeatures(nn.Module):
         self.cfg = cfg
 
         # Parameters        
+        self.masked_distance_fill = cfg.get("masked_distance_fill", 1000.0)
         self.k_neighbors = cfg.k_neighbors        
         self.num_positional_embeddings = cfg.num_positional_embeddings
         self.node_n_channel = cfg.node_n_channel
