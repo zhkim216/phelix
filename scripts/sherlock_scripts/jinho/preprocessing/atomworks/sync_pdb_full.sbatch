@@ -1,0 +1,46 @@
+#!/bin/bash
+#SBATCH --job-name=sync_pdb_full
+#SBATCH -p possu,normal,owners
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=2-0:00:00
+#SBATCH --output=/scratch/users/zhkim216/job_output/data_preprocessing/sync_pdb_full_%j.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/data_preprocessing/sync_pdb_full_%j.err
+
+source ~/.bashrc
+
+mkdir -p /scratch/users/zhkim216/job_output/data_preprocessing
+
+echo "==================================="
+echo "PDB Mirror Full Sync started at: $(date)"
+echo "Job ID: $SLURM_JOB_ID"
+echo "Running on node: $HOSTNAME"
+echo "==================================="
+
+DEST="/scratch/users/zhkim216/datasets/pdb_mirror_v2"
+REMOTE="rsync.wwpdb.org::ftp/data/structures/divided/mmCIF/"
+PORT=33444
+
+mkdir -p $DEST
+
+echo "Starting full PDB sync (~100GB)..."
+rsync -rltvz --stats --no-perms --chmod=ug=rwX,o=rX \
+    --delete --omit-dir-times \
+    --port=$PORT \
+    $REMOTE $DEST/
+
+echo ""
+echo "==================================="
+echo "Verification:"
+echo "Total files:"
+find $DEST -name "*.cif.gz" | wc -l
+echo "Total size:"
+du -sh $DEST
+echo ""
+echo "Sync completed at: $(date)"
+echo "Total runtime: $SECONDS seconds"
+echo "==================================="
+echo ""
+echo "Next steps:"
+echo "  1. rm -rf /scratch/users/zhkim216/datasets/pdb_mirror"
+echo "  2. mv /scratch/users/zhkim216/datasets/pdb_mirror_v2 /scratch/users/zhkim216/datasets/pdb_mirror"

@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=lc_seq_des_rfd3val
-#SBATCH -p possu,bioe
+#SBATCH -p possu,bioe,owners
 #SBATCH --array=0-49
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
-#SBATCH --time=1-0:00:00
-#SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_rfd3val_%A_%a.out
-#SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_rfd3val_%A_%a.err
+#SBATCH --time=02:00:00
+#SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_rfd3val_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_rfd3val_%A_%a.err
 
 # Define directories
 BASE_DIR=/home/users/zhkim216/code/allatom-design
@@ -23,11 +23,11 @@ export PYTHONWARNINGS="ignore"
 
 # Wandb settings
 WANDB_ID=zhkim216
-PROJECT=ligand_seq_des
+PROJECT=eval_ligand_seq_des
 
 # Model config
-MODEL_NAME="exp16_cfg0"
-STEP=62500
+MODEL_NAME="exp18_cfg3"
+STEP=52500
 
 # Input paths (rfd3 val CIFs with CCD code subdirectories)
 PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/rfd3_val_cifs/samples_uncompressed
@@ -41,6 +41,17 @@ EXP_NAME=eval_${MODEL_NAME}_${VALSET_NAME}_af3
 
 echo "Starting evaluation for model=${MODEL_NAME}, step=${STEP}, valset=${VALSET_NAME}, array_task=${SLURM_ARRAY_TASK_ID}/50 (CCD folder)"
 
+# Automatically detect flash attention implementation
+COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1)
+MAJOR=$(echo "$COMPUTE_CAP" | cut -d. -f1)
+
+if [[ "$MAJOR" -ge 8 ]]; then
+    FLASH_ATTN_IMPL="triton"
+else
+    FLASH_ATTN_IMPL="xla"
+fi
+echo "GPU compute capability: ${COMPUTE_CAP}, using flash_attention_implementation=${FLASH_ATTN_IMPL}"
+
 # Run evaluation script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py \
     wandb.no_wandb=false \
@@ -50,6 +61,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     debug=false \
     seed=0 \
     num_workers=${SLURM_CPUS_PER_TASK} \
+    protein_only=false \
     exp_name=${EXP_NAME} \
     base_out_dir=${BASE_OUT_DIR} \
     seq_des_cfg.denoiser_train_dir=${DENOISER_TRAIN_DIR} \
@@ -63,6 +75,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     sampling_inputs_csv=null \
     pos_constraint_csv=null \
     redesign_cfg.use_native_seq=false \
+    redesign_cfg.native_cif_dir=null \
+    pocket_cfg.pocket_distance_for_metrics=6.0 \
     input_sample_is_all_atom=true \
     input_sample_is_designed=true \
     load_from_cache=false \
@@ -75,7 +89,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     pdb_cfg.num_arrays=50 \
     'pdb_cfg.sample_indices=[0,1,2,3,4]' \
     featurizer_cfg.design.residue_cache_dir="/scratch/users/zhkim216/datasets/atomworks_cached_residue_data" \
-    struct_pred_cfg.af3.inference_config.base.flash_attention_implementation=triton \
+    struct_pred_cfg.af3.inference_config.base.flash_attention_implementation=${FLASH_ATTN_IMPL} \
     struct_pred_cfg.af3.inference_config.ss.num_recycles=10 \
     struct_pred_cfg.af3.inference_config.ss.num_diffusion_samples=5 \
     hydra.run.dir=${HYDRA_DIR}

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=exp8
+#SBATCH --job-name=exp9
 #SBATCH -p possu
-#SBATCH --array=0-2
+#SBATCH --array=4
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=1-0:00:00
-#SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp8_%A_%a.out
-#SBATCH --error=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp8_%A_%a.err
+#SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp9_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp9_%A_%a.err
 
 # Define directories
 BASE_DIR=/home/users/zhkim216/code/allatom-design
@@ -22,25 +22,23 @@ cd "${BASE_DIR}"
 WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 GROUP="training"
-EXP_NAME_BASE="exp8"
+EXP_NAME_BASE="exp9"
 
 # Dataset paths
 RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 TRAIN_METADATA_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_lmpnn.parquet"
+# Path where processed pdb files are stored
+PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3"
 
 # Experiment configs
 DENOISER_TYPE="lc_atom_mpnn"
 
-# Path where processed pdb files are stored
-PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3"
-
 CONFIGS=(  
-  "denoiser.mpnn.token_features.protein_graph_rbf_type=ca denoiser.mpnn.ligand_conditioning=false data/dataset@data=ligandmpnn_ppionly"
-  "denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb denoiser.mpnn.ligand_conditioning=false data/dataset@data=ligandmpnn_ppionly"
-  "denoiser.mpnn.token_features.protein_graph_rbf_type=ca denoiser.mpnn.ligand_conditioning=true data/dataset@data=ligandmpnn"
-  "denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb denoiser.mpnn.ligand_conditioning=true data/dataset@data=ligandmpnn"
-
-  
+  "denoiser.mpnn.token_features.protein_graph_rbf_type=ca denoiser.mpnn.ligand_conditioning=false data/dataset@data=ligandmpnn_ppionly data.grouping_scheme=interface"
+  "denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb denoiser.mpnn.ligand_conditioning=false data/dataset@data=ligandmpnn_ppionly data.grouping_scheme=interface"
+  "denoiser.mpnn.token_features.protein_graph_rbf_type=ca denoiser.mpnn.ligand_conditioning=true data/dataset@data=ligandmpnn data.grouping_scheme=interface"
+  "denoiser.mpnn.token_features.protein_graph_rbf_type=ncacocb denoiser.mpnn.ligand_conditioning=true data/dataset@data=ligandmpnn data.grouping_scheme=interface"
+  "denoiser.mpnn.token_features.protein_graph_rbf_type=ca denoiser.mpnn.ligand_conditioning=true data/dataset@data=ligandmpnn_wonuc data.grouping_scheme=interface"  
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
@@ -79,6 +77,7 @@ python3 allatom_design/train_seq_denoiser.py \
     data.featurizer_cfg.crop_spatial_p=0.5 \
     data.featurizer_cfg.crop_center_cutoff_distance=15.0 \
     data.featurizer_cfg.pocket_distance=6.0 \
+    data.featurizer_cfg.drop_prob_non_protein_chains=1.0 \
     data.sampling_weights.alphas_protein_monomer_chain.a_prot=1.0 \
     data.sampling_weights.alphas_protein_monomer_chain.a_nuc=0.0 \
     data.sampling_weights.alphas_protein_monomer_chain.a_peptide=0.0 \

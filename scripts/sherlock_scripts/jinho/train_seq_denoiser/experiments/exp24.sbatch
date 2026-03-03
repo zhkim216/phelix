@@ -87,7 +87,7 @@ python3 allatom_design/train_seq_denoiser.py \
     data.pocket_featurizer_cfg.spatial_crop_radius=15.0 \
     data.pocket_featurizer_cfg.training_structure_noise=0.1 \
     data.pocket_featurizer_cfg.asymmetric_noise=false \
-    data.samples_per_epoch=50000 \
+    data.samples_per_epoch=20000 \
     denoiser.mpnn.k_neighbors=32 \
     denoiser.mpnn.ligand_conditioning=true \
     denoiser.mpnn.token_features.use_pocket_rbf=false \
