@@ -8,30 +8,40 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 32
+num_debug_samples: 20
 seed: 0
 num_workers: 16 # for dataloading
-protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
+protein_only: false
+
+# Pocket-only design: crops structure to ligand pocket before sequence design
+pocket_only: true
+pocket_featurizer_cfg:
+  pocket_crop_distance: 6.0    # AnnotateLigandPockets distance for defining pocket residues
+  spatial_crop_radius: 20.0    # CropSpatialAroundTargetLigand coarse pre-crop radius (wider for large ligands)
+  max_tokens: null              # No truncation -- keep all pocket residues
+  max_atoms: null               # No fixed padding
+  remove_unresolved_tokens: true
+  remove_keys: []
 
 # Outputs
-exp_name: eval_exp27_cfg5 # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260220
+exp_name: eval_exp30_cfg2_6A # experiment name; used for wandb and output directory
+base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des
 
 # Sequence design config
 seq_des_cfg:  
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp27_cfg5
+  denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp30_cfg2
   ckpt_cfg:
-    start_step: 100000
-    end_step: 100000
+    start_step: 50000
+    end_step: 50000
     eval_every_n_ckpts: 1
     eval_last_ckpt: false
     use_ema: true
   atom_mpnn:
     ckpt_path: null
-    sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
+    sampling_cfg: /home/possu/jinho/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
     overrides:
-      batch_size: 8
+      batch_size: 16
       num_seqs_per_pdb: 1  # number of sequences to sample per pdb
       omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
       noise_labels: null
@@ -42,30 +52,31 @@ seq_des_cfg:
         lcp_expand_edge_idx_fix: true
 
 # sampling inputs
-sampling_inputs_csv: null
+sampling_inputs_csv: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/sampling_inputs_lmpnnval_small_molecule_filtered.csv
 
 # Positional constraints: supports columns in [pdb_key,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
 # e.g. 2fyzA,"A1-100,B1-100","A1-100"
 pos_constraint_csv: null
-
+  
 # Redesign pocket sequence options
 redesign_cfg:
   use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
   pocket_distance: 5.0
+  native_cif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs  #! Directory containing native CIF files (needed when use_native_seq: true)  
 
-# Docking metrics configuration
+# Pocket configuration
 pocket_cfg:
   pocket_distance_for_metrics: 6.0
 
 ######### Data & Transform configurations #########
-input_sample_is_all_atom: false
-input_sample_is_designed: true
+input_sample_is_all_atom: true
+input_sample_is_designed: false
 load_from_cache: false
 
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp16_cfg0_lmpnnval_sm_filt_full_af3/step_62500_epoch_39/samples
-  pdb_name_list: null
+  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
+  pdb_name_list: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/lmpnnval_small_molecule_filtered.txt
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
   # Recursive search for nested directory structures (e.g. CCD code subfolders)
@@ -177,7 +188,7 @@ featurizer_cfg:
 ######### Structure prediction model configuration (AF3) #########
 struct_pred_cfg:
   model_name: "af3"
-  evaluate_self_consistency: true
+  evaluate_self_consistency: false
   evaluate_docking_consistency: false
   calculate_metrics_only: false
   af3:

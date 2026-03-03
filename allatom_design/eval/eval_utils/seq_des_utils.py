@@ -41,6 +41,7 @@ from allatom_design.data.transform.sd_featurizer import (sd_featurizer,
                                                          sd_featurizer_for_design,
                                                          featurizer_af3_prediction, 
                                                          featurizer_designed_samples)
+from allatom_design.data.transform.sd_featurizer_pocket_only import sd_featurizer_pocket_only_for_design
 from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
@@ -460,6 +461,8 @@ def run_lc_seq_des(
     out_dir: str = None,
     pos_constraint_df: pd.DataFrame | None = None,
     protein_only: bool = False,
+    pocket_only: bool = False,
+    pocket_featurizer_cfg: dict | None = None,
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
     """
     Given a list of processed structure files, run sequence design on them.
@@ -472,6 +475,8 @@ def run_lc_seq_des(
     Args:
         ...
         protein_only: If True, condition only on protein atoms (exclude ligands from atom_cond_mask).
+        pocket_only: If True, use pocket-only featurizer to crop to ligand pocket.
+        pocket_featurizer_cfg: Config dict for the pocket-only featurizer.
     """
     # Set up outputs.
     outputs = {}
@@ -524,7 +529,9 @@ def run_lc_seq_des(
                                  featurizer_cfg = featurizer_cfg, 
                                  device=device, 
                                  parallel_pool=parallel_pool, 
-                                 sampling_inputs_df=sampling_inputs_df)                                                
+                                 sampling_inputs_df=sampling_inputs_df,
+                                 pocket_only=pocket_only,
+                                 pocket_featurizer_cfg=pocket_featurizer_cfg)                                                
                                                                                                    
             # Initialize seq_cond and atom_cond masks.
             batch = initialize_sampling_masks(batch, protein_only=protein_only)                        
@@ -1153,6 +1160,8 @@ def get_sd_batch(
     device: str = None, 
     parallel_pool: Parallel = None, 
     sampling_inputs_df: pd.DataFrame = None,
+    pocket_only: bool = False,
+    pocket_featurizer_cfg: dict | None = None,
 ) -> dict[str, Any]:
     """
     Given a list of pdb file paths, return a batch of sequence design model features.
@@ -1166,7 +1175,9 @@ def get_sd_batch(
                                          preprocess_cfg=preprocess_cfg,
                                          featurizer_cfg=featurizer_cfg,  
                                          sampling_inputs_df=sampling_inputs_df,
-                                         sample_is_designed=sample_is_designed) for pdb_path in pdb_paths]                                       
+                                         sample_is_designed=sample_is_designed,
+                                         pocket_only=pocket_only,
+                                         pocket_featurizer_cfg=pocket_featurizer_cfg) for pdb_path in pdb_paths]                                       
                                                                                                                                                                      
     else:
         # Load PDBs in parallel.
@@ -1175,7 +1186,9 @@ def get_sd_batch(
                                                                preprocess_cfg=preprocess_cfg,
                                                                featurizer_cfg=featurizer_cfg,                                         
                                                                sampling_inputs_df=sampling_inputs_df,
-                                                               sample_is_designed=sample_is_designed) for pdb_path in pdb_paths)
+                                                               sample_is_designed=sample_is_designed,
+                                                               pocket_only=pocket_only,
+                                                               pocket_featurizer_cfg=pocket_featurizer_cfg) for pdb_path in pdb_paths)
                                                                
 
     # Collate examples.
@@ -1191,7 +1204,9 @@ def get_sd_example(*,
                    preprocess_cfg: DictConfig = None,
                    featurizer_cfg: DictConfig = None,
                    sampling_inputs_df: pd.DataFrame = None,       
-                   load_from_cache: bool = False,                     
+                   load_from_cache: bool = False,
+                   pocket_only: bool = False,
+                   pocket_featurizer_cfg: dict | None = None,
                    ) -> dict[str, Any]:
     """
     Given a pdb file path, return a dictionary of sequence design model features.
@@ -1202,6 +1217,8 @@ def get_sd_example(*,
         load_from_cache: If True, load from cached .pt file
         use_load_any: If True, use load_any to load atom_array from cif file (preserves pn_unit_iid)
         load_from_pdb: If both load_from_cache and use_load_any are False, use preprocess_pdb
+        pocket_only: If True, use pocket-only featurizer (crops to ligand pocket).
+        pocket_featurizer_cfg: Config dict for sd_featurizer_pocket_only_for_design.
     """
 
     
@@ -1228,7 +1245,11 @@ def get_sd_example(*,
         example['query_pn_unit_iids'] = unique_pn_unit_iids
                                                 
     # Featurize the example.
-    featurizer = sd_featurizer_for_design(**featurizer_cfg, sample_is_designed=sample_is_designed)                                                                                    
+    if pocket_only:
+        _pocket_cfg = pocket_featurizer_cfg or {}
+        featurizer = sd_featurizer_pocket_only_for_design(**_pocket_cfg)
+    else:
+        featurizer = sd_featurizer_for_design(**featurizer_cfg, sample_is_designed=sample_is_designed)
         
     example = featurizer(example)
 
@@ -2641,6 +2662,8 @@ def redesign_with_lcaliby(seed: int = 0,
                         log_dir: Path = None,
                         pos_constraint_df: pd.DataFrame = None,
                         protein_only: bool = False,
+                        pocket_only: bool = False,
+                        pocket_featurizer_cfg: dict | None = None,
                         csv_suffix: str = "") -> list[tuple[dict, Path, dict]]:
     """
     Redesign pocket sequence using lcaliby model for each checkpoint.
@@ -2657,6 +2680,8 @@ def redesign_with_lcaliby(seed: int = 0,
         log_dir: Log directory.
         pos_constraint_df: Positional constraints DataFrame.
         protein_only: If True, condition only on protein atoms (exclude ligands from atom_cond_mask).
+        pocket_only: If True, use pocket-only featurizer to crop to ligand pocket.
+        pocket_featurizer_cfg: Config dict for the pocket-only featurizer.
     Returns:
         List of tuples: (sample_dict, output_dir, ckpt_info) for each checkpoint.
     """
@@ -2703,6 +2728,8 @@ def redesign_with_lcaliby(seed: int = 0,
             out_dir=str(log_dir_per_ckpt),
             pos_constraint_df=pos_constraint_df,
             protein_only=protein_only,
+            pocket_only=pocket_only,
+            pocket_featurizer_cfg=pocket_featurizer_cfg,
         )
                 
         sample_dict_per_ckpt = copy.deepcopy(sample_dict)
@@ -2725,6 +2752,7 @@ def redesign_with_lcaliby(seed: int = 0,
                     "pocket_seq_recovery_ratio_5": float(pocket_5[i]),
                     "pocket_seq_recovery_ratio_6": float(pocket_6[i])
                 })
+                print(f"sample {i} of {example_id}: seq recovery: {seq_recoveries[i]}, pocket seq recovery: 4A:{pocket_4[i]}, 5A:{pocket_5[i]}, 6A:{pocket_6[i]}")
         seq_recovery_metrics_df = pd.DataFrame(seq_recovery_metrics_list)
         seq_recovery_metrics_df.to_csv(Path(log_dir_per_ckpt, f"seq_recovery_metrics{csv_suffix}.csv"), index=False)
         

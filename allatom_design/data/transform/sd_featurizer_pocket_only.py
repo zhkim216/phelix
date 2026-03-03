@@ -1,8 +1,14 @@
 """
-Pocket-only featurizer for sequence denoiser training.
+Pocket-only featurizers for training and inference.
 
 Crops the atom array to ligand-pocket protein residues + all non-protein
-tokens, so the model is trained exclusively on pocket regions.
+tokens, so the model operates exclusively on pocket regions.
+
+Provides:
+    - ``sd_featurizer_pocket_only``: Training featurizer with random noise,
+      augmentation, and max_tokens truncation.
+    - ``sd_featurizer_pocket_only_for_design``: Inference featurizer with no
+      noise/augmentation and no token truncation.
 """
 from typing import Any
 
@@ -207,6 +213,121 @@ def sd_featurizer_pocket_only(
         spatial_pre_crop,       # Stage 1: coarse radius crop around target ligand
         pocket_annotation,      # Annotate pocket residues on the reduced structure
         pocket_crop,            # Stage 2: keep only pocket protein + non-protein
+        *featurization_transforms_post_crop,
+        PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
+        SubsetToKeys(keys=["example_id", "feats", *INFERENCE_ONLY_KEYS]),
+        FlattenFeatsDict(),
+        RemoveKeys(keys=remove_keys),
+    ]
+
+    return Compose(transforms)
+
+
+# ---------------------------------------------------------------------------
+# Pocket-only featurizer for inference / design
+# ---------------------------------------------------------------------------
+
+def sd_featurizer_pocket_only_for_design(
+    # Keys
+    remove_keys: list[str] = [],
+    # Unresolved tokens
+    remove_unresolved_tokens: bool = True,
+    # ----- Pocket crop parameters -----
+    pocket_crop_distance: float = 5.0,
+    # ----- Spatial pre-crop around target ligand -----
+    spatial_crop_radius: float = 20.0,
+    # ----- Pocket annotation for model features -----
+    pocket_distance: float = 6.0,
+    use_pocket_rbf: bool = False,
+    pocket_rbf_distance: float = 5.0,
+    # ----- Padding (None = no fixed padding) -----
+    max_tokens: int | None = None,
+    max_atoms: int | None = None,
+) -> Transform:
+    """Build a pocket-only transform pipeline for inference / sequence design.
+
+    This is the inference counterpart of :func:`sd_featurizer_pocket_only`.
+    Key differences from the training featurizer:
+
+    * **No training noise or random augmentation.**
+    * **No max_tokens truncation** in ``CropToPocket`` -- all pocket
+      residues are kept so that the full pocket is designed.
+    * **Wider spatial pre-crop** (default 20 A) to accommodate large ligands.
+    * ``is_inference`` is always ``True``.
+
+    For native structures the ``AnnotateTargetLigandChains`` transform falls
+    back to treating all non-covalent non-polymer units as the target
+    ligand, which is equivalent to using all ligand heavy atoms for pocket
+    definition.
+
+    Pipeline overview
+    -----------------
+    1. Pre-crop: filter to query PN units, annotate chain types and target
+       ligand, mask / remove unresolved residues.
+    2. Spatial pre-crop (20 A default): coarse reduction around target ligand.
+    3. Pocket crop: ``AnnotateLigandPockets`` marks pocket residues, then
+       ``CropToPocket`` keeps only pocket protein + all non-protein tokens.
+    4. Post-crop: mark all remaining protein as pocket, encode features,
+       featurize coordinates, pad.
+    """
+
+    # ------------------------------------------------------------------
+    # Pre-crop transforms
+    # ------------------------------------------------------------------
+    featurization_transforms_pre_crop = [
+        AddData({"is_inference": True}),
+        FilterToQueryPNUnits(),
+        AnnotateChainTypes(),
+        AnnotateTargetLigandChains(n_min_ligand_atoms=1),
+        MaskResiduesWithSpecificUnresolvedAtoms(
+            chain_type_to_atom_names={
+                aw_enums.ChainTypeInfo.PROTEINS: aw_const.PROTEIN_BACKBONE_ATOM_NAMES,
+                aw_enums.ChainTypeInfo.NUCLEIC_ACIDS: aw_const.NUCLEIC_ACID_BACKBONE_ATOM_NAMES,
+            },
+        ),
+        RemoveUnresolvedTokens() if remove_unresolved_tokens else Identity(),
+        RemoveUnsupportedChainTypes(),
+        ErrIfAllUnresolved(),
+    ]
+
+    # ------------------------------------------------------------------
+    # Stage 1: Spatial pre-crop (wider for inference)
+    # ------------------------------------------------------------------
+    spatial_pre_crop = CropSpatialAroundTargetLigand(
+        crop_radius=spatial_crop_radius,
+        keep_uncropped_atom_array=False,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 2: Pocket annotation + pocket crop (no truncation)
+    # ------------------------------------------------------------------
+    pocket_annotation = AnnotateLigandPockets(pocket_distance=pocket_crop_distance)
+
+    pocket_crop = CropToPocket(
+        max_tokens=None,
+        keep_uncropped_atom_array=True,
+    )
+
+    # ------------------------------------------------------------------
+    # Post-crop transforms (no noise / no augmentation)
+    # ------------------------------------------------------------------
+    featurization_transforms_post_crop = [
+        AddGlobalTokenIdAnnotation(),
+        EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
+        ComputeAtomToTokenMap(),
+        MarkAllProteinAsPocket(),        
+        AnnotateLigandPocketsPseudoCB(pocket_distance=pocket_rbf_distance) if use_pocket_rbf else Identity(),
+        ConvertToTorch(keys=["encoded", "feats"]),
+        AddAF3TokenBondFeatures(distance_cutoff=2.4),
+        FeaturizeCoordsAndMasks(),
+        GetNCACOAndPseudoCBCoords(),
+    ]
+
+    transforms = [
+        *featurization_transforms_pre_crop,
+        spatial_pre_crop,
+        pocket_annotation,
+        pocket_crop,
         *featurization_transforms_post_crop,
         PadSDFeats(max_tokens=max_tokens, max_atoms=max_atoms),
         SubsetToKeys(keys=["example_id", "feats", *INFERENCE_ONLY_KEYS]),
