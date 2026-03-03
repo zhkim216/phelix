@@ -114,8 +114,7 @@ def main(cfg: DictConfig):
             print("Phase 3a: AF3 Self-Consistency Evaluation")
             print("="*80 + "\n")
             evaluate_af3_self_consistency(
-                sample_dict=sample_dict,
-                num_redesigned_pocket_residue_list=None, 
+                sample_dict=sample_dict,                
                 out_dir=log_dir, 
                 struct_pred_cfg=cfg.struct_pred_cfg,
                 cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
@@ -134,7 +133,6 @@ def main(cfg: DictConfig):
             print("="*80 + "\n")
             evaluate_af3_docking_consistency(
                 sample_dict=sample_dict,
-                num_redesigned_pocket_residue_list=None,
                 out_dir=log_dir,
                 struct_pred_cfg=cfg.struct_pred_cfg,
                 cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
@@ -178,8 +176,7 @@ def main(cfg: DictConfig):
                 print(f"\nEvaluating checkpoint: step_{ckpt_info['global_step']}_epoch_{ckpt_info['epoch']}")
                 
                 evaluate_af3_self_consistency(
-                    sample_dict = sample_dict_per_ckpt,                         
-                    num_redesigned_pocket_residue_list=None, 
+                    sample_dict = sample_dict_per_ckpt,                                             
                     out_dir=log_dir_per_ckpt, 
                     struct_pred_cfg=cfg.struct_pred_cfg,
                     cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
