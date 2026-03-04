@@ -660,11 +660,10 @@ def annotate_ligand_pockets_pseudocb(
     atom_array = atom_array.copy()
     
     # --- Identify valid ligands ---
-    ligand_pn_unit_iids, ligand_counts = np.unique(
-        atom_array.pn_unit_iid[atom_array.atom_is_small_molecule_chain], return_counts=True
-    )
+    ligand_mask = (~atom_array.is_covalent_modification) & (~atom_array.is_polymer)        
+    ligand_pn_unit_iids, ligand_counts = np.unique(atom_array.pn_unit_iid[ligand_mask], return_counts=True)                        
     valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
-    valid_ligand_iids = ligand_pn_unit_iids[valid_ligand_mask]
+    valid_ligand_iids = ligand_pn_unit_iids[valid_ligand_mask] #! in this case, pn_unit_iids are used            
     
     # Initialize token-level annotation (spread to all atoms in residue)
     pocket_annotation = np.zeros(len(atom_array), dtype=bool)
@@ -706,9 +705,9 @@ def annotate_ligand_pockets_pseudocb(
     a = np.cross(b, c_vec)
     pseudo_cb_coords = -0.58273431 * a + 0.56802827 * b - 0.54067466 * c_vec + ca_coords
     
-    # Token indices for each pseudo-CB
-    token_ids_for_cb = atom_array.token_id[ca_mask]
-    
+    # Residue IDs for each pseudo-CB   
+    res_ids_for_cb = atom_array.res_id[ca_mask]
+        
     # --- Compute distances from pseudo-CB to ligand atoms ---
     all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_iids)
     ligand_coords = atom_array.coord[all_valid_ligands_mask]
@@ -734,8 +733,8 @@ def annotate_ligand_pockets_pseudocb(
     near_ligand = np.any(distance_mask, axis=1)  # [num_valid_cb]
     
     # Map back: mark all atoms in pocket residues
-    pocket_token_ids = token_ids_for_cb[valid_cb_indices[near_ligand]]
-    pocket_annotation = np.isin(atom_array.token_id, pocket_token_ids)
+    pocket_res_ids = res_ids_for_cb[valid_cb_indices[near_ligand]]
+    pocket_annotation = np.isin(atom_array.res_id, pocket_res_ids)
     
     # Only atoms in protein chains can be pocket atoms
     pocket_annotation = pocket_annotation & atom_array.atom_is_protein_chain

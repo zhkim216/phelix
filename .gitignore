@@ -186,4 +186,49 @@ alphafold3/src/alphafold3/constants/converters/ccd.pickle
 coding_practice/
 
 # Jupyter notebooks
-/allatom-design/allatom_design/jupyter_notebook
+allatom_design/jupyter_notebook/
+
+# Foundry
+foundry/
+
+# Local / personal files
+LigandMPNN/
+atomworks_test/
+debug/
+docker/
+figures/
+jupyter/
+local_debug_output/
+openstructure/
+plinder/
+
+# Local test/eval/util scripts
+allatom_design/eval/eval_utils/sasa_utils.py
+allatom_design/eval/eval_utils/test_atom_array_loading.py
+allatom_design/eval/eval_utils/test_seq_recovery.py
+allatom_design/tests/residue_cache_failure.py
+allatom_design/tests/residue_conformer_failures.csv
+allatom_design/tests/test_cache_examples
+allatom_design/tests/test_metadata_ligand_validity_join.py
+allatom_design/utils/inspect_sd_dataset.py
+allatom_design/utils/memscope.py
+allatom_design/utils/misc.py
+
+# AF3 local input examples
+alphafold3/input_examples/json_examples_lab_desktop/
+alphafold3/input_examples/scripts/
+alphafold3/input_examples/templates/
+
+# Sherlock eval/preprocessing scripts
+scripts/sherlock_scripts/jinho/eval_seq_des_training/
+scripts/sherlock_scripts/jinho/preprocessing/
+
+# Misc local files
+platinum_flat_file.csv
+prot_seq_length.png
+pyrightconfig.json
+run_all_sc_eval_af3.sh
+run_all_sc_eval_af3_parallel.sh
+run_remaining_sc_eval.sh
+test.parquet
+tests/check_ost_tools.py
