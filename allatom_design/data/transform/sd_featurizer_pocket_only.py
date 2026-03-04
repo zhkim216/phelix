@@ -237,9 +237,7 @@ def sd_featurizer_pocket_only_for_design(
     # ----- Spatial pre-crop around target ligand -----
     spatial_crop_radius: float = 20.0,
     # ----- Pocket annotation for model features -----
-    pocket_distance: float = 6.0,
-    use_pocket_rbf: bool = False,
-    pocket_rbf_distance: float = 5.0,
+    use_pseudo_cb_for_pocket_annotation: bool = False,
     # ----- Padding (None = no fixed padding) -----
     max_tokens: int | None = None,
     max_atoms: int | None = None,
@@ -301,7 +299,11 @@ def sd_featurizer_pocket_only_for_design(
     # ------------------------------------------------------------------
     # Stage 2: Pocket annotation + pocket crop (no truncation)
     # ------------------------------------------------------------------
-    pocket_annotation = AnnotateLigandPockets(pocket_distance=pocket_crop_distance)
+    if use_pseudo_cb_for_pocket_annotation:
+        pocket_annotation = AnnotateLigandPocketsPseudoCB(pocket_distance=pocket_crop_distance)
+    else:
+        pocket_annotation = AnnotateLigandPockets(pocket_distance=pocket_crop_distance)
+    
 
     pocket_crop = CropToPocket(
         max_tokens=None,
@@ -315,8 +317,7 @@ def sd_featurizer_pocket_only_for_design(
         AddGlobalTokenIdAnnotation(),
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
         ComputeAtomToTokenMap(),
-        MarkAllProteinAsPocket(),        
-        AnnotateLigandPocketsPseudoCB(pocket_distance=pocket_rbf_distance) if use_pocket_rbf else Identity(),
+        MarkAllProteinAsPocket(),                
         ConvertToTorch(keys=["encoded", "feats"]),
         AddAF3TokenBondFeatures(distance_cutoff=2.4),
         FeaturizeCoordsAndMasks(),
