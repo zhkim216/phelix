@@ -25,12 +25,12 @@ pocket_featurizer_cfg:
 
 # Outputs
 exp_name: eval_exp30_cfg2_6A # experiment name; used for wandb and output directory
-base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des
+base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
 seq_des_cfg:  
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp30_cfg2
+  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp30_cfg2
   ckpt_cfg:
     start_step: 50000
     end_step: 50000
@@ -39,7 +39,7 @@ seq_des_cfg:
     use_ema: true
   atom_mpnn:
     ckpt_path: null
-    sampling_cfg: /home/possu/jinho/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
+    sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
     overrides:
       batch_size: 16
       num_seqs_per_pdb: 1  # number of sequences to sample per pdb
