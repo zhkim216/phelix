@@ -300,7 +300,7 @@ def sd_featurizer_pocket_only_for_design(
     # Stage 2: Pocket annotation + pocket crop (no truncation)
     # ------------------------------------------------------------------
     if use_pseudo_cb_for_pocket_annotation:
-        pocket_annotation = AnnotateLigandPocketsPseudoCB(pocket_distance=pocket_crop_distance)
+        pocket_annotation = AnnotateLigandPocketsPseudoCB(pocket_distance=pocket_crop_distance, annotation_name="is_ligand_pocket", n_min_ligand_atoms=1)
     else:
         pocket_annotation = AnnotateLigandPockets(pocket_distance=pocket_crop_distance)
     
