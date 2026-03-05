@@ -675,7 +675,10 @@ def annotate_ligand_pockets_pseudocb(
     # --- Compute pseudo-CB from un-noised backbone coords ---
     # Get standard AA protein atoms with all backbone resolved
     is_atomized = atom_array.atomize
-    standard_aa_prot_mask = ~is_atomized & atom_array.atom_is_protein_chain
+    if hasattr(atom_array, "atom_is_protein_chain"):
+        standard_aa_prot_mask = ~is_atomized & atom_array.atom_is_protein_chain
+    else:   
+        standard_aa_prot_mask = ~is_atomized & (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
     
     is_ncaco_resolved = (
         np.isin(atom_array.atom_name, ["N", "CA", "C", "O"]) & 
