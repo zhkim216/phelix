@@ -17,7 +17,7 @@ protein_only: false
 pocket_only: true
 pocket_featurizer_cfg:
   pocket_crop_distance: 6.0    # AnnotateLigandPockets distance for defining pocket residues
-  spatial_crop_radius: 20.0    # CropSpatialAroundTargetLigand coarse pre-crop radius (wider for large ligands)
+  spatial_crop_radius: 30.0    # CropSpatialAroundTargetLigand coarse pre-crop radius (wider for large ligands)
   use_pseudo_cb_for_pocket_annotation: true
   max_tokens: null              # No truncation -- keep all pocket residues
   max_atoms: null               # No fixed padding
@@ -25,7 +25,7 @@ pocket_featurizer_cfg:
   remove_keys: []
 
 # Outputs
-exp_name: eval_exp30_cfg2_6A # experiment name; used for wandb and output directory
+exp_name: eval_exp30_cfg2_po_pseudocb_cd6.0A # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
