@@ -199,6 +199,7 @@ def make_pos_constraint_df(
     debug: bool = False,
     num_debug_samples: int = 5,
     save_ligand_mpnn_csv: bool = True,
+    use_pseudocb_for_pocket_annotation: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Create a positional constraint DataFrame for multiple CIF files.
@@ -285,6 +286,7 @@ def make_pos_constraint_df(
                 constraint_type=constraint_type,
                 receptor_chain_iids=receptor_chain_iids,
                 ligand_chain_iids=ligand_chain_iids,
+                use_pseudocb_for_pocket_annotation=use_pseudocb_for_pocket_annotation,
                 cif_path=str(cif_path) if save_ligand_mpnn_csv else None,
                 return_ligand_mpnn_format=save_ligand_mpnn_csv,
             )
@@ -411,6 +413,7 @@ def main(cfg: DictConfig):
             debug=cfg.get("debug", False),
             num_debug_samples=cfg.get("num_debug_samples", 5),
             save_ligand_mpnn_csv=cfg.get("save_ligand_mpnn_csv", True),
+            use_pseudocb_for_pocket_annotation=cfg.get("use_pseudocb_for_pocket_annotation", False),
         )
         
         # Print summary statistics
