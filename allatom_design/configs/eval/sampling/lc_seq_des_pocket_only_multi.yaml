@@ -8,15 +8,15 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 20
+num_debug_samples: 8
 seed: 0
-num_workers: 16 # for dataloading
+num_workers: 8 # for dataloading
 protein_only: false
 
 # Pocket-only design: crops structure to ligand pocket before sequence design
 pocket_only: true
 pocket_featurizer_cfg:
-  pocket_crop_distance: 6.0    # AnnotateLigandPockets distance for defining pocket residues
+  pocket_crop_distance: 8.0    # AnnotateLigandPockets distance for defining pocket residues
   spatial_crop_radius: 30.0    # CropSpatialAroundTargetLigand coarse pre-crop radius (wider for large ligands)
   use_pseudo_cb_for_pocket_annotation: true
   max_tokens: null              # No truncation -- keep all pocket residues
@@ -25,7 +25,7 @@ pocket_featurizer_cfg:
   remove_keys: []
 
 # Outputs
-exp_name: eval_exp30_cfg2_po_pseudocb_cd6.0A # experiment name; used for wandb and output directory
+exp_name: eval_exp30_cfg2_po_pseudocb_cd8.0A_rfd3val # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
@@ -53,7 +53,7 @@ seq_des_cfg:
         lcp_expand_edge_idx_fix: true
 
 # sampling inputs
-sampling_inputs_csv: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/sampling_inputs_lmpnnval_small_molecule_filtered.csv
+sampling_inputs_csv: null
 
 # Positional constraints: supports columns in [pdb_key,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
 # e.g. 2fyzA,"A1-100,B1-100","A1-100"
@@ -76,15 +76,15 @@ load_from_cache: false
 
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
-  pdb_name_list: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/lmpnnval_small_molecule_filtered.txt
+  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/rfd3_val-cifs/samples_uncompressed
+  pdb_name_list: null
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
   # Recursive search for nested directory structures (e.g. CCD code subfolders)
-  recursive: false
+  recursive: true
   split_by_subfolder: false  # if true, array job splits by subfolder instead of flat file list
   # Sample index filtering: matches pattern {PREFIX}_{IDX}_model_{M}.ext
-  sample_indices: null  # null = use all; e.g. [0,1,2,3,4] to select specific indices
+  sample_indices: [0,1,2,3,4]  # null = use all; e.g. [0,1,2,3,4] to select specific indices
   # Slurm array job parameters (set via CLI override in sbatch)
   array_id: null
   num_arrays: null
