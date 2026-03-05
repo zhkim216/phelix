@@ -23,7 +23,7 @@ import atomworks.enums as aw_enums
 
 from atomworks.ml.transforms.filters import remove_unresolved_tokens
 from atomworks.ml.transforms.atom_array import apply_and_spread_residue_wise
-from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets
+from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets, annotate_ligand_pockets_pseudocb
 from allatom_design.eval.eval_utils.seq_des_utils import (
     preprocess_pdb,
     _indices_to_pos_string,
@@ -95,6 +95,7 @@ def create_pos_constraint_dict_from_pocket(
     constraint_type: str = "pocket",  # "pocket" or "scaffold"
     receptor_chain_iids: list[str] = None,
     ligand_chain_iids: list[str] = None,
+    use_pseudocb_for_pocket_annotation: bool = False,
     cif_path: str = None,
     return_ligand_mpnn_format: bool = False,
 ) -> dict:
@@ -116,7 +117,15 @@ def create_pos_constraint_dict_from_pocket(
         If return_ligand_mpnn_format=True, also includes pdb_path, chains, fixed_residues for LigandMPNN.
     """
     # Annotate ligand pockets
-    annotated_atom_array = annotate_ligand_pockets(
+    if use_pseudocb_for_pocket_annotation:
+        annotated_atom_array = annotate_ligand_pockets_pseudocb(
+            atom_array=atom_array,
+            pocket_distance=pocket_distance,
+            n_min_ligand_atoms=1,            
+            annotation_name="is_ligand_pocket"
+        )
+    else:
+        annotated_atom_array = annotate_ligand_pockets(
         atom_array=atom_array,
         pocket_distance=pocket_distance,
         receptor_chain_iids=receptor_chain_iids,
@@ -183,8 +192,9 @@ def make_pos_constraint_df(
     output_path: str = None,
     pocket_distance: float = 5.0,
     constraint_type: str = "pocket",  # "pocket" or "scaffold"
-    data_cfg: DictConfig = None,
-    transform_cfg: DictConfig = None,
+    cif_parse_cfg: DictConfig = None,
+    preprocess_cfg: DictConfig = None,
+    sample_is_designed: bool = False,    
     pdb_chain_info_dict: dict[str, dict] = None,
     debug: bool = False,
     num_debug_samples: int = 5,
@@ -233,9 +243,6 @@ def make_pos_constraint_df(
     failed_pdbs = []
     results_for_ligand_mpnn = []
     
-    # Get preprocess config
-    preprocess_cfg = transform_cfg.preprocess_cfg if transform_cfg is not None else None
-    
     for cif_path in tqdm(cif_paths, desc=f"Processing CIFs ({constraint_type})"):
         # pdb_key is stem of cif_path, e.g., "1a28" from "1a28.cif"
         pdb_key = Path(cif_path).stem        
@@ -244,8 +251,9 @@ def make_pos_constraint_df(
             # Load CIF file using preprocess_pdb 
             example = preprocess_pdb(
                 pdb_path=str(cif_path),
-                data_cfg=data_cfg,
-                preprocess_transform_cfg=preprocess_cfg,
+                cif_parse_cfg=cif_parse_cfg,
+                preprocess_cfg=preprocess_cfg,
+                sample_is_designed=sample_is_designed,
             )
             
             atom_array = example["atom_array"]
@@ -346,7 +354,7 @@ def make_pos_constraint_df(
     return df, ligand_mpnn_input_df
 
 
-@hydra.main(config_path="../../configs/eval/sampling", config_name="make_pos_constraint_df", version_base="1.3.2")
+@hydra.main(config_path="../../configs_local/eval/sampling", config_name="make_pos_constraint_df", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Create positional constraint DataFrame for ligand pocket or scaffold regions.
@@ -362,13 +370,13 @@ def main(cfg: DictConfig):
         metadata = None
 
     if not cfg.source_is_designed:
-        data_cfg = cfg.data_cfg_for_design
-        transform_cfg = cfg.transform_cfg_for_design
+        cif_parse_cfg = cfg.cif_cfg.parse.native
+        preprocess_cfg = cfg.preprocess_cfg.native        
         pdb_chain_info_dict = extract_pdb_chain_info_from_metadata(metadata)
         print(f"Extracted pdb_chain_info for {len(pdb_chain_info_dict)} PDBs")
     else:
-        data_cfg = cfg.data_cfg_for_designed_samples
-        transform_cfg = cfg.transform_cfg_for_designed_samples
+        cif_parse_cfg = cfg.cif_cfg.parse.designed_samples
+        preprocess_cfg = cfg.preprocess_cfg.designed_samples        
         pdb_chain_info_dict = {}
         
     
@@ -396,8 +404,9 @@ def main(cfg: DictConfig):
             output_path=str(output_path),
             pocket_distance=cfg.pocket_distance,
             constraint_type=constraint_type,
-            data_cfg=data_cfg,
-            transform_cfg=transform_cfg,
+            cif_parse_cfg=cif_parse_cfg,
+            preprocess_cfg=preprocess_cfg,
+            sample_is_designed=cfg.get("source_is_designed", False),
             pdb_chain_info_dict=pdb_chain_info_dict,
             debug=cfg.get("debug", False),
             num_debug_samples=cfg.get("num_debug_samples", 5),

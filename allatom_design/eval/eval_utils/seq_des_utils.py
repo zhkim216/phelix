@@ -486,6 +486,8 @@ def run_lc_seq_des(
     Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
     sample_out_dir_for_af3_tc = f"{out_dir}/samples_for_af3_tc"
     Path(sample_out_dir_for_af3_tc).mkdir(parents=True, exist_ok=True)
+    sample_out_dir_pocket_only_full = f"{out_dir}/samples_pocket_only_full"
+    Path(sample_out_dir_pocket_only_full).mkdir(parents=True, exist_ok=True)
 
     # Validate pos_constraint_df.
     if pos_constraint_df is not None:
@@ -506,6 +508,277 @@ def run_lc_seq_des(
     if sampling_cfg.verbose and sampling_cfg.omit_aas is not None:
         print(f"Omitting aatype sampling for: {sampling_cfg.omit_aas}")
 
+
+
+    # Process PDBs in parallel.
+    parallel_context = Parallel(n_jobs=sampling_cfg.num_workers) if sampling_cfg.num_workers > 1 else nullcontext()
+
+    # Begin sampling.
+    pbar = tqdm(
+        total=len(pdb_paths),
+        desc=f"Sampling {len(pdb_paths)} PDBs, {sampling_cfg.num_seqs_per_pdb} sequences per PDB...",
+    )
+    
+    with parallel_context as parallel_pool:
+        for bi in range(0, len(pdb_paths), sampling_cfg.batch_size):
+            batch_pdb_paths = pdb_paths[bi : bi + sampling_cfg.batch_size]
+            B = len(batch_pdb_paths)                            
+                                     
+            batch = get_sd_batch(pdb_paths = batch_pdb_paths, 
+                                 sample_is_designed = input_sample_is_designed,
+                                 cif_parse_cfg = cif_parse_cfg,
+                                 preprocess_cfg = preprocess_cfg,
+                                 featurizer_cfg = featurizer_cfg, 
+                                 device=device, 
+                                 parallel_pool=parallel_pool, 
+                                 sampling_inputs_df=sampling_inputs_df,
+                                 pocket_only=pocket_only,
+                                 pocket_featurizer_cfg=pocket_featurizer_cfg)                                                
+                                                                                                   
+            # Initialize seq_cond and atom_cond masks.
+            batch = initialize_sampling_masks(batch, protein_only=protein_only)                        
+                                        
+            # Parse fixed positions.
+            batch = parse_fixed_pos_info(batch, pos_constraint_df, verbose=sampling_cfg.verbose)
+
+            # Restrict aatype sampling at certain positions.
+            sampling_inputs = OmegaConf.to_container(sampling_cfg, resolve=True)
+            sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(
+                batch, pos_constraint_df, verbose=sampling_cfg.verbose
+            )
+
+            # Run sampling.
+            id_to_atom_arrays, id_to_aux = model.sample(batch, sampling_inputs=sampling_inputs)
+
+            # Save outputs.
+            example_id_to_batch_idx = {eid: idx for idx, eid in enumerate(batch["example_id"])}
+            
+            # Get designed_cif_save_args from cif_save_cfg
+            cif_save_args = OmegaConf.to_container(cif_save_cfg, resolve=True) if cif_save_cfg else {}
+                                    
+            for sample_idx, (example_id, atom_arrays) in enumerate(id_to_atom_arrays.items()):
+                if example_id not in outputs:
+                    outputs[example_id] = defaultdict(list)
+                aux = id_to_aux[example_id]
+                                                                                
+                for ai, designed_atom_array in enumerate(atom_arrays):                            
+                    designed_sample_id = f"{example_id}_sample{ai}"
+                    outputs[example_id]["designed_sample_id"].append(designed_sample_id)
+                    outputs[example_id]["U"].append(aux[ai]["U"])
+                    
+                    # Save atom_array and sequence                                        
+                    chain_info = non_rcsb.initialize_chain_info_from_atom_array(designed_atom_array)
+                    outputs[example_id]["designed_sample_seq"].append(
+                        ":".join(info["processed_entity_canonical_sequence"] for info in chain_info.values())
+                    )
+                    
+                    # Process atom arrays for af3 template conditioning
+                    designed_prot_atom_array = designed_atom_array[designed_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+                    valid_coords_mask = ~np.isnan(designed_prot_atom_array.coord).any(axis=1)
+                    
+                    #! mask out atoms with NaN coordiantes (sidechain atoms). But atomized residues (hetero, covalent, etc.) could be included
+                    designed_prot_atom_array = designed_prot_atom_array[valid_coords_mask]                    
+                    designed_ligand_atom_array = designed_atom_array[np.isin(designed_atom_array.chain_type, list(aw_enums.ChainTypeInfo.NON_POLYMERS))]
+                                                                                                                                                           
+                    # Combine protein backbone and ligand atoms                    
+                    designed_atom_array_to_save = designed_prot_atom_array + designed_ligand_atom_array #! biotite use + operator to concatenate atom arrays                                       
+                    
+                    # Renumber atom_id sequentially (1-indexed)
+                    designed_atom_array_to_save.atom_id = np.arange(1, len(designed_atom_array_to_save) + 1)
+                    
+                    # Save samp_atom_array_no_sidechain to outputs
+                    outputs[example_id]["designed_sample_atom_array"].append(designed_atom_array_to_save)
+                    
+                    # atom_array with gaps for af3 template conditioning
+                    designed_prot_atom_array_with_gaps = designed_prot_atom_array.copy()
+                                                                                                                                                                
+                    # Insert UNK atoms for gaps in protein backbone atom array
+                    designed_prot_atom_array_with_gaps = insert_unk_residues_for_gaps_in_atom_array(designed_prot_atom_array_with_gaps)
+                    designed_atom_array_with_gaps_to_save = designed_prot_atom_array_with_gaps + designed_ligand_atom_array
+                    
+                    # Renumber atom_id sequentially (1-indexed)
+                    designed_atom_array_with_gaps_to_save.atom_id = np.arange(1, len(designed_atom_array_with_gaps_to_save) + 1)
+                    
+                    # Ensure b_factor annotation exists for AF3 template conditioning
+                    # AF3 requires _atom_site.B_iso_or_equiv in template CIF files
+                    if "b_factor" not in designed_atom_array_with_gaps_to_save.get_annotation_categories():
+                        designed_atom_array_with_gaps_to_save.set_annotation(
+                            "b_factor", np.zeros(len(designed_atom_array_with_gaps_to_save))
+                        )
+                    
+                    # Save designed atom array to cif file
+                    out_file = f"{sample_out_dir}/{designed_sample_id}.cif"                        
+                    out_file = to_cif_file(designed_atom_array_to_save, out_file, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)                        
+                    _fix_cif_formal_charge(out_file)                        
+                    outputs[example_id]["designed_sample_path"].append(out_file)      
+                                                                                  
+                    out_file_for_af3_tc = f"{sample_out_dir_for_af3_tc}/{designed_sample_id}.cif"
+                    out_file_for_af3_tc = to_cif_file(designed_atom_array_with_gaps_to_save, out_file_for_af3_tc, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)
+                    _fix_cif_formal_charge(out_file_for_af3_tc)
+                    outputs[example_id]["designed_sample_path_for_af3_tc"].append(out_file_for_af3_tc)  
+                                                                                
+                    input_atom_array = batch["atom_array"][example_id_to_batch_idx[example_id]]                    
+                    
+                    if pocket_only:
+                        source_atom_array = batch['crop_info'][example_id_to_batch_idx[example_id]]['atom_array']
+                        source_bb_atom_array = source_atom_array[source_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+                        source_bb_atom_array = source_bb_atom_array[~np.isnan(source_bb_atom_array.coord).any(axis=1)]
+                        
+                        source_ligand_atom_array = source_atom_array[np.isin(source_atom_array.chain_type, list(aw_enums.ChainTypeInfo.NON_POLYMERS))]
+                        
+                        source_atom_array = source_bb_atom_array + source_ligand_atom_array
+                        source_atom_array.atom_id = np.arange(1, len(source_atom_array) + 1)
+                                                
+                        # designed from residue unit mapping
+                        des_res_starts = get_residue_starts(designed_atom_array_to_save)
+                        designed_res_name_map = dict(zip(
+                            zip(designed_atom_array_to_save.chain_id[des_res_starts],
+                                designed_atom_array_to_save.res_id[des_res_starts]),
+                            designed_atom_array_to_save.res_name[des_res_starts]
+                        ))
+
+                        # replace source res_name with designed res_name
+                        new_res_names = source_atom_array.res_name.copy()
+                        for (chain_id, res_id), res_name in designed_res_name_map.items():
+                            mask = (source_atom_array.chain_id == chain_id) & (source_atom_array.res_id == res_id)
+                            new_res_names[mask] = res_name
+                        source_atom_array.res_name = new_res_names
+                        source_atom_array.atom_id = np.arange(1, len(source_atom_array) + 1)
+                        
+                        out_file_pocket_only_full = f"{sample_out_dir_pocket_only_full}/{designed_sample_id}.cif"
+                        out_file_pocket_only_full = to_cif_file(source_atom_array, out_file_pocket_only_full, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)                        
+                        _fix_cif_formal_charge(out_file_pocket_only_full)                 
+                                                                        
+                    
+                    #### Calculate sequence recovery metrics ####
+                    # Annotate ligand pockets for pocket sequence recovery metrics
+                    annotated_atom_array = input_atom_array.copy()
+                    annotated_atom_array = annotate_ligand_pockets(annotated_atom_array, pocket_distance=4.0, annotation_name="is_ligand_pocket_4")                    
+                    annotated_atom_array = annotate_ligand_pockets(annotated_atom_array, pocket_distance=5.0, annotation_name="is_ligand_pocket_5")                    
+                    annotated_atom_array = annotate_ligand_pockets(annotated_atom_array, pocket_distance=6.0, annotation_name="is_ligand_pocket_6")                    
+                    pocket_residue_mask_4 = apply_and_spread_residue_wise(annotated_atom_array, annotated_atom_array.get_annotation("is_ligand_pocket_4"), function=np.any)
+                    pocket_residue_mask_5 = apply_and_spread_residue_wise(annotated_atom_array, annotated_atom_array.get_annotation("is_ligand_pocket_5"), function=np.any)
+                    pocket_residue_mask_6 = apply_and_spread_residue_wise(annotated_atom_array, annotated_atom_array.get_annotation("is_ligand_pocket_6"), function=np.any)
+                                        
+                    seq_rec_mask = (annotated_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (np.isin(annotated_atom_array.res_name, STANDARD_AA)) & ~(annotated_atom_array.hetero) 
+                    seq_rec_mask = seq_rec_mask & ~(np.isnan(annotated_atom_array.coord).any(axis=1))
+                    pocket_seq_rec_mask_4 = seq_rec_mask & pocket_residue_mask_4
+                    pocket_seq_rec_mask_5 = seq_rec_mask & pocket_residue_mask_5
+                    pocket_seq_rec_mask_6 = seq_rec_mask & pocket_residue_mask_6
+                                                                                            
+                    token_start_idxs = get_token_starts(annotated_atom_array)                    
+                    is_token_start_mask = np.isin(np.arange(len(annotated_atom_array)), token_start_idxs)                                                            
+                                                                                
+                    input_res_names = annotated_atom_array[(is_token_start_mask) & (seq_rec_mask)].res_name
+                    designed_res_names = designed_atom_array[(is_token_start_mask) & (seq_rec_mask)].res_name
+                    seq_recovery_ratio = (input_res_names == designed_res_names).mean()
+                    
+                    input_pocket_res_names_4 = annotated_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_4)].res_name
+                    designed_pocket_res_names_4 = designed_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_4)].res_name
+                    pocket_seq_recovery_ratio_4 = (input_pocket_res_names_4 == designed_pocket_res_names_4).mean()
+                    
+                    input_pocket_res_names_5 = annotated_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_5)].res_name
+                    designed_pocket_res_names_5 = designed_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_5)].res_name
+                    pocket_seq_recovery_ratio_5 = (input_pocket_res_names_5 == designed_pocket_res_names_5).mean()
+                    
+                    input_pocket_res_names_6 = annotated_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_6)].res_name
+                    designed_pocket_res_names_6 = designed_atom_array[(is_token_start_mask) & (pocket_seq_rec_mask_6)].res_name
+                    pocket_seq_recovery_ratio_6 = (input_pocket_res_names_6 == designed_pocket_res_names_6).mean()
+                    
+                    outputs[example_id]["seq_recovery_ratio"].append(seq_recovery_ratio)
+                    outputs[example_id]["pocket_seq_recovery_ratio_4"].append(pocket_seq_recovery_ratio_4)
+                    outputs[example_id]["pocket_seq_recovery_ratio_5"].append(pocket_seq_recovery_ratio_5)
+                    outputs[example_id]["pocket_seq_recovery_ratio_6"].append(pocket_seq_recovery_ratio_6)
+                                                                                                                                                                                                             
+            pbar.update(B)
+    pbar.close()
+    
+        
+    # Convert tensors to CPU values
+    for example_id, example_outputs in outputs.items():
+        for k, v in example_outputs.items():
+            if isinstance(v, list) and len(v) > 0 and isinstance(v[0], torch.Tensor):
+                example_outputs[k] = [t.detach().cpu().item() for t in v]
+            elif isinstance(v, torch.Tensor):
+                example_outputs[k] = v.detach().cpu().item()                    
+
+          
+    # Save sample_metadata.pt for later use 
+    sample_metadata = {}
+    for example_id, example_outputs in outputs.items():
+        for idx in range(len(example_outputs["designed_sample_id"])):
+            designed_sample_id = example_outputs["designed_sample_id"][idx]
+            sample_metadata[designed_sample_id] = {
+                "example_id": example_id,
+                "designed_sample_id": designed_sample_id,
+                "designed_sample_path": example_outputs["designed_sample_path"][idx],
+                "designed_sample_seq": example_outputs["designed_sample_seq"][idx],
+                "U": example_outputs["U"][idx],
+            }
+    torch.save(sample_metadata, f"{sample_out_dir}/sample_metadata.pt")
+    print(f"Saved sample_metadata.pt with {len(sample_metadata)} samples to {sample_out_dir}")
+
+    return outputs
+
+def run_lc_scaffold_seq_des(
+    *,
+    model: SeqDenoiser = None,
+    input_sample_is_designed: bool = False,
+    cif_parse_cfg: DictConfig = None,
+    preprocess_cfg: DictConfig = None,
+    featurizer_cfg: DictConfig = None,
+    cif_save_cfg: DictConfig = None,
+    sampling_cfg: DictConfig = None,
+    sampling_inputs_df: pd.DataFrame = None,
+    pdb_paths: list[str] = None,
+    device: str = None,
+    out_dir: str = None,
+    pos_constraint_df: pd.DataFrame | None = None,
+    protein_only: bool = False,
+    pocket_only: bool = False,
+    pocket_featurizer_cfg: dict | None = None,
+) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
+    """
+    Given a list of processed structure files, run sequence design on them.
+
+    If out_dir is not None, PDBs with sampled sequences will be saved to the provided directory. In this case, run_aux
+    will be a dictionary with the following keys:
+        - "out_pdb": list of output PDB paths
+        - "pred_seqs": list of predicted sequences as a string for each sample
+        
+    Args:
+        ...
+        protein_only: If True, condition only on protein atoms (exclude ligands from atom_cond_mask).
+        pocket_only: If True, use pocket-only featurizer to crop to ligand pocket.
+        pocket_featurizer_cfg: Config dict for the pocket-only featurizer.
+    """
+    # Set up outputs.
+    outputs = {}
+    
+    # directory for output PDBs
+    sample_out_dir = f"{out_dir}/samples"          
+    Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
+    sample_out_dir_for_af3_tc = f"{out_dir}/samples_for_af3_tc"
+    Path(sample_out_dir_for_af3_tc).mkdir(parents=True, exist_ok=True)
+
+    # Validate pos_constraint_df.
+    if pos_constraint_df is not None:
+        valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype"]
+        if not set(pos_constraint_df.columns).issubset(valid_columns):
+            # Columns in input df must be a subset of valid columns.
+            raise ValueError(
+                f"Invalid columns in pos_constraint_df. Expected subset of {valid_columns}. "
+                f"Found: {pos_constraint_df.columns}"
+            )
+        # Set index to pdb name.
+        pos_constraint_df = pos_constraint_df.set_index("pdb_key")
+
+        # Set empty string to NaN for easier parsing.
+        pos_constraint_df = pos_constraint_df.replace("", np.nan)
+        
+    # Print omitted amino acids.
+    if sampling_cfg.verbose and sampling_cfg.omit_aas is not None:
+        print(f"Omitting aatype sampling for: {sampling_cfg.omit_aas}")
 
 
     # Process PDBs in parallel.
@@ -686,368 +959,6 @@ def run_lc_seq_des(
     print(f"Saved sample_metadata.pt with {len(sample_metadata)} samples to {sample_out_dir}")
 
     return outputs
-
-
-def run_lc_seq_des_prev(
-    *,
-    model: SeqDenoiser = None,
-    data_cfg: DictConfig = None,
-    transform_cfg: DictConfig = None,    
-    sampling_cfg: DictConfig = None,
-    metadata: pd.DataFrame = None,
-    pdb_paths: list[str] = None,
-    device: str = None,
-    out_dir: str = None,
-    pos_constraint_df: pd.DataFrame | None = None,
-    protein_only: bool = False,
-    fix_pocket_seq: bool = False,
-    pocket_distance: float = 8.0,
-    redesign_pocket_seq: bool = False,
-) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
-    """
-    Given a list of processed structure files, run sequence design on them.
-
-    If out_dir is not None, PDBs with sampled sequences will be saved to the provided directory. In this case, run_aux
-    will be a dictionary with the following keys:
-        - "out_pdb": list of output PDB paths
-        - "pred_seqs": list of predicted sequences as a string for each sample
-        
-    Args:
-        ...
-        ligand_chain_ids: Chain ID(s) of the ligand(s) to extract when protein_only=True.
-                          Can be a single chain ID string (e.g., "B") or a list of chain IDs.
-                          If None, falls back to extracting non-amino acid atoms.
-    """
-    # Set up outputs.
-    outputs = defaultdict(list)
-    if not redesign_pocket_seq:
-        sample_out_dir = f"{out_dir}/samples"  # directory for output PDBs
-    else:
-        sample_out_dir = f"{out_dir}/redesigned_samples"  # directory for output PDBs
-        
-    Path(sample_out_dir).mkdir(parents=True, exist_ok=True)
-
-    # Validate pos_constraint_df.
-    if pos_constraint_df is not None:
-        valid_columns = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn", "fixed_pos_override_seq", "pos_restrict_aatype"]
-        if not set(pos_constraint_df.columns).issubset(valid_columns):
-            # Columns in input df must be a subset of valid columns.
-            raise ValueError(
-                f"Invalid columns in pos_constraint_df. Expected subset of {valid_columns}. "
-                f"Found: {pos_constraint_df.columns}"
-            )
-        # Set index to pdb name.
-        pos_constraint_df = pos_constraint_df.set_index("pdb_key")
-
-        # Set empty string to NaN for easier parsing.
-        pos_constraint_df = pos_constraint_df.replace("", np.nan)
-        
-        if redesign_pocket_seq: #!! FIXME !!! 260101
-            sample_ids = [Path(pdb_path).stem for pdb_path in pdb_paths]
-            pdb_ids = [Path(pdb_path).stem.split("_")[0] for pdb_path in pdb_paths]
-            pdb_ids_to_sample_ids = {pdb_id: sample_id for pdb_id, sample_id in zip(pdb_ids, sample_ids)}
-            metadata = metadata[metadata["pdb_id"].isin(pdb_ids)]
-            metadata["example_id"] = metadata["pdb_id"].map(pdb_ids_to_sample_ids)
-
-    # Print omitted amino acids.
-    if sampling_cfg.verbose and sampling_cfg.omit_aas is not None:
-        print(f"Omitting aatype sampling for: {sampling_cfg.omit_aas}")
-
-    # Process PDBs in parallel.
-    parallel_context = Parallel(n_jobs=sampling_cfg.num_workers) if sampling_cfg.num_workers > 1 else nullcontext()
-
-    # Begin sampling.
-    pbar = tqdm(
-        total=len(pdb_paths),
-        desc=f"Sampling {len(pdb_paths)} PDBs, {sampling_cfg.num_seqs_per_pdb} sequences per PDB...",
-    )
-    
-    total_avg_seq_recovery = 0.0
-    total_avg_sp_seq_recovery = 0.0 #! small molecule pocket
-    # total_avg_mp_seq_recovery = 0.0 #! metal pocket
-    # total_avg_np_seq_recovery = 0.0 #! nucleotide pocket
-    with parallel_context as parallel_pool:
-        for pi in range(0, len(pdb_paths), sampling_cfg.batch_size):
-            batch_pdb_paths = pdb_paths[pi : pi + sampling_cfg.batch_size]
-            B = len(batch_pdb_paths)                            
-                                     
-            batch = get_sd_batch(batch_pdb_paths,  data_cfg=data_cfg, transform_cfg=transform_cfg, 
-                                 device=device, parallel_pool=parallel_pool, metadata=metadata,
-                                 protein_only=protein_only)
-                                 
-                                 
-
-            # Initialize seq_cond and atom_cond masks.
-            batch = initialize_sampling_masks(batch)
-            
-            #! Revert, directly use AnnotateLigandPockets transform instead of initialize_pocket_mask
-            # If fix_pocket_seq is enabled, create pos_constraint_df from ligand pocket
-            if fix_pocket_seq:
-                pos_constraint_df = None
-                pos_constraint_df = create_pos_constraint_from_ligand_pocket(batch)
-                print(f"Created pos_constraint_df from ligand pocket: {pos_constraint_df}")
-                                        
-            # Parse fixed positions.
-            batch = parse_fixed_pos_info(batch, pos_constraint_df, verbose=sampling_cfg.verbose)
-
-            # Restrict aatype sampling at certain positions.
-            sampling_inputs = OmegaConf.to_container(sampling_cfg, resolve=True)
-            sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(
-                batch, pos_constraint_df, verbose=sampling_cfg.verbose
-            )
-
-            # Run sampling.
-            id_to_atom_arrays, id_to_aux = model.sample(batch, sampling_inputs=sampling_inputs)
-
-            # Save outputs.
-            example_id_to_batch_idx = {eid: idx for idx, eid in enumerate(batch["example_id"])}
-            
-            # Get designed_cif_save_args from data_cfg (for run_lc_seq_des_prev)
-            cif_save_args = OmegaConf.to_container(data_cfg.cif_save_args, resolve=True) if data_cfg and data_cfg.get("cif_save_args") else {}
-            
-            # If protein_only, load original structures from cached .pt files to extract ligands                        
-            original_ligands = {}
-            if protein_only:
-                for pdb_path in batch_pdb_paths:
-                    try:
-                        # Load from cached .pt file
-                        cached_example = torch.load(str(pdb_path), map_location="cpu", weights_only=False)
-                        orig_array = cached_example.get("atom_array")                        
-                        
-                        # Get pdb_id and find ligand pn_unit_iid from metadata
-                        pdb_id = Path(pdb_path).stem.split("_")[0]
-                        
-                        # Determine ligand pn_unit_iid from metadata
-                        current_ligand_pn_unit_iids = None  
-                
-                        metadata_row = metadata[metadata["pdb_id"] == pdb_id]
-                        assert metadata_row is not None, f"Metadata row is None for {pdb_id}"
-                            
-                        # Find non-protein (ligand) pn_unit_iid
-                        # q_pn_unit_is_protein_1/2 indicates if that unit is protein
-                        ligand_pn_unit_iid_list = []
-                        for suffix_num in ["1", "2"]:
-                            is_protein_col = f"q_pn_unit_is_protein_{suffix_num}"
-                            pn_unit_iid_col = f"q_pn_unit_iid_{suffix_num}"
-                            if is_protein_col in metadata_row.columns and pn_unit_iid_col in metadata_row.columns:
-                                is_protein = metadata_row[is_protein_col].iloc[0]
-                                if not is_protein:  # This is ligand
-                                    ligand_pn_unit_iid = metadata_row[pn_unit_iid_col].iloc[0]                                    
-                                    assert ligand_pn_unit_iid is not None, f"Ligand pn_unit_iid is None for {pdb_id}"                                        
-                                    ligand_pn_unit_iid_list.append(ligand_pn_unit_iid)
-                            if ligand_pn_unit_iid_list:
-                                # Use pn_unit_iid directly (e.g., "B_1") - no suffix removal needed
-                                current_ligand_pn_unit_iids = ligand_pn_unit_iid_list
-                                print(f"Detected ligand pn_unit_iid(s) for {pdb_id}: {current_ligand_pn_unit_iids}")
-                        
-                        ligand_array = extract_ligand_from_structure(orig_array, ligand_pn_unit_iids=current_ligand_pn_unit_iids)
-                        original_ligands[pdb_id] = ligand_array
-                    except Exception as e:
-                        print(f"Warning: Failed to extract ligand from {pdb_path}: {e}")
-                        
-            for si, (example_id, atom_arrays) in enumerate(id_to_atom_arrays.items()):
-                aux = id_to_aux[example_id]
-                
-                # Add _protein_only suffix if protein_only mode (after convert_stem to avoid regex issues)
-                suffix = "_protein_only" if protein_only else ""
-                sample_stems = [convert_stem(f"{example_id}_sample{si}") + suffix for si in range(len(atom_arrays))]
-                
-                samp_bb_ligand_atom_arrays = []                                
-                sample_seq_recovery_sum = 0.0
-                sample_sp_seq_recovery_sum = 0.0                
-                # Save outputs, calculate sequence recovery metrics for each sample.
-                for ai, sample_stem in enumerate(sample_stems):
-                    outputs["example_id"].append(example_id)
-                    outputs["U"].append(aux[ai]["U"])
-                    
-                    samp_atom_array = atom_arrays[ai]
-                    
-                    # Save atom_array and sequence
-                    outputs["atom_array"].append(samp_atom_array)                                        
-                    chain_info = non_rcsb.initialize_chain_info_from_atom_array(samp_atom_array)
-                    outputs["seq"].append(
-                        ":".join(info["processed_entity_canonical_sequence"] for info in chain_info.values())
-                    )
-                    
-                    # Process atom arrays for further task (e.g., sequence recovery metrics, save cif files for af3 template conditioning)
-                    samp_prot_atom_array = samp_atom_array[samp_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
-                    samp_prot_bb_atom_array = samp_prot_atom_array[samp_prot_atom_array.is_backbone_atom]    
-                    
-                    if not protein_only:
-                        samp_ligand_atom_array = samp_atom_array[samp_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L]
-                    else:
-                        # For protein_only mode, only save with_ligand file (skip protein-only file)
-                        pdb_id = sample_stem.split("_")[0]
-                        samp_ligand_atom_array = original_ligands.get(pdb_id)                                          
-                    
-                    if samp_ligand_atom_array is None:
-                        print(f"Warning: Ligand array is None for {pdb_id}")
-                        continue
-                    
-                    # Combine protein backbone and ligand atoms
-                    samp_prot_bb_atom_array = samp_prot_atom_array[samp_prot_atom_array.is_backbone_atom]                                                
-                    samp_atom_array_no_sidechain = samp_prot_bb_atom_array + samp_ligand_atom_array #! biotite use + operator to concatenate atom arrays                                       
-                    
-                    # Renumber atom_id sequentially (1-indexed)
-                    samp_atom_array_no_sidechain.atom_id = np.arange(1, len(samp_atom_array_no_sidechain) + 1)
-                    
-                    # Save samp_atom_array_no_sidechain to outputs
-                    outputs["bb_ligand_atom_array"].append(samp_atom_array_no_sidechain)
-                    
-                    # Append samp_atom_array_no_sidechain to bb_ligand_atom_arrays to calculate sequence recovery metrics
-                    samp_bb_ligand_atom_arrays.append(samp_atom_array_no_sidechain)
-                    
-                    # atom_array with gaps for af3 template conditioning
-                    samp_prot_bb_atom_array_with_gaps = samp_prot_bb_atom_array.copy()
-                                                                                                                                                                
-                    # Insert UNK atoms for gaps in protein backbone atom array
-                    samp_atom_array_no_sidechain_with_gaps = insert_unk_residues_for_gaps_in_atom_array(samp_prot_bb_atom_array_with_gaps)
-                    samp_atom_array_no_sidechain_with_gaps = samp_atom_array_no_sidechain_with_gaps + samp_ligand_atom_array
-                    
-                    # Renumber atom_id sequentially (1-indexed)
-                    samp_atom_array_no_sidechain_with_gaps.atom_id = np.arange(1, len(samp_atom_array_no_sidechain_with_gaps) + 1)
-                    
-                    if not protein_only:
-                        out_file = f"{sample_out_dir}/{sample_stem}.cif"                        
-                        out_file = to_cif_file(samp_atom_array_no_sidechain, out_file, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)                        
-                        _fix_cif_formal_charge(out_file)                        
-                        outputs["out_pdb"].append(out_file)                        
-                        
-                        out_file_for_af3_tc = f"{sample_out_dir}/{sample_stem}_for_af3_tc.cif"
-                        out_file_for_af3_tc = to_cif_file(samp_atom_array_no_sidechain_with_gaps, out_file_for_af3_tc, file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)
-                        _fix_cif_formal_charge(out_file_for_af3_tc)
-                        outputs["out_pdb_for_af3_tc"].append(out_file_for_af3_tc)         
-                    else:                                                                                            
-                        # Save with _protein_only_with_ligand suffix only                    
-                        with_ligand_stem = sample_stem.replace("_protein_only", "_protein_only_with_ligand")
-                        out_file_with_ligand = f"{sample_out_dir}/{with_ligand_stem}.cif"                         
-                        
-                        out_file_with_ligand = to_cif_file(samp_atom_array_no_sidechain,
-                                                        out_file_with_ligand,
-                                                        file_type="cif",
-                                                        fill_gaps_in_poly_records=False,
-                                                        **cif_save_args)
-                                                                        
-                        _fix_cif_formal_charge(out_file_with_ligand)                        
-                        outputs["out_pdb"].append(out_file_with_ligand)
-                        print(f"Saved protein+ligand sample: {out_file_with_ligand}")                                                    
-                        
-                        out_file_with_ligand_for_tc = f"{sample_out_dir}/{with_ligand_stem}_for_af3_tc.cif"
-                        out_file_with_ligand_for_tc = to_cif_file(samp_atom_array_no_sidechain_with_gaps, out_file_with_ligand_for_tc, 
-                                                                  file_type="cif", fill_gaps_in_poly_records=False, **cif_save_args)
-                        _fix_cif_formal_charge(out_file_with_ligand_for_tc)
-                        outputs["out_pdb_for_af3_tc"].append(out_file_with_ligand_for_tc)                                                      
-                                    
-                    # Compute sequence recovery metrics                            
-                    orig_res_types = batch["restype"][si].argmax(dim=-1)          
-                    seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["token_resolved_mask"][si]
-                                        
-                    if (not protein_only) and (not fix_pocket_seq):
-                        lp_seq_mask = (1 - batch["seq_cond_mask"][si]) * batch["token_pad_mask"][si] * batch["pocket_token_mask"][si]
-                    elif (not protein_only) and fix_pocket_seq:
-                        lp_seq_mask = batch["pocket_token_mask"][si] * batch["token_pad_mask"][si]
-                    else:
-                        native_atom_array = batch["atom_array"][si]
-                        native_prot_atom_array = native_atom_array[native_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
-                        native_prot_ca_atom_array = native_prot_atom_array[native_prot_atom_array.atom_name == "CA"]                                                                        
-                
-                    # Calculate sequence recovery metrics for each sample                                                
-                    if not protein_only:
-                        recovery_metrics = compute_sequence_recovery(
-                            sampled_atom_array=atom_arrays[ai],
-                            orig_res_types=orig_res_types,
-                            seq_mask=seq_mask,
-                            pocket_mask=lp_seq_mask,
-                            device=device,
-                        )
-                        seq_recovery = recovery_metrics["seq_recovery"]
-                        sp_seq_recovery = recovery_metrics["pocket_seq_recovery"]
-                    else:
-                        #! Assume we're not conditioning on any sequences, for now.                                                
-                        samp_bb_ligand_atom_array = samp_bb_ligand_atom_arrays[ai]
-                        receptor_chain = samp_bb_ligand_atom_array[samp_bb_ligand_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L].chain_id[0]                                                                                                      
-                        ligand_chain = samp_bb_ligand_atom_array[samp_bb_ligand_atom_array.chain_type != aw_enums.ChainType.POLYPEPTIDE_L].chain_id[0]
-                                                        
-                        samp_bb_ligand_atom_array = annotate_ligand_pockets(atom_array = samp_bb_ligand_atom_array, 
-                                                                                            pocket_distance = pocket_distance, 
-                                                                                            receptor_chain = receptor_chain, 
-                                                                                            ligand_chain = ligand_chain)
-                            
-                        samp_prot_atom_array = samp_bb_ligand_atom_array[samp_bb_ligand_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
-                        
-                        samp_prot_ca_atom_array = samp_prot_atom_array[samp_prot_atom_array.atom_name == "CA"]
-                        valid_mask = (samp_prot_ca_atom_array.is_backbone_atom) & ~(samp_prot_ca_atom_array.res_name == "UNK") & (samp_prot_ca_atom_array.occupancy > 0.0) & (samp_prot_ca_atom_array.hetero == False)
-                        valid_lp_mask = (samp_prot_ca_atom_array.is_ligand_pocket) & valid_mask
-                        
-                        samp_seq = samp_prot_ca_atom_array[valid_mask].res_name
-                        _res_ids_designed = samp_prot_ca_atom_array[valid_mask].res_id
-                        
-                        samp_pocket_seq = samp_prot_ca_atom_array[valid_lp_mask].res_name
-                        _res_ids_designed_in_pocket = samp_prot_ca_atom_array[valid_lp_mask].res_id
-                        
-                        native_seq = native_prot_ca_atom_array[np.isin(native_prot_ca_atom_array.res_id, _res_ids_designed)].res_name                            
-                        native_pocket_seq = native_prot_ca_atom_array[np.isin(native_prot_ca_atom_array.res_id, _res_ids_designed_in_pocket)].res_name
-                        try:
-                            seq_recovery = ((native_seq == samp_seq).sum() / len(samp_seq))
-                            sp_seq_recovery = ((native_pocket_seq == samp_pocket_seq).sum() / len(samp_pocket_seq))
-                        except Exception as e:
-                            print(f"Error calculating sequence recovery: {e}")
-                            seq_recovery = 0.0
-                            sp_seq_recovery = 0.0
-                                                                                    
-                    # Save sequence recovery metrics
-                    outputs["sample_seq_recovery"].append(seq_recovery)
-                    sample_seq_recovery_sum += seq_recovery
-                                                                        
-                    outputs["sample_sp_seq_recovery"].append(sp_seq_recovery)
-                    sample_sp_seq_recovery_sum += sp_seq_recovery                        
-                    # Todo: Compute mp and np sequence recovery
-                    
-                    print (f"sample {ai} of {example_id}: seq recovery: {seq_recovery}, sp seq recovery: {sp_seq_recovery}")                                        
-                                        
-                sample_avg_seq_recovery = sample_seq_recovery_sum / len(atom_arrays)
-                sample_avg_sp_seq_recovery = sample_sp_seq_recovery_sum / len(atom_arrays)
-                outputs["sample_avg_seq_recovery"].append(sample_avg_seq_recovery)
-                outputs["sample_avg_sp_seq_recovery"].append(sample_avg_sp_seq_recovery)
-                                
-                total_avg_seq_recovery += sample_avg_seq_recovery
-                total_avg_sp_seq_recovery += sample_avg_sp_seq_recovery
-
-                print (f"{example_id} avg seq recovery: {seq_recovery}, avg sp seq recovery: {sp_seq_recovery} out of {len(atom_arrays)} samples")                                                   
-                
-            pbar.update(B)
-    pbar.close()
-    total_avg_seq_recovery /= len(pdb_paths)
-    total_avg_sp_seq_recovery /= len(pdb_paths)
-    outputs["total_avg_seq_recovery"] = total_avg_seq_recovery
-    outputs["total_avg_sp_seq_recovery"] = total_avg_sp_seq_recovery
-    print (f"Total avg seq recovery: {total_avg_seq_recovery}, Total avg sp seq recovery: {total_avg_sp_seq_recovery}")
-    
-    for k, v in outputs.items():
-        if isinstance(v, list) and len(v) > 0 and isinstance(v[0], torch.Tensor):
-            outputs[k] = [t.detach().cpu().item() for t in v]
-        elif isinstance(v, torch.Tensor):
-            outputs[k] = v.detach().cpu().item()
-        else:
-            outputs[k] = v
-
-    # Save sample_metadata.pt for later use (e.g., skip_sampling mode)
-    sample_metadata = {}
-    for idx in range(len(outputs["out_pdb"])):
-        sample_stem = Path(outputs["out_pdb"][idx]).stem
-        sample_metadata[sample_stem] = {
-            "example_id": outputs["example_id"][idx],
-            "out_pdb": outputs["out_pdb"][idx],
-            "out_pdb_for_af3_tc": outputs["out_pdb_for_af3_tc"][idx],
-            "U": outputs["U"][idx],
-            "sample_seq_recovery": outputs["sample_seq_recovery"][idx] if "sample_seq_recovery" in outputs else None,
-            "sample_sp_seq_recovery": outputs["sample_sp_seq_recovery"][idx] if "sample_sp_seq_recovery" in outputs else None,
-        }
-    torch.save(sample_metadata, f"{sample_out_dir}/sample_metadata.pt")
-    print(f"Saved sample_metadata.pt with {len(sample_metadata)} samples to {sample_out_dir}")
-
-    return outputs
-
 
 ###########################################################
 # Scoring Functions
@@ -2789,3 +2700,143 @@ def redesign_with_lcaliby(seed: int = 0,
     
     return results
 
+
+def redesign_scaffold_with_lcaliby(seed: int = 0,
+                        input_sample_is_designed: bool = False,
+                        pocket_source_is_designed: bool = False,
+                        sample_dict: dict = None,
+                        seq_des_cfg: DictConfig = None,
+                        cif_parse_cfg: DictConfig = None,
+                        preprocess_cfg: DictConfig = None,
+                        featurizer_cfg: DictConfig = None,
+                        cif_save_cfg: DictConfig = None,                          
+                        sampling_inputs_df: pd.DataFrame = None,
+                        log_dir: Path = None,
+                        pos_constraint_df: pd.DataFrame = None,
+                        protein_only: bool = False,
+                        pocket_only: bool = False,
+                        pocket_featurizer_cfg: dict | None = None,
+                        csv_suffix: str = "") -> list[tuple[dict, Path, dict]]:
+    """
+    Redesign pocket sequence using lcaliby model for each checkpoint.
+    
+    Args:
+        seed: Random seed.
+        sample_dict: Dictionary of sample information.
+        seq_des_cfg: Sequence design configuration.
+        cif_parse_cfg: CIF parser configuration for loading samples.
+        preprocess_cfg: Preprocessing configuration.
+        featurizer_cfg: Featurizer configuration.
+        cif_save_cfg: CIF save configuration.
+        sampling_inputs_df: Sampling inputs DataFrame.
+        log_dir: Log directory.
+        pos_constraint_df: Positional constraints DataFrame.
+        protein_only: If True, condition only on protein atoms (exclude ligands from atom_cond_mask).
+        pocket_only: If True, use pocket-only featurizer to crop to ligand pocket.
+        pocket_featurizer_cfg: Config dict for the pocket-only featurizer.
+    Returns:
+        List of tuples: (sample_dict, output_dir, ckpt_info) for each checkpoint.
+    """
+    torch.set_grad_enabled(False)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    sd_ckpts, pattern = get_training_checkpoints(
+        seq_des_cfg.denoiser_train_dir, "seq_denoiser",
+        seq_des_cfg.ckpt_cfg.eval_every_n_ckpts, 
+        seq_des_cfg.ckpt_cfg.start_step, 
+        seq_des_cfg.ckpt_cfg.end_step,
+        seq_des_cfg.ckpt_cfg.use_ema,
+        seq_des_cfg.ckpt_cfg.eval_last_ckpt
+    )
+    
+    input_sample_paths = [sample_dict[sid]['input_sample_path'] for sid in sample_dict.keys()]
+            
+    results = []    
+    for sd_ckpt in tqdm(sd_ckpts, desc="Redesigning sequence using lcaliby"):
+        match = pattern.search(Path(sd_ckpt).name)
+        global_step, epoch = int(match.group(1)), int(match.group(2))
+        
+        log_dir_per_ckpt = log_dir / f"step_{global_step}_epoch_{epoch}"
+        log_dir_per_ckpt.mkdir(parents=True, exist_ok=True)
+        
+        ckpt_info = {"global_step": global_step, "epoch": epoch, "ckpt_path": sd_ckpt}
+        
+        L.seed_everything(seed)
+        
+        seq_des_cfg.atom_mpnn.ckpt_path = sd_ckpt
+        seq_des_model = get_seq_des_model(cfg = seq_des_cfg, device=device)
+        
+        outputs = run_lc_scaffold_seq_des(
+            model=seq_des_model["model"], 
+            input_sample_is_designed = input_sample_is_designed,
+            cif_parse_cfg=cif_parse_cfg,
+            preprocess_cfg=preprocess_cfg,
+            featurizer_cfg=featurizer_cfg,
+            cif_save_cfg=cif_save_cfg,                                     
+            sampling_cfg=seq_des_model["sampling_cfg"],                          
+            sampling_inputs_df=sampling_inputs_df,
+            pdb_paths=input_sample_paths, 
+            device=device,             
+            out_dir=str(log_dir_per_ckpt),
+            pos_constraint_df=pos_constraint_df,
+            protein_only=protein_only,
+            pocket_only=pocket_only,
+            pocket_featurizer_cfg=pocket_featurizer_cfg,
+        )
+                
+        sample_dict_per_ckpt = copy.deepcopy(sample_dict)
+        
+        # Save sequence recovery metrics into .csv file (one row per sample)
+        seq_recovery_metrics_list = []
+        for example_id, output in outputs.items():
+            sample_ids = output["designed_sample_id"]
+            seq_recoveries = output["seq_recovery_ratio"]
+            pocket_4 = output["pocket_seq_recovery_ratio_4"]
+            pocket_5 = output["pocket_seq_recovery_ratio_5"]
+            pocket_6 = output["pocket_seq_recovery_ratio_6"]
+            
+            for i in range(len(sample_ids)):
+                seq_recovery_metrics_list.append({
+                    "example_id": example_id,
+                    "designed_sample_id": sample_ids[i],
+                    "seq_recovery_ratio": float(seq_recoveries[i]),
+                    "pocket_seq_recovery_ratio_4": float(pocket_4[i]),
+                    "pocket_seq_recovery_ratio_5": float(pocket_5[i]),
+                    "pocket_seq_recovery_ratio_6": float(pocket_6[i])
+                })
+                print(f"sample {i} of {example_id}: seq recovery: {seq_recoveries[i]}, pocket seq recovery: 4A:{pocket_4[i]}, 5A:{pocket_5[i]}, 6A:{pocket_6[i]}")
+        seq_recovery_metrics_df = pd.DataFrame(seq_recovery_metrics_list)
+        seq_recovery_metrics_df.to_csv(Path(log_dir_per_ckpt, f"seq_recovery_metrics{csv_suffix}.csv"), index=False)
+        
+        # Store outputs in sample_dict_per_ckpt
+        for example_id, output in outputs.items():  
+            sample_dict_per_ckpt[example_id]['designed_sample_id'] = output["designed_sample_id"]
+            sample_dict_per_ckpt[example_id]['designed_sample_atom_array'] = output["designed_sample_atom_array"]
+            sample_dict_per_ckpt[example_id]['designed_sample_bb_ligand_atom_array'] = output["designed_sample_bb_ligand_atom_array"]
+            sample_dict_per_ckpt[example_id]['designed_sample_seq'] = output["designed_sample_seq"]
+            sample_dict_per_ckpt[example_id]['designed_sample_path'] = output["designed_sample_path"]
+            sample_dict_per_ckpt[example_id]['designed_sample_path_for_af3_tc'] = output["designed_sample_path_for_af3_tc"]                                            
+                        
+        # Extract pdb_chain_info from outputs for af3 prediction
+        for example_id in sample_dict_per_ckpt.keys():
+            pdb_chain_info = defaultdict(list)
+            designed_sample_atom_array = sample_dict_per_ckpt[example_id]["designed_sample_atom_array"][0]
+            desgiend_sample_prot_atom_array = designed_sample_atom_array[designed_sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
+            desgiend_sample_ligand_atom_array = designed_sample_atom_array[np.isin(designed_sample_atom_array.chain_type, list(aw_enums.ChainTypeInfo.NON_POLYMERS))]
+            protein_chain_iids = [str(chain_iid) for chain_iid in np.unique(desgiend_sample_prot_atom_array.chain_iid)]    
+            ligand_chain_iids = [str(chain_iid) for chain_iid in np.unique(desgiend_sample_ligand_atom_array.chain_iid)]
+            ligand_ccd_codes = [str(desgiend_sample_ligand_atom_array[desgiend_sample_ligand_atom_array.chain_iid == chain_iid].res_name[0]) for chain_iid in ligand_chain_iids]
+            ligand_chain_iids_ccd_codes = list(zip(ligand_chain_iids, ligand_ccd_codes))    
+            
+            for chain_iid in protein_chain_iids:
+                pdb_chain_info["protein_chain_iids"].append(str(chain_iid))
+            
+            for chain_iid, ccd_code in ligand_chain_iids_ccd_codes:
+                pdb_chain_info["ligand_chain_iids"].append(str(chain_iid))
+                pdb_chain_info["ligand_ccd_codes"].append(str(ccd_code))            
+
+            sample_dict_per_ckpt[example_id]["pdb_chain_info"] = pdb_chain_info  
+                    
+        results.append((sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info))
+    
+    return results

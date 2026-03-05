@@ -8,14 +8,14 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 2
+num_debug_samples: 4
 seed: 0
 num_workers: 0 # for dataloading
 protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 
 # Outputs
-exp_name: debug_eval_exp24_cfg2_pocket_only # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260217
+exp_name: debug_two_stage_multi # experiment name; used for wandb and output directory
+base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260304
 
 # Sequence design config
 seq_des_cfg:  

@@ -18,7 +18,7 @@ pocket_only: true
 pocket_featurizer_cfg:
   pocket_crop_distance: 6.0    # AnnotateLigandPockets distance for defining pocket residues
   spatial_crop_radius: 20.0    # CropSpatialAroundTargetLigand coarse pre-crop radius (wider for large ligands)
-  use_pseudo_cb_for_pocket_annotation: true
+  use_pseudo_cb_for_pocket_annotation: false
   max_tokens: null              # No truncation -- keep all pocket residues
   max_atoms: null               # No fixed padding
   remove_unresolved_tokens: true
