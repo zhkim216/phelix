@@ -69,6 +69,7 @@ if [[ "$MAJOR" -ge 8 ]]; then
     FLASH_ATTN_IMPL="triton"
 else
     FLASH_ATTN_IMPL="xla"
+    export XLA_FLAGS="${XLA_FLAGS:+${XLA_FLAGS} }--xla_disable_hlo_passes=custom-kernel-fusion-rewriter"
 fi
 echo "GPU compute capability: ${COMPUTE_CAP}, using flash_attention_implementation=${FLASH_ATTN_IMPL}"
 
