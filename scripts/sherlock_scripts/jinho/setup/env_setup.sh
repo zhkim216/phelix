@@ -27,7 +27,8 @@ fi
 
 
 # XLA/JAX setups (AF3 recommendation)
-export XLA_FLAGS="--xla_gpu_enable_triton_gemm=false"
+# --xla_disable_hlo_passes: required for GPU compute capability 7.x (V100/T4)
+export XLA_FLAGS="--xla_gpu_enable_triton_gemm=false --xla_disable_hlo_passes=custom-kernel-fusion-rewriter"
 export XLA_PYTHON_CLIENT_PREALLOCATE=true
 export XLA_CLIENT_MEM_FRACTION=0.95
 
