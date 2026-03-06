@@ -61,6 +61,18 @@ DENOISER_TRAIN_DIR=/scratch/users/zhkim216/out_dir/ligand_seq_des/exp18_cfg3 # L
 echo "Starting evaluation for model=${MODEL_NAME}, step=${STEP}, valset=${VALSET_NAME}"
 echo "Config ${CONFIG_ID}/${NUM_CONFIGS}, data shard ${DATA_SHARD_ID}/${NUM_DATA_SHARDS}"
 
+# Automatically detect flash attention implementation
+COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1)
+MAJOR=$(echo "$COMPUTE_CAP" | cut -d. -f1)
+
+if [[ "$MAJOR" -ge 8 ]]; then
+    FLASH_ATTN_IMPL="triton"
+else
+    FLASH_ATTN_IMPL="xla"
+    export XLA_FLAGS="${XLA_FLAGS:+${XLA_FLAGS} }--xla_disable_hlo_passes=custom-kernel-fusion-rewriter"
+fi
+echo "GPU compute capability: ${COMPUTE_CAP}, using flash_attention_implementation=${FLASH_ATTN_IMPL}"
+
 # Run evaluation script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py \
     --config-path ${BASE_DIR}/allatom_design/configs/eval/sampling \
@@ -81,7 +93,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     seq_des_cfg.ckpt_cfg.eval_every_n_ckpts=1 \
     seq_des_cfg.ckpt_cfg.eval_last_ckpt=false \
     seq_des_cfg.ckpt_cfg.use_ema=true \
-    seq_des_cfg.atom_mpnn.overrides.batch_size=16 \
+    seq_des_cfg.atom_mpnn.overrides.batch_size=4 \
     seq_des_cfg.atom_mpnn.overrides.num_seqs_per_pdb=1 \
     sampling_inputs_csv=${SAMPLING_INPUTS_CSV} \
     pos_constraint_csv=${POS_CONSTRAINT_CSV} \
@@ -93,12 +105,15 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     pdb_cfg.pdb_name_list=null \
     pdb_cfg.pdb_name_ext=".cif" \
     pdb_cfg.recursive=true \
-    pdb_cfg.split_by_subfolder=true \
+    pdb_cfg.split_by_subfolder=false \
     pdb_cfg.array_id=${DATA_SHARD_ID} \
     pdb_cfg.num_arrays=${NUM_DATA_SHARDS} \
     'pdb_cfg.sample_indices=[0,1,2,3,4]' \
     featurizer_cfg.design.residue_cache_dir="/scratch/users/zhkim216/datasets/atomworks_cached_residue_data" \
-    struct_pred_cfg.evaluate_self_consistency=false \
+    struct_pred_cfg.evaluate_self_consistency=true \
+    struct_pred_cfg.af3.inference_config.base.flash_attention_implementation=${FLASH_ATTN_IMPL} \
+    struct_pred_cfg.af3.inference_config.ss.num_recycles=10 \
+    struct_pred_cfg.af3.inference_config.ss.num_diffusion_samples=5 \
     struct_pred_cfg.evaluate_docking_consistency=false \
     hydra.run.dir=${HYDRA_DIR}
 
