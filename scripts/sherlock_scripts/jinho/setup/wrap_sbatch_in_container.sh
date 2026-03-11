@@ -51,6 +51,13 @@ BIND="$BIND,${CUDA_HOST}:${CUDA_HOME}:ro"
 # Include /hmmer/bin which is inside the container image
 CONTAINER_PATH="$VENV/bin:$CUDA_HOME/bin:/hmmer/bin:$PATH"
 
+# Also copy the original script to the wrapper directory for reference
+ORIG_COPY="$WRAP_DIR/${JOB_BASE%.sbatch}.original.${STAMP}.sbatch"
+cp "$JOB_ABS" "$ORIG_COPY"
+
+# Extract script body (everything except #SBATCH lines and shebang)
+SCRIPT_BODY=$(grep -v -E '^[[:space:]]*(#SBATCH|#!/)' "$JOB_ABS" || true)
+
 {
   echo '#!/usr/bin/env bash'
   # Keep original #SBATCH
@@ -59,6 +66,7 @@ CONTAINER_PATH="$VENV/bin:$CUDA_HOME/bin:/hmmer/bin:$PATH"
 set -euo pipefail
 echo "[container] image: $IMG"
 echo "[container] binds: $BIND"
+echo "[container] original script saved to: $ORIG_COPY"
 
 # Load env_setup.sh in the wrapper to get all environment variables
 source "$SCRIPT_DIR/env_setup.sh"
@@ -93,5 +101,6 @@ EOF
 } > "$WRAP"
 
 chmod +x "$WRAP"
+echo "[wrapper] Original script saved to: $ORIG_COPY"
 echo "[wrapper] Submitting: $WRAP"
 sbatch "$WRAP"
