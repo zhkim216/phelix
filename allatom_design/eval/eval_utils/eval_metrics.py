@@ -248,6 +248,7 @@ def _compute_self_consistency_metrics_atomarray(*, pred_atom_array: AtomArray,
     else:
         return metrics
 
+
 def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray, 
                                        sample_atom_array: AtomArray,
                                        pred_sample_path: str = None,
@@ -350,21 +351,14 @@ def _compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
     # Calculate symmetry-corrected RMSD using RDKit
     ligand_rmsd = None
     try:        
-        # Convert ligand atom arrays to RDKit molecules                        
-        # Use atom_array_to_rdkit with sanitize fallback
         try:
             sample_mol = atom_array_to_rdkit(sample_ligand_atom_array, sanitize=True)
-            print("Sample ligand sanitization successful")
         except Exception:
             sample_mol = atom_array_to_rdkit(sample_ligand_atom_array, sanitize=False)
-            print("Sample ligand sanitization failed, not using sanitization fallback")
-        
         try:
             pred_mol = atom_array_to_rdkit(pred_ligand_atom_array, sanitize=True)
-            print("Pred ligand sanitization successful")
         except Exception:
             pred_mol = atom_array_to_rdkit(pred_ligand_atom_array, sanitize=False)
-            print("Pred ligand sanitization failed, not using sanitization fallback")
         
         if sample_mol and pred_mol:
             # Remove hydrogens for RMSD calculation
