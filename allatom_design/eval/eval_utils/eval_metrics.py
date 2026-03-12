@@ -129,7 +129,6 @@ def _compute_self_consistency_metrics_atomworks_af3(*, pred_example: dict[str, A
     pred_ca = pred_atom_array[pred_ca_mask]
     
     assert (sample_ca.res_name == pred_ca.res_name).all(), "Sample and pred CA residues must match"
-    
     # Align pred CA to sample CA using atomworks align_atom_arrays
     # This aligns pred_ca to sample_ca and applies the transformation to the full pred_atom_array
     aligned_pred_atom_array, ca_rmsd = align_atom_arrays(
@@ -184,19 +183,18 @@ def _compute_self_consistency_metrics_atomarray(*, pred_atom_array: AtomArray,
     Uses atomworks align_atom_arrays to handle structures with different atom sets
     (e.g., sample with backbone only vs pred with full sidechain atoms).
     """    
-    metrics = {}
-
+    metrics = {}    
     # Extract CA atoms from both structures (handles different atom counts)
     # For proteins, select CA atoms; for other chain types, this will be empty
-    sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) # 6: polypeptide-l chain type
+    sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (~sample_atom_array.atomize) # 6: polypeptide-l chain type
     sample_ca = sample_atom_array[sample_ca_mask]
     
     # Delete UNK residues from pred_atom_array, it's from the sample sequence for the gaps between the actual residues.
     # Designed sequence don't output UNK residues, so we can safely delete them.
     pred_ca_mask = (pred_atom_array.atom_name == "CA") & (pred_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (pred_atom_array.res_name != "UNK")
     pred_ca = pred_atom_array[pred_ca_mask]
-            
-    assert (sample_ca.res_name == pred_ca.res_name).all(), "Sample and pred CA residues must match"            
+                
+    assert (sample_ca.res_name == pred_ca.res_name).all(), "Sample and pred CA residues must match"                
     
     # Align pred CA to sample CA using atomworks align_atom_arrays
     # This aligns pred_ca to sample_ca and applies the transformation to the full pred_atom_array

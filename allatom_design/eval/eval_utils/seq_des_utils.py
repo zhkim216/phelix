@@ -2100,7 +2100,7 @@ def prepare_sample_dict(cfg: DictConfig = None,
     # Get PDB files
     sample_paths = get_pdb_files(**cfg.pdb_cfg)
     
-    if cfg.debug:
+    if cfg.debug:        
         sample_paths = sample_paths[:cfg.num_debug_samples]                
         
     # Initialize dictionary for storing sample information
