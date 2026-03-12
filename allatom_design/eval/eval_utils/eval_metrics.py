@@ -120,7 +120,7 @@ def _compute_self_consistency_metrics_atomworks_af3(*, pred_example: dict[str, A
     
     # Extract CA atoms from both structures (handles different atom counts)
     # For proteins, select CA atoms; for other chain types, this will be empty
-    sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)# 6: polypeptide-l chain type
+    sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) # 6: polypeptide-l chain type
     sample_ca = sample_atom_array[sample_ca_mask]
     
     # Delete UNK residues from pred_atom_array, it's from the sample sequence for the gaps between the actual residues.
@@ -186,7 +186,7 @@ def _compute_self_consistency_metrics_atomarray(*, pred_atom_array: AtomArray,
     metrics = {}    
     # Extract CA atoms from both structures (handles different atom counts)
     # For proteins, select CA atoms; for other chain types, this will be empty
-    sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (~sample_atom_array.atomize) # 6: polypeptide-l chain type
+    sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) # 6: polypeptide-l chain type
     sample_ca = sample_atom_array[sample_ca_mask]
     
     # Delete UNK residues from pred_atom_array, it's from the sample sequence for the gaps between the actual residues.

@@ -191,6 +191,8 @@ def make_af3_json(af3_ss_input_dir: str = None,
                     metadata: pd.DataFrame = None,                                   
                     json_config: dict = None,
                     make_tc_input: bool = False,
+                    use_smiles_cache: bool = False,
+                    smiles_cache_path: str = None,
                     ) -> None:
     """
     Create AF3 JSON input files for single-sequence and template-conditioned inference.
@@ -213,6 +215,18 @@ def make_af3_json(af3_ss_input_dir: str = None,
     """                           
     model_seeds = list(json_config.get('model_seeds', [42]))
     version = int(json_config.get('version', 2))
+    
+    # Load SMILES cache if enabled
+    smiles_cache = {}
+    if use_smiles_cache and smiles_cache_path:
+        import json as json_module
+        cache_path = Path(smiles_cache_path)
+        if cache_path.exists():
+            with open(cache_path, 'r') as f:
+                smiles_cache = json_module.load(f)
+            print(f"Loaded SMILES cache with {len(smiles_cache)} entries")
+        else:
+            print(f"Warning: SMILES cache not found at {smiles_cache_path}, falling back to CCD codes")
                     
     use_metadata = False
     if metadata is not None and pdb_chain_info is None:        
@@ -354,21 +368,32 @@ def make_af3_json(af3_ss_input_dir: str = None,
                     })                
             
             
-            for ligand_chain_iid, ligand_ccd_code in zip(ligand_chain_iids, ligand_ccd_codes):                    
-                ss_sequences.append({
-                    "ligand": {
-                        "id": ligand_chain_iid.split("_")[0],
-                        "ccdCodes": [ligand_ccd_code]
-                    }
-                })
+            for ligand_chain_iid, ligand_ccd_code in zip(ligand_chain_iids, ligand_ccd_codes):
+                ligand_id = ligand_chain_iid.split("_")[0]
                 
-                if make_tc_input:
-                    tc_sequences.append({
+                # Try to use SMILES from cache if enabled
+                smiles_str = smiles_cache.get(ligand_ccd_code) if use_smiles_cache else None
+                
+                if smiles_str:
+                    # Use SMILES string for ligand
+                    ligand_entry = {
                         "ligand": {
-                            "id": ligand_chain_iid.split("_")[0],
+                            "id": ligand_id,
+                            "smiles": smiles_str
+                        }
+                    }
+                else:
+                    # Fallback: use CCD code
+                    ligand_entry = {
+                        "ligand": {
+                            "id": ligand_id,
                             "ccdCodes": [ligand_ccd_code]
                         }
-                    })
+                    }
+                
+                ss_sequences.append(ligand_entry)
+                if make_tc_input:
+                    tc_sequences.append(ligand_entry)
             
             
             sample_af3_ss_json = {
@@ -583,7 +608,9 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
         af3_tc_input_dir=None,
         sample_dict=sample_dict,        
         metadata=None,
-        json_config=struct_pred_cfg.af3.json_config
+        json_config=struct_pred_cfg.af3.json_config,
+        use_smiles_cache=struct_pred_cfg.af3.get("use_smiles_cache", False),
+        smiles_cache_path=struct_pred_cfg.af3.get("smiles_cache_path", None),
     )
     
 
@@ -760,6 +787,8 @@ def evaluate_af3_docking_consistency(sample_dict: dict = None,
         metadata=None,
         json_config=struct_pred_cfg.af3.json_config,
         make_tc_input=True,
+        use_smiles_cache=struct_pred_cfg.af3.get("use_smiles_cache", False),
+        smiles_cache_path=struct_pred_cfg.af3.get("smiles_cache_path", None),
     )
     
 
