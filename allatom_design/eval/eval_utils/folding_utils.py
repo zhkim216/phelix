@@ -36,21 +36,18 @@ from atomworks.constants import (AF3_EXCLUDED_LIGANDS, STANDARD_AA,
 # AF3 In-Process Runner Utils (Internal)
 # ============================================================================
 
-# Global cache for AF3 runner module
+# Global caches for AF3 runner module, ModelRunner, and DataPipelineConfig
 _AF3_RUNNER_MOD = None
-_AF3_FLAGS_INITIALIZED = False
+_AF3_MODEL_RUNNER = None
+_AF3_DATA_PIPELINE_CONFIG = None
+_AF3_MAX_TEMPLATE_DATE = None
+_AF3_BUCKETS = None
 
 
 def _load_af3_runner(runner_path: str):
     """
     Load run_alphafold.py as a module dynamically.
     Cached after first load.
-    
-    Args:
-        runner_path: Path to the AF3 runner script (e.g., run_alphafold_debug_local.py)
-    
-    Returns:
-        The loaded module
     """
     global _AF3_RUNNER_MOD
     if _AF3_RUNNER_MOD is not None:
@@ -63,111 +60,141 @@ def _load_af3_runner(runner_path: str):
     return mod
 
 
+def _get_af3_model_runner_and_config(
+    runner_path: str,
+    inference_config: dict,
+    mode: str = "ss",
+):
+    """
+    Get or create cached AF3 ModelRunner and DataPipelineConfig.
+    ModelRunner and DataPipelineConfig are created once and reused across calls.
+    """
+    import datetime as dt
+    import pathlib
+    import jax
+    
+    global _AF3_MODEL_RUNNER, _AF3_DATA_PIPELINE_CONFIG
+    global _AF3_MAX_TEMPLATE_DATE, _AF3_BUCKETS
+    
+    runner = _load_af3_runner(runner_path)
+    base_config = inference_config.get('base', {})
+    mode_config = inference_config.get(mode, {})
+    
+    if _AF3_MODEL_RUNNER is None:
+        torch.cuda.empty_cache()
+        
+        from alphafold3.jax.attention import attention
+        from alphafold3.data import pipeline
+        import typing
+        
+        flash_attn = base_config.get('flash_attention_implementation', 'triton')
+        
+        devices = jax.local_devices(backend='gpu')
+        print(f'[AF3 init] Found devices: {devices}, using device 0: {devices[0]}')
+        
+        model_config = runner.make_model_config(
+            flash_attention_implementation=typing.cast(attention.Implementation, flash_attn),
+            num_diffusion_samples=mode_config.get('num_diffusion_samples', 5),
+            num_recycles=mode_config.get('num_recycles', 3),
+            return_embeddings=False,
+            return_distogram=False,
+            ligand_protein_template_conditioning_mode=mode_config.get('ligand_protein_template_conditioning_mode', 0),
+            mask_template_sidechains=mode_config.get('mask_template_sidechains', True),
+            mask_template_sequence=mode_config.get('mask_template_sequence', True),
+        )
+        
+        _AF3_MODEL_RUNNER = runner.ModelRunner(
+            config=model_config,
+            device=devices[0],
+            model_dir=pathlib.Path(base_config.get('model_dir', '')),
+        )
+        print('[AF3 init] Loading model parameters...')
+        _ = _AF3_MODEL_RUNNER.model_params
+        print('[AF3 init] Model parameters loaded and cached.')
+        
+        max_template_date_str = mode_config.get('max_template_date', '2021-09-30')
+        _AF3_MAX_TEMPLATE_DATE = dt.date.fromisoformat(max_template_date_str)
+        
+        buckets_list = [256, 512, 768, 1024, 1280, 1536, 2048, 2560, 3072, 3584, 4096, 4608, 5120]
+        _AF3_BUCKETS = tuple(buckets_list)
+        
+        db_dir = base_config.get('db_dir', '')
+        expand_path = lambda x: runner.replace_db_dir(x, [db_dir])
+        _AF3_DATA_PIPELINE_CONFIG = pipeline.DataPipelineConfig(
+            jackhmmer_binary_path='jackhmmer',
+            nhmmer_binary_path='nhmmer',
+            hmmalign_binary_path='hmmalign',
+            hmmsearch_binary_path='hmmsearch',
+            hmmbuild_binary_path='hmmbuild',
+            small_bfd_database_path=expand_path('${DB_DIR}/bfd-first_non_consensus_sequences.fasta'),
+            mgnify_database_path=expand_path('${DB_DIR}/mgy_clusters_2022_05.fa'),
+            uniprot_cluster_annot_database_path=expand_path('${DB_DIR}/uniprot_all_2021_04.fa'),
+            uniref90_database_path=expand_path('${DB_DIR}/uniref90_2022_05.fa'),
+            ntrna_database_path=expand_path('${DB_DIR}/nt_rna_2023_02_23_clust_seq_id_90_cov_80_rep_seq.fasta'),
+            rfam_database_path=expand_path('${DB_DIR}/rfam_14_9_clust_seq_id_90_cov_80_rep_seq.fasta'),
+            rna_central_database_path=expand_path('${DB_DIR}/rnacentral_active_seq_id_90_cov_80_linclust.fasta'),
+            pdb_database_path=expand_path('${DB_DIR}/mmcif_files'),
+            seqres_database_path=expand_path('${DB_DIR}/pdb_seqres_2022_09_28.fasta'),
+            max_template_date=_AF3_MAX_TEMPLATE_DATE,
+        )
+        print('[AF3 init] DataPipelineConfig created and cached.')
+    
+    return runner, _AF3_MODEL_RUNNER, _AF3_DATA_PIPELINE_CONFIG
+
+
 def _run_af3_inprocess(
     json_path: str,
     out_dir: str,
     runner_path: str,
     inference_config: dict,
-    mode: str = "ss",  # "ss" for single-sequence, "tc" for template-conditioned
+    mode: str = "ss",
 ) -> None:
     """
-    Run AF3 in-process without subprocess.
-    This avoids GPU exclusive mode issues on HPC clusters.
-    
-    Args:
-        json_path: Path to the input JSON file
-        out_dir: Output directory for predictions
-        runner_path: Path to the AF3 runner script
-        inference_config: Configuration dict containing base, ss, tc settings
-        mode: "ss" for single-sequence, "tc" for template-conditioned
+    Run AF3 in-process without subprocess, reusing a cached ModelRunner.
+    This avoids GPU exclusive mode issues and prevents GPU memory accumulation
+    from repeated model loading.
     """
-    from absl import flags
+    import pathlib
+    from alphafold3.common import folding_input
     
-    global _AF3_FLAGS_INITIALIZED
-    
-    # Check if prediction already exists
     sample_dir = Path(out_dir) / Path(json_path).stem
     sample_cif_files = list(sample_dir.rglob("*.cif"))
     if sample_cif_files:
         print(f"AF3 prediction already exists for {Path(json_path).stem}")
         return
     
-    # Clear PyTorch GPU memory before running JAX
-    torch.cuda.empty_cache()
+    runner, model_runner, data_pipeline_config = _get_af3_model_runner_and_config(
+        runner_path=runner_path,
+        inference_config=inference_config,
+        mode=mode,
+    )
     
-    # Load AF3 runner module
-    runner = _load_af3_runner(runner_path)
-    FLAGS = flags.FLAGS
-    
-    # Get mode-specific config
     mode_config = inference_config.get(mode, {})
-    base_config = inference_config.get('base', {})
     
-    # Build argv for AF3
-    argv = [
-        "run_af3",  # program name (placeholder)
-        f"--json_path={json_path}",
-        f"--output_dir={out_dir}",
-        f"--model_dir={base_config.get('model_dir', '')}",
-        "--run_data_pipeline=True",
-        "--run_inference=True",
-        f"--db_dir={base_config.get('db_dir', '')}",
-        f"--flash_attention_implementation={base_config.get('flash_attention_implementation', 'triton')}",
-        f"--num_recycles={mode_config.get('num_recycles', 3)}",
-        f"--num_diffusion_samples={mode_config.get('num_diffusion_samples', 5)}",
-        f"--max_templates={mode_config.get('max_templates', 0)}",
-        f"--ligand_protein_template_conditioning_mode={mode_config.get('ligand_protein_template_conditioning_mode', 0)}",
-        f"--mask_template_sidechains={mode_config.get('mask_template_sidechains', True)}",
-        f"--mask_template_sequence={mode_config.get('mask_template_sequence', True)}",
-        "--force_output_dir=True",
-    ]
+    fold_inputs = folding_input.load_fold_inputs_from_path(pathlib.Path(json_path))
     
-    # Add max_template_date for template-conditioned mode
-    if mode == "tc" and 'max_template_date' in mode_config:
-        argv.append(f"--max_template_date={mode_config['max_template_date']}")
-    
-    # Reset flags for multiple calls
-    # Use mark_as_parsed to allow re-parsing
-    try:
-        FLAGS.unparse_flags()
-    except Exception:
-        # If unparse_flags fails, try alternative approach
-        pass
-    
-    # Parse the new argv
-    try:
-        FLAGS(argv)
-    except flags.Error as e:
-        # Flags already defined - need to just update values
-        print(f"Warning: Flag parsing issue (likely already parsed): {e}")
-        # Try to set values directly
-        FLAGS.json_path = json_path
-        FLAGS.output_dir = out_dir
-        FLAGS.model_dir = base_config.get('model_dir', '')
-        FLAGS.run_data_pipeline = True
-        FLAGS.run_inference = True
-        FLAGS.db_dir = [base_config.get('db_dir', '')]
-        FLAGS.flash_attention_implementation = base_config.get('flash_attention_implementation', 'triton')
-        FLAGS.num_recycles = mode_config.get('num_recycles', 3)
-        FLAGS.num_diffusion_samples = mode_config.get('num_diffusion_samples', 5)
-        FLAGS.max_templates = mode_config.get('max_templates', 0)
-        FLAGS.ligand_protein_template_conditioning_mode = mode_config.get('ligand_protein_template_conditioning_mode', 0)
-        FLAGS.mask_template_sidechains = mode_config.get('mask_template_sidechains', True)
-        FLAGS.mask_template_sequence = mode_config.get('mask_template_sequence', True)
-        FLAGS.force_output_dir = True
-        if mode == "tc" and 'max_template_date' in mode_config:
-            FLAGS.max_template_date = mode_config['max_template_date']
-    
-    _AF3_FLAGS_INITIALIZED = True
-    
-    # Run AF3 main function
-    try:
-        runner.main(None)
-    except SystemExit as e:
-        # Catch sys.exit() calls from AF3 and don't let them kill our process
-        if e.code != 0 and e.code is not None:
-            raise RuntimeError(f"AF3 main() exited with code {e.code}")
-        # Exit code 0 or None is fine
+    for fold_input_item in fold_inputs:
+        output_dir = os.path.join(out_dir, fold_input_item.sanitised_name())
+        try:
+            runner.process_fold_input(
+                fold_input=fold_input_item,
+                data_pipeline_config=data_pipeline_config,
+                model_runner=model_runner,
+                output_dir=output_dir,
+                buckets=_AF3_BUCKETS,
+                ref_max_modified_date=_AF3_MAX_TEMPLATE_DATE,
+                conformer_max_iterations=None,
+                resolve_msa_overlaps=True,
+                max_templates=mode_config.get('max_templates', 0),
+                ligand_protein_template_conditioning_mode=mode_config.get('ligand_protein_template_conditioning_mode', 0),
+                force_output_dir=True,
+            )
+        except SystemExit as e:
+            if e.code != 0 and e.code is not None:
+                raise RuntimeError(f"AF3 process_fold_input exited with code {e.code}")
+        except Exception as e:
+            print(f"AF3 prediction failed for {Path(json_path).stem}: {e}")
+            raise
 
 # ============================================================================
 # AF3 JSON Input Creation
