@@ -83,6 +83,7 @@ def _get_af3_model_runner_and_config(
     if _AF3_MODEL_RUNNER is None:
         torch.cuda.empty_cache()
         
+        import shutil
         from alphafold3.jax.attention import attention
         from alphafold3.data import pipeline
         import typing
@@ -121,11 +122,11 @@ def _get_af3_model_runner_and_config(
         db_dir = base_config.get('db_dir', '')
         expand_path = lambda x: runner.replace_db_dir(x, [db_dir])
         _AF3_DATA_PIPELINE_CONFIG = pipeline.DataPipelineConfig(
-            jackhmmer_binary_path='jackhmmer',
-            nhmmer_binary_path='nhmmer',
-            hmmalign_binary_path='hmmalign',
-            hmmsearch_binary_path='hmmsearch',
-            hmmbuild_binary_path='hmmbuild',
+            jackhmmer_binary_path=shutil.which('jackhmmer'),
+            nhmmer_binary_path=shutil.which('nhmmer'),
+            hmmalign_binary_path=shutil.which('hmmalign'),
+            hmmsearch_binary_path=shutil.which('hmmsearch'),
+            hmmbuild_binary_path=shutil.which('hmmbuild'),
             small_bfd_database_path=expand_path('${DB_DIR}/bfd-first_non_consensus_sequences.fasta'),
             mgnify_database_path=expand_path('${DB_DIR}/mgy_clusters_2022_05.fa'),
             uniprot_cluster_annot_database_path=expand_path('${DB_DIR}/uniprot_all_2021_04.fa'),
