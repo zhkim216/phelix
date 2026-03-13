@@ -183,8 +183,6 @@ struct_pred_cfg:
   calculate_metrics_only: false
   af3:
     runner_path: /home/users/zhkim216/code/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
-    use_smiles_cache: false  # Use smiles strings if true
-    smiles_cache_path: null  # Path to cached smiles strings
     json_config:
       model_seeds: [42]
       version: 2

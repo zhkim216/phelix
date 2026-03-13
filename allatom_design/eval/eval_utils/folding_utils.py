@@ -20,9 +20,6 @@ from pytorch_lightning import Trainer
 from torchtyping import TensorType
 from tqdm import tqdm
 
-from rdkit import Chem
-from rdkit.Chem import AllChem, rdDetermineBonds
-
 from allatom_design.data import data
 from allatom_design.data.residue_constants import STANDARD_ATOM_MASK
 from atomworks.io.utils.atom_array_plus import AtomArray
@@ -222,8 +219,6 @@ def make_af3_json(af3_ss_input_dir: str = None,
                     metadata: pd.DataFrame = None,                                   
                     json_config: dict = None,
                     make_tc_input: bool = False,
-                    use_smiles_cache: bool = False,
-                    smiles_cache_path: str = None,
                     ) -> None:
     """
     Create AF3 JSON input files for single-sequence and template-conditioned inference.
@@ -246,18 +241,6 @@ def make_af3_json(af3_ss_input_dir: str = None,
     """                           
     model_seeds = list(json_config.get('model_seeds', [42]))
     version = int(json_config.get('version', 2))
-    
-    # Load SMILES cache if enabled
-    smiles_cache = {}
-    if use_smiles_cache and smiles_cache_path:
-        import json as json_module
-        cache_path = Path(smiles_cache_path)
-        if cache_path.exists():
-            with open(cache_path, 'r') as f:
-                smiles_cache = json_module.load(f)
-            print(f"Loaded SMILES cache with {len(smiles_cache)} entries")
-        else:
-            print(f"Warning: SMILES cache not found at {smiles_cache_path}, falling back to CCD codes")
                     
     use_metadata = False
     if metadata is not None and pdb_chain_info is None:        
@@ -399,32 +382,21 @@ def make_af3_json(af3_ss_input_dir: str = None,
                     })                
             
             
-            for ligand_chain_iid, ligand_ccd_code in zip(ligand_chain_iids, ligand_ccd_codes):
-                ligand_id = ligand_chain_iid.split("_")[0]
-                
-                # Try to use SMILES from cache if enabled
-                smiles_str = smiles_cache.get(ligand_ccd_code) if use_smiles_cache else None
-                
-                if smiles_str:
-                    # Use SMILES string for ligand
-                    ligand_entry = {
-                        "ligand": {
-                            "id": ligand_id,
-                            "smiles": smiles_str
-                        }
+            for ligand_chain_iid, ligand_ccd_code in zip(ligand_chain_iids, ligand_ccd_codes):                    
+                ss_sequences.append({
+                    "ligand": {
+                        "id": ligand_chain_iid.split("_")[0],
+                        "ccdCodes": [ligand_ccd_code]
                     }
-                else:
-                    # Fallback: use CCD code
-                    ligand_entry = {
+                })
+                
+                if make_tc_input:
+                    tc_sequences.append({
                         "ligand": {
-                            "id": ligand_id,
+                            "id": ligand_chain_iid.split("_")[0],
                             "ccdCodes": [ligand_ccd_code]
                         }
-                    }
-                
-                ss_sequences.append(ligand_entry)
-                if make_tc_input:
-                    tc_sequences.append(ligand_entry)
+                    })
             
             
             sample_af3_ss_json = {
@@ -591,154 +563,6 @@ def find_pred_sample_path_af3(out_dir: str = None,
 
 
 # ============================================================================
-# AF3 CIF Post-processing
-# ============================================================================
-
-_RDKIT_BOND_TO_MMCIF = {
-    Chem.BondType.SINGLE: ("SING", "N"),
-    Chem.BondType.DOUBLE: ("DOUB", "N"),
-    Chem.BondType.TRIPLE: ("TRIP", "N"),
-    Chem.BondType.AROMATIC: ("AROM", "Y"),
-}
-
-
-def _fix_af3_pred_cif(cif_path: str, original_res_name: str) -> None:
-    """Post-process an AF3 output CIF: rename synthetic ligand name and add chem_comp_bond.
-
-    AF3 assigns synthetic names like ``LIG_C`` when SMILES input is used, and never
-    writes ``_chem_comp_bond``.  This function:
-      1. Renames the synthetic ligand res_name to *original_res_name* throughout the CIF.
-      2. Generates ``_chem_comp_bond`` entries from ``_chem_comp.pdbx_smiles`` + 3-D coords
-         so that downstream parsers (atomworks) can recover bond connectivity.
-    """
-    import re
-    from biotite.structure.io import pdbx as biotite_pdbx
-
-    cif_file = biotite_pdbx.CIFFile.read(cif_path)
-    block = list(cif_file.values())[0]
-
-    chem_comp = block.get("chem_comp")
-    if chem_comp is None:
-        return
-
-    comp_ids = chem_comp["id"].as_array()
-    comp_types = chem_comp["type"].as_array()
-
-    lig_idx = None
-    for i, t in enumerate(comp_types):
-        if "non-polymer" in t.lower():
-            lig_idx = i
-            break
-    if lig_idx is None:
-        return
-
-    current_lig_name = str(comp_ids[lig_idx])
-    smiles_arr = chem_comp["pdbx_smiles"].as_array()
-    smiles = str(smiles_arr[lig_idx])
-    if not smiles or smiles in ("?", "."):
-        print(f"[_fix_af3_pred_cif] no pdbx_smiles for {current_lig_name}, skipping")
-        return
-
-    atom_site = block["atom_site"]
-    comp_id_col = atom_site["label_comp_id"].as_array()
-    atom_names = atom_site["label_atom_id"].as_array()
-    elements = atom_site["type_symbol"].as_array()
-    xs = atom_site["Cartn_x"].as_array(float)
-    ys = atom_site["Cartn_y"].as_array(float)
-    zs = atom_site["Cartn_z"].as_array(float)
-
-    lig_mask = comp_id_col == current_lig_name
-    lig_atom_names = [str(n) for n in atom_names[lig_mask]]
-    lig_elements = [str(e) for e in elements[lig_mask]]
-    lig_coords = list(zip(xs[lig_mask], ys[lig_mask], zs[lig_mask]))
-
-    if len(lig_atom_names) == 0:
-        print(f"[_fix_af3_pred_cif] no atoms found for {current_lig_name}, skipping")
-        return
-
-    mol = Chem.RWMol()
-    for elem in lig_elements:
-        mol.AddAtom(Chem.Atom(elem))
-    conf = Chem.Conformer(len(lig_atom_names))
-    for i, (x, y, z) in enumerate(lig_coords):
-        conf.SetAtomPosition(i, (float(x), float(y), float(z)))
-    mol.AddConformer(conf, assignId=True)
-
-    try:
-        rdDetermineBonds.DetermineConnectivity(mol)
-        template = Chem.MolFromSmiles(smiles)
-        if template is None:
-            print(f"[_fix_af3_pred_cif] MolFromSmiles failed for {current_lig_name}, skipping bond fix")
-            return
-        template = Chem.RemoveHs(template)
-        mol_heavy = Chem.RWMol(mol)
-        heavy_indices = [i for i, e in enumerate(lig_elements) if e != "H"]
-        h_indices = sorted([i for i, e in enumerate(lig_elements) if e == "H"], reverse=True)
-        for hi in h_indices:
-            mol_heavy.RemoveAtom(hi)
-        mol_heavy = AllChem.AssignBondOrdersFromTemplate(template, mol_heavy.GetMol())
-    except Exception as e:
-        print(f"[_fix_af3_pred_cif] bond determination failed for {current_lig_name}: {e}")
-        return
-
-    bond_lines = []
-    ordinal = 1
-    for bond in mol_heavy.GetBonds():
-        a1 = heavy_indices[bond.GetBeginAtomIdx()]
-        a2 = heavy_indices[bond.GetEndAtomIdx()]
-        name1 = lig_atom_names[a1]
-        name2 = lig_atom_names[a2]
-        bt = bond.GetBondType()
-        order, arom = _RDKIT_BOND_TO_MMCIF.get(bt, ("SING", "N"))
-        bond_lines.append(f"{ordinal:<4d} {original_res_name:<5s} {name1:<4s} {name2:<4s} {order} {arom} ?")
-        ordinal += 1
-
-    for bond in mol.GetBonds():
-        a1_idx, a2_idx = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
-        if lig_elements[a1_idx] == "H" or lig_elements[a2_idx] == "H":
-            name1 = lig_atom_names[a1_idx]
-            name2 = lig_atom_names[a2_idx]
-            bond_lines.append(f"{ordinal:<4d} {original_res_name:<5s} {name1:<4s} {name2:<4s} SING N ?")
-            ordinal += 1
-
-    chem_comp_bond_text = (
-        "loop_\n"
-        "_chem_comp_bond.pdbx_ordinal \n"
-        "_chem_comp_bond.comp_id \n"
-        "_chem_comp_bond.atom_id_1 \n"
-        "_chem_comp_bond.atom_id_2 \n"
-        "_chem_comp_bond.value_order \n"
-        "_chem_comp_bond.pdbx_aromatic_flag \n"
-        "_chem_comp_bond.pdbx_stereo_config \n"
-    )
-    for line in bond_lines:
-        chem_comp_bond_text += line + "\n"
-    chem_comp_bond_text += "#\n"
-
-    with open(cif_path, "r") as f:
-        cif_text = f.read()
-
-    if current_lig_name != original_res_name:
-        cif_text = re.sub(
-            r'\b' + re.escape(current_lig_name) + r'\b',
-            original_res_name,
-            cif_text,
-        )
-
-    insert_pos = cif_text.find("\nloop_\n_atom_site.")
-    if insert_pos == -1:
-        cif_text += chem_comp_bond_text
-    else:
-        cif_text = cif_text[:insert_pos] + "\n" + chem_comp_bond_text + cif_text[insert_pos:]
-
-    with open(cif_path, "w") as f:
-        f.write(cif_text)
-
-    print(f"[_fix_af3_pred_cif] fixed {cif_path}: {current_lig_name} -> {original_res_name}, "
-          f"{len(bond_lines)} bonds added")
-
-
-# ============================================================================
 # AF3 Evaluation Functions
 # ============================================================================
 
@@ -787,9 +611,7 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
         af3_tc_input_dir=None,
         sample_dict=sample_dict,        
         metadata=None,
-        json_config=struct_pred_cfg.af3.json_config,
-        use_smiles_cache=struct_pred_cfg.af3.get("use_smiles_cache", False),
-        smiles_cache_path=struct_pred_cfg.af3.get("smiles_cache_path", None),
+        json_config=struct_pred_cfg.af3.json_config
     )
     
 
@@ -836,12 +658,6 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
             if len(pred_ss_sample_paths) == 0:
                 print(f"No AF3 predicted structure found for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}")
                 continue
-
-            if ligand_chain_iids:
-                lig_mask = designed_sample_atom_array.chain_iid == ligand_chain_iids[0]
-                original_lig_res_name = str(designed_sample_atom_array[lig_mask].res_name[0])
-                for pred_cif_path in pred_ss_sample_paths:
-                    _fix_af3_pred_cif(str(pred_cif_path), original_lig_res_name)
 
             for pred_idx, pred_ss_sample_path in enumerate(pred_ss_sample_paths):
                 try:
@@ -968,8 +784,6 @@ def evaluate_af3_docking_consistency(sample_dict: dict = None,
         metadata=None,
         json_config=struct_pred_cfg.af3.json_config,
         make_tc_input=True,
-        use_smiles_cache=struct_pred_cfg.af3.get("use_smiles_cache", False),
-        smiles_cache_path=struct_pred_cfg.af3.get("smiles_cache_path", None),
     )
     
 
