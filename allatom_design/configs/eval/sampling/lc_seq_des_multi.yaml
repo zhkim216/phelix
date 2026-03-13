@@ -183,8 +183,6 @@ struct_pred_cfg:
   calculate_metrics_only: false
   af3:
     runner_path: /home/users/zhkim216/code/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
-    use_smiles_cache: false  # true면 SMILES 캐시 사용 (CCD 코드 대신)
-    smiles_cache_path: null  # JSON 캐시 파일 경로
     json_config:
       model_seeds: [42]
       version: 2

@@ -8,13 +8,13 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 4
+num_debug_samples: 2
 seed: 0
 num_workers: 0 # for dataloading
 protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 
 # Outputs
-exp_name: eval_debug # experiment name; used for wandb and output directory
+exp_name: eval_debug_5 # experiment name; used for wandb and output directory
 base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260312_debug
 
 # Sequence design config
@@ -183,8 +183,6 @@ struct_pred_cfg:
   calculate_metrics_only: false
   af3:
     runner_path: /home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py
-    use_smiles_cache: false  # true면 SMILES 캐시 사용 (CCD 코드 대신)
-    smiles_cache_path: null  # JSON 캐시 파일 경로
     json_config:
       model_seeds: [42]
       version: 2
