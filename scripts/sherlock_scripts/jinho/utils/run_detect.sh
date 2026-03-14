@@ -1,14 +1,14 @@
 #!/bin/bash
-# Usage: bash run_detect.sh /path/to/exp_dir1 /path/to/exp_dir2 ...
+# Edit EXP_DIRS below, then run: bash run_detect.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [ $# -eq 0 ]; then
-    echo "Usage: bash run_detect.sh <experiment_dir1> [experiment_dir2] ..."
-    exit 1
-fi
+EXP_DIRS=(
+    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp37_cfg0_nativeval_sm_selected_seq4_af3
+    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp37_cfg1_nativeval_sm_selected_seq4_af3
+)
 
-for exp_dir in "$@"; do
+for exp_dir in "${EXP_DIRS[@]}"; do
     echo "=========================================="
     echo "Processing: $exp_dir"
     echo "=========================================="
