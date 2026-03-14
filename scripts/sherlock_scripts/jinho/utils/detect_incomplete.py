@@ -39,79 +39,61 @@ def get_ccd_codes_from_csv(csv_path: Path, id_column: str) -> set[str]:
 
 def detect_incomplete(experiment_path: str, output_dir: str | None = None):
     experiment_path = Path(experiment_path)
+    exp_name = experiment_path.name
     if output_dir is None:
         output_dir = Path(__file__).parent
     else:
         output_dir = Path(output_dir)
 
-    # Find eval config directories
-    eval_configs = sorted([
+    # Find step directories directly inside experiment path
+    step_dirs = sorted([
         d for d in experiment_path.iterdir()
-        if d.is_dir() and d.name.startswith("eval_")
+        if d.is_dir() and d.name.startswith("step_")
     ])
 
-    if not eval_configs:
-        print(f"No eval_* directories found in {experiment_path}")
+    if not step_dirs:
+        print(f"No step_* directories found in {experiment_path}")
         return
 
-    total_incomplete_steps = 0
-    total_missing_entries = 0
+    # Build reference CCD set: union across all steps and all CSV files
+    reference_ccd_codes = set()
+    for step_dir in step_dirs:
+        for csv_key, csv_filename in CSV_FILES.items():
+            csv_path = step_dir / csv_filename
+            if csv_path.exists():
+                ccd_codes = get_ccd_codes_from_csv(csv_path, ID_COLUMNS[csv_key])
+                reference_ccd_codes.update(ccd_codes)
 
-    for eval_config_dir in eval_configs:
-        eval_config_name = eval_config_dir.name
+    # Detect missing CCD codes per step
+    rows = []
+    for step_dir in step_dirs:
+        step_name = step_dir.name
+        for csv_key, csv_filename in CSV_FILES.items():
+            csv_path = step_dir / csv_filename
+            if not csv_path.exists():
+                # Entire file missing — all CCD codes are missing
+                for ccd in sorted(reference_ccd_codes):
+                    rows.append((step_name, csv_key, ccd))
+                continue
 
-        # Find step directories
-        step_dirs = sorted([
-            d for d in eval_config_dir.iterdir()
-            if d.is_dir() and d.name.startswith("step_")
-        ])
+            present_ccd_codes = get_ccd_codes_from_csv(csv_path, ID_COLUMNS[csv_key])
+            missing = reference_ccd_codes - present_ccd_codes
+            for ccd in sorted(missing):
+                rows.append((step_name, csv_key, ccd))
 
-        if not step_dirs:
-            continue
+    # Write output CSV
+    if rows:
+        out_path = output_dir / f"incomplete_{exp_name}.csv"
+        with open(out_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["step", "missing_from", "ccd_code"])
+            writer.writerows(rows)
 
-        # Build reference CCD set: union across all steps and all CSV files
-        reference_ccd_codes = set()
-        for step_dir in step_dirs:
-            for csv_key, csv_filename in CSV_FILES.items():
-                csv_path = step_dir / csv_filename
-                if csv_path.exists():
-                    ccd_codes = get_ccd_codes_from_csv(csv_path, ID_COLUMNS[csv_key])
-                    reference_ccd_codes.update(ccd_codes)
-
-        # Detect missing CCD codes per step
-        rows = []
-        for step_dir in step_dirs:
-            step_name = step_dir.name
-            for csv_key, csv_filename in CSV_FILES.items():
-                csv_path = step_dir / csv_filename
-                if not csv_path.exists():
-                    # Entire file missing — all CCD codes are missing
-                    for ccd in sorted(reference_ccd_codes):
-                        rows.append((eval_config_name, step_name, csv_key, ccd))
-                    continue
-
-                present_ccd_codes = get_ccd_codes_from_csv(csv_path, ID_COLUMNS[csv_key])
-                missing = reference_ccd_codes - present_ccd_codes
-                for ccd in sorted(missing):
-                    rows.append((eval_config_name, step_name, csv_key, ccd))
-
-        # Write output CSV
-        if rows:
-            out_path = output_dir / f"incomplete_{eval_config_name}.csv"
-            with open(out_path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["eval_config", "step", "missing_from", "ccd_code"])
-                writer.writerows(rows)
-
-            # Summary
-            incomplete_steps = len(set(r[1] for r in rows))
-            total_incomplete_steps += incomplete_steps
-            total_missing_entries += len(rows)
-            print(f"[{eval_config_name}] {incomplete_steps} incomplete steps, {len(rows)} missing entries -> {out_path}")
-        else:
-            print(f"[{eval_config_name}] all steps complete")
-
-    print(f"\nTotal: {total_incomplete_steps} incomplete steps, {total_missing_entries} missing entries across {len(eval_configs)} eval configs")
+        # Summary
+        incomplete_steps = len(set(r[0] for r in rows))
+        print(f"[{exp_name}] {incomplete_steps} incomplete steps, {len(rows)} missing entries -> {out_path}")
+    else:
+        print(f"[{exp_name}] all steps complete")
 
 
 if __name__ == "__main__":
