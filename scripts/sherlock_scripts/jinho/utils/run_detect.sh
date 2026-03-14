@@ -1,14 +1,12 @@
 #!/bin/bash
-# Usage: bash run_detect.sh /path/to/exp_dir1 /path/to/exp_dir2 ...
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [ $# -eq 0 ]; then
-    echo "Usage: bash run_detect.sh <experiment_dir1> [experiment_dir2] ..."
-    exit 1
-fi
+# ===== Edit here: add experiment directories =====
+EXP_DIRS=(
+    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp36_cfg1_rfd3val_af3
+)
 
-for exp_dir in "$@"; do
+for exp_dir in "${EXP_DIRS[@]}"; do
     echo "=========================================="
     echo "Processing: $exp_dir"
     echo "=========================================="
