@@ -35,6 +35,8 @@ def get_pdb_files(pdb_dir: str | None,
                   split_by_subfolder: bool = False,
                   # sample index filtering (for files with pattern {CCD}_len_{L}_{IDX}_model_{M}.cif)
                   sample_indices: list[int] | None = None,
+                  # sample length filtering (for files with pattern {CCD}_len_{L}_{IDX}_model_{M}.cif)
+                  sample_lengths: list[int] | None = None,
                   ) -> list[str]:
     """
     Retrieve a list of PDB files from a directory, either by specifying a list of pdb_names or by getting all files.
@@ -54,6 +56,9 @@ def get_pdb_files(pdb_dir: str | None,
         sample_indices: Optional list of sample indices to keep. Filters files whose
             filename matches pattern {PREFIX}_{IDX}_model_{M}.ext, keeping only those
             where IDX is in sample_indices.
+        sample_lengths: Optional list of sample lengths to keep. Filters files whose
+            filename matches pattern {PREFIX}_len_{L}_{IDX}_model_{M}.ext, keeping only
+            those where L is in sample_lengths.
 
     Returns:
         List of PDB file paths, naturally sorted if retrieving all files
@@ -140,6 +145,17 @@ def get_pdb_files(pdb_dir: str | None,
             if match and int(match.group(1)) in sample_indices:
                 filtered_files.append(f)
         print(f"Filtered by sample_indices {sample_indices}: {len(pdb_files)} -> {len(filtered_files)} files")
+        pdb_files = filtered_files
+
+    # Filter by sample lengths (for files with pattern {PREFIX}_len_{L}_{IDX}_model_{M}...)
+    if sample_lengths is not None:
+        sample_len_pattern = re.compile(r"_len_(\d+)_")
+        filtered_files = []
+        for f in pdb_files:
+            match = sample_len_pattern.search(Path(f).name)
+            if match and int(match.group(1)) in sample_lengths:
+                filtered_files.append(f)
+        print(f"Filtered by sample_lengths {sample_lengths}: {len(pdb_files)} -> {len(filtered_files)} files")
         pdb_files = filtered_files
 
     # Parallelization: split PDB files into chunks based on array id
