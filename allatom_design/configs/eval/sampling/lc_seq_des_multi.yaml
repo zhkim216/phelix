@@ -73,7 +73,13 @@ pdb_cfg:
   recursive: true
   split_by_subfolder: false  # if true, array job splits by subfolder instead of flat file list
   # Sample index filtering: matches pattern {PREFIX}_{IDX}_model_{M}.ext
+<<<<<<< HEAD
   sample_indices: [0,1,2,3,4]  # null = use all; e.g. [0,1,2,3,4] to select specific indices
+=======
+  sample_indices: null  # null = use all; e.g. [0,1,2,3,4] to select specific indices
+  # Sample length filtering: matches pattern {PREFIX}_len_{L}_{IDX}_model_{M}.ext
+  sample_lengths: null  # null = use all; e.g. [150,250] to select specific lengths
+>>>>>>> refs/remotes/origin/jinho/AAA
   # Slurm array job parameters (set via CLI override in sbatch)
   array_id: 0
   num_arrays: 50
