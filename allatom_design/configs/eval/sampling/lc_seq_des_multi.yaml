@@ -18,7 +18,7 @@ exp_name: eval_exp27_cfg5 # experiment name; used for wandb and output directory
 base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260220
 
 # Sequence design config
-seq_des_cfg:  
+seq_des_cfg:
   model_name: "lc_atom_mpnn"
   denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp27_cfg5
   ckpt_cfg:
@@ -36,7 +36,7 @@ seq_des_cfg:
       omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
       noise_labels: null
       num_workers: ${num_workers}
-      use_potts_sampling: true      
+      use_potts_sampling: true
       potts_sampling_cfg:
         potts_sweeps: 500
         lcp_expand_edge_idx_fix: true
@@ -92,7 +92,7 @@ cif_cfg:
       fix_arginines: true
       convert_mse_to_met: true
       hydrogen_policy: "remove"
-      extra_fields: "all"      
+      extra_fields: "all"
     designed_samples:
       add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
@@ -101,7 +101,7 @@ cif_cfg:
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null  
+      extra_fields: null
     af3_predictions:
       add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
@@ -110,7 +110,7 @@ cif_cfg:
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null  
+      extra_fields: null
   save:
     date: "1959-01-07" #! Young-Ae Lee's birthday
     include_entity_poly: True
@@ -157,24 +157,24 @@ featurizer_cfg:
     occupancy_threshold_protein_backbone: 0.0
     training_structure_noise: 0.0
     undesired_res_names: []
-    remove_keys: []    
+    remove_keys: []
     remove_unresolved_tokens: true
     max_tokens: null
-    max_atoms: null  
+    max_atoms: null
     pocket_distance: 6.0
     residue_cache_dir: "/scratch/users/zhkim216/datasets/atomworks_cached_residue_data"
     max_conformers_per_residue: 50
     apply_random_augmentation: true
-    translation_scale: 1.0    
+    translation_scale: 1.0
   prepare_designed_samples:
     max_tokens: null
     max_atoms: null
-    remove_keys: []    
+    remove_keys: []
     remove_unresolved_tokens: true
   prepare_af3_predictions:
     max_tokens: null
     max_atoms: null
-    remove_keys: []    
+    remove_keys: []
     remove_unresolved_tokens: true
 
 ######### Structure prediction model configuration (AF3) #########
