@@ -10,17 +10,17 @@ wandb:
 debug: true
 num_debug_samples: 4
 seed: 0
-num_workers: 16 # for dataloading
+num_workers: 0 # for dataloading
 protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 
 # Outputs
-exp_name: eval_exp34_cfg0_fb_pseudocb_rfd3val_lcaliby_af3 # experiment name; used for wandb and output directory
+exp_name: eval_exp36_cfg1_denovoval_af3 # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
 seq_des_cfg:  
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp18_cfg3
+  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp36_cfg1
   ckpt_cfg:
     start_step: 82500
     end_step: 82500
@@ -65,7 +65,7 @@ load_from_cache: false
 
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp34_cfg0_fb_pseudocb_rfd3val_af3/step_92500_epoch_59/samples
+  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/denovo_val_cifs
   pdb_name_list: null
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
@@ -73,16 +73,12 @@ pdb_cfg:
   recursive: true
   split_by_subfolder: false  # if true, array job splits by subfolder instead of flat file list
   # Sample index filtering: matches pattern {PREFIX}_{IDX}_model_{M}.ext
-<<<<<<< HEAD
-  sample_indices: [0,1,2,3,4]  # null = use all; e.g. [0,1,2,3,4] to select specific indices
-=======
   sample_indices: null  # null = use all; e.g. [0,1,2,3,4] to select specific indices
   # Sample length filtering: matches pattern {PREFIX}_len_{L}_{IDX}_model_{M}.ext
   sample_lengths: null  # null = use all; e.g. [150,250] to select specific lengths
->>>>>>> refs/remotes/origin/jinho/AAA
   # Slurm array job parameters (set via CLI override in sbatch)
-  array_id: 0
-  num_arrays: 50
+  array_id: null
+  num_arrays: null
 
 #### For designing samples ####
 # Configurations for cif files
