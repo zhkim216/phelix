@@ -3,6 +3,7 @@ Gather CSV metric files from evaluation step directories and compress into a tar
 
 Usage:
     python gather_csvs.py <output_tar_gz> <src_dir1> [src_dir2 ...]
+    python gather_csvs.py --array-jobs <output_tar_gz> <src_dir1> [src_dir2 ...]
 """
 import argparse
 import shutil
@@ -10,14 +11,28 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-CSV_FILES = [
-    "all_docking_metrics_per_designed_sample.csv",
-    "all_sc_metrics_per_designed_sample.csv",
-    "seq_recovery_metrics.csv",
+CSV_STEMS = [
+    "all_docking_metrics_per_designed_sample",
+    "all_sc_metrics_per_designed_sample",
+    "seq_recovery_metrics",
 ]
 
 
-def gather(src_dirs: list[Path], output_tar: Path):
+def _find_csvs(step_dir: Path, array_jobs: bool) -> list[Path]:
+    """Return list of CSV paths to copy from a step directory."""
+    found = []
+    for stem in CSV_STEMS:
+        # Always check the base file
+        base = step_dir / f"{stem}.csv"
+        if base.exists():
+            found.append(base)
+        # Additionally check array files if requested
+        if array_jobs:
+            found.extend(sorted(step_dir.glob(f"{stem}_array_*.csv")))
+    return found
+
+
+def gather(src_dirs: list[Path], output_tar: Path, array_jobs: bool = False):
     total_copied = 0
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -41,15 +56,12 @@ def gather(src_dirs: list[Path], output_tar: Path):
 
             for step_dir in step_dirs:
                 dest = tmp / exp_name / step_dir.name
-                copied = 0
-                for csv_name in CSV_FILES:
-                    csv_path = step_dir / csv_name
-                    if csv_path.exists():
-                        dest.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(csv_path, dest / csv_name)
-                        copied += 1
-                if copied > 0:
-                    total_copied += copied
+                csvs = _find_csvs(step_dir, array_jobs)
+                if csvs:
+                    dest.mkdir(parents=True, exist_ok=True)
+                    for csv_path in csvs:
+                        shutil.copy2(csv_path, dest / csv_path.name)
+                    total_copied += len(csvs)
                 else:
                     print(f"    [SKIP] No CSVs in {step_dir.name}")
 
@@ -71,8 +83,10 @@ def main():
     parser = argparse.ArgumentParser(description="Gather CSV metrics into a tar.gz")
     parser.add_argument("output_tar", type=Path, help="Output .tar.gz path")
     parser.add_argument("src_dirs", type=Path, nargs="+", help="Source eval directories")
+    parser.add_argument("--array-jobs", action="store_true",
+                        help="Also collect *_array_N.csv files from array jobs")
     args = parser.parse_args()
-    gather(args.src_dirs, args.output_tar)
+    gather(args.src_dirs, args.output_tar, array_jobs=args.array_jobs)
 
 
 if __name__ == "__main__":

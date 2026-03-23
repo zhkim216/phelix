@@ -10,4 +10,11 @@ EXP_DIRS=(
 
 OUTPUT_TAR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/collected_csvs/exp36_rfd3val.tar.gz
 
-python3 "$SCRIPT_DIR/gather_csvs.py" "$OUTPUT_TAR" "${EXP_DIRS[@]}"
+# Add --array-jobs flag to also collect *_array_N.csv files
+ARRAY_JOBS=false
+
+if [ "$ARRAY_JOBS" = true ]; then
+    python3 "$SCRIPT_DIR/gather_csvs.py" --array-jobs "$OUTPUT_TAR" "${EXP_DIRS[@]}"
+else
+    python3 "$SCRIPT_DIR/gather_csvs.py" "$OUTPUT_TAR" "${EXP_DIRS[@]}"
+fi
