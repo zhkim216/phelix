@@ -52,7 +52,7 @@ pos_constraint_csv: null
 redesign_cfg:
   use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
   pocket_distance: 5.0
-  native_cif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
+  native_cif_dir: null
 
 # Docking metrics configuration
 pocket_cfg:

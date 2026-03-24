@@ -4,12 +4,13 @@ import os
 import re
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 import numpy as np
-from functools import partial
 import pandas as pd
 import wandb
+import hydra
 from natsort import natsorted
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from atomworks.ml.preprocessing.get_pn_unit_data_from_structure import DataPreprocessor
 from allatom_design.data.transform.preprocess import preprocess_transform
@@ -21,6 +22,8 @@ from allatom_design.utils.metadata_utils import (compute_contacts_to_proteins_pe
                                                  sum_nucleic_acid_cluster_residues_per_pdb,
                                                  compute_nuc_cluster_contacts_to_proteins_per_pdb)
 
+from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
+from allatom_design.checkpoint_utils import get_cfg_from_ckpt
 
 def get_pdb_files(pdb_dir: str | None,
                   pdb_name_list: str | None,
@@ -249,6 +252,51 @@ def get_training_checkpoints(
         ckpts.append(all_ckpts[-1])
 
     return ckpts, pattern
+
+def get_seq_des_model(cfg: DictConfig = None,
+                      device: str = None) -> dict[str, Any]:
+    """
+    Load in a sequence design model.
+    Example config:
+
+    seq_des_cfg:
+        # MPNN args
+        model_name: "atom_mpnn"  # ["atom_mpnn"]
+        denoiser_train_dir: /path/to/denoiser_train_dir
+        ckpt_cfg:
+            start_step: 22500
+            end_step: 22500
+            eval_every_n_ckpts: 1
+            eval_last_ckpt: false
+            use_ema: false
+        atom_mpnn:
+            ckpt_path: null
+            sampling_cfg: /path/to/sampling_cfg.yaml
+            overrides:
+                batch_size: 1
+                num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+                omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
+                noise_labels: null
+                num_workers: ${num_workers}
+                use_potts_sampling: true
+                ligand_conditioning: true
+                potts_sampling_cfg:
+                    potts_sweeps: 500
+                    lcp_expand_edge_idx_fix: true
+    """
+    model_name = cfg.model_name
+    seq_des_model = {"model_name": model_name, "cfg": cfg, "device": device}
+
+    lit_sd_model = LitSeqDenoiser.load_from_checkpoint(cfg.atom_mpnn.ckpt_path).eval()
+    model_cfg, _ = get_cfg_from_ckpt(cfg.atom_mpnn.ckpt_path)
+    data_cfg = hydra.utils.instantiate(model_cfg.data)
+    sampling_cfg = OmegaConf.load(cfg.atom_mpnn.sampling_cfg)
+    sampling_cfg = OmegaConf.merge(sampling_cfg, OmegaConf.to_container(cfg.atom_mpnn.overrides, resolve=True))
+    seq_des_model["model"] = lit_sd_model.model
+    seq_des_model["data_cfg"] = data_cfg
+    seq_des_model["sampling_cfg"] = sampling_cfg
+
+    return seq_des_model
 
 
 def wandb_setup(

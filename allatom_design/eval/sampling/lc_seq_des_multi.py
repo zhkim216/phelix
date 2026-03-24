@@ -1,41 +1,18 @@
 from pathlib import Path
 
-from biotite.structure import AtomArray
 import hydra
-import numpy as np
 from omegaconf import OmegaConf, DictConfig
 import pandas as pd
-import torch
-from tqdm import tqdm
-import wandb
 import yaml
 
-from allatom_design.eval.eval_utils.eval_setup_utils import (
-    get_pdb_files, get_training_checkpoints, wandb_setup)
+from allatom_design.eval.eval_utils.eval_setup_utils import wandb_setup
+from allatom_design.eval.eval_utils.sd_data_utils import prepare_sample_dict
 from allatom_design.eval.eval_utils.seq_des_utils import (
-    get_sd_example, 
-    load_example_with_load_any,                                                          
-    prepare_af3_prediction, 
-    prepare_designed_sample, 
-    run_lc_seq_des,
-    get_seq_des_model,
-    _indices_to_pos_string,
-    # Sample Dict / Data Preparation    
-    prepare_sample_dict,
-    _extract_ligand_atom_array_from_cached_examples,
-    # Pocket Sequence Utilities
-    extract_ligand_from_structure,
-    _replace_pocket_sequence_with_native,
-    create_pos_constraint_dict_from_atom_array,
-    # Redesign Functions
     load_samples_for_native_redesign,
     redesign_with_native,
     redesign_with_lcaliby,
 )
 from allatom_design.eval.eval_utils.folding_utils import (
-    run_af3_single_sequence,
-    find_pred_sample_path_af3,
-    make_af3_json,
     evaluate_af3_self_consistency,
     evaluate_af3_docking_consistency,
 )
@@ -100,22 +77,22 @@ def main(cfg: DictConfig):
     print("\n" + "="*80)
     print("Phase 2: Redesigning pocket sequence")
     print("="*80 + "\n")
-        
+            
     if cfg.redesign_cfg.get("use_native_seq", False):
         # Native replace mode: load atom arrays and chain info first
         sample_dict = load_samples_for_native_redesign(sample_dict, cfg)
         
-        redesign_out_dir = log_dir / "samples_redesigned_with_native"
+        redesign_out_dir = log_dir / "samples_redesigned_with_native"        
         sample_dict = redesign_with_native(sample_dict, cfg, redesign_out_dir)
-        
+                
         # Evaluate if needed
         if cfg.struct_pred_cfg.evaluate_self_consistency:
             print("\n" + "="*80)
             print("Phase 3a: AF3 Self-Consistency Evaluation")
             print("="*80 + "\n")
             evaluate_af3_self_consistency(
-                sample_dict=sample_dict,                
-                out_dir=log_dir, 
+                sample_dict=sample_dict,
+                out_dir=log_dir,
                 struct_pred_cfg=cfg.struct_pred_cfg,
                 cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
                 preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
@@ -124,9 +101,10 @@ def main(cfg: DictConfig):
                 no_wandb=cfg.wandb.no_wandb,
                 ckpt_info=None,
                 calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
-                csv_suffix=csv_suffix
+                csv_suffix=csv_suffix,
+                input_sample_is_designed=cfg.input_sample_is_designed,
             )
-        
+
         if cfg.struct_pred_cfg.evaluate_docking_consistency:
             print("\n" + "="*80)
             print("Phase 3b: AF3 Docking Consistency Evaluation (Template-Conditioned)")
@@ -142,14 +120,15 @@ def main(cfg: DictConfig):
                 no_wandb=cfg.wandb.no_wandb,
                 ckpt_info=None,
                 calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
-                csv_suffix=csv_suffix
+                csv_suffix=csv_suffix,
+                input_sample_is_designed=cfg.input_sample_is_designed,
             )
     else:
         # Lcaliby mode - iterate over checkpoints     
         if not cfg.input_sample_is_designed: #! For redesigning native proteins
             cif_parse_cfg_lcaliby = cfg.cif_cfg.parse.native
             preprocess_cfg_lcaliby = cfg.preprocess_cfg.native                
-        else: #! For redesigning designed proteins
+        else: #! For redesigning designed proteins            
             cif_parse_cfg_lcaliby = cfg.cif_cfg.parse.designed_samples
             preprocess_cfg_lcaliby = cfg.preprocess_cfg.designed_samples
                                     
@@ -160,21 +139,26 @@ def main(cfg: DictConfig):
             else None
         )
         
-        results = redesign_with_lcaliby(seed = cfg.seed,
-                                        input_sample_is_designed = cfg.input_sample_is_designed,
-                                        sample_dict = sample_dict,
-                                        seq_des_cfg = cfg.seq_des_cfg,
-                                        cif_parse_cfg = cif_parse_cfg_lcaliby,
-                                        preprocess_cfg = preprocess_cfg_lcaliby,
-                                        featurizer_cfg = cfg.featurizer_cfg.design,
-                                        cif_save_cfg = cfg.cif_cfg.save,                                            
-                                        sampling_inputs_df = sampling_inputs_df,
-                                        log_dir = log_dir,
-                                        pos_constraint_df = pos_constraint_df,
-                                        protein_only = cfg.get("protein_only", False),
-                                        pocket_only = _pocket_only,
-                                        pocket_featurizer_cfg = _pocket_featurizer_cfg,
-                                        csv_suffix = csv_suffix)                
+        if cfg.run_seq_des:
+            results = redesign_with_lcaliby(seed = cfg.seed,
+                                            input_sample_is_designed = cfg.input_sample_is_designed,
+                                            sample_dict = sample_dict,                                        
+                                            seq_des_cfg = cfg.seq_des_cfg,
+                                            cif_parse_cfg = cif_parse_cfg_lcaliby,
+                                            preprocess_cfg = preprocess_cfg_lcaliby,
+                                            featurizer_cfg = cfg.featurizer_cfg.design,
+                                            cif_save_cfg = cfg.cif_cfg.save,                                            
+                                            sampling_inputs_df = sampling_inputs_df,
+                                            log_dir = log_dir,
+                                            pos_constraint_df = pos_constraint_df,
+                                            protein_only = cfg.get("protein_only", False),
+                                            pocket_only = _pocket_only,
+                                            pocket_featurizer_cfg = _pocket_featurizer_cfg,
+                                            pocket_distances_for_seq_recovery = cfg.pocket_cfg.pocket_distances_for_seq_recovery,
+                                            csv_suffix = csv_suffix)                
+        
+        else:
+            results = None
                     
         # Evaluate each checkpoint
         if cfg.struct_pred_cfg.evaluate_self_consistency:
@@ -185,8 +169,8 @@ def main(cfg: DictConfig):
                 print(f"\nEvaluating checkpoint: step_{ckpt_info['global_step']}_epoch_{ckpt_info['epoch']}")
                 
                 evaluate_af3_self_consistency(
-                    sample_dict = sample_dict_per_ckpt,                                             
-                    out_dir=log_dir_per_ckpt, 
+                    sample_dict=sample_dict_per_ckpt,
+                    out_dir=log_dir_per_ckpt,
                     struct_pred_cfg=cfg.struct_pred_cfg,
                     cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
                     preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
@@ -195,7 +179,8 @@ def main(cfg: DictConfig):
                     no_wandb=cfg.wandb.no_wandb,
                     ckpt_info=ckpt_info,
                     calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
-                    csv_suffix=csv_suffix
+                    csv_suffix=csv_suffix,
+                    input_sample_is_designed=cfg.input_sample_is_designed,
                 )
         
         if cfg.struct_pred_cfg.evaluate_docking_consistency:
@@ -206,7 +191,7 @@ def main(cfg: DictConfig):
                 print(f"\nEvaluating checkpoint (TC): step_{ckpt_info['global_step']}_epoch_{ckpt_info['epoch']}")
                 
                 evaluate_af3_docking_consistency(
-                    sample_dict=sample_dict_per_ckpt,                    
+                    sample_dict=sample_dict_per_ckpt,
                     out_dir=log_dir_per_ckpt,
                     struct_pred_cfg=cfg.struct_pred_cfg,
                     cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
@@ -216,7 +201,8 @@ def main(cfg: DictConfig):
                     no_wandb=cfg.wandb.no_wandb,
                     ckpt_info=ckpt_info,
                     calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
-                    csv_suffix=csv_suffix
+                    csv_suffix=csv_suffix,
+                    input_sample_is_designed=cfg.input_sample_is_designed,
                 )    
     print("\n" + "="*80)
     print("All phases complete!")

@@ -83,15 +83,14 @@ def preprocess_transform_designed_samples(
     Assume necessary preprocessing (e.g., removing clashing PN units) has already been done during the design process.
     """
     # Preprocesing
-    preprocessing_transforms = [
-        # AssignPNUnitIIDsToAtomArray(),
+    preprocessing_transforms = [        
         RemoveHydrogens(),
-        RemoveTerminalOxygen() if remove_terminal_oxygen_protein else Identity(),
-        SetOccToZeroOnBfactor(b_factor_min, b_factor_max),        
-        RemovePolymersWithTooFewResolvedResidues(min_residues=min_residues_for_polymers),
-        MaskPolymerResiduesWithUnresolvedFrameAtoms(),
+        # RemoveTerminalOxygen() if remove_terminal_oxygen_protein else Identity(),
+        # SetOccToZeroOnBfactor(b_factor_min, b_factor_max),        
+        # RemovePolymersWithTooFewResolvedResidues(min_residues=min_residues_for_polymers),
+        # MaskPolymerResiduesWithUnresolvedFrameAtoms(),
         # NOTE: For inference, we must keep UNL to support ligands that are not in the CCD
-        HandleUndesiredResTokens(undesired_res_tokens=undesired_res_names),  # e.g., non-standard residues
+        # HandleUndesiredResTokens(undesired_res_tokens=undesired_res_names),  # e.g., non-standard residues
         FlagAndReassignCovalentModifications(),
         FlagNonPolymersForAtomization(),
         AddGlobalAtomIdAnnotation(allow_overwrite=True),
@@ -101,7 +100,7 @@ def preprocess_transform_designed_samples(
             move_atomized_part_to_end=False,
             validate_atomize=False,
         ),
-        RemoveNucleicAcidTerminalOxygen() if remove_terminal_oxygen_nucleic_acid else Identity(),
+        # RemoveNucleicAcidTerminalOxygen() if remove_terminal_oxygen_nucleic_acid else Identity(),
         AddWithinChainInstanceResIdx(),
         AddWithinPolyResIdxAnnotation(),
     ]

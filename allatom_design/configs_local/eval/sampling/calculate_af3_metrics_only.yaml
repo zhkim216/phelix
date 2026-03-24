@@ -1,0 +1,98 @@
+########### Basic settings #########
+debug: false
+num_debug_samples: 2
+
+# Data directory containing samples/ and af3_ss_preds/
+data_dir: /home/possu/jinho/allatom-design/debug/260323_debug/debug_debug/step_22500_epoch_14
+
+# Output CSV suffix (appended to all output CSV filenames)
+output_csv_suffix: _recalculate
+
+# Array job ID (for csv suffix, set via CLI override in sbatch)
+array_id: null
+
+# Whether the input samples are designed (affects pocket annotation for docking metrics)
+# true: uses annotate_ligand_pockets_pseudocb (pseudo-CB based)
+# false: uses annotate_ligand_pockets (all-atom based) - for native samples
+input_sample_is_designed: true
+
+# Pocket configuration
+pocket_cfg:
+  pocket_distance_for_docking_metrics: 6.0
+
+######### Structure prediction model configuration (AF3) #########
+struct_pred_cfg:
+  model_name: "af3"
+  evaluate_self_consistency: true
+  calculate_metrics_only: true
+  af3:
+    runner_path: null  # Not needed for metrics-only
+    json_config:
+      model_seeds: [42]
+      version: 2
+    inference_config:
+      base:
+        model_dir: null
+        db_dir: null
+        flash_attention_implementation: "xla"
+      ss:
+        num_recycles: 1
+        num_diffusion_samples: 1
+        max_templates: 0
+        ligand_protein_template_conditioning_mode: 0
+        mask_template_sidechains: true
+        mask_template_sequence: true
+
+######### CIF parsing & preprocessing configs #########
+cif_cfg:
+  parse:
+    designed_samples:
+      add_missing_atoms: false
+      remove_waters: false
+      remove_ccds: []
+      fix_ligands_at_symmetry_centers: false
+      fix_arginines: false
+      convert_mse_to_met: false
+      hydrogen_policy: "remove"
+      extra_fields: null
+    af3_predictions:
+      add_missing_atoms: false
+      remove_waters: false
+      remove_ccds: []
+      fix_ligands_at_symmetry_centers: false
+      fix_arginines: false
+      convert_mse_to_met: false
+      hydrogen_policy: "remove"
+      extra_fields: null
+
+preprocess_cfg:
+  designed_samples:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: true
+    remove_terminal_oxygen_nucleic_acid: true
+  af3_predictions:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: false
+    remove_terminal_oxygen_nucleic_acid: false
+
+featurizer_cfg:
+  prepare_designed_samples:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []
+    remove_unresolved_tokens: true
+  prepare_af3_predictions:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []
+    remove_unresolved_tokens: true
+
+hydra:
+  run:
+    dir: /home/possu/jinho/hydra_outputs
