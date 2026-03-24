@@ -43,7 +43,7 @@ pocket_cfg:
 cif_cfg:
   parse:
     designed_samples:
-      add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
+      add_missing_atoms: false #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
@@ -52,7 +52,7 @@ cif_cfg:
       hydrogen_policy: "remove"
       extra_fields: null
     af3_predictions:
-      add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
+      add_missing_atoms: false #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
