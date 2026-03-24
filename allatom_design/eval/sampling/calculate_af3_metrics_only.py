@@ -93,6 +93,8 @@ def main(cfg: DictConfig):
     print(f"Samples directory: {samples_dir}")
     print("="*80 + "\n")
 
+    af3_preds_dir = data_dir / "af3_ss_preds"
+
     sample_cif_paths = sorted(samples_dir.glob("*.cif"))
 
     if cfg.get("debug", False):
@@ -105,9 +107,27 @@ def main(cfg: DictConfig):
 
     print(f"Found {len(sample_cif_paths)} designed sample CIF files")
 
+    # Filter: only keep designed samples that have AF3 predictions
+    filtered_cif_paths = []
+    num_skipped = 0
+    for cif_path in sample_cif_paths:
+        pred_dir = af3_preds_dir / cif_path.stem
+        if pred_dir.is_dir():
+            filtered_cif_paths.append(cif_path)
+        else:
+            num_skipped += 1
+
+    if num_skipped > 0:
+        print(f"Skipped {num_skipped} designed samples without AF3 predictions")
+    print(f"Proceeding with {len(filtered_cif_paths)} designed samples that have AF3 predictions")
+
+    if not filtered_cif_paths:
+        print("No designed samples with AF3 predictions found. Exiting.")
+        return
+
     # Group by input_sample_id (strip _sample\d+ suffix)
     input_to_designed_paths = defaultdict(list)
-    for cif_path in sample_cif_paths:
+    for cif_path in filtered_cif_paths:
         designed_sample_id = cif_path.stem
         input_sample_id = re.sub(r'_sample\d+$', '', designed_sample_id)
         input_to_designed_paths[input_sample_id].append(cif_path)
