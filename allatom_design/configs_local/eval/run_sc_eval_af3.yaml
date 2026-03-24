@@ -13,6 +13,7 @@ debug: false
 num_debug_samples: 2
 seed: 0
 protein_only: false
+input_sample_is_designed: true
 
 # Outputs
 exp_name: eval_caliby_lmpnnval_af3
@@ -35,7 +36,7 @@ pdb_cfg:
 
 # Pocket configuration
 pocket_cfg:
-  pocket_distance_for_metrics: 6.0
+  pocket_distance_for_docking_metrics: 6.0
 
 ######### Data & Transform configurations #########
 # Configurations for cif files

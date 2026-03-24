@@ -1,4 +1,7 @@
 ########### Basic settings #########
+# Debug config for testing rfd3val with sample_lengths=[150,250] on Sherlock interactive node
+# Usage: python3 allatom_design/eval/sampling/lc_seq_des_multi.py --config-name=lc_seq_des_multi_debug
+
 # Wandb settings
 wandb:
   no_wandb: true  # Disable wandb logging
@@ -8,38 +11,37 @@ wandb:
 
 # Basic settings
 debug: true
-num_debug_samples: 1
+num_debug_samples: 2
 seed: 0
 num_workers: 0 # for dataloading
 protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
-run_seq_des: true
 
 # Outputs
-exp_name: debug # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260323_debug2
+exp_name: debug_260313_rfd3val # experiment name; used for wandb and output directory
+base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
-seq_des_cfg:  
+seq_des_cfg:
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp37_cfg11
+  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp36_cfg1
   ckpt_cfg:
-    start_step: 22500
-    end_step: 22500
+    start_step: 82500
+    end_step: 82500
     eval_every_n_ckpts: 1
     eval_last_ckpt: false
     use_ema: true
   atom_mpnn:
     ckpt_path: null
-    sampling_cfg: /home/possu/jinho/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
+    sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides:
-      batch_size: 1
-      num_seqs_per_pdb: 2  # number of sequences to sample per pdb
+      batch_size: 2
+      num_seqs_per_pdb: 1  # number of sequences to sample per pdb
       omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
       noise_labels: null
       num_workers: ${num_workers}
-      use_potts_sampling: true      
+      use_potts_sampling: true
       potts_sampling_cfg:
-        potts_sweeps: 50
+        potts_sweeps: 500
         lcp_expand_edge_idx_fix: true
 
 # sampling inputs
@@ -48,17 +50,16 @@ sampling_inputs_csv: null
 # Positional constraints: supports columns in [pdb_key,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
 # e.g. 2fyzA,"A1-100,B1-100","A1-100"
 pos_constraint_csv: null
-  
+
 # Redesign pocket sequence options
 redesign_cfg:
   use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
   pocket_distance: 5.0
-  native_cif_dir: /home/possu/jinho/datasets/val_cifs/native_val_cifs/cifs  #! Directory containing native CIF files (needed when use_native_seq: true)  
+  native_cif_dir: null
 
-# Pocket configuration
+# Docking metrics configuration
 pocket_cfg:
-  pocket_distances_for_seq_recovery: [4.0, 5.0, 6.0]
-  pocket_distance_for_docking_metrics: 6.0
+  pocket_distance_for_metrics: 6.0
 
 ######### Data & Transform configurations #########
 input_sample_is_all_atom: true
@@ -67,20 +68,20 @@ load_from_cache: false
 
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /home/possu/jinho/datasets/val_cifs/denovo_val_cifs
+  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/rfd3_val_cifs/samples_uncompressed
   pdb_name_list: null
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
   # Recursive search for nested directory structures (e.g. CCD code subfolders)
-  recursive: false
-  split_by_subfolder: false  # if true, array job splits by subfolder instead of flat file list
+  recursive: true
+  split_by_subfolder: true  # if true, array job splits by subfolder instead of flat file list
   # Sample index filtering: matches pattern {PREFIX}_{IDX}_model_{M}.ext
-  sample_indices: [0]  # null = use all; e.g. [0,1,2,3,4] to select specific indices
+  sample_indices: [0,1,2,3,4]  # null = use all; e.g. [0,1,2,3,4] to select specific indices
   # Sample length filtering: matches pattern {PREFIX}_len_{L}_{IDX}_model_{M}.ext
-  sample_lengths: [150]  # null = use all; e.g. [150,250] to select specific lengths
+  sample_lengths: [150,250]  # null = use all; e.g. [150,250] to select specific lengths
   # Slurm array job parameters (set via CLI override in sbatch)
-  array_id: 2
-  num_arrays: 64
+  array_id: 0  # test with first subfolder
+  num_arrays: 50
 
 #### For designing samples ####
 # Configurations for cif files
@@ -94,33 +95,32 @@ cif_cfg:
       fix_arginines: true
       convert_mse_to_met: true
       hydrogen_policy: "remove"
-      extra_fields: "all"      
+      extra_fields: "all"
     designed_samples:
-      add_missing_atoms: false #! For charge annotation and is_backbone_atom annotation
+      add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null  
+      extra_fields: null
     af3_predictions:
-      add_missing_atoms: false #! For charge annotation and is_backbone_atom annotation
+      add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null  
+      extra_fields: null
   save:
-    file_type: "cif"
     date: "1959-01-07" #! Young-Ae Lee's birthday
     include_entity_poly: True
     include_entity_nonpoly: True
     include_nan_coords: False #! designed structures should not have nan coords
     include_bonds: True
-    extra_fields: []
+    extra_fields: "all"
     exclude_field_keys: ["token_id", "is_ligand_pocket"]
     extra_categories:
       pdbx_audit_revision_history:
@@ -160,45 +160,45 @@ featurizer_cfg:
     occupancy_threshold_protein_backbone: 0.0
     training_structure_noise: 0.0
     undesired_res_names: []
-    remove_keys: []    
+    remove_keys: []
     remove_unresolved_tokens: true
     max_tokens: null
-    max_atoms: null  
+    max_atoms: null
     pocket_distance: 6.0
-    residue_cache_dir: "/home/possu/jinho/datasets/atomworks_cached_residue_data"
+    residue_cache_dir: "/scratch/users/zhkim216/datasets/atomworks_cached_residue_data"
     max_conformers_per_residue: 50
     apply_random_augmentation: true
-    translation_scale: 1.0    
+    translation_scale: 1.0
   prepare_designed_samples:
     max_tokens: null
     max_atoms: null
-    remove_keys: []    
+    remove_keys: []
     remove_unresolved_tokens: true
   prepare_af3_predictions:
     max_tokens: null
     max_atoms: null
-    remove_keys: []    
+    remove_keys: []
     remove_unresolved_tokens: true
 
 ######### Structure prediction model configuration (AF3) #########
 struct_pred_cfg:
   model_name: "af3"
-  evaluate_self_consistency: true
+  evaluate_self_consistency: false
   evaluate_docking_consistency: false
   calculate_metrics_only: false
   af3:
-    runner_path: /home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py
+    runner_path: /home/users/zhkim216/code/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
     json_config:
       model_seeds: [42]
       version: 2
     inference_config:
       base:
-        model_dir: /home/possu/jinho/model_params/af3
-        db_dir: /home/possu/jinho/af3_databases
-        flash_attention_implementation: "xla"
+        model_dir: /scratch/users/zhkim216/model_params/af3
+        db_dir: /scratch/users/zhkim216/af3_databases
+        flash_attention_implementation: "triton"
       ss:  # Single-sequence prediction config
-        num_recycles: 1
-        num_diffusion_samples: 1
+        num_recycles: 10
+        num_diffusion_samples: 5
         max_templates: 0
         ligand_protein_template_conditioning_mode: 0
         mask_template_sidechains: true
@@ -214,4 +214,4 @@ struct_pred_cfg:
 
 hydra:
   run:
-    dir: /home/possu/jinho/hydra_outputs
+    dir: /scratch/users/zhkim216/hydra_outputs

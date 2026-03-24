@@ -4,27 +4,36 @@
 ########### Basic settings #########
 debug: false
 num_debug_samples: 5  # Number of samples to process in debug mode
+num_workers: 8
 
 # Input settings
-cif_dir: /home/possu/jinho/allatom-design/local_debug_output/260304/debug_exp30_cfg2_pseudocb_cd8.0A/step_50000_epoch_31/samples
-pdb_list_file: null
-metadata_path: null
+sampling_inputs_csv: null
+pdb_cfg:
+  pdb_dir: /home/possu/jinho/datasets/val_cifs/denovo_val_cifs/cifs
+  pdb_name_list: null
+  pdb_name_ext: ".cif"
+  n_subsample: null  # null to use all samples
+  recursive: false
+  split_by_subfolder: false
+  sample_indices: null
+  sample_lengths: null
+  array_id: null
+  num_arrays: null
 
 # Output settings
-output_dir: /home/possu/jinho/allatom-design/local_debug_output/260304/debug_exp30_cfg2_pseudocb_cd8.0A/step_50000_epoch_31/samples
-output_prefix: ""
+output_dir: /home/possu/jinho/allatom-design/debug/260323_pos_constraint_df_debug
 
 # Save LigandMPNN input CSV
-save_ligand_mpnn_csv: false
+save_ligand_mpnn_csv: true
 
 # Pocket constraint settings
-pocket_distance: 8.0
+pocket_distance: 6.0
 use_pseudocb_for_pocket_annotation: true
-constraint_type: pocket  # "pocket", "scaffold", or "both"
+constraint_type: "pocket"  # "pocket", "scaffold"
 
 ######### Data & Transform configurations #########
 # Data configuration (for parsing original CIF files)
-source_is_designed: true
+source_is_designed: false
 
 #### For designing samples ####
 # Configurations for cif files

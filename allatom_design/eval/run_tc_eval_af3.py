@@ -12,14 +12,12 @@ import atomworks.enums as aw_enums
 
 from allatom_design.eval.eval_utils.eval_setup_utils import (
     get_pdb_files, wandb_setup)
-from allatom_design.eval.eval_utils.seq_des_utils import (
-    prepare_designed_sample,
-    insert_unk_residues_for_gaps_in_atom_array,
-    _fix_cif_formal_charge,
-)
+from allatom_design.eval.eval_utils.sd_data_utils import prepare_designed_sample
 from allatom_design.eval.eval_utils.folding_utils import (
     evaluate_af3_docking_consistency,
 )
+from allatom_design.utils.atom_array_utils import insert_unk_residues_for_gaps_in_atom_array
+from allatom_design.utils.sample_io_utils import _fix_cif_formal_charge
 from atomworks.io.utils.io_utils import to_cif_file
 
 
@@ -33,18 +31,18 @@ def extract_pdb_chain_info(atom_array) -> dict:
     prot_atom_array = atom_array[atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
     ligand_atom_array = atom_array[np.isin(atom_array.chain_type, list(aw_enums.ChainTypeInfo.NON_POLYMERS))]
     
-    protein_chain_iids = [str(chain_iid) for chain_iid in np.unique(prot_atom_array.chain_iid)]
-    ligand_chain_iids = [str(chain_iid) for chain_iid in np.unique(ligand_atom_array.chain_iid)]
+    protein_pn_unit_iids = [str(pn_unit_iid) for pn_unit_iid in np.unique(prot_atom_array.pn_unit_iid)]
+    ligand_pn_unit_iids = [str(pn_unit_iid) for pn_unit_iid in np.unique(ligand_atom_array.pn_unit_iid)]
     ligand_ccd_codes = [
-        str(ligand_atom_array[ligand_atom_array.chain_iid == chain_iid].res_name[0])
-        for chain_iid in ligand_chain_iids
+        str(ligand_atom_array[ligand_atom_array.pn_unit_iid == pn_unit_iid].res_name[0])
+        for pn_unit_iid in ligand_pn_unit_iids
     ]
-    
-    for chain_iid in protein_chain_iids:
-        pdb_chain_info["protein_chain_iids"].append(str(chain_iid))
-    
-    for chain_iid, ccd_code in zip(ligand_chain_iids, ligand_ccd_codes):
-        pdb_chain_info["ligand_chain_iids"].append(str(chain_iid))
+
+    for pn_unit_iid in protein_pn_unit_iids:
+        pdb_chain_info["protein_pn_unit_iids"].append(str(pn_unit_iid))
+
+    for pn_unit_iid, ccd_code in zip(ligand_pn_unit_iids, ligand_ccd_codes):
+        pdb_chain_info["ligand_pn_unit_iids"].append(str(pn_unit_iid))
         pdb_chain_info["ligand_ccd_codes"].append(str(ccd_code))
     
     return pdb_chain_info
@@ -93,7 +91,6 @@ def prepare_tc_template_cif(atom_array,
     out_path = to_cif_file(
         tc_atom_array, out_path, 
         file_type="cif", 
-        fill_gaps_in_poly_records=False, 
         **cif_save_args
     )
     _fix_cif_formal_charge(out_path)
@@ -174,7 +171,7 @@ def main(cfg: DictConfig):
         # Extract chain info
         pdb_chain_info = extract_pdb_chain_info(atom_array)
         
-        if not pdb_chain_info["protein_chain_iids"]:
+        if not pdb_chain_info["protein_pn_unit_iids"]:
             print(f"Warning: No protein chains found in {sample_id}, skipping")
             continue
         
