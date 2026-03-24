@@ -21,7 +21,7 @@ base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des
 
 # Configurations for getting designed sample paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_lmpnn010_lmpnnval_af3/samples/backbones
+  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_lmpnn_denovoval_af3/samples/backbones
   pdb_name_list: null
   pdb_name_ext: ".pdb"
   n_subsample: null
@@ -29,14 +29,14 @@ pdb_cfg:
   recursive: false
   split_by_subfolder: false
   # Sample index filtering
-  sample_indices: null
+  sample_indices: [0,1]
   # Slurm array job parameters (set via CLI override in sbatch)
-  array_id: null
-  num_arrays: null
+  array_id: 0
+  num_arrays: 64
 
 # Pocket configuration
 pocket_cfg:
-  pocket_distance_for_docking_metrics: 6.0
+  pocket_distance_for_docking_metrics: 8.0
 
 ######### Data & Transform configurations #########
 # Configurations for cif files
@@ -93,7 +93,7 @@ featurizer_cfg:
 struct_pred_cfg:
   model_name: "af3"
   evaluate_self_consistency: true
-  calculate_metrics_only: true
+  calculate_metrics_only: false
   af3:
     runner_path: /home/users/zhkim216/code/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
     json_config:
