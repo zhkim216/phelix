@@ -675,7 +675,7 @@ def annotate_ligand_pockets_pseudocb(
     # --- Compute pseudo-CB from un-noised backbone coords ---
     # Get standard AA protein atoms with all backbone resolved
     is_atomized = atom_array.atomize
-    if hasattr(atom_array, "atom_is_protein_chain"):
+    if hasattr(atom_array, "atom_is_protein_chain"):        
         standard_aa_prot_mask = ~is_atomized & atom_array.atom_is_protein_chain
     else:   
         standard_aa_prot_mask = ~is_atomized & (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
@@ -740,8 +740,11 @@ def annotate_ligand_pockets_pseudocb(
     pocket_annotation = np.isin(atom_array.res_id, pocket_res_ids)
     
     # Only atoms in protein chains can be pocket atoms
-    pocket_annotation = pocket_annotation & atom_array.atom_is_protein_chain
-    
+    if hasattr(atom_array, "atom_is_protein_chain"):        
+        pocket_annotation = pocket_annotation & atom_array.atom_is_protein_chain
+    else:   
+        pocket_annotation = pocket_annotation & (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)        
+        
     atom_array.set_annotation(annotation_name, pocket_annotation)
     return atom_array
 

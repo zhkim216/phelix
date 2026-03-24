@@ -47,7 +47,7 @@ def extract_pdb_chain_info(atom_array) -> dict:
     return pdb_chain_info
 
 
-@hydra.main(config_path="../configs_local/eval", config_name="run_sc_eval_af3", version_base="1.3.2")
+@hydra.main(config_path="../configs/eval", config_name="run_sc_eval_af3", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Run AF3 self-consistency evaluation on pre-designed samples.
@@ -83,9 +83,8 @@ def main(cfg: DictConfig):
     
     # Get CIF file paths
     sample_paths = get_pdb_files(**cfg.pdb_cfg)
-    
     if cfg.debug:
-        sample_paths = sample_paths[:cfg.num_debug_samples]
+        sample_paths = sample_paths[:cfg.num_debug_samples]        
     
     # Build sample_dict in evaluate_af3_self_consistency format
     sample_dict = {}
@@ -134,7 +133,6 @@ def main(cfg: DictConfig):
         
         evaluate_af3_self_consistency(
             sample_dict=sample_dict,
-            num_redesigned_pocket_residue_list=None,
             out_dir=log_dir,
             struct_pred_cfg=cfg.struct_pred_cfg,
             cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,

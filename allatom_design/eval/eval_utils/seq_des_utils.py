@@ -2101,8 +2101,8 @@ def prepare_sample_dict(cfg: DictConfig = None,
     sample_paths = get_pdb_files(**cfg.pdb_cfg)
     
     if cfg.debug:
-        # sample_paths = sample_paths[:cfg.num_debug_samples]                
-        sample_paths = ['/scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/cifs/3bgz.cif', '/scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/cifs/9gw7.cif']
+        sample_paths = sample_paths[:cfg.num_debug_samples]                
+        # sample_paths = ['/scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/cifs/3bgz.cif', '/scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/cifs/9gw7.cif']
         
     # Initialize dictionary for storing sample information
     sample_dict = create_sample_dict(sample_paths=sample_paths, prefix=prefix)

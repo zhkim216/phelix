@@ -468,6 +468,7 @@ def _extract_af3_confidence_metrics(confidence_file_path: str = None,
             f"Total atoms in atom_array: {len(atom_array)}, NaN atoms: {len(atom_array) - num_valid_atoms}"
         )
         
+        
         # Filter mask to only valid (non-NaN) atoms so it aligns with metric
         if isinstance(mask, np.ndarray):
             mask_torch = torch.tensor(mask[valid_coords_mask], dtype=torch.bool)
