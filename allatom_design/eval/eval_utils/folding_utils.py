@@ -198,21 +198,6 @@ def _run_af3_inprocess(
 # AF3 JSON Input Creation
 # ============================================================================
 
-def _chain_letters(n: int) -> list[str]:
-    """Generate chain letters like A, B, ..., Z, AA, BA, CA, ..."""
-    letters = []
-    base = [chr(i) for i in range(ord('A'), ord('Z') + 1)]
-    if n <= 26:
-        return base[:n]
-    # Extend like A, B, ..., Z, AA, BA, CA, ... (reverse spreadsheet style used in AF3 docs)
-    letters.extend(base)
-    idx = 0
-    while len(letters) < n:
-        letters.extend([f"{base[i]}{base[idx]}" for i in range(26)])
-        idx += 1
-    return letters[:n]
-
-
 def make_af3_json(af3_ss_input_dir: str = None,
                     af3_tc_input_dir: str = None,           
                     sample_dict: dict = None,                             
@@ -237,7 +222,9 @@ def make_af3_json(af3_ss_input_dir: str = None,
     Note:
         Either of metadata or pdb_chain_info must be provided.
         All lists must have the same length and be aligned by index
-        (i.e., sample_id_list[i] corresponds to pdb_id_list[i], sample_atom_array_list[i], and template_pdb_path_list[i])    
+        (i.e., sample_id_list[i] corresponds to pdb_id_list[i], sample_atom_array_list[i], and template_pdb_path_list[i])
+
+    Todo: need to split pn_unit_iids into separate chain iids to make af3 inputs for multi-chain ligands later
     """                           
     model_seeds = list(json_config.get('model_seeds', [42]))
     version = int(json_config.get('version', 2))
@@ -263,22 +250,22 @@ def make_af3_json(af3_ss_input_dir: str = None,
         for _, row in metadata.iterrows():
             pdb_key = row["pdb_id"]            
             pdb_chain_info[pdb_key] = {}
-            pdb_chain_info[pdb_key]['protein_chain_iids'] = []
-            pdb_chain_info[pdb_key]['ligand_chain_iids'] = []       
+            pdb_chain_info[pdb_key]['protein_pn_unit_iids'] = []
+            pdb_chain_info[pdb_key]['ligand_pn_unit_iids'] = []       
             pdb_chain_info[pdb_key]['ligand_ccd_codes'] = []
             
             for column in expanded_protein_columns:
                 if row[column]:
                     suffix = column.split("_")[-1]
-                    protein_chain_iid = row[f'q_pn_unit_iid_{suffix}']
-                    pdb_chain_info[pdb_key]['protein_chain_iids'].append(protein_chain_iid)
+                    protein_pn_unit_iid = row[f'q_pn_unit_iid_{suffix}']
+                    pdb_chain_info[pdb_key]['protein_pn_unit_iids'].append(protein_pn_unit_iid)
                     
             for column in expanded_nonpolymer_ligand_columns:
                 if row[column]:
                     suffix = column.split("_")[-1]
-                    ligand_chain_iid = row[f'q_pn_unit_iid_{suffix}']
+                    ligand_pn_unit_iid = row[f'q_pn_unit_iid_{suffix}']
                     ligand_ccd_code = row[f'q_pn_unit_non_polymer_res_names_{suffix}']
-                    pdb_chain_info[pdb_key]['ligand_chain_iids'].append(ligand_chain_iid)
+                    pdb_chain_info[pdb_key]['ligand_pn_unit_iids'].append(ligand_pn_unit_iid)
                     pdb_chain_info[pdb_key]['ligand_ccd_codes'].append(ligand_ccd_code)                                               
         
         use_metadata = True        
@@ -300,14 +287,14 @@ def make_af3_json(af3_ss_input_dir: str = None,
             
             job_name = designed_sample_id                                                                                
                                                             
-            protein_chain_iids = pdb_chain_info['protein_chain_iids']        
-            ligand_chain_iids = pdb_chain_info['ligand_chain_iids']
+            protein_pn_unit_iids = pdb_chain_info['protein_pn_unit_iids']        
+            ligand_pn_unit_iids = pdb_chain_info['ligand_pn_unit_iids']
             ligand_ccd_codes = pdb_chain_info['ligand_ccd_codes']
             
             ss_sequences = []
             tc_sequences = []
-            for protein_chain_iid in protein_chain_iids:
-                chain_mask = (designed_sample_atom_array.chain_iid == protein_chain_iid)
+            for protein_pn_unit_iid in protein_pn_unit_iids:
+                chain_mask = (designed_sample_atom_array.pn_unit_iid == protein_pn_unit_iid)
                 _res_starts = get_residue_starts(designed_sample_atom_array[chain_mask])
                 _res_ids = designed_sample_atom_array[chain_mask].res_id[_res_starts]
                 _res_ids_0based = _res_ids - np.min(_res_ids)
@@ -353,7 +340,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
                                     
                 ss_sequences.append({
                     "protein": {
-                        "id": protein_chain_iid.split("_")[0], 
+                        "id": protein_pn_unit_iid.split("_")[0], 
                         "sequence": sequence_with_gaps,
                         "modifications": modifications if modifications else [],
                         "unpairedMsa": "",
@@ -365,7 +352,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
                 if make_tc_input:
                     tc_sequences.append({
                         "protein": {
-                            "id": protein_chain_iid.split("_")[0],
+                            "id": protein_pn_unit_iid.split("_")[0],
                             "sequence": sequence_with_gaps, 
                             "modifications": modifications if modifications else [],
                             "unpairedMsa": "",
@@ -375,17 +362,17 @@ def make_af3_json(af3_ss_input_dir: str = None,
                                     "mmcifPath": template_sample_path,
                                     "queryIndices": query_indices,
                                     "templateIndices": template_indices,
-                                    "templateChainId": protein_chain_iid.split("_")[0],
+                                    "templateChainId": protein_pn_unit_iid.split("_")[0],
                                 }
                             ]
                         }
                     })                
             
             
-            for ligand_chain_iid, ligand_ccd_code in zip(ligand_chain_iids, ligand_ccd_codes):                    
+            for ligand_pn_unit_iid, ligand_ccd_code in zip(ligand_pn_unit_iids, ligand_ccd_codes):                    
                 ss_sequences.append({
                     "ligand": {
-                        "id": ligand_chain_iid.split("_")[0],
+                        "id": ligand_pn_unit_iid.split("_")[0],
                         "ccdCodes": [ligand_ccd_code]
                     }
                 })
@@ -393,7 +380,7 @@ def make_af3_json(af3_ss_input_dir: str = None,
                 if make_tc_input:
                     tc_sequences.append({
                         "ligand": {
-                            "id": ligand_chain_iid.split("_")[0],
+                            "id": ligand_pn_unit_iid.split("_")[0],
                             "ccdCodes": [ligand_ccd_code]
                         }
                     })
@@ -566,17 +553,18 @@ def find_pred_sample_path_af3(out_dir: str = None,
 # AF3 Evaluation Functions
 # ============================================================================
 
-def evaluate_af3_self_consistency(sample_dict: dict = None,                                  
+def evaluate_af3_self_consistency(sample_dict: dict = None,
                                   out_dir: Path = None,
                                   struct_pred_cfg: DictConfig = None,
                                   cif_parse_cfg: DictConfig = None,
                                   preprocess_cfg: DictConfig = None,
-                                  featurizer_cfg: DictConfig = None,                             
+                                  featurizer_cfg: DictConfig = None,
                                   pocket_cfg: DictConfig = None,
                                   ckpt_info: dict = None,
                                   no_wandb: bool = False,
                                   calculate_metrics_only: bool = False,
-                                  csv_suffix: str = "") -> None:
+                                  csv_suffix: str = "",
+                                  input_sample_is_designed: bool = True) -> None:
     """
     Run AF3 self-consistency and docking evaluation.
     
@@ -590,10 +578,10 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
         ckpt_info: Checkpoint info (optional, for wandb logging).
     """
     # Import here to avoid circular imports
-    from allatom_design.eval.eval_utils.seq_des_utils import prepare_af3_prediction
+    from allatom_design.eval.eval_utils.sd_data_utils import prepare_af3_prediction
     from allatom_design.eval.eval_utils.eval_metrics import (
-        _compute_self_consistency_metrics_atomarray, 
-        _compute_docking_metrics_atomarray
+        compute_self_consistency_metrics_atomarray, 
+        compute_docking_metrics_atomarray
     )
             
     # Make json input directory
@@ -639,8 +627,8 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
             ss_json_path = subsample_dict['af3_ss_json_paths'][dsidx]            
         
             # Get protein and ligand chain ids, because AF3 expects chain ids, not chain iids
-            protein_chain_iids = pdb_chain_info['protein_chain_iids']
-            ligand_chain_iids = pdb_chain_info['ligand_chain_iids']
+            protein_pn_unit_iids = pdb_chain_info['protein_pn_unit_iids']
+            ligand_pn_unit_iids = pdb_chain_info['ligand_pn_unit_iids']
             
             if not calculate_metrics_only:
                 # Run AF3 single-sequence prediction
@@ -662,18 +650,17 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
             for pred_idx, pred_ss_sample_path in enumerate(pred_ss_sample_paths):
                 try:
                     pred_example = prepare_af3_prediction(
-                        pdb_path=pred_ss_sample_path,
-                        cif_parse_cfg=cif_parse_cfg,
+                        pdb_path=pred_ss_sample_path,  
+                        cif_parse_cfg=cif_parse_cfg,                      
                         preprocess_cfg=preprocess_cfg,
                         featurizer_cfg=featurizer_cfg,  
                     )
                                                                                 
                     pred_atom_array = pred_example["atom_array"]
-                    per_pred_sc_metrics = _compute_self_consistency_metrics_atomarray(
+                    per_pred_sc_metrics = compute_self_consistency_metrics_atomarray(
                         pred_atom_array=pred_atom_array,
                         sample_atom_array=designed_sample_atom_array,
-                        pred_sample_path=pred_ss_sample_path,
-                        return_aligned_atom_array=False
+                        pred_sample_path=pred_ss_sample_path,                        
                     )                                                                                            
         
                 except Exception as e:
@@ -682,24 +669,24 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
                 else:            
                     designed_sample_id_to_per_pred_sc_metrics[designed_sample_id][f"diffusion_{pred_idx}"] = per_pred_sc_metrics
             
-                if ligand_chain_iids:
+                if ligand_pn_unit_iids:
                     try: 
-                        per_pred_docking_metrics = _compute_docking_metrics_atomarray(
+                        per_pred_docking_metrics = compute_docking_metrics_atomarray(
                             pred_atom_array=pred_atom_array,
                             sample_atom_array=designed_sample_atom_array,
-                            pred_sample_path=pred_ss_sample_path,
-                            return_aligned_atom_array=False,
-                            pocket_distance_for_metrics=pocket_cfg.pocket_distance_for_metrics,
-                            receptor_chain_iid=protein_chain_iids[0], #! FIXME
-                            ligand_chain_iid=ligand_chain_iids[0] #! FIXME
+                            pred_sample_path=pred_ss_sample_path,                            
+                            pocket_distance_for_docking_metrics=pocket_cfg.pocket_distance_for_docking_metrics,
+                            receptor_pn_unit_iids=protein_pn_unit_iids,
+                            ligand_pn_unit_iids=ligand_pn_unit_iids,
+                            ref_sample_is_designed=input_sample_is_designed,
                         )
-            
+
                     except Exception as e:
                         print(f"Docking metrics computation failed for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}, pred_idx: {pred_idx}: {e}")
                         continue
                     else:
                         designed_sample_id_to_per_pred_docking_metrics[designed_sample_id][f"diffusion_{pred_idx}"] = per_pred_docking_metrics
-    
+
     # Aggregate best metrics per designed_sample_id (best diffusion sample)
     designed_sample_id_best_sc_metrics = _aggregate_best_sc_metrics_per_designed_sample(designed_sample_id_to_per_pred_sc_metrics)
     designed_sample_id_best_docking_metrics = _aggregate_best_docking_metrics_per_designed_sample(designed_sample_id_to_per_pred_docking_metrics)
@@ -728,17 +715,18 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
     print("="*80 + "\n")
 
 
-def evaluate_af3_docking_consistency(sample_dict: dict = None,                                     
+def evaluate_af3_docking_consistency(sample_dict: dict = None,
                                      out_dir: Path = None,
                                      struct_pred_cfg: DictConfig = None,
                                      cif_parse_cfg: DictConfig = None,
                                      preprocess_cfg: DictConfig = None,
-                                     featurizer_cfg: DictConfig = None,                             
+                                     featurizer_cfg: DictConfig = None,
                                      pocket_cfg: DictConfig = None,
                                      ckpt_info: dict = None,
                                      no_wandb: bool = False,
                                      calculate_metrics_only: bool = False,
-                                     csv_suffix: str = "") -> None:
+                                     csv_suffix: str = "",
+                                     input_sample_is_designed: bool = True) -> None:
     """
     Run AF3 template-conditioned docking consistency evaluation.
     
@@ -759,7 +747,7 @@ def evaluate_af3_docking_consistency(sample_dict: dict = None,
         csv_suffix: Optional suffix for CSV filenames (e.g. "_array_0" for array jobs).
     """
     # Import here to avoid circular imports
-    from allatom_design.eval.eval_utils.seq_des_utils import prepare_af3_prediction
+    from allatom_design.eval.eval_utils.sd_data_utils import prepare_af3_prediction
     from allatom_design.eval.eval_utils.eval_metrics import (
         _compute_self_consistency_metrics_atomarray, 
         _compute_docking_metrics_atomarray
@@ -811,8 +799,8 @@ def evaluate_af3_docking_consistency(sample_dict: dict = None,
             tc_json_path = subsample_dict['af3_tc_json_paths'][dsidx]            
         
             # Get protein and ligand chain ids
-            protein_chain_iids = pdb_chain_info['protein_chain_iids']
-            ligand_chain_iids = pdb_chain_info['ligand_chain_iids']
+            protein_pn_unit_iids = pdb_chain_info['protein_pn_unit_iids']
+            ligand_pn_unit_iids = pdb_chain_info['ligand_pn_unit_iids']
             
             if not calculate_metrics_only:
                 # Run AF3 template-conditioned prediction
@@ -835,8 +823,7 @@ def evaluate_af3_docking_consistency(sample_dict: dict = None,
                 for pred_idx, pred_tc_sample_path in enumerate(pred_tc_sample_paths):
                     try:
                         pred_example = prepare_af3_prediction(
-                            pdb_path=pred_tc_sample_path,
-                            cif_parse_cfg=cif_parse_cfg,
+                            pdb_path=pred_tc_sample_path,                            
                             preprocess_cfg=preprocess_cfg,
                             featurizer_cfg=featurizer_cfg,  
                         )
@@ -857,16 +844,17 @@ def evaluate_af3_docking_consistency(sample_dict: dict = None,
                         designed_sample_id_to_per_pred_sc_metrics[designed_sample_id][f"diffusion_{pred_idx}"] = per_pred_sc_metrics
                 
                     # Only compute docking metrics if ligand exists
-                    if ligand_chain_iids:
+                    if ligand_pn_unit_iids:
                         try: 
                             per_pred_docking_metrics = _compute_docking_metrics_atomarray(
                                 pred_atom_array=pred_atom_array,
                                 sample_atom_array=designed_sample_atom_array,
                                 pred_sample_path=pred_tc_sample_path,
                                 return_aligned_atom_array=False,
-                                pocket_distance_for_metrics=pocket_cfg.pocket_distance_for_metrics,
-                                receptor_chain_iid=protein_chain_iids[0], #! FIXME
-                                ligand_chain_iid=ligand_chain_iids[0] #! FIXME
+                                pocket_distance_for_docking_metrics=pocket_cfg.pocket_distance_for_docking_metrics,
+                                receptor_pn_unit_iids=protein_pn_unit_iids,
+                                ligand_pn_unit_iids=ligand_pn_unit_iids,
+                                ref_sample_is_designed=input_sample_is_designed,
                         )
                 
                         except Exception as e:
@@ -1111,6 +1099,5 @@ def _save_metrics_results(out_dir: Path = None,
         if not no_wandb:
             wandb.log(wandb_metrics, commit=True)
             print(f"Logged metrics to wandb: {wandb_metrics}")
-
 
 

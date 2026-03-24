@@ -178,6 +178,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         # Design sequences
         for _ in tqdm(range(sampling_inputs["num_seqs_per_pdb"]), desc="Sampling sequences", leave=False):
+            
             S_sample, U_sample = self.atom_mpnn.decoder_S_potts.sample(
                 potts_decoder_aux["h"],
                 potts_decoder_aux["J"],
@@ -195,6 +196,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 edge_idx_coloring=edge_idx_coloring,
                 mask_ij_coloring=mask_ij_coloring,
             )
+            
             # Set all tokens that don't exist in the graph to unknown
             S_sample = torch.where(~batch["protein_residue_node_mask"].bool() & (batch["is_protein"] | batch["is_ligand"]),
                                    const.AF3_ENCODING.token_to_idx[const.UNKNOWN_AA],

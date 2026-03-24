@@ -526,8 +526,8 @@ def annotate_ligand_pockets(
     pocket_distance: float = 5.0,
     n_min_ligand_atoms: int = 5,
     annotation_name: str = "is_ligand_pocket",
-    receptor_chain_iids: list[str] = None,
-    ligand_chain_iids: list[str] = None,
+    receptor_pn_unit_iids: list[str] = None,
+    ligand_pn_unit_iids: list[str] = None,
 ) -> AtomArray:
     """
     Identify atoms near ligands of sufficient size.
@@ -539,39 +539,32 @@ def annotate_ligand_pockets(
         pocket_distance: Distance threshold for pocket identification (Angstroms)
         n_min_ligand_atoms: Minimum atoms required for a ligand to define pockets
         annotation_name: Name for the boolean annotation
-        receptor_chain_iids: List of receptor chain IIDs
-        ligand_chain_iids: List of ligand chain IIDs
-        receptor_chain_ids: List of receptor chain IDs
-        ligand_chain_ids: List of ligand chain IDs
-        spread_residue_wise: If True, mark all atoms in a residue as pocket if any atom is in pocket
+        receptor_pn_unit_iids: List of receptor pn_unit_iids
+        ligand_pn_unit_iids: List of ligand pn_unit_iids
     Returns:
         AtomArray with ligand pocket annotation added
     """
-    atom_array = atom_array.copy()
-    
-    
-    use_chain_iid = False
-    use_chain_id = False
-    assert hasattr(atom_array, 'chain_iid') or hasattr(atom_array, 'pn_unit_iid'), "atom_array must have chain_iid or pn_unit_iid"
+            
+    assert hasattr(atom_array, 'pn_unit_iid'), "atom_array must have pn_unit_iid"
         
-    if (receptor_chain_iids is None) or (ligand_chain_iids is None):
+    if (receptor_pn_unit_iids is None) or (ligand_pn_unit_iids is None):
         # Used in training time or when there is no specified receptor and ligand chains      
         ligand_mask = (~atom_array.is_covalent_modification) & (~atom_array.is_polymer)        
         ligand_pn_unit_iids, ligand_counts = np.unique(atom_array.pn_unit_iid[ligand_mask], return_counts=True)                        
         valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
-        valid_ligand_iids = ligand_pn_unit_iids[valid_ligand_mask] #! in this case, pn_unit_iids are used        
-        all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_iids)                
+        valid_ligand_pn_unit_iids = ligand_pn_unit_iids[valid_ligand_mask] #! in this case, pn_unit_iids are used        
+        all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_pn_unit_iids)                
                             
     else:        
-        ligand_chain_iids, ligand_counts = np.unique(atom_array.chain_iid[np.isin(atom_array.chain_iid, ligand_chain_iids)], return_counts=True)                
+        ligand_pn_unit_iids, ligand_counts = np.unique(atom_array.pn_unit_iid[np.isin(atom_array.pn_unit_iid, ligand_pn_unit_iids)], return_counts=True)                
         valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
-        valid_ligand_iids = ligand_chain_iids[valid_ligand_mask]  # Fixed: was ligand_chain_ids
-        all_valid_ligands_mask = np.isin(atom_array.chain_iid, valid_ligand_iids)        
+        valid_ligand_pn_unit_iids = ligand_pn_unit_iids[valid_ligand_mask]  
+        all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_pn_unit_iids)        
 
     # Initialize pocket annotation
     pocket_annotation = np.zeros(len(atom_array), dtype=bool)
 
-    if len(valid_ligand_iids) == 0:
+    if len(valid_ligand_pn_unit_iids) == 0:
         atom_array.set_annotation(annotation_name, pocket_annotation)
         return atom_array
 
@@ -620,8 +613,8 @@ class AnnotateLigandPockets(Transform):
 
     @override
     def forward(self, data: dict = None,
-                receptor_chain_iids: list[str] = None, 
-                ligand_chain_iids: list[str] = None,
+                receptor_pn_unit_iids: list[str] = None, 
+                ligand_pn_unit_iids: list[str] = None,
             ) -> dict:
         
         data["atom_array"] = annotate_ligand_pockets(
@@ -629,8 +622,8 @@ class AnnotateLigandPockets(Transform):
             pocket_distance=self.pocket_distance,
             n_min_ligand_atoms=self.n_min_ligand_atoms,
             annotation_name=self.annotation_name,
-            receptor_chain_iids=receptor_chain_iids,
-            ligand_chain_iids=ligand_chain_iids,
+            receptor_pn_unit_iids=receptor_pn_unit_iids,
+            ligand_pn_unit_iids=ligand_pn_unit_iids,
         )
         return data
     
@@ -640,6 +633,8 @@ def annotate_ligand_pockets_pseudocb(
     pocket_distance: float = 5.0,
     n_min_ligand_atoms: int = 5,
     annotation_name: str = "is_pocket_rbf",
+    receptor_pn_unit_iids: list[str] = None,
+    ligand_pn_unit_iids: list[str] = None,
 ) -> AtomArray:
     """
     Identify protein residues whose pseudo-CB is within pocket_distance of any ligand atom.
@@ -656,19 +651,28 @@ def annotate_ligand_pockets_pseudocb(
         annotation_name: Name for the boolean annotation (token-level)
     Returns:
         AtomArray with pocket annotation added
-    """
-    atom_array = atom_array.copy()
-    
-    # --- Identify valid ligands ---
-    ligand_mask = (~atom_array.is_covalent_modification) & (~atom_array.is_polymer)        
-    ligand_pn_unit_iids, ligand_counts = np.unique(atom_array.pn_unit_iid[ligand_mask], return_counts=True)                        
-    valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
-    valid_ligand_iids = ligand_pn_unit_iids[valid_ligand_mask] #! in this case, pn_unit_iids are used            
+    """    
+            
+    assert hasattr(atom_array, 'pn_unit_iid'), "atom_array must have pn_unit_iid"
+        
+    if (receptor_pn_unit_iids is None) or (ligand_pn_unit_iids is None):
+        # Used in training time or when there is no specified receptor and ligand chains      
+        ligand_mask = (~atom_array.is_covalent_modification) & (~atom_array.is_polymer)        
+        ligand_pn_unit_iids, ligand_counts = np.unique(atom_array.pn_unit_iid[ligand_mask], return_counts=True)                        
+        valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
+        valid_ligand_pn_unit_iids = ligand_pn_unit_iids[valid_ligand_mask] #! in this case, pn_unit_iids are used        
+        all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_pn_unit_iids)                
+                            
+    else:        
+        ligand_pn_unit_iids, ligand_counts = np.unique(atom_array.pn_unit_iid[np.isin(atom_array.pn_unit_iid, ligand_pn_unit_iids)], return_counts=True)                
+        valid_ligand_mask = ligand_counts >= n_min_ligand_atoms
+        valid_ligand_pn_unit_iids = ligand_pn_unit_iids[valid_ligand_mask]  
+        all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_pn_unit_iids)    
     
     # Initialize token-level annotation (spread to all atoms in residue)
     pocket_annotation = np.zeros(len(atom_array), dtype=bool)
     
-    if len(valid_ligand_iids) == 0:
+    if len(valid_ligand_pn_unit_iids) == 0:
         atom_array.set_annotation(annotation_name, pocket_annotation)
         return atom_array
     
@@ -712,7 +716,7 @@ def annotate_ligand_pockets_pseudocb(
     res_ids_for_cb = atom_array.res_id[ca_mask]
         
     # --- Compute distances from pseudo-CB to ligand atoms ---
-    all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_iids)
+    all_valid_ligands_mask = np.isin(atom_array.pn_unit_iid, valid_ligand_pn_unit_iids)
     ligand_coords = atom_array.coord[all_valid_ligands_mask]
     
     # Filter out NaN coordinates
@@ -740,7 +744,7 @@ def annotate_ligand_pockets_pseudocb(
     pocket_annotation = np.isin(atom_array.res_id, pocket_res_ids)
     
     # Only atoms in protein chains can be pocket atoms
-    pocket_annotation = pocket_annotation & atom_array.atom_is_protein_chain
+    pocket_annotation = pocket_annotation & (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
     
     atom_array.set_annotation(annotation_name, pocket_annotation)
     return atom_array
@@ -769,12 +773,17 @@ class AnnotateLigandPocketsPseudoCB(Transform):
         check_is_instance(data, "atom_array", AtomArray)
 
     @override
-    def forward(self, data: dict) -> dict:
+    def forward(self, data: dict = None,
+                receptor_pn_unit_iids: list[str] = None, 
+                ligand_pn_unit_iids: list[str] = None,
+            ) -> dict:
         data["atom_array"] = annotate_ligand_pockets_pseudocb(
             atom_array=data["atom_array"],
             pocket_distance=self.pocket_distance,
             n_min_ligand_atoms=self.n_min_ligand_atoms,
             annotation_name=self.annotation_name,
+            receptor_pn_unit_iids=receptor_pn_unit_iids,
+            ligand_pn_unit_iids=ligand_pn_unit_iids,
         )
         return data
 

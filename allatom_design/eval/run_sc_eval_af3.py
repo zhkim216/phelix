@@ -12,9 +12,7 @@ import atomworks.enums as aw_enums
 
 from allatom_design.eval.eval_utils.eval_setup_utils import (
     get_pdb_files, wandb_setup)
-from allatom_design.eval.eval_utils.seq_des_utils import (
-    prepare_designed_sample,
-)
+from allatom_design.eval.eval_utils.sd_data_utils import prepare_designed_sample
 from allatom_design.eval.eval_utils.folding_utils import (
     evaluate_af3_self_consistency,
 )
@@ -30,18 +28,18 @@ def extract_pdb_chain_info(atom_array) -> dict:
     prot_atom_array = atom_array[atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L]
     ligand_atom_array = atom_array[np.isin(atom_array.chain_type, list(aw_enums.ChainTypeInfo.NON_POLYMERS))]
     
-    protein_chain_iids = [str(chain_iid) for chain_iid in np.unique(prot_atom_array.chain_iid)]
-    ligand_chain_iids = [str(chain_iid) for chain_iid in np.unique(ligand_atom_array.chain_iid)]
+    protein_pn_unit_iids = [str(pn_unit_iid) for pn_unit_iid in np.unique(prot_atom_array.pn_unit_iid)]
+    ligand_pn_unit_iids = [str(pn_unit_iid) for pn_unit_iid in np.unique(ligand_atom_array.pn_unit_iid)]
     ligand_ccd_codes = [
-        str(ligand_atom_array[ligand_atom_array.chain_iid == chain_iid].res_name[0])
-        for chain_iid in ligand_chain_iids
+        str(ligand_atom_array[ligand_atom_array.pn_unit_iid == pn_unit_iid].res_name[0])
+        for pn_unit_iid in ligand_pn_unit_iids
     ]
-    
-    for chain_iid in protein_chain_iids:
-        pdb_chain_info["protein_chain_iids"].append(str(chain_iid))
-    
-    for chain_iid, ccd_code in zip(ligand_chain_iids, ligand_ccd_codes):
-        pdb_chain_info["ligand_chain_iids"].append(str(chain_iid))
+
+    for pn_unit_iid in protein_pn_unit_iids:
+        pdb_chain_info["protein_pn_unit_iids"].append(str(pn_unit_iid))
+
+    for pn_unit_iid, ccd_code in zip(ligand_pn_unit_iids, ligand_ccd_codes):
+        pdb_chain_info["ligand_pn_unit_iids"].append(str(pn_unit_iid))
         pdb_chain_info["ligand_ccd_codes"].append(str(ccd_code))
     
     return pdb_chain_info
@@ -108,7 +106,7 @@ def main(cfg: DictConfig):
         # Extract chain info
         pdb_chain_info = extract_pdb_chain_info(atom_array)
         
-        if not pdb_chain_info["protein_chain_iids"]:
+        if not pdb_chain_info["protein_pn_unit_iids"]:
             print(f"Warning: No protein chains found in {sample_id}, skipping")
             continue
         
@@ -134,7 +132,6 @@ def main(cfg: DictConfig):
         
         evaluate_af3_self_consistency(
             sample_dict=sample_dict,
-            num_redesigned_pocket_residue_list=None,
             out_dir=log_dir,
             struct_pred_cfg=cfg.struct_pred_cfg,
             cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
@@ -145,6 +142,7 @@ def main(cfg: DictConfig):
             ckpt_info=None,
             calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
             csv_suffix=csv_suffix,
+            input_sample_is_designed=cfg.input_sample_is_designed,
         )
     
     print("\n" + "="*80)

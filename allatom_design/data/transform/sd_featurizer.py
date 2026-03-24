@@ -287,8 +287,7 @@ def sd_featurizer_for_design(
     
     
     # Featurization    
-    featurization_transforms_post_crop = [
-        
+    featurization_transforms_post_crop = [        
         AddGlobalTokenIdAnnotation(),  # required for reference molecule features and TokenToAtomMap
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),        
         # AddCachedResidueData(residue_cache_dir=residue_cache_dir),
