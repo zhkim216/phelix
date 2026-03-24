@@ -540,12 +540,14 @@ def find_pred_sample_path_af3(out_dir: str = None,
     dir = Path(out_dir, job_name)
     sample_dirs = []
     sample_cif_paths = []
+    if not dir.exists():
+        return sample_dirs, sample_cif_paths
     for d in dir.iterdir():
         if d.is_dir():
             sample_dirs.append(d)
             cif_path = [p for p in d.glob("*.cif") if p.stem.endswith("model")][0]
             sample_cif_paths.append(cif_path)
-            
+
     return sample_dirs, sample_cif_paths
 
 
