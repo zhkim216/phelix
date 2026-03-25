@@ -688,6 +688,7 @@ def annotate_ligand_pockets_pseudocb(
         np.isin(atom_array.atom_name, ["N", "CA", "C", "O"]) & 
         (atom_array.occupancy > 0)
     ) #! OXT is deleted in preprocessing
+    
     has_all_backbone = apply_and_spread_token_wise(
         atom_array, is_ncaco_resolved, lambda x: np.sum(x) == 4
     )
