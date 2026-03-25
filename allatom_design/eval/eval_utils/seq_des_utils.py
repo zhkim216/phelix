@@ -41,9 +41,10 @@ from atomworks.ml.transforms.filters import remove_unresolved_tokens
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
 from allatom_design.data.transform.pad import pad_dim
 from allatom_design.eval.eval_utils.eval_setup_utils import get_training_checkpoints, get_pdb_files, get_seq_des_model
-from allatom_design.utils.sample_io_utils import save_cif_file
+from allatom_design.utils.sample_io_utils import save_cif_file, load_example_with_parse
 from allatom_design.utils.atom_array_utils import clean_up_and_renumber_atom_array, insert_unk_residues_for_gaps_in_atom_array
 from allatom_design.eval.eval_utils.eval_metrics import calculate_sequence_recovery
+
 
 ###########################################################
 # Sequence Design / Sampling Functions
@@ -1278,11 +1279,11 @@ def load_samples_for_native_redesign(sample_dict: dict,
     
     # Determine parse/preprocess configs for designed samples
     if not cfg.input_sample_is_designed:
-        designed_cif_parse_cfg = cfg.cif_cfg.parse.native
-        designed_preprocess_cfg = cfg.preprocess_cfg.native
+        cif_parse_cfg = cfg.cif_cfg.parse.native
+        preprocess_cfg = cfg.preprocess_cfg.native
     else:
-        designed_cif_parse_cfg = cfg.cif_cfg.parse.designed_samples
-        designed_preprocess_cfg = cfg.preprocess_cfg.designed_samples
+        cif_parse_cfg = cfg.cif_cfg.parse.designed_samples
+        preprocess_cfg = cfg.preprocess_cfg.designed_samples
     
     sample_ids = list(sample_dict.keys())
     for sample_id in tqdm(sample_ids, desc="Loading samples for native redesign"):
@@ -1304,14 +1305,15 @@ def load_samples_for_native_redesign(sample_dict: dict,
         if not native_cif_path.exists():
             print(f"Warning: Native CIF not found for {pdb_id} at {native_cif_path}, skipping.")
             continue
-            
-        native_example = preprocess_input(
-            pdb_path=str(native_cif_path),
-            cif_parse_cfg=cfg.cif_cfg.parse.native,
-            preprocess_cfg=cfg.preprocess_cfg.native,
-            sample_is_designed=False
+        
+        example = load_example_with_parse(pdb_path, cif_parse_cfg)    
+        example = preprocess_input(
+            example=example,
+            preprocess_cfg=preprocess_cfg,
+            sample_is_designed=input_sample_is_designed
         )
-        sample_dict[sample_id]["native_atom_array"] = native_example["atom_array"]
+        
+        sample_dict[sample_id]["native_atom_array"] = example["atom_array"]
         
         # 4. Extract pdb_chain_info from designed sample atom array
         pdb_chain_info = {
@@ -1534,13 +1536,14 @@ def _make_single_pos_constraint_dict(
         Dict with keys: "status" ("ok", "no_ligand", "error"),
         "pdb_key", "pos_constraint_dict", "ligand_mpnn_dict", "error_msg"
     """
+                
     pdb_key = Path(sample_path).stem
     try:
+        example = load_example_with_parse(sample_path, cif_parse_cfg)            
         example = preprocess_input(
-            pdb_path=str(sample_path),
-            cif_parse_cfg=cif_parse_cfg,
+            example=example,
             preprocess_cfg=preprocess_cfg,
-            sample_is_designed=sample_is_designed,
+            sample_is_designed=sample_is_designed
         )
         atom_array = example["atom_array"]
         atom_array = remove_unresolved_tokens(atom_array)
