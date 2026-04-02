@@ -3,6 +3,31 @@ from __future__ import annotations
 import numpy as np
 from biotite.structure import AtomArray, get_residue_starts
 import atomworks.enums as aw_enums
+from atomworks.constants import STANDARD_AA
+from atomworks.ml.transforms.atom_array import apply_and_spread_residue_wise
+
+
+def get_valid_standard_aa_residue_mask(atom_array: AtomArray) -> np.ndarray:
+    """
+    Get a boolean mask for atoms belonging to valid standard amino acid residues.
+    A residue is valid if it is:
+      1. A standard amino acid in a polypeptide chain (not hetero)
+      2. Has all backbone atoms (N, CA, C, O) resolved (occupancy > 0)
+    """
+    standard_aa_prot_mask = (
+        (atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
+        & np.isin(atom_array.res_name, STANDARD_AA)
+        & ~atom_array.hetero
+    )
+    is_ncaco_resolved = (
+        np.isin(atom_array.atom_name, ["N", "CA", "C", "O"])
+        & (atom_array.occupancy > 0)
+    )
+    has_all_backbone = apply_and_spread_residue_wise(
+        atom_array, is_ncaco_resolved, lambda x: np.sum(x) == 4
+    )
+    return standard_aa_prot_mask & has_all_backbone
+
 
 def insert_unk_residues_for_gaps_in_atom_array(atom_array: AtomArray) -> AtomArray:
     """

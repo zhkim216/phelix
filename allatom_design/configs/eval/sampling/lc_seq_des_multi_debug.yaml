@@ -1,4 +1,7 @@
 ########### Basic settings #########
+# Debug config for testing rfd3val with sample_lengths=[150,250] on Sherlock interactive node
+# Usage: python3 allatom_design/eval/sampling/lc_seq_des_multi.py --config-name=lc_seq_des_multi_debug
+
 # Wandb settings
 wandb:
   no_wandb: true  # Disable wandb logging

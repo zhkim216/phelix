@@ -33,6 +33,10 @@ from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.sd_data_utils import get_sd_example, prepare_af3_prediction
 from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets, annotate_ligand_pockets_pseudocb
 from allatom_design.utils.sample_io_utils import save_cif_file
+<<<<<<< HEAD
+=======
+from allatom_design.utils.atom_array_utils import get_valid_standard_aa_residue_mask
+>>>>>>> refs/remotes/origin/jinho/AAA
 
 # Atomworks imports
 from atomworks.constants import STANDARD_AA
@@ -51,6 +55,12 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, rdMolAlign
 
 
+<<<<<<< HEAD
+=======
+
+
+
+>>>>>>> refs/remotes/origin/jinho/AAA
 # ============================================================================
 # Sequence recovery
 # ============================================================================
@@ -63,23 +73,20 @@ def calculate_sequence_recovery(input_atom_array: AtomArray, designed_atom_array
     """        
     seq_recovery_metrics = {}
             
-    standard_aa_prot_mask = (input_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (np.isin(input_atom_array.res_name, STANDARD_AA)) & ~(input_atom_array.hetero) 
-    is_ncaco_resolved = ((np.isin(input_atom_array.atom_name, ["N", "CA", "C", "O"])) & (input_atom_array.occupancy > 0)) 
-    has_all_backbone = apply_and_spread_residue_wise(input_atom_array, is_ncaco_resolved, lambda x: np.sum(x) == 4)     
-    valid_residue_mask = standard_aa_prot_mask & has_all_backbone        
+    input_valid_residue_mask = get_valid_standard_aa_residue_mask(input_atom_array)
     
     # Get sequence of the input sample
-    input_seq_mask = valid_residue_mask & (input_atom_array.atom_name == "CA")    
+    input_seq_mask = input_valid_residue_mask & (input_atom_array.atom_name == "CA")    
     input_res_ids = input_atom_array[input_seq_mask].res_id
     input_res_names = input_atom_array[input_seq_mask].res_name
     
     # Get sequence of the designed sample
-    designed_seq_mask = np.isin(designed_atom_array.res_id, input_res_ids) & (designed_atom_array.atom_name == "CA")
-    designed_seq_mask = designed_seq_mask & 
+    designed_valid_residue_mask = get_valid_standard_aa_residue_mask(designed_atom_array)
+    designed_seq_mask = designed_valid_residue_mask & np.isin(designed_atom_array.res_id, input_res_ids) & (designed_atom_array.atom_name == "CA")
     designed_res_names = designed_atom_array[designed_seq_mask].res_name
     
-    # Calculate sequence recovery ratio and save to the metrics dictionary        
-    seq_recovery_ratio = (input_res_names == designed_res_names).mean()            
+    # Calculate sequence recovery ratio and save to the metrics dictionary                
+    seq_recovery_ratio = (input_res_names == designed_res_names).mean()        
     seq_recovery_metrics["seq_recovery_ratio"] = seq_recovery_ratio
     
     # Annotate ligand pockets at different distances
@@ -87,16 +94,16 @@ def calculate_sequence_recovery(input_atom_array: AtomArray, designed_atom_array
         # Input sample
         input_atom_array = annotate_ligand_pockets(input_atom_array, pocket_distance=pocket_distance, annotation_name=f"is_ligand_pocket_{pocket_distance}")                        
         input_pocket_residue_mask = apply_and_spread_residue_wise(input_atom_array, input_atom_array.get_annotation(f"is_ligand_pocket_{pocket_distance}"), function=np.any)        
-        input_pocket_seq_mask = input_seq_mask & input_pocket_residue_mask & (input_atom_array.atom_name == "CA")
+        input_pocket_seq_mask = input_seq_mask & input_pocket_residue_mask
         
-        input_pocket_res_ids = np.unique(input_atom_array[input_pocket_seq_mask].res_id)        
+        input_pocket_res_ids = input_atom_array[input_pocket_seq_mask].res_id
         input_pocket_res_names = input_atom_array[input_pocket_seq_mask].res_name
         
         # Designed sample        
-        designed_pocket_seq_mask = np.isin(designed_atom_array.res_id, input_pocket_res_ids) & (designed_atom_array.atom_name == "CA")
+        designed_pocket_seq_mask = np.isin(designed_atom_array.res_id, input_pocket_res_ids) & (designed_atom_array.atom_name == "CA")                        
         designed_pocket_res_names = designed_atom_array[designed_pocket_seq_mask].res_name        
-                
-        pocket_recovery_ratio = (input_pocket_res_names == designed_pocket_res_names).mean()                    
+        
+        pocket_recovery_ratio = (input_pocket_res_names == designed_pocket_res_names).mean()
         seq_recovery_metrics[f"pocket_recovery_ratio_{pocket_distance}"] = pocket_recovery_ratio
     
     return seq_recovery_metrics
@@ -116,7 +123,8 @@ def compute_self_consistency_metrics_atomarray(*, pred_atom_array: AtomArray,
     Uses atomworks align_atom_arrays to handle structures with different atom sets
     (e.g., sample with backbone only vs pred with full sidechain atoms).
     """    
-    metrics = {}    
+    metrics = {}
+
     # Extract CA atoms from both structures (handles different atom counts)
     # For proteins, select CA atoms; for other chain types, this will be empty
     sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) # 6: polypeptide-l chain type
@@ -126,8 +134,8 @@ def compute_self_consistency_metrics_atomarray(*, pred_atom_array: AtomArray,
     # Designed sequence don't output UNK residues, so we can safely delete them.
     pred_ca_mask = (pred_atom_array.atom_name == "CA") & (pred_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (pred_atom_array.res_name != "UNK")
     pred_ca = pred_atom_array[pred_ca_mask]
-                
-    assert (sample_ca.res_name == pred_ca.res_name).all(), "Sample and pred CA residues must match"                
+            
+    assert (sample_ca.res_name == pred_ca.res_name).all(), "Sample and pred CA residues must match"            
     
     # Align pred CA to sample CA using atomworks align_atom_arrays
     # This aligns pred_ca to sample_ca and applies the transformation to the full pred_atom_array
@@ -406,7 +414,10 @@ def extract_af3_confidence_metrics(confidence_file_path: str = None,
             f"Total atoms in atom_array: {len(atom_array)}, NaN atoms: {len(atom_array) - num_valid_atoms}"
         )
         
+<<<<<<< HEAD
         
+=======
+>>>>>>> refs/remotes/origin/jinho/AAA
         # Filter mask to only valid (non-NaN) atoms so it aligns with metric
         if isinstance(mask, np.ndarray):
             mask_torch = torch.tensor(mask[valid_coords_mask], dtype=torch.bool)
@@ -1527,30 +1538,6 @@ def motif_master_search(motif_pdb_path: str,
 
     return df
 
-
-def compute_seq_recovery(native_seq: str, sampled_seq: str,
-                         ignore_native_unk: bool = True,
-                         ignore_sampled_unk: bool = True) -> float:
-    """
-    Compute sequence recovery between native and sampled sequences.
-
-    If ignore_native_unk is True, we ignore unknown residues (e.g. X) in the native sequence.
-    If ignore_sampled_unk is True, we ignore unknown residues (e.g. X) in the sampled sequence.
-    """
-    native_seq = native_seq.replace(":", "")
-    sampled_seq = sampled_seq.replace(":", "")
-    native_seq = np.array(list(native_seq))
-    sampled_seq = np.array(list(sampled_seq))
-
-    unk_mask = np.zeros_like(native_seq, dtype=bool)
-    if ignore_native_unk:
-        unk_mask = unk_mask | (native_seq == "X")
-    if ignore_sampled_unk:
-        unk_mask = unk_mask | (sampled_seq == "X")
-    native_seq = native_seq[~unk_mask]
-    sampled_seq = sampled_seq[~unk_mask]
-
-    return np.mean(native_seq == sampled_seq)
 
 ###############################################
 # Docking metrics

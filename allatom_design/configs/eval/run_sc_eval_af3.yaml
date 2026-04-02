@@ -9,8 +9,8 @@ wandb:
   group: null
 
 # Basic settings
-debug: true
-num_debug_samples: 5
+debug: false
+num_debug_samples: 2
 seed: 0
 protein_only: false
 input_sample_is_designed: true
@@ -104,7 +104,7 @@ struct_pred_cfg:
       base:
         model_dir: /scratch/users/zhkim216/model_params/af3
         db_dir: /scratch/users/zhkim216/af3_databases
-        flash_attention_implementation: "xla"
+        flash_attention_implementation: "triton"
       ss:  # Single-sequence prediction config
         num_recycles: 1
         num_diffusion_samples: 1
