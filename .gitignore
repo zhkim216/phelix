@@ -219,10 +219,6 @@ alphafold3/input_examples/json_examples_lab_desktop/
 alphafold3/input_examples/scripts/
 alphafold3/input_examples/templates/
 
-# Sherlock eval/preprocessing scripts
-scripts/sherlock_scripts/jinho/eval_seq_des_training/
-scripts/sherlock_scripts/jinho/preprocessing/
-
 # Misc local files
 platinum_flat_file.csv
 prot_seq_length.png
@@ -231,4 +227,4 @@ run_all_sc_eval_af3.sh
 run_all_sc_eval_af3_parallel.sh
 run_remaining_sc_eval.sh
 test.parquet
-tests/check_ost_tools.py
+tests/check_ost_tools.py.claude/
