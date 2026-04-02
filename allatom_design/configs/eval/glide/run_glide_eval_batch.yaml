@@ -1,0 +1,77 @@
+# Batch Glide evaluation config (base)
+# Selects best AF3 diffusion samples by quality cutoffs, then runs Glide
+
+# Input directories
+af3_eval_dir: null   # AF3 eval step dir (contains af3_ss_preds/, samples/, and metrics CSVs)
+sample_dir: null     # Original input CIFs (denovo_val_cifs_designable)
+output_dir: null     # Output directory for Glide results
+
+# Debug mode
+debug: false
+num_debug_samples: 10   # Number of samples to process in debug mode
+
+# Parallelism
+num_workers: 1   # Number of parallel workers for Glide docking
+
+# Sample selection cutoffs
+selection:
+  ligand_rmsd_cutoff: 2.0     # Maximum allowed ligand RMSD (A)
+  ligand_plddt_cutoff: 70.0   # Minimum required ligand pLDDT
+  seed: 42                     # Seed used in AF3 diffusion
+
+# CIF parser config
+cif_parse_cfg:
+  add_missing_atoms: false
+  remove_waters: true
+  remove_ccds: []
+  fix_ligands_at_symmetry_centers: false
+  fix_arginines: false
+  convert_mse_to_met: false
+  hydrogen_policy: "remove"
+  extra_fields: null
+
+# Explicit chain specification (auto-detected if null)
+receptor_pn_unit_iids: null
+ligand_pn_unit_iids: null
+
+# Schrodinger tool configuration (PoseX 2025-3 protocol)
+schrodinger:
+  schrodinger_path: null
+  log_dir: null   # Directory for Schrodinger log files. Defaults to each sample's prep dir.
+  timeout: 3600
+  prepwizard:
+    propka_pH: 7.4
+    f: S-OPLS
+  ligprep:
+    epik: true
+    g: true
+    s: 1
+    bff: 16
+
+# Glide evaluation configuration
+glide:
+  modes:
+    inplace_scoring: true
+    redocking: true
+
+  use_ligprep: true
+
+  grid:
+    inner_box: [10, 10, 10]
+    outer_box: null  # dynamic
+    forcefield: OPLS4
+
+  inplace:
+    precision: SP
+    docking_method: mininplace
+    forcefield: OPLS4
+
+  redocking:
+    precision: SP
+    docking_method: confgen
+    num_poses: 1
+    forcefield: OPLS4
+
+hydra:
+  run:
+    dir: .

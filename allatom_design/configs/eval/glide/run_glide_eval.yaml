@@ -1,0 +1,98 @@
+# Glide docking evaluation config (base)
+
+# Wandb settings
+wandb:
+  no_wandb: true
+  project: "glide_eval"
+  wandb_id: null
+  group: null
+
+# Basic settings
+debug: false
+num_debug_samples: 2
+exp_name: glide_eval
+
+# Outputs
+base_out_dir: null  # override per environment
+
+# Sample paths
+pdb_cfg:
+  pdb_dir: null  # override per environment
+  pdb_name_list: null
+  pdb_name_ext: ".cif"
+  n_subsample: null
+  recursive: false
+  split_by_subfolder: false
+  sample_indices: null
+  array_id: null
+  num_arrays: null
+
+# Explicit chain specification (auto-detected if null)
+receptor_pn_unit_iids: null  # e.g. ["A_1", "B_1"]
+ligand_pn_unit_iids: null    # e.g. ["D_1"]
+
+# CIF parser config
+cif_parse_cfg:
+  add_missing_atoms: false
+  remove_waters: true
+  remove_ccds: []
+  fix_ligands_at_symmetry_centers: false
+  fix_arginines: false
+  convert_mse_to_met: false
+  hydrogen_policy: "remove"
+  extra_fields: null
+
+# Schrodinger tool configuration (PoseX 2025-3 protocol)
+schrodinger:
+  schrodinger_path: null  # override per environment, or set $SCHRODINGER
+  timeout: 3600  # seconds
+  prepwizard:
+    propka_pH: 7.4
+    f: S-OPLS
+  ligprep:
+    epik: true
+    g: true
+    s: 1
+    bff: 16
+
+# Glide evaluation configuration
+glide:
+  # Which evaluation modes to run
+  modes:
+    inplace_scoring: true
+    redocking: false
+    rmsd_comparison: false
+
+  # Use LigPrep to prepare ligand before docking
+  use_ligprep: true
+
+  # Grid generation parameters
+  grid:
+    inner_box: [10, 10, 10]
+    outer_box: null  # computed dynamically from ligand coordinates (range + 20)
+    forcefield: OPLS4
+
+  # In-place scoring parameters (mininplace: local minimization then score)
+  inplace:
+    precision: SP
+    docking_method: mininplace
+    forcefield: OPLS4
+
+  # Re-docking parameters
+  redocking:
+    precision: SP
+    docking_method: confgen
+    num_poses: 1
+    forcefield: OPLS4
+
+  # Pocket distance for RMSD binding-site superposition
+  pocket_distance: 8.0
+
+# Reference structures for RMSD comparison
+reference:
+  denovo_dir: null
+  native_dir: null
+
+hydra:
+  run:
+    dir: .
