@@ -51,9 +51,6 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, rdMolAlign
 
 
-
-
-
 # ============================================================================
 # Sequence recovery
 # ============================================================================
@@ -69,7 +66,7 @@ def calculate_sequence_recovery(input_atom_array: AtomArray, designed_atom_array
     standard_aa_prot_mask = (input_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (np.isin(input_atom_array.res_name, STANDARD_AA)) & ~(input_atom_array.hetero) 
     is_ncaco_resolved = ((np.isin(input_atom_array.atom_name, ["N", "CA", "C", "O"])) & (input_atom_array.occupancy > 0)) 
     has_all_backbone = apply_and_spread_residue_wise(input_atom_array, is_ncaco_resolved, lambda x: np.sum(x) == 4)     
-    valid_residue_mask = standard_aa_prot_mask & has_all_backbone    
+    valid_residue_mask = standard_aa_prot_mask & has_all_backbone        
     
     # Get sequence of the input sample
     input_seq_mask = valid_residue_mask & (input_atom_array.atom_name == "CA")    
@@ -78,10 +75,11 @@ def calculate_sequence_recovery(input_atom_array: AtomArray, designed_atom_array
     
     # Get sequence of the designed sample
     designed_seq_mask = np.isin(designed_atom_array.res_id, input_res_ids) & (designed_atom_array.atom_name == "CA")
+    designed_seq_mask = designed_seq_mask & 
     designed_res_names = designed_atom_array[designed_seq_mask].res_name
     
-    # Calculate sequence recovery ratio and save to the metrics dictionary                
-    seq_recovery_ratio = (input_res_names == designed_res_names).mean()        
+    # Calculate sequence recovery ratio and save to the metrics dictionary        
+    seq_recovery_ratio = (input_res_names == designed_res_names).mean()            
     seq_recovery_metrics["seq_recovery_ratio"] = seq_recovery_ratio
     
     # Annotate ligand pockets at different distances
@@ -89,16 +87,16 @@ def calculate_sequence_recovery(input_atom_array: AtomArray, designed_atom_array
         # Input sample
         input_atom_array = annotate_ligand_pockets(input_atom_array, pocket_distance=pocket_distance, annotation_name=f"is_ligand_pocket_{pocket_distance}")                        
         input_pocket_residue_mask = apply_and_spread_residue_wise(input_atom_array, input_atom_array.get_annotation(f"is_ligand_pocket_{pocket_distance}"), function=np.any)        
-        input_pocket_seq_mask = input_seq_mask & input_pocket_residue_mask
+        input_pocket_seq_mask = input_seq_mask & input_pocket_residue_mask & (input_atom_array.atom_name == "CA")
         
-        input_pocket_res_ids = input_atom_array[input_pocket_seq_mask].res_id
+        input_pocket_res_ids = np.unique(input_atom_array[input_pocket_seq_mask].res_id)        
         input_pocket_res_names = input_atom_array[input_pocket_seq_mask].res_name
         
         # Designed sample        
-        designed_pocket_seq_mask = np.isin(designed_atom_array.res_id, input_pocket_res_ids) & (designed_atom_array.atom_name == "CA")                        
+        designed_pocket_seq_mask = np.isin(designed_atom_array.res_id, input_pocket_res_ids) & (designed_atom_array.atom_name == "CA")
         designed_pocket_res_names = designed_atom_array[designed_pocket_seq_mask].res_name        
-        
-        pocket_recovery_ratio = (input_pocket_res_names == designed_pocket_res_names).mean()
+                
+        pocket_recovery_ratio = (input_pocket_res_names == designed_pocket_res_names).mean()                    
         seq_recovery_metrics[f"pocket_recovery_ratio_{pocket_distance}"] = pocket_recovery_ratio
     
     return seq_recovery_metrics

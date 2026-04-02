@@ -7,21 +7,21 @@ wandb:
   group: null
 
 # Basic settings
-debug: true
-num_debug_samples: 4
+debug: false
+num_debug_samples: 1
 seed: 0
 num_workers: 0 # for dataloading
 protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 run_seq_des: true
 
 # Outputs
-exp_name: eval_exp36_cfg1_denovoval_af3 # experiment name; used for wandb and output directory
+exp_name: 260402_debug # experiment name; used for wandb and output directory
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
 seq_des_cfg:
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp36_cfg1
+  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp22_cfg7
   ckpt_cfg:
     start_step: 82500
     end_step: 82500
@@ -62,7 +62,7 @@ pocket_cfg:
 
 ######### Data & Transform configurations #########
 input_sample_is_all_atom: true
-input_sample_is_designed: true
+input_sample_is_designed: false
 load_from_cache: false
 
 # Configurations for getting native or designed structures' paths
@@ -72,7 +72,7 @@ pdb_cfg:
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
   # Recursive search for nested directory structures (e.g. CCD code subfolders)
-  recursive: true
+  recursive: false
   split_by_subfolder: false  # if true, array job splits by subfolder instead of flat file list
   # Sample index filtering: matches pattern {PREFIX}_{IDX}_model_{M}.ext
   sample_indices: null  # null = use all; e.g. [0,1,2,3,4] to select specific indices
@@ -103,7 +103,7 @@ cif_cfg:
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null
+      extra_fields: []
     af3_predictions:
       add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
@@ -112,15 +112,15 @@ cif_cfg:
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null
+      extra_fields: []
   save:
     date: "1959-01-07" #! Young-Ae Lee's birthday
     include_entity_poly: True
     include_entity_nonpoly: True
     include_nan_coords: False #! designed structures should not have nan coords
     include_bonds: True
-    extra_fields: "all"
-    exclude_field_keys: ["token_id", "is_ligand_pocket"]
+    extra_fields: []
+    exclude_field_keys: []
     extra_categories:
       pdbx_audit_revision_history:
         ordinal: [1]
@@ -209,7 +209,7 @@ struct_pred_cfg:
         ligand_protein_template_conditioning_mode: 1
         mask_template_sidechains: true
         mask_template_sequence: true
-        max_template_date: "2021-09-30"
+        max_template_date: "2026-03-24"
 
 hydra:
   run:

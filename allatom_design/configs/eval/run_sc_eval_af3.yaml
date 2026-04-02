@@ -9,30 +9,31 @@ wandb:
   group: null
 
 # Basic settings
-debug: false
-num_debug_samples: 2
+debug: true
+num_debug_samples: 5
 seed: 0
 protein_only: false
 input_sample_is_designed: true
 
 # Outputs
-exp_name: eval_lmpnn010_lmpnnval_af3
-base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des
+exp_name: 8f7v_debugging
+base_out_dir: /scratch/users/zhkim216/debug_out_dir/260327_lmpnn_nativeval_debugging
 
 # Configurations for getting designed sample paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_lmpnn_denovoval_af3/samples/backbones
+  pdb_dir: /scratch/users/zhkim216/debug_out_dir/260327_lmpnn_nativeval_debugging
   pdb_name_list: null
-  pdb_name_ext: ".pdb"
+  pdb_name_ext: ".cif"
   n_subsample: null
   # Recursive search (not needed for flat directories)
   recursive: false
   split_by_subfolder: false
   # Sample index filtering
-  sample_indices: [0,1]
+  sample_indices: null
+  sample_lengths: null
   # Slurm array job parameters (set via CLI override in sbatch)
-  array_id: 0
-  num_arrays: 64
+  array_id: null
+  num_arrays: null
 
 # Pocket configuration
 pocket_cfg:
@@ -43,23 +44,23 @@ pocket_cfg:
 cif_cfg:
   parse:
     designed_samples:
-      add_missing_atoms: false #! For charge annotation and is_backbone_atom annotation
+      add_missing_atoms: true
       remove_waters: false
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null
+      extra_fields: []
     af3_predictions:
-      add_missing_atoms: false #! For charge annotation and is_backbone_atom annotation
+      add_missing_atoms: true
       remove_waters: false
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null
+      extra_fields: []
 
 preprocess_cfg:
   designed_samples:
@@ -103,7 +104,7 @@ struct_pred_cfg:
       base:
         model_dir: /scratch/users/zhkim216/model_params/af3
         db_dir: /scratch/users/zhkim216/af3_databases
-        flash_attention_implementation: "triton"
+        flash_attention_implementation: "xla"
       ss:  # Single-sequence prediction config
         num_recycles: 1
         num_diffusion_samples: 1
@@ -118,7 +119,7 @@ struct_pred_cfg:
         ligand_protein_template_conditioning_mode: 1
         mask_template_sidechains: true
         mask_template_sequence: true
-        max_template_date: "2021-09-30"
+        max_template_date: "2026-03-24"
 
 hydra:
   run:

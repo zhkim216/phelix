@@ -47,28 +47,13 @@ STEP=${BEST_STEPS[$SLURM_ARRAY_TASK_ID]}
 PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/rfd3_val_cifs/samples_uncompressed
 SAMPLING_INPUTS_CSV=null
 PDB_NAME_LIST=null
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
-VALSET_NAME="rfd3val"
-
->>>>>>> refs/remotes/origin/jinho/AAA
->>>>>>> refs/remotes/origin/jinho/AAA
 POS_CONSTRAINT_CSV=null
 
 # Denoiser train directory
 DENOISER_TRAIN_DIR=/scratch/users/zhkim216/out_dir/ligand_seq_des/${MODEL_NAME}
 
 # Experiment name 
-<<<<<<< HEAD
 VALSET_NAME="rfd3val"
-=======
-<<<<<<< HEAD
-VALSET_NAME="rfd3val"
-=======
->>>>>>> refs/remotes/origin/jinho/AAA
->>>>>>> refs/remotes/origin/jinho/AAA
 EXP_NAME=eval_${MODEL_NAME}_po_pseudocb_cd${POCKET_CROP_DISTANCE}A_${VALSET_NAME}_af3
 
 echo "Starting evaluation for model=${MODEL_NAME}, pocket_crop_distance=${POCKET_CROP_DISTANCE}A, step=${STEP}, valset=${VALSET_NAME}"
@@ -97,23 +82,13 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     seq_des_cfg.ckpt_cfg.eval_every_n_ckpts=1 \
     seq_des_cfg.ckpt_cfg.eval_last_ckpt=false \
     seq_des_cfg.ckpt_cfg.use_ema=true \
-<<<<<<< HEAD
     seq_des_cfg.atom_mpnn.overrides.batch_size=16 \
     seq_des_cfg.atom_mpnn.overrides.num_seqs_per_pdb=1 \
-=======
-<<<<<<< HEAD
-    seq_des_cfg.atom_mpnn.overrides.batch_size=16 \
-    seq_des_cfg.atom_mpnn.overrides.num_seqs_per_pdb=1 \
-=======
-    seq_des_cfg.atom_mpnn.overrides.batch_size=8 \
-    seq_des_cfg.atom_mpnn.overrides.num_seqs_per_pdb=4 \
->>>>>>> refs/remotes/origin/jinho/AAA
->>>>>>> refs/remotes/origin/jinho/AAA
     sampling_inputs_csv=${SAMPLING_INPUTS_CSV} \
     pos_constraint_csv=${POS_CONSTRAINT_CSV} \
     redesign_cfg.use_native_seq=false \
     input_sample_is_all_atom=true \
-    input_sample_is_designed=false \
+    input_sample_is_designed=true \
     load_from_cache=false \
     pdb_cfg.pdb_dir=${PDB_DIR} \
     pdb_cfg.pdb_name_list=null \
@@ -125,14 +100,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     'pdb_cfg.sample_indices=[0,1,2,3,4]' \
     featurizer_cfg.design.residue_cache_dir="/scratch/users/zhkim216/datasets/atomworks_cached_residue_data" \
     struct_pred_cfg.evaluate_self_consistency=false \
-<<<<<<< HEAD
     struct_pred_cfg.evaluate_docking_consistency=false \
-=======
-<<<<<<< HEAD
-    struct_pred_cfg.evaluate_docking_consistency=false \
-=======
->>>>>>> refs/remotes/origin/jinho/AAA
->>>>>>> refs/remotes/origin/jinho/AAA
     hydra.run.dir=${HYDRA_DIR}
 
 echo "Evaluation complete for model=${MODEL_NAME}"
