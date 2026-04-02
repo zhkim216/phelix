@@ -1,0 +1,82 @@
+# Unified ligand evaluation config (base)
+# Pipeline: PoseBusters → Glide (mininplace + redocking) → PoseBusters on Glide outputs
+
+# Input directories
+af3_eval_dir: null   # AF3 eval dir (contains af3_ss_preds/, metrics CSVs)
+sample_dir: null     # Original input CIFs (denovo_val_cifs/designable)
+output_dir: null     # Output directory for ligand eval results
+
+# Debug mode
+debug: false
+num_debug_samples: 10
+
+# Parallelism
+num_workers: 1
+
+# Retry mode: path to failed_samples CSV from a previous run
+retry_csv: null
+
+# Sample selection cutoffs (null = skip that filter)
+selection:
+  ligand_rmsd_cutoff: 2.0
+  ligand_plddt_cutoff: null
+  seed: 42
+
+# CIF parser config
+cif_parse_cfg:
+  add_missing_atoms: false
+  remove_waters: true
+  remove_ccds: []
+  fix_ligands_at_symmetry_centers: false
+  fix_arginines: false
+  convert_mse_to_met: false
+  hydrogen_policy: "remove"
+  extra_fields: null
+
+# Explicit chain specification (auto-detected if null)
+receptor_pn_unit_iids: null
+ligand_pn_unit_iids: null
+
+# Schrodinger tool configuration
+schrodinger:
+  schrodinger_path: null
+  log_dir: null
+  timeout: 3600
+  prepwizard:
+    propka_pH: 7.4
+    f: S-OPLS
+  ligprep:
+    epik: true
+    g: true
+    s: 1
+    bff: 16
+
+# Glide evaluation configuration
+glide:
+  enabled: true
+  modes:
+    inplace_scoring: true
+    redocking: true
+  use_ligprep: true
+  grid:
+    inner_box: [10, 10, 10]
+    outer_box: null  # dynamic
+    forcefield: OPLS4
+  inplace:
+    precision: SP
+    docking_method: mininplace
+    forcefield: OPLS4
+  redocking:
+    precision: SP
+    docking_method: confgen
+    num_poses: 1
+    forcefield: OPLS4
+
+# PoseBusters configuration
+posebusters:
+  config: dock        # "dock" (no reference) or "redock"
+  full_report: false  # True for detailed per-subtest columns
+
+hydra:
+  run:
+    dir: .

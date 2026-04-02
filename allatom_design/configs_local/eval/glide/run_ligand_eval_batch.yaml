@@ -1,0 +1,24 @@
+# Unified ligand evaluation config (local override)
+
+defaults:
+  - /eval/glide/run_ligand_eval_batch@_here_
+
+# Input directories
+af3_eval_dir: /home/possu/jinho/allatom-design/debug/260401_glide_debug/example_data/eval_exp37_cfg2_denovoval_designable_deep_af3/step_82500_epoch_52
+sample_dir: /home/possu/jinho/datasets/val_cifs/denovo_val_cifs_designable
+output_dir: /home/possu/jinho/allatom-design/debug/260401_glide_debug/example_data/eval_exp37_cfg2_denovoval_designable_deep_ligand_eval/step_82500_epoch_52
+
+# Debug mode
+debug: true
+num_debug_samples: 5
+num_workers: 4
+
+# Schrodinger path (local)
+schrodinger:
+  schrodinger_path: /home/possu/jinho/software/schrodinger
+
+hydra:
+  searchpath:
+    - file:///home/possu/jinho/allatom-design/allatom_design/configs
+  run:
+    dir: /home/possu/jinho/allatom-design/debug/260401_glide_debug/hydra_outputs
