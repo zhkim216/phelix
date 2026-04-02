@@ -33,6 +33,7 @@ from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.sd_data_utils import get_sd_example, prepare_af3_prediction
 from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets, annotate_ligand_pockets_pseudocb
 from allatom_design.utils.sample_io_utils import save_cif_file
+from allatom_design.utils.atom_array_utils import get_valid_standard_aa_residue_mask
 
 # Atomworks imports
 from atomworks.constants import STANDARD_AA
@@ -66,18 +67,16 @@ def calculate_sequence_recovery(input_atom_array: AtomArray, designed_atom_array
     """        
     seq_recovery_metrics = {}
             
-    standard_aa_prot_mask = (input_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (np.isin(input_atom_array.res_name, STANDARD_AA)) & ~(input_atom_array.hetero) 
-    is_ncaco_resolved = ((np.isin(input_atom_array.atom_name, ["N", "CA", "C", "O"])) & (input_atom_array.occupancy > 0)) 
-    has_all_backbone = apply_and_spread_residue_wise(input_atom_array, is_ncaco_resolved, lambda x: np.sum(x) == 4)     
-    valid_residue_mask = standard_aa_prot_mask & has_all_backbone    
+    input_valid_residue_mask = get_valid_standard_aa_residue_mask(input_atom_array)
     
     # Get sequence of the input sample
-    input_seq_mask = valid_residue_mask & (input_atom_array.atom_name == "CA")    
+    input_seq_mask = input_valid_residue_mask & (input_atom_array.atom_name == "CA")    
     input_res_ids = input_atom_array[input_seq_mask].res_id
     input_res_names = input_atom_array[input_seq_mask].res_name
     
     # Get sequence of the designed sample
-    designed_seq_mask = np.isin(designed_atom_array.res_id, input_res_ids) & (designed_atom_array.atom_name == "CA")
+    designed_valid_residue_mask = get_valid_standard_aa_residue_mask(designed_atom_array)
+    designed_seq_mask = designed_valid_residue_mask & np.isin(designed_atom_array.res_id, input_res_ids) & (designed_atom_array.atom_name == "CA")
     designed_res_names = designed_atom_array[designed_seq_mask].res_name
     
     # Calculate sequence recovery ratio and save to the metrics dictionary                
@@ -1529,30 +1528,6 @@ def motif_master_search(motif_pdb_path: str,
 
     return df
 
-
-def compute_seq_recovery(native_seq: str, sampled_seq: str,
-                         ignore_native_unk: bool = True,
-                         ignore_sampled_unk: bool = True) -> float:
-    """
-    Compute sequence recovery between native and sampled sequences.
-
-    If ignore_native_unk is True, we ignore unknown residues (e.g. X) in the native sequence.
-    If ignore_sampled_unk is True, we ignore unknown residues (e.g. X) in the sampled sequence.
-    """
-    native_seq = native_seq.replace(":", "")
-    sampled_seq = sampled_seq.replace(":", "")
-    native_seq = np.array(list(native_seq))
-    sampled_seq = np.array(list(sampled_seq))
-
-    unk_mask = np.zeros_like(native_seq, dtype=bool)
-    if ignore_native_unk:
-        unk_mask = unk_mask | (native_seq == "X")
-    if ignore_sampled_unk:
-        unk_mask = unk_mask | (sampled_seq == "X")
-    native_seq = native_seq[~unk_mask]
-    sampled_seq = sampled_seq[~unk_mask]
-
-    return np.mean(native_seq == sampled_seq)
 
 ###############################################
 # Docking metrics
