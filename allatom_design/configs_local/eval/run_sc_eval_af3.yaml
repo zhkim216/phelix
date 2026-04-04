@@ -14,6 +14,7 @@ num_debug_samples: 2
 seed: 0
 protein_only: false
 input_sample_is_designed: true
+sampling_inputs_csv: null  # Optional CSV with pdb_id, query_pn_unit_iids columns
 
 # Outputs
 exp_name: eval_caliby_lmpnnval_af3

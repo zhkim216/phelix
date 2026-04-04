@@ -14,6 +14,7 @@ num_debug_samples: 2
 seed: 0
 protein_only: false
 input_sample_is_designed: true
+sampling_inputs_csv: null  # Optional CSV with pdb_id, query_pn_unit_iids columns
 
 # Outputs
 exp_name: eval_lmpnn010_lmpnnval_af3
@@ -23,43 +24,45 @@ base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des
 pdb_cfg:
   pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_lmpnn010_lmpnnval_af3/samples/backbones
   pdb_name_list: null
-  pdb_name_ext: ".pdb"
+  pdb_name_ext: ".cif"
   n_subsample: null
   # Recursive search (not needed for flat directories)
   recursive: false
   split_by_subfolder: false
   # Sample index filtering
   sample_indices: null
+  # sample length filtering (for files with pattern {CCD}_len_{L}_{IDX}_model_{M}.cif)
+  sample_lengths: null
   # Slurm array job parameters (set via CLI override in sbatch)
   array_id: null
   num_arrays: null
 
 # Pocket configuration
 pocket_cfg:
-  pocket_distance_for_docking_metrics: 6.0
+  pocket_distance_for_docking_metrics: 8.0
 
 ######### Data & Transform configurations #########
 # Configurations for cif files
 cif_cfg:
   parse:
     designed_samples:
-      add_missing_atoms: false #! For charge annotation and is_backbone_atom annotation
+      add_missing_atoms: true
       remove_waters: false
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null
+      extra_fields: []
     af3_predictions:
-      add_missing_atoms: false #! For charge annotation and is_backbone_atom annotation
+      add_missing_atoms: true
       remove_waters: false
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null
+      extra_fields: []
 
 preprocess_cfg:
   designed_samples:
@@ -93,7 +96,7 @@ featurizer_cfg:
 struct_pred_cfg:
   model_name: "af3"
   evaluate_self_consistency: true
-  calculate_metrics_only: true
+  calculate_metrics_only: false
   af3:
     runner_path: /home/users/zhkim216/code/allatom-design/alphafold3/run_alphafold_debug_sherlock.py
     json_config:
@@ -118,7 +121,7 @@ struct_pred_cfg:
         ligand_protein_template_conditioning_mode: 1
         mask_template_sidechains: true
         mask_template_sequence: true
-        max_template_date: "2021-09-30"
+        max_template_date: "2026-03-24"
 
 hydra:
   run:

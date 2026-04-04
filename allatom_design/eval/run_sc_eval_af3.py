@@ -12,7 +12,10 @@ import atomworks.enums as aw_enums
 
 from allatom_design.eval.eval_utils.eval_setup_utils import (
     get_pdb_files, wandb_setup)
-from allatom_design.eval.eval_utils.sd_data_utils import prepare_designed_sample
+from allatom_design.eval.eval_utils.sd_data_utils import (
+    prepare_designed_sample,
+    resolve_query_pn_unit_iids,
+)
 from allatom_design.eval.eval_utils.folding_utils import (
     evaluate_af3_self_consistency,
 )
@@ -81,7 +84,21 @@ def main(cfg: DictConfig):
     
     # Get CIF file paths
     sample_paths = get_pdb_files(**cfg.pdb_cfg)
-    
+
+    # Load sampling_inputs_csv if provided (filters samples & chains)
+    sampling_inputs_df = None
+    if cfg.get("sampling_inputs_csv", None) is not None:
+        sampling_inputs_df = pd.read_csv(cfg.sampling_inputs_csv)
+        print(f"Loaded sampling inputs: {len(sampling_inputs_df)} entries from {cfg.sampling_inputs_csv}")
+
+        # Filter sample_paths to only include PDB IDs present in the CSV
+        pdb_id_set = set(sampling_inputs_df["pdb_id"].astype(str).str.lower().values)
+        sample_paths = [
+            p for p in sample_paths
+            if Path(p).stem.split("_")[0].lower() in pdb_id_set
+        ]
+        print(f"Filtered to {len(sample_paths)} samples matching sampling inputs")
+
     if cfg.debug:
         sample_paths = sample_paths[:cfg.num_debug_samples]
     
@@ -105,7 +122,29 @@ def main(cfg: DictConfig):
         
         # Extract chain info
         pdb_chain_info = extract_pdb_chain_info(atom_array)
-        
+
+        # Filter chains by query_pn_unit_iids from sampling_inputs_csv
+        if sampling_inputs_df is not None:
+            pdb_id = Path(sample_path).stem.split("_")[0]
+            query_pn_unit_iids = resolve_query_pn_unit_iids(
+                atom_array=atom_array,
+                sampling_inputs_df=sampling_inputs_df,
+                pdb_id=pdb_id,
+            )
+            query_set = set(query_pn_unit_iids)
+            filtered_info = defaultdict(list)
+            for pn_unit_iid in pdb_chain_info["protein_pn_unit_iids"]:
+                if pn_unit_iid in query_set:
+                    filtered_info["protein_pn_unit_iids"].append(pn_unit_iid)
+            for pn_unit_iid, ccd_code in zip(
+                pdb_chain_info["ligand_pn_unit_iids"],
+                pdb_chain_info["ligand_ccd_codes"],
+            ):
+                if pn_unit_iid in query_set:
+                    filtered_info["ligand_pn_unit_iids"].append(pn_unit_iid)
+                    filtered_info["ligand_ccd_codes"].append(ccd_code)
+            pdb_chain_info = filtered_info
+
         if not pdb_chain_info["protein_pn_unit_iids"]:
             print(f"Warning: No protein chains found in {sample_id}, skipping")
             continue
