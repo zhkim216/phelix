@@ -45,6 +45,15 @@ pocket_cfg:
 # Configurations for cif files
 cif_cfg:
   parse:
+    native_samples:
+      add_missing_atoms: true
+      remove_waters: true
+      remove_ccds: []
+      fix_ligands_at_symmetry_centers: true
+      fix_arginines: true
+      convert_mse_to_met: true
+      hydrogen_policy: "remove"
+      extra_fields: "all"
     designed_samples:
       add_missing_atoms: true
       remove_waters: false
@@ -65,6 +74,13 @@ cif_cfg:
       extra_fields: []
 
 preprocess_cfg:
+  native_samples:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: true
+    remove_terminal_oxygen_nucleic_acid: true
   designed_samples:
     undesired_res_names: []
     b_factor_min: null

@@ -13,12 +13,14 @@ import atomworks.enums as aw_enums
 from allatom_design.eval.eval_utils.eval_setup_utils import (
     get_pdb_files, wandb_setup)
 from allatom_design.eval.eval_utils.sd_data_utils import (
-    prepare_designed_sample,
+    preprocess_input,
     resolve_query_pn_unit_iids,
 )
 from allatom_design.eval.eval_utils.folding_utils import (
     evaluate_af3_self_consistency,
 )
+from allatom_design.utils.sample_io_utils import load_example_with_parse
+from allatom_design.data.transform.sd_featurizer import featurizer_designed_samples
 
 
 def extract_pdb_chain_info(atom_array) -> dict:
@@ -100,20 +102,34 @@ def main(cfg: DictConfig):
         print(f"Filtered to {len(sample_paths)} samples matching sampling inputs")
 
     if cfg.debug:
-        sample_paths = sample_paths[:cfg.num_debug_samples]        
-    
+        sample_paths = sample_paths[:cfg.num_debug_samples]
+
+    # Select parsing/preprocessing config based on input type
+    if cfg.input_sample_is_designed:
+        cif_parse_cfg = cfg.cif_cfg.parse.designed_samples
+        preprocess_cfg_input = cfg.preprocess_cfg.designed_samples
+    else:
+        cif_parse_cfg = cfg.cif_cfg.parse.native_samples
+        preprocess_cfg_input = cfg.preprocess_cfg.native_samples
+
     # Build sample_dict in evaluate_af3_self_consistency format
     sample_dict = {}
-    for sample_path in tqdm(sample_paths, desc="Loading designed samples"):
+    desc = "Loading designed samples" if cfg.input_sample_is_designed else "Loading native samples"
+    for sample_path in tqdm(sample_paths, desc=desc):
         sample_id = Path(sample_path).stem
-        
+
         try:
-            example = prepare_designed_sample(
-                pdb_path=sample_path,
-                cif_parse_cfg=cfg.cif_cfg.parse.designed_samples,
-                preprocess_cfg=cfg.preprocess_cfg.designed_samples,
-                featurizer_cfg=cfg.featurizer_cfg.prepare_designed_samples,
+            example = load_example_with_parse(sample_path, cif_parse_cfg)
+            example = preprocess_input(
+                example=example,
+                preprocess_cfg=preprocess_cfg_input,
+                sample_is_designed=cfg.input_sample_is_designed,
             )
+            featurizer_cfg_dict = OmegaConf.to_container(
+                cfg.featurizer_cfg.prepare_designed_samples, resolve=True
+            )
+            featurizer = featurizer_designed_samples(**featurizer_cfg_dict)
+            example = featurizer(example)
         except Exception as e:
             print(f"Failed to load {sample_id}: {e}")
             continue
@@ -145,10 +161,14 @@ def main(cfg: DictConfig):
                     filtered_info["ligand_ccd_codes"].append(ccd_code)
             pdb_chain_info = filtered_info
 
+            # Filter atom_array to only include atoms from query chains
+            # so that reference structure matches AF3 prediction scope
+            atom_array = atom_array[np.isin(atom_array.pn_unit_iid, list(query_set))]
+
         if not pdb_chain_info["protein_pn_unit_iids"]:
             print(f"Warning: No protein chains found in {sample_id}, skipping")
             continue
-        
+
         # Build entry in evaluate_af3_self_consistency format
         # Each designed sample is both the "input" and the "designed" sample
         sample_dict[sample_id] = {
