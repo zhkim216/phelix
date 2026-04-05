@@ -119,18 +119,30 @@ def compute_self_consistency_metrics_atomarray(*, pred_atom_array: AtomArray,
     """    
     metrics = {}
 
-    # Extract CA atoms from both structures (handles different atom counts)
-    # For proteins, select CA atoms; for other chain types, this will be empty
-    sample_ca_mask = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) # 6: polypeptide-l chain type
+    # Build initial CA masks (without NaN filtering) to identify matching residue positions
+    sample_ca_mask_initial = (sample_atom_array.atom_name == "CA") & (sample_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L)
+    pred_ca_mask_initial = (pred_atom_array.atom_name == "CA") & (pred_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (pred_atom_array.res_name != "UNK")
+
+    # Compute joint resolved mask: exclude positions where EITHER array has NaN coordinates
+    # (NaN occurs in native structures for unresolved residues; AF3 predictions never have NaN)
+    sample_ca_resolved_mask = ~np.isnan(sample_atom_array[sample_ca_mask_initial].coord[:, 0])
+    pred_ca_resolved_mask = ~np.isnan(pred_atom_array[pred_ca_mask_initial].coord[:, 0])
+    ca_resolved_mask = sample_ca_resolved_mask & pred_ca_resolved_mask
+
+    # Apply joint resolved mask back to full atom_array-level masks
+    sample_ca_indices = np.where(sample_ca_mask_initial)[0]
+    sample_ca_mask = np.zeros(len(sample_atom_array), dtype=bool)
+    sample_ca_mask[sample_ca_indices[ca_resolved_mask]] = True
+
+    pred_ca_indices = np.where(pred_ca_mask_initial)[0]
+    pred_ca_mask = np.zeros(len(pred_atom_array), dtype=bool)
+    pred_ca_mask[pred_ca_indices[ca_resolved_mask]] = True
+
     sample_ca = sample_atom_array[sample_ca_mask]
-    
-    # Delete UNK residues from pred_atom_array, it's from the sample sequence for the gaps between the actual residues.
-    # Designed sequence don't output UNK residues, so we can safely delete them.
-    pred_ca_mask = (pred_atom_array.atom_name == "CA") & (pred_atom_array.chain_type == aw_enums.ChainType.POLYPEPTIDE_L) & (pred_atom_array.res_name != "UNK")
     pred_ca = pred_atom_array[pred_ca_mask]
-            
-    assert (sample_ca.res_name == pred_ca.res_name).all(), "Sample and pred CA residues must match"            
-    
+
+    assert (sample_ca.res_name == pred_ca.res_name).all(), "Sample and pred CA residues must match"
+
     # Align pred CA to sample CA using atomworks align_atom_arrays
     # This aligns pred_ca to sample_ca and applies the transformation to the full pred_atom_array
     aligned_pred_atom_array, ca_rmsd = align_atom_arrays(
@@ -234,22 +246,33 @@ def compute_docking_metrics_atomarray(*, pred_atom_array: AtomArray,
     sample_receptor_mask = np.isin(sample_atom_array.pn_unit_iid, receptor_pn_unit_iids)
     pred_receptor_mask = np.isin(pred_atom_array.pn_unit_iid, receptor_pn_unit_iids)
     
-    # Get all CA atoms from receptor chain
-    sample_ca_mask = sample_receptor_mask & (sample_atom_array.atom_name == "CA") & (sample_atom_array.res_name != "UNK")
-    
-    # Delete UNK residues from pred_atom_array, it's from the sample sequence for the gaps between the actual residues.
-    # Designed sequence don't output UNK residues, so we can safely delete them.
-    pred_ca_mask = pred_receptor_mask & (pred_atom_array.atom_name == "CA") & (pred_atom_array.res_name != "UNK")
-        
+    # Build initial CA masks (without NaN filtering) to identify matching residue positions
+    sample_ca_mask_initial = sample_receptor_mask & (sample_atom_array.atom_name == "CA") & (sample_atom_array.res_name != "UNK")
+    pred_ca_mask_initial = pred_receptor_mask & (pred_atom_array.atom_name == "CA") & (pred_atom_array.res_name != "UNK")
+
+    # Compute joint resolved mask: exclude positions where EITHER array has NaN coordinates
+    sample_ca_resolved_mask = ~np.isnan(sample_atom_array[sample_ca_mask_initial].coord[:, 0])
+    pred_ca_resolved_mask = ~np.isnan(pred_atom_array[pred_ca_mask_initial].coord[:, 0])
+    ca_resolved_mask = sample_ca_resolved_mask & pred_ca_resolved_mask
+
+    # Apply joint resolved mask back to full atom_array-level masks
+    sample_ca_indices = np.where(sample_ca_mask_initial)[0]
+    sample_ca_mask = np.zeros(len(sample_atom_array), dtype=bool)
+    sample_ca_mask[sample_ca_indices[ca_resolved_mask]] = True
+
+    pred_ca_indices = np.where(pred_ca_mask_initial)[0]
+    pred_ca_mask = np.zeros(len(pred_atom_array), dtype=bool)
+    pred_ca_mask[pred_ca_indices[ca_resolved_mask]] = True
+
     sample_ca = sample_atom_array[sample_ca_mask]
     pred_ca = pred_atom_array[pred_ca_mask]
-    
-    # Check if the number of CA atoms in sample and pred match    
+
+    # Check if the number of CA atoms in sample and pred match
     assert len(sample_ca) == len(pred_ca), "Number of CA atoms in sample and pred must match"
-    
+
     if len(sample_ca) == 0 or len(pred_ca) == 0:
         return {"error": "No CA atoms found", "ligand_rmsd": None}
-    
+
     # Get binding site mask for CA atoms
     sample_bs_ca_mask = sample_atom_array.is_ligand_pocket_for_metrics[sample_ca_mask]
     
