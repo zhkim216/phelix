@@ -33,10 +33,7 @@ from allatom_design.eval.eval_utils.dssp_utils import annotate_sse, pdb_to_xyz
 from allatom_design.eval.eval_utils.sd_data_utils import get_sd_example, prepare_af3_prediction
 from allatom_design.data.transform.custom_transforms import annotate_ligand_pockets, annotate_ligand_pockets_pseudocb
 from allatom_design.utils.sample_io_utils import save_cif_file
-<<<<<<< HEAD
-=======
 from allatom_design.utils.atom_array_utils import get_valid_standard_aa_residue_mask
->>>>>>> refs/remotes/origin/jinho/AAA
 
 # Atomworks imports
 from atomworks.constants import STANDARD_AA
@@ -54,13 +51,6 @@ from biotite.structure import AtomArray, get_residue_count, spread_residue_wise
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdMolAlign
 
-
-<<<<<<< HEAD
-=======
-
-
-
->>>>>>> refs/remotes/origin/jinho/AAA
 # ============================================================================
 # Sequence recovery
 # ============================================================================
@@ -414,10 +404,6 @@ def extract_af3_confidence_metrics(confidence_file_path: str = None,
             f"Total atoms in atom_array: {len(atom_array)}, NaN atoms: {len(atom_array) - num_valid_atoms}"
         )
         
-<<<<<<< HEAD
-        
-=======
->>>>>>> refs/remotes/origin/jinho/AAA
         # Filter mask to only valid (non-NaN) atoms so it aligns with metric
         if isinstance(mask, np.ndarray):
             mask_torch = torch.tensor(mask[valid_coords_mask], dtype=torch.bool)

@@ -9,20 +9,20 @@ wandb:
   group: null
 
 # Basic settings
-debug: false
+debug: true
 num_debug_samples: 2
 seed: 0
 protein_only: false
-input_sample_is_designed: true
-sampling_inputs_csv: null  # Optional CSV with pdb_id, query_pn_unit_iids columns
+input_sample_is_designed: false
+sampling_inputs_csv: /scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/sampling_inputs_nativeval_sm_selected.csv  # Optional CSV with pdb_id, query_pn_unit_iids columns
 
 # Outputs
-exp_name: 8f7v_debugging
-base_out_dir: /scratch/users/zhkim216/debug_out_dir/260327_lmpnn_nativeval_debugging
+exp_name: native_debugging
+base_out_dir: /scratch/users/zhkim216/debug_out_dir/260404_native_debugging
 
 # Configurations for getting designed sample paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/debug_out_dir/260327_lmpnn_nativeval_debugging
+  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/cifs
   pdb_name_list: null
   pdb_name_ext: ".cif"
   n_subsample: null
