@@ -1,3 +1,4 @@
+import gc
 import json
 import subprocess
 import sys
@@ -193,6 +194,7 @@ def _run_af3_inprocess(
         except Exception as e:
             print(f"AF3 prediction failed for {Path(json_path).stem}: {e}")
             raise
+        gc.collect()
 
 # ============================================================================
 # AF3 JSON Input Creation
@@ -340,13 +342,14 @@ def make_af3_json(af3_ss_input_dir: str = None,
                                     
                 ss_sequences.append({
                     "protein": {
-                        "id": protein_pn_unit_iid.split("_")[0], 
+                        "id": protein_pn_unit_iid.split("_")[0],
                         "sequence": sequence_with_gaps,
                         "modifications": modifications if modifications else [],
                         "unpairedMsa": "",
-                        "pairedMsa": "",                    
+                        "pairedMsa": "",
+                        "templates": [],
                         }
-                    }                
+                    }
                 )
                 
                 if make_tc_input:
@@ -566,7 +569,8 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
                                   no_wandb: bool = False,
                                   calculate_metrics_only: bool = False,
                                   csv_suffix: str = "",
-                                  input_sample_is_designed: bool = True) -> None:
+                                  input_sample_is_designed: bool = True,
+                                  free_atom_arrays_progressively: bool = False) -> None:
     """
     Run AF3 self-consistency and docking evaluation.
     
@@ -635,59 +639,70 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
             if not calculate_metrics_only:
                 # Run AF3 single-sequence prediction
                 try:
-                    run_af3_single_sequence(str(ss_json_path), str(af3_ss_pred_dir), 
-                                            runner_path=af3_runner_path, 
+                    run_af3_single_sequence(str(ss_json_path), str(af3_ss_pred_dir),
+                                            runner_path=af3_runner_path,
                                             inference_config=af3_inference_config)
                 except Exception as e:
                     print(f"AF3 single sequence prediction failed for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}: {e}")
                     continue
-                
-            _, pred_ss_sample_paths = find_pred_sample_path_af3(out_dir=str(af3_ss_pred_dir), 
+                gc.collect()
+
+            _, pred_ss_sample_paths = find_pred_sample_path_af3(out_dir=str(af3_ss_pred_dir),
                                                                 job_name=designed_sample_id)
-            
+
             if len(pred_ss_sample_paths) == 0:
                 print(f"No AF3 predicted structure found for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}")
                 continue
 
             for pred_idx, pred_ss_sample_path in enumerate(pred_ss_sample_paths):
+                pred_example = None
+                pred_atom_array = None
                 try:
-                    pred_example = prepare_af3_prediction(
-                        pdb_path=pred_ss_sample_path,  
-                        cif_parse_cfg=cif_parse_cfg,                      
-                        preprocess_cfg=preprocess_cfg,
-                        featurizer_cfg=featurizer_cfg,  
-                    )
-                                                                                
-                    pred_atom_array = pred_example["atom_array"]
-                    per_pred_sc_metrics = compute_self_consistency_metrics_atomarray(
-                        pred_atom_array=pred_atom_array,
-                        sample_atom_array=designed_sample_atom_array,
-                        pred_sample_path=pred_ss_sample_path,                        
-                    )                                                                                            
-        
-                except Exception as e:
-                    print(f"Self-consistency metrics computation failed for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}, pred_idx: {pred_idx}: {e}")
-                    continue
-                else:            
-                    designed_sample_id_to_per_pred_sc_metrics[designed_sample_id][f"diffusion_{pred_idx}"] = per_pred_sc_metrics
-            
-                if ligand_pn_unit_iids:
-                    try: 
-                        per_pred_docking_metrics = compute_docking_metrics_atomarray(
+                    try:
+                        pred_example = prepare_af3_prediction(
+                            pdb_path=pred_ss_sample_path,
+                            cif_parse_cfg=cif_parse_cfg,
+                            preprocess_cfg=preprocess_cfg,
+                            featurizer_cfg=featurizer_cfg,
+                        )
+
+                        pred_atom_array = pred_example["atom_array"]
+                        per_pred_sc_metrics = compute_self_consistency_metrics_atomarray(
                             pred_atom_array=pred_atom_array,
                             sample_atom_array=designed_sample_atom_array,
-                            pred_sample_path=pred_ss_sample_path,                            
-                            pocket_distance_for_docking_metrics=pocket_cfg.pocket_distance_for_docking_metrics,
-                            receptor_pn_unit_iids=protein_pn_unit_iids,
-                            ligand_pn_unit_iids=ligand_pn_unit_iids,
-                            ref_sample_is_designed=input_sample_is_designed,
+                            pred_sample_path=pred_ss_sample_path,
                         )
 
                     except Exception as e:
-                        print(f"Docking metrics computation failed for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}, pred_idx: {pred_idx}: {e}")
+                        print(f"Self-consistency metrics computation failed for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}, pred_idx: {pred_idx}: {e}")
                         continue
                     else:
-                        designed_sample_id_to_per_pred_docking_metrics[designed_sample_id][f"diffusion_{pred_idx}"] = per_pred_docking_metrics
+                        designed_sample_id_to_per_pred_sc_metrics[designed_sample_id][f"diffusion_{pred_idx}"] = per_pred_sc_metrics
+
+                    if ligand_pn_unit_iids:
+                        try:
+                            per_pred_docking_metrics = compute_docking_metrics_atomarray(
+                                pred_atom_array=pred_atom_array,
+                                sample_atom_array=designed_sample_atom_array,
+                                pred_sample_path=pred_ss_sample_path,
+                                pocket_distance_for_docking_metrics=pocket_cfg.pocket_distance_for_docking_metrics,
+                                receptor_pn_unit_iids=protein_pn_unit_iids,
+                                ligand_pn_unit_iids=ligand_pn_unit_iids,
+                                ref_sample_is_designed=input_sample_is_designed,
+                            )
+
+                        except Exception as e:
+                            print(f"Docking metrics computation failed for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}, pred_idx: {pred_idx}: {e}")
+                            continue
+                        else:
+                            designed_sample_id_to_per_pred_docking_metrics[designed_sample_id][f"diffusion_{pred_idx}"] = per_pred_docking_metrics
+                finally:
+                    del pred_example, pred_atom_array
+
+        # Free memory after processing each input sample
+        if free_atom_arrays_progressively:
+            subsample_dict.pop('designed_sample_atom_array', None)
+        gc.collect()
 
     # Aggregate best metrics per designed_sample_id (best diffusion sample)
     designed_sample_id_best_sc_metrics = _aggregate_best_sc_metrics_per_designed_sample(designed_sample_id_to_per_pred_sc_metrics)
@@ -728,7 +743,8 @@ def evaluate_af3_docking_consistency(sample_dict: dict = None,
                                      no_wandb: bool = False,
                                      calculate_metrics_only: bool = False,
                                      csv_suffix: str = "",
-                                     input_sample_is_designed: bool = True) -> None:
+                                     input_sample_is_designed: bool = True,
+                                     free_atom_arrays_progressively: bool = False) -> None:
     """
     Run AF3 template-conditioned docking consistency evaluation.
     
@@ -807,47 +823,50 @@ def evaluate_af3_docking_consistency(sample_dict: dict = None,
             if not calculate_metrics_only:
                 # Run AF3 template-conditioned prediction
                 try:
-                    run_af3_template_conditioned(str(tc_json_path), str(af3_tc_pred_dir), 
-                                            runner_path=af3_runner_path, 
+                    run_af3_template_conditioned(str(tc_json_path), str(af3_tc_pred_dir),
+                                            runner_path=af3_runner_path,
                                             inference_config=af3_inference_config)
                 except Exception as e:
                     print(f"AF3 template-conditioned prediction failed for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}: {e}")
                     continue
-                
-            _, pred_tc_sample_paths = find_pred_sample_path_af3(out_dir=str(af3_tc_pred_dir), 
+                gc.collect()
+
+            _, pred_tc_sample_paths = find_pred_sample_path_af3(out_dir=str(af3_tc_pred_dir),
                                                                 job_name=designed_sample_id)
-            
+
             if len(pred_tc_sample_paths) == 0:
                 print(f"No AF3 TC predicted structure found for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}")
                 continue
-        
-            else:                                                              
-                for pred_idx, pred_tc_sample_path in enumerate(pred_tc_sample_paths):
+
+            for pred_idx, pred_tc_sample_path in enumerate(pred_tc_sample_paths):
+                pred_example = None
+                pred_atom_array = None
+                try:
                     try:
                         pred_example = prepare_af3_prediction(
-                            pdb_path=pred_tc_sample_path,                            
+                            pdb_path=pred_tc_sample_path,
                             preprocess_cfg=preprocess_cfg,
-                            featurizer_cfg=featurizer_cfg,  
+                            featurizer_cfg=featurizer_cfg,
                         )
-                                                                                    
+
                         pred_atom_array = pred_example["atom_array"]
                         per_pred_sc_metrics = _compute_self_consistency_metrics_atomarray(
                             pred_atom_array=pred_atom_array,
                             sample_atom_array=designed_sample_atom_array,
                             pred_sample_path=pred_tc_sample_path,
                             return_aligned_atom_array=False
-                    )                                                                                            
-            
+                        )
+
                     except Exception as e:
                         print(f"Self-consistency metrics computation failed for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}, pred_idx: {pred_idx}: {e}")
                         continue
-                    else:            
+                    else:
                         # Store self-consistency metrics
                         designed_sample_id_to_per_pred_sc_metrics[designed_sample_id][f"diffusion_{pred_idx}"] = per_pred_sc_metrics
-                
+
                     # Only compute docking metrics if ligand exists
                     if ligand_pn_unit_iids:
-                        try: 
+                        try:
                             per_pred_docking_metrics = _compute_docking_metrics_atomarray(
                                 pred_atom_array=pred_atom_array,
                                 sample_atom_array=designed_sample_atom_array,
@@ -857,15 +876,22 @@ def evaluate_af3_docking_consistency(sample_dict: dict = None,
                                 receptor_pn_unit_iids=protein_pn_unit_iids,
                                 ligand_pn_unit_iids=ligand_pn_unit_iids,
                                 ref_sample_is_designed=input_sample_is_designed,
-                        )
-                
+                            )
+
                         except Exception as e:
                             print(f"Docking metrics computation failed for input_sample_id: {input_sample_id}, designed_sample_id: {designed_sample_id}, pred_idx: {pred_idx}: {e}")
                             continue
                         else:
                             # Store docking metrics
                             designed_sample_id_to_per_pred_docking_metrics[designed_sample_id][f"diffusion_{pred_idx}"] = per_pred_docking_metrics
-    
+                finally:
+                    del pred_example, pred_atom_array
+
+        # Free memory after processing each input sample
+        if free_atom_arrays_progressively:
+            subsample_dict.pop('designed_sample_atom_array', None)
+        gc.collect()
+
     # Aggregate best metrics per designed_sample_id (best diffusion sample)
     designed_sample_id_best_sc_metrics = _aggregate_best_sc_metrics_per_designed_sample(designed_sample_id_to_per_pred_sc_metrics)
     designed_sample_id_best_docking_metrics = _aggregate_best_docking_metrics_per_designed_sample(designed_sample_id_to_per_pred_docking_metrics)

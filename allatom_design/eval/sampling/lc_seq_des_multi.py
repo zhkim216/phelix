@@ -1,3 +1,4 @@
+import gc
 from pathlib import Path
 
 import hydra
@@ -140,14 +141,14 @@ def main(cfg: DictConfig):
         )
         
         if cfg.run_seq_des:
-            results = redesign_with_lcaliby(seed = cfg.seed,
+            ckpt_iter = redesign_with_lcaliby(seed = cfg.seed,
                                             input_sample_is_designed = cfg.input_sample_is_designed,
-                                            sample_dict = sample_dict,                                        
+                                            sample_dict = sample_dict,
                                             seq_des_cfg = cfg.seq_des_cfg,
                                             cif_parse_cfg = cif_parse_cfg_lcaliby,
                                             preprocess_cfg = preprocess_cfg_lcaliby,
                                             featurizer_cfg = cfg.featurizer_cfg.design,
-                                            cif_save_cfg = cfg.cif_cfg.save,                                            
+                                            cif_save_cfg = cfg.cif_cfg.save,
                                             sampling_inputs_df = sampling_inputs_df,
                                             log_dir = log_dir,
                                             pos_constraint_df = pos_constraint_df,
@@ -155,55 +156,60 @@ def main(cfg: DictConfig):
                                             pocket_only = _pocket_only,
                                             pocket_featurizer_cfg = _pocket_featurizer_cfg,
                                             pocket_distances_for_seq_recovery = cfg.pocket_cfg.pocket_distances_for_seq_recovery,
-                                            csv_suffix = csv_suffix)                
-        
-        else:
-            results = None
-                    
-        # Evaluate each checkpoint
-        if cfg.struct_pred_cfg.evaluate_self_consistency:
-            print("\n" + "="*80)
-            print("Phase 3a: AF3 Self-Consistency Evaluation (per checkpoint)")
-            print("="*80 + "\n")
-            for sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info in results:                                                            
-                print(f"\nEvaluating checkpoint: step_{ckpt_info['global_step']}_epoch_{ckpt_info['epoch']}")
-                
-                evaluate_af3_self_consistency(
-                    sample_dict=sample_dict_per_ckpt,
-                    out_dir=log_dir_per_ckpt,
-                    struct_pred_cfg=cfg.struct_pred_cfg,
-                    cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
-                    preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
-                    featurizer_cfg=cfg.featurizer_cfg.prepare_af3_predictions,
-                    pocket_cfg=cfg.pocket_cfg,
-                    no_wandb=cfg.wandb.no_wandb,
-                    ckpt_info=ckpt_info,
-                    calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
-                    csv_suffix=csv_suffix,
-                    input_sample_is_designed=cfg.input_sample_is_designed,
-                )
-        
-        if cfg.struct_pred_cfg.evaluate_docking_consistency:
-            print("\n" + "="*80)
-            print("Phase 3b: AF3 Docking Consistency Evaluation (per checkpoint)")
-            print("="*80 + "\n")
-            for sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info in results:                                                            
-                print(f"\nEvaluating checkpoint (TC): step_{ckpt_info['global_step']}_epoch_{ckpt_info['epoch']}")
-                
-                evaluate_af3_docking_consistency(
-                    sample_dict=sample_dict_per_ckpt,
-                    out_dir=log_dir_per_ckpt,
-                    struct_pred_cfg=cfg.struct_pred_cfg,
-                    cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
-                    preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
-                    featurizer_cfg=cfg.featurizer_cfg.prepare_af3_predictions,
-                    pocket_cfg=cfg.pocket_cfg,
-                    no_wandb=cfg.wandb.no_wandb,
-                    ckpt_info=ckpt_info,
-                    calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
-                    csv_suffix=csv_suffix,
-                    input_sample_is_designed=cfg.input_sample_is_designed,
-                )    
+                                            csv_suffix = csv_suffix)
+
+            # Process each checkpoint: design → evaluate → free memory
+            _both_evals = (cfg.struct_pred_cfg.evaluate_self_consistency
+                           and cfg.struct_pred_cfg.evaluate_docking_consistency)
+
+            for sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info in ckpt_iter:
+                ckpt_label = f"step_{ckpt_info['global_step']}_epoch_{ckpt_info['epoch']}"
+
+                if cfg.struct_pred_cfg.evaluate_self_consistency:
+                    print("\n" + "="*80)
+                    print(f"Phase 3a: AF3 Self-Consistency Evaluation — {ckpt_label}")
+                    print("="*80 + "\n")
+
+                    evaluate_af3_self_consistency(
+                        sample_dict=sample_dict_per_ckpt,
+                        out_dir=log_dir_per_ckpt,
+                        struct_pred_cfg=cfg.struct_pred_cfg,
+                        cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
+                        preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
+                        featurizer_cfg=cfg.featurizer_cfg.prepare_af3_predictions,
+                        pocket_cfg=cfg.pocket_cfg,
+                        no_wandb=cfg.wandb.no_wandb,
+                        ckpt_info=ckpt_info,
+                        calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
+                        csv_suffix=csv_suffix,
+                        input_sample_is_designed=cfg.input_sample_is_designed,
+                        free_atom_arrays_progressively=not _both_evals,
+                    )
+
+                if cfg.struct_pred_cfg.evaluate_docking_consistency:
+                    print("\n" + "="*80)
+                    print(f"Phase 3b: AF3 Docking Consistency Evaluation — {ckpt_label}")
+                    print("="*80 + "\n")
+
+                    evaluate_af3_docking_consistency(
+                        sample_dict=sample_dict_per_ckpt,
+                        out_dir=log_dir_per_ckpt,
+                        struct_pred_cfg=cfg.struct_pred_cfg,
+                        cif_parse_cfg=cfg.cif_cfg.parse.af3_predictions,
+                        preprocess_cfg=cfg.preprocess_cfg.af3_predictions,
+                        featurizer_cfg=cfg.featurizer_cfg.prepare_af3_predictions,
+                        pocket_cfg=cfg.pocket_cfg,
+                        no_wandb=cfg.wandb.no_wandb,
+                        ckpt_info=ckpt_info,
+                        calculate_metrics_only=cfg.struct_pred_cfg.calculate_metrics_only,
+                        csv_suffix=csv_suffix,
+                        input_sample_is_designed=cfg.input_sample_is_designed,
+                        free_atom_arrays_progressively=True,
+                    )
+
+                # Free checkpoint data before next iteration
+                del sample_dict_per_ckpt
+                gc.collect()    
     print("\n" + "="*80)
     print("All phases complete!")
     print(f"Results saved to {log_dir}")
