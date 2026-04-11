@@ -4,7 +4,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
-#SBATCH --time=1-0:00:00
+#SBATCH --time=06:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/make_scaffold_constraint_mad_%j.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/make_scaffold_constraint_mad_%j.err
 
