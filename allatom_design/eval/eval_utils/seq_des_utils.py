@@ -8,7 +8,7 @@ import re
 from collections import defaultdict
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 import ast
 import numpy as np
 import pandas as pd
@@ -67,7 +67,7 @@ def redesign_with_lcaliby(seed: int = 0,
                         pocket_only: bool = False,
                         pocket_featurizer_cfg: dict | None = None,
                         pocket_distances_for_seq_recovery: list[float] = None,
-                        csv_suffix: str = "") -> list[tuple[dict, Path, dict]]:
+                        csv_suffix: str = "") -> Iterator[tuple[dict, Path, dict]]:
     """
     Redesign pocket sequence using lcaliby model for each checkpoint.
     
@@ -86,8 +86,8 @@ def redesign_with_lcaliby(seed: int = 0,
         protein_only: If True, condition only on protein atoms (exclude ligands from atom_cond_mask).
         pocket_only: If True, use pocket-only featurizer to crop to ligand pocket.
         pocket_featurizer_cfg: Config dict for the pocket-only featurizer.
-    Returns:
-        List of tuples: (sample_dict, output_dir, ckpt_info) for each checkpoint.
+    Yields:
+        Tuples of (sample_dict, output_dir, ckpt_info) for each checkpoint.
     """
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -102,8 +102,7 @@ def redesign_with_lcaliby(seed: int = 0,
     )
     
     input_sample_paths = [sample_dict[sid]['input_sample_path'] for sid in sample_dict.keys()]
-            
-    results = []    
+
     for sd_ckpt in tqdm(sd_ckpts, desc="Redesigning sequence using lcaliby"):
         match = pattern.search(Path(sd_ckpt).name)
         global_step, epoch = int(match.group(1)), int(match.group(2))
@@ -186,16 +185,14 @@ def redesign_with_lcaliby(seed: int = 0,
 
             sample_dict_per_ckpt[example_id]["pdb_chain_info"] = pdb_chain_info  
                     
-        results.append((sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info))
-
-        # Free GPU memory before loading next checkpoint
+        # Free GPU memory before yielding
         del seq_des_model
         del outputs
         gc.collect()
         if device == "cuda":
             torch.cuda.empty_cache()
 
-    return results
+        yield (sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info)
 
 def run_lc_seq_des(
     *,
