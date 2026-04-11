@@ -204,6 +204,10 @@ def main(cfg: DictConfig):
             traceback.print_exc()
             failed.append(pdb_stem)
 
+    # Shard suffix for array jobs
+    array_id = cfg.pdb_cfg.get("array_id", None)
+    shard_suffix = f"_shard{array_id}" if array_id is not None else ""
+
     # Save CSVs for each k
     for k in k_values:
         rows = all_rows[k]
@@ -216,11 +220,11 @@ def main(cfg: DictConfig):
 
         # Minimal CSV (consumable by lc_seq_des_multi.py)
         minimal_cols = ["pdb_key", "fixed_pos_seq", "fixed_pos_scn"]
-        minimal_path = output_dir / f"scaffold_constraint_mad_k{k_str}.csv"
+        minimal_path = output_dir / f"scaffold_constraint_mad_k{k_str}{shard_suffix}.csv"
         df[minimal_cols].to_csv(minimal_path, index=False)
 
         # Full CSV (with metadata)
-        full_path = output_dir / f"scaffold_constraint_mad_k{k_str}_full.csv"
+        full_path = output_dir / f"scaffold_constraint_mad_k{k_str}{shard_suffix}_full.csv"
         df.to_csv(full_path, index=False)
 
         print(f"  k={k}: saved {len(df)} rows -> {minimal_path.name}")
