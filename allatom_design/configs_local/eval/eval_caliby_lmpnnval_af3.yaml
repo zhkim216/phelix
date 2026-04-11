@@ -39,7 +39,7 @@ data_cfg_for_design:
     remove_ccds: []
     fix_ligands_at_symmetry_centers: false
     fix_arginines: false
-    convert_mse_to_met: false
+    convert_mse_to_met: true
     hydrogen_policy: "remove"
     extra_fields: "all"  
 
@@ -67,7 +67,7 @@ data_cfg_for_af3_prediction:
     remove_ccds: []
     fix_ligands_at_symmetry_centers: false  # Keep AF3's original ligand predictions
     fix_arginines: false
-    convert_mse_to_met: false
+    convert_mse_to_met: true
     hydrogen_policy: "remove"
     extra_fields: []  # AF3 CIF files don't have custom annotations
 

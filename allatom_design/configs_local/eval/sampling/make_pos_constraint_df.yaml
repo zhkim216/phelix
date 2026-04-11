@@ -54,7 +54,7 @@ cif_cfg:
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
       fix_arginines: false
-      convert_mse_to_met: false
+      convert_mse_to_met: true
       hydrogen_policy: "remove"
       extra_fields: []
     af3_predictions:
@@ -63,7 +63,7 @@ cif_cfg:
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
       fix_arginines: false
-      convert_mse_to_met: false
+      convert_mse_to_met: true
       hydrogen_policy: "remove"
       extra_fields: null  
   save:
