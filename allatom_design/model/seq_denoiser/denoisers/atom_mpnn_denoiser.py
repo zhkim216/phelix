@@ -17,6 +17,9 @@ import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
 from allatom_design.data.data import to
 from allatom_design.utils.feature_utils import slice_feats
+from allatom_design.eval.eval_utils.sampling_utils import (
+    get_timesteps_from_schedule, get_decoding_order,
+)
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
 from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn import \
@@ -133,7 +136,6 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         # Compute potts parameters
         potts_decoder_aux, batch, sampling_inputs = self.compute_potts_params(batch, sampling_inputs)
-        aux["potts_decoder_aux"] = to(potts_decoder_aux, "cpu")
 
         # Set up Potts sampling
         potts_sampling_cfg = sampling_inputs["potts_sampling_cfg"]
@@ -198,32 +200,173 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             )
             
             # Set all tokens that don't exist in the graph to unknown
-            S_sample = torch.where(~batch["protein_residue_node_mask"].bool() & (batch["is_protein"] | batch["is_ligand"]),
-                                   const.AF3_ENCODING.token_to_idx[const.UNKNOWN_AA],
-                                   S_sample)
-            S_sample = torch.where(~batch["protein_residue_node_mask"].bool() & batch["is_rna"],
-                                    const.AF3_ENCODING.token_to_idx[const.UNKNOWN_RNA],
-                                    S_sample)
-            S_sample = torch.where(~batch["protein_residue_node_mask"].bool() & batch["is_dna"],
-                                    const.AF3_ENCODING.token_to_idx[const.UNKNOWN_DNA],
-                                    S_sample)
+            S_sample = self._set_non_protein_tokens(S_sample, batch)
 
             aux["U"].append(U_sample.cpu())
             S.append(S_sample.cpu())
 
+        # Free GPU potts parameters before postprocessing
+        del potts_decoder_aux
+
+        return self._postprocess_sampled_sequences(
+            S, batch,
+            per_sample_aux=[{"U": aux["U"][si]} for si in range(len(S))],
+        )
+
+
+    @torch.no_grad()
+    def mlm_sample(self,
+                   batch: dict[str, TensorType["b ..."]],
+                   sampling_inputs: dict[str, Any]
+                   ) -> tuple[dict[str, list[AtomArray]], dict[str, Any]]:
+        """
+        MLM (order-agnostic autoregressive) sampling using W_out logits.
+        Iteratively unmasks positions, re-running the full model each step.
+
+        Follows the pattern from fampnn/fampnn/model/sd_model.py:sample().
+        """
+        mlm_cfg = sampling_inputs["mlm_sampling_cfg"]
+        num_steps = mlm_cfg["num_steps"]
+        temperature = mlm_cfg["temperature"]
+        num_seqs_per_pdb = sampling_inputs.get("num_seqs_per_pdb", 1)
+
+        # Build masks once (sets protein_residue_node_mask, token_exists_mask)
+        batch = self.build_masks(batch, is_sampling=True)
+        B, N, C = batch["restype"].shape
+        device = batch["restype"].device
+
+        # Banned token logit bias
+        ban_S = {"X"}
+        omit_aas = sampling_inputs.get("omit_aas", None)
+        if omit_aas is not None:
+            ban_S = ban_S | set(omit_aas)
+        ban_indices = const.AF3_ENCODING.encode_aa_seq(ban_S)
+        ban_indices = ban_indices + const.AF3_ENCODING.encode(const.AF3_ENCODING.non_protein_tokens)
+        gap_idx = const.AF3_ENCODING.token_to_idx["<G>"]
+        if gap_idx not in ban_indices:
+            ban_indices.append(gap_idx)
+
+        logit_bias = torch.zeros(C, device=device)
+        logit_bias[ban_indices] = -1e9
+
+        # Timestep schedule → K values (fampnn: sd_model.py:233-235)
+        timesteps = get_timesteps_from_schedule(
+            mode=mlm_cfg["timestep_schedule"]["mode"],
+            num_steps=mlm_cfg["timestep_schedule"]["num_steps"],
+            t_start=mlm_cfg["timestep_schedule"]["t_start"],
+            t_end=mlm_cfg["timestep_schedule"]["t_end"],
+        ).to(device)
+
+        # Designable positions and schedule
+        original_seq_cond_mask = batch["seq_cond_mask"].clone()
+        original_restype = batch["restype"].clone()
+        restype_dtype = original_restype.dtype
+
+        designable_mask = (1 - original_seq_cond_mask) * batch["protein_residue_node_mask"]
+        n_designable = designable_mask.sum(dim=-1).long()           # [B]
+        n_partial = original_seq_cond_mask.sum(dim=-1).long()       # [B]
+        timesteps_K = torch.ceil(
+            timesteps[None, :] * n_designable[:, None].float()
+        ).long() + n_partial[:, None]                                # [B, S+1]
+
+        gap_onehot = F.one_hot(
+            torch.tensor(gap_idx, device=device), num_classes=C
+        ).to(restype_dtype)
+
+        # Main sampling loop
+        S_all = []
+        for sample_idx in tqdm(range(num_seqs_per_pdb), desc="MLM sampling sequences", leave=False):
+            # Reset state: mask designable positions to gap token
+            seq_cond_mask = original_seq_cond_mask.clone()
+            restype = original_restype.clone()
+            restype[designable_mask.bool()] = gap_onehot
+
+            # Random decoding order (fampnn: sampling_utils.get_decoding_order)
+            decoding_order = get_decoding_order(
+                mode=mlm_cfg.get("aatype_decoding_order_mode", "random"),
+                seq_mask=designable_mask,
+                mlm_mask_prev=seq_cond_mask,
+            )
+
+            # Iterative unmasking (fampnn: sd_model.py:237-271)
+            for step in range(num_steps):
+                K_next = timesteps_K[:, step + 1]  # [B]
+
+                batch["seq_cond_mask"] = seq_cond_mask
+                batch["restype"] = restype
+
+                # Forward pass → logits
+                seq_logits, _ = self.atom_mpnn(batch, is_sampling=True)
+
+                # Sample tokens (fampnn: fampnn_denoiser.py:112-130)
+                masked_logits = seq_logits + logit_bias[None, None, :]
+                if temperature == 0.0:
+                    aatype_pred = masked_logits.argmax(dim=-1)
+                else:
+                    probs = F.softmax(masked_logits / temperature, dim=-1)
+                    aatype_pred = torch.multinomial(probs.view(-1, C), 1).view(B, N)
+
+                # Update mask (fampnn: sampling_utils.update_mlm_mask)
+                seq_mlm_mask_prev = seq_cond_mask.clone()
+                newly_unmask = (~seq_cond_mask.bool()) & (decoding_order < K_next[:, None])
+                seq_cond_mask = (newly_unmask.float() + seq_cond_mask).clamp(max=1.0)
+
+                # Update restype at newly unmasked positions (fampnn: sampling_utils.unmask)
+                aatype_pred_onehot = F.one_hot(aatype_pred, num_classes=C).to(restype_dtype)
+                restype = torch.where(newly_unmask.unsqueeze(-1), aatype_pred_onehot, restype)
+
+            # Collect final sequence
+            S_sample = restype.argmax(dim=-1)  # [B, N]
+            S_sample = self._set_non_protein_tokens(S_sample, batch)
+            S_all.append(S_sample.cpu())
+
+        # Restore original batch state
+        batch["seq_cond_mask"] = original_seq_cond_mask
+        batch["restype"] = original_restype
+
+        return self._postprocess_sampled_sequences(S_all, batch)
+
+
+    @staticmethod
+    def _set_non_protein_tokens(S: TensorType["b n", int],
+                                batch: dict[str, TensorType["b ..."]],
+                                ) -> TensorType["b n", int]:
+        """Set non-protein-residue-node positions to appropriate unknown tokens."""
+        non_protein = ~batch["protein_residue_node_mask"].bool()
+        S = torch.where(non_protein & (batch["is_protein"] | batch["is_ligand"]),
+                        const.AF3_ENCODING.token_to_idx[const.UNKNOWN_AA], S)
+        S = torch.where(non_protein & batch["is_rna"],
+                        const.AF3_ENCODING.token_to_idx[const.UNKNOWN_RNA], S)
+        S = torch.where(non_protein & batch["is_dna"],
+                        const.AF3_ENCODING.token_to_idx[const.UNKNOWN_DNA], S)
+        return S
+
+
+    def _postprocess_sampled_sequences(
+        self,
+        S_list: list[TensorType["b n", int]],
+        batch: dict[str, TensorType["b ..."]],
+        per_sample_aux: list[dict] | None = None,
+    ) -> tuple[dict[str, list[AtomArray]], dict[str, Any]]:
+        """Thread sampled integer sequences onto atom arrays.
+
+        Args:
+            S_list: list of [B, N] integer tensors, one per sample.
+            batch: the batch dict (will be moved to CPU).
+            per_sample_aux: optional list of dicts with per-sample auxiliary data (e.g. {"U": tensor}).
+        """
         batch = to(batch, device="cpu")
 
-        # Thread sequences onto atom arrays.
         id_to_atom_arrays = defaultdict(list)
         id_to_aux = defaultdict(list)
-        for si in range(len(S)):  # iterate over num_seqs_per_pdb
+        for si in range(len(S_list)):
             atom_arrays = copy.deepcopy(batch["atom_array"])
 
-            for bi in range(len(atom_arrays)):  # iterate over batch size
+            for bi in range(len(atom_arrays)):
                 token_pad_mask = batch["token_pad_mask"][bi].bool()
                 atom_pad_mask = batch["atom_pad_mask"][bi].bool()
 
-                new_restype = S[si][bi][token_pad_mask]
+                new_restype = S_list[si][bi][token_pad_mask]
                 new_coords = batch["coords"][bi][atom_pad_mask]
 
                 example_id = batch["example_id"][bi]
@@ -233,7 +376,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 atom_resolved_mask = batch["atom_resolved_mask"][bi][atom_pad_mask]
 
                 # Update resnames.
-                update_seq_mask = ~seq_cond_mask.numpy().astype(bool)  # update where seq_cond_mask is False
+                update_seq_mask = ~seq_cond_mask.numpy().astype(bool)
                 atomwise_update_seq_mask = spread_token_wise(atom_array, update_seq_mask)
                 atomwise_resnames = spread_token_wise(atom_array, const.AF3_ENCODING.idx_to_token[new_restype])
                 atomwise_resnames = np.where(atomwise_update_seq_mask,
@@ -247,17 +390,15 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                                             new_coords.numpy(),
                                             np.nan)
 
-                # Add to id_to_atom_arrays.
                 id_to_atom_arrays[example_id].append(atom_array)
-                
-                # Add additional auxiliary outputs.
-                id_to_aux[example_id].append(
-                    {
-                        "U": aux["U"][si][bi].cpu().item(),
-                        "S": new_restype.cpu(),
-                    }
-                )
 
+                # Auxiliary outputs.
+                sample_aux = {"S": new_restype.cpu()}
+                if per_sample_aux is not None and "U" in per_sample_aux[si]:
+                    sample_aux["U"] = per_sample_aux[si]["U"][bi].cpu().item() if torch.is_tensor(per_sample_aux[si]["U"]) else float("nan")
+                else:
+                    sample_aux["U"] = float("nan")
+                id_to_aux[example_id].append(sample_aux)
 
         return id_to_atom_arrays, id_to_aux
 
@@ -290,6 +431,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 potts_decoder_aux.setdefault(k, []).append(v)
             protein_residue_node_mask.append(aux_preds_i["protein_residue_node_mask"])
             token_exists_mask.append(aux_preds_i["token_exists_mask"])
+            del aux_preds_i  # free seq_logits, h_V, h_ESV etc.
         potts_decoder_aux = {k: torch.cat(v, dim=0) for k, v in potts_decoder_aux.items()}
         
         token_exists_mask = torch.cat(token_exists_mask, dim=0)
