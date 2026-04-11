@@ -3,28 +3,40 @@
 
 ########### Basic settings #########
 debug: false
-num_debug_samples: 5
+num_debug_samples: null
+num_workers: 8
 
 # Input settings
-cif_dir: null
-pdb_list_file: null
-metadata_path: null
+sampling_inputs_csv: /scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/sampling_inputs_nativeval_sm_selected.csv
+pdb_cfg:
+  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/cifs
+  pdb_name_list: /scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/nativeval_sm_selected.txt
+  pdb_name_ext: ".cif"
+  n_subsample: null  # null to use all samples
+  recursive: false
+  split_by_subfolder: false
+  sample_indices: null
+  sample_lengths: null
+  array_id: null
+  num_arrays: null
 
 # Output settings
-output_dir: null
-output_prefix: ""
+output_dir: /scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/pos_constraint_df
 
 # Save LigandMPNN input CSV
 save_ligand_mpnn_csv: false
 
 # Pocket constraint settings
-pocket_distance: 8.0
-use_pseudocb_for_pocket_annotation: true
-constraint_type: pocket  # "pocket", "scaffold", or "both"
+pocket_distance: 6.0
+use_pseudocb_for_pocket_annotation: false
+constraint_type: scaffold  # "pocket", "scaffold", or "both"
 
 ######### Data & Transform configurations #########
-source_is_designed: true
+# Data configuration (for parsing original CIF files)
+source_is_designed: false
 
+#### For designing samples ####
+# Configurations for cif files
 cif_cfg:
   parse:
     native:
@@ -35,16 +47,41 @@ cif_cfg:
       fix_arginines: true
       convert_mse_to_met: true
       hydrogen_policy: "remove"
-      extra_fields: "all"
+      extra_fields: "all"      
     designed_samples:
-      add_missing_atoms: true
+      add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
       fix_arginines: false
       convert_mse_to_met: false
       hydrogen_policy: "remove"
-      extra_fields: null
+      extra_fields: []
+    af3_predictions:
+      add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
+      remove_waters: false
+      remove_ccds: []
+      fix_ligands_at_symmetry_centers: false
+      fix_arginines: false
+      convert_mse_to_met: false
+      hydrogen_policy: "remove"
+      extra_fields: [] 
+  save:
+    date: "1959-01-07" #! Young-Ae Lee's birthday
+    include_entity_poly: True
+    include_entity_nonpoly: True
+    include_nan_coords: False #! designed structures should not have nan coords
+    include_bonds: True
+    extra_fields: []
+    exclude_field_keys: []
+    extra_categories:
+      pdbx_audit_revision_history:
+        ordinal: [1]
+        revision_id: [1]
+        revision_date: ["1959-01-07"]
+        major_revision: [1]
+        minor_revision: [0]
+        revision_description: ["Dummy date for template-conditioning AF3"]
 
 preprocess_cfg:
   native:
@@ -61,6 +98,39 @@ preprocess_cfg:
     min_residues_for_polymers: 0
     remove_terminal_oxygen_protein: true
     remove_terminal_oxygen_nucleic_acid: true
+  af3_predictions:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: false #! AF3 prediction CIF files have OXT atoms, so need to preserve them
+    remove_terminal_oxygen_nucleic_acid: false #! AF3 prediction CIF files have OXT atoms, so need to preserve them
+
+featurizer_cfg:
+  design:
+    is_inference: true
+    occupancy_threshold_protein_backbone: 0.0
+    training_structure_noise: 0.0
+    undesired_res_names: []
+    remove_keys: []    
+    remove_unresolved_tokens: true
+    max_tokens: null
+    max_atoms: null  
+    pocket_distance: 6.0
+    residue_cache_dir: "/home/possu/jinho/datasets/atomworks_cached_residue_data"
+    max_conformers_per_residue: 50
+    apply_random_augmentation: true
+    translation_scale: 1.0    
+  prepare_designed_samples:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []    
+    remove_unresolved_tokens: true
+  prepare_af3_predictions:
+    max_tokens: null
+    max_atoms: null
+    remove_keys: []    
+    remove_unresolved_tokens: true
 
 hydra:
   run:

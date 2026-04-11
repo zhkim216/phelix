@@ -133,7 +133,7 @@ struct_pred_cfg:
         ligand_protein_template_conditioning_mode: 1
         mask_template_sidechains: true
         mask_template_sequence: true
-        max_template_date: "2021-09-30"
+        max_template_date: "2026-03-24"
 
 hydra:
   run:

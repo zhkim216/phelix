@@ -90,8 +90,8 @@ loss:
     compile_msa_loss: false
   
   # Main training loss scope
-  main_seq_loss_pocket_only: false
-  main_potts_loss_pocket_only: false
+  main_seq_loss_pocket_only: true
+  main_potts_loss_pocket_only: true
     
 optim:
   optimizer: "noam"

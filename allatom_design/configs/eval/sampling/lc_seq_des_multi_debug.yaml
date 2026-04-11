@@ -1,30 +1,36 @@
 ########### Basic settings #########
-# Debug config for testing rfd3val with sample_lengths=[150,250] on Sherlock interactive node
-# Usage: python3 allatom_design/eval/sampling/lc_seq_des_multi.py --config-name=lc_seq_des_multi_debug
+# Debug config for two-stage sequence+pocket design evaluation on Sherlock interactive node
+# Model: exp35_cfg2 (sequence denoiser) on top of exp37_cfg11 (structure generation) outputs
+# Valset: nativeval_sm_selected_twostage_sp
+#
+# Usage (interactive):
+#   bash scripts/sherlock_scripts/jinho/eval_seq_des_training/lc_seq_des_multi/interactive_lc_seq_des_multi_nativeval_selected_twostage_sp.sh
+# Usage (direct):
+#   python3 allatom_design/eval/sampling/lc_seq_des_multi.py --config-name=lc_seq_des_multi_debug
 
 # Wandb settings
 wandb:
-  no_wandb: true  # Disable wandb logging
-  project: "ligand_seq_des"
+  no_wandb: true  # Set false to enable wandb logging
+  project: "eval_ligand_seq_des"
   wandb_id: "zhkim216"  # Wandb username
   group: null
 
 # Basic settings
-debug: false
-num_debug_samples: 1
+debug: false  # Set false for full evaluation
+num_debug_samples: 2
 seed: 0
-num_workers: 0 # for dataloading
+num_workers: 8  # Set to 8 for full evaluation
 protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 run_seq_des: true
 
 # Outputs
-exp_name: 260402_debug # experiment name; used for wandb and output directory
+exp_name: eval_exp35_cfg2_nativeval_sm_selected_twostage_sp_seq2_af3
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
 seq_des_cfg:
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp22_cfg7
+  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp35_cfg2
   ckpt_cfg:
     start_step: 82500
     end_step: 82500
@@ -35,7 +41,7 @@ seq_des_cfg:
     ckpt_path: null
     sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides:
-      batch_size: 4
+      batch_size: 8
       num_seqs_per_pdb: 1  # number of sequences to sample per pdb
       omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
       noise_labels: null
@@ -46,32 +52,32 @@ seq_des_cfg:
         lcp_expand_edge_idx_fix: true
 
 # sampling inputs
-sampling_inputs_csv: /scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/sampling_inputs_nativeval_sm_selected.csv
+sampling_inputs_csv: null
 
 # Positional constraints: supports columns in [pdb_key,fixed_pos_seq,fixed_pos_scn,fixed_pos_override_seq,pos_restrict_aatype]
 # e.g. 2fyzA,"A1-100,B1-100","A1-100"
-pos_constraint_csv: null
+pos_constraint_csv: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp37_cfg11_nativeval_sm_selected_seq4_af3/exp37_cfg11_nativeval_pos_constraint_scaffold_6.0A.csv
 
 # Redesign pocket sequence options
 redesign_cfg:
   use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
   pocket_distance: 5.0
-  native_cif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
+  native_cif_dir: null
 
 # Docking metrics configuration
 pocket_cfg:
   pocket_distances_for_seq_recovery: [4.0, 5.0, 6.0]
-  pocket_distance_for_docking_metrics: 6.0
+  pocket_distance_for_docking_metrics: 8.0
 
 ######### Data & Transform configurations #########
 input_sample_is_all_atom: true
-input_sample_is_designed: false
+input_sample_is_designed: true
 load_from_cache: false
 
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/cifs
-  pdb_name_list: /scratch/users/zhkim216/datasets/val_cifs/native_val_cifs/nativeval_sm_selected.txt
+  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp37_cfg11_nativeval_sm_selected_seq4_af3/step_22500_epoch_14/samples
+  pdb_name_list: null
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
   # Recursive search for nested directory structures (e.g. CCD code subfolders)
@@ -104,26 +110,26 @@ cif_cfg:
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
       fix_arginines: false
-      convert_mse_to_met: false
+      convert_mse_to_met: true
       hydrogen_policy: "remove"
-      extra_fields: []
+      extra_fields: null
     af3_predictions:
       add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
       remove_ccds: []
       fix_ligands_at_symmetry_centers: false
       fix_arginines: false
-      convert_mse_to_met: false
+      convert_mse_to_met: true
       hydrogen_policy: "remove"
-      extra_fields: []
+      extra_fields: null
   save:
     date: "1959-01-07" #! Young-Ae Lee's birthday
     include_entity_poly: True
     include_entity_nonpoly: True
     include_nan_coords: False #! designed structures should not have nan coords
     include_bonds: True
-    extra_fields: []
-    exclude_field_keys: []
+    extra_fields: "all"
+    exclude_field_keys: ["token_id", "is_ligand_pocket"]
     extra_categories:
       pdbx_audit_revision_history:
         ordinal: [1]
@@ -212,7 +218,7 @@ struct_pred_cfg:
         ligand_protein_template_conditioning_mode: 1
         mask_template_sidechains: true
         mask_template_sequence: true
-        max_template_date: "2026-03-24"
+        max_template_date: "2021-09-30"
 
 hydra:
   run:

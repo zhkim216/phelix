@@ -3,7 +3,7 @@ debug: false
 num_debug_samples: 2
 
 # Data directory containing samples/ and af3_ss_preds/
-data_dir: /home/possu/jinho/allatom-design/debug/260323_debug/debug_debug/step_22500_epoch_14
+data_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp37_cfg11_denovoval_seq2_af3_len150_250/step_22500_epoch_14
 
 # Output CSV suffix (appended to all output CSV filenames)
 output_csv_suffix: _recalculate
@@ -18,7 +18,7 @@ input_sample_is_designed: true
 
 # Pocket configuration
 pocket_cfg:
-  pocket_distance_for_docking_metrics: 6.0
+  pocket_distance_for_docking_metrics: 8.0
 
 ######### Structure prediction model configuration (AF3) #########
 struct_pred_cfg:
@@ -95,4 +95,4 @@ featurizer_cfg:
 
 hydra:
   run:
-    dir: /home/possu/jinho/hydra_outputs
+    dir: /scratch/users/zhkim216/hydra_outputs
