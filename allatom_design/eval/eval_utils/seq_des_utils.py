@@ -3,6 +3,7 @@ Utils for sampling from sequence design models.
 """
 
 import copy
+import gc
 import re
 from collections import defaultdict
 from contextlib import nullcontext
@@ -186,7 +187,14 @@ def redesign_with_lcaliby(seed: int = 0,
             sample_dict_per_ckpt[example_id]["pdb_chain_info"] = pdb_chain_info  
                     
         results.append((sample_dict_per_ckpt, log_dir_per_ckpt, ckpt_info))
-    
+
+        # Free GPU memory before loading next checkpoint
+        del seq_des_model
+        del outputs
+        gc.collect()
+        if device == "cuda":
+            torch.cuda.empty_cache()
+
     return results
 
 def run_lc_seq_des(
