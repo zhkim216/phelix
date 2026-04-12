@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=make_scaffold_constraint_mad
-#SBATCH -p possu,bioe
+#SBATCH -p possu,bioe,owners
 #SBATCH --array=0-4
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
-#SBATCH --time=03:00:00
+#SBATCH --time=06:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/make_scaffold_constraint_mad_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/make_scaffold_constraint_mad_%A_%a.err
 
