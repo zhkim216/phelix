@@ -57,7 +57,10 @@ def _run_command(
 
     if result.returncode != 0:
         logger.error(f"Command failed (rc={result.returncode}): {cmd_str}")
-        logger.error(f"stderr: {result.stderr}")
+        if result.stdout:
+            logger.error(f"stdout: {result.stdout}")
+        if result.stderr:
+            logger.error(f"stderr: {result.stderr}")
         raise subprocess.CalledProcessError(
             result.returncode, cmd_str, result.stdout, result.stderr
         )
@@ -114,7 +117,19 @@ def run_prepwizard(
 
     cwd = log_dir if log_dir else str(Path(output_file).parent)
     Path(cwd).mkdir(parents=True, exist_ok=True)
-    _run_command(cmd, cwd=cwd, timeout=timeout)
+
+    try:
+        _run_command(cmd, cwd=cwd, timeout=timeout)
+    except subprocess.CalledProcessError:
+        # PrepWizard writes detailed errors to .log files in cwd
+        for log_file in sorted(Path(cwd).glob("*.log")):
+            try:
+                log_content = log_file.read_text()
+                if log_content.strip():
+                    logger.error(f"PrepWizard log ({log_file.name}):\n{log_content[-2000:]}")
+            except Exception:
+                pass
+        raise
 
     if not Path(output_file).exists():
         raise FileNotFoundError(f"PrepWizard output not found: {output_file}")
