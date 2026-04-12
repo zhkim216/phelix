@@ -51,4 +51,5 @@ CUDA_BIND_OPT="--bind ${CUDA_HOST}:${CUDA_HOME}:ro"
     --env SCHRODINGER=$SCHRODINGER \
     --env SCHROD_LICENSE_FILE=$SCHROD_LICENSE_FILE \
     --bind "$OAK_LIBS" \
+    --bind "$MACHINE_ID_FILE:/etc/machine-id:ro" \
     "$SIF"

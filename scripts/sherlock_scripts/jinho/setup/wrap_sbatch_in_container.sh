@@ -45,6 +45,8 @@ BIND="$BIND,$TORCH_EXTENSIONS_DIR,$UV_CACHE_DIR,$UV_PYTHON_INSTALL_DIR"
 BIND="$BIND,$JAX_COMPILATION_CACHE_DIR"
 # Oak libs for Schrodinger (libglib, libpcre, etc.)
 [[ -n "${OAK_LIBS:-}" ]] && BIND="$BIND,$OAK_LIBS"
+# Machine-id for Schrodinger SLM (Sherlock compute nodes have empty /etc/machine-id)
+[[ -n "${MACHINE_ID_FILE:-}" && -f "${MACHINE_ID_FILE}" ]] && BIND="$BIND,$MACHINE_ID_FILE:/etc/machine-id"
 
 # CUDA bind, important for torch.compile
 BIND="$BIND,${CUDA_HOST}:${CUDA_HOME}:ro"
