@@ -19,7 +19,7 @@ retry_csv: null
 # Sample selection cutoffs (null = skip that filter)
 selection:
   ligand_rmsd_cutoff: 2.0
-  ligand_plddt_cutoff: null
+  ligand_plddt_cutoff: 80
   seed: 42
 
 # CIF parser config
@@ -45,6 +45,7 @@ schrodinger:
   prepwizard:
     propka_pH: 7.4
     f: S-OPLS
+    noimpref: false  # true to skip restrained minimization (impref)
   ligprep:
     epik: true
     g: true

@@ -16,7 +16,7 @@
 # --- Configurable parameters ---
 NUM_WORKERS=4
 LIGAND_RMSD_CUTOFF=2.0
-LIGAND_PLDDT_CUTOFF=null   # null = skip pLDDT filter
+LIGAND_PLDDT_CUTOFF=80
 # --------------------------------
 
 # Directories

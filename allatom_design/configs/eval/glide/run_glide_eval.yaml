@@ -49,6 +49,7 @@ schrodinger:
   prepwizard:
     propka_pH: 7.4
     f: S-OPLS
+    noimpref: false  # true to skip restrained minimization (impref)
   ligprep:
     epik: true
     g: true
