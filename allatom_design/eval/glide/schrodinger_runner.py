@@ -38,10 +38,34 @@ def find_schrodinger(schrodinger_path: str | None = None) -> str:
     )
 
 
+# Default license server for Stanford Sherlock.
+_DEFAULT_LICENSE = "53001@srcc-license-srcf.stanford.edu"
+
+
+def _ensure_schrodinger_env(schrodinger_path: str) -> dict[str, str]:
+    """Build env dict with Schrodinger paths for subprocess calls.
+
+    Ensures SCHRODINGER and SCHROD_LICENSE_FILE are set, falling back
+    to defaults when the calling shell doesn't have them.
+    """
+    env = os.environ.copy()
+
+    env.setdefault("SCHRODINGER", schrodinger_path)
+
+    if "SCHROD_LICENSE_FILE" not in env:
+        logger.warning(
+            f"SCHROD_LICENSE_FILE not set — using default: {_DEFAULT_LICENSE}"
+        )
+        env["SCHROD_LICENSE_FILE"] = _DEFAULT_LICENSE
+
+    return env
+
+
 def _run_command(
     cmd: list[str],
     cwd: str | None = None,
     timeout: int = DEFAULT_TIMEOUT,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a command with logging and error handling."""
     cmd_str = " ".join(cmd)
@@ -53,6 +77,7 @@ def _run_command(
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=env,
     )
 
     if result.returncode != 0:
@@ -112,14 +137,15 @@ def run_prepwizard(
             else:
                 cmd.extend([f"-{key}", str(value)])
 
-    cmd.extend(["-HOST", "localhost", "-WAIT"])
+    cmd.extend(["-NOJOBID"])
     cmd.extend([input_file, output_file])
 
     cwd = log_dir if log_dir else str(Path(output_file).parent)
     Path(cwd).mkdir(parents=True, exist_ok=True)
+    env = _ensure_schrodinger_env(schrodinger_path)
 
     try:
-        _run_command(cmd, cwd=cwd, timeout=timeout)
+        _run_command(cmd, cwd=cwd, timeout=timeout, env=env)
     except subprocess.CalledProcessError:
         # PrepWizard writes detailed errors to .log files in cwd
         for log_file in sorted(Path(cwd).glob("*.log")):
@@ -194,8 +220,9 @@ def run_grid_generation(
     cwd = str(Path(input_file).parent)
     jobname = Path(input_file).stem
 
-    cmd = [glide, input_file, "-HOST", "localhost", "-WAIT", "-OVERWRITE"]
-    _run_command(cmd, cwd=cwd, timeout=timeout)
+    cmd = [glide, input_file, "-NOJOBID", "-OVERWRITE"]
+    env = _ensure_schrodinger_env(schrodinger_path)
+    _run_command(cmd, cwd=cwd, timeout=timeout, env=env)
 
     grid_file = str(Path(cwd) / f"{jobname}.zip")
     if not Path(grid_file).exists():
@@ -252,11 +279,12 @@ def run_ligprep(
             else:
                 cmd.extend([f"-{key}", str(value)])
 
-    cmd.extend(["-HOST", "localhost", "-WAIT"])
+    cmd.extend(["-NOJOBID"])
 
     cwd = log_dir if log_dir else str(Path(output_file).parent)
     Path(cwd).mkdir(parents=True, exist_ok=True)
-    _run_command(cmd, cwd=cwd, timeout=timeout)
+    env = _ensure_schrodinger_env(schrodinger_path)
+    _run_command(cmd, cwd=cwd, timeout=timeout, env=env)
 
     if not Path(output_file).exists():
         raise FileNotFoundError(f"LigPrep output not found: {output_file}")
@@ -349,8 +377,9 @@ def run_glide(
     cwd = str(Path(input_file).parent)
     jobname = Path(input_file).stem
 
-    cmd = [glide, input_file, "-HOST", "localhost", "-WAIT", "-OVERWRITE"]
-    _run_command(cmd, cwd=cwd, timeout=timeout)
+    cmd = [glide, input_file, "-NOJOBID", "-OVERWRITE"]
+    env = _ensure_schrodinger_env(schrodinger_path)
+    _run_command(cmd, cwd=cwd, timeout=timeout, env=env)
 
     # Locate output files
     outputs: dict[str, str | None] = {
