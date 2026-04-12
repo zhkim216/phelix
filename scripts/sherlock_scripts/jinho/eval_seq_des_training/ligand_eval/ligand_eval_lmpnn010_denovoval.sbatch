@@ -24,8 +24,8 @@ BASE_DIR=/home/users/zhkim216/code/allatom-design
 HYDRA_DIR=/scratch/users/zhkim216/hydra_outputs
 BASE_OUT_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des
 
-AF3_EVAL_DIR=${BASE_OUT_DIR}/eval_lmpnn010_denovoval_designable_af3
-OUTPUT_DIR=${BASE_OUT_DIR}/eval_lmpnn010_denovoval_designable_ligand_eval
+AF3_EVAL_DIR=${BASE_OUT_DIR}/eval_lmpnn010_denovoval_af3
+OUTPUT_DIR=${BASE_OUT_DIR}/eval_lmpnn010_denovoval_ligand_eval
 SAMPLE_DIR=/scratch/users/zhkim216/datasets/val_cifs/denovo_val_cifs/designable
 SCHRODINGER_PATH=/scratch/users/zhkim216/software/schrodinger2025-3
 
