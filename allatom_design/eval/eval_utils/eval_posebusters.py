@@ -122,9 +122,22 @@ def _patch_posebusters_flatness():
             }
             return {"results": results, "details": details}
 
+        # Patch ALL references — PoseBusters captures the function at import
+        # time via `from .modules.flatness import check_flatness`, so
+        # replacing the module attribute alone is not enough.
         _flat.check_flatness = _check_flatness_safe
+
+        import posebusters.posebusters as _pb
+        _pb.check_flatness = _check_flatness_safe
+        if "flatness" in _pb.module_dict:
+            _pb.module_dict["flatness"] = _check_flatness_safe
+
+        import posebusters as _pb_init
+        if hasattr(_pb_init, "check_flatness"):
+            _pb_init.check_flatness = _check_flatness_safe
+
         __patched = True
-        logger.debug("Patched posebusters.modules.flatness.check_flatness")
+        logger.debug("Patched posebusters flatness (module + module_dict + __init__)")
     except Exception as e:
         logger.warning(f"Failed to patch PoseBusters flatness: {e}")
 
