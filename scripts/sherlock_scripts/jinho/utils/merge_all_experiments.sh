@@ -14,6 +14,7 @@ EXP_DIRS=(
     /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg6_denovoval_af3
     /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg7_denovoval_af3
     /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg8_denovoval_af3
+    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/pocket_pos_constraint_mad
 )
 
 echo "=============================================="

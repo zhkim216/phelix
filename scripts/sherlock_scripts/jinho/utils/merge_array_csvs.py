@@ -26,7 +26,7 @@ from natsort import natsorted
 
 
 def merge_array_csvs(results_dir: Path) -> None:
-    """단일 디렉토리 내의 array CSV 파일들을 머지한다."""
+    """Merge all array-shard CSV files inside a single directory."""
     # Find all array CSV files
     array_csvs = natsorted(glob.glob(str(results_dir / "*_array_*.csv")))
     
@@ -67,17 +67,18 @@ def merge_array_csvs(results_dir: Path) -> None:
 
 
 def merge_all(root_dir: str) -> None:
-    """root_dir 내의 step_* 하위 폴더들을 순회하며 각각 머지한다.
-    
-    만약 root_dir 자체에 *_array_*.csv 파일이 있으면 그것도 머지한다.
+    """Walk `step_*` subdirectories of `root_dir` and merge each one.
+
+    If `root_dir` has no `step_*` subdirectories but contains `*_array_*.csv`
+    files directly, those are merged in place.
     """
     root_dir = Path(root_dir)
-    
-    # step_* 패턴의 하위 폴더 탐색
+
+    # Look for step_* subfolders first.
     step_dirs = natsorted(
         [d for d in root_dir.iterdir() if d.is_dir() and d.name.startswith("step_")]
     )
-    
+
     if step_dirs:
         print(f"Found {len(step_dirs)} step directories in {root_dir}:\n")
         for step_dir in step_dirs:
@@ -85,7 +86,7 @@ def merge_all(root_dir: str) -> None:
             merge_array_csvs(step_dir)
             print()
     else:
-        # step_* 폴더가 없으면 root_dir 자체를 처리
+        # No step_* subfolders → treat root_dir itself as the target.
         print(f"No step_* subdirectories found. Processing {root_dir} directly.\n")
         merge_array_csvs(root_dir)
 
@@ -93,6 +94,6 @@ def merge_all(root_dir: str) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Merge array job CSV files")
     parser.add_argument("--results_dir", type=str, required=True,
-                        help="상위 디렉토리 (step_* 하위 폴더 자동 순회) 또는 단일 step 디렉토리")
+                        help="Parent directory (auto-traverses step_* subfolders) or a single step/flat directory")
     args = parser.parse_args()
     merge_all(args.results_dir)

@@ -1,24 +1,31 @@
 #!/bin/bash
 #SBATCH --job-name=lc_seq_des_denovoval_twostage_ps_mad
 #SBATCH -p possu,bioe
-#SBATCH --array=0-24
+#SBATCH --array=0-29
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
+#SBATCH --mem=16G
 #SBATCH --time=12:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_denovoval_twostage_ps_mad_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_denovoval_twostage_ps_mad_%A_%a.err
 
 # ==============================================================================
-# Two-stage evaluation with MAD-based scaffold constraints
+# Two-stage evaluation with MAD-based pocket constraints
 # Stage 1: exp35_cfg2 generates samples from denovo_val_cifs
 # Stage 2: exp37_cfg11 redesigns scaffold (pocket fixed via MAD pos_constraint)
+#   Pocket (delta_J >= MAD threshold) is fixed; scaffold (delta_J < threshold)
+#   is resampled. pos_constraint_csv lists the pocket positions to fix.
+#
+# Expects stage-1 shard CSVs from `make_pocket_pos_constraint_mad.sbatch`
+# already merged into `pocket_constraint_mad_k{K}_numsample1.csv` via
+# `scripts/sherlock_scripts/jinho/utils/merge_array_csvs.py`.
+#
 # Array dimensions: k_values x models x steps x chunks
-# Total: 5 k_values x 1 model x 1 step x 5 chunks = 25 tasks
+# Total: 6 k_values x 1 model x 1 step x 5 chunks = 30 tasks
 # ==============================================================================
 MODEL_NAMES=("exp37_cfg11")
 STEPS=(22500)
-K_STRS=("02" "06" "10" "14" "18")
+K_STRS=("02" "04" "06" "08" "10" "12")
 NUM_CHUNKS=5
 
 # Array index calculation: k_value → model → step → chunk
@@ -59,9 +66,9 @@ PROJECT=eval_ligand_seq_des
 PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/exp35_cfg2_step82500_samples
 VALSET_NAME="denovoval_twostage_ps_mad_k${K_STR}"
 
-# MAD scaffold constraint CSV
-POS_CONSTRAINT_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/scaffold_pos_constraint_mad
-POS_CONSTRAINT_CSV=${POS_CONSTRAINT_DIR}/scaffold_constraint_mad_k${K_STR}.csv
+# MAD pocket constraint CSV (pocket positions are fixed; scaffold is resampled)
+POS_CONSTRAINT_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/pocket_pos_constraint_mad
+POS_CONSTRAINT_CSV=${POS_CONSTRAINT_DIR}/pocket_constraint_mad_k${K_STR}_numsample1.csv
 
 # Eval settings
 NUM_SEQS_PER_PDB=1
@@ -73,7 +80,7 @@ DENOISER_TRAIN_DIR=/scratch/users/zhkim216/out_dir/ligand_seq_des/${MODEL_NAME}
 EXP_NAME=eval_${MODEL_NAME}_${VALSET_NAME}_af3
 
 echo "Starting evaluation for model=${MODEL_NAME}, step=${STEP}, k=${K_STR}, valset=${VALSET_NAME}, chunk=${CHUNK_IDX}/${NUM_CHUNKS} (array_task=${SLURM_ARRAY_TASK_ID})"
-echo "Using pos_constraint_csv: ${POS_CONSTRAINT_CSV}"
+echo "Using pocket_constraint_csv (pocket fixed, scaffold resampled): ${POS_CONSTRAINT_CSV}"
 
 # Automatically detect flash attention implementation
 COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1)
