@@ -8,6 +8,14 @@ Modular functions for:
 - Batch evaluation with multiprocessing
 
 Requires posebusters >= 0.6.0.
+
+Note:
+    Applies a monkey-patch to ``posebusters.modules.flatness`` to work
+    around an rdkit pip-wheel bug where ``GetSubstructMatches`` with
+    aromatic-hybridization SMARTS corrupts the C++ Conformer object,
+    causing a segfault on subsequent ``GetAtomPosition`` calls.
+    The fix pre-extracts all 3D coordinates to a numpy array via
+    ``GetPositions()`` *before* calling ``GetSubstructMatches``.
 """
 
 import logging
@@ -23,6 +31,105 @@ from posebusters import PoseBusters
 from allatom_design.eval.glide.preprocessing import preprocess_structure
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Monkey-patch: fix rdkit pip-wheel segfault in PoseBusters flatness check.
+# See debug/260401_glide_pb_debug/ for reproduction scripts.
+# ---------------------------------------------------------------------------
+__patched = False
+
+
+def _patch_posebusters_flatness():
+    """Replace ``check_flatness`` to pre-extract coords before SMARTS match.
+
+    The rdkit 2026.3.1 (and 2025.9.6) pip wheel has a bug where
+    ``GetSubstructMatches`` with ``[ar5^2]``-style SMARTS corrupts the
+    internal C++ Conformer object. Any subsequent ``GetAtomPosition()``
+    call reads garbage memory and segfaults. The workaround is to copy
+    all coordinates to a numpy array via ``GetPositions()`` *before*
+    calling ``GetSubstructMatches``, then use numpy indexing.
+    """
+    global __patched
+    if __patched:
+        return
+    try:
+        import posebusters.modules.flatness as _flat
+        from copy import deepcopy
+
+        import numpy as np
+        from rdkit.Chem.rdmolfiles import MolFromSmarts
+        from rdkit.Chem.rdmolops import SanitizeMol
+
+        _orig_empty = _flat._empty_results
+
+        def _check_flatness_safe(
+            mol_pred,
+            threshold_flatness=0.1,
+            flat_systems=_flat.flat,
+            check_nonflat=False,
+        ):
+            mol = deepcopy(mol_pred)
+            try:
+                assert mol_pred.GetNumConformers() > 0, (
+                    "Molecule does not have a conformer."
+                )
+                # Pre-extract ALL coords BEFORE SanitizeMol/SMARTS (workaround).
+                all_coords = mol.GetConformer().GetPositions()
+                SanitizeMol(mol)
+            except Exception:
+                return _orig_empty
+
+            planar_groups = []
+            types = []
+            for flat_system, smarts in flat_systems.items():
+                match = MolFromSmarts(smarts)
+                atom_groups = list(mol.GetSubstructMatches(match))
+                planar_groups += atom_groups
+                types += [flat_system] * len(atom_groups)
+
+            # Use pre-extracted numpy coords instead of GetAtomPosition.
+            coords = [all_coords[list(g)] for g in planar_groups]
+            max_distances = [
+                float(_flat._get_distances_to_plane(X).max()) for X in coords
+            ]
+            if not check_nonflat:
+                flatness_passes = [
+                    bool(d <= threshold_flatness) for d in max_distances
+                ]
+                extreme_distance = (
+                    max(max_distances) if max_distances else np.nan
+                )
+            else:
+                flatness_passes = [
+                    bool(d >= threshold_flatness) for d in max_distances
+                ]
+                extreme_distance = (
+                    min(max_distances) if max_distances else np.nan
+                )
+            details = {
+                "type": types,
+                "planar_group": planar_groups,
+                "max_distance": max_distances,
+                "flatness_passes": flatness_passes,
+            }
+            results = {
+                "num_systems_checked": len(planar_groups),
+                "num_systems_passed": sum(flatness_passes),
+                "max_distance": extreme_distance,
+                "flatness_passes": (
+                    all(flatness_passes) if len(flatness_passes) > 0 else True
+                ),
+            }
+            return {"results": results, "details": details}
+
+        _flat.check_flatness = _check_flatness_safe
+        __patched = True
+        logger.debug("Patched posebusters.modules.flatness.check_flatness")
+    except Exception as e:
+        logger.warning(f"Failed to patch PoseBusters flatness: {e}")
+
+
+_patch_posebusters_flatness()
 
 # PB 0.6.0 validity test columns (full_report=False names).
 # Excludes loading columns. Used by add_pb_valid() for the summary.
