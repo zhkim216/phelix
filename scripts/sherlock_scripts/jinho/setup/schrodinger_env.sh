@@ -10,3 +10,6 @@ export SCHRODINGER_LD_LIBS=$SCHRODINGER/internal/lib:$SCHRODINGER/mmshare-v7.1/l
 
 # Oak path for bind-mounting into container
 export OAK_LIBS=/oak/stanford/groups/possu/jinho/libs
+
+# Machine-id for SLM (Sherlock compute nodes have empty /etc/machine-id)
+export MACHINE_ID_FILE=/home/users/zhkim216/.schrodinger/machine-id
