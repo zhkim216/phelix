@@ -47,6 +47,12 @@ def _ensure_schrodinger_env(schrodinger_path: str) -> dict[str, str]:
 
     Ensures SCHRODINGER and SCHROD_LICENSE_FILE are set, falling back
     to defaults when the calling shell doesn't have them.
+
+    Injects Schrodinger-bundled libs into LD_LIBRARY_PATH for this subprocess
+    only. The parent Python process must keep a clean LD_LIBRARY_PATH so that
+    AF3's C++ extension can resolve GLIBCXX_3.4.32 from the container's system
+    libstdc++ — Schrodinger bundles an older libstdc++ that lacks this symbol
+    and would otherwise shadow the system one.
     """
     env = os.environ.copy()
 
@@ -57,6 +63,15 @@ def _ensure_schrodinger_env(schrodinger_path: str) -> dict[str, str]:
             f"SCHROD_LICENSE_FILE not set — using default: {_DEFAULT_LICENSE}"
         )
         env["SCHROD_LICENSE_FILE"] = _DEFAULT_LICENSE
+
+    schrod_libs = env.get("SCHRODINGER_LD_LIBS")
+    if not schrod_libs:
+        schrod_libs = ":".join([
+            f"{schrodinger_path}/internal/lib",
+            f"{schrodinger_path}/mmshare-v7.1/lib/Linux-x86_64",
+        ])
+    parent_ld = env.get("LD_LIBRARY_PATH", "")
+    env["LD_LIBRARY_PATH"] = f"{schrod_libs}:{parent_ld}" if parent_ld else schrod_libs
 
     return env
 
