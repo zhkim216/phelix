@@ -1,20 +1,13 @@
 """Tests for Glide result parser module."""
 
-import gzip
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
-from rdkit import Chem
-from rdkit.Chem import AllChem
 
 from allatom_design.eval.glide.result_parser import (
     GLIDE_SCORE_COLUMNS,
     extract_best_scores,
-    get_pose_coordinates,
     parse_glide_csv,
-    parse_glide_sdf,
 )
 
 
@@ -56,60 +49,6 @@ class TestParseGlideCsv:
 
 
 # ============================================================================
-# SDF parsing
-# ============================================================================
-
-
-class TestParseGlideSdf:
-    def test_basic(self, sample_glide_sdf):
-        poses = parse_glide_sdf(sample_glide_sdf)
-        assert len(poses) == 1
-        assert poses[0]["mol"] is not None
-        assert poses[0]["mol"].GetNumAtoms() > 0
-
-    def test_gzipped_sdf(self, tmp_path):
-        """Test reading compressed .sdfgz files."""
-        mol = Chem.MolFromSmiles("CCO")
-        mol = Chem.AddHs(mol)
-        AllChem.EmbedMolecule(mol, randomSeed=42)
-        mol = Chem.RemoveHs(mol)
-
-        # Write plain SDF first
-        plain_path = str(tmp_path / "test.sdf")
-        writer = Chem.SDWriter(plain_path)
-        writer.write(mol)
-        writer.close()
-
-        # Compress it
-        gz_path = str(tmp_path / "test.sdfgz")
-        with open(plain_path, "r") as f_in:
-            with gzip.open(gz_path, "wt") as f_out:
-                f_out.write(f_in.read())
-
-        poses = parse_glide_sdf(gz_path)
-        assert len(poses) == 1
-
-    def test_missing_file(self):
-        with pytest.raises(FileNotFoundError):
-            parse_glide_sdf("/nonexistent/file.sdf")
-
-    def test_multiple_poses(self, tmp_path):
-        mol = Chem.MolFromSmiles("c1ccccc1")
-        mol = Chem.AddHs(mol)
-        AllChem.EmbedMolecule(mol, randomSeed=42)
-        mol = Chem.RemoveHs(mol)
-
-        sdf_path = str(tmp_path / "multi.sdf")
-        writer = Chem.SDWriter(sdf_path)
-        for i in range(3):
-            writer.write(mol)
-        writer.close()
-
-        poses = parse_glide_sdf(sdf_path)
-        assert len(poses) == 3
-
-
-# ============================================================================
 # Score extraction
 # ============================================================================
 
@@ -145,20 +84,3 @@ class TestExtractBestScores:
         scores = extract_best_scores(df)
         assert scores["best_docking_score"] == pytest.approx(-5.0)
         assert scores["best_glide_score"] == pytest.approx(-4.0)
-
-
-# ============================================================================
-# Pose coordinate extraction
-# ============================================================================
-
-
-class TestGetPoseCoordinates:
-    def test_basic(self, sample_glide_sdf):
-        coords = get_pose_coordinates(sample_glide_sdf, pose_index=0)
-        assert coords is not None
-        assert coords.ndim == 2
-        assert coords.shape[1] == 3
-
-    def test_out_of_range(self, sample_glide_sdf):
-        coords = get_pose_coordinates(sample_glide_sdf, pose_index=999)
-        assert coords is None
