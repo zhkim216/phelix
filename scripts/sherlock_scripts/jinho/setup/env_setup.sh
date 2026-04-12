@@ -43,6 +43,9 @@ export PROJECT_ROOT="/home/users/zhkim216/code/allatom-design"
 # OpenStructure Compound Library
 export OST_COMPOUND_LIB=/scratch/users/zhkim216/datasets/compounds.chemlib
 
+# Schrodinger (PrepWizard, Glide, etc.)
+source "/home/users/zhkim216/code/allatom-design/scripts/sherlock_scripts/jinho/setup/schrodinger_env.sh"
+
 echo "Environment loaded:"
 echo "  PROJECT_ROOT: $PROJECT_ROOT"
 echo "  CUDA_HOME: $CUDA_HOME"
