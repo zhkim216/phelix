@@ -771,8 +771,8 @@ def main(cfg: DictConfig):
     print(f"\nTotal samples: {len(results_df)}")
     for col_name, label in [
         ("pb_af3_pb_valid", "PB AF3 valid"),
-        ("inplace_best_docking_score", "Inplace DockingScore (mean)"),
-        ("redock_best_docking_score", "Redock DockingScore (mean)"),
+        ("inplace_best_docking_score", "Inplace DockingScore (median)"),
+        ("redock_best_docking_score", "Redock DockingScore (median)"),
         ("pb_mininplace_pb_valid", "PB Mininplace valid"),
         ("pb_redocking_pb_valid", "PB Redocking valid"),
     ]:
@@ -783,7 +783,7 @@ def main(cfg: DictConfig):
                     rate = valid.mean() * 100
                     print(f"  {label}: {rate:.1f}% ({valid.sum()}/{len(valid)})")
                 else:
-                    print(f"  {label}: {valid.mean():.3f}")
+                    print(f"  {label}: {valid.median():.3f}")
 
     error_cols = [c for c in results_df.columns if "error" in c]
     n_errors = results_df[error_cols].notna().any(axis=1).sum() if error_cols else 0
