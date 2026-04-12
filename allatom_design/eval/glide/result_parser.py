@@ -1,11 +1,9 @@
-"""Parse Glide output files (CSV scores, SDF poses) and compute pose metrics."""
+"""Parse Glide output files (CSV scores) and compute pose metrics."""
 
-import gzip
 import logging
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdMolAlign
@@ -67,42 +65,6 @@ def parse_glide_csv(csv_path: str) -> pd.DataFrame:
     return df
 
 
-def parse_glide_sdf(
-    sdf_path: str,
-) -> list[dict[str, Any]]:
-    """Parse Glide SDF output to extract pose molecules and properties.
-
-    Handles both plain .sdf and compressed .sdfgz files.
-
-    Args:
-        sdf_path: Path to SDF or SDFGZ file.
-
-    Returns:
-        List of dicts, each with 'mol' (RDKit Mol) and 'properties' (dict).
-    """
-    if not Path(sdf_path).exists():
-        raise FileNotFoundError(f"Glide SDF not found: {sdf_path}")
-
-    if sdf_path.endswith(".sdfgz"):
-        fh = gzip.open(sdf_path, "rb")
-    else:
-        fh = open(sdf_path, "rb")
-
-    try:
-        supplier = Chem.ForwardSDMolSupplier(fh, removeHs=True)
-        poses = []
-        for mol in supplier:
-            if mol is None:
-                continue
-            props = mol.GetPropsAsDict()
-            poses.append({"mol": mol, "properties": props})
-    finally:
-        fh.close()
-
-    logger.info(f"Parsed {len(poses)} poses from {sdf_path}")
-    return poses
-
-
 def extract_best_scores(results_df: pd.DataFrame) -> dict[str, float]:
     """Extract the best (lowest) scores from parsed Glide results.
 
@@ -122,26 +84,6 @@ def extract_best_scores(results_df: pd.DataFrame) -> dict[str, float]:
         scores["best_ligand_efficiency"] = results_df["ligand_efficiency"].min()
 
     return scores
-
-
-def get_pose_coordinates(sdf_path: str, pose_index: int = 0) -> np.ndarray | None:
-    """Extract 3D coordinates of a specific pose from Glide SDF output.
-
-    Args:
-        sdf_path: Path to SDF/SDFGZ file.
-        pose_index: Index of the pose to extract (0 = best).
-
-    Returns:
-        Nx3 array of atom coordinates, or None if pose not found.
-    """
-    poses = parse_glide_sdf(sdf_path)
-    if pose_index >= len(poses):
-        logger.warning(f"Pose index {pose_index} out of range ({len(poses)} poses)")
-        return None
-
-    mol = poses[pose_index]["mol"]
-    conf = mol.GetConformer()
-    return np.array(conf.GetPositions())
 
 
 def compute_redock_vs_reference_rmsd(

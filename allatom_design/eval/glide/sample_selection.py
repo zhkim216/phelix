@@ -55,17 +55,25 @@ def load_af3_metrics(
 
 def select_best_diffusion(
     flat_df: pd.DataFrame,
-    ligand_rmsd_cutoff: float = 2.0,
-    ligand_plddt_cutoff: float = 70.0,
+    ligand_rmsd_cutoff: float | None = 2.0,
+    ligand_plddt_cutoff: float | None = 70.0,
 ) -> pd.DataFrame:
     """Select best diffusion sample per designed_sample_id.
 
-    Filters by cutoffs, then picks the diffusion with highest ligand_plddt.
+    Filters by cutoffs, then picks the diffusion with highest ligand_plddt
+    (falling back to lowest ligand_rmsd, or first row per sample).
+
+    Shared by ``run_ligand_eval_batch.py`` and ``pipeline.py``. Handles
+    ``None`` cutoffs (skip that filter) and missing columns gracefully.
     """
-    mask = (
-        (flat_df["ligand_rmsd"] <= ligand_rmsd_cutoff)
-        & (flat_df["ligand_plddt"] >= ligand_plddt_cutoff)
-    )
+    mask = pd.Series(True, index=flat_df.index)
+
+    if ligand_rmsd_cutoff is not None and "ligand_rmsd" in flat_df.columns:
+        mask &= flat_df["ligand_rmsd"] <= ligand_rmsd_cutoff
+
+    if ligand_plddt_cutoff is not None and "ligand_plddt" in flat_df.columns:
+        mask &= flat_df["ligand_plddt"] >= ligand_plddt_cutoff
+
     filtered = flat_df[mask]
 
     if filtered.empty:
@@ -82,7 +90,13 @@ def select_best_diffusion(
         f"(rmsd <= {ligand_rmsd_cutoff}, plddt >= {ligand_plddt_cutoff})"
     )
 
-    idx = filtered.groupby("designed_sample_id")["ligand_plddt"].idxmax()
+    if "ligand_plddt" in filtered.columns:
+        idx = filtered.groupby("designed_sample_id")["ligand_plddt"].idxmax()
+    elif "ligand_rmsd" in filtered.columns:
+        idx = filtered.groupby("designed_sample_id")["ligand_rmsd"].idxmin()
+    else:
+        idx = filtered.groupby("designed_sample_id").head(1).index
+
     return filtered.loc[idx].reset_index(drop=True)
 
 

@@ -1,5 +1,9 @@
 """PoseBusters evaluation for AF3 predicted ligand poses.
 
+Canonical PoseBusters library. Consumers:
+``allatom_design.eval.glide.pipeline`` (integrated Glide + PB pipeline) and
+``allatom_design.eval.posebusters.run_pb_eval`` (standalone PB CLI).
+
 Modular functions for:
 - Preparing PB inputs from CIF files (reuses glide/preprocessing.py)
 - Running PB validity checks (single or batch)

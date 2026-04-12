@@ -54,26 +54,6 @@ def sample_glide_csv(tmp_path):
 
 
 @pytest.fixture
-def sample_glide_sdf(tmp_path):
-    """Create a minimal SDF file mimicking Glide output."""
-    from rdkit import Chem
-    from rdkit.Chem import AllChem
-
-    mol = Chem.MolFromSmiles("c1ccccc1")  # benzene
-    mol = Chem.AddHs(mol)
-    AllChem.EmbedMolecule(mol, randomSeed=42)
-    mol = Chem.RemoveHs(mol)
-
-    sdf_path = str(tmp_path / "dock_test_lib.sdf")
-    writer = Chem.SDWriter(sdf_path)
-    mol.SetProp("r_i_docking_score", "-5.0")
-    mol.SetProp("r_i_glide_gscore", "-4.8")
-    writer.write(mol)
-    writer.close()
-    return sdf_path
-
-
-@pytest.fixture
 def mock_schrodinger_path(tmp_path):
     """Create a mock Schrodinger installation directory."""
     schrodinger = tmp_path / "schrodinger"
