@@ -7,12 +7,15 @@ seed: 0
 ckpt_path: /home/possu/jinho/out_dir/ligand_seq_des/exp35_cfg2/checkpoints/ema/sd-step82500-epoch52-ema0.99.ckpt
 
 # MAD thresholding parameters
-k_values: [0.2, 0.6, 1.0, 1.4, 1.8]
-num_samples: 2
+k_values: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2]
+# num_samples = per-base stage-1 sample count to forward-pass.
+# 1 → only `_sample0` per base (cheap, one row per base).
+# N → `_sample0`..`_sample{N-1}` each forward-passed independently.
+num_samples: 1
 max_tokens_for_forward: 2000
 
 # Output
-output_dir: /home/possu/jinho/allatom-design/debug/260404_pottsweight_based_pocket_selection/nativeval/scaffold/pos_constraint_csvs
+output_dir: /home/possu/jinho/allatom-design/debug/260404_pottsweight_based_pocket_selection/nativeval/pocket_pos_constraint_csvs
 
 ######### Data & Transform configurations #########
 input_sample_is_designed: true
