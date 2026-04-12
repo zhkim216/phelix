@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from allatom_design.eval.eval_utils.eval_posebusters import (
+from allatom_design.eval.posebusters.core import (
     discover_af3_cif_paths,
     evaluate_batch,
     split_entries_for_array_job,
