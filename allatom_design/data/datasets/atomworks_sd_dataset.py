@@ -313,6 +313,18 @@ class SDDataset(MolecularDataset):
             metadata_df = metadata_df[~metadata_df['q_pn_unit_is_maybe_covalently_linked_to_protein']]        
             len_after = len(metadata_df)
             logger.info(f"Excluded {len_before - len_after} small molecules in {dataset_name} interface dataset, because of covalently linked to protein")
+        
+        ### Filter out small molecules with resolution ratio less than min_resolution_ratio
+        min_resolution_ratio = self.cfg.get("min_resolution_ratio", 0.8)
+        if min_resolution_ratio is not None:
+            len_before = len(metadata_df)
+            rr = metadata_df["q_pn_unit_resolution_ratio"]
+            # NaN rows (polymer pn_units) are exempt — only defined for non-polymers.
+            keep_mask = rr.isna() | (rr >= min_resolution_ratio)
+            metadata_df = metadata_df[keep_mask]
+            len_after = len(metadata_df)
+            logger.info(f"Excluded {len_before - len_after} small molecules in {dataset_name} interface dataset, because of resolution ratio less than {min_resolution_ratio}")
+        
                         
         if self.scheme == "neighbor":
             # Remove chain iids from q_pn_unit_context_group_iids that were excluded by filters

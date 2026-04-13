@@ -17,6 +17,7 @@ save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don
 residue_cache_dir: /home/possu/jinho/datasets/atomworks_cached_residue_data
 exclude_val_cluster: true
 exclude_small_molecules_covalently_linked_to_protein: true
+min_resolution_ratio: 0.8
 use_biologically_meaningful_small_molecule: true
 grouping_scheme: "neighbor"
   
