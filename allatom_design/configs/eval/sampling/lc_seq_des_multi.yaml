@@ -55,6 +55,17 @@ redesign_cfg:
   pocket_distance: 5.0
   native_cif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
 
+# Classifier-free-style guidance for Potts sequence design.
+# When enabled, sampling runs two forward passes (cond = with ligand,
+# uncond = ligand masked out) and mixes the DLMC proposal as
+#   logP_ij = gamma * logP_ij_cond + (1 - gamma) * logP_ij_uncond
+guidance_cfg:
+  enabled: false
+  gamma_list: [0.0, 0.5, 1.0, 1.5, 2.0]
+  uncond_mode: "protein_only"
+  clamp_mix_prob: true
+  pocket_distance: 10.0  # Å from any ligand atom to pseudo-Cβ for pocket mask
+
 # Docking metrics configuration
 pocket_cfg:
   pocket_distances_for_seq_recovery: [4.0, 5.0, 6.0]

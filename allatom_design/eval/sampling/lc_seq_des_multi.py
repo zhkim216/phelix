@@ -156,7 +156,8 @@ def main(cfg: DictConfig):
                                             pocket_only = _pocket_only,
                                             pocket_featurizer_cfg = _pocket_featurizer_cfg,
                                             pocket_distances_for_seq_recovery = cfg.pocket_cfg.pocket_distances_for_seq_recovery,
-                                            csv_suffix = csv_suffix)
+                                            csv_suffix = csv_suffix,
+                                            guidance_cfg = cfg.get("guidance_cfg", None))
 
             # Process each checkpoint: design → evaluate → free memory
             _both_evals = (cfg.struct_pred_cfg.evaluate_self_consistency

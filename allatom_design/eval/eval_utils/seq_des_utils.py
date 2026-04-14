@@ -59,7 +59,7 @@ def redesign_with_lcaliby(seed: int = 0,
                         cif_parse_cfg: DictConfig = None,
                         preprocess_cfg: DictConfig = None,
                         featurizer_cfg: DictConfig = None,
-                        cif_save_cfg: DictConfig = None,                          
+                        cif_save_cfg: DictConfig = None,
                         sampling_inputs_df: pd.DataFrame = None,
                         log_dir: Path = None,
                         pos_constraint_df: pd.DataFrame = None,
@@ -67,7 +67,8 @@ def redesign_with_lcaliby(seed: int = 0,
                         pocket_only: bool = False,
                         pocket_featurizer_cfg: dict | None = None,
                         pocket_distances_for_seq_recovery: list[float] = None,
-                        csv_suffix: str = "") -> Iterator[tuple[dict, Path, dict]]:
+                        csv_suffix: str = "",
+                        guidance_cfg: DictConfig | None = None) -> Iterator[tuple[dict, Path, dict]]:
     """
     Redesign pocket sequence using lcaliby model for each checkpoint.
     
@@ -118,44 +119,101 @@ def redesign_with_lcaliby(seed: int = 0,
         seq_des_model = get_seq_des_model(cfg = seq_des_cfg, device=device)
         
         outputs = run_lc_seq_des(
-            model=seq_des_model["model"], 
+            model=seq_des_model["model"],
             input_sample_is_designed = input_sample_is_designed,
             cif_parse_cfg=cif_parse_cfg,
             preprocess_cfg=preprocess_cfg,
             featurizer_cfg=featurizer_cfg,
-            cif_save_cfg=cif_save_cfg,                                     
-            sampling_cfg=seq_des_model["sampling_cfg"],                          
+            cif_save_cfg=cif_save_cfg,
+            sampling_cfg=seq_des_model["sampling_cfg"],
             sampling_inputs_df=sampling_inputs_df,
-            pdb_paths=input_sample_paths,             
-            device=device,             
+            pdb_paths=input_sample_paths,
+            device=device,
             out_dir=str(log_dir_per_ckpt),
             pos_constraint_df=pos_constraint_df,
             protein_only=protein_only,
             pocket_only=pocket_only,
             pocket_featurizer_cfg=pocket_featurizer_cfg,
             pocket_distances_for_seq_recovery=pocket_distances_for_seq_recovery,
+            guidance_cfg=guidance_cfg,
         )
                 
         sample_dict_per_ckpt = copy.deepcopy(sample_dict)
-        
+
+        guidance_enabled = bool(guidance_cfg) and bool(
+            guidance_cfg.get("enabled", False) if hasattr(guidance_cfg, "get") else False
+        )
+
         # Save sequence recovery metrics into .csv file (one row per sample)
         seq_recovery_metrics_list = []
+        guidance_metrics_list = []
         for example_id, output in outputs.items():
             sample_ids = output["designed_sample_id"]
             seq_recovery_metrics = output["seq_recovery_metrics"]
-            
+
             for i in range(len(sample_ids)):
-                seq_recovery_metrics_list.append({
+                row = {
                     "example_id": example_id,
                     "designed_sample_id": sample_ids[i],
-                    **seq_recovery_metrics[i]
-                })
-                
+                    **seq_recovery_metrics[i],
+                }
+                if guidance_enabled:
+                    gamma_val = output["gamma"][i]
+                    u_cond = output["U_cond"][i]
+                    u_uncond = output["U_uncond"][i]
+                    u_mixed = output["U"][i]
+                    u_cond_per_res = output.get("U_cond_per_res", [None] * len(sample_ids))[i]
+                    u_uncond_per_res = output.get("U_uncond_per_res", [None] * len(sample_ids))[i]
+                    u_cond_pocket = output.get("U_cond_pocket", [None] * len(sample_ids))[i]
+                    u_uncond_pocket = output.get("U_uncond_pocket", [None] * len(sample_ids))[i]
+                    u_cond_pocket_per_res = output.get("U_cond_pocket_per_res", [None] * len(sample_ids))[i]
+                    u_uncond_pocket_per_res = output.get("U_uncond_pocket_per_res", [None] * len(sample_ids))[i]
+                    n_pocket = output.get("N_pocket", [None] * len(sample_ids))[i]
+
+                    def _mix(uc, uu):
+                        if uc is None or uu is None or gamma_val is None:
+                            return None
+                        return gamma_val * uc + (1.0 - gamma_val) * uu
+
+                    u_mixed_per_res = _mix(u_cond_per_res, u_uncond_per_res)
+                    u_mixed_pocket = _mix(u_cond_pocket, u_uncond_pocket)
+                    u_mixed_pocket_per_res = _mix(u_cond_pocket_per_res, u_uncond_pocket_per_res)
+
+                    guidance_row = {
+                        "gamma": gamma_val,
+                        "U_cond": u_cond,
+                        "U_uncond": u_uncond,
+                        "U_mixed": u_mixed,
+                        "U_cond_per_res": u_cond_per_res,
+                        "U_uncond_per_res": u_uncond_per_res,
+                        "U_mixed_per_res": u_mixed_per_res,
+                        "U_cond_pocket": u_cond_pocket,
+                        "U_uncond_pocket": u_uncond_pocket,
+                        "U_mixed_pocket": u_mixed_pocket,
+                        "U_cond_pocket_per_res": u_cond_pocket_per_res,
+                        "U_uncond_pocket_per_res": u_uncond_pocket_per_res,
+                        "U_mixed_pocket_per_res": u_mixed_pocket_per_res,
+                        "N_pocket": n_pocket,
+                    }
+                    row.update(guidance_row)
+                    guidance_metrics_list.append({
+                        "example_id": example_id,
+                        "designed_sample_id": sample_ids[i],
+                        **guidance_row,
+                    })
+                seq_recovery_metrics_list.append(row)
+
                 metrics_to_print = ", ".join([f"{k}: {v:.3f}" for k, v in seq_recovery_metrics[i].items()])
                 print(f"sample {i} of {example_id}: {metrics_to_print}")
-                
+
         seq_recovery_metrics_df = pd.DataFrame(seq_recovery_metrics_list)
         seq_recovery_metrics_df.to_csv(Path(log_dir_per_ckpt, f"seq_recovery_metrics{csv_suffix}.csv"), index=False)
+
+        if guidance_enabled and len(guidance_metrics_list) > 0:
+            guidance_metrics_df = pd.DataFrame(guidance_metrics_list)
+            guidance_metrics_df.to_csv(
+                Path(log_dir_per_ckpt, f"guidance_metrics{csv_suffix}.csv"), index=False
+            )
         
         # Store outputs in sample_dict_per_ckpt
         for example_id, output in outputs.items():  
@@ -213,6 +271,7 @@ def run_lc_seq_des(
     pocket_only: bool = False,
     pocket_featurizer_cfg: dict | None = None,
     pocket_distances_for_seq_recovery: list[float] = None,
+    guidance_cfg: DictConfig | None = None,
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
     """
     Given a list of processed structure files, run sequence design on them.
@@ -286,8 +345,8 @@ def run_lc_seq_des(
                                  pocket_featurizer_cfg=pocket_featurizer_cfg)                                                
                                                                                                    
             # Initialize seq_cond and atom_cond masks.
-            batch = initialize_sampling_masks(batch, protein_only=protein_only)                        
-                                        
+            batch = initialize_sampling_masks(batch, protein_only=protein_only)
+
             # Parse fixed positions.
             batch = parse_fixed_pos_info(batch, pos_constraint_df, verbose=sampling_cfg.verbose)
 
@@ -296,6 +355,18 @@ def run_lc_seq_des(
             sampling_inputs["pos_restrict_aatype"] = parse_pos_restrict_aatype_info(
                 batch, pos_constraint_df, verbose=sampling_cfg.verbose
             )
+
+            # Inject guidance_cfg into potts_sampling_cfg so it reaches
+            # AtomMPNNDenoiser.potts_sample. A None / disabled guidance_cfg
+            # is a no-op (denoiser falls back to the cond-only path).
+            if guidance_cfg is not None:
+                guidance_cfg_dict = (
+                    OmegaConf.to_container(guidance_cfg, resolve=True)
+                    if isinstance(guidance_cfg, DictConfig)
+                    else dict(guidance_cfg)
+                )
+                sampling_inputs.setdefault("potts_sampling_cfg", {})
+                sampling_inputs["potts_sampling_cfg"]["guidance_cfg"] = guidance_cfg_dict
 
             # Run sampling.
             id_to_atom_arrays, id_to_aux = model.sample(batch, sampling_inputs=sampling_inputs)
@@ -307,11 +378,36 @@ def run_lc_seq_des(
                 if example_id not in outputs:
                     outputs[example_id] = defaultdict(list)
                 aux = id_to_aux[example_id]
-                                                                                
-                for ai, designed_atom_array in enumerate(atom_arrays):                            
-                    designed_sample_id = f"{example_id}_sample{ai}"
+
+                # Per-gamma counter so that gamma-tagged sample ids reset
+                # within each gamma (e.g. gamma0.50_sample0, gamma0.50_sample1, ...).
+                gamma_counter: dict[float, int] = defaultdict(int)
+
+                for ai, designed_atom_array in enumerate(atom_arrays):
+                    gamma_val = aux[ai].get("gamma") if isinstance(aux[ai], dict) else None
+                    if gamma_val is not None:
+                        sub_ai = gamma_counter[gamma_val]
+                        gamma_counter[gamma_val] += 1
+                        designed_sample_id = f"{example_id}_gamma{gamma_val:.2f}_sample{sub_ai}"
+                    else:
+                        designed_sample_id = f"{example_id}_sample{ai}"
                     outputs[example_id]["designed_sample_id"].append(designed_sample_id)
                     outputs[example_id]["U"].append(aux[ai]["U"])
+                    outputs[example_id]["gamma"].append(gamma_val)
+                    for guidance_key in (
+                        "U_cond",
+                        "U_uncond",
+                        "U_cond_per_res",
+                        "U_uncond_per_res",
+                        "U_cond_pocket",
+                        "U_uncond_pocket",
+                        "U_cond_pocket_per_res",
+                        "U_uncond_pocket_per_res",
+                        "N_pocket",
+                    ):
+                        outputs[example_id][guidance_key].append(
+                            aux[ai].get(guidance_key) if isinstance(aux[ai], dict) else None
+                        )
                     
                     # Save atom_array and sequence                                        
                     chain_info = non_rcsb.initialize_chain_info_from_atom_array(designed_atom_array)
@@ -384,18 +480,34 @@ def run_lc_seq_des(
                 example_outputs[k] = v.detach().cpu().item()                    
 
           
-    # Save sample_metadata.pt for later use 
+    # Save sample_metadata.pt for later use
     sample_metadata = {}
     for example_id, example_outputs in outputs.items():
         for idx in range(len(example_outputs["designed_sample_id"])):
             designed_sample_id = example_outputs["designed_sample_id"][idx]
-            sample_metadata[designed_sample_id] = {
+            meta_entry = {
                 "example_id": example_id,
                 "designed_sample_id": designed_sample_id,
                 "designed_sample_path": example_outputs["designed_sample_path"][idx],
                 "designed_sample_seq": example_outputs["designed_sample_seq"][idx],
                 "U": example_outputs["U"][idx],
             }
+            if "gamma" in example_outputs:
+                meta_entry["gamma"] = example_outputs["gamma"][idx]
+            for guidance_key in (
+                "U_cond",
+                "U_uncond",
+                "U_cond_per_res",
+                "U_uncond_per_res",
+                "U_cond_pocket",
+                "U_uncond_pocket",
+                "U_cond_pocket_per_res",
+                "U_uncond_pocket_per_res",
+                "N_pocket",
+            ):
+                if guidance_key in example_outputs:
+                    meta_entry[guidance_key] = example_outputs[guidance_key][idx]
+            sample_metadata[designed_sample_id] = meta_entry
     torch.save(sample_metadata, f"{sample_out_dir}/sample_metadata.pt")
     print(f"Saved sample_metadata.pt with {len(sample_metadata)} samples to {sample_out_dir}")
 
