@@ -8,6 +8,7 @@ num_workers: 8  # number of workers for data loading
 
 # Sequence design options
 use_potts_sampling: true
+use_mlm_sampling: false  # if true, use MLM (order-agnostic autoregressive) sampling instead of Potts
 
 skip_sampling: false  # if true, skip sampling and just return potts parameters
 save_potts_params: false
@@ -24,6 +25,17 @@ potts_sampling_cfg:
 
   # add gaussian noise to inputs
   noise_std: 0.0
+
+  # Classifier-free-style guidance: mix a ligand-conditioned ("cond") and
+  # ligand-absent ("uncond") Potts proposal at each DLMC sweep. When
+  # `enabled=false` this is a no-op and the sampler uses the cond branch
+  # only. See _potts_proposal_dlmc_guidance in potts.py for math details.
+  guidance_cfg:
+    enabled: false
+    gamma_list: [0.0, 0.5, 1.0, 1.5, 2.0]   # gamma > 1 = CFG extrapolation
+    uncond_mode: "protein_only"              # only mode currently implemented
+    clamp_mix_prob: true                     # per-entry [0,1] clamp on the mixed P_ij (ablation toggle)
+    pocket_distance: 10.0                    # Å from any ligand atom to pseudo-Cβ for the pocket mask
 
 mlm_sampling_cfg:
   num_steps: 50

@@ -122,6 +122,18 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         """
         Potts sampling for sequence design.
 
+        When ``potts_sampling_cfg.guidance_cfg.enabled`` is true, a second
+        forward pass is run on a ligand-masked (``protein_only``) copy of the
+        batch to obtain "uncond" Potts parameters. The sampler then mixes the
+        cond and uncond DLMC proposals at each sweep with
+
+            logP_ij_guidance = gamma * logP_ij_cond + (1 - gamma) * logP_ij_uncond
+
+        sweeping over ``gamma_list``. For each sampled sequence we also
+        record post-hoc physical Potts energies ``U_cond`` and ``U_uncond``
+        (no LCP penalty) so that downstream code can plot the Pareto front
+        of ligand-fit vs. ligand-free stability.
+
         Returns:
             output_feats: list[dict[str, TensorType["b ..."]]]: list of length (n_samples_per_pdb) of output features for each sample
             aux: dict[str, Any]: auxiliary outputs
@@ -134,11 +146,54 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             print("Conditioning on sequence only in the potts model")
             batch["seq_cond_mask"] = torch.zeros_like(batch["seq_cond_mask"])  # zero out model-level sequence conditioning mask
 
-        # Compute potts parameters
+        # Parse guidance config (optional).
+        potts_sampling_cfg = sampling_inputs["potts_sampling_cfg"]
+        guidance_cfg = potts_sampling_cfg.get("guidance_cfg", None)
+        use_guidance = bool(guidance_cfg) and bool(guidance_cfg.get("enabled", False))
+        if use_guidance:
+            if "tied_sampling_ids" in batch:
+                raise NotImplementedError(
+                    "Potts guidance is not supported together with tied_sampling."
+                )
+            gamma_list = list(guidance_cfg.get("gamma_list", [1.0]))
+            uncond_mode = guidance_cfg.get("uncond_mode", "protein_only")
+            if uncond_mode != "protein_only":
+                raise NotImplementedError(
+                    f"Unsupported uncond_mode={uncond_mode!r}. Only 'protein_only' is implemented."
+                )
+            clamp_mix_prob = bool(guidance_cfg.get("clamp_mix_prob", True))
+            # Build the uncond batch *before* the first compute_potts_params
+            # call so both branches see the same starting state. A shallow
+            # copy is enough — we only rebind specific keys; no tensors are
+            # mutated in place.
+            batch_uncond = dict(batch)
+            batch_uncond["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_is_protein_chain"]
+            pocket_distance = float(guidance_cfg.get("pocket_distance", 10.0))
+        else:
+            gamma_list = [None]
+            batch_uncond = None
+            clamp_mix_prob = True  # unused when guidance is off
+            pocket_distance = None
+
+        # Compute cond potts parameters
         potts_decoder_aux, batch, sampling_inputs = self.compute_potts_params(batch, sampling_inputs)
 
+        # Compute uncond potts parameters (single extra forward pass) if guidance is on
+        potts_decoder_aux_uncond = None
+        pocket_mask = None
+        n_protein = None
+        n_pocket = None
+        if use_guidance:
+            potts_decoder_aux_uncond, _, _ = self.compute_potts_params(batch_uncond, sampling_inputs)
+            # Pocket mask is structure-only; compute once per batch, reuse for
+            # every (gamma, sample). N_pocket==0 is possible (no ligand atoms
+            # or nothing within pocket_distance) — handled via clamp below.
+            pocket_mask, n_protein = self._compute_ligand_pocket_mask(
+                batch, pocket_distance=pocket_distance,
+            )  # [B, N], [B]
+            n_pocket = pocket_mask.sum(-1)  # [B]
+
         # Set up Potts sampling
-        potts_sampling_cfg = sampling_inputs["potts_sampling_cfg"]
         regularization = potts_sampling_cfg["regularization"]
         potts_sweeps = potts_sampling_cfg["potts_sweeps"]
         potts_proposal = potts_sampling_cfg["potts_proposal"]
@@ -157,7 +212,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         ban_S = ban_S + const.AF3_ENCODING.encode(const.AF3_ENCODING.non_protein_tokens)  # ban all non-protein tokens
 
         # Initialize random sequence and sampling masks
-        mask_sample = (1 - batch["seq_cond_mask_potts"]) * batch["token_pad_mask"]  # 1 where we can sample, 0 where we can't        
+        mask_sample = (1 - batch["seq_cond_mask_potts"]) * batch["token_pad_mask"]  # 1 where we can sample, 0 where we can't
 
         mask_sample, _, S_init = potts.init_sampling_masks(
             logits_init, mask_sample=mask_sample, S=batch["restype"].argmax(dim=-1), ban_S=ban_S, pos_restrict_aatype=sampling_inputs.get("pos_restrict_aatype", None)
@@ -171,47 +226,152 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             C_complexity = batch["asym_id"] - torch.min(batch["asym_id"]) + 1  # renumber asym_id to have min value of 1
             C_complexity = C_complexity * batch["protein_residue_node_mask"]
             #! fixed, 251110
-            # mask out i) non-protein chains, ii) pad tokens, iii) tokens that don't exist in the graph            
-            # complexity is only calculated for the residues where C_complexity > 0        
+            # mask out i) non-protein chains, ii) pad tokens, iii) tokens that don't exist in the graph
+            # complexity is only calculated for the residues where C_complexity > 0
             penalty_func = lambda _S: complexity.complexity_lcp(_S, C_complexity)
 
         S = []  # keep track of sequences for each sample
-        aux["U"] = []  # keep track of energies for each sample
+        aux["U"] = []  # mixed energy per sample (equal to U_cond when guidance is off)
+        aux["gamma"] = []  # gamma used to produce each sample (None when guidance is off)
+        aux["U_cond"] = []  # post-hoc cond energy (no penalty); None when guidance is off
+        aux["U_uncond"] = []  # post-hoc uncond energy (no penalty); None when guidance is off
+        # Per-residue and pocket-restricted energy aux (guidance-only). All
+        # are shape [B] per sample when filled, or None when guidance is off.
+        aux["U_cond_per_res"] = []
+        aux["U_uncond_per_res"] = []
+        aux["U_cond_pocket"] = []
+        aux["U_uncond_pocket"] = []
+        aux["U_cond_pocket_per_res"] = []
+        aux["U_uncond_pocket_per_res"] = []
+        aux["N_pocket"] = []
 
-        # Design sequences
-        for _ in tqdm(range(sampling_inputs["num_seqs_per_pdb"]), desc="Sampling sequences", leave=False):
-            
-            S_sample, U_sample = self.atom_mpnn.decoder_S_potts.sample(
-                potts_decoder_aux["h"],
-                potts_decoder_aux["J"],
-                potts_decoder_aux["edge_idx"],
-                potts_decoder_aux["mask_i"],
-                potts_decoder_aux["mask_ij"],
-                S=S_init,
-                mask_sample=mask_sample,
-                temperature=potts_temperature,
-                num_sweeps=potts_sweeps,
-                penalty_func=penalty_func,
-                proposal=potts_proposal,
-                rejection_step=rejection_step,
-                verbose=False,
-                edge_idx_coloring=edge_idx_coloring,
-                mask_ij_coloring=mask_ij_coloring,
-            )
-            
-            # Set all tokens that don't exist in the graph to unknown
-            S_sample = self._set_non_protein_tokens(S_sample, batch)
+        num_seqs_per_pdb = sampling_inputs["num_seqs_per_pdb"]
 
-            aux["U"].append(U_sample.cpu())
-            S.append(S_sample.cpu())
+        # Design sequences: outer loop over gamma, inner loop over samples-per-pdb.
+        for gamma in gamma_list:
+            gamma_desc = f"gamma={gamma:.2f}" if gamma is not None else "no-guidance"
+            for _ in tqdm(range(num_seqs_per_pdb), desc=f"Sampling sequences ({gamma_desc})", leave=False):
+
+                if use_guidance:
+                    S_sample, U_sample = self.atom_mpnn.decoder_S_potts.sample(
+                        potts_decoder_aux["h"],
+                        potts_decoder_aux["J"],
+                        potts_decoder_aux["edge_idx"],
+                        potts_decoder_aux["mask_i"],
+                        potts_decoder_aux["mask_ij"],
+                        S=S_init,
+                        mask_sample=mask_sample,
+                        temperature=potts_temperature,
+                        num_sweeps=potts_sweeps,
+                        penalty_func=penalty_func,
+                        proposal=potts_proposal,
+                        rejection_step=rejection_step,
+                        verbose=False,
+                        edge_idx_coloring=edge_idx_coloring,
+                        mask_ij_coloring=mask_ij_coloring,
+                        h_uncond=potts_decoder_aux_uncond["h"],
+                        J_uncond=potts_decoder_aux_uncond["J"],
+                        edge_idx_uncond=potts_decoder_aux_uncond["edge_idx"],
+                        gamma=gamma,
+                        clamp_mix_prob=clamp_mix_prob,
+                    )
+                else:
+                    S_sample, U_sample = self.atom_mpnn.decoder_S_potts.sample(
+                        potts_decoder_aux["h"],
+                        potts_decoder_aux["J"],
+                        potts_decoder_aux["edge_idx"],
+                        potts_decoder_aux["mask_i"],
+                        potts_decoder_aux["mask_ij"],
+                        S=S_init,
+                        mask_sample=mask_sample,
+                        temperature=potts_temperature,
+                        num_sweeps=potts_sweeps,
+                        penalty_func=penalty_func,
+                        proposal=potts_proposal,
+                        rejection_step=rejection_step,
+                        verbose=False,
+                        edge_idx_coloring=edge_idx_coloring,
+                        mask_ij_coloring=mask_ij_coloring,
+                    )
+
+                # Set all tokens that don't exist in the graph to unknown
+                S_sample = self._set_non_protein_tokens(S_sample, batch)
+
+                aux["U"].append(U_sample.cpu())
+                aux["gamma"].append(gamma)
+
+                if use_guidance:
+                    # Post-hoc physical Potts energies on both branches. Used
+                    # as the (x, y) coordinates of the Pareto plot downstream.
+                    U_cond_post, _, U_cond_per_res_post = potts.compute_potts_energy(
+                        S_sample,
+                        potts_decoder_aux["h"],
+                        potts_decoder_aux["J"],
+                        potts_decoder_aux["edge_idx"],
+                        return_per_res=True,
+                    )
+                    U_uncond_post, _, U_uncond_per_res_post = potts.compute_potts_energy(
+                        S_sample,
+                        potts_decoder_aux_uncond["h"],
+                        potts_decoder_aux_uncond["J"],
+                        potts_decoder_aux_uncond["edge_idx"],
+                        return_per_res=True,
+                    )
+                    # Pocket-restricted totals: sum per-residue contributions
+                    # over pocket residues only.
+                    U_cond_pocket = (U_cond_per_res_post * pocket_mask).sum(-1)
+                    U_uncond_pocket = (U_uncond_per_res_post * pocket_mask).sum(-1)
+                    safe_np = n_pocket.clamp(min=1.0)
+                    safe_n = n_protein.clamp(min=1.0)
+                    U_cond_per_res_global = U_cond_post / safe_n
+                    U_uncond_per_res_global = U_uncond_post / safe_n
+                    U_cond_pocket_per_res = U_cond_pocket / safe_np
+                    U_uncond_pocket_per_res = U_uncond_pocket / safe_np
+
+                    aux["U_cond"].append(U_cond_post.cpu())
+                    aux["U_uncond"].append(U_uncond_post.cpu())
+                    aux["U_cond_per_res"].append(U_cond_per_res_global.cpu())
+                    aux["U_uncond_per_res"].append(U_uncond_per_res_global.cpu())
+                    aux["U_cond_pocket"].append(U_cond_pocket.cpu())
+                    aux["U_uncond_pocket"].append(U_uncond_pocket.cpu())
+                    aux["U_cond_pocket_per_res"].append(U_cond_pocket_per_res.cpu())
+                    aux["U_uncond_pocket_per_res"].append(U_uncond_pocket_per_res.cpu())
+                    aux["N_pocket"].append(n_pocket.cpu())
+                else:
+                    aux["U_cond"].append(None)
+                    aux["U_uncond"].append(None)
+                    aux["U_cond_per_res"].append(None)
+                    aux["U_uncond_per_res"].append(None)
+                    aux["U_cond_pocket"].append(None)
+                    aux["U_uncond_pocket"].append(None)
+                    aux["U_cond_pocket_per_res"].append(None)
+                    aux["U_uncond_pocket_per_res"].append(None)
+                    aux["N_pocket"].append(None)
+
+                S.append(S_sample.cpu())
 
         # Free GPU potts parameters before postprocessing
         del potts_decoder_aux
+        if potts_decoder_aux_uncond is not None:
+            del potts_decoder_aux_uncond
 
-        return self._postprocess_sampled_sequences(
-            S, batch,
-            per_sample_aux=[{"U": aux["U"][si]} for si in range(len(S))],
-        )
+        per_sample_aux = [
+            {
+                "U": aux["U"][si],
+                "gamma": aux["gamma"][si],
+                "U_cond": aux["U_cond"][si],
+                "U_uncond": aux["U_uncond"][si],
+                "U_cond_per_res": aux["U_cond_per_res"][si],
+                "U_uncond_per_res": aux["U_uncond_per_res"][si],
+                "U_cond_pocket": aux["U_cond_pocket"][si],
+                "U_uncond_pocket": aux["U_uncond_pocket"][si],
+                "U_cond_pocket_per_res": aux["U_cond_pocket_per_res"][si],
+                "U_uncond_pocket_per_res": aux["U_uncond_pocket_per_res"][si],
+                "N_pocket": aux["N_pocket"][si],
+            }
+            for si in range(len(S))
+        ]
+        return self._postprocess_sampled_sequences(S, batch, per_sample_aux=per_sample_aux)
 
 
     @torch.no_grad()
@@ -328,6 +488,55 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
 
     @staticmethod
+    def _compute_ligand_pocket_mask(
+        batch: dict[str, torch.Tensor],
+        pocket_distance: float = 10.0,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per-batch ligand pocket mask over token positions.
+
+        A protein residue is "in the pocket" iff its pseudo-Cβ coordinate is
+        within ``pocket_distance`` Å of any resolved ligand atom in the same
+        batch item. The pseudo-Cβ is read from
+        ``batch['noised_pseudo_cb_coords']``, which at sequence-design time
+        has zero structure noise and so matches the real pseudo-Cβ.
+
+        Returns:
+            pocket_mask: float tensor ``[B, N_tokens]``, 1 at pocket residues,
+                0 elsewhere.
+            n_protein: float tensor ``[B]``, count of valid protein residues
+                per batch item (used for whole-protein per-residue averaging).
+        """
+        pcb = batch["noised_pseudo_cb_coords"]                # [B, N, 3]
+        coords = batch["coords"]                              # [B, N_atoms, 3]
+        lig_atom_mask = (
+            batch["atom_is_small_molecule_chain"].bool()
+            & batch["atom_resolved_mask"].bool()
+            & batch["atom_pad_mask"].bool()
+        )                                                     # [B, N_atoms]
+
+        # Entries with zero pseudo-Cβ flag non-standard / unresolved tokens.
+        # Combine with the existing protein-residue node mask to be safe.
+        pcb_valid = (
+            (pcb.norm(dim=-1) > 1e-6)
+            & batch["protein_residue_node_mask"].bool()
+        )                                                     # [B, N]
+        n_protein = pcb_valid.sum(-1).float()                 # [B]
+
+        B, N, _ = pcb.shape
+        pocket = torch.zeros((B, N), device=pcb.device, dtype=torch.float32)
+        d2_threshold = float(pocket_distance) ** 2
+        for b in range(B):
+            if not lig_atom_mask[b].any():
+                continue
+            lig_b = coords[b][lig_atom_mask[b]]               # [L_b, 3]
+            pcb_b = pcb[b]                                    # [N, 3]
+            d2 = ((pcb_b[:, None, :] - lig_b[None, :, :]) ** 2).sum(-1)
+            min_d2 = d2.min(dim=1).values                     # [N]
+            pocket[b] = (min_d2 < d2_threshold).float()
+        pocket = pocket * pcb_valid.float()
+        return pocket, n_protein
+
+    @staticmethod
     def _set_non_protein_tokens(S: TensorType["b n", int],
                                 batch: dict[str, TensorType["b ..."]],
                                 ) -> TensorType["b n", int]:
@@ -394,8 +603,32 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
                 # Auxiliary outputs.
                 sample_aux = {"S": new_restype.cpu()}
-                if per_sample_aux is not None and "U" in per_sample_aux[si]:
-                    sample_aux["U"] = per_sample_aux[si]["U"][bi].cpu().item() if torch.is_tensor(per_sample_aux[si]["U"]) else float("nan")
+
+                def _extract_scalar(entry, batch_idx):
+                    if entry is None:
+                        return float("nan")
+                    if torch.is_tensor(entry):
+                        return entry[batch_idx].cpu().item()
+                    return float("nan")
+
+                if per_sample_aux is not None:
+                    aux_si = per_sample_aux[si]
+                    sample_aux["U"] = _extract_scalar(aux_si.get("U"), bi)
+                    if "gamma" in aux_si:
+                        sample_aux["gamma"] = aux_si["gamma"]  # scalar or None
+                    for key in (
+                        "U_cond",
+                        "U_uncond",
+                        "U_cond_per_res",
+                        "U_uncond_per_res",
+                        "U_cond_pocket",
+                        "U_uncond_pocket",
+                        "U_cond_pocket_per_res",
+                        "U_uncond_pocket_per_res",
+                        "N_pocket",
+                    ):
+                        if key in aux_si:
+                            sample_aux[key] = _extract_scalar(aux_si.get(key), bi)
                 else:
                     sample_aux["U"] = float("nan")
                 id_to_aux[example_id].append(sample_aux)
