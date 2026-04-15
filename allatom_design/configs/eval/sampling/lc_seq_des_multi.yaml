@@ -58,14 +58,16 @@ redesign_cfg:
 
 # Classifier-free-style guidance for Potts sequence design.
 # When enabled, sampling runs two forward passes (cond = with ligand,
-# uncond = ligand masked out) and mixes the DLMC proposal as
-#   logP_ij = gamma * logP_ij_cond + (1 - gamma) * logP_ij_uncond
+# uncond = ligand masked out) and runs the standard DLMC proposal on the
+# linearly-mixed Potts parameters
+#   h_mix = gamma * h_cond + (1 - gamma) * h_uncond
+#   J_mix = gamma * J_cond + (1 - gamma) * J_uncond
+# which samples from the Boltzmann distribution of
+#   U_mix = gamma * U_cond + (1 - gamma) * U_uncond.
 guidance_cfg:
   enabled: false
   gamma_list: [0.0, 0.5, 1.0, 1.5, 2.0]
   uncond_mode: "protein_only"
-  guidance_mode: "rate"   # "rate" | "energy"; see potts.py for details
-  clamp_mix_prob: true
   pocket_distance: 10.0  # Å from any ligand atom to pseudo-Cβ for pocket mask
 
 # Docking metrics configuration
