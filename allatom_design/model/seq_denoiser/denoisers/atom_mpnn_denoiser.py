@@ -162,6 +162,11 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                     f"Unsupported uncond_mode={uncond_mode!r}. Only 'protein_only' is implemented."
                 )
             clamp_mix_prob = bool(guidance_cfg.get("clamp_mix_prob", True))
+            guidance_mode = str(guidance_cfg.get("guidance_mode", "rate"))
+            if guidance_mode not in ("rate", "energy"):
+                raise ValueError(
+                    f"Unknown guidance_mode={guidance_mode!r}; expected 'rate' or 'energy'."
+                )
             # Build the uncond batch *before* the first compute_potts_params
             # call so both branches see the same starting state. A shallow
             # copy is enough — we only rebind specific keys; no tensors are
@@ -173,6 +178,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             gamma_list = [None]
             batch_uncond = None
             clamp_mix_prob = True  # unused when guidance is off
+            guidance_mode = "rate"  # unused when guidance is off
             pocket_distance = None
 
         # Compute cond potts parameters
@@ -274,6 +280,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                         edge_idx_uncond=potts_decoder_aux_uncond["edge_idx"],
                         gamma=gamma,
                         clamp_mix_prob=clamp_mix_prob,
+                        guidance_mode=guidance_mode,
                     )
                 else:
                     S_sample, U_sample = self.atom_mpnn.decoder_S_potts.sample(

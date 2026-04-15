@@ -41,6 +41,7 @@ seq_des_cfg:
       potts_sampling_cfg:
         potts_sweeps: 500
         lcp_expand_edge_idx_fix: true
+        rejection_step: false
 
 # sampling inputs
 sampling_inputs_csv: null
@@ -63,6 +64,7 @@ guidance_cfg:
   enabled: false
   gamma_list: [0.0, 0.5, 1.0, 1.5, 2.0]
   uncond_mode: "protein_only"
+  guidance_mode: "rate"   # "rate" | "energy"; see potts.py for details
   clamp_mix_prob: true
   pocket_distance: 10.0  # Å from any ligand atom to pseudo-Cβ for pocket mask
 
