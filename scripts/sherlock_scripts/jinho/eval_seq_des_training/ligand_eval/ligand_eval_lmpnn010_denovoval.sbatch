@@ -46,6 +46,7 @@ python3 -m allatom_design.eval.glide.run_ligand_eval_batch \
     debug=false \
     selection.ligand_rmsd_cutoff=${LIGAND_RMSD_CUTOFF} \
     selection.ligand_plddt_cutoff=${LIGAND_PLDDT_CUTOFF} \
+    selection.is_baseline=true \
     schrodinger.schrodinger_path=${SCHRODINGER_PATH} \
     hydra.run.dir=${HYDRA_DIR}
 

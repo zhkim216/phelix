@@ -1,16 +1,75 @@
 """Sample selection for Glide batch evaluation.
 
-Parses AF3 evaluation metrics (docking + SC), applies quality cutoffs,
-and selects the best diffusion sample per designed sequence.
+Parses AF3 evaluation metrics (docking + SC), applies length-dependent
+protein-quality filtering, and picks the best (designed_sample, diffusion)
+per input scaffold matching fig4 Pipeline B (``debug/plot_scripts``).
 """
 
 import ast
 import logging
+import re
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Fig4 Pipeline B constants + helpers (duplicated from debug/plot_scripts)
+# ---------------------------------------------------------------------------
+# debug/ is not part of the importable allatom_design package, so these are
+# copied verbatim. Keep in sync with:
+#   debug/plot_scripts/success_utils.py:15 DESIGNABLE_LENGTH_THRESHOLDS
+#   debug/plot_scripts/data_loaders.py:57  extract_length
+#   debug/plot_scripts/data_loaders.py:73  normalize_input_id
+#   debug/plot_scripts/success_utils.py:21 build_protein_quality_mask
+
+DESIGNABLE_LENGTH_THRESHOLDS = {
+    (150, 250): {"ca_plddt_threshold": 80, "sc_rmsd_threshold": 2.0},
+    (350, 450): {"ca_plddt_threshold": 70, "sc_rmsd_threshold": 3.0},
+}
+
+_LENGTH_PATTERN = re.compile(r"_len_(\d+)_")
+_BASELINE_SEQ_SUFFIX = re.compile(r"_\d+$")
+
+
+def _extract_length(sample_id: str) -> float:
+    """Return integer length parsed from ``_len_<N>_`` in the sample id."""
+    if not isinstance(sample_id, str):
+        return np.nan
+    match = _LENGTH_PATTERN.search(sample_id)
+    return int(match.group(1)) if match else np.nan
+
+
+def _normalize_input_id(sample_id: str, is_baseline: bool) -> str:
+    """Strip trailing ``_<seqN>`` from baseline (LigandMPNN/ProteinMPNN) ids."""
+    if not isinstance(sample_id, str):
+        return sample_id
+    if is_baseline:
+        return _BASELINE_SEQ_SUFFIX.sub("", sample_id)
+    return sample_id
+
+
+def _build_protein_quality_mask(
+    df: pd.DataFrame,
+    length_thresholds: dict,
+) -> pd.Series:
+    """Length-dependent ``(avg_ca_plddt, sc_ca_rmsd)`` mask.
+
+    Rows whose ``length`` is not covered by any key tuple in
+    ``length_thresholds`` are excluded (False).
+    """
+    mask = pd.Series(False, index=df.index)
+    for lengths, thresholds in length_thresholds.items():
+        length_mask = df["length"].isin(lengths)
+        quality_mask = (
+            (df["avg_ca_plddt"] >= thresholds["ca_plddt_threshold"])
+            & (df["sc_ca_rmsd"] <= thresholds["sc_rmsd_threshold"])
+        )
+        mask |= (length_mask & quality_mask)
+    return mask
 
 
 def load_af3_metrics(
@@ -56,48 +115,110 @@ def load_af3_metrics(
 def select_best_diffusion(
     flat_df: pd.DataFrame,
     ligand_rmsd_cutoff: float | None = 2.0,
-    ligand_plddt_cutoff: float | None = 70.0,
+    ligand_plddt_cutoff: float | None = 80.0,
+    apply_protein_filter: bool = True,
+    is_baseline: bool = False,
+    length_thresholds: dict | None = None,
 ) -> pd.DataFrame:
-    """Select best diffusion sample per designed_sample_id.
+    """Fig4 Pipeline B sample selection.
 
-    Filters by cutoffs, then picks the diffusion with highest ligand_plddt
-    (falling back to lowest ligand_rmsd, or first row per sample).
+    Input ``flat_df`` has one row per (designed_sample_id, diffusion_idx)
+    with both SC and docking metric columns merged in by
+    :func:`load_af3_metrics`.
 
-    Shared by ``run_ligand_eval_batch.py`` and ``pipeline.py``. Handles
-    ``None`` cutoffs (skip that filter) and missing columns gracefully.
+    Steps (match ``debug/plot_scripts/data_loaders.load_merged_designable_csv``
+    + ``success_utils.summarize_success``):
+
+    1. Derive ``length`` from ``input_sample_id``.
+    2. If ``apply_protein_filter``: drop rows whose length is not covered
+       by ``length_thresholds`` (default :data:`DESIGNABLE_LENGTH_THRESHOLDS`).
+    3. If ``apply_protein_filter``: keep only rows passing the
+       length-dependent ``(avg_ca_plddt, sc_ca_rmsd)`` quality gate.
+    4. Per ``designed_sample_id``: keep the surviving diffusion with max
+       ``ligand_plddt``.
+    5. Per (normalized) ``input_sample_id``: keep the designed-sample row
+       with max ``ligand_plddt``. ``is_baseline=True`` strips trailing
+       ``_<seqN>`` from ids so LigandMPNN/ProteinMPNN seq variants collapse
+       under one scaffold.
+    6. Apply ligand cutoffs (``ligand_rmsd <= cutoff``,
+       ``ligand_plddt >= cutoff``) to the collapsed rows.
+
+    Applying cutoffs before the per-input collapse would diverge when an
+    input's best-lplddt row fails the rmsd cutoff while a second-best row
+    passes — fig4 discards that input, so we must too.
     """
-    mask = pd.Series(True, index=flat_df.index)
+    if length_thresholds is None:
+        length_thresholds = DESIGNABLE_LENGTH_THRESHOLDS
 
-    if ligand_rmsd_cutoff is not None and "ligand_rmsd" in flat_df.columns:
-        mask &= flat_df["ligand_rmsd"] <= ligand_rmsd_cutoff
-
-    if ligand_plddt_cutoff is not None and "ligand_plddt" in flat_df.columns:
-        mask &= flat_df["ligand_plddt"] >= ligand_plddt_cutoff
-
-    filtered = flat_df[mask]
-
-    if filtered.empty:
-        logger.warning(
-            f"No samples pass cutoffs (rmsd <= {ligand_rmsd_cutoff}, "
-            f"plddt >= {ligand_plddt_cutoff})"
-        )
+    n_total = len(flat_df)
+    if n_total == 0:
         return pd.DataFrame()
 
-    n_before = flat_df["designed_sample_id"].nunique()
-    n_after = filtered["designed_sample_id"].nunique()
+    df = flat_df.copy()
+    df["length"] = df["input_sample_id"].map(_extract_length)
+
+    if apply_protein_filter:
+        covered_lengths = {l for lengths in length_thresholds for l in lengths}
+        in_length = df["length"].isin(covered_lengths)
+        n_length = int(in_length.sum())
+        logger.info(
+            f"Length filter: {n_length}/{n_total} rows in lengths "
+            f"{sorted(covered_lengths)}"
+        )
+        df = df[in_length]
+        if df.empty:
+            logger.warning("No rows survive length filter")
+            return pd.DataFrame()
+
+        protein_mask = _build_protein_quality_mask(df, length_thresholds)
+        n_protein = int(protein_mask.sum())
+        logger.info(
+            f"Protein quality filter: {n_protein}/{len(df)} rows pass "
+            f"length-dependent (avg_ca_plddt, sc_ca_rmsd) thresholds"
+        )
+        df = df[protein_mask]
+        if df.empty:
+            logger.warning("No rows survive protein quality filter")
+            return pd.DataFrame()
+
+    # Step 4: best diffusion per designed sample by ligand_plddt.
+    if "ligand_plddt" not in df.columns:
+        raise KeyError(
+            "flat_df missing 'ligand_plddt' column required for selection"
+        )
+    best_diff_idx = df.groupby("designed_sample_id")["ligand_plddt"].idxmax()
+    per_design = df.loc[best_diff_idx]
     logger.info(
-        f"Selection: {n_after}/{n_before} designed samples pass cutoffs "
-        f"(rmsd <= {ligand_rmsd_cutoff}, plddt >= {ligand_plddt_cutoff})"
+        f"Per-designed-sample collapse: {len(per_design)} designed samples"
     )
 
-    if "ligand_plddt" in filtered.columns:
-        idx = filtered.groupby("designed_sample_id")["ligand_plddt"].idxmax()
-    elif "ligand_rmsd" in filtered.columns:
-        idx = filtered.groupby("designed_sample_id")["ligand_rmsd"].idxmin()
-    else:
-        idx = filtered.groupby("designed_sample_id").head(1).index
+    # Step 5: best designed sample per (normalized) input by ligand_plddt.
+    per_design = per_design.copy()
+    per_design["_norm_input_id"] = per_design["input_sample_id"].map(
+        lambda s: _normalize_input_id(s, is_baseline)
+    )
+    best_input_idx = per_design.groupby("_norm_input_id")["ligand_plddt"].idxmax()
+    per_input = per_design.loc[best_input_idx].drop(columns="_norm_input_id")
+    logger.info(
+        f"Per-input collapse (is_baseline={is_baseline}): "
+        f"{len(per_input)} unique input scaffolds"
+    )
 
-    return filtered.loc[idx].reset_index(drop=True)
+    # Step 6: ligand cutoffs on the collapsed rows.
+    mask = pd.Series(True, index=per_input.index)
+    if ligand_rmsd_cutoff is not None and "ligand_rmsd" in per_input.columns:
+        mask &= per_input["ligand_rmsd"] <= ligand_rmsd_cutoff
+    if ligand_plddt_cutoff is not None:
+        mask &= per_input["ligand_plddt"] >= ligand_plddt_cutoff
+    selected = per_input[mask]
+
+    logger.info(
+        f"Ligand cutoffs (rmsd <= {ligand_rmsd_cutoff}, "
+        f"plddt >= {ligand_plddt_cutoff}): "
+        f"{len(selected)}/{len(per_input)} inputs survive"
+    )
+
+    return selected.reset_index(drop=True)
 
 
 def find_af3_prediction_path(

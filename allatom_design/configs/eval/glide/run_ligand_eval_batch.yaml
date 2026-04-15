@@ -23,11 +23,19 @@ num_workers: 1
 # Retry mode: path to failed_samples CSV from a previous run
 retry_csv: null
 
-# Sample selection cutoffs (null = skip that filter)
+# Sample selection cutoffs (null = skip that filter).
+# Matches fig4 Pipeline B (debug/plot_scripts/success_utils.py).
 selection:
   ligand_rmsd_cutoff: 2.0
   ligand_plddt_cutoff: 80
   seed: 42
+  # Length-dependent (avg_ca_plddt, sc_ca_rmsd) protein quality gate.
+  # Required for fig4 parity on denovoval-designable inputs; set false for
+  # datasets whose scaffold lengths fall outside {150, 250, 350, 450}.
+  apply_protein_filter: true
+  # Strip trailing _<seqN> from input_sample_id so LigandMPNN/ProteinMPNN
+  # seq variants collapse onto one scaffold during per-input selection.
+  is_baseline: false
 
 # CIF parser config
 cif_parse_cfg:

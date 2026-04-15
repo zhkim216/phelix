@@ -222,6 +222,8 @@ def main(cfg: DictConfig):
             flat_df,
             ligand_rmsd_cutoff=sel_cfg.get("ligand_rmsd_cutoff"),
             ligand_plddt_cutoff=sel_cfg.get("ligand_plddt_cutoff"),
+            apply_protein_filter=sel_cfg.get("apply_protein_filter", True),
+            is_baseline=sel_cfg.get("is_baseline", False),
         )
         print(f"Selected {len(selected)} samples after cutoff filtering")
 
