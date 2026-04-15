@@ -242,6 +242,167 @@ def plot_guidance_pareto(
     return written
 
 
+def _median_iqr_by_gamma(
+    df: pd.DataFrame, x: str, y: str
+) -> pd.DataFrame:
+    """Per-gamma median and IQR for ``x`` and ``y``, ascending by gamma.
+
+    Returned columns: ``gamma``, ``{y}_med``, ``{y}_q25``, ``{y}_q75``,
+    ``{x}_med``, ``{x}_q25``, ``{x}_q75``. Extracted so
+    :func:`plot_guidance_median_curve` and
+    :func:`plot_guidance_median_curve_compare` share the same statistics.
+    """
+    g = df.groupby("gamma")
+    stat = pd.DataFrame(
+        {
+            f"{y}_med": g[y].median(),
+            f"{y}_q25": g[y].quantile(0.25),
+            f"{y}_q75": g[y].quantile(0.75),
+            f"{x}_med": g[x].median(),
+            f"{x}_q25": g[x].quantile(0.25),
+            f"{x}_q75": g[x].quantile(0.75),
+        }
+    ).reset_index().sort_values("gamma")
+    return stat
+
+
+def _median_iqr_by_schedule(
+    df: pd.DataFrame, x: str, y: str, schedule_order: list[str] | None = None,
+) -> pd.DataFrame:
+    """Per-schedule median and IQR for ``x`` and ``y``.
+
+    The dataframe must contain a ``schedule_label`` column (raised by
+    :func:`plot_guidance_schedule_comparison`). Output columns:
+    ``schedule_label``, ``{y}_med``, ``{y}_q25``, ``{y}_q75``, ``{x}_med``,
+    ``{x}_q25``, ``{x}_q75``. Rows are emitted in ``schedule_order`` if given,
+    otherwise in first-encounter order.
+    """
+    if "schedule_label" not in df.columns:
+        raise ValueError(
+            "Dataframe is missing required column 'schedule_label'. "
+            "Re-run sampling with `guidance_cfg.schedule_list` set, or use "
+            "`plot_guidance_median_curve` for legacy gamma-only sweeps."
+        )
+    g = df.groupby("schedule_label")
+    stat = pd.DataFrame(
+        {
+            f"{y}_med": g[y].median(),
+            f"{y}_q25": g[y].quantile(0.25),
+            f"{y}_q75": g[y].quantile(0.75),
+            f"{x}_med": g[x].median(),
+            f"{x}_q25": g[x].quantile(0.25),
+            f"{x}_q75": g[x].quantile(0.75),
+        }
+    ).reset_index()
+
+    if schedule_order is None:
+        # First-encounter order from the dataframe.
+        seen: list[str] = []
+        for lbl in df["schedule_label"].tolist():
+            if lbl not in seen:
+                seen.append(lbl)
+        schedule_order = seen
+    else:
+        missing = [s for s in schedule_order if s not in set(stat["schedule_label"])]
+        if missing:
+            raise ValueError(
+                f"schedule_order references labels missing from dataframe: {missing}"
+            )
+
+    stat = stat.set_index("schedule_label").loc[schedule_order].reset_index()
+    return stat
+
+
+def plot_guidance_schedule_comparison(
+    df: pd.DataFrame,
+    out_png: str | Path,
+    *,
+    x: str = "U_uncond_per_res",
+    y: str = "U_cond_per_res",
+    schedule_order: list[str] | None = None,
+    title_suffix: str = "",
+) -> Path:
+    """Two-panel summary keyed on ``schedule_label`` (categorical x-axis).
+
+    Mirrors :func:`plot_guidance_median_curve` but groups by schedule label
+    instead of by ``gamma``. Designed for comparing constant-γ baselines
+    against time-dependent γ schedules at a fixed γ_max.
+
+    Left panel: per-schedule median ± IQR of ``y`` (blue) and ``x`` (red, twin
+    axis), with categorical x-ticks. Right panel: per-schedule median (x, y)
+    point colored by schedule index (tab10), labels annotated. No connecting
+    trajectory because schedules are not naturally ordered.
+    """
+    if len(df) == 0:
+        raise ValueError("Cannot plot schedule comparison on an empty dataframe.")
+
+    stat = _median_iqr_by_schedule(df, x, y, schedule_order=schedule_order)
+    labels = stat["schedule_label"].tolist()
+    xs_pos = np.arange(len(labels), dtype=float)
+
+    fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=(20, 6.2))
+    fig.subplots_adjust(wspace=0.6)
+    if title_suffix:
+        fig.suptitle(title_suffix, y=1.02)
+
+    # Left: median ± IQR per schedule, twin axis for x and y.
+    y_med = stat[f"{y}_med"].to_numpy(dtype=float)
+    y_q25 = stat[f"{y}_q25"].to_numpy(dtype=float)
+    y_q75 = stat[f"{y}_q75"].to_numpy(dtype=float)
+    ax_l.plot(xs_pos, y_med, color="tab:blue", marker="o", label=f"{y} median")
+    ax_l.fill_between(
+        xs_pos, y_q25, y_q75, color="tab:blue", alpha=0.2, label=f"{y} IQR",
+    )
+    ax_l.set_xticks(xs_pos)
+    ax_l.set_xticklabels(labels, rotation=15, ha="right")
+    ax_l.set_xlabel("schedule")
+    ax_l.set_ylabel(y, color="tab:blue")
+    ax_l.tick_params(axis="y", labelcolor="tab:blue")
+    ax_l.grid(True, alpha=0.3)
+
+    ax_l_twin = ax_l.twinx()
+    x_med = stat[f"{x}_med"].to_numpy(dtype=float)
+    x_q25 = stat[f"{x}_q25"].to_numpy(dtype=float)
+    x_q75 = stat[f"{x}_q75"].to_numpy(dtype=float)
+    ax_l_twin.plot(xs_pos, x_med, color="tab:red", marker="s", label=f"{x} median")
+    ax_l_twin.fill_between(
+        xs_pos, x_q25, x_q75, color="tab:red", alpha=0.2, label=f"{x} IQR",
+    )
+    ax_l_twin.set_ylabel(x, color="tab:red")
+    ax_l_twin.tick_params(axis="y", labelcolor="tab:red")
+
+    lines_l, labels_l = ax_l.get_legend_handles_labels()
+    lines_r, labels_r = ax_l_twin.get_legend_handles_labels()
+    ax_l.legend(lines_l + lines_r, labels_l + labels_r, loc="best", frameon=True)
+    ax_l.set_title("Median ± IQR per schedule")
+
+    # Right: median (x, y) trajectory keyed by schedule. No connecting line —
+    # schedules have no natural ordering.
+    cmap = plt.get_cmap("tab10")
+    colors = [cmap(i % 10) for i in range(len(labels))]
+    for i, lbl in enumerate(labels):
+        ax_r.scatter(
+            x_med[i], y_med[i],
+            color=colors[i], s=120, edgecolors="black", linewidths=0.7,
+            label=lbl, zorder=2,
+        )
+        ax_r.annotate(
+            lbl, (x_med[i], y_med[i]),
+            textcoords="offset points", xytext=(7, 5), fontsize=8,
+        )
+    ax_r.set_xlabel(f"{x} (median across examples)")
+    ax_r.set_ylabel(f"{y} (median across examples)")
+    ax_r.set_title("Median Pareto point per schedule")
+    ax_r.grid(True, alpha=0.3)
+    ax_r.legend(loc="best", frameon=True, fontsize=8)
+
+    out_png = Path(out_png)
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_png, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_png
+
+
 def plot_guidance_median_curve(
     df: pd.DataFrame,
     out_png: str | Path,
@@ -262,21 +423,12 @@ def plot_guidance_median_curve(
     if len(df) == 0:
         raise ValueError("Cannot plot median curve on an empty dataframe.")
 
-    g = df.groupby("gamma")
-    stat = pd.DataFrame(
-        {
-            f"{y}_med": g[y].median(),
-            f"{y}_q25": g[y].quantile(0.25),
-            f"{y}_q75": g[y].quantile(0.75),
-            f"{x}_med": g[x].median(),
-            f"{x}_q25": g[x].quantile(0.25),
-            f"{x}_q75": g[x].quantile(0.75),
-        }
-    ).reset_index().sort_values("gamma")
+    stat = _median_iqr_by_gamma(df, x, y)
 
     gammas = stat["gamma"].to_numpy(dtype=float)
 
-    fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=(12, 4.8))
+    fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=(20, 6.2))
+    fig.subplots_adjust(wspace=0.6)
 
     # Left: median ± IQR vs gamma, twin axis for x and y.
     ax_l.plot(gammas, stat[f"{y}_med"], color="tab:blue", marker="o", label=f"{y} median")
@@ -327,6 +479,146 @@ def plot_guidance_median_curve(
     ax_r.grid(True, alpha=0.3)
     cbar = fig.colorbar(sc, ax=ax_r, shrink=0.85, pad=0.02)
     cbar.set_label("gamma")
+
+    out_png = Path(out_png)
+    out_png.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_png, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_png
+
+
+def plot_guidance_median_curve_compare(
+    dfs: dict[str, pd.DataFrame],
+    out_png: str | Path,
+    *,
+    x: str = "U_uncond",
+    y: str = "U_cond",
+    title_suffix: str = "",
+    colors: dict[str, str] | None = None,
+    markers: dict[str, str] | None = None,
+    left_panel_title: str = "Per-residue energies vs gamma",
+) -> Path:
+    """Two-panel comparison of median curves across multiple guidance runs.
+
+    Mirrors the :func:`plot_guidance_median_curve` layout but overlays one
+    curve per run in ``dfs``. Designed for 2-run comparisons (e.g. rate vs
+    energy guidance); the API accepts any number of runs keyed by label.
+
+    Left panel: per-run median ± IQR of ``x`` and ``y`` vs gamma. Each run
+    contributes two lines (``y`` as circles/solid, ``x`` as squares/dashed)
+    coloured by ``colors[run_name]``. Best suited to per-residue energy
+    columns, where ``x`` and ``y`` live on a comparable scale.
+
+    Right panel: per-run median ``(x, y)`` trajectory, scattered by gamma on
+    a shared ``viridis`` colorbar. Run is encoded by marker shape (from
+    ``markers[run_name]``); each gamma point is annotated with its value.
+    """
+    if not dfs:
+        raise ValueError("`dfs` must contain at least one run.")
+    for name, df in dfs.items():
+        if len(df) == 0:
+            raise ValueError(f"Dataframe for run {name!r} is empty.")
+
+    run_names = list(dfs.keys())
+
+    default_palette = ["tab:blue", "tab:orange", "tab:green", "tab:red"]
+    default_markers = ["o", "s", "^", "D"]
+    if colors is None:
+        colors = {name: default_palette[i % len(default_palette)]
+                  for i, name in enumerate(run_names)}
+    if markers is None:
+        markers = {name: default_markers[i % len(default_markers)]
+                   for i, name in enumerate(run_names)}
+
+    stats = {name: _median_iqr_by_gamma(df, x, y) for name, df in dfs.items()}
+
+    fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=(16, 6.2))
+    title = "guidance median curves"
+    if title_suffix:
+        title = f"{title} — {title_suffix}"
+    fig.suptitle(title)
+
+    # Left: 2 lines per run (y = cond, circle solid; x = uncond, square dashed).
+    for name in run_names:
+        s = stats[name]
+        gammas = s["gamma"].to_numpy(dtype=float)
+        run_color = colors[name]
+
+        ax_l.plot(
+            gammas, s[f"{y}_med"].to_numpy(dtype=float),
+            color=run_color, marker="o", linestyle="-",
+            label=f"{y} ({name})",
+        )
+        ax_l.fill_between(
+            gammas,
+            s[f"{y}_q25"].to_numpy(dtype=float),
+            s[f"{y}_q75"].to_numpy(dtype=float),
+            color=run_color, alpha=0.15,
+        )
+
+        ax_l.plot(
+            gammas, s[f"{x}_med"].to_numpy(dtype=float),
+            color=run_color, marker="s", linestyle="--",
+            label=f"{x} ({name})",
+        )
+        ax_l.fill_between(
+            gammas,
+            s[f"{x}_q25"].to_numpy(dtype=float),
+            s[f"{x}_q75"].to_numpy(dtype=float),
+            color=run_color, alpha=0.15,
+        )
+
+    ax_l.set_xlabel("gamma")
+    ax_l.set_ylabel("U / N  (median; shade = IQR)")
+    ax_l.set_title(left_panel_title)
+    ax_l.grid(True, alpha=0.3)
+    ax_l.legend(fontsize=8, loc="best", frameon=True)
+
+    # Right: median Pareto trajectory per run.
+    all_gammas = np.concatenate(
+        [stats[n]["gamma"].to_numpy(dtype=float) for n in run_names]
+    )
+    vmin = float(np.nanmin(all_gammas)) if np.isfinite(all_gammas).any() else 0.0
+    vmax = float(np.nanmax(all_gammas)) if np.isfinite(all_gammas).any() else 1.0
+
+    sc = None
+    for i, name in enumerate(run_names):
+        s = stats[name]
+        gammas = s["gamma"].to_numpy(dtype=float)
+        xs_med = s[f"{x}_med"].to_numpy(dtype=float)
+        ys_med = s[f"{y}_med"].to_numpy(dtype=float)
+
+        connector_style = "-" if i == 0 else "--"
+        ax_r.plot(
+            xs_med, ys_med,
+            color="0.5", linewidth=1.0, alpha=0.5,
+            linestyle=connector_style, zorder=1,
+        )
+        sc = ax_r.scatter(
+            xs_med, ys_med,
+            c=gammas, cmap="viridis", vmin=vmin, vmax=vmax,
+            s=90, marker=markers[name],
+            edgecolors="black", linewidths=0.6,
+            label=name, zorder=2,
+        )
+        for gi, (xi, yi) in enumerate(zip(xs_med, ys_med)):
+            ax_r.annotate(
+                f"{gammas[gi]:.2f}", (xi, yi),
+                textcoords="offset points", xytext=(6, 4), fontsize=8,
+            )
+
+    ax_r.set_xlabel(f"{x} (median across examples)")
+    ax_r.set_ylabel(f"{y} (median across examples)")
+    n_pdbs = dfs[run_names[0]]["example_id"].nunique()
+    ax_r.set_title(f"Median Pareto trajectory (n_pdbs={n_pdbs})")
+    ax_r.grid(True, alpha=0.3)
+    ax_r.legend(fontsize=9, loc="best", frameon=True)
+
+    if sc is not None:
+        cbar = fig.colorbar(sc, ax=ax_r, shrink=0.85, pad=0.02)
+        cbar.set_label("gamma")
+
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
 
     out_png = Path(out_png)
     out_png.parent.mkdir(parents=True, exist_ok=True)

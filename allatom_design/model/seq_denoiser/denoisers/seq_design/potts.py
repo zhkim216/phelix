@@ -431,8 +431,7 @@ class GraphPotts(nn.Module):
         J_uncond: Optional[torch.Tensor] = None,
         edge_idx_uncond: Optional[torch.LongTensor] = None,
         gamma: float = 1.0,
-        clamp_mix_prob: bool = True,
-        guidance_mode: Literal["rate", "energy"] = "rate",
+        gamma_schedule_cfg: Optional[dict] = None,
     ) -> tuple[torch.LongTensor, torch.Tensor]:
         """Sample from Potts model with Chromatic Gibbs sampling.
 
@@ -528,8 +527,7 @@ class GraphPotts(nn.Module):
             J_uncond=J_uncond,
             edge_idx_uncond=edge_idx_uncond,
             gamma=gamma,
-            clamp_mix_prob=clamp_mix_prob,
-            guidance_mode=guidance_mode,
+            gamma_schedule_cfg=gamma_schedule_cfg,
         )
 
         if symmetry_order is not None:
@@ -717,6 +715,43 @@ def _color_graph(edge_idx, mask_ij, max_iter=100):
 
 
 @torch.no_grad()
+def _build_gamma_schedule(num_iterations: int, schedule_cfg: dict) -> List[float]:
+    """Return γ at every DLMC step for a time-dependent guidance schedule.
+
+    Convention: t = 1 - k / max(1, num_iterations - 1), so k=0 → t=1 (initial
+    / fully masked) and k=num_iterations-1 → t=0 (final). Schedules from
+    Rojas et al., ICLR 2026, Table 2.
+
+    Supported types:
+        - "constant":       γ(t) = gamma_max
+        - "ramp_up":        γ(t) = min(gamma_max, gamma_max * (1 - t) / (1 - tau))
+        - "right_interval": γ(t) = gamma_max if t >= tau else 0.0
+    """
+    N = int(num_iterations)
+    if N <= 0:
+        return []
+    g_max = float(schedule_cfg["gamma_max"])
+    stype = schedule_cfg["type"]
+    denom_k = max(1, N - 1)
+
+    out: List[float] = []
+    for k in range(N):
+        t = 1.0 - k / denom_k
+        if stype == "constant":
+            g = g_max
+        elif stype == "ramp_up":
+            tau = float(schedule_cfg["tau"])
+            denom = max(1e-12, 1.0 - tau)
+            g = min(g_max, g_max * (1.0 - t) / denom)
+        elif stype == "right_interval":
+            tau = float(schedule_cfg["tau"])
+            g = g_max if t >= tau else 0.0
+        else:
+            raise ValueError(f"Unknown gamma schedule type: {stype!r}")
+        out.append(float(g))
+    return out
+
+
 def sample_potts(
     h: torch.Tensor,
     J: torch.Tensor,
@@ -742,8 +777,7 @@ def sample_potts(
     J_uncond: Optional[torch.Tensor] = None,
     edge_idx_uncond: Optional[torch.LongTensor] = None,
     gamma: float = 1.0,
-    clamp_mix_prob: bool = True,
-    guidance_mode: Literal["rate", "energy"] = "rate",
+    gamma_schedule_cfg: Optional[dict] = None,
 ) -> Union[
     tuple[torch.LongTensor, torch.Tensor],
     tuple[torch.LongTensor, torch.Tensor, list[torch.LongTensor], list[torch.Tensor]],
@@ -823,13 +857,6 @@ def sample_potts(
                 "Potts guidance is only supported with the DLMC proposal; got "
                 f"proposal={proposal!r}."
             )
-        if rejection_step and guidance_mode != "energy":
-            raise NotImplementedError(
-                "rejection_step is only compatible with guidance_mode='energy' "
-                "when Potts guidance is active. Rate-mode mixes DLMC transition "
-                "probabilities so the mixed proposal does not correspond to any "
-                "Boltzmann target, breaking detailed balance."
-            )
         assert J_uncond is not None and edge_idx_uncond is not None, (
             "h_uncond was provided but J_uncond / edge_idx_uncond are missing."
         )
@@ -864,8 +891,8 @@ def sample_potts(
     ).tolist() + [temperature] * (num_iterations - num_iterations_annealing)
 
     if use_guidance:
-        if guidance_mode == "rate":
-            _energy_proposal = lambda _S, _T: _potts_proposal_dlmc_guidance(
+        def _energy_proposal(_S, _T, _gamma):
+            return _potts_proposal_dlmc_guidance_energy(
                 _S,
                 h,
                 J,
@@ -873,58 +900,54 @@ def sample_potts(
                 h_uncond,
                 J_uncond,
                 edge_idx_uncond,
-                gamma=gamma,
+                gamma=_gamma,
                 T=_T,
                 penalty_func=penalty_func,
                 differentiable_penalty=differentiable_penalty,
-                clamp_mix_prob=clamp_mix_prob,
-            )
-        elif guidance_mode == "energy":
-            _energy_proposal = lambda _S, _T: _potts_proposal_dlmc_guidance_energy(
-                _S,
-                h,
-                J,
-                edge_idx,
-                h_uncond,
-                J_uncond,
-                edge_idx_uncond,
-                gamma=gamma,
-                T=_T,
-                penalty_func=penalty_func,
-                differentiable_penalty=differentiable_penalty,
-            )
-        else:
-            raise ValueError(
-                f"Unknown guidance_mode={guidance_mode!r}; expected 'rate' or 'energy'."
             )
     elif proposal == "chromatic":
-        _energy_proposal = lambda _S, _T: _potts_proposal_gibbs(
-            _S,
-            h,
-            J,
-            edge_idx,
-            T=_T,
-            penalty_func=penalty_func,
-            differentiable_penalty=differentiable_penalty,
-        )
+        def _energy_proposal(_S, _T, _gamma=None):
+            return _potts_proposal_gibbs(
+                _S,
+                h,
+                J,
+                edge_idx,
+                T=_T,
+                penalty_func=penalty_func,
+                differentiable_penalty=differentiable_penalty,
+            )
     elif proposal == "dlmc":
-        _energy_proposal = lambda _S, _T: _potts_proposal_dlmc(
-            _S,
-            h,
-            J,
-            edge_idx,
-            T=_T,
-            penalty_func=penalty_func,
-            differentiable_penalty=differentiable_penalty,
-        )
+        def _energy_proposal(_S, _T, _gamma=None):
+            return _potts_proposal_dlmc(
+                _S,
+                h,
+                J,
+                edge_idx,
+                T=_T,
+                penalty_func=penalty_func,
+                differentiable_penalty=differentiable_penalty,
+            )
     else:
         raise NotImplementedError
+
+    # Per-step γ trajectory. When no schedule is supplied (or schedule is the
+    # constant type), this collapses to [gamma] * num_iterations and behavior
+    # is bit-for-bit identical to the legacy constant-γ path.
+    if (
+        use_guidance
+        and gamma_schedule_cfg is not None
+        and gamma_schedule_cfg.get("type", "constant") != "constant"
+    ):
+        gammas_per_step = _build_gamma_schedule(num_iterations, gamma_schedule_cfg)
+    else:
+        gammas_per_step = [float(gamma)] * num_iterations
 
     cumulative_sweeps = 0
     if return_trajectory:
         S_trajectory = []
         U_trajectory = []
     for i, T_i in enumerate(tqdm(temperatures, desc="Potts Sampling", leave=False)):
+        g_i = gammas_per_step[i]
         # Cycle through Gibbs updates random sites to the update with fixed prob
         if proposal == "chromatic":
             mask_update = schedule.eq(i % num_colors)
@@ -934,7 +957,7 @@ def sample_potts(
             mask_update = mask_update * (mask_mutatable > 0)
 
         # Compute current energy and local conditionals
-        U, logp = _energy_proposal(S, T_i)
+        U, logp = _energy_proposal(S, T_i, g_i)
 
         # Propose
         S_new = torch.distributions.categorical.Categorical(logits=logp).sample()
@@ -950,7 +973,7 @@ def sample_potts(
                 flux = -_U / T_i + _logp_ij
                 return flux
 
-            U_new, logp_new = _energy_proposal(S_new, T_i)
+            U_new, logp_new = _energy_proposal(S_new, T_i, g_i)
 
             _flux_backward = _flux(U_new, logp_new, S)
             _flux_forward = _flux(U, logp, S_new)
@@ -975,10 +998,11 @@ def sample_potts(
         if use_guidance:
             # Keep the reported U consistent with the mixed distribution
             # we are actually sampling from (penalty-free; raw physical Potts
-            # energies on both branches, mixed with gamma).
+            # energies on both branches, mixed with the terminal γ).
+            g_final = gammas_per_step[-1] if gammas_per_step else float(gamma)
             U_cond_final, _ = compute_potts_energy(S, h, J, edge_idx)
             U_uncond_final, _ = compute_potts_energy(S, h_uncond, J_uncond, edge_idx_uncond)
-            U = gamma * U_cond_final + (1.0 - gamma) * U_uncond_final
+            U = g_final * U_cond_final + (1.0 - g_final) * U_uncond_final
         else:
             U, _ = compute_potts_energy(S, h, J, edge_idx)
 
@@ -1167,142 +1191,6 @@ def _potts_proposal_dlmc(
     return U, logP_ij
 
 
-def _potts_proposal_dlmc_guidance(
-    S,
-    h_cond,
-    J_cond,
-    edge_idx_cond,
-    h_uncond,
-    J_uncond,
-    edge_idx_uncond,
-    gamma=1.0,
-    T=1.0,
-    penalty_func=None,
-    differentiable_penalty=True,
-    dt=0.1,
-    balancing_func="sigmoid",
-    clamp_mix_prob: bool = True,
-):
-    """Classifier-free-style guided DLMC proposal (rate/prob-space mixing).
-
-    Mixes the off-diagonal transition *probabilities* (not log-probs) of a
-    "cond" branch (ligand-conditioned Potts params) and an "uncond" branch
-    (ligand-masked Potts params) in log-space with an eps floor, mirroring
-    the reference CFG implementation in
-    `discrete_guidance/src/fm_utils.py::flow_matching_sampling_masking_euler`
-    (lines 309-326):
-
-        P_ij_mix = exp(gamma * log(P_ij_cond + eps)
-                       + (1 - gamma) * log(P_ij_uncond + eps))
-        P_ij_mix = clamp(P_ij_mix, 0, 1)            # per-entry cap
-        P_ii_mix = clamp(1 - sum_{j != i} P_ij_mix, 0)   # self-transition
-
-    gamma=1 recovers the cond-only DLMC proposal; gamma=0 is the pure
-    uncond baseline; intermediate values interpolate; gamma > 1
-    extrapolates toward cond (classifier-free guidance). A naive linear
-    mix of the log-probs (`gamma * logP_cond + (1 - gamma) * logP_uncond`)
-    is NOT numerically safe at gamma > 1: whenever cond and uncond
-    disagree on a banned-token entry, the subtraction can overflow
-    `exp()` to `+inf`, and the downstream `(1 - p_flip).clamp(1e-5).log()`
-    does NOT sanitize NaN (torch.clamp passes NaN through), which then
-    crashes Categorical's CUDA validation kernel. The rate-space
-    formulation with eps + per-entry clamp makes the computation robust
-    for all gamma the user is likely to try.
-
-    The LCP complexity penalty only depends on S, so its gradient is
-    computed once and applied identically to both U_i_cond and U_i_uncond
-    (and U_cond / U_uncond).
-    """
-    assert h_cond.shape == h_uncond.shape, (
-        f"cond/uncond h shape mismatch: {tuple(h_cond.shape)} vs {tuple(h_uncond.shape)}"
-    )
-    assert J_cond.shape == J_uncond.shape, (
-        f"cond/uncond J shape mismatch: {tuple(J_cond.shape)} vs {tuple(J_uncond.shape)}"
-    )
-
-    num_states = h_cond.shape[-1]
-
-    # Potts energies for both branches (shared S).
-    U_cond, U_i_cond = compute_potts_energy(S, h_cond, J_cond, edge_idx_cond)
-    U_uncond, U_i_uncond = compute_potts_energy(S, h_uncond, J_uncond, edge_idx_uncond)
-
-    # Penalty depends only on S, so compute once and apply identically to
-    # both branches.
-    if penalty_func is not None:
-        O_pen = F.one_hot(S, num_states).float()
-        if differentiable_penalty:
-            with torch.enable_grad():
-                O_pen.requires_grad = True
-                U_penalty = penalty_func(O_pen)
-                U_i_adjustment = torch.autograd.grad(U_penalty.sum(), [O_pen])[0].detach()
-                U_penalty = U_penalty.detach()
-                U_i_adjustment = U_i_adjustment - torch.gather(
-                    U_i_adjustment, -1, S[..., None]
-                )
-            U_i_cond = U_i_cond + U_i_adjustment
-            U_i_uncond = U_i_uncond + U_i_adjustment
-        else:
-            U_penalty = penalty_func(O_pen)
-        U_cond = U_cond + U_penalty
-        U_uncond = U_uncond + U_penalty
-
-    O = F.one_hot(S, num_states).float()
-
-    def _branch_logP_ij(U_i):
-        logP_j = F.log_softmax(-U_i / T, dim=-1)
-        logP_i = torch.gather(logP_j, -1, S[..., None])
-        if balancing_func == "sqrt":
-            log_Q_ij = 0.5 * (logP_j - logP_i)
-        elif balancing_func == "sigmoid":
-            log_Q_ij = F.logsigmoid(logP_j - logP_i)
-        else:
-            raise NotImplementedError
-        rate = torch.exp(log_Q_ij - logP_j)
-        logP_ij = logP_j + (-(-dt * rate).expm1()).log()
-        return logP_ij
-
-    logP_ij_cond = _branch_logP_ij(U_i_cond)
-    logP_ij_uncond = _branch_logP_ij(U_i_uncond)
-
-    # CFG mixing in probability space with an eps floor. See the
-    # function docstring for the rationale; the short version is that a
-    # naive linear mix in log-space produces NaN at gamma > 1 whenever
-    # cond and uncond disagree on a banned-token entry, and torch.clamp
-    # does not sanitize NaN.
-    P_ij_cond_off = (1.0 - O) * logP_ij_cond.exp()
-    P_ij_uncond_off = (1.0 - O) * logP_ij_uncond.exp()
-    eps = 1e-9
-    log_P_mix = (
-        gamma * torch.log(P_ij_cond_off + eps)
-        + (1.0 - gamma) * torch.log(P_ij_uncond_off + eps)
-    )
-    P_ij_mix_off = log_P_mix.exp()
-    # Re-zero the diagonal: `+ eps` inside the log leaked mass there.
-    P_ij_mix_off = (1.0 - O) * P_ij_mix_off
-    if clamp_mix_prob:
-        # Per-entry clamp — belt-and-braces guard against any single entry
-        # running away when gamma is large. Toggleable via the guidance
-        # config for ablations; Categorical's internal log_softmax is the
-        # true normalisation step, so turning this off is safe but lets
-        # individual entries grow arbitrarily before the softmax reweighs.
-        P_ij_mix_off = P_ij_mix_off.clamp(min=0.0, max=1.0)
-
-    # Off-diagonal total mass → self-transition probability.
-    p_flip = P_ij_mix_off.sum(-1, keepdim=True)
-    p_stay = (1.0 - p_flip).clamp(min=0.0)
-
-    # Reassemble the full transition matrix, then convert to logits for
-    # Categorical. Categorical's internal log_softmax absorbs any
-    # residual normalisation drift.
-    P_ij = (1.0 - O) * P_ij_mix_off + O * p_stay
-    logP_ij = torch.log(P_ij + eps)
-
-    # Tracked energy mirrors the distribution we're sampling from so
-    # downstream rankings / logs stay consistent with the mixed proposal.
-    U = gamma * U_cond + (1.0 - gamma) * U_uncond
-    return U, logP_ij
-
-
 def _potts_proposal_dlmc_guidance_energy(
     S,
     h_cond,
@@ -1332,13 +1220,9 @@ def _potts_proposal_dlmc_guidance_energy(
     graph). This is asserted at runtime; any future regression where the graph
     depends on the conditioning will surface immediately.
 
-    Unlike the rate-space variant (`_potts_proposal_dlmc_guidance`), this path
-    does not need an `eps` floor or per-entry clamp: energy-space mixing is
-    linear, so gamma extrapolation cannot produce log-domain NaNs. Complexity
-    penalties are handled by the inner `_potts_proposal_dlmc` on the mixed
-    parameters — since the penalty depends only on `S`, this is equivalent to
-    applying it once and sharing it across both branches (matching the
-    rate-space variant's semantics).
+    Complexity penalties are handled by the inner `_potts_proposal_dlmc` on the
+    mixed parameters — since the penalty depends only on `S`, this is equivalent
+    to applying it once and sharing it across both branches.
     """
     assert h_cond.shape == h_uncond.shape, (
         f"cond/uncond h shape mismatch: {tuple(h_cond.shape)} vs {tuple(h_uncond.shape)}"

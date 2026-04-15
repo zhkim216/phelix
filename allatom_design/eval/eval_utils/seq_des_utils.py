@@ -159,6 +159,7 @@ def redesign_with_lcaliby(seed: int = 0,
                 }
                 if guidance_enabled:
                     gamma_val = output["gamma"][i]
+                    schedule_label_val = output.get("schedule_label", [None] * len(sample_ids))[i]
                     u_cond = output["U_cond"][i]
                     u_uncond = output["U_uncond"][i]
                     u_mixed = output["U"][i]
@@ -181,6 +182,7 @@ def redesign_with_lcaliby(seed: int = 0,
 
                     guidance_row = {
                         "gamma": gamma_val,
+                        "schedule_label": schedule_label_val,
                         "U_cond": u_cond,
                         "U_uncond": u_uncond,
                         "U_mixed": u_mixed,
@@ -379,21 +381,30 @@ def run_lc_seq_des(
                     outputs[example_id] = defaultdict(list)
                 aux = id_to_aux[example_id]
 
-                # Per-gamma counter so that gamma-tagged sample ids reset
-                # within each gamma (e.g. gamma0.50_sample0, gamma0.50_sample1, ...).
-                gamma_counter: dict[float, int] = defaultdict(int)
+                # Per-(schedule, gamma) counter so that tagged sample ids reset
+                # within each schedule run (e.g. ramp_up_t0.5_sample0,
+                # ramp_up_t0.5_sample1, ... and gamma0.50_sample0, ...).
+                tag_counter: dict[str, int] = defaultdict(int)
 
                 for ai, designed_atom_array in enumerate(atom_arrays):
                     gamma_val = aux[ai].get("gamma") if isinstance(aux[ai], dict) else None
-                    if gamma_val is not None:
-                        sub_ai = gamma_counter[gamma_val]
-                        gamma_counter[gamma_val] += 1
-                        designed_sample_id = f"{example_id}_gamma{gamma_val:.2f}_sample{sub_ai}"
+                    schedule_label_val = aux[ai].get("schedule_label") if isinstance(aux[ai], dict) else None
+                    if schedule_label_val is not None and not str(schedule_label_val).startswith("gamma_"):
+                        tag = str(schedule_label_val)
+                        sub_ai = tag_counter[tag]
+                        tag_counter[tag] += 1
+                        designed_sample_id = f"{example_id}_{tag}_sample{sub_ai}"
+                    elif gamma_val is not None:
+                        tag = f"gamma{gamma_val:.2f}"
+                        sub_ai = tag_counter[tag]
+                        tag_counter[tag] += 1
+                        designed_sample_id = f"{example_id}_{tag}_sample{sub_ai}"
                     else:
                         designed_sample_id = f"{example_id}_sample{ai}"
                     outputs[example_id]["designed_sample_id"].append(designed_sample_id)
                     outputs[example_id]["U"].append(aux[ai]["U"])
                     outputs[example_id]["gamma"].append(gamma_val)
+                    outputs[example_id]["schedule_label"].append(schedule_label_val)
                     for guidance_key in (
                         "U_cond",
                         "U_uncond",

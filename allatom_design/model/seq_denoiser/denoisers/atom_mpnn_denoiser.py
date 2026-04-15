@@ -124,15 +124,18 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         When ``potts_sampling_cfg.guidance_cfg.enabled`` is true, a second
         forward pass is run on a ligand-masked (``protein_only``) copy of the
-        batch to obtain "uncond" Potts parameters. The sampler then mixes the
-        cond and uncond DLMC proposals at each sweep with
+        batch to obtain "uncond" Potts parameters. The sampler then runs DLMC
+        on the linearly-mixed parameters
 
-            logP_ij_guidance = gamma * logP_ij_cond + (1 - gamma) * logP_ij_uncond
+            h_mix = gamma * h_cond + (1 - gamma) * h_uncond
+            J_mix = gamma * J_cond + (1 - gamma) * J_uncond
 
-        sweeping over ``gamma_list``. For each sampled sequence we also
-        record post-hoc physical Potts energies ``U_cond`` and ``U_uncond``
-        (no LCP penalty) so that downstream code can plot the Pareto front
-        of ligand-fit vs. ligand-free stability.
+        sweeping over ``gamma_list``. This samples from the Boltzmann
+        distribution of ``U_mix = gamma * U_cond + (1 - gamma) * U_uncond``.
+        For each sampled sequence we also record post-hoc physical Potts
+        energies ``U_cond`` and ``U_uncond`` (no LCP penalty) so that
+        downstream code can plot the Pareto front of ligand-fit vs.
+        ligand-free stability.
 
         Returns:
             output_feats: list[dict[str, TensorType["b ..."]]]: list of length (n_samples_per_pdb) of output features for each sample
@@ -156,16 +159,12 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                     "Potts guidance is not supported together with tied_sampling."
                 )
             gamma_list = list(guidance_cfg.get("gamma_list", [1.0]))
+            schedule_list_raw = guidance_cfg.get("schedule_list", None)
+            schedule_list = [dict(s) for s in schedule_list_raw] if schedule_list_raw is not None else None
             uncond_mode = guidance_cfg.get("uncond_mode", "protein_only")
             if uncond_mode != "protein_only":
                 raise NotImplementedError(
                     f"Unsupported uncond_mode={uncond_mode!r}. Only 'protein_only' is implemented."
-                )
-            clamp_mix_prob = bool(guidance_cfg.get("clamp_mix_prob", True))
-            guidance_mode = str(guidance_cfg.get("guidance_mode", "rate"))
-            if guidance_mode not in ("rate", "energy"):
-                raise ValueError(
-                    f"Unknown guidance_mode={guidance_mode!r}; expected 'rate' or 'energy'."
                 )
             # Build the uncond batch *before* the first compute_potts_params
             # call so both branches see the same starting state. A shallow
@@ -176,9 +175,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             pocket_distance = float(guidance_cfg.get("pocket_distance", 10.0))
         else:
             gamma_list = [None]
+            schedule_list = None
             batch_uncond = None
-            clamp_mix_prob = True  # unused when guidance is off
-            guidance_mode = "rate"  # unused when guidance is off
             pocket_distance = None
 
         # Compute cond potts parameters
@@ -238,7 +236,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         S = []  # keep track of sequences for each sample
         aux["U"] = []  # mixed energy per sample (equal to U_cond when guidance is off)
-        aux["gamma"] = []  # gamma used to produce each sample (None when guidance is off)
+        aux["gamma"] = []  # gamma used to produce each sample (None when guidance is off; γ_max for schedules)
+        aux["schedule_label"] = []  # human-readable schedule tag (None when guidance is off)
         aux["U_cond"] = []  # post-hoc cond energy (no penalty); None when guidance is off
         aux["U_uncond"] = []  # post-hoc uncond energy (no penalty); None when guidance is off
         # Per-residue and pocket-restricted energy aux (guidance-only). All
@@ -253,10 +252,41 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
 
         num_seqs_per_pdb = sampling_inputs["num_seqs_per_pdb"]
 
-        # Design sequences: outer loop over gamma, inner loop over samples-per-pdb.
-        for gamma in gamma_list:
-            gamma_desc = f"gamma={gamma:.2f}" if gamma is not None else "no-guidance"
-            for _ in tqdm(range(num_seqs_per_pdb), desc=f"Sampling sequences ({gamma_desc})", leave=False):
+        # Outer iteration: schedule_list (when set) takes precedence over
+        # gamma_list. Each item is normalized to {label, type, gamma_max}; for
+        # constant entries we pass gamma_schedule_cfg=None so the legacy
+        # constant-γ path runs unchanged.
+        if use_guidance and schedule_list is not None:
+            iter_items = []
+            for sched in schedule_list:
+                if "type" not in sched or "gamma_max" not in sched:
+                    raise ValueError(
+                        f"schedule_list entry must include 'type' and 'gamma_max'; got {sched!r}"
+                    )
+                iter_items.append({
+                    "label": str(sched.get("label", f"{sched['type']}_g{float(sched['gamma_max']):.2f}")),
+                    "type": str(sched["type"]),
+                    "gamma_max": float(sched["gamma_max"]),
+                    **({"tau": float(sched["tau"])} if "tau" in sched else {}),
+                })
+        else:
+            iter_items = [
+                {
+                    "label": (f"gamma_{g:.2f}" if g is not None else "no-guidance"),
+                    "type": "constant",
+                    "gamma_max": (float(g) if g is not None else None),
+                }
+                for g in gamma_list
+            ]
+
+        # Design sequences: outer loop over schedule (or constant gamma),
+        # inner loop over samples-per-pdb.
+        for sched in iter_items:
+            sched_label = sched["label"]
+            sched_gamma_max = sched["gamma_max"]
+            sched_cfg = None if sched["type"] == "constant" else sched
+            desc = f"schedule={sched_label}"
+            for _ in tqdm(range(num_seqs_per_pdb), desc=f"Sampling sequences ({desc})", leave=False):
 
                 if use_guidance:
                     S_sample, U_sample = self.atom_mpnn.decoder_S_potts.sample(
@@ -278,9 +308,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                         h_uncond=potts_decoder_aux_uncond["h"],
                         J_uncond=potts_decoder_aux_uncond["J"],
                         edge_idx_uncond=potts_decoder_aux_uncond["edge_idx"],
-                        gamma=gamma,
-                        clamp_mix_prob=clamp_mix_prob,
-                        guidance_mode=guidance_mode,
+                        gamma=sched_gamma_max,
+                        gamma_schedule_cfg=sched_cfg,
                     )
                 else:
                     S_sample, U_sample = self.atom_mpnn.decoder_S_potts.sample(
@@ -305,7 +334,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 S_sample = self._set_non_protein_tokens(S_sample, batch)
 
                 aux["U"].append(U_sample.cpu())
-                aux["gamma"].append(gamma)
+                aux["gamma"].append(sched_gamma_max)
+                aux["schedule_label"].append(sched_label if use_guidance else None)
 
                 if use_guidance:
                     # Post-hoc physical Potts energies on both branches. Used
@@ -366,6 +396,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             {
                 "U": aux["U"][si],
                 "gamma": aux["gamma"][si],
+                "schedule_label": aux["schedule_label"][si],
                 "U_cond": aux["U_cond"][si],
                 "U_uncond": aux["U_uncond"][si],
                 "U_cond_per_res": aux["U_cond_per_res"][si],
@@ -623,6 +654,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                     sample_aux["U"] = _extract_scalar(aux_si.get("U"), bi)
                     if "gamma" in aux_si:
                         sample_aux["gamma"] = aux_si["gamma"]  # scalar or None
+                    if "schedule_label" in aux_si:
+                        sample_aux["schedule_label"] = aux_si["schedule_label"]  # str or None
                     for key in (
                         "U_cond",
                         "U_uncond",

@@ -29,22 +29,17 @@ potts_sampling_cfg:
   # Classifier-free-style guidance: mix a ligand-conditioned ("cond") and
   # ligand-absent ("uncond") Potts proposal at each DLMC sweep. When
   # `enabled=false` this is a no-op and the sampler uses the cond branch
-  # only. Two mixing schemes are implemented (see potts.py):
-  #   - "rate"   (default): CFG mixing in DLMC transition-probability space
-  #              via `_potts_proposal_dlmc_guidance`. Numerically robust at
-  #              gamma > 1 thanks to the eps floor + per-entry clamp.
-  #   - "energy": mix `h`, `J` linearly (γ·cond + (1-γ)·uncond) and run the
-  #              standard `_potts_proposal_dlmc`. Exact sampler for the
-  #              Boltzmann distribution of `U_guided = γ·U_cond + (1-γ)·U_uncond`;
-  #              exploits the linearity of the Potts energy in (h, J). Requires
-  #              edge_idx_cond == edge_idx_uncond (holds here because both
-  #              branches share the same protein kNN graph).
+  # only. Guidance mixes `h`, `J` linearly (γ·cond + (1-γ)·uncond) and
+  # runs the standard DLMC proposal on the mixed parameters, giving an
+  # exact sampler for the Boltzmann distribution of
+  #     U_mix = γ·U_cond + (1-γ)·U_uncond
+  # (exploits the linearity of the Potts energy in (h, J); requires
+  # edge_idx_cond == edge_idx_uncond, which holds here because both
+  # branches share the same protein kNN graph).
   guidance_cfg:
     enabled: false
     gamma_list: [0.0, 0.5, 1.0, 1.5, 2.0]   # gamma > 1 = CFG extrapolation
     uncond_mode: "protein_only"              # only mode currently implemented
-    guidance_mode: "rate"                    # "rate" | "energy"  (see above)
-    clamp_mix_prob: true                     # per-entry [0,1] clamp on the mixed P_ij (only used when guidance_mode="rate")
     pocket_distance: 10.0                    # Å from any ligand atom to pseudo-Cβ for the pocket mask
 
 mlm_sampling_cfg:
