@@ -33,6 +33,7 @@ DESIGNABLE_LENGTH_THRESHOLDS = {
 
 _LENGTH_PATTERN = re.compile(r"_len_(\d+)_")
 _BASELINE_SEQ_SUFFIX = re.compile(r"_\d+$")
+_SEQ_SAMPLE_SUFFIX = re.compile(r"_sample\d+$")
 
 
 def _extract_length(sample_id: str) -> float:
@@ -44,12 +45,23 @@ def _extract_length(sample_id: str) -> float:
 
 
 def _normalize_input_id(sample_id: str, is_baseline: bool) -> str:
-    """Strip trailing ``_<seqN>`` from baseline (LigandMPNN/ProteinMPNN) ids."""
+    """Collapse a per-sequence-sample id to its backbone id.
+
+    Always strips trailing ``_sample<N>``: the seq denoiser names each
+    sequence sample ``{backbone}_sample{i}``, and in the twostage pipeline
+    the stage-1 output becomes ``input_sample_id`` for stage-2 eval — so
+    different ``i`` values belong to the same backbone and must collapse
+    before the per-scaffold reduction (otherwise they double-count).
+
+    Baseline runs additionally strip trailing ``_<seqN>`` (LigandMPNN /
+    ProteinMPNN use that suffix to index sequence variants).
+    """
     if not isinstance(sample_id, str):
         return sample_id
+    out = _SEQ_SAMPLE_SUFFIX.sub("", sample_id)
     if is_baseline:
-        return _BASELINE_SEQ_SUFFIX.sub("", sample_id)
-    return sample_id
+        out = _BASELINE_SEQ_SUFFIX.sub("", out)
+    return out
 
 
 def _build_protein_quality_mask(
@@ -197,12 +209,19 @@ def select_best_diffusion(
     per_design["_norm_input_id"] = per_design["input_sample_id"].map(
         lambda s: _normalize_input_id(s, is_baseline)
     )
+    n_raw_inputs = per_design["input_sample_id"].nunique()
     best_input_idx = per_design.groupby("_norm_input_id")["ligand_plddt"].idxmax()
     per_input = per_design.loc[best_input_idx].drop(columns="_norm_input_id")
     logger.info(
         f"Per-input collapse (is_baseline={is_baseline}): "
         f"{len(per_input)} unique input scaffolds"
     )
+    n_dedup = n_raw_inputs - len(per_input)
+    if n_dedup > 0:
+        logger.info(
+            f"Sequence-sample collapse: {n_dedup} duplicate backbones merged "
+            f"({n_raw_inputs} raw input_sample_ids → {len(per_input)} backbones)"
+        )
 
     # Step 6: ligand cutoffs on the collapsed rows.
     mask = pd.Series(True, index=per_input.index)
