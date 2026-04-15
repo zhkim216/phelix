@@ -5,7 +5,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
-#SBATCH --time=16:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_guidance_denovoval_noclamp_g1.0_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_guidance_denovoval_noclamp_g1.0_%A_%a.err
 
@@ -54,7 +54,7 @@ VALSET_NAME="denovoval_guidance_noclamp"
 
 DENOISER_TRAIN_DIR=/scratch/users/zhkim216/out_dir/ligand_seq_des/${MODEL_NAME}
 
-EXP_NAME=eval_${MODEL_NAME}_${VALSET_NAME}_len150_250_gamma${GAMMA}
+EXP_NAME=eval_${MODEL_NAME}_${VALSET_NAME}_len150_250_gamma${GAMMA}_full
 
 echo "Starting guidance run for model=${MODEL_NAME}, step=${STEP}, valset=${VALSET_NAME}, gamma=${GAMMA}, chunk=${CHUNK_IDX}/${NUM_CHUNKS} (array_task=${SLURM_ARRAY_TASK_ID})"
 
@@ -72,6 +72,8 @@ echo "GPU compute capability: ${COMPUTE_CAP}, using flash_attention_implementati
 # NOTE: batch_size=4 (halved from the usual 8) since guidance runs cond+uncond
 # forward passes and doubles Potts-decoder memory.
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py \
+    --config-path ${BASE_DIR}/allatom_design/configs/eval/sampling \
+    --config-name lc_seq_des_multi \
     wandb.no_wandb=false \
     wandb.project=${PROJECT} \
     wandb.wandb_id=${WANDB_ID} \
@@ -105,7 +107,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     pdb_cfg.split_by_subfolder=false \
     pdb_cfg.array_id=${CHUNK_IDX} \
     pdb_cfg.num_arrays=${NUM_CHUNKS} \
-    'pdb_cfg.sample_indices=[0,1]' \
+    'pdb_cfg.sample_indices=[0,1,2,3,4]' \
     'pdb_cfg.sample_lengths=[150,250]' \
     guidance_cfg.enabled=true \
     "guidance_cfg.gamma_list=[${GAMMA}]" \
