@@ -27,7 +27,7 @@ BASE_OUT_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des
 
 AF3_EVAL_DIR=${BASE_OUT_DIR}/eval_exp35_cfg2_denovoval_af3/step_82500_epoch_52
 OUTPUT_DIR=${BASE_OUT_DIR}/eval_exp35_cfg2_denovoval_ligand_eval/step_82500_epoch_52
-SAMPLE_DIR=${BASE_OUT_DIR}/eval_exp35_cfg2_denovoval_af3/step_82500_epoch_52/samples
+SAMPLE_DIR=${AF3_EVAL_DIR}/samples
 SCHRODINGER_PATH=/scratch/users/zhkim216/software/schrodinger2025-3
 
 mkdir -p /scratch/users/zhkim216/job_output/eval_ligand_seq_des "${HYDRA_DIR}" "${OUTPUT_DIR}"
