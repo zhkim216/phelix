@@ -214,6 +214,7 @@ def process_single_sample(
     pb_cfg: dict[str, Any],
     cif_parse_cfg: dict | None = None,
     seed: int = 42,
+    ref_sample_is_designed: bool = False,
 ) -> dict[str, Any]:
     """Run the full per-sample pipeline; stateless for ``ProcessPoolExecutor``."""
     designed_id = row["designed_sample_id"]
@@ -414,8 +415,9 @@ def process_single_sample(
 
     # ========== Redock vs reference RMSD ==========
     if redock_sdf:
+        ref_stem = sample_name if ref_sample_is_designed else input_id
         rmsd_val = _compute_redock_vs_ref_rmsd(
-            sample_cif=Path(sample_dir) / f"{input_id}.cif",
+            sample_cif=Path(sample_dir) / f"{ref_stem}.cif",
             cif_parse_cfg=cif_parse_cfg,
             redock_sdf_path=redock_sdf,
             designed_id=designed_id,
@@ -442,6 +444,7 @@ def evaluate_batch(
     cif_parse_cfg: dict | None = None,
     seed: int = 42,
     num_workers: int = 1,
+    ref_sample_is_designed: bool = False,
 ) -> pd.DataFrame:
     """Evaluate all selected samples, optionally in parallel."""
     output_path = Path(output_dir)
@@ -469,6 +472,7 @@ def evaluate_batch(
         pb_cfg=pb_cfg,
         cif_parse_cfg=cif_parse_cfg,
         seed=seed,
+        ref_sample_is_designed=ref_sample_is_designed,
     )
 
     results: list[dict[str, Any]] = []

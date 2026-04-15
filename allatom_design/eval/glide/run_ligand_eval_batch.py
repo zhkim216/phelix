@@ -265,6 +265,7 @@ def main(cfg: DictConfig):
         cif_parse_cfg=cfg_dict.get("cif_parse_cfg"),
         seed=sel_cfg.get("seed", 42),
         num_workers=num_workers,
+        ref_sample_is_designed=cfg_dict.get("ref_sample_is_designed", False),
     )
 
     # ================================================================

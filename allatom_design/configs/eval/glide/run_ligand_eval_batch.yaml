@@ -3,8 +3,15 @@
 
 # Input directories
 af3_eval_dir: null   # AF3 eval dir (contains af3_ss_preds/, metrics CSVs)
-sample_dir: null     # Original input CIFs (denovo_val_cifs/designable)
+sample_dir: null     # Reference-ligand CIF dir. When ref_sample_is_designed=true,
+                     # point at ${af3_eval_dir}/samples (denoiser output). When false,
+                     # point at the native input dir (e.g. denovo_val_cifs/designable).
 output_dir: null     # Output directory for ligand eval results
+
+# Reference-ligand filename rule for redock_vs_ref_ligand_rmsd:
+#   true  -> look up {designed_sample_id}.cif in sample_dir (denoiser samples layout)
+#   false -> look up {input_sample_id}.cif in sample_dir (native layout)
+ref_sample_is_designed: true
 
 # Debug mode
 debug: false
