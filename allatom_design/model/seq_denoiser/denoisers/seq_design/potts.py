@@ -432,6 +432,7 @@ class GraphPotts(nn.Module):
         edge_idx_uncond: Optional[torch.LongTensor] = None,
         gamma: float = 1.0,
         clamp_mix_prob: bool = True,
+        guidance_mode: Literal["rate", "energy"] = "rate",
     ) -> tuple[torch.LongTensor, torch.Tensor]:
         """Sample from Potts model with Chromatic Gibbs sampling.
 
@@ -528,6 +529,7 @@ class GraphPotts(nn.Module):
             edge_idx_uncond=edge_idx_uncond,
             gamma=gamma,
             clamp_mix_prob=clamp_mix_prob,
+            guidance_mode=guidance_mode,
         )
 
         if symmetry_order is not None:
@@ -741,6 +743,7 @@ def sample_potts(
     edge_idx_uncond: Optional[torch.LongTensor] = None,
     gamma: float = 1.0,
     clamp_mix_prob: bool = True,
+    guidance_mode: Literal["rate", "energy"] = "rate",
 ) -> Union[
     tuple[torch.LongTensor, torch.Tensor],
     tuple[torch.LongTensor, torch.Tensor, list[torch.LongTensor], list[torch.Tensor]],
@@ -820,10 +823,12 @@ def sample_potts(
                 "Potts guidance is only supported with the DLMC proposal; got "
                 f"proposal={proposal!r}."
             )
-        if rejection_step:
+        if rejection_step and guidance_mode != "energy":
             raise NotImplementedError(
-                "rejection_step is not supported together with Potts guidance "
-                "(reverse-direction scoring of a mixed proposal is out of scope)."
+                "rejection_step is only compatible with guidance_mode='energy' "
+                "when Potts guidance is active. Rate-mode mixes DLMC transition "
+                "probabilities so the mixed proposal does not correspond to any "
+                "Boltzmann target, breaking detailed balance."
             )
         assert J_uncond is not None and edge_idx_uncond is not None, (
             "h_uncond was provided but J_uncond / edge_idx_uncond are missing."
@@ -859,20 +864,39 @@ def sample_potts(
     ).tolist() + [temperature] * (num_iterations - num_iterations_annealing)
 
     if use_guidance:
-        _energy_proposal = lambda _S, _T: _potts_proposal_dlmc_guidance(
-            _S,
-            h,
-            J,
-            edge_idx,
-            h_uncond,
-            J_uncond,
-            edge_idx_uncond,
-            gamma=gamma,
-            T=_T,
-            penalty_func=penalty_func,
-            differentiable_penalty=differentiable_penalty,
-            clamp_mix_prob=clamp_mix_prob,
-        )
+        if guidance_mode == "rate":
+            _energy_proposal = lambda _S, _T: _potts_proposal_dlmc_guidance(
+                _S,
+                h,
+                J,
+                edge_idx,
+                h_uncond,
+                J_uncond,
+                edge_idx_uncond,
+                gamma=gamma,
+                T=_T,
+                penalty_func=penalty_func,
+                differentiable_penalty=differentiable_penalty,
+                clamp_mix_prob=clamp_mix_prob,
+            )
+        elif guidance_mode == "energy":
+            _energy_proposal = lambda _S, _T: _potts_proposal_dlmc_guidance_energy(
+                _S,
+                h,
+                J,
+                edge_idx,
+                h_uncond,
+                J_uncond,
+                edge_idx_uncond,
+                gamma=gamma,
+                T=_T,
+                penalty_func=penalty_func,
+                differentiable_penalty=differentiable_penalty,
+            )
+        else:
+            raise ValueError(
+                f"Unknown guidance_mode={guidance_mode!r}; expected 'rate' or 'energy'."
+            )
     elif proposal == "chromatic":
         _energy_proposal = lambda _S, _T: _potts_proposal_gibbs(
             _S,
@@ -1277,6 +1301,74 @@ def _potts_proposal_dlmc_guidance(
     # downstream rankings / logs stay consistent with the mixed proposal.
     U = gamma * U_cond + (1.0 - gamma) * U_uncond
     return U, logP_ij
+
+
+def _potts_proposal_dlmc_guidance_energy(
+    S,
+    h_cond,
+    J_cond,
+    edge_idx_cond,
+    h_uncond,
+    J_uncond,
+    edge_idx_uncond,
+    gamma=1.0,
+    T=1.0,
+    penalty_func=None,
+    differentiable_penalty=True,
+    dt=0.1,
+    balancing_func="sigmoid",
+):
+    """Energy-space CFG: build h_mix, J_mix once, reuse `_potts_proposal_dlmc`.
+
+    Exploits the linearity of the Potts energy in `(h, J)` at fixed `edge_idx`::
+
+        U(S; γ·h_cond + (1-γ)·h_uncond, γ·J_cond + (1-γ)·J_uncond)
+            = γ·U_cond(S) + (1-γ)·U_uncond(S)
+
+    so running the standard DLMC proposal on the linearly-mixed parameters
+    samples from the Boltzmann distribution of `U_guided = γ·U_cond + (1-γ)·U_uncond`.
+    Requires `edge_idx_cond == edge_idx_uncond`, which holds whenever cond and
+    uncond differ only in `atom_cond_mask` (same atom positions ⇒ same kNN
+    graph). This is asserted at runtime; any future regression where the graph
+    depends on the conditioning will surface immediately.
+
+    Unlike the rate-space variant (`_potts_proposal_dlmc_guidance`), this path
+    does not need an `eps` floor or per-entry clamp: energy-space mixing is
+    linear, so gamma extrapolation cannot produce log-domain NaNs. Complexity
+    penalties are handled by the inner `_potts_proposal_dlmc` on the mixed
+    parameters — since the penalty depends only on `S`, this is equivalent to
+    applying it once and sharing it across both branches (matching the
+    rate-space variant's semantics).
+    """
+    assert h_cond.shape == h_uncond.shape, (
+        f"cond/uncond h shape mismatch: {tuple(h_cond.shape)} vs {tuple(h_uncond.shape)}"
+    )
+    assert J_cond.shape == J_uncond.shape, (
+        f"cond/uncond J shape mismatch: {tuple(J_cond.shape)} vs {tuple(J_uncond.shape)}"
+    )
+    assert edge_idx_cond.shape == edge_idx_uncond.shape, (
+        f"cond/uncond edge_idx shape mismatch: "
+        f"{tuple(edge_idx_cond.shape)} vs {tuple(edge_idx_uncond.shape)}"
+    )
+    assert torch.equal(edge_idx_cond, edge_idx_uncond), (
+        "edge_idx mismatch between cond/uncond Potts branches — energy-space "
+        "guidance requires the two branches to share the same neighbor graph."
+    )
+
+    h_mix = gamma * h_cond + (1.0 - gamma) * h_uncond
+    J_mix = gamma * J_cond + (1.0 - gamma) * J_uncond
+
+    return _potts_proposal_dlmc(
+        S,
+        h_mix,
+        J_mix,
+        edge_idx_cond,
+        T=T,
+        penalty_func=penalty_func,
+        differentiable_penalty=differentiable_penalty,
+        dt=dt,
+        balancing_func=balancing_func,
+    )
 
 
 def _mask_J(edge_idx, mask_i, mask_ij):
