@@ -8,13 +8,14 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 EXP_DIRS=(
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp37_cfg11_denovoval_twostage_ps_ligand_eval
+    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg2_denovoval_full_ligand_eval_new
+    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp37_cfg11_denovoval_twostage_ps_ligand_eval_new
 )
 
-OUTPUT_TAR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/collected_csvs/exp37_cfg11_denovoval_twostage_ps_ligand_eval.tar.gz
+OUTPUT_TAR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/collected_csvs/exp35_37_ligand_eval.tar.gz
 
 # Add --array-jobs flag to also collect *_array_N.csv files
-ARRAY_JOBS=true
+ARRAY_JOBS=false
 
 if [ "$ARRAY_JOBS" = true ]; then
     python3 "$SCRIPT_DIR/gather_ligand_eval_csvs.py" --array-jobs "$OUTPUT_TAR" "${EXP_DIRS[@]}"

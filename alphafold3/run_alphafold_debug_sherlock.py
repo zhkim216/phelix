@@ -202,7 +202,7 @@ _RESOLVE_MSA_OVERLAPS = flags.DEFINE_bool(
 )
 _MAX_TEMPLATE_DATE = flags.DEFINE_string(
     'max_template_date',
-    '2021-09-30',  # By default, use the date from the AlphaFold 3 paper.
+    '2026-03-24',  
     'Maximum template release date to consider. Format: YYYY-MM-DD. All'
     ' templates released after this date will be ignored. Controls also whether'
     ' to allow use of model coordinates for a chemical component from the CCD'

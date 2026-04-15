@@ -318,14 +318,10 @@ class SDDataset(MolecularDataset):
         min_resolution_ratio = self.cfg.get("min_resolution_ratio", 0.8)
         if min_resolution_ratio is not None:
             len_before = len(metadata_df)
-<<<<<<< HEAD
-            metadata_df = metadata_df[metadata_df['q_pn_unit_resolution_ratio'] >= min_resolution_ratio]
-=======
             rr = metadata_df["q_pn_unit_resolution_ratio"]
             # NaN rows (polymer pn_units) are exempt — only defined for non-polymers.
             keep_mask = rr.isna() | (rr >= min_resolution_ratio)
             metadata_df = metadata_df[keep_mask]
->>>>>>> refs/remotes/origin/jinho/AAA
             len_after = len(metadata_df)
             logger.info(f"Excluded {len_before - len_after} small molecules in {dataset_name} interface dataset, because of resolution ratio less than {min_resolution_ratio}")
         

@@ -16,15 +16,15 @@ wandb:
   group: null
 
 # Basic settings
-debug: false  # Set false for full evaluation
+debug: true  # Set false for full evaluation
 num_debug_samples: 2
 seed: 0
-num_workers: 8  # Set to 8 for full evaluation
+num_workers: 0  # Set to 8 for full evaluation
 protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 run_seq_des: true
 
 # Outputs
-exp_name: eval_exp35_cfg2_nativeval_sm_selected_twostage_sp_seq2_af3
+exp_name: eval_exp35_cfg2_nativeval_sm_selected_twostage_sp_seq2_af3_2
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Sequence design config
@@ -41,7 +41,7 @@ seq_des_cfg:
     ckpt_path: null
     sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides:
-      batch_size: 8
+      batch_size: 1
       num_seqs_per_pdb: 1  # number of sequences to sample per pdb
       omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
       noise_labels: null

@@ -50,22 +50,32 @@ def gather(src_dirs: list[Path], output_tar: Path, array_jobs: bool = False):
             step_dirs = sorted(
                 [d for d in src_dir.iterdir() if d.is_dir() and d.name.startswith("step_")]
             )
-            if not step_dirs:
-                print(f"    No step_* directories found")
-                continue
 
-            for step_dir in step_dirs:
-                dest = tmp / exp_name / step_dir.name
-                csvs = _find_csvs(step_dir, array_jobs)
+            if step_dirs:
+                # Case 1: step_* subdirectories exist
+                for step_dir in step_dirs:
+                    dest = tmp / exp_name / step_dir.name
+                    csvs = _find_csvs(step_dir, array_jobs)
+                    if csvs:
+                        dest.mkdir(parents=True, exist_ok=True)
+                        for csv_path in csvs:
+                            shutil.copy2(csv_path, dest / csv_path.name)
+                        total_copied += len(csvs)
+                    else:
+                        print(f"    [SKIP] No CSVs in {step_dir.name}")
+                print(f"    {len(step_dirs)} step dirs processed")
+            else:
+                # Case 2: CSVs directly in src_dir (no step_* subdirectories)
+                csvs = _find_csvs(src_dir, array_jobs)
                 if csvs:
+                    dest = tmp / exp_name
                     dest.mkdir(parents=True, exist_ok=True)
                     for csv_path in csvs:
                         shutil.copy2(csv_path, dest / csv_path.name)
                     total_copied += len(csvs)
+                    print(f"    {len(csvs)} CSVs found directly in directory")
                 else:
-                    print(f"    [SKIP] No CSVs in {step_dir.name}")
-
-            print(f"    {len(step_dirs)} step dirs processed")
+                    print(f"    No step_* directories or CSVs found")
 
         # Create tar.gz
         output_tar = output_tar.resolve()

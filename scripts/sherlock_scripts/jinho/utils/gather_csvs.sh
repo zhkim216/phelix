@@ -40,17 +40,22 @@ if [ -n "$PATTERN" ]; then
 else
     # Hardcoded fallback
     EXP_DIRS=(
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg0_denovoval_designable_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg1_denovoval_designable_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg2_denovoval_designable_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg3_denovoval_designable_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg4_denovoval_designable_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg5_denovoval_designable_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg6_denovoval_designable_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg7_denovoval_designable_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg8_denovoval_designable_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp22_cfg0_nativeval_sm_selected_seq4_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp22_cfg2_nativeval_sm_selected_seq4_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp22_cfg4_nativeval_sm_selected_seq4_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp22_cfg5_nativeval_sm_selected_seq4_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp22_cfg7_nativeval_sm_selected_seq4_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp22_cfg9_nativeval_sm_selected_seq4_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp22_cfg10_nativeval_sm_selected_seq4_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp22_cfg12_nativeval_sm_selected_seq4_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp22_cfg14_nativeval_sm_selected_seq4_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg2_denovoval_designable_deep_potts_pocket_015_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg2_denovoval_designable_deep_potts_pocket_020_af3
+    # /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg2_denovoval_designable_deep_potts_pocket_025_af3
+    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp41_cfg0_denovoval_af3
+    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp41_cfg1_denovoval_af3
     )
-    OUTPUT_TAR="$BASE_DIR/collected_csvs/exp35_denovo_designable_sweep.tar.gz"
+    OUTPUT_TAR="$BASE_DIR/collected_csvs/exp41_denovoval_len150250_sweep.tar.gz"
 fi
 
 echo "Output: $OUTPUT_TAR"

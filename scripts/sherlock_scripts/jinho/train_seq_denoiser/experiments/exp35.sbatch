@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=exp35
 #SBATCH -p possu
-#SBATCH --array=0-7
+#SBATCH --array=7,8
 #SBATCH --gres=gpu:1
-#SBATCH --mem=64G
+#SBATCH --mem=96G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=2-0:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/exp35_%A_%a.out
@@ -47,7 +47,8 @@ CONFIGS=(
   "denoiser.mpnn.k_neighbors=32 denoiser.mpnn.potts.k_neighbors_potts=32 denoiser.mpnn.token_features.ligand_atom_context_num=25"
   "denoiser.mpnn.k_neighbors=48 denoiser.mpnn.potts.k_neighbors_potts=48 denoiser.mpnn.token_features.ligand_atom_context_num=16"
   "denoiser.mpnn.k_neighbors=48 denoiser.mpnn.potts.k_neighbors_potts=48 denoiser.mpnn.token_features.ligand_atom_context_num=25"
-  "denoiser.mpnn.k_neighbors=48 denoiser.mpnn.potts.k_neighbors_potts=48 denoiser.mpnn.token_features.ligand_atom_context_num=36"
+  "denoiser.mpnn.k_neighbors=48 denoiser.mpnn.potts.k_neighbors_potts=48 denoiser.mpnn.token_features.ligand_atom_context_num=36 resume.ckpt_path=/scratch/users/zhkim216/out_dir/ligand_seq_des/exp35_cfg7/checkpoints/sd-step30000-epoch19.ckpt"
+  "denoiser.mpnn.k_neighbors=32 denoiser.mpnn.potts.k_neighbors_potts=32 denoiser.mpnn.token_features.ligand_atom_context_num=36 resume.ckpt_path=/scratch/users/zhkim216/out_dir/ligand_seq_des/exp35_cfg8/checkpoints/sd-step25000-epoch15.ckpt"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))

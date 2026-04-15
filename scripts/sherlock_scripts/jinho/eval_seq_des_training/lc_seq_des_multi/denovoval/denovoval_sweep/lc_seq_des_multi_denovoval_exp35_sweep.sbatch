@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=lc_seq_des_denovoval_sweep_exp35
 #SBATCH -p possu,bioe
-#SBATCH --array=5-35
+#SBATCH --array=26
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -73,6 +73,8 @@ echo "GPU compute capability: ${COMPUTE_CAP}, using flash_attention_implementati
 
 # Run evaluation script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py \
+    --config-path ${BASE_DIR}/allatom_design/configs/eval/sampling \
+    --config-name lc_seq_des_multi \
     wandb.no_wandb=false \
     wandb.project=${PROJECT} \
     wandb.wandb_id=${WANDB_ID} \

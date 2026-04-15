@@ -72,6 +72,8 @@ echo "GPU compute capability: ${COMPUTE_CAP}, using flash_attention_implementati
 # NOTE: batch_size=4 (halved from the usual 8) since guidance runs cond+uncond
 # forward passes and doubles Potts-decoder memory.
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py \
+    --config-path ${BASE_DIR}/allatom_design/configs/eval/sampling \
+    --config-name lc_seq_des_multi \
     wandb.no_wandb=false \
     wandb.project=${PROJECT} \
     wandb.wandb_id=${WANDB_ID} \

@@ -237,7 +237,7 @@ def sd_featurizer_pocket_only_for_design(
     # ----- Spatial pre-crop around target ligand -----
     spatial_crop_radius: float = 20.0,
     # ----- Pocket annotation for model features -----
-    use_pseudo_cb_for_pocket_annotation: bool = False,
+    use_pseudo_cb_for_pocket_annotation: bool = True,
     # ----- Padding (None = no fixed padding) -----
     max_tokens: int | None = None,
     max_atoms: int | None = None,

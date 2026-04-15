@@ -61,7 +61,7 @@ def extract_pdb_chain_info(atom_array) -> dict:
     return pdb_chain_info
 
 
-@hydra.main(config_path="../../configs_local/eval/sampling", config_name="calculate_af3_metrics_only", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/sampling", config_name="calculate_af3_metrics_only", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Calculate AF3 metrics only from pre-existing designed samples and AF3 predictions.
@@ -72,7 +72,11 @@ def main(cfg: DictConfig):
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
     data_dir = Path(cfg.data_dir)
-    samples_dir = data_dir / "samples"
+    samples_dir = data_dir / "samples"    
+    sample_cif_paths = sorted(samples_dir.glob("*.cif"))
+    if len(sample_cif_paths) == 0:
+        samples_dir = data_dir / "samples" / "backbones"
+        sample_cif_paths = sorted(samples_dir.glob("*.cif"))
 
     # Save config
     config_out_path = data_dir / "config_calculate_af3_metrics_only.yaml"
@@ -93,9 +97,7 @@ def main(cfg: DictConfig):
     print(f"Samples directory: {samples_dir}")
     print("="*80 + "\n")
 
-    af3_preds_dir = data_dir / "af3_ss_preds"
-
-    sample_cif_paths = sorted(samples_dir.glob("*.cif"))
+    af3_preds_dir = data_dir / "af3_ss_preds"    
 
     if cfg.get("debug", False):
         num_debug_samples = cfg.get("num_debug_samples", 2)
