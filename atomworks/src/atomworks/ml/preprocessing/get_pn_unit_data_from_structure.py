@@ -53,6 +53,9 @@ class DataPreprocessor:
     convert_mse_to_met: bool = True
     hydrogen_policy: Literal["remove", "infer", "keep"] = "remove",
     add_bond_types_from_struct_conn: list[str] = field(default_factory=lambda: ["covale"]) #! (JH) changed 251016
+    # JH changed: metal coordination and small molecule neighboring config
+    metal_coordination_cfg: dict | None = None  # e.g. {"coordination_distance": 3.2, "min_partner_occupancy": 0.5, "donor_elements": [...]}
+    small_molecule_neighboring_distance: float = 5.0  # distance for n_neighboring_heavy_atoms computation
 
     def __post_init__(self):
         logger.info(f"Initialized DataPreprocessor with the following parameters: {self.__dict__}")
@@ -261,6 +264,14 @@ class DataPreprocessor:
             # Remake the cell list, since we have removed atoms
             cell_list = struc.CellList(filtered_atom_array, cell_size=CELL_SIZE)
 
+        # JH changed: pre-compute metal coordination partner counts
+        if self.metal_coordination_cfg is not None:
+            metal_coordination_counts = dp.count_metal_coordination_partners(
+                filtered_atom_array, cell_list, **self.metal_coordination_cfg
+            )
+        else:
+            metal_coordination_counts = {}
+
         # ---------- Step 5: Find contacting/partner PN units and build dataframes ---------- #
         # Loop through all considered query PN units, including proteins (single-chain), nucleic acids (single-chain), and ligands (single- or multi-chain)
         assembly_records = []
@@ -336,6 +347,27 @@ class DataPreprocessor:
                     len(query_pn_unit_atom_array) == 1 and query_pn_unit_atom_array[0].element.upper() in METAL_ELEMENTS
                 )
 
+                # JH changed: coordination partners for metals, neighboring heavy atoms for small molecules
+                n_coordination_partners = None
+                n_neighboring_heavy_atoms_sm = None
+                if is_metal:
+                    n_coordination_partners = metal_coordination_counts.get(query_pn_unit_iid, 0)
+                else:
+                    neighbor_mask = dp.get_atom_mask_from_cell_list(
+                        query_pn_unit_atom_array.coord, cell_list,
+                        len(filtered_atom_array), self.small_molecule_neighboring_distance,
+                    )
+                    collapsed = np.any(neighbor_mask, axis=0)
+                    non_query = not_isin(
+                        filtered_atom_array.pn_unit_iid,
+                        np.unique(query_pn_unit_atom_array.pn_unit_iid),
+                    )
+                    n_neighboring_heavy_atoms_sm = int(np.sum(collapsed & non_query))
+
+                # JH changed: avg_occupancy including missing atoms (occ=0) from full_atom_array
+                full_query_atoms = full_atom_array[full_atom_array.pn_unit_iid == query_pn_unit_iid]
+                avg_occupancy = float(np.mean(full_query_atoms.occupancy)) if len(full_query_atoms) > 0 else None
+
                 if exists(ligand_validity_scores):
                     _query_pn_unit_ligand_ids = sorted(
                         set(zip(query_pn_unit_atom_array.chain_id, query_pn_unit_atom_array.res_name, strict=False))
@@ -367,6 +399,10 @@ class DataPreprocessor:
                     "bonded_polymer_pn_units": bonded_polymer_pn_units,
                     "ligand_validity": ligand_validity,
                     "non_polymer_res_names": non_polymer_res_names,
+                    # JH changed: new physical annotation fields
+                    "n_coordination_partners": n_coordination_partners,
+                    "n_neighboring_heavy_atoms_small_molecule": n_neighboring_heavy_atoms_sm,
+                    "avg_occupancy": avg_occupancy,
                 }
                 
             elif query_pn_unit_type.is_polymer():
@@ -448,6 +484,10 @@ class DataPreprocessor:
                     for pn_unit in type_specific_criteria.get("bonded_polymer_pn_units", set())
                 },  # Covalent modifications
                 "q_pn_unit_non_polymer_res_names": ",".join(type_specific_criteria.get("non_polymer_res_names", [])),
+                # JH changed: physical annotation columns (None for polymers)
+                "q_pn_unit_n_coordination_partners_metal": type_specific_criteria.get("n_coordination_partners", None),
+                "q_pn_unit_n_neighboring_heavy_atoms_small_molecule": type_specific_criteria.get("n_neighboring_heavy_atoms_small_molecule", None),
+                "q_pn_unit_avg_occupancy_nonpolymer": type_specific_criteria.get("avg_occupancy", None),
                 # (Type-specific) Polymer criteria
                 "q_pn_unit_ec_numbers": type_specific_criteria.get("ec_numbers", []),
                 "q_pn_unit_sequence_length": type_specific_criteria.get("sequence_length", None),

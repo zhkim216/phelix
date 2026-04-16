@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import defaultdict
-from typing import Any, Final
+from typing import Any, Collection, Final
 
 import networkx as nx
 import numpy as np
@@ -175,7 +175,7 @@ def handle_clashing_pn_units(
         pn_unit_atom_array = atom_array[atom_array.pn_unit_iid == pn_unit]
         clashing_pn_unit_details[pn_unit] = {
             "num_atoms": len(pn_unit_atom_array),
-            "is_metal": pn_unit_atom_array[0].element.upper in METAL_ELEMENTS,
+            "is_metal": pn_unit_atom_array[0].element.upper() in METAL_ELEMENTS,  # JH changed: .upper -> .upper() (was always False)
             "is_polymer": pn_unit_atom_array[0].is_polymer,
         }
 
@@ -296,6 +296,68 @@ def get_contacting_pn_units(
             )
 
     return contacting_pn_unit_summary
+
+
+# JH changed: added count_metal_coordination_partners
+def count_metal_coordination_partners(
+    filtered_atom_array: AtomArray,
+    cell_list: CellList,
+    coordination_distance: float = 3.2,
+    min_partner_occupancy: float = 0.5,
+    donor_elements: Collection[str] = ("N", "O", "F", "P", "S", "Cl", "As", "Se", "Br", "I"),
+) -> dict[int, int]:
+    """
+    Count coordination partners for each single-atom metal PN unit.
+
+    A coordination partner is an atom within ``coordination_distance`` that is either:
+    - A donor element (from ``donor_elements``), OR
+    - A metal atom from another PN unit with occupancy >= ``min_partner_occupancy``
+
+    Args:
+        filtered_atom_array: AtomArray with non-zero occupancy atoms.
+        cell_list: CellList of ``filtered_atom_array`` for distance computations.
+        coordination_distance: Distance threshold for coordination partners (Angstrom).
+        min_partner_occupancy: Minimum occupancy for partner metal atoms to count.
+        donor_elements: Element symbols considered as donor atoms.
+
+    Returns:
+        Dictionary mapping metal ``pn_unit_iid`` → number of coordination partners.
+    """
+    donor_elements_upper = frozenset(e.upper() for e in donor_elements)
+
+    # 1. Identify all single-atom metal PN units
+    pn_unit_iids = np.unique(filtered_atom_array.pn_unit_iid)
+    metal_iids: list[int] = []
+    for iid in pn_unit_iids:
+        atoms = filtered_atom_array[filtered_atom_array.pn_unit_iid == iid]
+        if len(atoms) == 1 and atoms[0].element.upper() in METAL_ELEMENTS:
+            metal_iids.append(iid)
+
+    if not metal_iids:
+        return {}
+
+    # 2. Build valid-partner mask: donor element OR high-occ metal atom (from any metal PN unit)
+    elements_upper = np.array([e.upper() for e in filtered_atom_array.element])
+    is_donor = np.isin(elements_upper, list(donor_elements_upper))
+
+    metal_iid_set = set(metal_iids)
+    is_metal_atom = np.array([iid in metal_iid_set for iid in filtered_atom_array.pn_unit_iid])
+    is_high_occ_metal = is_metal_atom & (filtered_atom_array.occupancy >= min_partner_occupancy)
+
+    valid_partner_mask = is_donor | is_high_occ_metal
+
+    # 3. Per metal: count coordination partners within distance, excluding self
+    result: dict[int, int] = {}
+    for metal_iid in metal_iids:
+        metal_atoms = filtered_atom_array[filtered_atom_array.pn_unit_iid == metal_iid]
+        neighbor_mask = get_atom_mask_from_cell_list(
+            metal_atoms.coord, cell_list, len(filtered_atom_array), coordination_distance
+        )
+        collapsed = np.any(neighbor_mask, axis=0)
+        non_self = filtered_atom_array.pn_unit_iid != metal_iid
+        result[metal_iid] = int(np.sum(collapsed & non_self & valid_partner_mask))
+
+    return result
 
 
 def get_intra_pn_unit_bonds(pn_unit_iid: str, full_atom_array: AtomArray) -> np.ndarray:
