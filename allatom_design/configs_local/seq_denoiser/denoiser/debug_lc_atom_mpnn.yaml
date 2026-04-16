@@ -32,10 +32,8 @@ mpnn:
     add_angle_features: true
     use_multichain_encoding: true
     ligand_conditioning: ${denoiser.mpnn.ligand_conditioning}
-    use_sidechain_context: true
     use_ligand_context: true
-    ligand_atom_context_num: 25  
-    sidechain_context_token_num: 16
+    ligand_atom_context_num: 25
     # Pocket-aware RBF: use full backbone RBF for ligand pocket residues, CA-only for others
     use_pocket_rbf: true  # false for backward compat; set true to enable pocket-aware RBF
     pocket_rbf_type: "ncaco"  # "ncaco" or "ncacocb" - RBF type for pocket residue edges

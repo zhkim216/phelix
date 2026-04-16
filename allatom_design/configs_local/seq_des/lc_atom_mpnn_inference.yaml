@@ -8,6 +8,7 @@ num_workers: 8  # number of workers for data loading
 
 # Sequence design options
 use_potts_sampling: true
+use_mlm_sampling: false  # if true, use MLM (order-agnostic autoregressive) sampling instead of Potts
 
 skip_sampling: false  # if true, skip sampling and just return potts parameters
 save_potts_params: false
@@ -24,6 +25,22 @@ potts_sampling_cfg:
 
   # add gaussian noise to inputs
   noise_std: 0.0
+
+  # Classifier-free-style guidance: mix a ligand-conditioned ("cond") and
+  # ligand-absent ("uncond") Potts proposal at each DLMC sweep. When
+  # `enabled=false` this is a no-op and the sampler uses the cond branch
+  # only. Guidance mixes `h`, `J` linearly (γ·cond + (1-γ)·uncond) and
+  # runs the standard DLMC proposal on the mixed parameters, giving an
+  # exact sampler for the Boltzmann distribution of
+  #     U_mix = γ·U_cond + (1-γ)·U_uncond
+  # (exploits the linearity of the Potts energy in (h, J); requires
+  # edge_idx_cond == edge_idx_uncond, which holds here because both
+  # branches share the same protein kNN graph).
+  guidance_cfg:
+    enabled: false
+    gamma_list: [0.0, 0.5, 1.0, 1.5, 2.0]   # gamma > 1 = CFG extrapolation
+    uncond_mode: "protein_only"              # only mode currently implemented
+    pocket_distance: 10.0                    # Å from any ligand atom to pseudo-Cβ for the pocket mask
 
 mlm_sampling_cfg:
   num_steps: 50

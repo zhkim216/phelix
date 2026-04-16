@@ -128,8 +128,9 @@ FEAT_TO_ATOM_DIM = {
     "prot_scn_atom_mask": [0],
     "prot_scn_wo_cb_atom_mask": [0],
     "atom_is_atomized": [0],
-    "atom_is_prot_std_aa": [0],    
-    
+    "atom_is_prot_std_aa": [0],
+    "can_be_pseudo_ligand": [0],  # JH Changed 260415
+
     # optional features that might not be present
     "atom_cond_mask": [0],
     "ref_pos": [0],
@@ -157,6 +158,9 @@ class CheckCoordinatesAreNan(Transform):
 
 class FeaturizeCoordsAndMasks(Transform):
     """Add coordinates and atom masks to feats."""
+
+    def __init__(self, pseudo_ligand_occupancy_threshold: float = 0.5):  # JH Changed 260416
+        self.pseudo_ligand_occupancy_threshold = pseudo_ligand_occupancy_threshold
 
     @override
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -245,8 +249,12 @@ class FeaturizeCoordsAndMasks(Transform):
         is_prot_scn_wo_cb = ((atom_is_protein_chain) & ~np.isin(atom_array.atom_name, ["N", "CA", "C", "O", "OXT", "CB"]))
         feats["prot_bb_atom_mask"] = torch.tensor(is_prot_bb).float()
         feats["prot_scn_atom_mask"] = torch.tensor(is_prot_scn).float()
-        feats["prot_scn_wo_cb_atom_mask"] = torch.tensor(is_prot_scn_wo_cb).float()        
-                                                                
+        feats["prot_scn_wo_cb_atom_mask"] = torch.tensor(is_prot_scn_wo_cb).float()
+
+        # Pseudo-ligand eligibility: sidechain atoms (excl CB) on protein chains with sufficient occupancy  # JH Changed 260415, 260416
+        is_pseudo_ligand_eligible = is_prot_scn_wo_cb & (atom_array.occupancy > self.pseudo_ligand_occupancy_threshold)
+        feats["can_be_pseudo_ligand"] = torch.tensor(is_pseudo_ligand_eligible).float()
+
         # Calculate number of atoms per token
         device = feats["coords"].device
         N_tokens = feats["token_pad_mask"].shape[0]
