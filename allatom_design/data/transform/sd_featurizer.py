@@ -123,7 +123,10 @@ def sd_featurizer(
     asymmetric_noise: bool = False,
     protein_noise_scale: float = 0.1,
     context_noise_scale: float = 0.1,
-            
+
+    # Pseudo-ligand sidechain conditioning  # JH Changed 260416
+    pseudo_ligand_occupancy_threshold: float = 0.5,
+
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure into a training example (including cropping).
@@ -210,10 +213,10 @@ def sd_featurizer(
         # PlaceUnresolvedTokenAtomsOnRepresentativeAtom(annotation_to_update="coord"),
         # PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"), 
         # Add features from the atom_array                            
-        FeaturizeCoordsAndMasks(),        
-        GetNCACOAndPseudoCBCoords(),        
+        FeaturizeCoordsAndMasks(pseudo_ligand_occupancy_threshold=pseudo_ligand_occupancy_threshold),  # JH Changed 260416
+        GetNCACOAndPseudoCBCoords(),
     ]
-    
+
     transforms = [
         *featurization_transforms_pre_crop,
         cropping_transform,
@@ -267,6 +270,9 @@ def sd_featurizer_for_design(
     asymmetric_noise: bool = False,
     protein_noise_scale: float = 0.1,
     context_noise_scale: float = 0.1,
+
+    # Pseudo-ligand sidechain conditioning  # JH Changed 260416
+    pseudo_ligand_occupancy_threshold: float = 0.5,
 ) -> Transform:
     """
     Build a transform pipeline that transforms a featurized structure into an example for designing samples.
@@ -307,10 +313,10 @@ def sd_featurizer_for_design(
         # PlaceUnresolvedTokenOnClosestResolvedTokenInSequence(annotation_to_update="coord", annotation_to_copy="coord"), 
         # Add features from the atom_array
         AddAF3TokenBondFeatures(distance_cutoff=2.4),
-        FeaturizeCoordsAndMasks(),                
-        GetNCACOAndPseudoCBCoords(),        
+        FeaturizeCoordsAndMasks(pseudo_ligand_occupancy_threshold=pseudo_ligand_occupancy_threshold),  # JH Changed 260416
+        GetNCACOAndPseudoCBCoords(),
     ]
-    
+
     transforms = [
         *featurization_transforms_pre_crop,
         *featurization_transforms_post_crop,

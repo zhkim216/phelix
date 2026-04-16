@@ -23,7 +23,8 @@ class MaskSelector:
         self.atom_masking_schedule = cfg.atom_masking_schedule
         self.atom_masking_cfg = OmegaConf.to_container(cfg.atom_masking_cfg[self.atom_masking_schedule], resolve=True)  
         self.scn_context_ratio = cfg.scn_context_ratio
-        
+        self.pseudo_ligand_backbone_mask_radius = cfg.get("pseudo_ligand_backbone_mask_radius", 0)  # JH Changed 260415
+
 
     def sample_seq_cond_mask(self,
                              batch: dict[str, TensorType["b ..."]],
@@ -56,52 +57,101 @@ class MaskSelector:
         return seq_cond_mask
 
 
-    def sample_atom_cond_mask(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n_atoms", float]:
+    # JH Changed 260415 — Pseudo-ligand sidechain conditioning via Y track
+    def sample_atom_cond_mask(
+        self, batch: dict[str, TensorType["b ..."]]
+    ) -> tuple[TensorType["b n_atoms", float], TensorType["b n_tokens", float], TensorType["b n_tokens", float]]:
         """
-        Create a mask denoting which atoms to mask out.
-        0 if we should mask, 1 if we should keep.
+        Create atom-level conditioning mask and pseudo-ligand token masks.
+
+        Returns:
+            atom_cond_mask:          [B, n_atoms]  — 1 = keep atom, 0 = mask
+            tok_keep_scn_mask:       [B, n_tokens] — 1 = pseudo-ligand position (sidechain visible, removed from protein graph)
+            expanded_backbone_mask:  [B, n_tokens] — 1 = backbone-masked neighbor of pseudo-ligand (also removed from protein graph)
         """
         B, _ = batch["atom_to_token_map"].shape
         device = batch["atom_resolved_mask"].device
 
-        atom_cond_mask = batch["atom_resolved_mask"].clone()  # [n_atoms]
-                
-        # # Mask out the sidechain of a token with probability p in U[0, 1]  # TODO: try different masking schemes
-        # tok_keep_scn_p = self._sample_t(B, device=device, schedule=self.atom_masking_schedule, cfg=self.atom_masking_cfg)
-        # tok_keep_scn_mask = torch.rand_like(batch["seq_cond_mask"]) < rearrange(tok_keep_scn_p, "b -> b 1")
-        
-        # Following LigandMPNN, sample sidechains only scn_context_ratio
+        atom_cond_mask = batch["atom_resolved_mask"].clone()
+
         standard_aa_prot_token_mask = batch["token_is_prot_std_aa"] * batch["token_resolved_mask"] * batch["token_pad_mask"]
         standard_aa_prot_atom_mask = batch["atom_is_prot_std_aa"] * batch["atom_resolved_mask"] * batch["atom_pad_mask"]
-        target_count = (standard_aa_prot_token_mask.sum(dim=-1) * self.scn_context_ratio).long()
-        
+
+        # --- Token eligibility: must have at least one can_be_pseudo_ligand atom ---
+        can_be_pl = batch.get("can_be_pseudo_ligand", torch.zeros_like(batch["atom_resolved_mask"]))
+        token_eligible = torch.zeros(B, batch["token_pad_mask"].shape[1], device=device)
+        token_eligible.scatter_reduce_(1, batch["atom_to_token_map"], can_be_pl, reduce="amax", include_self=False)
+        token_eligible = standard_aa_prot_token_mask * (token_eligible > 0).float()
+
+        # --- Select scn_context_ratio fraction from eligible tokens ---
+        target_count = (token_eligible.sum(dim=-1) * self.scn_context_ratio).long()
         random_priority = torch.where(
-            standard_aa_prot_token_mask.bool(),
-            torch.rand_like(standard_aa_prot_token_mask.float()),
-            torch.full_like(standard_aa_prot_token_mask.float(), fill_value=-float("inf"))
+            token_eligible.bool(),
+            torch.rand_like(token_eligible),
+            torch.full_like(token_eligible, -float("inf"))
         )
-        rank = random_priority.argsort(dim=-1, descending=True).argsort(dim=-1)        
-        tok_keep_scn_mask = standard_aa_prot_token_mask * (rank < target_count.unsqueeze(-1)).float()                              
+        rank = random_priority.argsort(dim=-1, descending=True).argsort(dim=-1)
+        tok_keep_scn_mask = token_eligible * (rank < target_count.unsqueeze(-1)).float()
+
+        # --- Expand to ±radius sequential neighbors for backbone masking ---
+        expanded_backbone_mask = self._expand_backbone_mask(tok_keep_scn_mask, batch, self.pseudo_ligand_backbone_mask_radius)
+
+        # --- Build atom_cond_mask ---
         atomwise_tok_keep_scn_mask = tok_keep_scn_mask.gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
-        
+        atomwise_expanded_bb_mask = expanded_backbone_mask.gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
+
         standard_aa_prot_bb_atom_mask = standard_aa_prot_atom_mask * batch["prot_bb_atom_mask"]
-        standard_aa_prot_scn_wo_cb_atom_mask = standard_aa_prot_atom_mask * batch["prot_scn_wo_cb_atom_mask"] 
-        #! (JH) Following LigandMPNN, we mask out the CB atoms of the sidechain, as we use pseudo CB coordinates in the ligand & interaction module
-        
-        # Select sidechain atoms or backbone atoms from the standard amino acids in protein chains
-        prot_atom_mask = torch.where(atomwise_tok_keep_scn_mask.bool(),
-                                     standard_aa_prot_scn_wo_cb_atom_mask,
-                                     standard_aa_prot_bb_atom_mask)
+        standard_aa_prot_scn_wo_cb_atom_mask = standard_aa_prot_atom_mask * batch["prot_scn_wo_cb_atom_mask"]
+
+        # Pseudo-ligand tokens: sidechain excl CB visible, backbone hidden
+        # Expanded neighbor tokens: ALL atoms hidden (prevent backbone leaking into ligand context)
+        # Normal tokens: backbone visible, sidechain hidden
+        prot_atom_mask = torch.where(
+            atomwise_tok_keep_scn_mask.bool(),
+            standard_aa_prot_scn_wo_cb_atom_mask,                # pseudo-ligand: sidechain only
+            torch.where(
+                atomwise_expanded_bb_mask.bool(),
+                torch.zeros_like(standard_aa_prot_bb_atom_mask), # neighbor: nothing
+                standard_aa_prot_bb_atom_mask                    # normal: backbone
+            )
+        )
         prot_atom_mask = prot_atom_mask * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
-                
-        # Keep all atoms in non-protein chains or atoms in non-standard residues or covalent modifications in protein chains
-        atom_cond_mask = torch.where(standard_aa_prot_atom_mask.bool(),
-                                     prot_atom_mask,
-                                     atom_cond_mask)
-                    
+
+        atom_cond_mask = torch.where(standard_aa_prot_atom_mask.bool(), prot_atom_mask, atom_cond_mask)
         atom_cond_mask = atom_cond_mask * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
-        
-        return atom_cond_mask    
+
+        return atom_cond_mask, tok_keep_scn_mask, expanded_backbone_mask
+
+    @staticmethod
+    def _expand_backbone_mask(
+        tok_keep_scn_mask: TensorType["b n", float],
+        batch: dict[str, TensorType["b ..."]],
+        radius: int,
+    ) -> TensorType["b n", float]:
+        """Expand pseudo-ligand mask to ±radius sequential neighbors on the same chain.
+
+        Returns a mask that is 1 for neighbor positions (NOT including the pseudo-ligand
+        itself), 0 elsewhere.
+        """  # JH Changed 260415
+        if radius == 0:
+            return torch.zeros_like(tok_keep_scn_mask)
+
+        residue_index = batch["residue_index"]  # [B, N]
+        asym_id = batch["asym_id"]              # [B, N]
+
+        # Pairwise same-chain check and residue distance
+        same_chain = (asym_id.unsqueeze(2) == asym_id.unsqueeze(1))           # [B, N, N]
+        res_dist = (residue_index.unsqueeze(2) - residue_index.unsqueeze(1)).abs()  # [B, N, N]
+        within_radius = same_chain & (res_dist <= radius) & (res_dist > 0)    # [B, N, N], exclude self
+
+        # For each position, check if ANY pseudo-ligand is within radius on the same chain
+        expanded = torch.einsum("bnm,bm->bn", within_radius.float(), tok_keep_scn_mask)
+        expanded = (expanded > 0).float()
+
+        # Exclude positions that are already pseudo-ligand themselves
+        expanded = expanded * (1 - tok_keep_scn_mask)
+
+        return expanded
             
     def _sample_t(
         self, 

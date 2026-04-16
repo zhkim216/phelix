@@ -28,6 +28,7 @@ masking_cfg:
     t_max: 1.0
   
 scn_context_ratio: 0.02
+pseudo_ligand_backbone_mask_radius: 0  # JH Changed 260415 — ±N sequential neighbors to exclude from protein graph
 
 # Reference to shared config (can be overridden separately if needed)
 restype_masking_cfg: ${.masking_cfg}

@@ -114,6 +114,8 @@ def sd_featurizer_pocket_only(
     asymmetric_noise: bool = False,
     protein_noise_scale: float = 0.1,
     context_noise_scale: float = 0.1,
+    # Pseudo-ligand sidechain conditioning  # JH Changed 260416
+    pseudo_ligand_occupancy_threshold: float = 0.5,
 ) -> Transform:
     """Build a pocket-only transform pipeline for training the sequence denoiser.
 
@@ -204,7 +206,7 @@ def sd_featurizer_pocket_only(
                 context_noise_scale=context_noise_scale,
             )
         ),
-        FeaturizeCoordsAndMasks(),
+        FeaturizeCoordsAndMasks(pseudo_ligand_occupancy_threshold=pseudo_ligand_occupancy_threshold),  # JH Changed 260416
         GetNCACOAndPseudoCBCoords(),
     ]
 
@@ -317,10 +319,10 @@ def sd_featurizer_pocket_only_for_design(
         AddGlobalTokenIdAnnotation(),
         EncodeAF3TokenLevelFeatures(sequence_encoding=const.AF3_ENCODING),
         ComputeAtomToTokenMap(),
-        MarkAllProteinAsPocket(),                
+        MarkAllProteinAsPocket(),
         ConvertToTorch(keys=["encoded", "feats"]),
         AddAF3TokenBondFeatures(distance_cutoff=2.4),
-        FeaturizeCoordsAndMasks(),
+        FeaturizeCoordsAndMasks(),  # inference: pseudo-ligand threshold irrelevant (mask_selector not called)
         GetNCACOAndPseudoCBCoords(),
     ]
 

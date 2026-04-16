@@ -120,6 +120,7 @@ class SDDataset(MolecularDataset):
         
             # Compute sampling weights
             if not self.pocket_only_training:
+                ligand_cluster_col = self.cfg.sampling_weights.get("ligand_cluster_col", None)
                 if self.interface_only_training:
                     # Preserve existing interface weighting logic while excluding monomer samples.
                     empty_monomer_df = self.metadata_df.iloc[0:0].copy()
@@ -129,16 +130,19 @@ class SDDataset(MolecularDataset):
                         alphas_interface=self.cfg.sampling_weights["alphas_interface"],
                         cluster_col="q_pn_unit_cluster_id",
                         k_percentile=self.cfg.sampling_weights["k_percentile"],
+                        ligand_cluster_col=ligand_cluster_col,
                     )
                 else:
                     # Cluster-balanced sampling across both dataframes
                     self.protein_monomer_chain_df, self.interface_df = add_cluster_balanced_sampling_weights(
                         monomer_df=self.protein_monomer_chain_df,
                         interface_df=self.interface_df,
-                        alphas_interface=self.cfg.sampling_weights["alphas_interface"],                
+                        alphas_interface=self.cfg.sampling_weights["alphas_interface"],
                         cluster_col="q_pn_unit_cluster_id",
-                        k_percentile=self.cfg.sampling_weights["k_percentile"]
-                    )            
+                        k_percentile=self.cfg.sampling_weights["k_percentile"],
+                        ligand_cluster_col=ligand_cluster_col,
+                    )
+
             # Parse dfs into a common format and concatenate
             self.parsed_df = self._parse_dfs()        
 
@@ -338,7 +342,8 @@ class SDDataset(MolecularDataset):
             )
                                     
         # Build interface df
-        interface_df = build_interface_df(metadata_df=metadata_df, dataset_name=Path(metadata_path).parent.name)
+        max_interface_distance = self.cfg.get("max_interface_distance", 6.0)
+        interface_df = build_interface_df(metadata_df=metadata_df, dataset_name=Path(metadata_path).parent.name, max_interface_distance=max_interface_distance)
                         
         # Filter out invalid iids in interface df based on cluster exclusion
         if self.cfg.exclude_val_cluster:                        
@@ -636,14 +641,16 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     return collated
 
 
-def build_interface_df(metadata_df: pd.DataFrame, dataset_name: str) -> pd.DataFrame:
+def build_interface_df(metadata_df: pd.DataFrame, dataset_name: str, max_interface_distance: float = 6.0) -> pd.DataFrame:
     # Bring example_id into a column if it's the index
     metadata_df = metadata_df.reset_index(drop=True)
 
-    # Get columns we'll need from the source df        
-    chain_specific_cols = ['q_pn_unit_id', 'q_pn_unit_iid', 'q_pn_unit_type', 'q_pn_unit_sequence_length', 
-                        'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_nuc', 'q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal', 
-                        'q_pn_unit_is_loi', 'q_pn_unit_is_polymer', 'q_pn_unit_cluster_id']    
+    # Get columns we'll need from the source df
+    chain_specific_cols = ['q_pn_unit_id', 'q_pn_unit_iid', 'q_pn_unit_type', 'q_pn_unit_sequence_length',
+                        'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_nuc', 'q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal',
+                        'q_pn_unit_is_loi', 'q_pn_unit_is_polymer', 'q_pn_unit_cluster_id']
+    if 'bl_ligand_cluster' in metadata_df.columns:
+        chain_specific_cols.append('bl_ligand_cluster')
         
     base_cols = [
         "example_id", "pdb_id", "assembly_id", "path", "q_pn_unit_contacting_pn_unit_iids", "q_pn_unit_context_group_iids",
@@ -661,6 +668,12 @@ def build_interface_df(metadata_df: pd.DataFrame, dataset_name: str) -> pd.DataF
     interface_df["contact_num_contacts"] = interface_df["q_pn_unit_contacting_pn_unit_iids"].map(
         lambda d: d.get("num_contacts", 0) if isinstance(d, dict) else 0
     )
+
+    # Filter by max_interface_distance (contact_distance may be larger than the desired interface cutoff)
+    len_before = len(interface_df)
+    interface_df = interface_df[interface_df["contact_min_distance"] <= max_interface_distance]
+    if len(interface_df) < len_before:
+        logger.info(f"Filtered {len_before - len(interface_df)} contacts beyond {max_interface_distance}Å")
 
     # Extract the contacted iid
     interface_df["q_pn_unit_iid_2"] = interface_df["q_pn_unit_contacting_pn_unit_iids"].map(
@@ -857,45 +870,87 @@ def add_sampling_weights_info(df: pd.DataFrame,
 def add_cluster_balanced_sampling_weights(
     monomer_df: pd.DataFrame,
     interface_df: pd.DataFrame,
-    alphas_interface: dict[str, float],    
+    alphas_interface: dict[str, float],
     cluster_col: str = "q_pn_unit_cluster_id",
     k_percentile: float = 100.0,
+    ligand_cluster_col: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Compute sampling weights for cluster-balanced sampling across monomer and interface dataframes.
-    
+
     Ensures two levels of equalization:
     1. Interface pair cluster equalization: each (c1, c2) pair in interface_df is sampled equally
     2. Overall protein cluster equalization: each protein cluster C is sampled equally across monomer_df + interface_df
-    
+
     Algorithm:
     - Step 1: Compute interface weights (pair cluster equalization)
     - Step 2: Compute each protein cluster's interface contribution
     - Step 3: Adjust monomer weights to achieve overall protein cluster equalization (auto-computed)
-    
+
     Note: Monomer weights are automatically computed to ensure protein cluster equalization.
     k_percentile: Adjust this value to control the balance between interface and monomer sampling
-          
+
     K Calculation:
     - K is the target total contribution per protein cluster
     - K = percentile(interface_contrib, k_percentile)
     - If k_percentile=100.0 (default): K = max(interface_contrib)
     - If k_percentile=80.0: K = 80th percentile of interface_contrib
     - Clusters with interface_contrib > K will have monomer_weight = 0 (interface-only sampling)
-    
+
     Args:
         monomer_df: Protein monomer chain dataframe with cluster_col
         interface_df: Interface dataframe with q_pn_unit_cluster_id_1, q_pn_unit_cluster_id_2, interface_type
-        alphas_interface: Dict with keys like a_protein_protein, a_protein_small_molecule, etc.        
+        alphas_interface: Dict with keys like a_protein_protein, a_protein_small_molecule, etc.
         cluster_col: Column name for protein cluster ID in monomer_df
         k_percentile: Percentile of interface_contrib to use for K calculation (default: 100.0 = max)
+        ligand_cluster_col: Optional column name (e.g. "bl_ligand_cluster") whose
+            value replaces `q_pn_unit_cluster_id` on the NON-protein side when
+            building `pair_cluster`. Protein-side cluster key is unchanged. When
+            set, `pair_cluster` uses (protein_seq_cluster, ligand_tanimoto_cluster)
+            instead of (protein_seq_cluster, ccd_hash_cluster), giving chemically
+            diverse ligands more headroom vs. over-represented scaffolds. If the
+            per-row ligand cluster value is missing (< 0 or NaN), falls back to
+            `q_pn_unit_cluster_id` for that side. interface_contrib / scaling /
+            monomer weighting still key off `q_pn_unit_cluster_id` since those
+            are protein-cluster-equalization concerns.
     """
     # ===== Step 1: Compute interface weights (pair cluster equalization) =====
-    
-    # Compute pair cluster sizes for interface_df
+
+    # Build an effective cluster key per chain side. For ligand (non-protein) sides
+    # we optionally substitute `ligand_cluster_col` so that similar ligands (e.g.
+    # ATP vs an ATP analog) collapse into one pair cluster. The key is tagged with
+    # its source so that integer collisions between seq-cluster IDs and
+    # ligand-cluster IDs cannot merge unrelated groups.
+    use_ligand = (
+        ligand_cluster_col is not None
+        and f"{ligand_cluster_col}_1" in interface_df.columns
+        and f"{ligand_cluster_col}_2" in interface_df.columns
+    )
+    if ligand_cluster_col is not None and not use_ligand:
+        logger.warning(
+            f"ligand_cluster_col={ligand_cluster_col!r} was requested but "
+            f"'{ligand_cluster_col}_1'/'{ligand_cluster_col}_2' are not present on interface_df. "
+            "Falling back to q_pn_unit_cluster_id on both sides."
+        )
+
+    def _effective_cluster(row, side: str):
+        if use_ligand:
+            is_protein = bool(row.get(f"q_pn_unit_is_protein_{side}", False))
+            if not is_protein:
+                bl_cid = row.get(f"{ligand_cluster_col}_{side}", None)
+                try:
+                    bl_cid_int = int(bl_cid) if bl_cid is not None and not pd.isna(bl_cid) else -1
+                except (TypeError, ValueError):
+                    bl_cid_int = -1
+                if bl_cid_int >= 0:
+                    return ("bl", bl_cid_int)
+        return ("seq", row[f"q_pn_unit_cluster_id_{side}"])
+
+    interface_df["effective_cluster_1"] = interface_df.apply(lambda r: _effective_cluster(r, "1"), axis=1)
+    interface_df["effective_cluster_2"] = interface_df.apply(lambda r: _effective_cluster(r, "2"), axis=1)
     interface_df["pair_cluster"] = interface_df.apply(
-        lambda row: tuple(sorted([row["q_pn_unit_cluster_id_1"], row["q_pn_unit_cluster_id_2"]])),
-        axis=1
+        lambda row: tuple(sorted([row["effective_cluster_1"], row["effective_cluster_2"]])),
+        axis=1,
     )
     pair_cluster_sizes = interface_df["pair_cluster"].value_counts()
     interface_df["pair_cluster_size"] = interface_df["pair_cluster"].map(pair_cluster_sizes)

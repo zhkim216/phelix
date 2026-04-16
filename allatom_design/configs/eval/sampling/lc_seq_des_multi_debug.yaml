@@ -24,8 +24,13 @@ protein_only: false #! If true, condition only on protein atoms (exclude ligands
 run_seq_des: true
 
 # Outputs
+<<<<<<< HEAD
 exp_name: eval_exp35_cfg2_nativeval_sm_selected_twostage_sp_seq2_af3_2
 base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
+=======
+exp_name: eval_exp35_cfg2_nativeval_sm_selected_twostage_sp_seq2_af3
+base_out_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des
+>>>>>>> refs/remotes/origin/jinho/AAA
 
 # Sequence design config
 seq_des_cfg:
@@ -42,7 +47,11 @@ seq_des_cfg:
     sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides:
       batch_size: 1
+<<<<<<< HEAD
       num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+=======
+      num_seqs_per_pdb: 2  # number of sequences to sample per pdb
+>>>>>>> refs/remotes/origin/jinho/AAA
       omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
       noise_labels: null
       num_workers: ${num_workers}

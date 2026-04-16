@@ -58,7 +58,12 @@ class SeqDenoiser(nn.Module):
         with torch.no_grad():
             # Sample sequence and atom conditioning masks
             batch["seq_cond_mask"] = self.mask_selector.sample_seq_cond_mask(batch, t)  # 1 if we should condition on the restype, 0 otherwise
-            batch["atom_cond_mask"] = self.mask_selector.sample_atom_cond_mask(batch)  # 1 if we should condition on the atom, 0 otherwise            
+            batch["atom_cond_mask"], scn_token_mask, expanded_bb_mask = self.mask_selector.sample_atom_cond_mask(batch)  # JH Changed 260415
+
+            # Pseudo-context mask: pseudo-ligand positions + their backbone-masked neighbors.
+            # Both are excluded from the protein graph (build_masks) and have restype
+            # masked to GAP (atom_mpnn forward).  # JH Changed 260416
+            batch["pseudo_context_mask"] = (scn_token_mask + expanded_bb_mask).clamp(max=1.0)
 
         # Denoise sequence
         _, aux_preds = self.denoiser(batch)
@@ -98,8 +103,12 @@ class SeqDenoiser(nn.Module):
             batch["t"] = torch.full((batch["token_pad_mask"].shape[0],), fill_value=sampling_inputs["t"], device=batch["token_pad_mask"].device)
 
         # Choose sampling method
-        if sampling_inputs["use_potts_sampling"]:
+        if sampling_inputs.get("use_mlm_sampling", False):
+            id_to_atom_arrays, aux = self.denoiser.mlm_sample(batch, sampling_inputs)
+        elif sampling_inputs.get("use_potts_sampling", False):
             id_to_atom_arrays, aux = self.denoiser.potts_sample(batch, sampling_inputs)
+        else:
+            raise ValueError("No sampling method specified. Set use_potts_sampling=True or use_mlm_sampling=True.")
 
         return id_to_atom_arrays, aux
 

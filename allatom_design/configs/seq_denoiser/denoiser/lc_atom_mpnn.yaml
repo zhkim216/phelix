@@ -11,7 +11,8 @@ mpnn:
   k_neighbors: 32
   n_layers: 3
   dropout_p: 0.1
-  ligand_conditioning: true  
+  ligand_conditioning: true
+  use_decoder: true
 
   # ligand conditioning options
   lmpnn_module:
@@ -32,10 +33,10 @@ mpnn:
     add_angle_features: true # true or false
     use_multichain_encoding: true
     ligand_conditioning: ${denoiser.mpnn.ligand_conditioning}
-    use_sidechain_context: true
     use_ligand_context: true
     ligand_atom_context_num: 25
-    sidechain_context_token_num: 16
+    # JH Changed 260415 — removed use_sidechain_context and sidechain_context_token_num
+    # Pseudo-ligand sidechain atoms now flow through Y (ligand context) via protein_residue_node_mask=0
     # Pocket-aware RBF: use full backbone RBF for ligand pocket residues, CA-only for others
     use_pocket_rbf: false  # false for backward compat; set true to enable pocket-aware RBF
     pocket_rbf_type: "ncaco"  # "ncaco" or "ncacocb" - RBF type for pocket residue edges

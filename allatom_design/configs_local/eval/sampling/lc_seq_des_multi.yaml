@@ -41,6 +41,7 @@ seq_des_cfg:
       potts_sampling_cfg:
         potts_sweeps: 50
         lcp_expand_edge_idx_fix: true
+        rejection_step: false
 
 # sampling inputs
 sampling_inputs_csv: null
@@ -53,7 +54,23 @@ pos_constraint_csv: null
 redesign_cfg:
   use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
   pocket_distance: 5.0
-  native_cif_dir: /home/possu/jinho/datasets/val_cifs/native_val_cifs/cifs  #! Directory containing native CIF files (needed when use_native_seq: true)  
+  native_cif_dir: /home/possu/jinho/datasets/val_cifs/native_val_cifs/cifs  #! Directory containing native CIF files (needed when use_native_seq: true)
+
+# Classifier-free-style guidance for Potts sequence design.
+# When enabled, sampling runs two forward passes (cond = with ligand,
+# uncond = ligand masked out) and runs the standard DLMC proposal on the
+# linearly-mixed Potts parameters
+#   h_mix = gamma * h_cond + (1 - gamma) * h_uncond
+#   J_mix = gamma * J_cond + (1 - gamma) * J_uncond
+# which samples from the Boltzmann distribution of
+#   U_mix = gamma * U_cond + (1 - gamma) * U_uncond.
+# gamma=1 is the original ligand-conditioned sampler; gamma=0 is
+# ligand-free; gamma>1 extrapolates the cond/uncond ratio.
+guidance_cfg:
+  enabled: true
+  gamma_list: [0.0, 0.5, 1.0, 1.5, 2.0]
+  uncond_mode: "protein_only"
+  pocket_distance: 10.0  # Å from any ligand atom to pseudo-Cβ for pocket mask
 
 # Pocket configuration
 pocket_cfg:
@@ -77,7 +94,7 @@ pdb_cfg:
   # Sample index filtering: matches pattern {PREFIX}_{IDX}_model_{M}.ext
   sample_indices: [0]  # null = use all; e.g. [0,1,2,3,4] to select specific indices
   # Sample length filtering: matches pattern {PREFIX}_len_{L}_{IDX}_model_{M}.ext
-  sample_lengths: [150]  # null = use all; e.g. [150,250] to select specific lengths
+  sample_lengths: [150, 250]  # null = use all; e.g. [150,250] to select specific lengths
   # Slurm array job parameters (set via CLI override in sbatch)
   array_id: 2
   num_arrays: 64

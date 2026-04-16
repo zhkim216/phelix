@@ -95,9 +95,13 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         atomwise_hetero_mask = batch.get("atomwise_hetero_mask", torch.ones_like(batch["atom_resolved_mask"]))
         
         if not is_sampling:
-            # Encode mask: standard AA only (N, CA, C, O resolved)
+            # Exclude pseudo-context positions (pseudo-ligands + backbone-masked neighbors)
+            # from the protein residue graph.  # JH Changed 260416
+            pseudo_context_mask = batch.get("pseudo_context_mask", torch.zeros_like(batch["token_pad_mask"]))
+
             batch["protein_residue_node_mask"] = (
                 batch["token_is_prot_std_aa"] *
+                (1 - pseudo_context_mask) *
                 batch["token_exists_mask"] *
                 batch["token_pad_mask"]
             )
