@@ -1,5 +1,5 @@
 mmcif_dir: /scratch/users/zhkim216/datasets/pdb_mirror
-out_dir: /scratch/users/zhkim216/datasets/debug_atomworks_pdb_full_v5
+out_dir: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v8
 
 # Optional: newline-delimited list of mmCIF paths to process (overrides mmcif_dir scan)
 cif_list_path: null
@@ -26,10 +26,17 @@ data_preprocessor_cfg:
 
   # Cutoff distances
   close_distance: 30.0
-  contact_distance: 6
+  contact_distance: 8
   clash_distance: 1.0
   # Misc
   ignore_residues: ["UNL", "UNX"] #! unknown ligands, and atoms
+  # Metal coordination partner counting
+  metal_coordination_cfg:
+    coordination_distance: 3.2
+    min_partner_occupancy: 0.5
+    donor_elements: ["N", "O", "F", "P", "S", "Cl", "As", "Se", "Br", "I"]
+  # Small molecule neighboring heavy atom counting distance
+  small_molecule_neighboring_distance: 5.0
   # Efficiency
   polymer_pn_unit_limit: 500
 
