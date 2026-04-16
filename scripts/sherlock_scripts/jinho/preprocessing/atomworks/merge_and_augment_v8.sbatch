@@ -24,6 +24,7 @@ python3 -m allatom_design.data.preprocessing.atomworks.augment_metadata_with_phy
     --input-parquet "${DATASET_DIR}/metadata.parquet" \
     --output-parquet "${DATASET_DIR}/metadata_augmented.parquet" \
     --min-metal-occupancy 0.5 \
+    --metal-coordination-distance 3.2 \
     --min-metal-coordination-partners 3 \
     --min-small-molecule-neighboring-heavy-atoms 3 \
     --context-distance 5.0

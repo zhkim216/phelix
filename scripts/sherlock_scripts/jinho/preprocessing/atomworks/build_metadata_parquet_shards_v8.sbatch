@@ -48,6 +48,7 @@ python3 allatom_design/data/preprocessing/atomworks/build_metadata_parquet_shard
     data_preprocessor_cfg.close_distance=30.0 \
     data_preprocessor_cfg.from_rcsb=true \
     data_preprocessor_cfg.small_molecule_neighboring_distance=5.0 \
+    data_preprocessor_cfg.metal_coordination_cfg.coordination_distance=3.2 \
     processing_timeout=600 \
     batch_size=200 \
     max_tasks_per_child=25

@@ -72,6 +72,7 @@ def main():
     parser.add_argument("--input-parquet", required=True, help="Input metadata parquet path.")
     parser.add_argument("--output-parquet", default=None, help="Output parquet path (default: overwrites input).")
     parser.add_argument("--min-metal-occupancy", type=float, default=0.5)
+    parser.add_argument("--metal-coordination-distance", type=float, default=3.2, help="Distance used for metal coordination partner counting during preprocessing.")
     parser.add_argument("--min-metal-coordination-partners", type=int, default=3)
     parser.add_argument("--min-small-molecule-neighboring-heavy-atoms", type=int, default=3)
     parser.add_argument("--context-distance", type=float, default=5.0, help="Distance threshold for context group derivation.")
@@ -83,6 +84,10 @@ def main():
     print(f"Input : {input_path}")
     print(f"Output: {output_path}")
     print(f"Thresholds: metal_occ>={args.min_metal_occupancy}, "
+<<<<<<< HEAD
+=======
+          f"metal_coord_dist<={args.metal_coordination_distance}, "
+>>>>>>> refs/remotes/origin/jinho/AAA
           f"coord_partners>={args.min_metal_coordination_partners}, "
           f"neigh_heavy>={args.min_small_molecule_neighboring_heavy_atoms}, "
           f"context_dist<={args.context_distance}")
