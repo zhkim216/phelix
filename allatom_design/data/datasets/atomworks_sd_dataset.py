@@ -39,28 +39,38 @@ class AtomworksSDDataModule(L.LightningDataModule):
         self._val_set = SDDataset(cfg, phase="val")
                 
     def train_dataloader(self) -> DataLoader:
-                                
-        train_loader = DataLoader(dataset=self._train_set,                            
+        num_workers = self.cfg.get("num_workers", 0)
+        persistent_workers = num_workers > 0
+        prefetch_factor = 4 if num_workers > 0 else None
+
+        train_loader = DataLoader(dataset=self._train_set,
                             batch_size=self.cfg.batch_size,
-                            num_workers=self.cfg.num_workers,
+                            num_workers=num_workers,
                             shuffle=False,
                             pin_memory=True,
                             drop_last=True,
-                            collate_fn=sd_collator,                            
+                            collate_fn=sd_collator,
+                            persistent_workers=persistent_workers,
+                            prefetch_factor=prefetch_factor,
                             worker_init_fn=worker_init_fn)
-                            
-        
+
         return train_loader
-        
+
 
     def val_dataloader(self) -> DataLoader:
+        num_workers = self.cfg.get("num_workers", 0)
+        persistent_workers = num_workers > 0
+        prefetch_factor = 4 if num_workers > 0 else None
+
         val_loader = DataLoader(dataset=self._val_set,
                                 batch_size=self.cfg.batch_size,
-                                num_workers=self.cfg.num_workers,
+                                num_workers=num_workers,
                                 shuffle=False,
                                 pin_memory=True,
                                 drop_last=False,
                                 collate_fn=sd_collator,
+                                persistent_workers=persistent_workers,
+                                prefetch_factor=prefetch_factor,
                                 worker_init_fn=worker_init_fn)
 
         return val_loader

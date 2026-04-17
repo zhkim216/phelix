@@ -40,6 +40,7 @@ trainer:
   precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
   check_val_every_n_epoch: 1  # How often to run validation
   num_sanity_val_steps: 1 # Skip sanity check validation batches before training #! default is 2
+  enable_progress_bar: false  # Disable tqdm progress bar (reduces log noise / overhead)
 
 # Resuming training options
 resume:
@@ -110,6 +111,8 @@ logging:
   log_dir: ${out_dir}
   log_every_n_steps: 500
   wandb_watch_freq: 5000  # Log gradients every n steps
+  wandb_watch_enabled: false  # Enable wandb gradient/parameter logging (adds overhead)
+  wandb_watch_mode: "gradients"  # "all" | "gradients" | "parameters"
 
 checkpointing:
   save_latest_every_n_steps: 2500  # Save the model every n steps
