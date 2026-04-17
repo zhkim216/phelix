@@ -54,3 +54,9 @@ cif_parser_args:
 # --- sharding for multi-node runs ---
 num_shards: 1000     # total number of shards
 shard_id: 0   # per-job shard id
+
+# --- resume behavior ---
+# If true, batches previously recorded in `attempted_empty_batches` (all files
+# failed/timed out on the prior run) will be retried. Default is false because
+# the same file set is likely to fail again and it wastes wall-time.
+retry_empty_batches: false
