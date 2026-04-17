@@ -42,6 +42,16 @@ class SDLoss(nn.Module):
         else:
             raise ValueError(f"Unrecognized task: {self.task}")
 
+        # Accumulator for non-standard AA token violations detected during
+        # seq_loss computation. Kept as a non-persistent buffer so that it
+        # moves with the module's device and is NOT saved to checkpoints
+        # (preserves state_dict compatibility with existing checkpoints).
+        self.register_buffer(
+            "_nonstd_aa_violation_count",
+            torch.zeros((), dtype=torch.long),
+            persistent=False,
+        )
+
 
     def forward(self, outputs, batch, eval_seq = True, eval_total = True, return_aux: bool = False):
         """
@@ -63,9 +73,16 @@ class SDLoss(nn.Module):
             if self.main_seq_loss_pocket_only and self.task == "lc_seq_des" and pocket_mask is not None:
                 main_seq_loss_mask = main_seq_loss_mask * pocket_mask
 
-            # DEBUG: ensure that we're only computing over resolved standard AA protein tokens
-            if (~outputs["protein_residue_node_mask"].bool())[main_seq_loss_mask.bool()].any().item():
-                logger.warning("WARNING: seq_loss is being computed over non-standard amino acid protein tokens")            
+            # Accumulate non-standard AA violation count as a tensor so we
+            # avoid the per-step GPU->CPU sync that ``.item()`` would force.
+            # The accumulator is inspected (and zeroed) at epoch end by the
+            # LightningModule.
+            violation = (
+                (~outputs["protein_residue_node_mask"].bool()) & main_seq_loss_mask.bool()
+            ).sum()
+            self._nonstd_aa_violation_count = (
+                self._nonstd_aa_violation_count + violation.detach()
+            )
 
             aux["seq_loss"] = masked_cross_entropy(outputs["seq_logits"], target_restype, main_seq_loss_mask,
                                                    seq_loss_cfg=self.cfg.seq_loss)

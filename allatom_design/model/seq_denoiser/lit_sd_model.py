@@ -9,10 +9,14 @@ from torch.optim import Adam, AdamW
 from torch.optim.lr_scheduler import LinearLR
 from torchtyping import TensorType
 
+import logging
+
 from allatom_design.model.ema.phema import PowerFunctionEMA
 from allatom_design.model.lr_schedule import InverseSqrtLR, NoamLR
 from allatom_design.model.seq_denoiser.sd_loss import SDLoss
 from allatom_design.model.seq_denoiser.sd_model import SeqDenoiser
+
+logger = logging.getLogger(__name__)
 
 
 class LitSeqDenoiser(L.LightningModule):
@@ -53,13 +57,30 @@ class LitSeqDenoiser(L.LightningModule):
         if self.use_phema:
             self.ema_tracker.reset()                
                 
-    def training_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int):        
-        outputs = self(batch)                
-        
+    @staticmethod
+    def _pop_non_tensor_fields(batch: dict) -> dict:
+        """Remove non-tensor entries from ``batch`` and return them.
+
+        torch.compile's dynamo guards on Python-level structures (e.g. the
+        contents of ``batch["example_id"]`` string lists) and will recompile
+        on every step if those values change, eventually hitting the
+        recompile limit and falling back to eager. Stripping them before
+        the forward avoids that.
+        """
+        meta_fields = {k: batch[k] for k in list(batch) if not isinstance(batch[k], torch.Tensor)}
+        for k in meta_fields:
+            del batch[k]
+        return meta_fields
+
+    def training_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int):
+        meta_fields = self._pop_non_tensor_fields(batch)
+        outputs = self(batch)
+        batch.update(meta_fields)
+
         loss, aux = self.loss(outputs, batch, return_aux=True)
 
         # Logging
-        self._log(batch, outputs, aux, batch_idx, phase="train")                
+        self._log(batch, outputs, aux, batch_idx, phase="train")
 
         return loss
 
@@ -69,25 +90,48 @@ class LitSeqDenoiser(L.LightningModule):
                 # Update EMA tracker
                 self.ema_tracker.update(t=self.trainer.global_step)
 
+    def on_train_epoch_end(self):
+        # Report non-standard AA token violations accumulated by SDLoss
+        # over the epoch (single device->host sync, once per epoch).
+        count = int(self._nonstd_aa_violation_tensor().item())
+        if count > 0:
+            logger.warning(
+                f"seq_loss was computed over {count} non-standard AA tokens this epoch"
+            )
+        self._nonstd_aa_violation_tensor().zero_()
+
+    def _nonstd_aa_violation_tensor(self) -> torch.Tensor:
+        """Return the SDLoss violation accumulator, regardless of compile wrapping."""
+        return self.loss._nonstd_aa_violation_count
+
 
     def validation_step(self, batch: dict[str, TensorType["b ..."]], batch_idx: int, dataloader_idx: int = 0):
         # Lightning automatically disables grads + sets model to eval mode
         phase_suffix = ""
 
+        # Strip non-tensor fields once for the whole step; self._log needs
+        # them back (e.g. batch["example_id"] for batch size), so restore
+        # before any logging call.
+        meta_fields = self._pop_non_tensor_fields(batch)
+
         outputs = self(batch)
         _, aux = self.loss(outputs, batch, return_aux=True)
+        batch.update(meta_fields)
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
-        
+
         # eval seq design over discrete sequence noise
-        
-        aux_t = defaultdict(list)            
-            
-            
+
+        aux_t = defaultdict(list)
+
         for eval_t in self.cfg.eval.eval_timesteps:
             B = batch["token_pad_mask"].shape[0]
             t_seq = torch.full((B, ), fill_value=eval_t).to(self.device)
+
+            meta_fields = self._pop_non_tensor_fields(batch)
             outputs = self(batch, t=t_seq)
             _, aux = self.loss(outputs, batch, eval_total = False, return_aux=True)
+            batch.update(meta_fields)
+
             aux = {k: v for k, v in aux.items() if ("seq" in k) or ("potts" in k)}  # trim aux to sequence metrics
             self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix=f"_t{eval_t}")
 
@@ -96,7 +140,7 @@ class LitSeqDenoiser(L.LightningModule):
                 aux_t[k].append(v)
 
         # average across timesteps and log
-        aux_t = {k: torch.stack(v).mean().item() for k, v in aux_t.items()}            
+        aux_t = {k: torch.stack(v).mean().item() for k, v in aux_t.items()}
         self._log(batch, None, aux_t, batch_idx, phase="val", phase_suffix=phase_suffix, key_suffix="_avg_t")
 
 

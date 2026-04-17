@@ -123,8 +123,10 @@ def main(cfg: DictConfig):
             state_dict = repair_state_dict(state_dict)
         lit_model.load_state_dict(state_dict, strict=True)
 
-    if not cfg.wandb.no_wandb:
-        logger.watch(lit_model.model, log="all", log_freq=cfg.logging.wandb_watch_freq)
+    if not cfg.wandb.no_wandb and cfg.logging.get("wandb_watch_enabled", False):
+        logger.watch(lit_model.model,
+                     log=cfg.logging.get("wandb_watch_mode", "gradients"),
+                     log_freq=cfg.logging.wandb_watch_freq)
 
     # Define callbacks
     callbacks = []
