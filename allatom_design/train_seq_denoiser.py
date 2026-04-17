@@ -21,7 +21,7 @@ from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
 from allatom_design.data.datasets.atomworks_sd_dataset import AtomworksSDDataModule    
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
 
-@hydra.main(config_path="configs_local/seq_denoiser", config_name="debug_seq_denoiser", version_base="1.3.2")
+@hydra.main(config_path="configs/seq_denoiser", config_name="seq_denoiser", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Script for training an sequence denoiser model.
