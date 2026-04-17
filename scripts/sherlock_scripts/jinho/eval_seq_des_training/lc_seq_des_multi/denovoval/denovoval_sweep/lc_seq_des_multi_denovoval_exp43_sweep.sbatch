@@ -1,35 +1,32 @@
 #!/bin/bash
 #SBATCH --job-name=lc_seq_des_denovoval_sweep_exp43
-#SBATCH -p possu,bioe
-#SBATCH --array=0-4
+#SBATCH -p possu,bioe,owners
+#SBATCH --array=0-8
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=4:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_denovoval_sweep_exp43_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_denovoval_sweep_exp43_%A_%a.err
 
 
-MODEL_NAMES=("exp43_cfg0" "exp43_cfg1" "exp43_cfg2" "exp43_cfg3" "exp43_cfg4")
-             
-             
-STEPS=(42500 62500 82500 102500)
+MODEL_STEP_COMBOS=(
+    "exp43_cfg0:22500"
+    "exp43_cfg0:42500"
+    "exp43_cfg1:22500"
+    "exp43_cfg1:42500"
+    "exp43_cfg1:62500"
+    "exp43_cfg2:22500"
+    "exp43_cfg3:22500"
+    "exp43_cfg4:22500"
+    "exp43_cfg4:42500"
+)
 NUM_CHUNKS=1
 
-# ==============================================================================
-# Array index calculation
-# ==============================================================================
-NUM_MODELS=${#MODEL_NAMES[@]}
-NUM_STEPS=${#STEPS[@]}
-TASKS_PER_MODEL=$((NUM_STEPS * NUM_CHUNKS))
-
-MODEL_IDX=$((SLURM_ARRAY_TASK_ID / TASKS_PER_MODEL))
-REMAINDER=$((SLURM_ARRAY_TASK_ID % TASKS_PER_MODEL))
-STEP_IDX=$((REMAINDER / NUM_CHUNKS))
-CHUNK_IDX=$((REMAINDER % NUM_CHUNKS))
-
-MODEL_NAME=${MODEL_NAMES[$MODEL_IDX]}
-STEP=${STEPS[$STEP_IDX]}
+COMBO=${MODEL_STEP_COMBOS[$SLURM_ARRAY_TASK_ID]}
+MODEL_NAME=${COMBO%%:*}
+STEP=${COMBO##*:}
+CHUNK_IDX=0
 
 # Define directories
 BASE_DIR=/home/users/zhkim216/code/allatom-design
@@ -49,7 +46,7 @@ PROJECT=eval_ligand_seq_des
 
 # Input paths (denovo val CIFs, flat directory)
 PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/denovo_val_cifs
-VALSET_NAME="denovoval"
+VALSET_NAME="denovoval_len150250"
 
 # Denoiser train directory
 DENOISER_TRAIN_DIR=/scratch/users/zhkim216/out_dir/ligand_seq_des/${MODEL_NAME}
@@ -97,7 +94,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     pos_constraint_csv=null \
     redesign_cfg.use_native_seq=false \
     redesign_cfg.native_cif_dir=null \
-    pocket_cfg.pocket_distance_for_docking_metrics=6.0 \
+    pocket_cfg.pocket_distance_for_docking_metrics=10.0 \
     input_sample_is_all_atom=true \
     input_sample_is_designed=true \
     load_from_cache=false \
