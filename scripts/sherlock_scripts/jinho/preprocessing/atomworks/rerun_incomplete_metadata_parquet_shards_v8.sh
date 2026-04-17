@@ -102,6 +102,7 @@ cd "${REPO_ROOT}"
 python3 -m allatom_design.data.preprocessing.atomworks.detect_incomplete_shards \
     --out_dir "${OUT_DIR}" \
     --num-shards "${NUM_SHARDS}" \
+    --job-output-dir "${JOB_OUT_DIR}" \
     --verbose \
     --write-report "${REPORT_JSON}"
 

@@ -28,7 +28,23 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
+
+DEFAULT_JOB_OUTPUT_DIR = "/scratch/users/zhkim216/job_output/data_preprocessing"
+DEFAULT_ERR_FILE_TEMPLATE = "build_metadata_parquet_shards_v8_*_{shard_id}.err"
+DEFAULT_ERR_TAIL_LINES = 20
+
+# Patterns used by `_infer_failure_reason` to classify stderr tails.
+# Precedence is timeout > oom > exception > unknown, so ordering matters.
+_TIMEOUT_PATTERNS = ("DUE TO TIME LIMIT",)
+_OOM_PATTERNS = (
+    "oom-kill",
+    "Out of memory",
+    "MemoryError",
+    "OutOfMemoryError",
+)
+_EXCEPTION_MARKER = "Traceback (most recent call last)"
 
 
 @dataclass
@@ -41,6 +57,10 @@ class ShardDiagnostic:
     progress_total_batches: int | None = None
     batch_files_on_disk: list[int] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    latest_err_path: str | None = None
+    latest_err_mtime: str | None = None
+    latest_err_tail: list[str] = field(default_factory=list)
+    inferred_failure_reason: str | None = None
 
 
 def find_incomplete_shards(shard_dir: Path, num_shards: int) -> list[int]:
@@ -81,7 +101,54 @@ def format_slurm_array(shard_ids: list[int]) -> str:
     return ",".join(parts)
 
 
-def diagnose_shard(shard_dir: Path, shard_id: int) -> ShardDiagnostic:
+def _find_latest_err(
+    job_output_dir: Path, err_file_template: str, shard_id: int
+) -> Path | None:
+    """Return the most-recently-modified .err file matching the template, or None.
+
+    Template must contain `{shard_id}` and may contain glob wildcards.
+    """
+    pattern = err_file_template.format(shard_id=shard_id)
+    matches = list(job_output_dir.glob(pattern))
+    if not matches:
+        return None
+    return max(matches, key=lambda p: p.stat().st_mtime)
+
+
+def _tail_lines(path: Path, n: int) -> list[str]:
+    """Return up to `n` last lines of a text file, newlines stripped."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return []
+    return [line.rstrip("\n") for line in lines[-n:]]
+
+
+def _infer_failure_reason(tail: list[str]) -> str:
+    """Classify failure from a stderr tail. Caller handles the no-err-file case.
+
+    Precedence: timeout > oom > exception > unknown.
+    """
+    if not tail:
+        return "unknown"
+    text = "\n".join(tail)
+    if any(p in text for p in _TIMEOUT_PATTERNS):
+        return "timeout"
+    if any(p in text for p in _OOM_PATTERNS):
+        return "oom"
+    if _EXCEPTION_MARKER in text:
+        return "exception"
+    return "unknown"
+
+
+def diagnose_shard(
+    shard_dir: Path,
+    shard_id: int,
+    job_output_dir: Path | None = None,
+    err_file_template: str = DEFAULT_ERR_FILE_TEMPLATE,
+    err_tail_lines: int = DEFAULT_ERR_TAIL_LINES,
+) -> ShardDiagnostic:
     diag = ShardDiagnostic(
         shard_id=shard_id,
         final_parquet_exists=(shard_dir / f"metadata_shard_{shard_id:05d}.parquet").exists(),
@@ -109,6 +176,22 @@ def diagnose_shard(shard_dir: Path, shard_id: int) -> ShardDiagnostic:
                 continue
         diag.batch_files_on_disk = sorted(on_disk)
 
+    # Only scan stderr for shards that actually failed; completed shards
+    # should not pay the glob/IO cost and cannot get a misleading reason.
+    if job_output_dir is not None and not diag.final_parquet_exists:
+        err_path = _find_latest_err(job_output_dir, err_file_template, shard_id)
+        if err_path is None:
+            diag.inferred_failure_reason = "no_err_file"
+        else:
+            diag.latest_err_path = str(err_path)
+            try:
+                mtime = err_path.stat().st_mtime
+                diag.latest_err_mtime = datetime.fromtimestamp(mtime).isoformat(timespec="seconds")
+            except OSError:
+                pass
+            diag.latest_err_tail = _tail_lines(err_path, err_tail_lines)
+            diag.inferred_failure_reason = _infer_failure_reason(diag.latest_err_tail)
+
     return diag
 
 
@@ -118,6 +201,7 @@ def _format_verbose_line(diag: ShardDiagnostic) -> str:
     empty_n = len(diag.progress_attempted_empty)
     on_disk_n = len(diag.batch_files_on_disk)
     expected_str = str(expected) if expected is not None else "?"
+    reason_str = f"  reason={diag.inferred_failure_reason}" if diag.inferred_failure_reason else ""
     notes_str = f"  notes={diag.notes}" if diag.notes else ""
     return (
         f"  shard {diag.shard_id:>5d}: "
@@ -125,6 +209,7 @@ def _format_verbose_line(diag: ShardDiagnostic) -> str:
         f"completed={completed_n}/{expected_str}  "
         f"empty={empty_n}  "
         f"batch_files_on_disk={on_disk_n}"
+        f"{reason_str}"
         f"{notes_str}"
     )
 
@@ -135,6 +220,31 @@ def main() -> int:
     ap.add_argument("--num-shards", type=int, required=True, help="Total number of shards (SLURM_ARRAY_TASK_MAX + 1)")
     ap.add_argument("--verbose", action="store_true", help="Print per-shard diagnostics (progress JSON, batch file counts)")
     ap.add_argument("--write-report", type=str, default=None, help="Optional path to write a JSON report")
+    ap.add_argument(
+        "--job-output-dir",
+        type=str,
+        default=None,
+        help=(
+            "SLURM job output directory containing .out/.err files. If provided, "
+            "each incomplete shard's most recent .err is scanned to infer the "
+            f"failure reason. Typical value: {DEFAULT_JOB_OUTPUT_DIR}"
+        ),
+    )
+    ap.add_argument(
+        "--err-file-template",
+        type=str,
+        default=DEFAULT_ERR_FILE_TEMPLATE,
+        help=(
+            "Glob pattern (with `{shard_id}` placeholder) used to locate per-shard "
+            f".err files under --job-output-dir. Default: {DEFAULT_ERR_FILE_TEMPLATE}"
+        ),
+    )
+    ap.add_argument(
+        "--err-tail-lines",
+        type=int,
+        default=DEFAULT_ERR_TAIL_LINES,
+        help=f"Number of trailing .err lines to capture per shard. Default: {DEFAULT_ERR_TAIL_LINES}",
+    )
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -165,9 +275,19 @@ def main() -> int:
         print("All shards complete.")
 
     diagnostics: list[ShardDiagnostic] = []
+    job_output_dir = Path(args.job_output_dir) if args.job_output_dir else None
     if args.verbose or args.write_report:
         target_ids = incomplete if args.verbose else range(args.num_shards)
-        diagnostics = [diagnose_shard(shard_dir, i) for i in target_ids]
+        diagnostics = [
+            diagnose_shard(
+                shard_dir,
+                i,
+                job_output_dir=job_output_dir,
+                err_file_template=args.err_file_template,
+                err_tail_lines=args.err_tail_lines,
+            )
+            for i in target_ids
+        ]
 
     if args.verbose and diagnostics:
         print()
