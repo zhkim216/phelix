@@ -2,19 +2,29 @@
 """
 Build metadata parquet shards from mmCIF files using AtomWorks.
 
-This script adds a minimal per-file timeout to avoid hanging on
-pathological structures. Other behavior is kept identical to the
-original implementation.
+Per-file timeout is applied via `signal.alarm()` inside worker processes
+to avoid hanging on pathological structures.
 
 Features:
-- Batch processing with intermediate saves for OOM resilience
-- Resume support: skips already completed batch parquet files on restart
+- Batch processing with intermediate saves for OOM resilience.
+- Atomic writes (tmp + os.replace) for batch parquets, progress JSON,
+  summary log, and final shard parquet — safe against SLURM wall-time kills.
+- Resume support: on restart, rebuilds the completed-batch set from the
+  *union* of the progress JSON (`completed_batches`) and on-disk batch
+  parquets (glob `batch_*.parquet`). Either source alone is insufficient.
+- "Attempted-empty" tracking: if every file in a batch fails/times out
+  the batch is recorded in `attempted_empty_batches` so we don't retry
+  a dead batch forever. Override with `retry_empty_batches: true`.
+- Progress JSON schema is a backward-compatible superset — legacy files
+  containing only `completed_batches` still work.
 """
 
 import glob
 import itertools
 import json
+import os
 import signal
+from datetime import datetime, timezone
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, TimeoutError as FuturesTimeoutError
 
@@ -44,6 +54,55 @@ DEFAULT_LIGAND_SCORES = [
     "ranking_model_fit",
     "ranking_model_geometry",
 ]
+
+
+def _atomic_write_parquet(df: pd.DataFrame, final_path: Path) -> None:
+    """Write a parquet atomically via tmp + os.replace to avoid torn files on crashes."""
+    tmp = final_path.with_suffix(final_path.suffix + ".tmp")
+    df.to_parquet(tmp)
+    os.replace(tmp, final_path)
+
+
+def _atomic_write_json(final_path: Path, obj: dict) -> None:
+    """Write a JSON atomically, fsync'd, to avoid torn progress files."""
+    tmp = final_path.with_suffix(final_path.suffix + ".tmp")
+    with open(tmp, "w") as f:
+        json.dump(obj, f, indent=2, sort_keys=True)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, final_path)
+
+
+def _atomic_write_text(final_path: Path, text: str) -> None:
+    """Write a text file atomically via tmp + os.replace."""
+    tmp = final_path.with_suffix(final_path.suffix + ".tmp")
+    with open(tmp, "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, final_path)
+
+
+def _load_progress(progress_file: Path) -> dict:
+    """Load progress JSON; return {} if missing or unreadable.
+
+    The progress JSON schema is a *superset*: legacy files contain only
+    `completed_batches`; new keys (`attempted_empty_batches`, `batch_size`,
+    `total_files`, `total_batches`, `updated_at`) are read via `.get(..., default)`
+    so legacy progress files remain readable.
+    """
+    if not progress_file.exists():
+        return {}
+    try:
+        with open(progress_file) as f:
+            return json.load(f)
+    except Exception as e:
+        print(
+            f"WARNING: progress file {progress_file} is unreadable ({e!r}); "
+            "treating as empty. On-disk batch parquets will still be picked up."
+        )
+        return {}
+
 
 def _worker_timeout_handler(signum, frame):
     """Signal handler used inside worker processes for timeouts."""
@@ -138,26 +197,80 @@ def main(cfg: DictConfig):
     batch_dir = shard_dir / f"shard_{cfg.shard_id:05d}_batches"
     batch_dir.mkdir(parents=True, exist_ok=True)
 
-    # Resume: detect completed batches from existing parquet files
-    completed_batches: set[int] = set()
+    # Clean up stale .tmp files left by crashed atomic writes
+    for stale in batch_dir.glob("batch_*.parquet.tmp"):
+        try:
+            stale.unlink()
+            print(f"Removed stale tmp file: {stale}")
+        except OSError as e:
+            print(f"WARNING: could not remove stale tmp file {stale}: {e!r}")
+    for stale_name in (
+        f"metadata_shard_{cfg.shard_id:05d}.parquet.tmp",
+        f"metadata_shard_{cfg.shard_id:05d}_progress.json.tmp",
+        f"metadata_shard_{cfg.shard_id:05d}.log.tmp",
+    ):
+        stale = shard_dir / stale_name
+        if stale.exists():
+            try:
+                stale.unlink()
+                print(f"Removed stale tmp file: {stale}")
+            except OSError as e:
+                print(f"WARNING: could not remove stale tmp file {stale}: {e!r}")
+
+    # Batch processing settings (defined up front so resume checks can use them)
+    batch_size = getattr(cfg, "batch_size", 100)
+    max_tasks_per_child = getattr(cfg, "max_tasks_per_child", 50)
+    timeout = getattr(cfg, "processing_timeout", 300)
+    retry_empty_batches = bool(getattr(cfg, "retry_empty_batches", False))
+    total_batches = (len(cif_paths) + batch_size - 1) // batch_size
+
+    # Resume: union of (a) progress JSON and (b) on-disk batch parquet glob.
+    # Either source alone is insufficient: the JSON might be corrupt/stale, or
+    # the process may have died between writing a batch and updating the JSON.
+    progress = _load_progress(progress_file)
+    completed_batches: set[int] = set(progress.get("completed_batches", []))
+    attempted_empty: set[int] = set(progress.get("attempted_empty_batches", []))
+    prev_batch_size = progress.get("batch_size")
+    prev_total_files = progress.get("total_files")
+
+    on_disk_batches: set[int] = set()
     for f in batch_dir.glob("batch_*.parquet"):
         # filename format: batch_00001.parquet
         try:
-            batch_num = int(f.stem.split("_")[1])
-            completed_batches.add(batch_num)
+            on_disk_batches.add(int(f.stem.split("_")[1]))
         except Exception:
             continue
-    if completed_batches:
-        print(f"Resuming: found {len(completed_batches)} completed batch parquet files in {batch_dir}")
-    
+    completed_batches |= on_disk_batches
+    # If a batch is now on disk, it is no longer "attempted empty".
+    attempted_empty -= on_disk_batches
+
+    if completed_batches or attempted_empty:
+        print(
+            f"Resuming shard {cfg.shard_id}: "
+            f"{len(completed_batches)} completed batches, "
+            f"{len(attempted_empty)} attempted-empty batches "
+            f"(from progress.json + {len(on_disk_batches)} on-disk batch parquets)."
+        )
+
+    # Consistency checks: bail if batch_size changed, warn if input size changed.
+    if prev_batch_size is not None and prev_batch_size != batch_size:
+        raise SystemExit(
+            f"batch_size mismatch for shard {cfg.shard_id}: previous run used "
+            f"batch_size={prev_batch_size}, current run uses batch_size={batch_size}. "
+            f"Mixing batch sizes would cause batch_num->file_range drift. "
+            f"Restore batch_size={prev_batch_size} or delete {batch_dir} and {progress_file} "
+            f"to restart this shard from scratch."
+        )
+    if prev_total_files is not None and prev_total_files != len(cif_paths):
+        print(
+            f"WARNING: shard {cfg.shard_id} input file count changed since last run: "
+            f"prev={prev_total_files}, now={len(cif_paths)}. "
+            "Already-saved batches will still be reused, but new-vs-old file ordering "
+            "may have shifted — re-run from scratch if input set meaningfully changed."
+        )
+
     # Track skipped details with reasons
     skipped_with_reason: list[tuple[str, str, str]] = []  # (path, reason, message)
-    
-    # Batch processing settings
-    batch_size = getattr(cfg, 'batch_size', 100)
-    max_tasks_per_child = getattr(cfg, 'max_tasks_per_child', 50)
-    timeout = getattr(cfg, 'processing_timeout', 300)
-    total_batches = (len(cif_paths) + batch_size - 1) // batch_size
 
     preprocessor_args = {**cfg.cif_parser_args, **cfg.data_preprocessor_cfg}
 
@@ -168,6 +281,13 @@ def main(cfg: DictConfig):
         # Skip already completed batches
         if batch_num in completed_batches:
             print(f"Skipping already completed batch {batch_num}/{total_batches}")
+            continue
+        if (batch_num in attempted_empty) and not retry_empty_batches:
+            print(
+                f"Skipping previously-empty batch {batch_num}/{total_batches} "
+                "(all files in this batch failed before). "
+                "Set `retry_empty_batches: true` in config to retry."
+            )
             continue
 
         batch_start = batch_idx * batch_size
@@ -234,31 +354,59 @@ def main(cfg: DictConfig):
                     signal.alarm(0)
                     signal.signal(signal.SIGALRM, old_handler)
 
-        # Save batch parquet immediately
+        # Save batch parquet immediately (atomic: tmp -> rename).
+        # An empty batch means every file in this slice timed out or errored.
+        # Track it separately so we don't retry it on every resume.
         batch_df = pd.DataFrame(itertools.chain(*batch_results))
+        batch_parquet = batch_dir / f"batch_{batch_num:05d}.parquet"
         if not batch_df.empty:
             _add_parquet_columns(batch_df, dataset_name, cfg.mmcif_dir)
-            batch_parquet = batch_dir / f"batch_{batch_num:05d}.parquet"
-            batch_df.to_parquet(batch_parquet)
-            print(f"Saved batch {batch_num} with {len(batch_df)} rows to {batch_parquet}")
+            try:
+                _atomic_write_parquet(batch_df, batch_parquet)
+                completed_batches.add(batch_num)
+                attempted_empty.discard(batch_num)
+                print(f"Saved batch {batch_num} with {len(batch_df)} rows to {batch_parquet}")
+            except Exception as e:
+                # Write failure is a hard error: we lose this batch's work for this run,
+                # but we leave the slot available for retry on the next run.
+                print(f"ERROR: failed to write {batch_parquet}: {e!r}")
+        else:
+            attempted_empty.add(batch_num)
+            print(
+                f"Batch {batch_num}/{total_batches}: produced 0 rows "
+                f"(all {len(batch_paths)} files failed/timed out); marked attempted_empty."
+            )
 
-        # Update progress (only completed batches)
-        completed_batches.add(batch_num)
+        # Update progress JSON (atomic). Legacy key `completed_batches` is preserved;
+        # new keys are additive so older readers still work via .get().
         try:
-            with open(progress_file, 'w') as f:
-                json.dump({'completed_batches': sorted(completed_batches)}, f)
-        except Exception:
-            pass
+            _atomic_write_json(
+                progress_file,
+                {
+                    "completed_batches": sorted(completed_batches),
+                    "attempted_empty_batches": sorted(attempted_empty),
+                    "batch_size": batch_size,
+                    "total_files": len(cif_paths),
+                    "total_batches": total_batches,
+                    "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                },
+            )
+        except Exception as e:
+            print(f"WARNING: failed to write progress file {progress_file}: {e!r}")
 
-    # Write summary log for skipped files
+    # Write summary log for skipped files (atomic).
+    log_lines = [
+        f"Shard {cfg.shard_id}: total_files={len(cif_paths)}, "
+        f"completed_batches={len(completed_batches)}, "
+        f"attempted_empty_batches={len(attempted_empty)}",
+        f"Skipped {len(skipped_with_reason)} files:",
+    ]
+    for p, reason, message in skipped_with_reason:
+        log_lines.append(f"SKIPPED\t{reason}\t{message}\t{p}")
     try:
-        with open(log_file, 'w') as f:
-            f.write(f"Shard {cfg.shard_id}: total_files={len(cif_paths)}, completed_batches={len(completed_batches)}\n")
-            f.write(f"Skipped {len(skipped_with_reason)} files:\n")
-            for p, reason, message in skipped_with_reason:
-                f.write(f"SKIPPED\t{reason}\t{message}\t{p}\n")
-    except Exception:
-        pass
+        _atomic_write_text(log_file, "\n".join(log_lines) + "\n")
+    except Exception as e:
+        print(f"WARNING: failed to write log file {log_file}: {e!r}")
 
     # Merge batch parquets into final shard parquet
     _merge_batch_parquets(batch_dir, shard_dir, cfg.shard_id)
@@ -287,21 +435,21 @@ def _add_parquet_columns(df: pd.DataFrame, dataset_name: str, pdb_in_dir: str):
 
 
 def _merge_batch_parquets(batch_dir: Path, shard_dir: Path, shard_id: int):
-    """Merge all batch parquets into a single shard parquet."""
+    """Merge all batch parquets into a single shard parquet (atomic)."""
     batch_files = sorted(batch_dir.glob("batch_*.parquet"))
     if not batch_files:
         print(f"Shard {shard_id}: no batch files to merge.")
         return
-    
+
     dfs = [pd.read_parquet(f) for f in batch_files]
     df = pd.concat(dfs, ignore_index=True)
-    
+
     if df.empty:
         print(f"Shard {shard_id}: produced 0 rows after merging.")
         return
-    
+
     shard_out = shard_dir / f"metadata_shard_{shard_id:05d}.parquet"
-    df.to_parquet(shard_out)
+    _atomic_write_parquet(df, shard_out)
     print(f"Shard {shard_id}: merged {len(batch_files)} batches, wrote {len(df)} rows to {shard_out}")
 
 
