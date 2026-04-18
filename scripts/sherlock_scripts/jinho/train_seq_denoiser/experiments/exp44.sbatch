@@ -47,9 +47,9 @@ CONFIGS=(
   ""  # cfg0 placeholder (identical to exp43_cfg0; not re-trained here)
   "loss.loss_weights.potts_composite_loss=0.0 loss.loss_weights.potts_pseudolikelihood_loss=1.0"
   "loss.loss_weights.potts_composite_loss=0.0 loss.loss_weights.potts_pseudolikelihood_loss=1.0 loss.loss_weights.seq_loss=0.0"
-  "denoiser.mpnn.potts.parameterization=score"
+  "denoiser.mpnn.potts.parameterization=score denoiser.mpnn.potts.num_factors=32"
   "denoiser.mpnn.potts.parameterization=factor_scale"
-  "denoiser.mpnn.potts.parameterization=score_scale"
+  "denoiser.mpnn.potts.parameterization=score_scale denoiser.mpnn.potts.num_factors=32"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))
