@@ -40,8 +40,8 @@ class GraphPotts(nn.Module):
         dim_edges (int): Hidden dimension of edge tensor.
         num_states (int): Size of the vocabulary.
         parameterization (str): Parameterization choice in
-            `{'linear', 'factor', 'score', 'score_zsum', 'score_scale'}`, or
-            any of those suffixed with `_beta`, which will add in a globally
+            `{'linear', 'factor', 'factor_scale', 'score', 'score_zsum', 'score_scale'}`,
+            or any of those suffixed with `_beta`, which will add in a globally
             learnable temperature scaling parameter.
         symmetric_J (bool): If True enforce symmetry of Potts model i.e.
             `J_ij(s_i, s_j) = J_ji(s_j, s_i)`.
@@ -145,6 +145,13 @@ class GraphPotts(nn.Module):
             self.W_h = nn.Linear(self.dim_nodes, self.num_states)
             self.W_J_left = nn.Linear(self.dim_edges, self.num_states * num_factors)
             self.W_J_right = nn.Linear(self.dim_edges, self.num_states * num_factors)
+        elif self.parameterization == "factor_scale":
+            # factor parameterization + per-token/per-edge learnable log-scale (no background).
+            self.W_h_log_scale = nn.Linear(self.dim_nodes, 1)
+            self.W_J_log_scale = nn.Linear(self.dim_edges, 1)
+            self.W_h = nn.Linear(self.dim_nodes, self.num_states, bias=True)
+            self.W_J_left = nn.Linear(self.dim_edges, self.num_states ** 2, bias=True)
+            self.W_J_right = nn.Linear(self.dim_edges, self.num_states ** 2, bias=True)
         else:
             print(f"Unknown potts parameterization: {parameterization}")
             raise NotImplementedError
@@ -285,6 +292,37 @@ class GraphPotts(nn.Module):
             J_bg = (mask_J * self.W_J_bg(edge_h)).unsqueeze(-1)
             h = h_scale * (h + h_bg)
             J = J_scale * (J + J_bg)
+        elif self.parameterization == "factor_scale":
+            # factor-style bilinear J and unary h with per-token/per-edge
+            # learnable log-scale (no background). The 2x offset on the J
+            # log-scale preserves the scale^1 vs scale^2 asymmetry of the
+            # plain `factor` mode at initialization.
+            mask_h_raw = mask_i.unsqueeze(-1)
+            mask_J_raw = mask_J.unsqueeze(-1)
+            h = mask_h_raw * self.W_h(node_h)
+            shape_J = list(edge_h.size())[:3] + ([self.num_states] * 2)
+            J_left = (mask_J_raw * self.W_J_left(edge_h)).view(shape_J)
+            J_right = (mask_J_raw * self.W_J_right(edge_h)).view(shape_J)
+            J = torch.matmul(J_left, J_right)
+            J = self.dropout(J)
+
+            # Zero-sum gauge (matches factor)
+            h = h - h.mean(-1, keepdim=True)
+            J = (
+                J
+                - J.mean(-1, keepdim=True)
+                - J.mean(-2, keepdim=True)
+                + J.mean(dim=[-1, -2], keepdim=True)
+            )
+
+            # Per-token / per-edge learnable log-scale with init_scale offset.
+            log_scale_offset = np.log(self.init_scale)
+            h_scale = torch.exp(self.W_h_log_scale(node_h) + log_scale_offset)
+            J_scale = torch.exp(
+                self.W_J_log_scale(edge_h) + 2 * log_scale_offset
+            ).unsqueeze(-1)
+            h = h_scale * h
+            J = J_scale * J
 
         if self.symmetric_J:
             J = self._symmetrize_J(J, edge_idx, mask_ij)
@@ -393,18 +431,7 @@ class GraphPotts(nn.Module):
             log_probs (torch.Tensor): Potts log-pseudolihoods with shape
                 `(num_batch, num_nodes, num_states)`.
         """
-
-        # Gather J [Batch,i,j,A_i,A_j] => J_ij(:,A_j) [Batch,i,j,A_i]
-        S_j = graph.collect_neighbors(S.unsqueeze(-1), edge_idx)
-        S_j = S_j.unsqueeze(-1).expand(-1, -1, -1, self.num_states, -1)
-        J_ij = torch.gather(J, -1, S_j).squeeze(-1)
-
-        # Sum out J contributions
-        J_i = J_ij.sum(2)
-
-        logits = h + J_i
-        log_probs = F.log_softmax(-logits, dim=-1)
-        return log_probs
+        return pseudolikelihood(S, h, J, edge_idx)
 
 
     def sample(
@@ -1270,6 +1297,96 @@ def _mask_J(edge_idx, mask_i, mask_ij):
     if mask_ij is not None:
         mask_J = mask_ij * mask_J
     return mask_J
+
+
+def pseudolikelihood(
+    S: torch.LongTensor,
+    h: torch.Tensor,
+    J: torch.Tensor,
+    edge_idx: torch.LongTensor,
+) -> torch.Tensor:
+    """Compute Potts pseudolikelihood log-probabilities from a sequence.
+
+    Module-level mirror of :meth:`GraphPotts.pseudolikelihood` so loss code can
+    call it without a GraphPotts instance (same pattern as
+    ``log_composite_likelihood``).
+
+    Inputs:
+        S (torch.LongTensor): Sequence with shape ``(num_batch, num_nodes)``.
+        h (torch.Tensor): Potts fields with shape
+            ``(num_batch, num_nodes, num_states)``.
+        J (torch.Tensor): Potts couplings with shape
+            ``(num_batch, num_nodes, num_neighbors, num_states, num_states)``.
+        edge_idx (torch.LongTensor): Edge indices with shape
+            ``(num_batch, num_nodes, num_neighbors)``.
+
+    Outputs:
+        log_probs (torch.Tensor): Per-site conditional log-probabilities with
+            shape ``(num_batch, num_nodes, num_states)``.
+    """
+    num_states = J.shape[-1]
+    S_j = graph.collect_neighbors(S.unsqueeze(-1), edge_idx)
+    S_j = S_j.unsqueeze(-1).expand(-1, -1, -1, num_states, -1)
+    J_ij = torch.gather(J, -1, S_j).squeeze(-1)
+    J_i = J_ij.sum(2)
+    logits = h + J_i
+    return F.log_softmax(-logits, dim=-1)
+
+
+def log_pseudolikelihood(
+    S: torch.LongTensor,
+    h: torch.Tensor,
+    J: torch.Tensor,
+    edge_idx: torch.LongTensor,
+    mask_i: torch.Tensor,
+    smoothing_alpha: float = 0.0,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Compute Potts per-site pseudolikelihood at the true residue.
+
+    Sibling of :func:`log_composite_likelihood`. Returns the masked log-prob
+    tensor and site mask so the loss module aggregates identically in both
+    cases (no one-hot target arithmetic in the caller).
+
+    Inputs:
+        S (torch.LongTensor): Sequence with shape ``(num_batch, num_nodes)``.
+        h (torch.Tensor): Potts fields with shape
+            ``(num_batch, num_nodes, num_states)``.
+        J (torch.Tensor): Potts couplings with shape
+            ``(num_batch, num_nodes, num_neighbors, num_states, num_states)``.
+        edge_idx (torch.LongTensor): Edge indices with shape
+            ``(num_batch, num_nodes, num_neighbors)``.
+        mask_i (torch.Tensor): Node mask with shape ``(num_batch, num_nodes)``.
+        smoothing_alpha (float): Label smoothing probability on ``(0, 1)``.
+
+    Outputs:
+        logp_i (torch.Tensor): ``log p(S_i | S_{N(i)})`` at the true ``S_i``,
+            masked by ``mask_i``, with shape ``(num_batch, num_nodes)``.
+        mask_i (torch.Tensor): Site mask (returned for symmetry with
+            ``log_composite_likelihood``).
+    """
+    num_states = J.shape[-1]
+
+    # Full per-site conditional log-prob: logp[b,i,q] = log p(S_i = q | S_{N(i)})
+    S_j = graph.collect_neighbors(S.unsqueeze(-1), edge_idx)
+    S_j = S_j.unsqueeze(-1).expand(-1, -1, -1, num_states, -1)
+    J_ij = torch.gather(J, -1, S_j).squeeze(-1)
+    J_i = J_ij.sum(2)
+    logp = F.log_softmax(-(h + J_i), dim=-1)
+
+    # Score the true residue at each site.
+    logp_i = torch.gather(logp, -1, S.unsqueeze(-1)).squeeze(-1)
+
+    # Optional label smoothing — per-site analog of log_composite_likelihood's
+    # pair-level scheme. num_bins = num_states (not num_states**2).
+    if smoothing_alpha > 0.0:
+        prob_no_smooth = 1.0 - smoothing_alpha
+        prob_background = (1.0 - prob_no_smooth) / float(num_states - 1)
+        # Corrects for double-counting of the foreground bin inside logp.sum(-1).
+        p_foreground = prob_no_smooth - prob_background
+        logp_i = p_foreground * logp_i + prob_background * logp.sum(-1)
+
+    logp_i = mask_i * logp_i
+    return logp_i, mask_i
 
 
 def log_composite_likelihood(
