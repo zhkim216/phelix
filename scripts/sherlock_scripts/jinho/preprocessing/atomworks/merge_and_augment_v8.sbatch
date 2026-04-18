@@ -26,18 +26,18 @@ python3 -m allatom_design.data.preprocessing.atomworks.augment_metadata_with_phy
     --min-metal-occupancy 0.5 \
     --metal-coordination-distance 3.2 \
     --min-metal-coordination-partners 3 \
-    --min-small-molecule-neighboring-heavy-atoms 3 \
+    --min-small-molecule-neighboring-heavy-atoms 5 \
     --context-distance 5.0
 
-echo "=== Step 3: Exclude CCD codes (NA, K, CL, BR) ==="
-python3 -m allatom_design.data.preprocessing.atomworks.exclude_ccd_codes_from_metadata \
-    --input-parquet "${DATASET_DIR}/metadata_augmented.parquet" \
-    --output-parquet "${DATASET_DIR}/metadata_augmented_lmpnn.parquet" \
-    --deleted-chains-out "${DATASET_DIR}/metadata_augmented_deleted_chains.parquet" \
-    --exclude-ccd-codes NA K CL BR
+# echo "=== Step 3: Exclude CCD codes (NA, K, CL, BR) ==="
+# python3 -m allatom_design.data.preprocessing.atomworks.exclude_ccd_codes_from_metadata \
+#     --input-parquet "${DATASET_DIR}/metadata_augmented.parquet" \
+#     --output-parquet "${DATASET_DIR}/metadata_augmented_lmpnn.parquet" \
+#     --deleted-chains-out "${DATASET_DIR}/metadata_augmented_deleted_chains.parquet" \
+#     --exclude-ccd-codes NA K CL BR
 
-echo "=== Done ==="
-echo "Outputs:"
-echo "  Merged:    ${DATASET_DIR}/metadata.parquet"
-echo "  Augmented: ${DATASET_DIR}/metadata_augmented.parquet"
-echo "  Final:     ${DATASET_DIR}/metadata_augmented_lmpnn.parquet"
+# echo "=== Done ==="
+# echo "Outputs:"
+# echo "  Merged:    ${DATASET_DIR}/metadata.parquet"
+# echo "  Augmented: ${DATASET_DIR}/metadata_augmented.parquet"
+# echo "  Final:     ${DATASET_DIR}/metadata_augmented_lmpnn.parquet"
