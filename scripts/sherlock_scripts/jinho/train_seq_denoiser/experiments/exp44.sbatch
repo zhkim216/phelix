@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=exp44
 #SBATCH -p possu
+<<<<<<< HEAD
 #SBATCH --array=0
+=======
+#SBATCH --array=1-5
+>>>>>>> refs/remotes/origin/jinho/AAA
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
@@ -33,11 +37,23 @@ RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
 PDB_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3"
 TRAIN_METADATA_PATH="/scratch/users/zhkim216/datasets/atomworks_pdb_full_v3/metadata_seq_clustered_04_filtered_grouped_250205.parquet"
 
-# cfg0: enc-dec + seq_loss (exp43_cfg0 동일 config, batch_size만 16으로 bump)
+# cfg0: Same as exp43_cfg0 (enc-dec + seq_loss), 
+# cfg1: Potts composite off; pseudolikelihood NLL + seq_loss on
+# cfg2: Potts pseudolikelihood only (composite + seq_loss both off)
+# cfg3: Potts parameterization factor -> score
+# cfg4: Potts parameterization factor -> factor_scale
+# cfg5: Potts parameterization factor -> score_scale
 DENOISER_TYPE="lc_atom_mpnn"
 
+# Per-cfg overrides indexed by SLURM_ARRAY_TASK_ID (cfg0 slot is a placeholder;
+# array=1-5 means only ${CONFIGS[1]}..${CONFIGS[5]} are ever accessed).
 CONFIGS=(
-  ""
+  ""  # cfg0 placeholder (identical to exp43_cfg0; not re-trained here)
+  "loss.loss_weights.potts_composite_loss=0.0 loss.loss_weights.potts_pseudolikelihood_loss=1.0"
+  "loss.loss_weights.potts_composite_loss=0.0 loss.loss_weights.potts_pseudolikelihood_loss=1.0 loss.loss_weights.seq_loss=0.0"
+  "denoiser.mpnn.potts.parameterization=score"
+  "denoiser.mpnn.potts.parameterization=factor_scale"
+  "denoiser.mpnn.potts.parameterization=score_scale"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))

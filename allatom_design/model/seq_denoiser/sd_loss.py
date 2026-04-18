@@ -36,9 +36,9 @@ class SDLoss(nn.Module):
 
         # Define losses based on task
         if self.task == "seq_des":
-            self.loss_keys = {"seq_loss", "potts_composite_loss"}
+            self.loss_keys = {"seq_loss", "potts_composite_loss", "potts_pseudolikelihood_loss"}
         elif self.task == "lc_seq_des":
-            self.loss_keys = {"seq_loss", "potts_composite_loss"}
+            self.loss_keys = {"seq_loss", "potts_composite_loss", "potts_pseudolikelihood_loss"}
         else:
             raise ValueError(f"Unrecognized task: {self.task}")
 
@@ -119,17 +119,37 @@ class SDLoss(nn.Module):
                 if self.main_potts_loss_pocket_only and self.task == "lc_seq_des" and pocket_mask is not None:
                     main_potts_seq_loss_mask = ligand_pocket_seq_loss_mask
 
-                potts_loss, ligand_pocket_potts_loss = potts_composite_loss(S = target_restype, 
-                                                                   potts_decoder_aux = potts_decoder_aux,
-                                                                   label_smoothing = self.cfg.potts.label_smoothing,
-                                                                   per_token_avg = self.cfg.potts.per_token_avg,
-                                                                   main_seq_loss_mask = main_potts_seq_loss_mask,
-                                                                   compute_ligand_pocket_loss = self.task == "lc_seq_des",
-                                                                   ligand_pocket_seq_loss_mask = ligand_pocket_seq_loss_mask,
-                                                                   )
-                aux["potts_composite_loss"] = potts_loss
-                if ligand_pocket_potts_loss is not None:
-                    aux_monitor["ligand_pocket_potts_composite_loss"] = ligand_pocket_potts_loss.mean().detach().clone()
+                # Composite and pseudolikelihood Potts losses are independently
+                # toggleable via loss_weights. Gating mirrors the same ``weight > 0``
+                # pattern for both so default configs (composite=1.0, pseudolikelihood=0.0)
+                # remain bit-identical while a pseudolikelihood-only run skips the
+                # composite path entirely.
+                if self.loss_weights.get("potts_composite_loss", 0.0) > 0.0:
+                    potts_loss, ligand_pocket_potts_loss = potts_composite_loss(S = target_restype,
+                                                                       potts_decoder_aux = potts_decoder_aux,
+                                                                       label_smoothing = self.cfg.potts.label_smoothing,
+                                                                       per_token_avg = self.cfg.potts.per_token_avg,
+                                                                       main_seq_loss_mask = main_potts_seq_loss_mask,
+                                                                       compute_ligand_pocket_loss = self.task == "lc_seq_des",
+                                                                       ligand_pocket_seq_loss_mask = ligand_pocket_seq_loss_mask,
+                                                                       )
+                    aux["potts_composite_loss"] = potts_loss
+                    if ligand_pocket_potts_loss is not None:
+                        aux_monitor["ligand_pocket_potts_composite_loss"] = ligand_pocket_potts_loss.mean().detach().clone()
+
+                if self.loss_weights.get("potts_pseudolikelihood_loss", 0.0) > 0.0:
+                    pl_loss, pl_ligand_pocket_loss = potts_pseudolikelihood_loss(
+                        S=target_restype,
+                        potts_decoder_aux=potts_decoder_aux,
+                        label_smoothing=self.cfg.potts.label_smoothing,
+                        per_token_avg=self.cfg.potts.per_token_avg,
+                        main_seq_loss_mask=main_potts_seq_loss_mask,
+                        compute_ligand_pocket_loss=self.task == "lc_seq_des",
+                        ligand_pocket_seq_loss_mask=ligand_pocket_seq_loss_mask,
+                    )
+                    aux["potts_pseudolikelihood_loss"] = pl_loss
+                    if pl_ligand_pocket_loss is not None:
+                        aux_monitor["ligand_pocket_potts_pseudolikelihood_loss"] = pl_ligand_pocket_loss.mean().detach().clone()
 
         # Aggregate losses
         total_loss = 0.0        
@@ -262,4 +282,49 @@ def potts_composite_loss(S: TensorType["b n", int] = None,
             ligand_pocket_loss = torch.tensor(0.0, device=loss.device)
         return loss, ligand_pocket_loss
 
-    
+
+def potts_pseudolikelihood_loss(S: TensorType["b n", int] = None,
+                                potts_decoder_aux: dict[str, TensorType["b ...", float]] = None,
+                                label_smoothing: float = 0.1,
+                                per_token_avg: bool = False,
+                                main_seq_loss_mask: TensorType["b n", float] = None,
+                                compute_ligand_pocket_loss: bool = False,
+                                ligand_pocket_seq_loss_mask: TensorType["b n", float] = None,
+                                ) -> tuple[TensorType["b", float], TensorType["b", float] | None]:
+    """Potts pseudolikelihood NLL loss (direct-regression form).
+
+    Mirrors ``potts_composite_loss``: ``potts.log_pseudolikelihood`` returns a
+    masked per-site log-prob at the true residue; here we just negate + average
+    over unmasked positions, with no one-hot target arithmetic.
+    """
+    # ``log_pseudolikelihood`` masks logp_i internally and returns the node mask
+    # unchanged; reuse it here to avoid a redundant ``potts_decoder_aux`` lookup.
+    logp_i, mask = potts.log_pseudolikelihood(
+        S,
+        potts_decoder_aux["h"],
+        potts_decoder_aux["J"],
+        potts_decoder_aux["edge_idx"],
+        potts_decoder_aux["mask_i"],
+        smoothing_alpha=label_smoothing,
+    )
+
+    if main_seq_loss_mask is not None:
+        mask = mask * main_seq_loss_mask
+
+    if per_token_avg:
+        loss = -(logp_i * mask).sum(dim=-1) / mask.sum(dim=-1).clamp(min=1e-8)
+    else:
+        N = mask.shape[1]
+        loss = -(logp_i * mask).sum(dim=-1) / N
+
+    if not compute_ligand_pocket_loss or ligand_pocket_seq_loss_mask is None:
+        return loss, None
+
+    ligand_pocket_loss = -(logp_i * ligand_pocket_seq_loss_mask).sum(dim=-1) \
+                         / ligand_pocket_seq_loss_mask.sum(dim=-1).clamp(min=1e-8)
+    has_close_ligands = ligand_pocket_seq_loss_mask.sum(dim=-1) > 0
+    if has_close_ligands.any():
+        ligand_pocket_loss = ligand_pocket_loss[has_close_ligands]
+    else:
+        ligand_pocket_loss = torch.tensor(0.0, device=loss.device)
+    return loss, ligand_pocket_loss
