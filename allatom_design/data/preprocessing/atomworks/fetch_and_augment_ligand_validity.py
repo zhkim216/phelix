@@ -216,28 +216,45 @@ def augment_step(
     metadata_out: Path,
     ligand_scores: list[str],
 ) -> int:
-    """Join cache parquet into metadata and write augmented metadata atomically."""
+    """Join cache parquet into metadata and write augmented metadata atomically.
+
+    Uses in-place column assignment instead of accumulating augmented
+    groups in a list followed by pd.concat. The legacy concat pattern
+    allocated roughly 2x meta_df at peak and OOM-killed on multi-million-row
+    inputs; the in-place variant keeps memory bounded at ~meta_df size.
+    """
     meta_df = pd.read_parquet(metadata_in)
     cache_df = pd.read_parquet(cache_parquet)
     print(
         f"[augment] input metadata rows={len(meta_df)}, cache rows={len(cache_df)}"
     )
     by_pdb = _build_scores_table(cache_df, ligand_scores)
+    del cache_df  # no longer needed — score tables are in by_pdb
 
-    out_groups = []
+    # Ensure the target column exists (legacy concat path left it NaN for
+    # pdb_ids without scores; replicate that here).
+    if "q_pn_unit_ligand_validity" not in meta_df.columns:
+        meta_df["q_pn_unit_ligand_validity"] = pd.NA
+
+    # Only touch rows whose pdb_id has ligand-validity scores.
+    scored_pdb_ids = set(by_pdb.keys())
+    scored_mask = meta_df["pdb_id"].astype(str).isin(scored_pdb_ids)
+    scored_rows = meta_df.loc[scored_mask]
+
     for pdb_id, g in tqdm(
-        meta_df.groupby("pdb_id", sort=False),
+        scored_rows.groupby("pdb_id", sort=False),
         desc="augment",
-        total=meta_df["pdb_id"].nunique(),
+        total=scored_rows["pdb_id"].nunique(),
     ):
-        scores_df = by_pdb.get(str(pdb_id), None)
-        out_groups.append(_augment_group(g, scores_df, ligand_scores))
+        scores_df = by_pdb[str(pdb_id)]
+        augmented_g = _augment_group(g, scores_df, ligand_scores)
+        if "q_pn_unit_ligand_validity" in augmented_g.columns:
+            meta_df.loc[augmented_g.index, "q_pn_unit_ligand_validity"] = augmented_g["q_pn_unit_ligand_validity"]
 
-    out_df = pd.concat(out_groups, ignore_index=True) if out_groups else meta_df
     metadata_out.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write_parquet(out_df, metadata_out)
-    print(f"[augment] wrote augmented metadata -> {metadata_out} (rows={len(out_df)})")
-    return len(out_df)
+    _atomic_write_parquet(meta_df, metadata_out)
+    print(f"[augment] wrote augmented metadata -> {metadata_out} (rows={len(meta_df)})")
+    return len(meta_df)
 
 
 # -----------------------------

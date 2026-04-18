@@ -2,8 +2,8 @@
 # Submit the ligand-validity fetch + augment sbatch.
 # Thin wrapper around fetch_and_augment_ligand_validity_v8.sbatch.
 #
-# Run after merge_and_augment_v8.sbatch has finished (and has produced
-# metadata_augmented_lmpnn.parquet in the dataset dir).
+# Run after merge_v8.sbatch has finished (and has produced
+# metadata.parquet in the dataset dir).
 #
 # Usage:
 #   bash submit_fetch_and_augment_ligand_validity_v8.sh            # submit
@@ -17,7 +17,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SBATCH_SCRIPT="${SCRIPT_DIR}/fetch_and_augment_ligand_validity_v8.sbatch"
 DATASET_DIR="${DATASET_DIR:-/scratch/users/zhkim216/datasets/atomworks_pdb_full_v8}"
-METADATA_IN="${DATASET_DIR}/metadata_augmented_lmpnn.parquet"
+METADATA_IN="${DATASET_DIR}/metadata.parquet"
 
 if [[ ! -f "${SBATCH_SCRIPT}" ]]; then
     echo "ERROR: sbatch script not found at ${SBATCH_SCRIPT}" >&2
@@ -40,8 +40,8 @@ if [[ ! -e "${METADATA_IN}" ]]; then
     cat <<EOF >&2
 WARNING: expected input parquet not found: ${METADATA_IN}
 
-This step needs metadata_augmented_lmpnn.parquet, which is produced by
-  sbatch ${SCRIPT_DIR}/merge_and_augment_v8.sbatch
+This step needs metadata.parquet, which is produced by
+  sbatch ${SCRIPT_DIR}/merge_v8.sbatch
 
 If that job hasn't run yet, launch it first. Continuing anyway so the
 sbatch can still be submitted — the job itself will fail loudly if the
@@ -67,6 +67,6 @@ Monitor with:
   squeue -u "$USER" | grep ligval_v8
 
 After completion, verify:
-  ls -la "${DATASET_DIR:-/scratch/users/zhkim216/datasets/atomworks_pdb_full_v8}/metadata_augmented_lmpnn_ligval.parquet"
+  ls -la "${DATASET_DIR:-/scratch/users/zhkim216/datasets/atomworks_pdb_full_v8}/metadata_ligval.parquet"
   du -sh "${DATASET_DIR:-/scratch/users/zhkim216/datasets/atomworks_pdb_full_v8}/ligand_validity_cache_json"
 EOF
