@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=exp44
 #SBATCH -p possu
-<<<<<<< HEAD
-#SBATCH --array=0
-=======
 #SBATCH --array=1-5
->>>>>>> refs/remotes/origin/jinho/AAA
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
