@@ -1333,11 +1333,6 @@ def create_pos_constraint_dict_from_atom_array(
 
 
 ###########################################################
-# Sample Dict / Data Preparation Utilities
-###########################################################
-
-
-###########################################################
 # Redesign Functions
 ###########################################################
 
@@ -1549,12 +1544,6 @@ def redesign_with_native(sample_dict: dict,
     print(f"Saved redesign summary to {csv_path}")
     
     return sample_dict
-
-
-
-
-
-
 
 ######################################
 # Utils for making pos_constraint_df

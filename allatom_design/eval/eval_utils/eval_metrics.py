@@ -51,10 +51,6 @@ from biotite.structure import AtomArray, get_residue_count, spread_residue_wise
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdMolAlign
 
-
-
-
-
 # ============================================================================
 # Sequence recovery
 # ============================================================================

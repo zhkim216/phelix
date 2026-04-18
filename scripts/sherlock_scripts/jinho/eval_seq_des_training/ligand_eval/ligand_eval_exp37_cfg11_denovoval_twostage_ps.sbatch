@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=le_exp37_cfg11_ts
 #SBATCH -p possu,owners
-#SBATCH --array=0-9
+#SBATCH --array=0-1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH --time=08:00:00
+#SBATCH --mem=16G
+#SBATCH --time=00:30:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/le_exp37_cfg11_denovoval_twostage_ps_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/le_exp37_cfg11_denovoval_twostage_ps_%A_%a.err
 
@@ -25,7 +25,7 @@ HYDRA_DIR=/scratch/users/zhkim216/hydra_outputs
 BASE_OUT_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des
 
 AF3_EVAL_DIR=${BASE_OUT_DIR}/eval_exp37_cfg11_denovoval_twostage_ps_af3/step_22500_epoch_14
-OUTPUT_DIR=${BASE_OUT_DIR}/eval_exp37_cfg11_denovoval_twostage_ps_ligand_eval/step_22500_epoch_14
+OUTPUT_DIR=${BASE_OUT_DIR}/eval_exp37_cfg11_denovoval_twostage_ps_ligand_eval_new/step_22500_epoch_14
 SAMPLE_DIR=${AF3_EVAL_DIR}/samples
 SCHRODINGER_PATH=/scratch/users/zhkim216/software/schrodinger2025-3
 

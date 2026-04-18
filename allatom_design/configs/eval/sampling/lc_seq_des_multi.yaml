@@ -7,24 +7,24 @@ wandb:
   group: null
 
 # Basic settings
-debug: true
-num_debug_samples: 32
+debug: false
+num_debug_samples: 1
 seed: 0
-num_workers: 16 # for dataloading
+num_workers: 8 # for dataloading
 protein_only: false #! If true, condition only on protein atoms (exclude ligands from atom_cond_mask)
 run_seq_des: true
 
 # Outputs
-exp_name: eval_exp27_cfg5 # experiment name; used for wandb and output directory
-base_out_dir: /home/possu/jinho/allatom-design/local_debug_output/260220
+exp_name: exp35_cfg2_nativeval_samples # experiment name; used for wandb and output directory
+base_out_dir: /scratch/users/zhkim216/datasets/val_cifs
 
 # Sequence design config
 seq_des_cfg:
   model_name: "lc_atom_mpnn"
-  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp27_cfg5
+  denoiser_train_dir: /scratch/users/zhkim216/out_dir/ligand_seq_des/exp35_cfg2
   ckpt_cfg:
-    start_step: 100000
-    end_step: 100000
+    start_step: 82500
+    end_step: 82500
     eval_every_n_ckpts: 1
     eval_last_ckpt: false
     use_ema: true
@@ -33,7 +33,7 @@ seq_des_cfg:
     sampling_cfg: /home/users/zhkim216/code/allatom-design/allatom_design/configs/seq_des/lc_atom_mpnn_inference.yaml
     overrides:
       batch_size: 8
-      num_seqs_per_pdb: 1  # number of sequences to sample per pdb
+      num_seqs_per_pdb: 2  # number of sequences to sample per pdb
       omit_aas: null  # exclude certain aatypes globally, e.g. ["C", "G"]. "X" is always excluded.
       noise_labels: null
       num_workers: ${num_workers}
@@ -52,7 +52,7 @@ pos_constraint_csv: null
 
 # Redesign pocket sequence options
 redesign_cfg:
-  use_native_seq: true #! If false, automatically redesign the pocket sequence using lcaliby
+  use_native_seq: false #! If false, automatically redesign the pocket sequence using lcaliby
   pocket_distance: 5.0
   native_cif_dir: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/cifs
 
@@ -76,13 +76,13 @@ pocket_cfg:
   pocket_distance_for_docking_metrics: 6.0
 
 ######### Data & Transform configurations #########
-input_sample_is_all_atom: false
-input_sample_is_designed: true
+input_sample_is_all_atom: true
+input_sample_is_designed: false
 load_from_cache: false
 
 # Configurations for getting native or designed structures' paths
 pdb_cfg:
-  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp16_cfg0_lmpnnval_sm_filt_full_af3/step_62500_epoch_39/samples
+  pdb_dir: null
   pdb_name_list: null
   pdb_name_ext: ".cif"
   n_subsample: null  # null to use all samples
@@ -118,7 +118,7 @@ cif_cfg:
       fix_arginines: false
       convert_mse_to_met: true
       hydrogen_policy: "remove"
-      extra_fields: null
+      extra_fields: []
     af3_predictions:
       add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
       remove_waters: false
@@ -127,15 +127,15 @@ cif_cfg:
       fix_arginines: false
       convert_mse_to_met: true
       hydrogen_policy: "remove"
-      extra_fields: null
+      extra_fields: []
   save:
     date: "1959-01-07" #! Young-Ae Lee's birthday
     include_entity_poly: True
     include_entity_nonpoly: True
     include_nan_coords: False #! designed structures should not have nan coords
     include_bonds: True
-    extra_fields: "all"
-    exclude_field_keys: ["token_id", "is_ligand_pocket"]
+    extra_fields: []
+    exclude_field_keys: []
     extra_categories:
       pdbx_audit_revision_history:
         ordinal: [1]
@@ -197,7 +197,7 @@ featurizer_cfg:
 ######### Structure prediction model configuration (AF3) #########
 struct_pred_cfg:
   model_name: "af3"
-  evaluate_self_consistency: true
+  evaluate_self_consistency: false
   evaluate_docking_consistency: false
   calculate_metrics_only: false
   af3:
@@ -224,7 +224,7 @@ struct_pred_cfg:
         ligand_protein_template_conditioning_mode: 1
         mask_template_sidechains: true
         mask_template_sequence: true
-        max_template_date: "2021-09-30"
+        max_template_date: "2026-03-24"
 
 hydra:
   run:

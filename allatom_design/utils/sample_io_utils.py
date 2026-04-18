@@ -65,6 +65,7 @@ def fix_cif_annotation_types_atom_array(atom_array: AtomArray) -> AtomArray:
         "is_n_terminal_atom",
         "is_c_terminal_atom",
     ]
+    
     for ann in bool_annotations:
         if ann in atom_array.get_annotation_categories():
             val = getattr(atom_array, ann)
@@ -95,8 +96,8 @@ def fix_cif_annotation_types_atom_array(atom_array: AtomArray) -> AtomArray:
     for ann in int_annotations:
         if ann in atom_array.get_annotation_categories():
             val = getattr(atom_array, ann)
-            if val.dtype.kind in ("U", "S", "O"):
-                new_val = np.array([int(v) if str(v).lstrip("-").isdigit() else 0 for v in val])
+            if val.dtype.kind in ("U", "S", "O"):                
+                new_val = np.array([int(v) if str(v).lstrip("-").isdigit() else 0 for v in val])                
                 atom_array.del_annotation(ann)
                 atom_array.set_annotation(ann, new_val)
 

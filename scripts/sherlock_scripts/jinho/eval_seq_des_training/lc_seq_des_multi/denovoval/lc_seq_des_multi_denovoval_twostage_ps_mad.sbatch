@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=lc_seq_des_denovoval_twostage_ps_mad
-#SBATCH -p possu,bioe
-#SBATCH --array=0-29
+#SBATCH -p possu,bioe,owners
+#SBATCH --array=0-59
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
-#SBATCH --time=12:00:00
+#SBATCH --time=6:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_denovoval_twostage_ps_mad_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_denovoval_twostage_ps_mad_%A_%a.err
 
@@ -26,7 +26,7 @@
 MODEL_NAMES=("exp37_cfg11")
 STEPS=(22500)
 K_STRS=("02" "04" "06" "08" "10" "12")
-NUM_CHUNKS=5
+NUM_CHUNKS=10
 
 # Array index calculation: k_value → model → step → chunk
 NUM_MODELS=${#MODEL_NAMES[@]}
@@ -63,7 +63,7 @@ WANDB_ID=zhkim216
 PROJECT=eval_ligand_seq_des
 
 # Input paths (stage 1 outputs)
-PDB_DIR=/scratch/users/zhkim216/datasets/val_cifs/exp35_cfg2_step82500_samples
+PDB_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg2_denovoval_full_af3/step_82500_epoch_52/samples
 VALSET_NAME="denovoval_twostage_ps_mad_k${K_STR}"
 
 # MAD pocket constraint CSV (pocket positions are fixed; scaffold is resampled)
@@ -130,7 +130,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     pdb_cfg.array_id=${CHUNK_IDX} \
     pdb_cfg.num_arrays=${NUM_CHUNKS} \
     'pdb_cfg.sample_indices=[0,1,2,3,4]' \
-    'pdb_cfg.sample_lengths=[150,250,350,450]' \
+    'pdb_cfg.sample_lengths=[150,250]' \
     featurizer_cfg.design.residue_cache_dir="/scratch/users/zhkim216/datasets/atomworks_cached_residue_data" \
     struct_pred_cfg.evaluate_self_consistency=true \
     struct_pred_cfg.evaluate_docking_consistency=false \

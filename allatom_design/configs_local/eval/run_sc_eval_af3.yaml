@@ -9,7 +9,7 @@ wandb:
   group: null
 
 # Basic settings
-debug: false
+debug: true
 num_debug_samples: 2
 seed: 0
 protein_only: false
@@ -17,12 +17,12 @@ input_sample_is_designed: true
 sampling_inputs_csv: null  # Optional CSV with pdb_id, query_pn_unit_iids columns
 
 # Outputs
-exp_name: eval_caliby_lmpnnval_af3
-base_out_dir: /home/possu/jinho/allatom-design/debug/260206_caliby_lmpnnval_af3_debugging/
+exp_name: eval_lmpnn010_denovoval_af3
+base_out_dir: /scratch/users/zhkim216/out_dir/debug_eval_ligand_seq_des
 
 # Configurations for getting designed sample paths
 pdb_cfg:
-  pdb_dir: /home/possu/jinho/datasets/val_cifs/caliby_samples/lmpnn_val_cifs/samples
+  pdb_dir: /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_lmpnn010_denovoval_af3/samples/backbones
   pdb_name_list: null
   pdb_name_ext: ".cif"
   n_subsample: null
@@ -30,14 +30,14 @@ pdb_cfg:
   recursive: false
   split_by_subfolder: false
   # Sample index filtering
-  sample_indices: null
+  sample_indices: [0,1,2,3,4]
   # Slurm array job parameters (set via CLI override in sbatch)
-  array_id: null
-  num_arrays: null
+  array_id: 21
+  num_arrays: 62
 
 # Pocket configuration
 pocket_cfg:
-  pocket_distance_for_docking_metrics: 6.0
+  pocket_distance_for_docking_metrics: 8.0
 
 ######### Data & Transform configurations #########
 # Configurations for cif files
@@ -110,7 +110,7 @@ featurizer_cfg:
 struct_pred_cfg:
   model_name: "af3"
   evaluate_self_consistency: true
-  calculate_metrics_only: true
+  calculate_metrics_only: false
   af3:
     runner_path: /home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py
     json_config:

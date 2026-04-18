@@ -5,16 +5,8 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 EXP_DIRS=(
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg0_denovoval_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg1_denovoval_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg2_denovoval_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg3_denovoval_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg4_denovoval_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg5_denovoval_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg6_denovoval_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg7_denovoval_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp35_cfg8_denovoval_af3
-    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/pocket_pos_constraint_mad
+    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp41_cfg0_denovoval_af3
+    /scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_exp41_cfg1_denovoval_af3
 )
 
 echo "=============================================="

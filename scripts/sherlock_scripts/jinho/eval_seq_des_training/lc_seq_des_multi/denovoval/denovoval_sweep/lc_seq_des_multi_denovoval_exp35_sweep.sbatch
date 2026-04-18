@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=lc_seq_des_denovoval_sweep_exp35
-#SBATCH -p possu,bioe,owners
-#SBATCH --array=0-35
+#SBATCH -p possu,bioe
+#SBATCH --array=26
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=1-0:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_denovoval_sweep_exp35_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_denovoval_sweep_exp35_%A_%a.err
 
@@ -73,6 +73,8 @@ echo "GPU compute capability: ${COMPUTE_CAP}, using flash_attention_implementati
 
 # Run evaluation script
 WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py \
+    --config-path ${BASE_DIR}/allatom_design/configs/eval/sampling \
+    --config-name lc_seq_des_multi \
     wandb.no_wandb=false \
     wandb.project=${PROJECT} \
     wandb.wandb_id=${WANDB_ID} \
@@ -95,7 +97,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     pos_constraint_csv=null \
     redesign_cfg.use_native_seq=false \
     redesign_cfg.native_cif_dir=null \
-    pocket_cfg.pocket_distance_for_metrics=6.0 \
+    pocket_cfg.pocket_distance_for_docking_metrics=6.0 \
     input_sample_is_all_atom=true \
     input_sample_is_designed=true \
     load_from_cache=false \

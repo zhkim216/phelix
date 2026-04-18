@@ -18,7 +18,7 @@ import hydra
 from allatom_design.eval.eval_utils.seq_des_utils import make_pos_constraint_df    
 
 
-@hydra.main(config_path="../../configs_local/eval/sampling", config_name="make_pos_constraint_df", version_base="1.3.2")
+@hydra.main(config_path="../../configs/eval/sampling", config_name="make_pos_constraint_df", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Create positional constraint DataFrame for ligand pocket or scaffold regions.

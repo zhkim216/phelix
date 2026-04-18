@@ -74,6 +74,7 @@ python3 allatom_design/train_seq_denoiser.py \
     train.debug=false \
     train.compile.compile_model=true \
     trainer.strategy="ddp_find_unused_parameters_true" \
+    trainer.enable_progress_bar=true \
     resume.use_current_cfg=true \
     loss.main_seq_loss_pocket_only=false \
     loss.main_potts_loss_pocket_only=false \

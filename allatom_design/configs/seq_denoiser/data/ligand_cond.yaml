@@ -25,11 +25,18 @@ sampling_weights:
     a_protein_protein: 0.0
     a_protein_nuc: 0.0
     a_protein_peptide: 0.0
+<<<<<<< HEAD
+    a_protein_small_molecule: 1.0 
+    a_protein_metal: 0.0 
+    a_protein_loi: 1.0      
+  k_percentile: 100.0 # Adjust this value to control the balance between interface and monomer sampling
+=======
     a_protein_small_molecule: 1.0
     a_protein_metal: 0.0
     a_protein_loi: 1.0
   k_percentile: 55.0 # Adjust this value to control the balance between interface and monomer sampling
   ligand_cluster_col: "bl_ligand_cluster"  # null to disable; name of per-row ligand cluster column on the metadata parquet. Used only on the non-protein side of pair_cluster.
+>>>>>>> refs/remotes/origin/jinho/AAA
 
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:

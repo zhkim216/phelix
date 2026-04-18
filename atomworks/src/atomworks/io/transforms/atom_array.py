@@ -820,6 +820,8 @@ def add_chain_type_annotation(
         - AtomArray | AtomArrayStack: The AtomArray with the chain_type annotation added as an integer.
     """
     # Add annotation for chain_type as an integer
+    if "chain_type" in atom_array.get_annotation_categories():
+        atom_array.del_annotation("chain_type")
     atom_array.add_annotation("chain_type", dtype=np.int8)
     for chain_id in np.unique(atom_array.chain_id):
         chain_type = chain_info_dict[chain_id]["chain_type"]

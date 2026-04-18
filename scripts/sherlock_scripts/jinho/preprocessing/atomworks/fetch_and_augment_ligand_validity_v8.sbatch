@@ -32,5 +32,5 @@ python3 -m allatom_design.data.preprocessing.atomworks.fetch_and_augment_ligand_
     --metadata-out  "${DATASET_DIR}/metadata_ligval.parquet" \
     --cache-dir     "${DATASET_DIR}/ligand_validity_cache_json" \
     --cache-parquet "${DATASET_DIR}/ligand_validity_cache.parquet" \
-    --num-workers   16 \
-    --checkpoint-every 1000
+    --num-workers   8 \
+    --checkpoint-every 1000 --only-augment

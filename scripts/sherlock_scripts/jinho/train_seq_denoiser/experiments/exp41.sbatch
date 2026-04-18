@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=exp41
 #SBATCH -p possu
-#SBATCH --array=0-4
+#SBATCH --array=7
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
@@ -47,6 +47,7 @@ CONFIGS=(
   "data.grouping_scheme=interface"
   "loss.seq_loss.per_token_avg=true loss.potts.per_token_avg=true"
   "mask_selector.restype_masking_schedule=uniform_t"
+  "loss.seq_loss.per_token_avg=true loss.potts.per_token_avg=true data.interface_only_training=true"
 )
 
 IDX=$((SLURM_ARRAY_TASK_ID))

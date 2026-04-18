@@ -227,4 +227,5 @@ run_all_sc_eval_af3.sh
 run_all_sc_eval_af3_parallel.sh
 run_remaining_sc_eval.sh
 test.parquet
-tests/check_ost_tools.py.claude/
+tests/check_ost_tools.py
+.claude/

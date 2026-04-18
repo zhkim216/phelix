@@ -56,7 +56,7 @@ cif_cfg:
       fix_arginines: false
       convert_mse_to_met: true
       hydrogen_policy: "remove"
-      extra_fields: null  
+      extra_fields: []
     af3_predictions:
       add_missing_atoms: true #! For charge annotation and is_backbone_atom annotation
       remove_waters: false

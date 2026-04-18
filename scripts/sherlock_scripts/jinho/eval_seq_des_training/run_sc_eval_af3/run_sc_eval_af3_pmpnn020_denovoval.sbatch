@@ -1,19 +1,19 @@
 #!/bin/bash
 #SBATCH --job-name=sc_pmpnn020_denovoval
 #SBATCH -p possu,bioe,owners
-#SBATCH --array=0-63
+#SBATCH --array=18-35
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH --time=03:00:00
+#SBATCH --mem=16G
+#SBATCH --time=06:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/sc_pmpnn020_denovoval_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/sc_pmpnn020_denovoval_%A_%a.err
 
 # ==============================================================================
 # Self-consistency evaluation for ProteinMPNN 0.20 designed samples on denovo val
-# 64 chunks, each chunk processes a subset of designed backbones
+# 62 chunks, each chunk processes a subset of designed backbones
 # ==============================================================================
-NUM_CHUNKS=64
+NUM_CHUNKS=62
 CHUNK_IDX=${SLURM_ARRAY_TASK_ID}
 
 # Define directories
@@ -56,7 +56,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/run_sc_eval_af3.py \
     exp_name=${EXP_NAME} \
     base_out_dir=${BASE_OUT_DIR} \
     pdb_cfg.pdb_dir=${PDB_DIR} \
-    pdb_cfg.pdb_name_ext=".pdb" \
+    pdb_cfg.pdb_name_ext=".cif" \
     pdb_cfg.recursive=false \
     pdb_cfg.split_by_subfolder=false \
     pdb_cfg.array_id=${CHUNK_IDX} \
