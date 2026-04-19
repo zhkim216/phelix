@@ -27,6 +27,10 @@ from allatom_design.data.sampler import Sampler
 from allatom_design.data.transform.pad import pad_to_max
 from allatom_design.data.transform import sd_featurizer
 from allatom_design.data.transform import sd_featurizer_pocket_only
+from allatom_design.data.datasets._runtime_context import (
+    apply_context_group_chain_type_whitelist,
+    derive_context_columns,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -231,13 +235,85 @@ class SDDataset(MolecularDataset):
         
         # Add q_pn_unit_is_nuc & q_pn_unit_is_small_molecule columns
         nuc_chain_type_enums = [chain_type.value for chain_type in aw_enums.ChainType.get_nucleic_acids()]
-        metadata_df["q_pn_unit_is_nuc"] = metadata_df["q_pn_unit_is_polymer"].astype(bool) & (metadata_df["q_pn_unit_type"].isin(nuc_chain_type_enums))            
-        
-        # q_pn_unit_is_small_molecule: config option으로 biologically meaningful 버전 사용 가능
-        if self.cfg.get("use_biologically_meaningful_small_molecule", False) and \
-           "q_pn_unit_is_biologically_meaningful_small_molecule" in metadata_df.columns:
+        metadata_df["q_pn_unit_is_nuc"] = metadata_df["q_pn_unit_is_polymer"].astype(bool) & (metadata_df["q_pn_unit_type"].isin(nuc_chain_type_enums))
+
+        # v8 parquet does not ship q_pn_unit_is_protein; derive it from q_pn_unit_type
+        # using atomworks ChainType. v3 parquet already carries the column — preserve it.
+        if "q_pn_unit_is_protein" not in metadata_df.columns:
+            protein_chain_type_enums = [ct.value for ct in aw_enums.ChainType.get_proteins()]
+            metadata_df["q_pn_unit_is_protein"] = metadata_df["q_pn_unit_type"].isin(protein_chain_type_enums)
+            logger.info(
+                f"Derived q_pn_unit_is_protein from q_pn_unit_type "
+                f"(ChainType values {sorted(protein_chain_type_enums)}): "
+                f"{int(metadata_df['q_pn_unit_is_protein'].sum()):,} rows"
+            )
+
+        # --- Physically meaningful small molecule (runtime, v8+ parquet) ---
+        # Only materialized when config opts in; raises if the raw column is missing
+        # so that a stale parquet doesn't silently fall back to a different definition.
+        pm_sm_enabled = self.cfg.get("use_physically_meaningful_small_molecule", False)
+        if pm_sm_enabled:
+            required_col = "q_pn_unit_n_neighboring_heavy_atoms_small_molecule"
+            if required_col not in metadata_df.columns:
+                raise KeyError(
+                    f"Config enables use_physically_meaningful_small_molecule but "
+                    f"metadata_df lacks '{required_col}'. "
+                    f"Use metadata parquet generated from v8 build_metadata_parquet_shards."
+                )
+            pm_cfg = self.cfg.get("physically_meaningful_small_molecule", {})
+            min_heavy = pm_cfg.get("min_neighboring_heavy_atoms", 3)
+            metadata_df["q_pn_unit_is_physically_meaningful_small_molecule"] = (
+                (~metadata_df["q_pn_unit_is_polymer"].astype(bool))
+                & (~metadata_df["q_pn_unit_is_metal"].astype(bool))
+                & metadata_df[required_col].notna()
+                & (metadata_df[required_col] >= min_heavy)
+            )
+            logger.info(
+                f"Computed q_pn_unit_is_physically_meaningful_small_molecule "
+                f"(min_neighboring_heavy_atoms={min_heavy}): "
+                f"{metadata_df['q_pn_unit_is_physically_meaningful_small_molecule'].sum():,} rows"
+            )
+
+        # --- Physically meaningful metal (runtime, v8+ parquet) ---
+        pm_metal_enabled = self.cfg.get("use_physically_meaningful_metal", False)
+        if pm_metal_enabled:
+            required_cols = [
+                "q_pn_unit_n_coordination_partners_metal",
+                "q_pn_unit_avg_occupancy_nonpolymer",
+            ]
+            missing = [c for c in required_cols if c not in metadata_df.columns]
+            if missing:
+                raise KeyError(
+                    f"Config enables use_physically_meaningful_metal but "
+                    f"metadata_df lacks columns {missing}."
+                )
+            pm_cfg = self.cfg.get("physically_meaningful_metal", {})
+            min_occ = pm_cfg.get("min_avg_occupancy", 0.5)
+            min_coord = pm_cfg.get("min_coordination_partners", 3)
+            metadata_df["q_pn_unit_is_physically_meaningful_metal"] = (
+                metadata_df["q_pn_unit_is_metal"].astype(bool)
+                & metadata_df["q_pn_unit_avg_occupancy_nonpolymer"].notna()
+                & (metadata_df["q_pn_unit_avg_occupancy_nonpolymer"] >= min_occ)
+                & metadata_df["q_pn_unit_n_coordination_partners_metal"].notna()
+                & (metadata_df["q_pn_unit_n_coordination_partners_metal"] >= min_coord)
+            )
+            logger.info(
+                f"Computed q_pn_unit_is_physically_meaningful_metal "
+                f"(min_occ={min_occ}, min_coord={min_coord}): "
+                f"{metadata_df['q_pn_unit_is_physically_meaningful_metal'].sum():,} rows"
+            )
+
+        # q_pn_unit_is_small_molecule dispatch.
+        # BMSM wins over PM-SM when both toggles are on, preserving the legacy
+        # behavior of the running task10-validation experiment.
+        use_bmsm = self.cfg.get("use_biologically_meaningful_small_molecule", False)
+        use_pm_sm = self.cfg.get("use_physically_meaningful_small_molecule", False)
+        if use_bmsm and "q_pn_unit_is_biologically_meaningful_small_molecule" in metadata_df.columns:
             metadata_df["q_pn_unit_is_small_molecule"] = metadata_df["q_pn_unit_is_biologically_meaningful_small_molecule"]
             logger.info("Using q_pn_unit_is_biologically_meaningful_small_molecule as q_pn_unit_is_small_molecule")
+        elif use_pm_sm and "q_pn_unit_is_physically_meaningful_small_molecule" in metadata_df.columns:
+            metadata_df["q_pn_unit_is_small_molecule"] = metadata_df["q_pn_unit_is_physically_meaningful_small_molecule"]
+            logger.info("Using q_pn_unit_is_physically_meaningful_small_molecule as q_pn_unit_is_small_molecule")
         else:
             metadata_df["q_pn_unit_is_small_molecule"] = (~metadata_df["q_pn_unit_is_polymer"].astype(bool)) & (~metadata_df["q_pn_unit_is_metal"].astype(bool))
         
@@ -250,8 +326,46 @@ class SDDataset(MolecularDataset):
                 metadata_df["q_pn_unit_contacting_pn_unit_iids"] = metadata_df["q_pn_unit_contacting_pn_unit_iids"].apply(json.loads)
             except:
                 logger.info("q_pn_unit_contacting_pn_unit_iids is already a list, skipping...")
-    
-        # Load in validation IDs and hold out based on phase. Case insensitive, no extension.                    
+
+        # Runtime context columns. Parquets that ship `num_contacting_protein_chains`
+        # and `q_pn_unit_context_group_iids` at a fixed cutoff are reused as-is;
+        # otherwise we derive them from `q_pn_unit_contacting_pn_unit_iids` at
+        # `cfg.context_distance`. Set `recompute_context_columns=true` to force
+        # re-derivation — needed for a context_distance sweep on a parquet that
+        # already ships pre-computed columns at a different cutoff.
+        context_distance = self.cfg.get("context_distance", 5.0)
+        already_has_context = (
+            "num_contacting_protein_chains" in metadata_df.columns
+            and "q_pn_unit_context_group_iids" in metadata_df.columns
+            and self.cfg.get("recompute_context_columns", False) is False
+        )
+        if not already_has_context:
+            metadata_df = derive_context_columns(metadata_df, context_distance=context_distance)
+            logger.info(
+                f"Computed num_contacting_protein_chains / q_pn_unit_context_group_iids "
+                f"at context_distance={context_distance} A"
+            )
+        else:
+            logger.info(
+                "Using pre-computed num_contacting_protein_chains / q_pn_unit_context_group_iids "
+                "from parquet"
+            )
+
+        # Optional chain-type whitelist for q_pn_unit_context_group_iids.
+        # PMSM / PMM flag columns must already be materialized above when
+        # include_pmsm / include_pmm are on.
+        whitelist_cfg = self.cfg.get("context_group_chain_type_whitelist", None)
+        if whitelist_cfg is not None and whitelist_cfg.get("enabled", False):
+            metadata_df = apply_context_group_chain_type_whitelist(
+                metadata_df,
+                include_pmsm=whitelist_cfg.get("include_pmsm", True),
+                include_pmm=whitelist_cfg.get("include_pmm", True),
+                include_branched=whitelist_cfg.get("include_branched", True),
+                include_nuc=whitelist_cfg.get("include_nuc", True),
+                include_peptide=whitelist_cfg.get("include_peptide", True),
+            )
+
+        # Load in validation IDs and hold out based on phase. Case insensitive, no extension.
         with open(self.cfg.validation_ids_file, "r") as f:                
             val_split = {x.lower().split(".")[0] for x in f.read().splitlines()}        
         logger.info(f"Loading in validation IDs from {self.cfg.validation_ids_file}...")
@@ -353,7 +467,13 @@ class SDDataset(MolecularDataset):
                                     
         # Build interface df
         max_interface_distance = self.cfg.get("max_interface_distance", 6.0)
-        interface_df = build_interface_df(metadata_df=metadata_df, dataset_name=Path(metadata_path).parent.name, max_interface_distance=max_interface_distance)
+        ligand_cluster_col = self.cfg.sampling_weights.get("ligand_cluster_col", None)
+        interface_df = build_interface_df(
+            metadata_df=metadata_df,
+            dataset_name=Path(metadata_path).parent.name,
+            max_interface_distance=max_interface_distance,
+            ligand_cluster_col=ligand_cluster_col,
+        )
                         
         # Filter out invalid iids in interface df based on cluster exclusion
         if self.cfg.exclude_val_cluster:                        
@@ -410,13 +530,7 @@ class SDDataset(MolecularDataset):
             metadata_df = metadata_df[~(metadata_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids))]
             current_len = len(metadata_df)
             logger.info(f"Excluded {prev_len - current_len} pockets in {dataset_name} pocket dataset, because of cluster exclusion")
-        
-        if self.cfg.exclude_val_cluster:
-            prev_len = len(metadata_df)
-            metadata_df = metadata_df[~(metadata_df['q_pn_unit_cluster_id'].isin(self.val_cluster_ids))]
-            current_len = len(metadata_df)
-            logger.info(f"Excluded {prev_len - current_len} pockets in {dataset_name} pocket dataset, because of cluster exclusion")
-        
+
         # Exclude small molecules that are covalently linked to proteins
         if self.cfg.exclude_small_molecules_covalently_linked_to_protein and metadata_df.get("q_pn_unit_is_maybe_covalently_linked_to_protein", False).sum() > 0:
             len_before = len(metadata_df)
@@ -651,7 +765,12 @@ def sd_collator(data: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     return collated
 
 
-def build_interface_df(metadata_df: pd.DataFrame, dataset_name: str, max_interface_distance: float = 6.0) -> pd.DataFrame:
+def build_interface_df(
+    metadata_df: pd.DataFrame,
+    dataset_name: str,
+    max_interface_distance: float = 6.0,
+    ligand_cluster_col: str | None = None,
+) -> pd.DataFrame:
     # Bring example_id into a column if it's the index
     metadata_df = metadata_df.reset_index(drop=True)
 
@@ -659,8 +778,16 @@ def build_interface_df(metadata_df: pd.DataFrame, dataset_name: str, max_interfa
     chain_specific_cols = ['q_pn_unit_id', 'q_pn_unit_iid', 'q_pn_unit_type', 'q_pn_unit_sequence_length',
                         'q_pn_unit_is_protein', 'q_pn_unit_is_peptide', 'q_pn_unit_is_nuc', 'q_pn_unit_is_small_molecule', 'q_pn_unit_is_metal',
                         'q_pn_unit_is_loi', 'q_pn_unit_is_polymer', 'q_pn_unit_cluster_id']
-    if 'bl_ligand_cluster' in metadata_df.columns:
-        chain_specific_cols.append('bl_ligand_cluster')
+    # Attach the config-specified ligand cluster column (e.g. v3 "bl_ligand_cluster"
+    # or v8 "q_pn_unit_bmsm_ligand_cluster_id") so `_effective_cluster` can key off it.
+    if ligand_cluster_col is not None:
+        if ligand_cluster_col in metadata_df.columns and ligand_cluster_col not in chain_specific_cols:
+            chain_specific_cols.append(ligand_cluster_col)
+        elif ligand_cluster_col not in metadata_df.columns:
+            logger.warning(
+                f"build_interface_df: ligand_cluster_col={ligand_cluster_col!r} is not on metadata_df; "
+                "it will be ignored and sampling will fall back to q_pn_unit_cluster_id."
+            )
         
     base_cols = [
         "example_id", "pdb_id", "assembly_id", "path", "q_pn_unit_contacting_pn_unit_iids", "q_pn_unit_context_group_iids",

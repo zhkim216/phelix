@@ -18,6 +18,27 @@ exclude_val_cluster: true
 exclude_small_molecules_covalently_linked_to_protein: true
 min_resolution_ratio: 0.8
 use_biologically_meaningful_small_molecule: true
+# Runtime context-group extensions. Defaults preserve legacy training behavior:
+# physical toggles off, chain-type whitelist off, and pre-computed context columns
+# reused when the parquet already ships them.
+context_distance: 5.0
+use_physically_meaningful_small_molecule: false
+use_physically_meaningful_metal: false
+recompute_context_columns: false
+physically_meaningful_small_molecule:
+  min_neighboring_heavy_atoms: 3
+physically_meaningful_metal:
+  min_avg_occupancy: 0.5
+  min_coordination_partners: 3
+# Keep q_pn_unit_context_group_iids to these chain types only. Runs after the
+# distance cutoff; self-iid is always preserved. Toggle per experiment.
+context_group_chain_type_whitelist:
+  enabled: false
+  include_pmsm: true       # needs use_physically_meaningful_small_molecule=true
+  include_pmm: true        # needs use_physically_meaningful_metal=true
+  include_branched: true   # q_pn_unit_type == ChainType.BRANCHED
+  include_nuc: true        # DNA / RNA / DNA-RNA hybrid
+  include_peptide: true
 grouping_scheme: "neighbor" # interface, neighbor
 
 sampling_weights:
@@ -25,18 +46,11 @@ sampling_weights:
     a_protein_protein: 0.0
     a_protein_nuc: 0.0
     a_protein_peptide: 0.0
-<<<<<<< HEAD
-    a_protein_small_molecule: 1.0 
-    a_protein_metal: 0.0 
-    a_protein_loi: 1.0      
-  k_percentile: 100.0 # Adjust this value to control the balance between interface and monomer sampling
-=======
     a_protein_small_molecule: 1.0
     a_protein_metal: 0.0
     a_protein_loi: 1.0
   k_percentile: 55.0 # Adjust this value to control the balance between interface and monomer sampling
   ligand_cluster_col: "bl_ligand_cluster"  # null to disable; name of per-row ligand cluster column on the metadata parquet. Used only on the non-protein side of pair_cluster.
->>>>>>> refs/remotes/origin/jinho/AAA
 
 # CIF parser args. Not used during training since we've already cached the CIFs.
 cif_parser_args:
@@ -75,6 +89,10 @@ featurizer_cfg:
   protein_noise_scale: 0.3
   context_noise_scale: 0.05
   pseudo_ligand_occupancy_threshold: 0.5  # JH Changed 260416 — min occupancy for pseudo-ligand sidechain atoms
+  # JH Changed 260416 vdM
+  vdm_contact_radius: 5.0
+  vdm_seq_gap: 10
+  vdm_n_s_min: 3
 
 # Pocket-only featurizer config (used when pocket_only_training is true)
 pocket_featurizer_cfg:
