@@ -28,6 +28,13 @@ rsync -rltvz --stats --no-perms --chmod=ug=rwX,o=rX \
     --include='*/' --include='*.cif' --exclude='*' \
     $REMOTE $DEST/
 
+# Invalidate atomworks' .ccd_codes_cache so the next process does a fresh scan.
+# rsync with --omit-dir-times does not bump the root dir mtime, so atomworks'
+# `cache_mtime > dir_mtime` staleness check in
+# atomworks/src/atomworks/io/utils/ccd.py:get_available_ccd_codes_in_mirror
+# would otherwise keep serving the pre-sync code set.
+rm -f "$DEST/.ccd_codes_cache"
+
 echo ""
 echo "==================================="
 echo "Verification:"
