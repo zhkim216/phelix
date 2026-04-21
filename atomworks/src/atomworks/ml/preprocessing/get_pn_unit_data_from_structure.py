@@ -54,7 +54,9 @@ class DataPreprocessor:
     hydrogen_policy: Literal["remove", "infer", "keep"] = "remove",
     add_bond_types_from_struct_conn: list[str] = field(default_factory=lambda: ["covale"]) #! (JH) changed 251016
     # JH changed: metal coordination and small molecule neighboring config
-    metal_coordination_cfg: dict | None = None  # e.g. {"coordination_distance": 3.2, "min_partner_occupancy": 0.5, "donor_elements": [...]}
+    metal_coordination_cfg: dict | None = None  # e.g. {"coordination_distance": 3.2, "donor_elements": [...]}
+    # JH changed: halide coordination config (5A non-C atom count)
+    halide_coordination_cfg: dict | None = None  # e.g. {"coordination_distance": 5.0, "halide_res_names": ["F","CL","BR","IOD"]}
     small_molecule_neighboring_distance: float = 5.0  # distance for n_neighboring_heavy_atoms computation
 
     def __post_init__(self):
@@ -269,8 +271,43 @@ class DataPreprocessor:
             metal_coordination_counts = dp.count_metal_coordination_partners(
                 filtered_atom_array, cell_list, **self.metal_coordination_cfg
             )
+            metal_coord_distance = self.metal_coordination_cfg.get("coordination_distance", 3.2)
+            metal_donor_elements = self.metal_coordination_cfg.get(
+                "donor_elements", ("N", "O", "F", "P", "S", "Cl", "As", "Se", "Br", "I")
+            )
         else:
             metal_coordination_counts = {}
+            metal_coord_distance = 3.2
+            metal_donor_elements = ("N", "O", "F", "P", "S", "Cl", "As", "Se", "Br", "I")
+
+        # JH changed: pre-compute halide coordination partner counts
+        if self.halide_coordination_cfg is not None:
+            halide_coordination_counts = dp.count_halide_coordination_partners(
+                filtered_atom_array, cell_list, **self.halide_coordination_cfg
+            )
+            halide_coord_distance = self.halide_coordination_cfg.get("coordination_distance", 5.0)
+            halide_res_names_upper = frozenset(
+                n.upper()
+                for n in self.halide_coordination_cfg.get(
+                    "halide_res_names", ("F", "CL", "BR", "IOD")
+                )
+            )
+        else:
+            halide_coordination_counts = {}
+            halide_coord_distance = 5.0
+            halide_res_names_upper = frozenset()
+
+        # JH changed: pre-compute per-partner masks (donor / non-carbon) over filtered_atom_array.
+        # Hydrogens are removed upstream (hydrogen_policy="remove"), so "non-C" == "heavy non-C".
+        if len(filtered_atom_array) > 0:
+            _elements_upper = np.array([e.upper() for e in filtered_atom_array.element])
+            is_donor_partner_mask = np.isin(
+                _elements_upper, list(frozenset(e.upper() for e in metal_donor_elements))
+            )
+            is_non_carbon_partner_mask = _elements_upper != "C"
+        else:
+            is_donor_partner_mask = np.zeros(0, dtype=bool)
+            is_non_carbon_partner_mask = np.zeros(0, dtype=bool)
 
         # ---------- Step 5: Find contacting/partner PN units and build dataframes ---------- #
         # Loop through all considered query PN units, including proteins (single-chain), nucleic acids (single-chain), and ligands (single- or multi-chain)
@@ -342,17 +379,48 @@ class DataPreprocessor:
                 residue_names = np.unique(query_pn_unit_atom_array.res_name)
                 is_loi = len(loi_ligand_set.intersection(residue_names)) > 0
 
-                # ... check if metal
+                # ... check if metal (single atom + metal element)
                 is_metal = bool(
                     len(query_pn_unit_atom_array) == 1 and query_pn_unit_atom_array[0].element.upper() in METAL_ELEMENTS
                 )
+                # JH changed: check if halide (single atom + halide res_name; physically disjoint from metal)
+                is_halide = bool(
+                    not is_metal
+                    and len(query_pn_unit_atom_array) == 1
+                    and query_pn_unit_atom_array[0].res_name.upper() in halide_res_names_upper
+                )
 
-                # JH changed: coordination partners for metals, neighboring heavy atoms for small molecules
-                n_coordination_partners = None
+                # JH changed: per-type total counts and per-partner contact breakdowns
+                # (mutually exclusive: metal XOR halide XOR small molecule)
+                n_coordination_partners_metal = None
+                n_coordination_partners_halide = None
                 n_neighboring_heavy_atoms_sm = None
+                per_partner_contacts_metal_raw = None
+                per_partner_contacts_halide_raw = None
+                per_partner_contacts_small_molecule_raw = None
+
                 if is_metal:
-                    n_coordination_partners = metal_coordination_counts.get(query_pn_unit_iid, 0)
+                    n_coordination_partners_metal = metal_coordination_counts.get(query_pn_unit_iid, 0)
+                    per_partner_contacts_metal_raw = dp.count_per_partner_contacts(
+                        query_coord=query_pn_unit_atom_array.coord,
+                        query_pn_unit_iids=[query_pn_unit_iid],
+                        filtered_atom_array=filtered_atom_array,
+                        cell_list=cell_list,
+                        distance=metal_coord_distance,
+                        partner_mask=is_donor_partner_mask,
+                    )
+                elif is_halide:
+                    n_coordination_partners_halide = halide_coordination_counts.get(query_pn_unit_iid, 0)
+                    per_partner_contacts_halide_raw = dp.count_per_partner_contacts(
+                        query_coord=query_pn_unit_atom_array.coord,
+                        query_pn_unit_iids=[query_pn_unit_iid],
+                        filtered_atom_array=filtered_atom_array,
+                        cell_list=cell_list,
+                        distance=halide_coord_distance,
+                        partner_mask=is_non_carbon_partner_mask,
+                    )
                 else:
+                    # Small molecule (non-metal, non-halide, non-polymer)
                     neighbor_mask = dp.get_atom_mask_from_cell_list(
                         query_pn_unit_atom_array.coord, cell_list,
                         len(filtered_atom_array), self.small_molecule_neighboring_distance,
@@ -363,6 +431,33 @@ class DataPreprocessor:
                         np.unique(query_pn_unit_atom_array.pn_unit_iid),
                     )
                     n_neighboring_heavy_atoms_sm = int(np.sum(collapsed & non_query))
+                    per_partner_contacts_small_molecule_raw = dp.count_per_partner_contacts(
+                        query_coord=query_pn_unit_atom_array.coord,
+                        query_pn_unit_iids=[query_pn_unit_iid],
+                        filtered_atom_array=filtered_atom_array,
+                        cell_list=cell_list,
+                        distance=self.small_molecule_neighboring_distance,
+                        partner_mask=None,
+                    )
+
+                # JH changed: decode raw int pn_unit_iid → verbose string via id_map_dict
+                def _decode_per_partner(raw_list: list[dict] | None) -> list[dict] | None:
+                    if raw_list is None:
+                        return None
+                    return [
+                        {
+                            "pn_unit_iid": id_map_dict["pn_unit_iid"][p["pn_unit_iid"]],
+                            "chain_iid": p["chain_iid"],
+                            "count": p["count"],
+                        }
+                        for p in raw_list
+                    ]
+
+                per_partner_contacts_metal = _decode_per_partner(per_partner_contacts_metal_raw)
+                per_partner_contacts_halide = _decode_per_partner(per_partner_contacts_halide_raw)
+                per_partner_contacts_small_molecule = _decode_per_partner(
+                    per_partner_contacts_small_molecule_raw
+                )
 
                 # JH changed: avg_occupancy including missing atoms (occ=0) from full_atom_array
                 full_query_atoms = full_atom_array[full_atom_array.pn_unit_iid == query_pn_unit_iid]
@@ -395,14 +490,21 @@ class DataPreprocessor:
 
                 type_specific_criteria = {
                     "is_metal": is_metal,
+                    # JH changed: halide flag
+                    "is_halide": is_halide,
                     "is_loi": is_loi,
                     "bonded_polymer_pn_units": bonded_polymer_pn_units,
                     "ligand_validity": ligand_validity,
                     "non_polymer_res_names": non_polymer_res_names,
-                    # JH changed: new physical annotation fields
-                    "n_coordination_partners": n_coordination_partners,
+                    # JH changed: per-type coordination counts
+                    "n_coordination_partners_metal": n_coordination_partners_metal,
+                    "n_coordination_partners_halide": n_coordination_partners_halide,
                     "n_neighboring_heavy_atoms_small_molecule": n_neighboring_heavy_atoms_sm,
                     "avg_occupancy": avg_occupancy,
+                    # JH changed: per-partner contact breakdowns (list of {pn_unit_iid, chain_iid, count})
+                    "per_partner_contacts_metal": per_partner_contacts_metal,
+                    "per_partner_contacts_halide": per_partner_contacts_halide,
+                    "per_partner_contacts_small_molecule": per_partner_contacts_small_molecule,
                 }
                 
             elif query_pn_unit_type.is_polymer():
@@ -477,6 +579,8 @@ class DataPreprocessor:
                 "q_pn_unit_num_resolved_residues": num_resolved_residues,
                 # (Type-specific) Non-polymer criteria
                 "q_pn_unit_is_metal": type_specific_criteria.get("is_metal", False),
+                # JH changed: halide flag (False for polymers and non-halide non-polymers)
+                "q_pn_unit_is_halide": type_specific_criteria.get("is_halide", False),
                 "q_pn_unit_is_loi": type_specific_criteria.get("is_loi", False),
                 "q_pn_unit_ligand_validity": type_specific_criteria.get("ligand_validity", {}),
                 "q_pn_unit_bonded_polymer_pn_units": {
@@ -484,10 +588,28 @@ class DataPreprocessor:
                     for pn_unit in type_specific_criteria.get("bonded_polymer_pn_units", set())
                 },  # Covalent modifications
                 "q_pn_unit_non_polymer_res_names": ",".join(type_specific_criteria.get("non_polymer_res_names", [])),
-                # JH changed: physical annotation columns (None for polymers)
-                "q_pn_unit_n_coordination_partners_metal": type_specific_criteria.get("n_coordination_partners", None),
+                # JH changed: physical annotation columns (None for polymers / non-applicable types)
+                "q_pn_unit_n_coordination_partners_metal": type_specific_criteria.get("n_coordination_partners_metal", None),
+                "q_pn_unit_n_coordination_partners_halide": type_specific_criteria.get("n_coordination_partners_halide", None),
                 "q_pn_unit_n_neighboring_heavy_atoms_small_molecule": type_specific_criteria.get("n_neighboring_heavy_atoms_small_molecule", None),
                 "q_pn_unit_avg_occupancy_nonpolymer": type_specific_criteria.get("avg_occupancy", None),
+                # JH changed: per-partner contact breakdowns serialized as JSON strings
+                # (None for non-applicable rows, json.dumps([]) for applicable rows with no partners)
+                "q_pn_unit_per_partner_contacts_metal": (
+                    json.dumps(type_specific_criteria["per_partner_contacts_metal"])
+                    if type_specific_criteria.get("per_partner_contacts_metal") is not None
+                    else None
+                ),
+                "q_pn_unit_per_partner_contacts_halide": (
+                    json.dumps(type_specific_criteria["per_partner_contacts_halide"])
+                    if type_specific_criteria.get("per_partner_contacts_halide") is not None
+                    else None
+                ),
+                "q_pn_unit_per_partner_contacts_small_molecule": (
+                    json.dumps(type_specific_criteria["per_partner_contacts_small_molecule"])
+                    if type_specific_criteria.get("per_partner_contacts_small_molecule") is not None
+                    else None
+                ),
                 # (Type-specific) Polymer criteria
                 "q_pn_unit_ec_numbers": type_specific_criteria.get("ec_numbers", []),
                 "q_pn_unit_sequence_length": type_specific_criteria.get("sequence_length", None),

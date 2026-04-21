@@ -303,7 +303,6 @@ def count_metal_coordination_partners(
     filtered_atom_array: AtomArray,
     cell_list: CellList,
     coordination_distance: float = 3.2,
-    min_partner_occupancy: float = 0.5,
     donor_elements: Collection[str] = ("N", "O", "F", "P", "S", "Cl", "As", "Se", "Br", "I"),
 ) -> dict[int, int]:
     """
@@ -311,13 +310,16 @@ def count_metal_coordination_partners(
 
     A coordination partner is an atom within ``coordination_distance`` that is either:
     - A donor element (from ``donor_elements``), OR
-    - A metal atom from another PN unit with occupancy >= ``min_partner_occupancy``
+    - A metal atom from another PN unit.
+
+    The caller is expected to have already applied ``occupancy > 0`` filtering upstream
+    (see ``DataPreprocessor._apply_filters``), so no per-partner occupancy threshold is
+    applied here.
 
     Args:
         filtered_atom_array: AtomArray with non-zero occupancy atoms.
         cell_list: CellList of ``filtered_atom_array`` for distance computations.
         coordination_distance: Distance threshold for coordination partners (Angstrom).
-        min_partner_occupancy: Minimum occupancy for partner metal atoms to count.
         donor_elements: Element symbols considered as donor atoms.
 
     Returns:
@@ -336,15 +338,15 @@ def count_metal_coordination_partners(
     if not metal_iids:
         return {}
 
-    # 2. Build valid-partner mask: donor element OR high-occ metal atom (from any metal PN unit)
+    # 2. Build valid-partner mask: donor element OR any metal atom (from any metal PN unit).
+    # Self is excluded per metal below via `non_self`.
     elements_upper = np.array([e.upper() for e in filtered_atom_array.element])
     is_donor = np.isin(elements_upper, list(donor_elements_upper))
 
     metal_iid_set = set(metal_iids)
     is_metal_atom = np.array([iid in metal_iid_set for iid in filtered_atom_array.pn_unit_iid])
-    is_high_occ_metal = is_metal_atom & (filtered_atom_array.occupancy >= min_partner_occupancy)
 
-    valid_partner_mask = is_donor | is_high_occ_metal
+    valid_partner_mask = is_donor | is_metal_atom
 
     # 3. Per metal: count coordination partners within distance, excluding self
     result: dict[int, int] = {}
@@ -358,6 +360,126 @@ def count_metal_coordination_partners(
         result[metal_iid] = int(np.sum(collapsed & non_self & valid_partner_mask))
 
     return result
+
+
+# JH changed: added count_halide_coordination_partners
+def count_halide_coordination_partners(
+    filtered_atom_array: AtomArray,
+    cell_list: CellList,
+    coordination_distance: float = 5.0,
+    halide_res_names: Collection[str] = ("F", "CL", "BR", "IOD"),
+) -> dict[int, int]:
+    """
+    Count coordination partners for each single-atom halide-ion PN unit.
+
+    A halide-ion PN unit is a non-polymer single-atom PN unit whose residue name is one of
+    ``halide_res_names`` (PDB ``comp_id``: F, CL, BR, IOD for fluoride/chloride/bromide/iodide).
+
+    A coordination partner is any non-carbon atom within ``coordination_distance`` (regardless
+    of modality), excluding atoms belonging to the halide's own PN unit. Hydrogens are assumed
+    to have been removed upstream (``hydrogen_policy="remove"``), so "non-C" effectively means
+    "heavy non-C".
+
+    Args:
+        filtered_atom_array: AtomArray with non-zero occupancy atoms.
+        cell_list: CellList of ``filtered_atom_array`` for distance computations.
+        coordination_distance: Distance threshold for coordination partners (Angstrom).
+        halide_res_names: Residue names (``comp_id``) treated as halide ions.
+
+    Returns:
+        Dictionary mapping halide ``pn_unit_iid`` → number of non-C atoms within
+        ``coordination_distance``.
+    """
+    halide_res_names_upper = frozenset(n.upper() for n in halide_res_names)
+
+    # 1. Identify single-atom halide PN units by residue name
+    pn_unit_iids = np.unique(filtered_atom_array.pn_unit_iid)
+    halide_iids: list[int] = []
+    for iid in pn_unit_iids:
+        atoms = filtered_atom_array[filtered_atom_array.pn_unit_iid == iid]
+        if len(atoms) == 1 and atoms[0].res_name.upper() in halide_res_names_upper:
+            halide_iids.append(iid)
+
+    if not halide_iids:
+        return {}
+
+    # 2. Build non-C partner mask once
+    elements_upper = np.array([e.upper() for e in filtered_atom_array.element])
+    is_non_carbon = elements_upper != "C"
+
+    # 3. Per halide: count non-C atoms within distance, excluding self
+    result: dict[int, int] = {}
+    for halide_iid in halide_iids:
+        halide_atoms = filtered_atom_array[filtered_atom_array.pn_unit_iid == halide_iid]
+        neighbor_mask = get_atom_mask_from_cell_list(
+            halide_atoms.coord, cell_list, len(filtered_atom_array), coordination_distance
+        )
+        collapsed = np.any(neighbor_mask, axis=0)
+        non_self = filtered_atom_array.pn_unit_iid != halide_iid
+        result[halide_iid] = int(np.sum(collapsed & non_self & is_non_carbon))
+
+    return result
+
+
+# JH changed: added count_per_partner_contacts
+def count_per_partner_contacts(
+    query_coord: np.ndarray,
+    query_pn_unit_iids: Collection[int],
+    filtered_atom_array: AtomArray,
+    cell_list: CellList,
+    distance: float,
+    partner_mask: np.ndarray | None = None,
+) -> list[dict]:
+    """
+    For a single query (small molecule / metal / halide), list how many atoms each partner
+    PN unit contributes within ``distance``, broken down by (pn_unit_iid, chain_iid).
+
+    Args:
+        query_coord: Coordinates of the query atoms; shape ``(n_q, 3)``.
+        query_pn_unit_iids: pn_unit_iid(s) considered "self" and excluded from the breakdown.
+            For a single-pn_unit query, pass ``[query_pn_unit_iid]``.
+        filtered_atom_array: AtomArray with ``pn_unit_iid`` and ``chain_iid`` annotations;
+            post-filter (occupancy > 0, clashes resolved).
+        cell_list: CellList of ``filtered_atom_array``.
+        distance: Distance threshold (Angstrom).
+        partner_mask: Optional bool mask over ``filtered_atom_array`` restricting eligible
+            partner atoms (e.g. donor elements only, or non-C only). Default: all atoms.
+
+    Returns:
+        List of ``{"pn_unit_iid": int, "chain_iid": str, "count": int}``, sorted by count
+        descending. Empty list if no contacts. ``pn_unit_iid`` is returned as the raw
+        remapped integer; callers are expected to decode via ``id_map_dict["pn_unit_iid"]``
+        to the verbose string before persisting.
+    """
+    if len(query_coord) == 0:
+        return []
+
+    neighbor_mask = get_atom_mask_from_cell_list(
+        query_coord, cell_list, len(filtered_atom_array), distance
+    )
+    collapsed = np.any(neighbor_mask, axis=0)  # (n_cell_list,)
+
+    # Exclude query's own pn_unit(s) to avoid self-contacts in multi-chain covalent cases
+    self_mask = np.isin(filtered_atom_array.pn_unit_iid, list(query_pn_unit_iids))
+    eligible = collapsed & ~self_mask
+    if partner_mask is not None:
+        eligible = eligible & partner_mask
+
+    if not np.any(eligible):
+        return []
+
+    partner_pn_unit_iids = filtered_atom_array.pn_unit_iid[eligible]
+    partner_chain_iids = filtered_atom_array.chain_iid[eligible]
+
+    # Group (pn_unit_iid, chain_iid) -> atom count
+    counts: dict[tuple[int, str], int] = defaultdict(int)
+    for p, c in zip(partner_pn_unit_iids.tolist(), partner_chain_iids.tolist()):
+        counts[(int(p), str(c))] += 1
+
+    return [
+        {"pn_unit_iid": p, "chain_iid": c, "count": n}
+        for (p, c), n in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    ]
 
 
 def get_intra_pn_unit_bonds(pn_unit_iid: str, full_atom_array: AtomArray) -> np.ndarray:

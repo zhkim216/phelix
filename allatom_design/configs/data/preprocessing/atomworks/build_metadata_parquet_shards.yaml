@@ -30,11 +30,14 @@ data_preprocessor_cfg:
   clash_distance: 1.0
   # Misc
   ignore_residues: ["UNL", "UNX"] #! unknown ligands, and atoms
-  # Metal coordination partner counting
+  # Metal coordination partner counting (3.2A donor/metal atoms; occupancy>0 already enforced upstream)
   metal_coordination_cfg:
     coordination_distance: 3.2
-    min_partner_occupancy: 0.5
     donor_elements: ["N", "O", "F", "P", "S", "Cl", "As", "Se", "Br", "I"]
+  # Halide coordination partner counting (5A non-C atoms around F/CL/BR/IOD ions)
+  halide_coordination_cfg:
+    coordination_distance: 5.0
+    halide_res_names: ["F", "CL", "BR", "IOD"]
   # Small molecule neighboring heavy atom counting distance
   small_molecule_neighboring_distance: 5.0
   # Efficiency

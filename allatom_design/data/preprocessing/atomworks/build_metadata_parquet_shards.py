@@ -414,7 +414,22 @@ def main(cfg: DictConfig):
 
 def _add_parquet_columns(df: pd.DataFrame, dataset_name: str, pdb_in_dir: str):
     """Add example_id and rel_path columns to dataframe (in-place)."""
-    # Convert all object columns to string
+    # Numeric-nullable columns: cast explicitly to float (None → NaN) BEFORE the blanket
+    # object→str conversion below. Without this, a batch where every row has ``None`` for
+    # one of these fields (e.g. a shard with no halide or no metal PN units) gets its
+    # object column stringified to ``"None"``, which then fails type inference at merge time
+    # against other batches where the same column ended up as float64.
+    numeric_nullable_cols = (
+        "q_pn_unit_n_coordination_partners_metal",
+        "q_pn_unit_n_coordination_partners_halide",
+        "q_pn_unit_n_neighboring_heavy_atoms_small_molecule",
+        "q_pn_unit_avg_occupancy_nonpolymer",
+    )
+    for col in numeric_nullable_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Convert all remaining object columns to string (e.g. JSON-stringified list/dict fields).
     for col in df.columns:
         if df[col].dtype == 'object':
             df[col] = df[col].astype(str)
