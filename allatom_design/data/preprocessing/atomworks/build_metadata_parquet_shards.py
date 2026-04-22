@@ -55,6 +55,10 @@ DEFAULT_LIGAND_SCORES = [
     "ranking_model_geometry",
 ]
 
+# Upstream atomworks raises this when _entity_poly/_struct_asym declares a polymer chain
+# with no observed atoms. Treat as a data-quality skip, not a pipeline error.
+_MISMATCH_MARKER = "Mismatch between `atom_array` and `chain_to_sequence`"
+
 
 def _atomic_write_parquet(df: pd.DataFrame, final_path: Path) -> None:
     """Write a parquet atomically via tmp + os.replace to avoid torn files on crashes."""
@@ -139,6 +143,10 @@ def _process_cif_worker(cif_path: str):
         return ('ok', result)
     except TimeoutError:
         return ('timeout', 'Processing timeout')
+    except ValueError as e:
+        if _MISMATCH_MARKER in str(e):
+            return ('skip_data_quality', str(e))
+        return ('error', repr(e))
     except Exception as e:
         return ('error', repr(e))
     finally:
@@ -346,6 +354,12 @@ def main(cfg: DictConfig):
                     batch_results.append(res)
                 except TimeoutError:
                     skipped_with_reason.append((cif_path, 'fallback_timeout', 'Fallback processing timeout'))
+                    batch_results.append([])
+                except ValueError as fallback_e:
+                    if _MISMATCH_MARKER in str(fallback_e):
+                        skipped_with_reason.append((cif_path, 'skip_data_quality', str(fallback_e)))
+                    else:
+                        skipped_with_reason.append((cif_path, 'fallback_error', repr(fallback_e)))
                     batch_results.append([])
                 except Exception as fallback_e:
                     skipped_with_reason.append((cif_path, 'fallback_error', repr(fallback_e)))

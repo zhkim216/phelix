@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=metadata_atomworks_pdb_full_v9
 #SBATCH -p possu,normal,owners
-#SBATCH --array=0-99
+#SBATCH --array=0-49
 #SBATCH --cpus-per-task=8
 #SBATCH --time=1-0:00:00
-#SBATCH --mem=128GB
+#SBATCH --mem=96GB
 
 # Send stdout and stderr to logs
 #SBATCH --output=/scratch/users/zhkim216/job_output/data_preprocessing/build_metadata_parquet_shards_v9_%A_%a.out
@@ -35,6 +35,8 @@ echo "Starting shard ${SLURM_ARRAY_TASK_ID}/${NUM_SHARDS} for atomworks_pdb_full
 #   - Per-partner contact breakdown for non-polymer query rows (metal / halide / small molecule).
 #     Each row gets one JSON-stringified list of {pn_unit_iid, chain_iid, count} for the
 #     applicable type, with the other two fields set to None.
+#   - contact_distance: 8.0 -> 5.0 (matches downstream max_interface_distance=5.0 in every
+#     dataset config; ~2.75x speedup on 1ubq in 04_contact_distance_timing benchmark).
 #
 # New parquet columns (added on top of v8 schema):
 #   q_pn_unit_is_halide                                (bool)
@@ -61,7 +63,7 @@ python3 allatom_design/data/preprocessing/atomworks/build_metadata_parquet_shard
     fetch_ligand_validity_scores=false \
     data_preprocessor_cfg.polymer_pn_unit_limit=500 \
     data_preprocessor_cfg.clash_distance=1.0 \
-    data_preprocessor_cfg.contact_distance=8.0 \
+    data_preprocessor_cfg.contact_distance=5.0 \
     data_preprocessor_cfg.close_distance=30.0 \
     data_preprocessor_cfg.from_rcsb=true \
     data_preprocessor_cfg.small_molecule_neighboring_distance=5.0 \
