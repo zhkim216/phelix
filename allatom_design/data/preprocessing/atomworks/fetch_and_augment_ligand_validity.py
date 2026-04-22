@@ -147,16 +147,34 @@ def fetch_step(
     num_retries: int,
     skip_existing: bool,
     checkpoint_every: int,
+    shard_id: int | None = None,
+    num_shards: int | None = None,
+    consolidate: bool = True,
 ) -> tuple[int, list[tuple[str, str]]]:
-    """Populate per-PDB JSON cache, then consolidate to a cache parquet.
+    """Populate per-PDB JSON cache, then (optionally) consolidate to a cache parquet.
 
-    Returns (num_records_in_cache_parquet, errors).
+    Sharding: when ``shard_id`` and ``num_shards`` are both set, the sorted
+    global PDB list is sliced as ``all_pdb_ids[shard_id::num_shards]``. Disjoint
+    across shards → safe to run in a SLURM array without write contention.
+
+    ``consolidate=False`` skips the per-task cache_parquet rewrite; use this in
+    array tasks so parallel workers don't race on a single parquet file.
+
+    Returns (num_records_in_cache_parquet_or_0, errors).
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     meta_df = pd.read_parquet(metadata_in, columns=["pdb_id"])
     all_pdb_ids = sorted({str(x).lower() for x in meta_df["pdb_id"].tolist() if pd.notna(x)})
     print(f"[fetch] {len(all_pdb_ids)} unique pdb_ids in {metadata_in.name}")
+
+    if (shard_id is None) != (num_shards is None):
+        raise SystemExit("--shard-id and --num-shards must be set together")
+    if shard_id is not None and num_shards is not None:
+        if not (0 <= shard_id < num_shards):
+            raise SystemExit(f"--shard-id {shard_id} out of range for --num-shards {num_shards}")
+        all_pdb_ids = all_pdb_ids[shard_id::num_shards]
+        print(f"[fetch] shard {shard_id}/{num_shards}: {len(all_pdb_ids)} pdb_ids assigned to this task")
 
     if skip_existing:
         cached = {pid for pid in _iter_cached_pdb_ids(cache_dir)}
@@ -168,12 +186,20 @@ def fetch_step(
 
     errors: list[tuple[str, str]] = []
     if not todo:
-        print("[fetch] nothing to do; consolidating existing cache...")
-        n = _consolidate_cache_to_parquet(cache_dir, cache_parquet)
-        print(f"[fetch] consolidated {n} records -> {cache_parquet}")
-        return n, errors
+        if consolidate:
+            print("[fetch] nothing to do; consolidating existing cache...")
+            n = _consolidate_cache_to_parquet(cache_dir, cache_parquet)
+            print(f"[fetch] consolidated {n} records -> {cache_parquet}")
+            return n, errors
+        print("[fetch] nothing to do; --no-consolidate requested, skipping parquet write")
+        return 0, errors
 
     timeout = (float(connect_timeout), float(read_timeout))
+
+    def maybe_checkpoint(completed_now: int) -> None:
+        if consolidate and checkpoint_every and completed_now % checkpoint_every == 0:
+            n = _consolidate_cache_to_parquet(cache_dir, cache_parquet)
+            tqdm.write(f"[fetch] checkpoint at {completed_now}/{len(todo)}: cache parquet has {n} records")
 
     completed = 0
     if num_workers <= 1:
@@ -182,9 +208,7 @@ def fetch_step(
             if err:
                 errors.append((_pid, err))
             completed += 1
-            if checkpoint_every and completed % checkpoint_every == 0:
-                n = _consolidate_cache_to_parquet(cache_dir, cache_parquet)
-                tqdm.write(f"[fetch] checkpoint at {completed}/{len(todo)}: cache parquet has {n} records")
+            maybe_checkpoint(completed)
     else:
         with cf.ThreadPoolExecutor(max_workers=int(num_workers)) as ex:
             futures = {
@@ -196,13 +220,14 @@ def fetch_step(
                 if err:
                     errors.append((_pid, err))
                 completed += 1
-                if checkpoint_every and completed % checkpoint_every == 0:
-                    n = _consolidate_cache_to_parquet(cache_dir, cache_parquet)
-                    tqdm.write(f"[fetch] checkpoint at {completed}/{len(todo)}: cache parquet has {n} records")
+                maybe_checkpoint(completed)
 
-    n = _consolidate_cache_to_parquet(cache_dir, cache_parquet)
-    print(f"[fetch] done: cache parquet has {n} records ({len(errors)} failed pdbs)")
-    return n, errors
+    if consolidate:
+        n = _consolidate_cache_to_parquet(cache_dir, cache_parquet)
+        print(f"[fetch] done: cache parquet has {n} records ({len(errors)} failed pdbs)")
+        return n, errors
+    print(f"[fetch] done: {completed} pdbs processed ({len(errors)} failed); --no-consolidate → skipping parquet write")
+    return 0, errors
 
 
 # -----------------------------
@@ -213,16 +238,24 @@ def augment_step(
     *,
     metadata_in: Path,
     cache_parquet: Path,
+    cache_dir: Path,
     metadata_out: Path,
     ligand_scores: list[str],
 ) -> int:
     """Join cache parquet into metadata and write augmented metadata atomically.
 
-    Uses in-place column assignment instead of accumulating augmented
-    groups in a list followed by pd.concat. The legacy concat pattern
-    allocated roughly 2x meta_df at peak and OOM-killed on multi-million-row
-    inputs; the in-place variant keeps memory bounded at ~meta_df size.
+    Always rebuilds ``cache_parquet`` from ``cache_dir`` first — this makes
+    the augment step robust to any partial state left behind by sharded
+    fetch runs (array tasks skip per-task consolidation to avoid racing).
+    Rebuild is cheap: one JSON scan + one parquet write.
+
+    Uses in-place column assignment rather than pd.concat; the legacy concat
+    path allocated ~2x meta_df at peak and OOM-killed on multi-million-row
+    inputs.
     """
+    n_consolidated = _consolidate_cache_to_parquet(cache_dir, cache_parquet)
+    print(f"[augment] consolidated {n_consolidated} records from {cache_dir} -> {cache_parquet}")
+
     meta_df = pd.read_parquet(metadata_in)
     cache_df = pd.read_parquet(cache_parquet)
     print(
@@ -283,7 +316,14 @@ def main() -> None:
                     help="Score field to include (repeatable); default = DEFAULT_LIGAND_SCORES")
     ap.add_argument("--only-fetch", action="store_true", help="Skip the augment step")
     ap.add_argument("--only-augment", action="store_true", help="Skip the fetch step")
-    ap.set_defaults(skip_existing=True)
+    ap.add_argument("--shard-id", type=int, default=None,
+                    help="Fetch only pdb_ids[shard_id::num_shards] (SLURM array use). Must be set with --num-shards.")
+    ap.add_argument("--num-shards", type=int, default=None,
+                    help="Total number of shards in a SLURM array fetch. Must be set with --shard-id.")
+    ap.add_argument("--no-consolidate", dest="consolidate", action="store_false",
+                    help="Skip the per-task cache-parquet rewrite during fetch (use in array mode to avoid races). "
+                         "Augment always re-consolidates from cache_dir.")
+    ap.set_defaults(skip_existing=True, consolidate=True)
     args = ap.parse_args()
 
     if args.only_fetch and args.only_augment:
@@ -307,12 +347,16 @@ def main() -> None:
             num_retries=args.num_retries,
             skip_existing=args.skip_existing,
             checkpoint_every=args.checkpoint_every,
+            shard_id=args.shard_id,
+            num_shards=args.num_shards,
+            consolidate=args.consolidate,
         )
 
     if not args.only_fetch:
         augment_step(
             metadata_in=metadata_in,
             cache_parquet=cache_parquet,
+            cache_dir=cache_dir,
             metadata_out=metadata_out,
             ligand_scores=ligand_scores,
         )
