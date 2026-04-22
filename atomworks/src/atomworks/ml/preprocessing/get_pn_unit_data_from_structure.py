@@ -51,7 +51,7 @@ class DataPreprocessor:
     build_assembly: str = "all"
     fix_arginines: bool = True
     convert_mse_to_met: bool = True
-    hydrogen_policy: Literal["remove", "infer", "keep"] = "remove",
+    hydrogen_policy: Literal["remove", "infer", "keep"] = "remove"
     add_bond_types_from_struct_conn: list[str] = field(default_factory=lambda: ["covale"]) #! (JH) changed 251016
     # JH changed: metal coordination and small molecule neighboring config
     metal_coordination_cfg: dict | None = None  # e.g. {"coordination_distance": 3.2, "donor_elements": [...]}
