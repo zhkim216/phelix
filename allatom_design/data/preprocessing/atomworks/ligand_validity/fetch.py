@@ -1,25 +1,18 @@
 #!/usr/bin/env python3
 """
-Fetch RCSB ligand validity scores AND augment a metadata parquet, in a single run.
+Fetch RCSB ligand-validity scores per PDB and cache them locally.
 
-Network failures are isolated per-PDB: each successful fetch is written
-immediately to `<cache_dir>/{pdb[:2]}/{pdb}.json`, so re-runs only hit the
-network for the still-missing PDBs. On a clean cache-dir this is equivalent
-to running `fetch_ligand_validity_cache.py` followed by
-`augment_metadata_with_ligand_validity.py`, but with:
+For each pdb_id in --metadata-in:
+  1. GET via RCSB GraphQL (atomworks.ml.preprocessing.utils.structure_utils)
+  2. Save to <cache_dir>/{pdb[:2]}/{pdb}.json (atomic; resume-friendly)
 
-- Per-PDB JSON cache (resume-friendly; a bad PDB doesn't poison the parquet).
-- `--skip-existing` (default on): do not re-fetch PDBs already cached.
-- Periodic consolidation of the JSON cache into a single parquet
-  (`--cache-parquet`, `--checkpoint-every`) for fault tolerance.
-- `--only-fetch` / `--only-augment` so each step can be run/debugged alone.
+Resume model: --skip-existing (default) checks per-PDB cache and skips already-
+fetched entries, so re-runs only hit network for what's missing.
 
-Relationship to the legacy scripts:
-- `fetch_ligand_validity_cache.py` and `augment_metadata_with_ligand_validity.py`
-  are unchanged and still usable standalone. This script imports their
-  internal helpers (`_fetch_one`, `_build_scores_table`, `_augment_group`,
-  `DEFAULT_LIGAND_SCORES`) so there is exactly one source of truth for
-  fetch semantics and the augmentation shape.
+Sharding: pass --shard-id S --num-shards N to fetch only pdb_ids[S::N] —
+disjoint across shards, safe in SLURM array. Pass --no-consolidate when running
+in a SLURM array so workers don't race on a single cache_parquet write; then
+run consolidate_cache.py once after the array completes.
 """
 
 from __future__ import annotations
@@ -34,14 +27,7 @@ from typing import Iterable
 import pandas as pd
 from tqdm import tqdm
 
-from allatom_design.data.preprocessing.atomworks.fetch_ligand_validity_cache import (
-    _fetch_one,
-)
-from allatom_design.data.preprocessing.atomworks.augment_metadata_with_ligand_validity import (
-    DEFAULT_LIGAND_SCORES,
-    _augment_group,
-    _build_scores_table,
-)
+import atomworks.ml.preprocessing.utils.structure_utils as dp
 
 
 # -----------------------------
@@ -116,6 +102,14 @@ def _consolidate_cache_to_parquet(cache_dir: Path, out_parquet: Path) -> int:
 # -----------------------------
 # Fetch step (network-bound)
 # -----------------------------
+
+def _fetch_one(pdb_id: str, timeout: tuple[float, float], num_retries: int) -> list[dict]:
+    """Hit RCSB GraphQL for one pdb_id; tag each returned record with pdb_id."""
+    recs = dp.get_ligand_validity_scores_from_pdb_id(pdb_id.lower(), timeout=timeout, num_retries=num_retries)
+    for r in recs:
+        r["pdb_id"] = pdb_id.lower()
+    return recs
+
 
 def _fetch_one_safe(
     pdb_id: str,
@@ -231,73 +225,12 @@ def fetch_step(
 
 
 # -----------------------------
-# Augment step (local)
-# -----------------------------
-
-def augment_step(
-    *,
-    metadata_in: Path,
-    cache_parquet: Path,
-    cache_dir: Path,
-    metadata_out: Path,
-    ligand_scores: list[str],
-) -> int:
-    """Join cache parquet into metadata and write augmented metadata atomically.
-
-    Always rebuilds ``cache_parquet`` from ``cache_dir`` first — this makes
-    the augment step robust to any partial state left behind by sharded
-    fetch runs (array tasks skip per-task consolidation to avoid racing).
-    Rebuild is cheap: one JSON scan + one parquet write.
-
-    Uses in-place column assignment rather than pd.concat; the legacy concat
-    path allocated ~2x meta_df at peak and OOM-killed on multi-million-row
-    inputs.
-    """
-    n_consolidated = _consolidate_cache_to_parquet(cache_dir, cache_parquet)
-    print(f"[augment] consolidated {n_consolidated} records from {cache_dir} -> {cache_parquet}")
-
-    meta_df = pd.read_parquet(metadata_in)
-    cache_df = pd.read_parquet(cache_parquet)
-    print(
-        f"[augment] input metadata rows={len(meta_df)}, cache rows={len(cache_df)}"
-    )
-    by_pdb = _build_scores_table(cache_df, ligand_scores)
-    del cache_df  # no longer needed — score tables are in by_pdb
-
-    # Ensure the target column exists (legacy concat path left it NaN for
-    # pdb_ids without scores; replicate that here).
-    if "q_pn_unit_ligand_validity" not in meta_df.columns:
-        meta_df["q_pn_unit_ligand_validity"] = pd.NA
-
-    # Only touch rows whose pdb_id has ligand-validity scores.
-    scored_pdb_ids = set(by_pdb.keys())
-    scored_mask = meta_df["pdb_id"].astype(str).isin(scored_pdb_ids)
-    scored_rows = meta_df.loc[scored_mask]
-
-    for pdb_id, g in tqdm(
-        scored_rows.groupby("pdb_id", sort=False),
-        desc="augment",
-        total=scored_rows["pdb_id"].nunique(),
-    ):
-        scores_df = by_pdb[str(pdb_id)]
-        augmented_g = _augment_group(g, scores_df, ligand_scores)
-        if "q_pn_unit_ligand_validity" in augmented_g.columns:
-            meta_df.loc[augmented_g.index, "q_pn_unit_ligand_validity"] = augmented_g["q_pn_unit_ligand_validity"]
-
-    metadata_out.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write_parquet(meta_df, metadata_out)
-    print(f"[augment] wrote augmented metadata -> {metadata_out} (rows={len(meta_df)})")
-    return len(meta_df)
-
-
-# -----------------------------
 # CLI
 # -----------------------------
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--metadata-in", required=True, help="Input metadata parquet (pre-validity)")
-    ap.add_argument("--metadata-out", required=True, help="Output metadata parquet (post-validity)")
+    ap.add_argument("--metadata-in", required=True, help="Input metadata parquet (source of pdb_ids)")
     ap.add_argument("--cache-dir", required=True, help="Directory for per-PDB JSON cache files")
     ap.add_argument("--cache-parquet", required=True, help="Consolidated cache parquet path")
     ap.add_argument("--num-workers", type=int, default=8)
@@ -312,58 +245,37 @@ def main() -> None:
     )
     ap.add_argument("--checkpoint-every", type=int, default=1000,
                     help="Consolidate cache-dir to cache-parquet every N fetched PDBs (0=disable)")
-    ap.add_argument("--ligand-score", action="append", default=None,
-                    help="Score field to include (repeatable); default = DEFAULT_LIGAND_SCORES")
-    ap.add_argument("--only-fetch", action="store_true", help="Skip the augment step")
-    ap.add_argument("--only-augment", action="store_true", help="Skip the fetch step")
     ap.add_argument("--shard-id", type=int, default=None,
                     help="Fetch only pdb_ids[shard_id::num_shards] (SLURM array use). Must be set with --num-shards.")
     ap.add_argument("--num-shards", type=int, default=None,
                     help="Total number of shards in a SLURM array fetch. Must be set with --shard-id.")
     ap.add_argument("--no-consolidate", dest="consolidate", action="store_false",
                     help="Skip the per-task cache-parquet rewrite during fetch (use in array mode to avoid races). "
-                         "Augment always re-consolidates from cache_dir.")
+                         "Run consolidate_cache.py once after the array completes.")
     ap.set_defaults(skip_existing=True, consolidate=True)
     args = ap.parse_args()
 
-    if args.only_fetch and args.only_augment:
-        raise SystemExit("--only-fetch and --only-augment are mutually exclusive")
-
     metadata_in = Path(args.metadata_in)
-    metadata_out = Path(args.metadata_out)
     cache_dir = Path(args.cache_dir)
     cache_parquet = Path(args.cache_parquet)
-    ligand_scores = args.ligand_score or list(DEFAULT_LIGAND_SCORES)
 
-    errors: list[tuple[str, str]] = []
-    if not args.only_augment:
-        _, errors = fetch_step(
-            metadata_in=metadata_in,
-            cache_dir=cache_dir,
-            cache_parquet=cache_parquet,
-            num_workers=args.num_workers,
-            connect_timeout=args.connect_timeout,
-            read_timeout=args.read_timeout,
-            num_retries=args.num_retries,
-            skip_existing=args.skip_existing,
-            checkpoint_every=args.checkpoint_every,
-            shard_id=args.shard_id,
-            num_shards=args.num_shards,
-            consolidate=args.consolidate,
-        )
-
-    if not args.only_fetch:
-        augment_step(
-            metadata_in=metadata_in,
-            cache_parquet=cache_parquet,
-            cache_dir=cache_dir,
-            metadata_out=metadata_out,
-            ligand_scores=ligand_scores,
-        )
+    _, errors = fetch_step(
+        metadata_in=metadata_in,
+        cache_dir=cache_dir,
+        cache_parquet=cache_parquet,
+        num_workers=args.num_workers,
+        connect_timeout=args.connect_timeout,
+        read_timeout=args.read_timeout,
+        num_retries=args.num_retries,
+        skip_existing=args.skip_existing,
+        checkpoint_every=args.checkpoint_every,
+        shard_id=args.shard_id,
+        num_shards=args.num_shards,
+        consolidate=args.consolidate,
+    )
 
     if errors:
         print(f"\n[summary] {len(errors)} PDBs failed during fetch (they are omitted from the cache):")
-        # Only show first 20 — full list can be recovered by re-running with --only-fetch
         for pid, err in errors[:20]:
             print(f"  {pid}: {err}")
         if len(errors) > 20:
