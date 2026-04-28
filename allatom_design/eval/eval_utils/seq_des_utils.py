@@ -67,6 +67,7 @@ def redesign_with_lcaliby(seed: int = 0,
                         pocket_only: bool = False,
                         pocket_featurizer_cfg: dict | None = None,
                         pocket_distances_for_seq_recovery: list[float] = None,
+                        pocket_distance_bins: list[tuple[float, float]] | None = None,
                         csv_suffix: str = "",
                         guidance_cfg: DictConfig | None = None) -> Iterator[tuple[dict, Path, dict]]:
     """
@@ -135,6 +136,7 @@ def redesign_with_lcaliby(seed: int = 0,
             pocket_only=pocket_only,
             pocket_featurizer_cfg=pocket_featurizer_cfg,
             pocket_distances_for_seq_recovery=pocket_distances_for_seq_recovery,
+            pocket_distance_bins=pocket_distance_bins,
             guidance_cfg=guidance_cfg,
         )
                 
@@ -273,6 +275,7 @@ def run_lc_seq_des(
     pocket_only: bool = False,
     pocket_featurizer_cfg: dict | None = None,
     pocket_distances_for_seq_recovery: list[float] = None,
+    pocket_distance_bins: list[tuple[float, float]] | None = None,
     guidance_cfg: DictConfig | None = None,
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
     """
@@ -476,7 +479,8 @@ def run_lc_seq_des(
                     
                     # Calculate sequence recovery metrics
                     seq_recovery_metrics = calculate_sequence_recovery(input_atom_array, designed_atom_array,
-                                                                       pocket_distances_for_seq_recovery=pocket_distances_for_seq_recovery)                    
+                                                                       pocket_distances_for_seq_recovery=pocket_distances_for_seq_recovery,
+                                                                       pocket_distance_bins=pocket_distance_bins)
                     outputs[example_id]["seq_recovery_metrics"].append(seq_recovery_metrics)                                                                                                                                                                                                                                                                        
             pbar.update(B)
     pbar.close()
