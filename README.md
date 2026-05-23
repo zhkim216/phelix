@@ -101,7 +101,7 @@ bash ./scripts/sherlock_scripts/jinho/shell_in_container.sh
 Inside the container shell:
 
 ```bash
-cd $HOME/code/allatom-design/requirements_split
+cd $HOME/code/allatom-design/requirements_split/sherlock
 
 # Upgrade setuptools and wheel
 uv pip install --upgrade setuptools wheel pip
@@ -187,35 +187,27 @@ bash ./scripts/sherlock_scripts/jinho/shell_in_container.sh
 - Check that all paths in the setup scripts point to your actual directory locations
 
 
-## Environment setup on the lab desktop  
+## Environment setup on the lab desktop
 
 ### Installing the environment
 ```bash
-mamba create -n lullaby_local python=3.12
-mamba activate lullaby_local
-mamba install openstructure=2.10.0 -c conda-forge -c bioconda -y
+export MAMBA_ROOT_PREFIX=/home/yjhk/model-dev/envs/micromamba
+micromamba create -n phelix_local python=3.10 openstructure zlib uv -c bioconda -c conda-forge -y
 
-mamba activate lullaby_local
-cd ${PATH_TO_allatom-design}
-bash scripts/local_scripts/jinho/setup/install_lullaby_local.sh
-uv pip install python-dotenv
+micromamba activate phelix_local
+cd /home/yjhk/model-dev/allatom-design
+bash scripts/local_scripts/jinho/setup/install_phelix_local.sh
 ```
 
-If you encounter the error below,
-```bash
-can't find file to patch at input line 3
-...
-|--- hmmer-3.4/src/jackhmmer.c
-|+++ hmmer-3.4/src/jackhmmer.c
-```
+The install script applies the AlphaFold3 `jackhmmer_seq_limit.patch` automatically and installs `allatom_design` in editable mode. Because this desktop environment uses Python 3.10 for OpenStructure compatibility while the root package metadata currently declares Python 3.12, it uses `python -m pip install -e . --no-deps --ignore-requires-python` for the local editable install.
 
-Then you can do 
-```bash
-File to patch: src/jackhmmer.c
-```
+The lab desktop currently uses an RTX 2080 Ti. The local setup script installs
+the CUDA 12.6 PyTorch/PyG pins from `requirements_split/local` and configures the
+AlphaFold3 XLA compatibility flag needed for compute capability 7.x GPUs. For
+local AlphaFold3 inference, pass `--flash_attention_implementation=xla`.
 
 When you use the environment,
 ```bash
-mamba activate lullaby_local
-source scripts/local_scripts/jinho/setup/activate_lullaby_local.sh
+micromamba activate phelix_local
+source scripts/local_scripts/jinho/setup/activate_phelix_local.sh
 ```

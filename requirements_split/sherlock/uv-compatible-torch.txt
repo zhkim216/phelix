@@ -1,0 +1,5 @@
+torch==2.7.0+cu126
+torchaudio==2.7.0+cu126
+torchvision==0.22.0+cu126
+torch-geometric==2.6.1
+lightning==2.5.6

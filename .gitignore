@@ -229,3 +229,26 @@ run_remaining_sc_eval.sh
 test.parquet
 tests/check_ost_tools.py
 .claude/
+
+# Externally cloned repos (not part of this project)
+LASErMPNN/
+claude-code-best-practice/
+
+# .claude/ is fully gitignored (see top-level rule above), so .claude/tasks/
+# and .claude/tests/ inherit that. Legacy todos_claude/ and tests_local/
+# locations are retired in favor of .claude/tasks/{date}/{task_name}/ and
+# .claude/tests/{date}/{task_name}/ — see project CLAUDE.md.
+
+# Codex harness local raw payloads: keep papers/results local unless explicitly curated.
+.codex/raw/**
+!.codex/raw/
+!.codex/raw/README.md
+!.codex/raw/papers/
+!.codex/raw/papers/**/
+!.codex/raw/papers/**/.gitkeep
+!.codex/raw/notes/
+!.codex/raw/notes/**/
+!.codex/raw/notes/**/.gitkeep
+!.codex/raw/results/
+!.codex/raw/results/**/
+!.codex/raw/results/**/.gitkeep
