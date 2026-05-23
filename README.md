@@ -1,5 +1,7 @@
 # Ligand-Conditioned Potts Models
 
+_Note: parts of this README were LLM-written and manually reviewed._
+
 ## Environment setup on Sherlock
 
 ### 1. Clone Repository
