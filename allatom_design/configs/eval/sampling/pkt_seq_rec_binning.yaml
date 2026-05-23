@@ -53,6 +53,7 @@ redesign_cfg:
 
 # Pocket configuration: cumulative cutoffs (kept additive) + disjoint bins (new)
 pocket_cfg:
+  n_min_ligand_atoms_for_seq_recovery: 5
   pocket_distances_for_seq_recovery: [4.0, 6.0, 8.0, 10.0]
   pocket_distance_bins:
     - [0.0, 4.0]

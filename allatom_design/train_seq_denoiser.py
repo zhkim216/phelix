@@ -18,8 +18,26 @@ from datetime import datetime
 from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
                                              repair_state_dict)
 from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
-from allatom_design.data.datasets.atomworks_sd_dataset import AtomworksSDDataModule    
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
+
+
+def build_sd_datamodule(data_cfg: DictConfig) -> L.LightningDataModule:
+    dataset_impl = data_cfg.get("dataset_impl", "atomworks_sd")
+    if dataset_impl == "atomworks_sd":
+        from allatom_design.data.datasets.atomworks_sd_dataset import AtomworksSDDataModule
+
+        return AtomworksSDDataModule(data_cfg)
+    if dataset_impl == "mg_proto":
+        from allatom_design.data.datasets.atomworks_sd_dataset_mg_proto import (
+            AtomworksSDMGProtoDataModule,
+        )
+
+        return AtomworksSDMGProtoDataModule(data_cfg)
+    raise ValueError(
+        f"Unknown data.dataset_impl={dataset_impl!r}. "
+        "Supported values: 'atomworks_sd', 'mg_proto'."
+    )
+
 
 @hydra.main(config_path="configs/seq_denoiser", config_name="seq_denoiser", version_base="1.3.2")
 def main(cfg: DictConfig):
@@ -56,7 +74,7 @@ def main(cfg: DictConfig):
     torch.backends.cudnn.benchmark = False  # nonrandom selection of CUDNN convolution, maybe slower
 
     # Set up LightningDataModule
-    datamodule = AtomworksSDDataModule(cfg.data)
+    datamodule = build_sd_datamodule(cfg.data)
 
     # Init wandb only on node rank 0
     local_rank = os.environ.get("LOCAL_RANK", None)

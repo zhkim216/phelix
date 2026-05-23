@@ -1,0 +1,13 @@
+defaults:
+  - mg_proto_base
+  - _self_
+
+wandb:
+  group: null
+
+out_dir: "/home/yjhk/model-dev/allatom-design/debug/260523_mg_bml_prototype/no_filter"
+exp_name: mg_proto_no_filter
+
+data:
+  mg_proto:
+    external_evidence_policy: no_filter

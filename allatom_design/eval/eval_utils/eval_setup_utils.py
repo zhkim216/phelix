@@ -9,8 +9,12 @@ import numpy as np
 import pandas as pd
 import wandb
 import hydra
-from natsort import natsorted
 from omegaconf import DictConfig, OmegaConf
+
+try:
+    from natsort import natsorted
+except ImportError:
+    natsorted = sorted
 
 from atomworks.ml.preprocessing.get_pn_unit_data_from_structure import DataPreprocessor
 from allatom_design.data.transform.preprocess import preprocess_transform
@@ -502,4 +506,3 @@ def get_ensemble_constraint_df(pos_constraint_df: pd.DataFrame,
         conformer_dfs.append(conformer_df)
     pos_constraint_df = pd.concat(conformer_dfs)
     return pos_constraint_df
-

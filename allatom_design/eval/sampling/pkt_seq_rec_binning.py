@@ -85,6 +85,9 @@ def main(cfg: DictConfig):
             pocket_featurizer_cfg=None,
             pocket_distances_for_seq_recovery=cfg.pocket_cfg.pocket_distances_for_seq_recovery,
             pocket_distance_bins=pocket_distance_bins,
+            pocket_n_min_ligand_atoms_for_seq_recovery=cfg.pocket_cfg.get(
+                "n_min_ligand_atoms_for_seq_recovery", 5
+            ),
             csv_suffix=csv_suffix,
             guidance_cfg=None,
         )

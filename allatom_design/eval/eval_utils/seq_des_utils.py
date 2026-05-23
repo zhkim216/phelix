@@ -23,10 +23,17 @@ from atomworks.ml.transforms.atom_array import apply_and_spread_residue_wise
 import atomworks.enums as aw_enums
 from biotite.structure import AtomArray, get_residue_starts
 from biotite.structure.filter import filter_amino_acids
-from joblib import Parallel, delayed
 from omegaconf import DictConfig, OmegaConf
 from torchtyping import TensorType
 from tqdm import tqdm
+
+try:
+    from joblib import Parallel, delayed
+except ImportError:
+    Parallel = None  # type: ignore[assignment]
+
+    def delayed(func):
+        raise ImportError("joblib is required when using parallel sequence-design utilities") from None
 
 import allatom_design.data.const as const
 from allatom_design.data.const import AF3_ENCODING
@@ -51,6 +58,13 @@ from allatom_design.eval.eval_utils.eval_metrics import calculate_sequence_recov
 # Sequence Design / Sampling Functions
 ###########################################################
 
+def _parallel_context(num_workers: int):
+    if num_workers <= 1:
+        return nullcontext()
+    if Parallel is None:
+        raise ImportError("joblib is required when num_workers > 1") from None
+    return Parallel(n_jobs=num_workers)
+
 def redesign_with_lcaliby(seed: int = 0,
                         input_sample_is_designed: bool = False,
                         sample_dict: dict = None,
@@ -68,6 +82,7 @@ def redesign_with_lcaliby(seed: int = 0,
                         pocket_featurizer_cfg: dict | None = None,
                         pocket_distances_for_seq_recovery: list[float] = None,
                         pocket_distance_bins: list[tuple[float, float]] | None = None,
+                        pocket_n_min_ligand_atoms_for_seq_recovery: int = 5,
                         csv_suffix: str = "",
                         guidance_cfg: DictConfig | None = None) -> Iterator[tuple[dict, Path, dict]]:
     """
@@ -137,6 +152,7 @@ def redesign_with_lcaliby(seed: int = 0,
             pocket_featurizer_cfg=pocket_featurizer_cfg,
             pocket_distances_for_seq_recovery=pocket_distances_for_seq_recovery,
             pocket_distance_bins=pocket_distance_bins,
+            pocket_n_min_ligand_atoms_for_seq_recovery=pocket_n_min_ligand_atoms_for_seq_recovery,
             guidance_cfg=guidance_cfg,
         )
                 
@@ -276,6 +292,7 @@ def run_lc_seq_des(
     pocket_featurizer_cfg: dict | None = None,
     pocket_distances_for_seq_recovery: list[float] = None,
     pocket_distance_bins: list[tuple[float, float]] | None = None,
+    pocket_n_min_ligand_atoms_for_seq_recovery: int = 5,
     guidance_cfg: DictConfig | None = None,
 ) -> tuple[dict[str, dict[str, torch.Tensor]], dict[str, Any]]:
     """
@@ -325,7 +342,7 @@ def run_lc_seq_des(
         print(f"Omitting aatype sampling for: {sampling_cfg.omit_aas}")
 
     # Process PDBs in parallel.
-    parallel_context = Parallel(n_jobs=sampling_cfg.num_workers) if sampling_cfg.num_workers > 1 else nullcontext()
+    parallel_context = _parallel_context(sampling_cfg.num_workers)
 
     # Begin sampling.
     pbar = tqdm(
@@ -480,7 +497,8 @@ def run_lc_seq_des(
                     # Calculate sequence recovery metrics
                     seq_recovery_metrics = calculate_sequence_recovery(input_atom_array, designed_atom_array,
                                                                        pocket_distances_for_seq_recovery=pocket_distances_for_seq_recovery,
-                                                                       pocket_distance_bins=pocket_distance_bins)
+                                                                       pocket_distance_bins=pocket_distance_bins,
+                                                                       n_min_ligand_atoms=pocket_n_min_ligand_atoms_for_seq_recovery)
                     outputs[example_id]["seq_recovery_metrics"].append(seq_recovery_metrics)                                                                                                                                                                                                                                                                        
             pbar.update(B)
     pbar.close()
@@ -567,7 +585,7 @@ def run_seq_des_ensemble(
         print(f"Omitting aatype sampling for: {sampling_cfg.omit_aas}")
 
     # Process PDBs in parallel.
-    parallel_context = Parallel(n_jobs=sampling_cfg.num_workers) if sampling_cfg.num_workers > 1 else nullcontext()
+    parallel_context = _parallel_context(sampling_cfg.num_workers)
 
     # Begin sampling.
     with parallel_context as parallel_pool:
@@ -700,7 +718,7 @@ def score_samples(
 
     # Process PDBs in parallel.
     pbar = tqdm(total=len(pdb_paths), desc=f"Scoring {len(pdb_paths)} PDBs...")
-    parallel_context = Parallel(n_jobs=sampling_cfg.num_workers) if sampling_cfg.num_workers > 1 else nullcontext()
+    parallel_context = _parallel_context(sampling_cfg.num_workers)
 
     # Begin scoring.
     with parallel_context as parallel_pool:
@@ -746,7 +764,7 @@ def score_samples_ensemble(
     outputs = defaultdict(list)
 
     # Process PDBs in parallel.
-    parallel_context = Parallel(n_jobs=sampling_cfg.num_workers) if sampling_cfg.num_workers > 1 else nullcontext()
+    parallel_context = _parallel_context(sampling_cfg.num_workers)
     with parallel_context as parallel_pool:
         for pdb_name, pdb_paths in tqdm(pdb_to_conformers.items(), desc=f"Scoring {len(pdb_to_conformers)} PDBs..."):
             # Create tied_sampling_ids by tying all samples together.
@@ -1770,6 +1788,8 @@ def make_pos_constraint_df(
     results_for_ligand_mpnn = []
 
     if num_workers > 1:
+        if Parallel is None:
+            raise ImportError("joblib is required when num_workers > 1") from None
         print(f"Using {num_workers} workers for parallel processing")
         results = Parallel(n_jobs=num_workers, backend="loky")(
             delayed(_make_single_pos_constraint_dict)(

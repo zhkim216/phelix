@@ -1,0 +1,36 @@
+defaults:
+  - pkt_seq_rec_binning
+  - _self_
+
+debug: true
+num_debug_samples: 1
+num_workers: 0
+protein_only: false
+ckpt_steps: null
+
+exp_name: pkt_seq_rec_binning_mg_nativeval
+base_out_dir: /home/yjhk/model-dev/allatom-design/debug/260523_mg_bml_prototype/eval
+
+sampling_inputs_csv: /home/yjhk/model-dev/datasets/val_cifs/mg_native_val_cifs_test/staged_local/sampling_inputs_mg_nativeval_site_local.csv
+
+pocket_cfg:
+  n_min_ligand_atoms_for_seq_recovery: 1
+  pocket_distances_for_seq_recovery: [5.0]
+  pocket_distance_bins: null
+
+pdb_cfg:
+  pdb_dir: /home/yjhk/model-dev/datasets/val_cifs/mg_native_val_cifs_test/staged_local/cifs
+  pdb_name_list: null
+  pdb_name_ext: ".cif"
+  n_subsample: null
+  recursive: false
+  split_by_subfolder: false
+  sample_indices: null
+  sample_lengths: null
+  array_id: null
+  num_arrays: null
+
+featurizer_cfg:
+  design:
+    pocket_n_min_ligand_atoms: 1
+    pocket_rbf_n_min_ligand_atoms: 1

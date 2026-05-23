@@ -207,6 +207,10 @@ def get_spatial_crop_center(
     Returns:
         np.ndarray: A boolean mask indicating the crop center.
     """
+    if query_pn_unit_iids is None or len(query_pn_unit_iids) == 0:
+        raise ValueError("No query PN units provided for spatial crop center selection.")
+    query_pn_unit_iids = list(dict.fromkeys(list(query_pn_unit_iids)))
+
     # ... get mask for query polymer/non-polymer unit
     is_query_pn_unit = np.isin(atom_array.pn_unit_iid, query_pn_unit_iids)
 
@@ -214,14 +218,19 @@ def get_spatial_crop_center(
     is_occupied = atom_array.occupancy > 0
 
     # ... optionally provide a fallback when not all query pn_units are present
+    available_query_pn_unit_iids = [
+        pn_unit_iid
+        for pn_unit_iid in query_pn_unit_iids
+        if np.any((atom_array.pn_unit_iid == pn_unit_iid) & is_occupied)
+    ]
     if not raise_if_missing_query:
-        available_query_pn_unit_iids = np.unique(atom_array.pn_unit_iid[is_query_pn_unit])
-
-        # If only one of the query pn_units is present, we will just use that
-        if len(available_query_pn_unit_iids) == 1 and len(query_pn_unit_iids) > 1:
+        # If only some query pn_units are present, use the available subset.
+        if 0 < len(available_query_pn_unit_iids) < len(query_pn_unit_iids):
+            missing = [iid for iid in query_pn_unit_iids if iid not in available_query_pn_unit_iids]
             query_pn_unit_iids = available_query_pn_unit_iids
             logger.warning(
-                f"Falling back to only available query pn_unit ({query_pn_unit_iids[0]}) for the crop center."
+                f"Falling back to available query pn_units {query_pn_unit_iids} "
+                f"for the crop center; missing={missing}."
             )
 
         # If none of the query pn_units are present, we will randomly select one
@@ -232,6 +241,13 @@ def get_spatial_crop_center(
 
         # Update the mask for query pn_unit
         is_query_pn_unit = np.isin(atom_array.pn_unit_iid, query_pn_unit_iids)
+    elif len(available_query_pn_unit_iids) < len(query_pn_unit_iids):
+        missing = [iid for iid in query_pn_unit_iids if iid not in available_query_pn_unit_iids]
+        raise ValueError(
+            "No crop center found because query PN unit(s) are missing or unoccupied after filtering: "
+            f"missing={missing}, query={query_pn_unit_iids}, "
+            f"available={np.unique(atom_array.pn_unit_iid).tolist()}"
+        )
 
     if len(query_pn_unit_iids) == 1:
         # If there's only one query unit, we don't need to check for spatial proximity,
@@ -563,7 +579,9 @@ class CropSpatialLikeAF3(CropTransformBase):
     def forward(self, data: dict) -> dict:
         atom_array = data["atom_array"]
 
-        if data.get("query_pn_unit_iids"):
+        if data.get("crop_center_pn_unit_iids"):
+            query_pn_units = data["crop_center_pn_unit_iids"]
+        elif data.get("query_pn_unit_iids"):
             query_pn_units = data["query_pn_unit_iids"]
         else:
             query_pn_units = np.unique(atom_array.pn_unit_iid)
@@ -599,10 +617,6 @@ def crop_spatial_like_af3_constrained(
     crop_center_cutoff_distance: float = 15.0,
     force_crop: bool = False,
     raise_if_missing_query: bool = True,
-    min_protein_tokens_in_crop: int | None = None,
-    constrain_on_interface_protein_chain: bool = False,
-    interface_pn_unit_iids: tuple[str, str] | None = None,
-    interface_pn_unit_is_protein: tuple[bool, bool] | None = None,
 ) -> dict:
     """Crop spatial tokens around a given `crop_center` by keeping the `crop_size` nearest neighbors (with jitter).
 
@@ -671,83 +685,12 @@ def crop_spatial_like_af3_constrained(
             dists = np.full((n_tokens,), np.inf, dtype=float)
             dists[is_valid] = np.linalg.norm(coord_for_dist[is_valid] - crop_center_coord[None, :], axis=1)
 
-            # Token-level annotations at the token starts
-            token_start_atom_idxs = token_segments[:-1]
-            token_pn_unit_iids = atom_array.pn_unit_iid[token_start_atom_idxs]
-            token_chain_types = atom_array.chain_type[token_start_atom_idxs]
-
-            # Build a set of tokens to always include (protected/reserved tokens)
+            # Build a set of tokens to always include (protected/reserved tokens).
+            # Currently only the crop center token itself is reserved; the
+            # legacy `min_protein_tokens_in_crop` / `constrain_on_interface_protein_chain`
+            # path (which depended on `q_pn_unit_is_protein_{1,2}` interface columns)
+            # has been removed along with the BMSM-centered interface_df migration.
             protected: list[int] = []
-
-            # Ensure at least `min_protein_tokens_in_crop` protein tokens.
-            #
-            # This constrained implementation only supports selecting the protein pn_unit(s) from the interface pair,
-            # using `q_pn_unit_is_protein_{1,2}` semantics passed via `interface_pn_unit_is_protein`.
-            if exists(min_protein_tokens_in_crop) and min_protein_tokens_in_crop > 0:
-                protein_chain_type = aw_enums.ChainType.POLYPEPTIDE_L.value
-                protein_token_mask = (token_chain_types == protein_chain_type) & np.isfinite(dists)
-                if not np.any(protein_token_mask):
-                    logger.warning(
-                        "Requested min_protein_tokens_in_crop, but no protein tokens with valid coordinates exist."
-                    )
-                else:
-                    pn_unit_to_constrain: str | None = None
-
-                    if not constrain_on_interface_protein_chain:
-                        raise ValueError(
-                            "constrain_on_interface_protein_chain=False is not implemented for "
-                            "min_protein_tokens_in_crop. Set constrain_on_interface_protein_chain=True."
-                        )
-
-                    if interface_pn_unit_iids is None or interface_pn_unit_is_protein is None:
-                        raise ValueError(
-                            "constrain_on_interface_protein_chain=True requires "
-                            "interface_pn_unit_iids and interface_pn_unit_is_protein"
-                        )
-                    iid1, iid2 = interface_pn_unit_iids
-                    is_p1, is_p2 = interface_pn_unit_is_protein
-                    n_prot = int(is_p1) + int(is_p2)
-                    if n_prot == 0:
-                        # Policy: should not happen in training; treat as hard error
-                        raise ValueError(
-                            f"Interface pair has no protein pn_unit: {iid1} (is_protein={is_p1}), "
-                            f"{iid2} (is_protein={is_p2})"
-                        )
-                    if n_prot == 1:
-                        pn_unit_to_constrain = iid1 if is_p1 else iid2
-                    else:
-                        # n_prot == 2: constrain on the *other* protein chain (not containing crop center token)
-                        center_pn_unit = token_pn_unit_iids[int(crop_center_token_idx)]
-                        if center_pn_unit == iid1:
-                            pn_unit_to_constrain = iid2
-                        elif center_pn_unit == iid2:
-                            pn_unit_to_constrain = iid1
-                        else:
-                            raise ValueError(
-                                f"Crop center token pn_unit '{center_pn_unit}' is not in interface pair "
-                                f"({iid1}, {iid2})"
-                            )
-
-                    if pn_unit_to_constrain is None:
-                        logger.warning(
-                            "Requested min_protein_tokens_in_crop, but failed to identify a protein pn_unit to constrain."
-                        )
-                    else:
-                        # Reserve at least N tokens from the selected pn_unit (closest-to-center tokens first)
-                        idxs = np.where(protein_token_mask & (token_pn_unit_iids == pn_unit_to_constrain))[0]
-                        if idxs.size == 0:
-                            # Policy: if we cannot find any tokens for the target protein chain, treat as hard error
-                            raise ValueError(
-                                f"Selected protein pn_unit '{pn_unit_to_constrain}' has no valid tokens in crop."
-                            )
-                        order_in_chain = idxs[np.argsort(dists[idxs])]
-                        n_need = int(min_protein_tokens_in_crop)
-                        if order_in_chain.size < n_need:
-                            logger.warning(
-                                f"Protein pn_unit '{pn_unit_to_constrain}' has only {order_in_chain.size} tokens; "
-                                f"cannot satisfy min_protein_tokens_in_crop={n_need}."
-                            )
-                        protected.extend(list(map(int, order_in_chain[:n_need])))
 
             # Always include crop center token itself
             protected.append(int(crop_center_token_idx))
@@ -951,8 +894,6 @@ class CropSpatialLikeAF3Constrained(CropTransformBase):
         force_crop: bool = False,
         max_atoms_in_crop: int | None = None,
         raise_if_missing_query: bool = True,
-        min_protein_tokens_in_crop: int | None = None,
-        constrain_on_interface_protein_chain: bool = False,
         **kwargs,
     ):
         """Initialize the CropSpatialLikeAF3 transform.
@@ -982,8 +923,6 @@ class CropSpatialLikeAF3Constrained(CropTransformBase):
         self.force_crop = force_crop
         self.max_atoms_in_crop = max_atoms_in_crop
         self.raise_if_missing_query = raise_if_missing_query
-        self.min_protein_tokens_in_crop = min_protein_tokens_in_crop
-        self.constrain_on_interface_protein_chain = constrain_on_interface_protein_chain
         self._validate()
 
     def check_input(self, data: dict) -> None:
@@ -1021,20 +960,6 @@ class CropSpatialLikeAF3Constrained(CropTransformBase):
             crop_center_cutoff_distance=self.crop_center_cutoff_distance,
             force_crop=self.force_crop,
             raise_if_missing_query=self.raise_if_missing_query,
-            min_protein_tokens_in_crop=self.min_protein_tokens_in_crop,
-            constrain_on_interface_protein_chain=self.constrain_on_interface_protein_chain,
-            interface_pn_unit_iids=(
-                data['extra_info'].get("q_pn_unit_iid_1"),
-                data['extra_info'].get("q_pn_unit_iid_2"),
-            )
-            if self.constrain_on_interface_protein_chain
-            else None,
-            interface_pn_unit_is_protein=(
-                bool(data['extra_info'].get("q_pn_unit_is_protein_1")),
-                bool(data['extra_info'].get("q_pn_unit_is_protein_2")),
-            )
-            if self.constrain_on_interface_protein_chain
-            else None,
         )
         crop_info = resize_crop_info_like_af3_constrained(
             crop_info=crop_info,
@@ -1276,4 +1201,3 @@ class CropSpatialAroundTargetLigand(CropTransformBase):
         data["atom_array"] = atom_array[crop_info["crop_atom_idxs"]]
 
         return data
-

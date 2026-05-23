@@ -9,8 +9,15 @@ import numpy as np
 import pandas as pd
 from atomworks.io.parser import parse as aw_parse
 from biotite.structure import AtomArray
-from joblib import Parallel, delayed
 from omegaconf import DictConfig, OmegaConf
+
+try:
+    from joblib import Parallel, delayed
+except ImportError:
+    Parallel = None  # type: ignore[assignment]
+
+    def delayed(func):
+        raise ImportError("joblib is required when using parallel SD featurization") from None
 
 
 from allatom_design.data.data import to
@@ -292,3 +299,78 @@ def resolve_query_pn_unit_iids(
         return [str(x) for x in np.unique(atom_array.pn_unit_iid).tolist()]
 
     raise ValueError("pn_unit_iid annotation is required")
+
+
+def resolve_selectivity_row(
+    *,
+    sampling_inputs_df: pd.DataFrame,
+    pdb_id: str,
+    guidance_direction: int,
+) -> dict[str, Any]:
+    """Resolve one backbone's selectivity-assay context from the paired CSV.
+
+    The paired CSV schema has columns `pdb_id_{1,2}`, `query_pn_unit_iids_{1,2}`,
+    `ccd_code_{1,2}`. A single `pdb_id` may appear at either `_1` (the H-bond-rich
+    position) or `_2` (the H-bond-poor position) across rows; this function
+    locates it and returns the self/partner pair plus the guidance target.
+
+    Args:
+        sampling_inputs_df: DataFrame loaded from the paired selectivity CSV.
+        pdb_id: Backbone identifier (case-insensitive).
+        guidance_direction: 1 or 2. Selects `ccd_code_{guidance_direction}` as
+            the guidance target — independent of which slot the backbone
+            occupies. One pass with `guidance_direction=1` designs every
+            backbone with the potential pulling toward the H-bond-rich CCD;
+            `guidance_direction=2` pulls toward the H-bond-poor CCD.
+
+    Returns:
+        dict with keys:
+            pdb_id_self, query_pn_unit_iids_self, ccd_self,
+            pdb_id_partner, query_pn_unit_iids_partner, ccd_partner,
+            guidance_target_ccd, pocket_subcluster_id,
+            self_position (1 or 2).
+
+    Raises:
+        ValueError: if `guidance_direction` is not in {1, 2}, required columns
+            are missing, or `pdb_id` is absent from both slots.
+    """
+    if guidance_direction not in (1, 2):
+        raise ValueError(f"guidance_direction must be 1 or 2, got {guidance_direction}")
+
+    required_cols = {
+        "pdb_id_1", "pdb_id_2",
+        "query_pn_unit_iids_1", "query_pn_unit_iids_2",
+        "ccd_code_1", "ccd_code_2",
+    }
+    missing = required_cols - set(sampling_inputs_df.columns)
+    if missing:
+        raise ValueError(f"sampling_inputs_df missing columns: {sorted(missing)}")
+
+    pdb_lc = str(pdb_id).lower()
+    for self_pos in (1, 2):
+        other_pos = 3 - self_pos
+        hit = sampling_inputs_df[
+            sampling_inputs_df[f"pdb_id_{self_pos}"].astype(str).str.lower() == pdb_lc
+        ]
+        if not hit.empty:
+            row = hit.iloc[0]
+            out = {
+                "pdb_id_self": str(row[f"pdb_id_{self_pos}"]),
+                "query_pn_unit_iids_self":
+                    parse_query_pn_unit_iids(row[f"query_pn_unit_iids_{self_pos}"]),
+                "ccd_self": str(row[f"ccd_code_{self_pos}"]),
+                "pdb_id_partner": str(row[f"pdb_id_{other_pos}"]),
+                "query_pn_unit_iids_partner":
+                    parse_query_pn_unit_iids(row[f"query_pn_unit_iids_{other_pos}"]),
+                "ccd_partner": str(row[f"ccd_code_{other_pos}"]),
+                "guidance_target_ccd": str(row[f"ccd_code_{guidance_direction}"]),
+                "self_position": self_pos,
+            }
+            if "pocket_subcluster_id" in sampling_inputs_df.columns:
+                out["pocket_subcluster_id"] = int(row["pocket_subcluster_id"])
+            return out
+
+    raise ValueError(
+        f"pdb_id={pdb_id} not found in either pdb_id_1 or pdb_id_2 column of "
+        f"sampling_inputs_df (rows={len(sampling_inputs_df)})"
+    )

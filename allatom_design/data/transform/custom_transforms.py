@@ -95,9 +95,9 @@ FEAT_TO_TOKEN_DIM = {
     "noised_n_coords": [0],
     "noised_c_coords": [0],
     "noised_o_coords": [0],
-    "noised_pseudo_cb_coords": [0],        
-    "token_is_prot_std_aa": [0],        
-    
+    "noised_pseudo_cb_coords": [0],
+    "token_is_prot_std_aa": [0],
+
     # optional features that might not be present
     "seq_cond_mask": [0],
     "token_exists_mask": [0],
@@ -286,7 +286,7 @@ class FeaturizeCoordsAndMasks(Transform):
         #     print(f"Atom array has no attribute 'is_aromatic' for {data['example_id']}")            
                         
         return data
-                    
+
 
 class PadSDFeats(Transform):
     """Pad the token and atom features to the maximum number of tokens and atoms."""
@@ -464,18 +464,54 @@ class DropOutNonProteinChains(Transform):
             data["atom_array"] = atom_array
         return data
 
+class FilterToBiologicallyMeaningfulChains(Transform):
+    """Filter atom array to metadata-derived biologically meaningful PN units.
+
+    This is intentionally separate from ``FilterToQueryPNUnits``: train
+    interface examples should keep a BM-filtered assembly for spatial cropping,
+    after excluding non-BM non-polymer clutter.
+    """
+
+    @override
+    def forward(self, data: dict[str, Any]) -> dict[str, Any]:
+        bm_pn_unit_iids = data.get("biologically_meaningful_pn_unit_iids", None)
+        if bm_pn_unit_iids is None:
+            return data
+
+        if isinstance(bm_pn_unit_iids, np.ndarray):
+            bm_pn_unit_iids = bm_pn_unit_iids.tolist()
+        elif isinstance(bm_pn_unit_iids, tuple):
+            bm_pn_unit_iids = list(bm_pn_unit_iids)
+
+        atom_array = data["atom_array"]
+        data["atom_array"] = filter_to_specified_pn_units(atom_array, bm_pn_unit_iids)
+        return data
+
+
 class FilterToQueryPNUnits(Transform):
-    """Filter the atom array to the query PN units."""
+    """Filter the atom array to the query PN units.
+
+    For ``data_category == "interface"`` training examples the full complex is
+    passed through untouched after any metadata-derived BM filtering, so
+    ``CropSpatialLikeAF3`` can grow its K-nearest shell around the interface.
+    Monomer-training and validation paths still collapse to the query pn_unit
+    set.
+    """
 
     @override
     def forward(self, data: dict[str, Any]) -> dict[str, Any]:
         atom_array = data["atom_array"]
 
+        skip_filter = (
+            data.get("data_category") == "interface"
+            and data.get("phase") == "train"
+        )
+
         #* From atomworks.ml.datasets.parsers.GenericDFParser: "During VALIDATION, then we do not crop, and query_pn_unit_iids should be None."
-        if "query_pn_unit_iids" in data:
+        if not skip_filter and "query_pn_unit_iids" in data:
             atom_array = filter_to_specified_pn_units(atom_array, data["query_pn_unit_iids"])
-        data["atom_array"] = atom_array                
-                        
+        data["atom_array"] = atom_array
+
         return data
 
 class MaskAtomizedTokensInProtein(Transform):

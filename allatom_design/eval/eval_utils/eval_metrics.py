@@ -12,7 +12,10 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from natsort import natsorted
+try:
+    from natsort import natsorted
+except ImportError:
+    natsorted = sorted
 
 # import gemmi
 import numpy as np
