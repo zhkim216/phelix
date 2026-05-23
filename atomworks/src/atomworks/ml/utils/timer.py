@@ -13,7 +13,9 @@ from collections.abc import Callable
 from enum import Enum
 from functools import wraps
 from multiprocessing import Queue
-from typing import Any, Literal, Never
+from typing import Any, Literal
+
+from typing_extensions import Never
 
 
 def timeout(timeout: float | int | None = None, strategy: Literal["signal", "subprocess"] = "subprocess") -> Callable:

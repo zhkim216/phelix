@@ -165,7 +165,7 @@ def get_or_infer_type_symbol(
   _atom_site.label_comp_id (residue name), _atom_site.label_atom_id (atom name)
   and the CCD.
   """
-  ccd = ccd or chemical_components.cached_ccd()
+  ccd = ccd or chemical_components.Ccd()
   type_symbol_fn = lambda res_name, atom_name: chemical_components.type_symbol(
       ccd, res_name, atom_name
   )

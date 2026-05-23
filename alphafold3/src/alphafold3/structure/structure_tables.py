@@ -67,7 +67,9 @@ class AuthorNamingScheme:
 
 
 def _default(
-    candidate_value: np.ndarray | None, default_value: Sequence[Any], dtype: Any
+    candidate_value: np.ndarray | None,
+    default_value: Sequence[Any] | np.ndarray,
+    dtype: Any,
 ) -> np.ndarray:
   if candidate_value is None:
     return np.array(default_value, dtype=dtype)
@@ -417,7 +419,7 @@ def to_mmcif_atom_site_and_bonds_table(
     coords_decimal_places: int,
 ) -> Mapping[str, Sequence[str]]:
   """Returns raw _atom_site and _struct_conn mmCIF tables."""
-  raw_mmcif = collections.defaultdict(list)
+  raw_mmcif: dict[str, Sequence[str]] = {}
   # Use [value] * num wherever possible since it is about 10x faster than list
   # comprehension in such cases. Also use f-strings instead of str() - faster.
   total_atoms = atoms.size * atoms.num_models
@@ -521,7 +523,7 @@ def to_mmcif_atom_site_and_bonds_table(
 
 
 def _flatten_author_naming_scheme_table(
-    res_table: Mapping[str, Mapping[int, str]],
+    res_table: Mapping[str, Mapping[int, str | None]],
     chain_ids: np.ndarray,
     res_chain_ids: np.ndarray,
     res_ids: np.ndarray,

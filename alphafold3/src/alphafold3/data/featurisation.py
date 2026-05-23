@@ -41,9 +41,10 @@ def featurise_input(
     buckets: Sequence[int] | None,
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
+    max_templates: int = 4,
     resolve_msa_overlaps: bool = True,
-    max_templates: int = 4, # (JH) ligand-protein template conditioning  
-    ligand_protein_template_conditioning_mode: int = 0, # (JH) ligand-protein template conditioning
+    ligand_protein_template_conditioning_mode: int = 0,
+    fix_standalone_glycans: bool = False,
     verbose: bool = False,
 ) -> Sequence[features.BatchDict]:
   """Featurise the folding input.
@@ -63,14 +64,20 @@ def featurise_input(
       date the model coordinates can be used as a fallback.
     conformer_max_iterations: Optional override for maximum number of iterations
       to run for RDKit conformer search.
+    max_templates: Maximum number of templates to use for each chain.
     resolve_msa_overlaps: Whether to deduplicate unpaired MSA against paired
       MSA. The default behaviour matches the method described in the AlphaFold 3
       paper. Set this to false if providing custom paired MSA using the unpaired
       MSA field to keep it exactly as is as deduplication against the paired MSA
       could break the manually crafted pairing between MSA sequences.
-    do_ligand_template_conditioning: Whether to do ligand-protein template conditioning. #* (JH) ligand-protein template conditioning
-    max_templates: Maximum number of templates to use for each chain. Set to 0
-      to disable templates completely. #* (JH) ligand-protein template conditioning
+    ligand_protein_template_conditioning_mode: Mode for ligand-protein template
+      conditioning. 0 disables the local conditioning extension.
+    fix_standalone_glycans: AlphaFold 3 model training and evaluation filtered
+      out leaving atoms from glycan ligands even if they were not bonded to
+      anything ("standalone" glycans). Setting this flag to True fixes this
+      undesirable behavior, but moves away from the regime where AlphaFold 3 was
+      trained and evaluated. This has only an effect if filter_leaving_atoms is
+      True in the WholePdbPipeline.Config.
     verbose: Whether to print progress messages.
 
   Returns:
@@ -84,9 +91,12 @@ def featurise_input(
           buckets=buckets,
           ref_max_modified_date=ref_max_modified_date,
           conformer_max_iterations=conformer_max_iterations,
+          max_templates=max_templates,
           resolve_msa_overlaps=resolve_msa_overlaps,
-          max_templates=max_templates, # (JH) ligand-protein template conditioning        
-          ligand_protein_template_conditioning_mode=ligand_protein_template_conditioning_mode, # (JH) ligand-protein template conditioning
+          ligand_protein_template_conditioning_mode=(
+              ligand_protein_template_conditioning_mode
+          ),
+          fix_standalone_glycans=fix_standalone_glycans,
       ),
   )
 
@@ -99,7 +109,7 @@ def featurise_input(
         fold_input=fold_input,
         ccd=ccd,
         random_state=np.random.RandomState(rng_seed),
-        random_seed=rng_seed,      
+        random_seed=rng_seed,
     )
     if verbose:
       print(

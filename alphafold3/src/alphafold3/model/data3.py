@@ -14,6 +14,7 @@ from collections.abc import Mapping
 import datetime
 from typing import TypeAlias
 
+from alphafold3.constants import mmcif_names
 from alphafold3.constants import residue_names
 from alphafold3.cpp import msa_profile
 from alphafold3.model import protein_data_processing
@@ -39,20 +40,29 @@ def get_profile_features(
 
 
 def fix_template_features(
-    template_features: FeatureDict, num_res: int,
+    template_features: FeatureDict,
+    num_res: int,
     ligand_protein_template_conditioning: bool = False,
+    chain_type: str | None = None,
 ) -> FeatureDict:
   """Convert template features to AlphaFold 3 format.
 
   Args:
     template_features: Template features for the protein.
     num_res: The length of the amino acid sequence of the protein.
+    ligand_protein_template_conditioning: Whether to keep template chain-type
+      flags for ligand-protein template conditioning.
+    chain_type: Chain type used for empty template conditioning masks.
 
   Returns:
     Updated template_features for the chain.
   """
   if not template_features['template_aatype'].shape[0]:
-    template_features = empty_template_features(num_res)
+    template_features = empty_template_features(
+        num_res,
+        ligand_protein_template_conditioning=ligand_protein_template_conditioning,
+        chain_type=chain_type,
+    )
   else:
     template_release_timestamp = [
         _get_timestamp(x.decode('utf-8'))
@@ -75,13 +85,18 @@ def fix_template_features(
         axis=2,
     )
     atom_positions *= atom_mask[..., None]
-    
-    if ligand_protein_template_conditioning: #* (JH) ligand-protein template conditioning.
-      template_is_protein = template_features['template_is_protein']
-      template_is_dna = template_features['template_is_dna']
-      template_is_rna = template_features['template_is_rna']
-      template_is_other = template_features['template_is_other']
-    
+    template_conditioning_features = {}
+    if ligand_protein_template_conditioning:
+      template_conditioning_features = {
+          feature_name: template_features[feature_name]
+          for feature_name in (
+              'template_is_protein',
+              'template_is_dna',
+              'template_is_rna',
+              'template_is_other',
+          )
+      }
+
     template_features = {
         'template_aatype': template_features['template_aatype'],
         'template_atom_mask': atom_mask.astype(np.int32),
@@ -92,44 +107,27 @@ def fix_template_features(
         'template_release_timestamp': np.array(
             template_release_timestamp, dtype=np.float32
         ),
-        }
-    if ligand_protein_template_conditioning: # (JH) ligand-protein template conditioning.
-        template_features['template_is_protein'] = template_is_protein
-        template_features['template_is_dna'] = template_is_dna
-        template_features['template_is_rna'] = template_is_rna
-        template_features['template_is_other'] = template_is_other
-  
+    }
+    template_features.update(template_conditioning_features)
   return template_features
 
 
-def empty_template_features(num_res: int, ligand_protein_template_conditioning: bool = False, 
-                            chain_type: str = None, mmcif_names = None) -> FeatureDict:
+def empty_template_features(
+    num_res: int,
+    ligand_protein_template_conditioning: bool = False,
+    chain_type: str | None = None,
+) -> FeatureDict:
   """Creates a fully masked out template features to allow padding to work.
 
   Args:
     num_res: The length of the target chain.
+    ligand_protein_template_conditioning: Whether to add template chain-type
+      flags for ligand-protein template conditioning.
+    chain_type: Chain type used to set template chain-type flags.
 
   Returns:
     Empty template features for the chain.
   """
-  if ligand_protein_template_conditioning: # (JH) Ligand-protein template conditioning.
-    assert mmcif_names is not None, "mmcif_names is required for empty_template_features" 
-    assert chain_type is not None, "chain_type is required for empty_template_features" 
-    
-    template_is_protein = np.zeros((1, num_res), dtype=np.int64)
-    template_is_dna = np.zeros((1, num_res), dtype=np.int64)
-    template_is_rna = np.zeros((1, num_res), dtype=np.int64)
-    template_is_other = np.zeros((1, num_res), dtype=np.int64)
-    
-    if chain_type == mmcif_names.PROTEIN_CHAIN:
-      template_is_protein = np.ones((1, num_res), dtype=np.int64)
-    elif chain_type == mmcif_names.DNA_CHAIN:
-      template_is_dna = np.ones((1, num_res), dtype=np.int64)
-    elif chain_type == mmcif_names.RNA_CHAIN:
-      template_is_rna = np.ones((1, num_res), dtype=np.int64)
-    else:
-      template_is_other = np.ones((1, num_res), dtype=np.int64)
-  
   template_features = {
       'template_aatype': np.zeros(num_res, dtype=np.int32)[None, ...],
       'template_atom_mask': np.zeros(
@@ -141,13 +139,27 @@ def empty_template_features(num_res: int, ligand_protein_template_conditioning: 
       'template_domain_names': np.array([b''], dtype=object),
       'template_release_timestamp': np.array([0.0], dtype=np.float32),
   }
-  
-  if ligand_protein_template_conditioning: #* (JH) ligand-protein template conditioning.
-    template_features['template_is_protein'] = template_is_protein
-    template_features['template_is_dna'] = template_is_dna
-    template_features['template_is_rna'] = template_is_rna
-    template_features['template_is_other'] = template_is_other
-  
+  if ligand_protein_template_conditioning:
+    template_is_protein = np.zeros((1, num_res), dtype=np.int64)
+    template_is_dna = np.zeros((1, num_res), dtype=np.int64)
+    template_is_rna = np.zeros((1, num_res), dtype=np.int64)
+    template_is_other = np.zeros((1, num_res), dtype=np.int64)
+
+    if chain_type == mmcif_names.PROTEIN_CHAIN:
+      template_is_protein[:] = 1
+    elif chain_type == mmcif_names.DNA_CHAIN:
+      template_is_dna[:] = 1
+    elif chain_type == mmcif_names.RNA_CHAIN:
+      template_is_rna[:] = 1
+    elif chain_type is not None:
+      template_is_other[:] = 1
+
+    template_features.update({
+        'template_is_protein': template_is_protein,
+        'template_is_dna': template_is_dna,
+        'template_is_rna': template_is_rna,
+        'template_is_other': template_is_other,
+    })
   return template_features
 
 

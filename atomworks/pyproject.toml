@@ -39,7 +39,7 @@ dependencies = [
     # ... bioinformatics
     "py3Dmol>=2.2.1,<3", # Python wrapper for 3Dmol.js
     "pymol-remote>=0.0.5", # Remote access to PyMOL from Python (has no dependencies)
-    "biotite==1.4.0", # Biotite is a Python library for bioinformatics  # TODO: Test newer versions
+    "biotite==1.2.0", # Python 3.10 is limited to biotite<=1.2.x
     "hydride>=1.2.3,<2", # Biotite-supported tool for hydrogen addition
     # ... small molecule libraries
     "rdkit>=2024.3.5,<2025.9",

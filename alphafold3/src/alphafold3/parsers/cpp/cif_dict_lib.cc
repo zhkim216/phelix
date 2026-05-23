@@ -116,7 +116,7 @@ absl::StatusOr<std::vector<absl::string_view>> TokenizeInternal(
   tokens.reserve(lines.size() * 21);
   int line_num = 0;
   while (line_num < lines.size()) {
-    auto line = lines[line_num];
+    auto line = absl::StripSuffix(lines[line_num], "\r");
     line_num++;
 
     if (line.empty() || line[0] == '#') {
@@ -134,6 +134,9 @@ absl::StatusOr<std::vector<absl::string_view>> TokenizeInternal(
         line_num++;
         if (!multiline.empty() && multiline[0] == ';') {
           break;
+        } else if (line_num == lines.size()) {
+          return absl::InvalidArgumentError(
+              "Last multiline token is not terminated by a semicolon.");
         }
         multiline_tokens.push_back(multiline);
       }
@@ -340,6 +343,16 @@ struct GroupedKeys {
   int value_size;
 };
 
+absl::Status CheckLoopColumnSizes(int num_loop_keys, int num_loop_values) {
+  if ((num_loop_keys > 0) && (num_loop_values % num_loop_keys != 0)) {
+    return absl::InvalidArgumentError(absl::StrFormat(
+        "The number of values (%d) in a loop is not a multiple of the "
+        "number of the loop's columns (%d)",
+        num_loop_values, num_loop_keys));
+  }
+  return absl::OkStatus();
+}
+
 }  // namespace
 
 absl::StatusOr<CifDict> CifDict::FromString(absl::string_view cif_string) {
@@ -364,41 +377,58 @@ absl::StatusOr<CifDict> CifDict::FromString(absl::string_view cif_string) {
     return absl::InvalidArgumentError(
         "The CIF file does not start with the data_ field.");
   }
+  if (first_token.empty()) {
+    return absl::InvalidArgumentError(
+        "The CIF file does not contain a data block name.");
+  }
   cif["data_"].emplace_back(first_token);
 
   // Counters for CIF loop_ regions.
-  int loop_token_index = 0;
   int num_loop_keys = 0;
   // Loops have usually O(10) columns but could have up to O(10^6) rows. It is
   // therefore wasteful to look up the cif vector where to add a loop value
   // since that means doing `columns * rows` map lookups. If we save pointers to
   // these loop column fields instead, we need only 1 cif lookup per column.
   std::vector<std::vector<std::string>*> loop_column_values;
+  // Use a resetting column index instead of computing modulo on every token.
+  // This is the hot path for _atom_site tables with millions of values.
+  int token_column_index = 0;
+  // Total number of loop values seen (for column size validation).
+  int loop_token_count = 0;
 
   // Skip the first element since we already processed it above.
   for (auto token_itr = tokens->begin() + 1; token_itr != tokens->end();
        ++token_itr) {
     auto token = *token_itr;
     if (absl::EqualsIgnoreCase(token, "loop_")) {
-      // A new loop started, get rid of old loop's data.
+      // A new loop started, check the previous loop and get rid of its data.
+      absl::Status loop_status =
+          CheckLoopColumnSizes(num_loop_keys, loop_token_count);
+      if (!loop_status.ok()) {
+        return loop_status;
+      }
       loop_flag = true;
       loop_column_values.clear();
-      loop_token_index = 0;
+      token_column_index = 0;
+      loop_token_count = 0;
       num_loop_keys = 0;
       continue;
     } else if (loop_flag) {
       // The second condition checks we are in the first column. Some mmCIF
       // files (e.g. 4q9r) have values in later columns starting with an
       // underscore and we don't want to read these as keys.
-      int token_column_index =
-          num_loop_keys == 0 ? 0 : loop_token_index % num_loop_keys;
       if (token_column_index == 0 && !token.empty() && token[0] == '_') {
-        if (loop_token_index > 0) {
+        if (loop_token_count > 0) {
           // We are out of the loop.
           loop_flag = false;
         } else {
           // We are in the keys (column names) section of the loop.
-          auto& columns = cif[token];
+          auto [it, inserted] = cif.try_emplace(token);
+          if (!inserted) {
+            return absl::InvalidArgumentError(
+                absl::StrCat("Duplicate loop key: '", token, "'"));
+          }
+          auto& columns = it->second;
           columns.clear();
 
           // Heuristic: _atom_site is typically the largest table in an mmCIF
@@ -422,16 +452,34 @@ absl::StatusOr<CifDict> CifDict::FromString(absl::string_view cif_string) {
                            " expected at most: ", loop_column_values.size()));
         }
         loop_column_values[token_column_index]->emplace_back(token);
-        loop_token_index++;
+        loop_token_count++;
+        if (++token_column_index == num_loop_keys) {
+          // We have completed a row, reset the column index for the next row.
+          token_column_index = 0;
+        }
         continue;
       }
     }
     if (key.empty()) {
       key = token;
+      if (!absl::StartsWith(key, "_")) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Key '", key, "' does not start with an underscore."));
+      }
     } else {
-      cif[key].emplace_back(token);
+      auto [it, inserted] = cif.try_emplace(key);
+      if (!inserted) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Duplicate key: '", key, "'"));
+      }
+      (it->second).emplace_back(token);
       key = "";
     }
+  }
+  absl::Status loop_status =
+      CheckLoopColumnSizes(num_loop_keys, loop_token_count);
+  if (!loop_status.ok()) {
+    return loop_status;
   }
   return CifDict(std::move(cif));
 }

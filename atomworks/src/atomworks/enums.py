@@ -1,6 +1,6 @@
 """Enums used across atomworks."""
 
-from enum import IntEnum, StrEnum, auto
+from enum import Enum, IntEnum, auto
 from types import MappingProxyType
 from typing import Final, Union
 
@@ -14,6 +14,19 @@ from atomworks.constants import (
     POLYPEPTIDE_L_CHEM_TYPES,
     RNA_LIKE_CHEM_TYPES,
 )
+
+try:
+    from enum import StrEnum
+except ImportError:
+    class StrEnum(str, Enum):
+        """Python 3.10 fallback for enum.StrEnum."""
+
+        @staticmethod
+        def _generate_next_value_(name, start, count, last_values):
+            return name.lower()
+
+        def __str__(self) -> str:
+            return self.value
 
 
 class ChainType(IntEnum):

@@ -29,9 +29,9 @@ from alphafold3.data import parsers
 from alphafold3.data import structure_stores
 from alphafold3.data import template_realign
 from alphafold3.data.tools import hmmsearch
+from alphafold3.model import data_constants
 from alphafold3.structure import mmcif
 import numpy as np
-from alphafold3.model import data_constants #* (JH) ligand-protein template conditioning.
 
 
 _POLYMER_FEATURES: Final[Mapping[str, np.float64 | np.int32 | object]] = {
@@ -46,6 +46,7 @@ _POLYMER_FEATURES: Final[Mapping[str, np.float64 | np.int32 | object]] = {
 _LIGAND_FEATURES: Final[Mapping[str, Any]] = {
     'ligand_features': Mapping[str, Any]
 }
+
 
 TemplateFeatures: TypeAlias = Mapping[
     str, np.ndarray | bytes | Mapping[str, np.ndarray | bytes]
@@ -824,7 +825,6 @@ def get_polymer_features(
     query_sequence_length: int,
     query_to_hit_mapping: Mapping[int, int],
     ligand_protein_template_conditioning: bool = False,
-    mmcif_names = None,
 ) -> Mapping[str, Any]:
   """Returns features for this polymer chain.
 
@@ -834,6 +834,8 @@ def get_polymer_features(
     chain_poly_type: The chain polymer type (protein, DNA, RNA).
     query_sequence_length: The length of the query sequence.
     query_to_hit_mapping: 0-based query index to hit index mapping.
+    ligand_protein_template_conditioning: Whether to add template chain-type
+      flags for ligand-protein template conditioning.
 
   Returns:
     A dictionary with polymer features for template_chain_id in the struc.
@@ -861,16 +863,14 @@ def get_polymer_features(
   auth_chain_id, label_chain_id = next(
       iter(chain.polymer_auth_asym_id_to_label_asym_id().items())
   )
-  
   chain_sequence = chain.chain_single_letter_sequence()[label_chain_id]
-  # (JH) chain_single_letter_sequences() has default value of include_missing_residues=True
-  # (JH) returns pdx_poly_seq_one_letter_code
 
   polymer = _POLYMERS[chain_poly_type]
-  positions, positions_mask = chain.to_res_arrays(
+  res_arrays = chain.to_res_arrays(
       include_missing_residues=True, atom_order=polymer.atom_order
   )
-    
+  positions = res_arrays.atom_positions
+  positions_mask = res_arrays.atom_mask
   template_all_atom_positions = np.zeros(
       (query_sequence_length, polymer.num_atom_types, 3), dtype=np.float64
   )
@@ -886,49 +886,45 @@ def get_polymer_features(
 
   template_sequence = ''.join(template_sequence)
   template_aatype = _encode_restype(chain_poly_type, template_sequence)
-  
-  ###### (JH) ligand-protein template conditioning. ######
-  if ligand_protein_template_conditioning:    
-    assert mmcif_names is not None, "mmcif_names is required for ligand-protein template conditioning"
-    # chain type flags
-    template_is_protein = np.zeros(query_sequence_length, dtype=np.int64)
-    template_is_dna = np.zeros(query_sequence_length, dtype=np.int64)
-    template_is_rna = np.zeros(query_sequence_length, dtype=np.int64)
-    template_is_other = np.zeros(query_sequence_length, dtype=np.int64)
-    
-    if chain_poly_type == mmcif_names.PROTEIN_CHAIN:
-      template_is_protein = np.ones(query_sequence_length, dtype=np.int64)
-    elif chain_poly_type == mmcif_names.DNA_CHAIN:
-      template_is_dna = np.ones(query_sequence_length, dtype=np.int64)
-    elif chain_poly_type == mmcif_names.RNA_CHAIN:
-      template_is_rna = np.ones(query_sequence_length, dtype=np.int64)
-    else:
-      template_is_other = np.ones(query_sequence_length, dtype=np.int64)
-  ##############################################################
-  
-  
   template_name = f'{chain.name.lower()}_{auth_chain_id}'
   release_date = chain.release_date.strftime('%Y-%m-%d')
-  
-  template_features_dict = {
+  template_features = {
       'template_all_atom_positions': template_all_atom_positions,
       'template_all_atom_masks': template_all_atom_masks,
       'template_sequence': template_sequence.encode(),
       'template_aatype': np.array(template_aatype, dtype=np.int32),
-      'template_domain_names': np.array(template_name.encode(), dtype=object), 
+      'template_domain_names': np.array(template_name.encode(), dtype=object),
       'template_release_date': np.array(release_date.encode(), dtype=object),
   }
-  # (JH) template_domain_names record auth_chain_id, but template_sequence takes sequences from the corresponding label_chain_id
-  
-  if ligand_protein_template_conditioning: # (JH) ligand-protein template conditioning.
-    template_features_dict['template_is_protein'] = template_is_protein
-    template_features_dict['template_is_dna'] = template_is_dna
-    template_features_dict['template_is_rna'] = template_is_rna
-    template_features_dict['template_is_other'] = template_is_other 
-  
-  return template_features_dict
-  
-  
+  if ligand_protein_template_conditioning:
+    template_features.update({
+        'template_is_protein': np.full(
+            query_sequence_length,
+            chain_poly_type == mmcif_names.PROTEIN_CHAIN,
+            dtype=np.int64,
+        ),
+        'template_is_dna': np.full(
+            query_sequence_length,
+            chain_poly_type == mmcif_names.DNA_CHAIN,
+            dtype=np.int64,
+        ),
+        'template_is_rna': np.full(
+            query_sequence_length,
+            chain_poly_type == mmcif_names.RNA_CHAIN,
+            dtype=np.int64,
+        ),
+        'template_is_other': np.full(
+            query_sequence_length,
+            chain_poly_type
+            not in {
+                mmcif_names.PROTEIN_CHAIN,
+                mmcif_names.DNA_CHAIN,
+                mmcif_names.RNA_CHAIN,
+            },
+            dtype=np.int64,
+        ),
+    })
+  return template_features
 
 
 def _get_ligand_features(
@@ -969,7 +965,9 @@ def package_template_features(
   if include_ligand_features:
     features_to_include.update(_LIGAND_FEATURES)
   if ligand_protein_template_conditioning:
-    features_to_include.update(data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES)
+    features_to_include.update(
+        data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES
+    )
 
   features = {
       feat: [single_hit_features[feat] for single_hit_features in hit_features]
@@ -980,9 +978,11 @@ def package_template_features(
   for k, v in features.items():
     if k in _POLYMER_FEATURES:
       v = np.stack(v, axis=0) if v else np.array([], dtype=_POLYMER_FEATURES[k])
-    if ligand_protein_template_conditioning: # (JH) ligand-protein template conditioning.
-      if k in data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES:
-        v = np.stack(v, axis=0) if v else np.array([], dtype=np.int64)
+    elif (
+        ligand_protein_template_conditioning
+        and k in data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES
+    ):
+      v = np.stack(v, axis=0) if v else np.array([], dtype=np.int64)
     stacked_features[k] = v
 
   return stacked_features

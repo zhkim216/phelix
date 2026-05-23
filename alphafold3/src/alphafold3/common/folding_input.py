@@ -36,7 +36,7 @@ import zstandard as zstd
 BondAtomId: TypeAlias = tuple[str, int, str]
 
 JSON_DIALECT: Final[str] = 'alphafold3'
-JSON_VERSIONS: Final[tuple[int, ...]] = (1, 2, 3)
+JSON_VERSIONS: Final[tuple[int, ...]] = (1, 2, 3, 4)
 JSON_VERSION: Final[int] = JSON_VERSIONS[-1]
 
 ALPHAFOLDSERVER_JSON_DIALECT: Final[str] = 'alphafoldserver'
@@ -86,9 +86,15 @@ def _read_file(path: pathlib.Path, json_path: pathlib.Path | None) -> str:
 class Template:
   """Structural template input."""
 
-  __slots__ = ('_mmcif', '_query_to_template', '_template_chain_id') #* (JH) Added templateChainId for template conditioning
+  __slots__ = ('_mmcif', '_query_to_template', '_template_chain_id')
 
-  def __init__(self, *, mmcif: str, query_to_template_map: Mapping[int, int], template_chain_id: str | None = None): #* (JH) Added templateChainId for template conditioning
+  def __init__(
+      self,
+      *,
+      mmcif: str,
+      query_to_template_map: Mapping[int, int],
+      template_chain_id: str | None = None,
+  ):
     """Initializes the template.
 
     Args:
@@ -96,11 +102,13 @@ class Template:
         one protein chain.
       query_to_template_map: A mapping from query residue index to template
         residue index.
+      template_chain_id: Optional template chain ID to select from multi-chain
+        mmCIF files before featurisation.
     """
     self._mmcif = mmcif
     # Needed to make the Template class hashable.
     self._query_to_template = tuple(query_to_template_map.items())
-    self._template_chain_id = template_chain_id #* (JH) Added templateChainId for template conditioning
+    self._template_chain_id = template_chain_id
 
   @property
   def query_to_template_map(self) -> Mapping[int, int]:
@@ -110,15 +118,26 @@ class Template:
   def mmcif(self) -> str:
     return self._mmcif
 
-  def __hash__(self) -> int:
-    return hash((self._mmcif, tuple(sorted(self._query_to_template))))
+  @property
+  def template_chain_id(self) -> str | None:
+    return self._template_chain_id
 
-  def __eq__(self, other: Self) -> bool:
+  def __hash__(self) -> int:
+    return hash((
+        self._mmcif,
+        tuple(sorted(self._query_to_template)),
+        self._template_chain_id,
+    ))
+
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, Template):
+      return NotImplemented
     mmcifs_equal = self._mmcif == other._mmcif
     maps_equal = sorted(self._query_to_template) == sorted(
         other._query_to_template
     )
-    return mmcifs_equal and maps_equal
+    chain_ids_equal = self._template_chain_id == other._template_chain_id
+    return mmcifs_equal and maps_equal and chain_ids_equal
 
 
 class ProteinChain:
@@ -128,6 +147,7 @@ class ProteinChain:
       '_id',
       '_sequence',
       '_ptms',
+      '_description',
       '_paired_msa',
       '_unpaired_msa',
       '_templates',
@@ -139,6 +159,7 @@ class ProteinChain:
       id: str,  # pylint: disable=redefined-builtin
       sequence: str,
       ptms: Sequence[tuple[str, int]],
+      description: str | None = None,
       paired_msa: str | None = None,
       unpaired_msa: str | None = None,
       templates: Sequence[Template] | None = None,
@@ -150,6 +171,7 @@ class ProteinChain:
       sequence: The amino acid sequence of the chain.
       ptms: A list of tuples containing the post-translational modification type
         and the (1-based) residue index where the modification is applied.
+      description: An optional textual description of the protein chain.
       paired_msa: Paired A3M-formatted MSA for this chain. This MSA is not
         deduplicated and will be used to compute paired features. If None, this
         field is unset and must be filled in by the data pipeline before
@@ -176,6 +198,7 @@ class ProteinChain:
     self._id = id
     self._sequence = sequence
     self._ptms = tuple(ptms)
+    self._description = description
     self._paired_msa = paired_msa
     self._unpaired_msa = unpaired_msa
     self._templates = tuple(templates) if templates is not None else None
@@ -200,6 +223,10 @@ class ProteinChain:
     return self._ptms
 
   @property
+  def description(self) -> str | None:
+    return self._description
+
+  @property
   def paired_msa(self) -> str | None:
     return self._paired_msa
 
@@ -214,11 +241,14 @@ class ProteinChain:
   def __len__(self) -> int:
     return len(self._sequence)
 
-  def __eq__(self, other: Self) -> bool:
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, ProteinChain):
+      return NotImplemented
     return (
         self._id == other._id
         and self._sequence == other._sequence
         and self._ptms == other._ptms
+        and self._description == other._description
         and self._paired_msa == other._paired_msa
         and self._unpaired_msa == other._unpaired_msa
         and self._templates == other._templates
@@ -229,6 +259,7 @@ class ProteinChain:
         self._id,
         self._sequence,
         self._ptms,
+        self._description,
         self._paired_msa,
         self._unpaired_msa,
         self._templates,
@@ -239,6 +270,7 @@ class ProteinChain:
     return hash((
         self._sequence,
         self._ptms,
+        self._description,
         self._paired_msa,
         self._unpaired_msa,
         self._templates,
@@ -299,6 +331,7 @@ class ProteinChain:
             'id',
             'sequence',
             'modifications',
+            'description',
             'unpairedMsa',
             'unpairedMsaPath',
             'pairedMsa',
@@ -348,7 +381,13 @@ class ProteinChain:
       for raw_template in raw_templates:
         _validate_keys(
             raw_template.keys(),
-            {'mmcif', 'mmcifPath', 'queryIndices', 'templateIndices', 'templateChainId'}, #* (JH) Added templateChainId for template conditioning
+            {
+                'mmcif',
+                'mmcifPath',
+                'queryIndices',
+                'templateIndices',
+                'templateChainId',
+            },
         )
         mmcif = raw_template.get('mmcif', None)
         mmcif_path = raw_template.get('mmcifPath', None)
@@ -361,15 +400,19 @@ class ProteinChain:
         query_to_template_map = dict(
             zip(raw_template['queryIndices'], raw_template['templateIndices'])
         )
-        template_chain_id = raw_template.get('templateChainId', None) #* (JH) Added templateChainId for template conditioning
         templates.append(
-            Template(mmcif=mmcif, query_to_template_map=query_to_template_map, template_chain_id=template_chain_id) #* (JH) Added templateChainId for template conditioning
+            Template(
+                mmcif=mmcif,
+                query_to_template_map=query_to_template_map,
+                template_chain_id=raw_template.get('templateChainId'),
+            )
         )
 
     return cls(
         id=seq_id or json_dict['id'],
         sequence=sequence,
         ptms=ptms,
+        description=json_dict.get('description', None),
         paired_msa=paired_msa,
         unpaired_msa=unpaired_msa,
         templates=templates,
@@ -382,16 +425,18 @@ class ProteinChain:
     if self._templates is None:
       templates = None
     else:
-      templates = [
-          {
-              'mmcif': template.mmcif,
-              'queryIndices': list(template.query_to_template_map.keys()),
-              'templateIndices': (
-                  list(template.query_to_template_map.values()) or None
-              ),
-          }
-          for template in self._templates
-      ]
+      templates = []
+      for template in self._templates:
+        template_dict = {
+            'mmcif': template.mmcif,
+            'queryIndices': list(template.query_to_template_map.keys()),
+            'templateIndices': (
+                list(template.query_to_template_map.values()) or None
+            ),
+        }
+        if template.template_chain_id is not None:
+          template_dict['templateChainId'] = template.template_chain_id
+        templates.append(template_dict)
     contents = {
         'id': seq_id or self._id,
         'sequence': self._sequence,
@@ -402,6 +447,8 @@ class ProteinChain:
         'pairedMsa': self._paired_msa,
         'templates': templates,
     }
+    if self._description is not None:
+      contents['description'] = self._description
     return {'protein': contents}
 
   def to_ccd_sequence(self) -> Sequence[str]:
@@ -420,6 +467,7 @@ class ProteinChain:
         id=self.id,
         sequence=self._sequence,
         ptms=self._ptms,
+        description=self._description,
         unpaired_msa=self._unpaired_msa or '',
         paired_msa=self._paired_msa or '',
         templates=self._templates or [],
@@ -429,7 +477,13 @@ class ProteinChain:
 class RnaChain:
   """RNA chain input."""
 
-  __slots__ = ('_id', '_sequence', '_modifications', '_unpaired_msa')
+  __slots__ = (
+      '_id',
+      '_sequence',
+      '_modifications',
+      '_description',
+      '_unpaired_msa',
+  )
 
   def __init__(
       self,
@@ -437,6 +491,7 @@ class RnaChain:
       id: str,  # pylint: disable=redefined-builtin
       sequence: str,
       modifications: Sequence[tuple[str, int]],
+      description: str | None = None,
       unpaired_msa: str | None = None,
   ):
     """Initializes a single strand RNA chain input.
@@ -446,6 +501,7 @@ class RnaChain:
       sequence: The RNA sequence of the chain.
       modifications: A list of tuples containing the modification type and the
         (1-based) residue index where the modification is applied.
+      description: An optional textual description of the RNA chain.
       unpaired_msa: Unpaired A3M-formatted MSA for this chain. This will be
         deduplicated and used to compute unpaired features. If None, this field
         is unset and must be filled in by the data pipeline before
@@ -465,6 +521,7 @@ class RnaChain:
     self._sequence = sequence
     # Use hashable container for modifications.
     self._modifications = tuple(modifications)
+    self._description = description
     self._unpaired_msa = unpaired_msa
 
   @property
@@ -487,28 +544,44 @@ class RnaChain:
     return self._modifications
 
   @property
+  def description(self) -> str | None:
+    return self._description
+
+  @property
   def unpaired_msa(self) -> str | None:
     return self._unpaired_msa
 
   def __len__(self) -> int:
     return len(self._sequence)
 
-  def __eq__(self, other: Self) -> bool:
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, RnaChain):
+      return NotImplemented
     return (
         self._id == other._id
         and self._sequence == other._sequence
         and self._modifications == other._modifications
+        and self._description == other._description
         and self._unpaired_msa == other._unpaired_msa
     )
 
   def __hash__(self) -> int:
-    return hash(
-        (self._id, self._sequence, self._modifications, self._unpaired_msa)
-    )
+    return hash((
+        self._id,
+        self._sequence,
+        self._modifications,
+        self._description,
+        self._unpaired_msa,
+    ))
 
   def hash_without_id(self) -> int:
     """Returns a hash ignoring the ID - useful for deduplication."""
-    return hash((self._sequence, self._modifications, self._unpaired_msa))
+    return hash((
+        self._sequence,
+        self._modifications,
+        self._description,
+        self._unpaired_msa,
+    ))
 
   @classmethod
   def from_alphafoldserver_dict(
@@ -534,7 +607,14 @@ class RnaChain:
     json_dict = json_dict['rna']
     _validate_keys(
         json_dict.keys(),
-        {'id', 'sequence', 'unpairedMsa', 'unpairedMsaPath', 'modifications'},
+        {
+            'id',
+            'sequence',
+            'modifications',
+            'description',
+            'unpairedMsa',
+            'unpairedMsaPath',
+        },
     )
     sequence = json_dict['sequence']
     modifications = [
@@ -561,6 +641,7 @@ class RnaChain:
         id=seq_id or json_dict['id'],
         sequence=sequence,
         modifications=modifications,
+        description=json_dict.get('description', None),
         unpaired_msa=unpaired_msa,
     )
 
@@ -577,6 +658,8 @@ class RnaChain:
         ],
         'unpairedMsa': self._unpaired_msa,
     }
+    if self._description is not None:
+      contents['description'] = self._description
     return {'rna': contents}
 
   def to_ccd_sequence(self) -> Sequence[str]:
@@ -595,6 +678,7 @@ class RnaChain:
         id=self.id,
         sequence=self.sequence,
         modifications=self.modifications,
+        description=self.description,
         unpaired_msa=self._unpaired_msa or '',
     )
 
@@ -602,7 +686,7 @@ class RnaChain:
 class DnaChain:
   """Single strand DNA chain input."""
 
-  __slots__ = ('_id', '_sequence', '_modifications')
+  __slots__ = ('_id', '_sequence', '_modifications', '_description')
 
   def __init__(
       self,
@@ -610,6 +694,7 @@ class DnaChain:
       id: str,  # pylint: disable=redefined-builtin
       sequence: str,
       modifications: Sequence[tuple[str, int]],
+      description: str | None = None,
   ):
     """Initializes a single strand DNA chain input.
 
@@ -618,6 +703,7 @@ class DnaChain:
       sequence: The DNA sequence of the chain.
       modifications: A list of tuples containing the modification type and the
         (1-based) residue index where the modification is applied.
+      description: An optional textual description of the DNA chain.
     """
     if not all(res.isalpha() for res in sequence):
       raise ValueError(f'DNA must contain only letters, got "{sequence}"')
@@ -632,6 +718,7 @@ class DnaChain:
     self._sequence = sequence
     # Use hashable container for modifications.
     self._modifications = tuple(modifications)
+    self._description = description
 
   @property
   def id(self) -> str:
@@ -648,25 +735,34 @@ class DnaChain:
         for r in self.to_ccd_sequence()
     ])
 
+  @property
+  def description(self) -> str | None:
+    return self._description
+
   def __len__(self) -> int:
     return len(self._sequence)
 
-  def __eq__(self, other: Self) -> bool:
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, DnaChain):
+      return NotImplemented
     return (
         self._id == other._id
         and self._sequence == other._sequence
         and self._modifications == other._modifications
+        and self._description == other._description
     )
 
   def __hash__(self) -> int:
-    return hash((self._id, self._sequence, self._modifications))
+    return hash(
+        (self._id, self._sequence, self._modifications, self._description)
+    )
 
   def modifications(self) -> Sequence[tuple[str, int]]:
     return self._modifications
 
   def hash_without_id(self) -> int:
     """Returns a hash ignoring the ID - useful for deduplication."""
-    return hash((self._sequence, self._modifications))
+    return hash((self._sequence, self._modifications, self._description))
 
   @classmethod
   def from_alphafoldserver_dict(
@@ -687,7 +783,9 @@ class DnaChain:
   ) -> Self:
     """Constructs DnaChain from the AlphaFold JSON dict."""
     json_dict = json_dict['dna']
-    _validate_keys(json_dict.keys(), {'id', 'sequence', 'modifications'})
+    _validate_keys(
+        json_dict.keys(), {'id', 'sequence', 'modifications', 'description'}
+    )
     sequence = json_dict['sequence']
     modifications = [
         (mod['modificationType'], mod['basePosition'])
@@ -697,6 +795,7 @@ class DnaChain:
         id=seq_id or json_dict['id'],
         sequence=sequence,
         modifications=modifications,
+        description=json_dict.get('description', None),
     )
 
   def to_dict(
@@ -711,6 +810,8 @@ class DnaChain:
             for mod in self._modifications
         ],
     }
+    if self._description is not None:
+      contents['description'] = self._description
     return {'dna': contents}
 
   def to_ccd_sequence(self) -> Sequence[str]:
@@ -736,11 +837,13 @@ class Ligand:
       a bond linking these components should be added to the bonded_atom_pairs
       Input field.
     smiles: The SMILES representation of the ligand.
+    description: An optional textual description of the ligand.
   """
 
   id: str
   ccd_ids: Sequence[str] | None = None
   smiles: str | None = None
+  description: str | None = None
 
   def __post_init__(self):
     if (self.ccd_ids is None) == (self.smiles is None):
@@ -763,7 +866,7 @@ class Ligand:
 
   def hash_without_id(self) -> int:
     """Returns a hash ignoring the ID - useful for deduplication."""
-    return hash((self.ccd_ids, self.smiles))
+    return hash((self.ccd_ids, self.smiles, self.description))
 
   @classmethod
   def from_alphafoldserver_dict(
@@ -785,7 +888,9 @@ class Ligand:
   ) -> Self:
     """Constructs Ligand from the AlphaFold JSON dict."""
     json_dict = json_dict['ligand']
-    _validate_keys(json_dict.keys(), {'id', 'ccdCodes', 'smiles'})
+    _validate_keys(
+        json_dict.keys(), {'id', 'ccdCodes', 'smiles', 'description'}
+    )
     if json_dict.get('ccdCodes') and json_dict.get('smiles'):
       raise ValueError(
           'Ligand cannot have both CCD code and SMILES set at the same time, '
@@ -799,9 +904,17 @@ class Ligand:
             'CCD codes must be a list of strings, got '
             f'{type(ccd_codes).__name__} instead: {ccd_codes}'
         )
-      return cls(id=seq_id or json_dict['id'], ccd_ids=ccd_codes)
+      return cls(
+          id=seq_id or json_dict['id'],
+          ccd_ids=ccd_codes,
+          description=json_dict.get('description', None),
+      )
     elif 'smiles' in json_dict:
-      return cls(id=seq_id or json_dict['id'], smiles=json_dict['smiles'])
+      return cls(
+          id=seq_id or json_dict['id'],
+          smiles=json_dict['smiles'],
+          description=json_dict.get('description', None),
+      )
     else:
       raise ValueError(f'Unknown ligand type: {json_dict}')
 
@@ -814,6 +927,8 @@ class Ligand:
       contents['ccdCodes'] = self.ccd_ids
     if self.smiles is not None:
       contents['smiles'] = self.smiles
+    if self.description is not None:
+      contents['description'] = self.description
     return {'ligand': contents}
 
 

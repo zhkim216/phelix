@@ -54,14 +54,14 @@ import numpy as np
 import tokamax
 
 _HOME_DIR = pathlib.Path.home()
-_DEFAULT_MODEL_DIR = _HOME_DIR / 'models'
-_DEFAULT_DB_DIR = _HOME_DIR / 'public_databases'
+_DEFAULT_MODEL_DIR = pathlib.Path('/home/yjhk/model-dev/model_params/af3')
+_DEFAULT_DB_DIR = pathlib.Path('/home/yjhk/model-dev/af3_databases')
 
 
 # Input and output paths.
 _JSON_PATH = flags.DEFINE_string(
     'json_path',
-    None,
+    '/home/yjhk/model-dev/alphafold3_move/debug/260523_alphafold3_migration_validation/fixtures/GFP/P42212_F64L_tc.json',
     'Path to the input JSON file.',
 )
 _INPUT_DIR = flags.DEFINE_string(
@@ -71,7 +71,7 @@ _INPUT_DIR = flags.DEFINE_string(
 )
 _OUTPUT_DIR = flags.DEFINE_string(
     'output_dir',
-    None,
+    '/home/yjhk/model-dev/alphafold3_move/debug/260523_alphafold3_migration_validation/local_outputs',
     'Path to a directory where the results will be saved.',
 )
 MODEL_DIR = flags.DEFINE_string(
@@ -319,7 +319,7 @@ _BUCKETS = flags.DEFINE_list(
 )
 _FLASH_ATTENTION_IMPLEMENTATION = flags.DEFINE_enum(
     'flash_attention_implementation',
-    default='triton',
+    default='xla',
     enum_values=['triton', 'cudnn', 'xla'],
     help=(
         "Flash attention implementation to use. 'triton' and 'cudnn' uses a"
@@ -332,13 +332,13 @@ _FLASH_ATTENTION_IMPLEMENTATION = flags.DEFINE_enum(
 )
 _NUM_RECYCLES = flags.DEFINE_integer(
     'num_recycles',
-    10,
+    1,
     'Number of recycles to use during inference.',
     lower_bound=1,
 )
 _NUM_DIFFUSION_SAMPLES = flags.DEFINE_integer(
     'num_diffusion_samples',
-    5,
+    1,
     'Number of diffusion samples to generate.',
     lower_bound=1,
 )
@@ -389,14 +389,14 @@ _DEBUG = flags.DEFINE_bool(
 )
 _MAX_TEMPLATES = flags.DEFINE_integer(
     'max_templates',
-    4,
+    1,
     'Maximum number of templates to use for each chain. Set to 0 to switch off'
     ' template features.',
     lower_bound=0,
 )
 _LIGAND_PROTEIN_TEMPLATE_CONDITIONING_MODE = flags.DEFINE_integer(
     'ligand_protein_template_conditioning_mode',
-    0,
+    1,
     'Local ligand-protein template conditioning mode. 0 disables the extension;'
     ' modes 1, 2, and 3 currently enable the same template conditioning path.',
     lower_bound=0,
@@ -410,7 +410,7 @@ _MASK_TEMPLATE_SEQUENCE = flags.DEFINE_bool(
 )
 _MASK_TEMPLATE_SIDECHAINS = flags.DEFINE_bool(
     'mask_template_sidechains',
-    False,
+    True,
     'Whether to use CA rather than pseudo-beta template positions when local'
     ' template conditioning is enabled.',
 )
@@ -1119,5 +1119,4 @@ def main(_):
 
 
 if __name__ == '__main__':
-  flags.mark_flags_as_required(['output_dir'])
   app.run(main)

@@ -11,11 +11,12 @@
 """The main featurizer."""
 
 import bisect
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 import datetime
 import itertools
 
 from absl import logging
+from alphafold3 import structure
 from alphafold3.common import base_config
 from alphafold3.common import folding_input
 from alphafold3.constants import chemical_components
@@ -102,8 +103,6 @@ class WholePdbPipeline:
         date the model coordinates can be used as a fallback.
       max_templates: The maximum number of templates to send through the network
         set to 0 to switch off templates.
-      filter_clashes: If true then will remove clashing chains.
-      filter_crystal_aids: If true ligands in the cryal aid list are removed.
       max_paired_sequence_per_species: The maximum number of sequences per
         species that will be used for MSA pairing.
       drop_ligand_leaving_atoms: Flag for handling leaving atoms for ligands.
@@ -114,8 +113,6 @@ class WholePdbPipeline:
       atom_cross_att_keys_subset_size: keys subset size in atom cross attention
       flatten_non_standard_residues: Whether to expand non-standard polymer
         residues into flat-atom format.
-      remove_nonsymmetric_bonds: Whether to remove nonsymmetric bonds from
-        symmetric polymer chains.
       deterministic_frames: Whether to use fixed-seed reference positions to
         construct deterministic frames.
       resolve_msa_overlaps: Whether to deduplicate unpaired MSA against paired
@@ -124,6 +121,14 @@ class WholePdbPipeline:
         unpaired MSA field to keep it exactly as is as deduplication against
         the paired MSA could break the manually crafted pairing between MSA
         sequences.
+      ligand_protein_template_conditioning_mode: Mode for ligand-protein
+        template conditioning. 0 disables the local conditioning extension.
+      fix_standalone_glycans: AlphaFold 3 model training and evaluation filtered
+        out leaving atoms from glycan ligands even if they were not bonded to
+        anything ("standalone" glycans). Setting this flag to True fixes this
+        undesirable behavior, but moves away from the regime where AlphaFold 3
+        was trained and evaluated. This has only an effect if
+        drop_ligand_leaving_atoms is True.
     """
 
     max_atoms_per_token: int = 24
@@ -135,19 +140,17 @@ class WholePdbPipeline:
     max_template_date: datetime.date | None = None
     ref_max_modified_date: datetime.date | None = None
     max_templates: int = 4
-    filter_clashes: bool = False
-    filter_crystal_aids: bool = False
     max_paired_sequence_per_species: int = 600
     drop_ligand_leaving_atoms: bool = True
     average_num_atoms_per_token: int = 24
     atom_cross_att_queries_subset_size: int = 32
     atom_cross_att_keys_subset_size: int = 128
     flatten_non_standard_residues: bool = True
-    remove_nonsymmetric_bonds: bool = False
     deterministic_frames: bool = True
     conformer_max_iterations: int | None = None
     resolve_msa_overlaps: bool = True
-    ligand_protein_template_conditioning_mode: int = 0 # (JH) ligand-protein template conditioning
+    ligand_protein_template_conditioning_mode: int = 0
+    fix_standalone_glycans: bool = False
 
   def __init__(self, *, config: Config):
     """Initializes WholePdb data pipeline.
@@ -157,32 +160,30 @@ class WholePdbPipeline:
     """
     self._config = config
 
-  def process_item(
+  def process_structure(
       self,
-      fold_input: folding_input.Input,
+      struct: structure.Structure,
       random_state: np.random.RandomState,
       ccd: chemical_components.Ccd,
+      unpaired_msa_by_chain_id: Mapping[str, str],
+      paired_msa_by_chain_id: Mapping[str, str],
+      templates_by_chain_id: Mapping[str, Sequence[folding_input.Template]],
       random_seed: int | None = None,
-      ligand_protein_template_conditioning_info: dict[str, bool] = None, # (JH) ligand-protein template conditioning
-  ) -> features.BatchDict:
-    """Takes requests from in_queue, adds (key, serialized ex) to out_queue."""
+  ) -> feat_batch.Batch:
+    """Computes features for a structure and associated MSAs/templates."""
     if random_seed is None:
       random_seed = random_state.randint(2**31)
 
     random_state = np.random.RandomState(seed=random_seed)
-
-    logging_name = f'{fold_input.name}, random_seed={random_seed}'
-    logging.info('processing %s', logging_name)
-    struct = fold_input.to_structure(ccd=ccd)
+    logging_name = f'{struct.name}, random_seed={random_seed}'
+    logging.info('Processing %s', logging_name)
 
     # Clean structure.
-    cleaned_struc, cleaning_metadata = structure_cleaning.clean_structure(
+    cleaned_struc = structure_cleaning.clean_structure(
         struct,
         ccd=ccd,
         drop_non_standard_atoms=True,
         drop_missing_sequence=True,
-        filter_clashes=self._config.filter_clashes,
-        filter_crystal_aids=self._config.filter_crystal_aids,
         filter_waters=True,
         filter_hydrogens=True,
         filter_leaving_atoms=self._config.drop_ligand_leaving_atoms,
@@ -190,21 +191,10 @@ class WholePdbPipeline:
         covalent_bonds_only=True,
         remove_polymer_polymer_bonds=True,
         remove_bad_bonds=True,
-        remove_nonsymmetric_bonds=self._config.remove_nonsymmetric_bonds,
+        fix_standalone_glycans=self._config.fix_standalone_glycans,
     )
 
-    num_clashing_chains_removed = cleaning_metadata[
-        'num_clashing_chains_removed'
-    ]
-
-    if num_clashing_chains_removed:
-      logging.info(
-          'Removed %d clashing chains from %s',
-          num_clashing_chains_removed,
-          logging_name,
-      )
-
-    # No chains after fixes
+    # No chains after cleaning.
     if cleaned_struc.num_chains == 0:
       raise MmcifNumChainsError(f'{logging_name}: No chains in structure!')
 
@@ -230,6 +220,7 @@ class WholePdbPipeline:
             polymer_ligand_bonds=polymer_ligand_bonds,
             ligand_ligand_bonds=ligand_ligand_bonds,
             drop_ligand_leaving_atoms=self._config.drop_ligand_leaving_atoms,
+            fix_standalone_glycans=self._config.fix_standalone_glycans,
         )
     )
 
@@ -323,7 +314,6 @@ class WholePdbPipeline:
     batch_convert_model_output = features.ConvertModelOutput.compute_features(
         all_token_atoms_layout=all_token_atoms_layout,
         padding_shapes=padding_shapes,
-        cleaned_struc=cleaned_struc,
         flat_output_layout=flat_output_layout,
         empty_output_struc=empty_output_struc,
         polymer_ligand_bonds=polymer_ligand_bonds,
@@ -344,7 +334,8 @@ class WholePdbPipeline:
         all_tokens=all_tokens,
         standard_token_idxs=standard_token_idxs,
         padding_shapes=padding_shapes,
-        fold_input=fold_input,
+        unpaired_msa_by_chain_id=unpaired_msa_by_chain_id,
+        paired_msa_by_chain_id=paired_msa_by_chain_id,
         logging_name=logging_name,
         max_paired_sequence_per_species=self._config.max_paired_sequence_per_species,
         resolve_msa_overlaps=self._config.resolve_msa_overlaps,
@@ -355,10 +346,12 @@ class WholePdbPipeline:
         all_tokens=all_tokens,
         standard_token_idxs=standard_token_idxs,
         padding_shapes=padding_shapes,
-        fold_input=fold_input,
+        templates_by_chain_id=templates_by_chain_id,
         max_templates=self._config.max_templates,
-        logging_name=logging_name,        
-        ligand_protein_template_conditioning_mode=self._config.ligand_protein_template_conditioning_mode, # (JH) ligand-protein template conditioning
+        logging_name=logging_name,
+        ligand_protein_template_conditioning_mode=(
+            self._config.ligand_protein_template_conditioning_mode
+        ),
     )
 
     ref_max_modified_date = self._config.ref_max_modified_date
@@ -439,20 +432,48 @@ class WholePdbPipeline:
         frames=batch_frames,
     )
 
+    return batch
+
+  def process_item(
+      self,
+      fold_input: folding_input.Input,
+      random_state: np.random.RandomState,
+      ccd: chemical_components.Ccd,
+      random_seed: int | None = None,
+  ) -> features.BatchDict:
+    """Takes requests from in_queue, adds (key, serialized ex) to out_queue."""
+    struct = fold_input.to_structure(ccd=ccd)
+    unpaired_msa_by_chain_id = {}
+    paired_msa_by_chain_id = {}
+    templates_by_chain_id = {}
+    for chain in fold_input.chains:
+      if isinstance(
+          chain, (folding_input.ProteinChain, folding_input.RnaChain)
+      ):
+        unpaired_msa_by_chain_id[chain.id] = chain.unpaired_msa
+      if isinstance(chain, folding_input.ProteinChain):
+        paired_msa_by_chain_id[chain.id] = chain.paired_msa
+        templates_by_chain_id[chain.id] = list(chain.templates)
+
+    batch = self.process_structure(
+        struct=struct,
+        random_state=random_state,
+        ccd=ccd,
+        unpaired_msa_by_chain_id=unpaired_msa_by_chain_id,
+        paired_msa_by_chain_id=paired_msa_by_chain_id,
+        templates_by_chain_id=templates_by_chain_id,
+        random_seed=random_seed,
+    )
     np_example = batch.as_data_dict()
-    if 'num_iter_recycling' in np_example:
-      del np_example['num_iter_recycling']  # that does not belong here
-        
-    for name, value in np_example.items():          
+
+    for name, value in np_example.items():
       if (
           value.dtype.kind not in {'U', 'S'}
           and value.dtype.name != 'object'
           and np.isnan(np.sum(value))
       ):
         raise NanDataError(
-            'The output of the data pipeline contained nans. '
-            f'nan feature: {name}, fold input name: {fold_input.name}, '
-            f'random_seed {random_seed}'
+            f'Data pipeline output for struct.name={struct.name},'
+            f' random_seed={random_seed} contains NaNs. NaN feature: {name}'
         )
-
     return np_example

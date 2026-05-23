@@ -8,7 +8,7 @@ Condition system with:
 
 from abc import ABC, ABCMeta, abstractmethod
 from collections.abc import Callable
-from enum import StrEnum
+from enum import Enum
 from typing import Any, ClassVar, Literal
 
 import numpy as np
@@ -20,6 +20,19 @@ from atomworks.io.utils.selection import get_annotation, get_residue_starts
 from atomworks.ml.utils.token import get_token_starts
 
 __all__ = ["CONDITIONS", "ConditionBase"]
+
+try:
+    from enum import StrEnum
+except ImportError:
+    class StrEnum(str, Enum):
+        """Python 3.10 fallback for enum.StrEnum."""
+
+        @staticmethod
+        def _generate_next_value_(name, start, count, last_values):
+            return name.lower()
+
+        def __str__(self) -> str:
+            return self.value
 
 
 class Level(StrEnum):

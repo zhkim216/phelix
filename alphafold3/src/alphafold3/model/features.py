@@ -10,6 +10,7 @@
 
 """Data-side of the input features processing."""
 
+from collections.abc import Mapping, Sequence
 import dataclasses
 import datetime
 import itertools
@@ -32,7 +33,6 @@ from alphafold3.model import merging_features
 from alphafold3.model import msa_pairing
 from alphafold3.model.atom_layout import atom_layout
 from alphafold3.structure import chemical_components as struc_chem_comps
-from alphafold3.data import templates
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -420,7 +420,8 @@ class MSA:
       all_tokens: atom_layout.AtomLayout,
       standard_token_idxs: np.ndarray,
       padding_shapes: PaddingShapes,
-      fold_input: folding_input.Input,
+      unpaired_msa_by_chain_id: Mapping[str, str],
+      paired_msa_by_chain_id: Mapping[str, str],
       logging_name: str,
       max_paired_sequence_per_species: int,
       resolve_msa_overlaps: bool = True,
@@ -438,12 +439,10 @@ class MSA:
     need_msa_pairing = num_unique_chains > 1
 
     np_chains_list = []
-    input_chains_by_id = {chain.id: chain for chain in fold_input.chains}
     nonempty_chain_ids = set(all_tokens.chain_id)
     for asym_id, chain_info in enumerate(substruct.iter_chains(), start=1):
       b_chain_id = chain_info['chain_id']
       chain_type = chain_info['chain_type']
-      chain = input_chains_by_id[b_chain_id]
 
       # Generalised "sequence" for ligands (can't trust residue name)
       chain_tokens = all_tokens[all_tokens.chain_id == b_chain_id]
@@ -481,14 +480,19 @@ class MSA:
 
       if chain_type in mmcif_names.STANDARD_POLYMER_CHAIN_TYPES:
         unpaired_a3m = ''
+        if not skip_chain and chain_type in (
+            mmcif_names.RNA_CHAIN,
+            mmcif_names.PROTEIN_CHAIN,
+        ):
+          unpaired_a3m = unpaired_msa_by_chain_id[b_chain_id]
+
         paired_a3m = ''
-        if not skip_chain:
-          if need_msa_pairing and isinstance(chain, folding_input.ProteinChain):
-            paired_a3m = chain.paired_msa
-          if isinstance(
-              chain, folding_input.RnaChain | folding_input.ProteinChain
-          ):
-            unpaired_a3m = chain.unpaired_msa
+        if (
+            not skip_chain
+            and need_msa_pairing
+            and chain_type == mmcif_names.PROTEIN_CHAIN
+        ):
+          paired_a3m = paired_msa_by_chain_id[b_chain_id]
         # If we generated the MSA ourselves, it is already deduplicated. If it
         # is user-provided, keep it as is to prevent destroying desired pairing.
         unpaired_msa = msa_module.Msa.from_a3m(
@@ -712,13 +716,11 @@ class Templates:
   atom_positions: xnp_ndarray
   # atom mask of templates, bool w shape [num_templates, num_res, 24]
   atom_mask: xnp_ndarray
-  
-  #### (JH) ligand-protein template conditioning. ####  
+  # chain-type flags used by ligand-protein template conditioning.
   template_is_protein: xnp_ndarray
   template_is_dna: xnp_ndarray
   template_is_rna: xnp_ndarray
   template_is_other: xnp_ndarray
-  #####################################################
 
   @classmethod
   def compute_features(
@@ -726,19 +728,19 @@ class Templates:
       all_tokens: atom_layout.AtomLayout,
       standard_token_idxs: np.ndarray,
       padding_shapes: PaddingShapes,
-      fold_input: folding_input.Input,
+      templates_by_chain_id: Mapping[str, Sequence[folding_input.Template]],
       max_templates: int,
       logging_name: str,
-      ligand_protein_template_conditioning_mode: int = 0, # (JH) for ligand-protein template conditioning
+      ligand_protein_template_conditioning_mode: int = 0,
   ) -> Self:
     """Compute the template features."""
 
+    ligand_protein_template_conditioning = (
+        ligand_protein_template_conditioning_mode > 0
+    )
     seen_entities = {}
     polymer_entity_features = {True: {}, False: {}}
-    
-    # (JH) Whether to do ligand-protein template conditioning.
-    ligand_protein_template_conditioning = ligand_protein_template_conditioning_mode > 0
-        
+
     substruct = atom_layout.make_structure(
         flat_layout=all_tokens,
         atom_coords=np.zeros(all_tokens.shape + (3,)),
@@ -746,14 +748,12 @@ class Templates:
     )
     np_chains_list = []
 
-    input_chains_by_id = {chain.id: chain for chain in fold_input.chains}
+    sequences = substruct.chain_single_letter_sequence()
 
     nonempty_chain_ids = set(all_tokens.chain_id)
-    
     for chain_info in substruct.iter_chains():
       chain_id = chain_info['chain_id']
       chain_type = chain_info['chain_type']
-      chain = input_chains_by_id[chain_id]
 
       # Generalised "sequence" for ligands (can't trust residue name)
       chain_tokens = all_tokens[all_tokens.chain_id == chain_id]
@@ -775,18 +775,15 @@ class Templates:
 
       if entity_id not in polymer_entity_features[skip_chain]:
         if skip_chain:
-          template_features = data3.empty_template_features(chain_num_tokens,
-                                                            ligand_protein_template_conditioning=ligand_protein_template_conditioning, 
-                                                            chain_type=chain_type,
-                                                            mmcif_names=mmcif_names) # (JH) Ligand-protein template conditioning.
-          
-          # (JH) non-protein chains have all zero values for aatype, atom_positions, atom_mask (False)
-          #Todo (JH) But for ligand-template conditioning, we'll need to change this part
+          template_features = data3.empty_template_features(
+              chain_num_tokens,
+              ligand_protein_template_conditioning=ligand_protein_template_conditioning,
+              chain_type=chain_type,
+          )
         else:
-          assert isinstance(chain, folding_input.ProteinChain)
 
           sorted_features = []
-          for template in chain.templates:
+          for template in templates_by_chain_id[chain_id]:
             struc = structure.from_mmcif(
                 template.mmcif,
                 fix_mse_residues=True,
@@ -795,37 +792,37 @@ class Templates:
                 include_water=False,
                 include_other=True,  # For non-standard polymer chains.
             )
-                                    
-            ######## (JH) for ligand-protein template conditioning #######
-            if ligand_protein_template_conditioning: 
-              template_chain_id = template._template_chain_id
-              struc = struc.filter(chain_id=template_chain_id) # (JH) override struc to a single chain where we want to condition on            
-            #! (JH) important: label_chain_id is used in struc.filter()
-            ##############################################################
-                                                          
+            if (
+                ligand_protein_template_conditioning
+                and template.template_chain_id is not None
+            ):
+              struc = struc.filter(chain_id=template.template_chain_id)
             hit_features = templates.get_polymer_features(
                 chain=struc,
                 chain_poly_type=mmcif_names.PROTEIN_CHAIN,
-                query_sequence_length=len(chain.sequence),
-                query_to_hit_mapping=dict(template.query_to_template_map),              
+                query_sequence_length=len(sequences[chain_id]),
+                query_to_hit_mapping=dict(template.query_to_template_map),
                 ligand_protein_template_conditioning=ligand_protein_template_conditioning,
-                mmcif_names=mmcif_names
             )
             sorted_features.append(hit_features)
 
           template_features = templates.package_template_features(
               hit_features=sorted_features,
               include_ligand_features=False,
-              ligand_protein_template_conditioning=ligand_protein_template_conditioning
+              ligand_protein_template_conditioning=ligand_protein_template_conditioning,
           )
 
           template_features = data3.fix_template_features(
-              template_features=template_features, num_res=len(chain.sequence),
-              ligand_protein_template_conditioning=ligand_protein_template_conditioning
+              template_features=template_features,
+              num_res=len(sequences[chain_id]),
+              ligand_protein_template_conditioning=ligand_protein_template_conditioning,
+              chain_type=mmcif_names.PROTEIN_CHAIN,
           )
 
         template_features = _reduce_template_features(
-            template_features, max_templates, ligand_protein_template_conditioning
+            template_features,
+            max_templates,
+            ligand_protein_template_conditioning=ligand_protein_template_conditioning,
         )
         polymer_entity_features[skip_chain][entity_id] = template_features
 
@@ -836,7 +833,7 @@ class Templates:
 
     # We pad the num_templates dimension before merging, so that different
     # chains can be concatenated on the num_res dimension.  Masking will be
-    # applied so that each chains templates can't see each other in evoformer.py.    
+    # applied so that each chains templates can't see each other.
     for chain in np_chains_list:
       chain['template_aatype'] = _pad_to(
           chain['template_aatype'], (max_templates, None)
@@ -847,17 +844,20 @@ class Templates:
       chain['template_atom_mask'] = _pad_to(
           chain['template_atom_mask'], (max_templates, None, None)
       )
-      if ligand_protein_template_conditioning: # (JH) ligand-protein template conditioning.
-        for feature_name in data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES:
+      if ligand_protein_template_conditioning:
+        for feature_name in (
+            data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES
+        ):
           chain[feature_name] = _pad_to(
               chain[feature_name], (max_templates, None)
           )
 
     # Merge on token dimension.
     allowed_features = list(data_constants.TEMPLATE_FEATURES)
-    if ligand_protein_template_conditioning: # (JH) ligand-protein template conditioning.
-      allowed_features.extend(data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES)
-    
+    if ligand_protein_template_conditioning:
+      allowed_features.extend(
+          data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES
+      )
     np_example = {
         ft: np.concatenate([c[ft] for c in np_chains_list], axis=1)
         for ft in np_chains_list[0]
@@ -869,7 +869,7 @@ class Templates:
     # we get repeated template information.
     for feature_name, v in np_example.items():
       np_example[feature_name] = v[:max_templates, standard_token_idxs, ...]
-              
+
     # Pad along the token dimension.
     template_kwargs = {
         'aatype': _pad_to(
@@ -884,49 +884,59 @@ class Templates:
             (None, padding_shapes.num_tokens, None),
         ),
     }
-    
-    ###### (JH) ligand-protein template conditioning. #####    
-    if ligand_protein_template_conditioning: 
-      for feature_name in data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES:
-        template_kwargs[feature_name] = np_example[feature_name]  
-        template_kwargs[feature_name] = _pad_to(template_kwargs[feature_name], (None, padding_shapes.num_tokens))
-                  
+    if ligand_protein_template_conditioning:
+      for feature_name in (
+          data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES
+      ):
+        template_kwargs[feature_name] = _pad_to(
+            np_example[feature_name], (None, padding_shapes.num_tokens)
+        )
     else:
-      for feature_name in data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES: # (JH) Dummy values for non-conditioning, for passing value type scan in pipeline.py
-        template_kwargs[feature_name] = np.zeros((max_templates, padding_shapes.num_tokens), dtype=np.int64)
-                                                   
+      for feature_name in (
+          data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES
+      ):
+        template_kwargs[feature_name] = np.zeros(
+            (max_templates, padding_shapes.num_tokens), dtype=np.int64
+        )
+
     templates_features = Templates(**template_kwargs)
-    ##############################################################
-    
     return templates_features
 
   @classmethod
   def from_data_dict(cls, batch: BatchDict) -> Self:
     """Make Template from batch dictionary."""
+    num_templates, num_tokens = batch['template_aatype'].shape
     kwargs = {
         'aatype': batch['template_aatype'],
         'atom_positions': batch['template_atom_positions'],
         'atom_mask': batch['template_atom_mask'],
     }
-
-    # (JH) ligand-protein template conditioning, always include all fields for JIT compatibility
-    for feature_name in data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES:      
-        kwargs[feature_name] = batch[feature_name]
-
+    for feature_name in (
+        data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES
+    ):
+      kwargs[feature_name] = batch.get(
+          feature_name,
+          np.zeros((num_templates, num_tokens), dtype=np.int64),
+      )
     return cls(**kwargs)
 
   def as_data_dict(self) -> BatchDict:
-    result = {
+    output = {
         'template_aatype': self.aatype,
         'template_atom_positions': self.atom_positions,
         'template_atom_mask': self.atom_mask,
     }
-
-    # (JH) ligand-protein template conditioning, always include all fields for JIT compatibility
-    for feature_name in data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES:
-      result[feature_name] = getattr(self, feature_name)    
-
-    return result
+    if any(
+        np.any(np.asarray(getattr(self, feature_name)))
+        for feature_name in (
+            data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES
+        )
+    ):
+      for feature_name in (
+          data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES
+      ):
+        output[feature_name] = getattr(self, feature_name)
+    return output
 
 
 jax.tree_util.register_dataclass(
@@ -945,18 +955,17 @@ def _reduce_template_features(
   num_templates = template_features['template_aatype'].shape[0]
   template_keep_mask = np.arange(num_templates) < max_templates
   template_fields = data_constants.TEMPLATE_FEATURES + (
-      'template_release_timestamp',    
+      'template_release_timestamp',
   )
-  
-  if ligand_protein_template_conditioning: #* (JH) ligand-protein template conditioning.
-    template_fields += data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES
-  
+  if ligand_protein_template_conditioning:
+    template_fields += (
+        data_constants.LIGAND_PROTEIN_TEMPLATE_CONDITIONING_FEATURES
+    )
   template_features = {
       k: v[template_keep_mask]
       for k, v in template_features.items()
       if k in template_fields
   }
-  
   return template_features
 
 
@@ -1893,9 +1902,19 @@ jax.tree_util.register_dataclass(
 
 @dataclasses.dataclass(frozen=True)
 class ConvertModelOutput:
-  """Contains atom layout info."""
+  """Contains information needed to convert model flat output back to structure.
 
-  cleaned_struc: structure.Structure
+  Attributes:
+    token_atoms_layout: Layout mapping tokens to their corresponding atoms.
+    flat_output_layout: Flat layout of all atoms present in the structure.
+    empty_output_struc: Container structure without coordinates used to store
+      the converted model predictions.
+    polymer_ligand_bonds: Atom layout containing information on the bonds
+      between polymers and ligands.
+    ligand_ligand_bonds: Atom layout containing information on the intra- and
+      inter-ligand covalent bonds.
+  """
+
   token_atoms_layout: atom_layout.AtomLayout
   flat_output_layout: atom_layout.AtomLayout
   empty_output_struc: structure.Structure
@@ -1907,7 +1926,6 @@ class ConvertModelOutput:
       cls,
       all_token_atoms_layout: atom_layout.AtomLayout,
       padding_shapes: PaddingShapes,
-      cleaned_struc: structure.Structure,
       flat_output_layout: atom_layout.AtomLayout,
       empty_output_struc: structure.Structure,
       polymer_ligand_bonds: atom_layout.AtomLayout,
@@ -1920,7 +1938,6 @@ class ConvertModelOutput:
     )
 
     return cls(
-        cleaned_struc=cleaned_struc,
         token_atoms_layout=token_atoms_layout,
         flat_output_layout=flat_output_layout,
         empty_output_struc=empty_output_struc,
@@ -1933,7 +1950,6 @@ class ConvertModelOutput:
     """Construct atom layout object from dictionary."""
 
     return cls(
-        cleaned_struc=_unwrap(batch.get('cleaned_struc', None)),
         token_atoms_layout=_unwrap(batch.get('token_atoms_layout', None)),
         flat_output_layout=_unwrap(batch.get('flat_output_layout', None)),
         empty_output_struc=_unwrap(batch.get('empty_output_struc', None)),
@@ -1943,7 +1959,6 @@ class ConvertModelOutput:
 
   def as_data_dict(self) -> BatchDict:
     return {
-        'cleaned_struc': np.array(self.cleaned_struc, object),
         'token_atoms_layout': np.array(self.token_atoms_layout, object),
         'flat_output_layout': np.array(self.flat_output_layout, object),
         'empty_output_struc': np.array(self.empty_output_struc, object),

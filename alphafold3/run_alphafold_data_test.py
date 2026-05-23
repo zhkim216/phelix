@@ -162,7 +162,9 @@ class DataPipelineTest(parameterized.TestCase):
             {
                 'protein': {
                     'id': 'P',
-                    'sequence': 'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN',
+                    'sequence': (
+                        'SEFEKLRQTGDELVQAFQRLREIFDKGDDDSLEQVLEEIEELIQKHRQLFDNRQEAADTEAAKQGDQWVQLFQRFREAIDKGDKDSLEQLLEELEQALQKIRELAEKKN'
+                    ),
                     'modifications': [],
                     'unpairedMsa': None,
                     'pairedMsa': None,
@@ -198,6 +200,56 @@ class DataPipelineTest(parameterized.TestCase):
       output.write(model_config_as_str.encode('utf-8'))
     self.compare_golden(result_path)
 
+  def test_template_chain_id_roundtrip(self):
+    fold_input = folding_input.Input.from_json(
+        json.dumps({
+            'name': 'template-chain-id',
+            'modelSeeds': [1],
+            'sequences': [{
+                'protein': {
+                    'id': 'A',
+                    'sequence': 'ACD',
+                    'unpairedMsa': '',
+                    'pairedMsa': '',
+                    'templates': [{
+                        'mmcif': 'data_template\n',
+                        'queryIndices': [0, 1, 2],
+                        'templateIndices': [5, 6, 7],
+                        'templateChainId': 'B',
+                    }],
+                },
+            }],
+            'dialect': folding_input.JSON_DIALECT,
+            'version': folding_input.JSON_VERSION,
+        })
+    )
+
+    protein = fold_input.protein_chains[0]
+    self.assertEqual(protein.templates[0].template_chain_id, 'B')
+    roundtripped = folding_input.Input.from_json(fold_input.to_json())
+    self.assertEqual(
+        roundtripped.protein_chains[0].templates[0].template_chain_id, 'B'
+    )
+    self.assertEqual(roundtripped, fold_input)
+
+  def test_ligand_template_conditioning_config(self):
+    model_config = run_alphafold.make_model_config(
+        ligand_protein_template_conditioning_mode=1,
+        mask_template_sidechains=True,
+        mask_template_sequence=True,
+    )
+
+    self.assertEqual(
+        model_config.evoformer.template.ligand_protein_template_conditioning_mode,
+        1,
+    )
+    self.assertTrue(model_config.evoformer.template.mask_template_sidechains)
+    self.assertTrue(model_config.evoformer.template.mask_template_sequence)
+
+  def test_ligand_template_conditioning_rejects_zero_templates(self):
+    with self.assertRaisesRegex(ValueError, 'max_templates must be > 0'):
+      run_alphafold._validate_ligand_protein_template_conditioning_flags(1, 0)
+
   def test_featurisation(self):
     """Run featurisation and assert that the output is as expected."""
     fold_input = folding_input.Input.from_json(self._test_input_json)
@@ -205,7 +257,7 @@ class DataPipelineTest(parameterized.TestCase):
     full_fold_input = data_pipeline.process(fold_input)
     featurised_example = featurisation.featurise_input(
         full_fold_input,
-        ccd=chemical_components.cached_ccd(),
+        ccd=chemical_components.Ccd(),
         buckets=None,
     )
     del featurised_example[0]['ref_pos']  # Depends on specific RDKit version.

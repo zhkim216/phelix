@@ -54,14 +54,14 @@ import numpy as np
 import tokamax
 
 _HOME_DIR = pathlib.Path.home()
-_DEFAULT_MODEL_DIR = _HOME_DIR / 'models'
-_DEFAULT_DB_DIR = _HOME_DIR / 'public_databases'
+_DEFAULT_MODEL_DIR = pathlib.Path('/scratch/users/zhkim216/model_params/af3')
+_DEFAULT_DB_DIR = pathlib.Path('/scratch/users/zhkim216/af3_databases')
 
 
 # Input and output paths.
 _JSON_PATH = flags.DEFINE_string(
     'json_path',
-    None,
+    '/scratch/users/zhkim216/out_dir/eval_ligand_seq_des/eval_af3_exp1_cfg0/step_40000_epoch_25/af3_tc_inputs/1a28_1_A1_C1_sample0.json',
     'Path to the input JSON file.',
 )
 _INPUT_DIR = flags.DEFINE_string(
@@ -71,7 +71,7 @@ _INPUT_DIR = flags.DEFINE_string(
 )
 _OUTPUT_DIR = flags.DEFINE_string(
     'output_dir',
-    None,
+    '/scratch/users/zhkim216/debug_out_dir/251129_af3_debugging',
     'Path to a directory where the results will be saved.',
 )
 MODEL_DIR = flags.DEFINE_string(
@@ -268,7 +268,7 @@ _RESOLVE_MSA_OVERLAPS = flags.DEFINE_bool(
 )
 _MAX_TEMPLATE_DATE = flags.DEFINE_string(
     'max_template_date',
-    '2021-09-30',  # By default, use the date from the AlphaFold 3 paper.
+    '2026-03-24',
     'Maximum template release date to consider. Format: YYYY-MM-DD. All'
     ' templates released after this date will be ignored. Controls also whether'
     ' to allow use of model coordinates for a chemical component from the CCD'
@@ -332,7 +332,7 @@ _FLASH_ATTENTION_IMPLEMENTATION = flags.DEFINE_enum(
 )
 _NUM_RECYCLES = flags.DEFINE_integer(
     'num_recycles',
-    10,
+    3,
     'Number of recycles to use during inference.',
     lower_bound=1,
 )
@@ -389,14 +389,14 @@ _DEBUG = flags.DEFINE_bool(
 )
 _MAX_TEMPLATES = flags.DEFINE_integer(
     'max_templates',
-    4,
+    1,
     'Maximum number of templates to use for each chain. Set to 0 to switch off'
     ' template features.',
     lower_bound=0,
 )
 _LIGAND_PROTEIN_TEMPLATE_CONDITIONING_MODE = flags.DEFINE_integer(
     'ligand_protein_template_conditioning_mode',
-    0,
+    1,
     'Local ligand-protein template conditioning mode. 0 disables the extension;'
     ' modes 1, 2, and 3 currently enable the same template conditioning path.',
     lower_bound=0,
@@ -410,7 +410,7 @@ _MASK_TEMPLATE_SEQUENCE = flags.DEFINE_bool(
 )
 _MASK_TEMPLATE_SIDECHAINS = flags.DEFINE_bool(
     'mask_template_sidechains',
-    False,
+    True,
     'Whether to use CA rather than pseudo-beta template positions when local'
     ' template conditioning is enabled.',
 )
@@ -1119,5 +1119,4 @@ def main(_):
 
 
 if __name__ == '__main__':
-  flags.mark_flags_as_required(['output_dir'])
   app.run(main)
