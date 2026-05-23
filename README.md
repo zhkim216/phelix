@@ -1,5 +1,3 @@
-(LLM written)
-
 # Ligand-Conditioned Potts Models
 
 ## Environment setup on Sherlock
