@@ -37,6 +37,71 @@ The image must provide:
 - CUDA 12-compatible runtime
 - patched HMMER in `PATH`, ideally under `/hmmer/bin`, with `jackhmmer --seq_limit`
 
+## Recommended: Build The SIF Locally And Copy It To Sherlock
+
+If Sherlock cannot build the image cleanly, build it on the local workstation
+with Apptainer and copy the resulting SIF to Sherlock.
+
+Local preflight:
+
+```bash
+apptainer --version
+uname -m
+command -v mksquashfs
+command -v newuidmap || true
+command -v newgidmap || true
+df -h /home/yjhk/model-dev
+ls -l /home/yjhk/model-dev/allatom-design/alphafold3/docker/jackhmmer_seq_limit.patch
+```
+
+Build locally with real root and explicit cache/temp locations:
+
+```bash
+mkdir -p /home/yjhk/model-dev/apptainer_tmp
+mkdir -p /home/yjhk/model-dev/apptainer_cache
+mkdir -p /home/yjhk/model-dev/logs
+
+cd /home/yjhk/model-dev/allatom-design
+
+sudo env \
+  SIF=/home/yjhk/model-dev/phelix.sif \
+  FORCE=1 \
+  APPTAINER_BUILD_FLAGS= \
+  APPTAINER_TMPDIR=/home/yjhk/model-dev/apptainer_tmp \
+  APPTAINER_CACHEDIR=/home/yjhk/model-dev/apptainer_cache \
+  bash /home/yjhk/model-dev/allatom-design/scripts/sherlock_scripts/jinho/setup/build_phelix_sif.sh \
+  2>&1 | tee /home/yjhk/model-dev/logs/phelix_sif_build.log
+
+sudo chown "$USER:$USER" /home/yjhk/model-dev/phelix.sif
+```
+
+Validate locally:
+
+```bash
+ls -lh /home/yjhk/model-dev/phelix.sif
+apptainer exec /home/yjhk/model-dev/phelix.sif \
+  bash -lc 'python3.12 --version && uv --version && gcc --version | head -1 && g++ --version | head -1 && jackhmmer -h | grep -- --seq_limit'
+```
+
+Copy to Sherlock:
+
+```bash
+ssh sherlock 'mkdir -p /scratch/users/zhkim216/containers'
+rsync -avP /home/yjhk/model-dev/phelix.sif \
+  sherlock:/scratch/users/zhkim216/containers/phelix.sif
+```
+
+Validate on Sherlock:
+
+```bash
+cd /home/users/zhkim216/code/phelix
+git pull
+apptainer exec --nv /scratch/users/zhkim216/containers/phelix.sif \
+  bash -lc 'python3.12 --version && uv --version && jackhmmer -h | grep -- --seq_limit'
+```
+
+## Alternative: Build The SIF On Sherlock
+
 The repo includes an Apptainer/Singularity definition that builds this image
 from the NVIDIA CUDA 12.6 Ubuntu 24.04 Docker base and adds Python 3.12, uv,
 zlib development headers, and patched HMMER:

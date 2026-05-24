@@ -18,7 +18,9 @@ if [ -z "${APPTAINER_BIN:-}" ]; then
 fi
 SIF="${SIF:-/scratch/users/zhkim216/containers/phelix.sif}"
 DEF="${DEF:-$SCRIPT_DIR/phelix_apptainer.def}"
-APPTAINER_BUILD_FLAGS="${APPTAINER_BUILD_FLAGS:---fakeroot}"
+# Use --fakeroot by default, but allow callers to disable it with
+# APPTAINER_BUILD_FLAGS= when building with real root via sudo.
+APPTAINER_BUILD_FLAGS="${APPTAINER_BUILD_FLAGS---fakeroot}"
 FORCE="${FORCE:-0}"
 PATCH_PATH="${PATCH_PATH:-$REPO_ROOT/alphafold3/docker/jackhmmer_seq_limit.patch}"
 
