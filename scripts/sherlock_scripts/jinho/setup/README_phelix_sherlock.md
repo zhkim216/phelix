@@ -62,6 +62,7 @@ mkdir -p /home/yjhk/model-dev/apptainer_cache
 mkdir -p /home/yjhk/model-dev/logs
 
 cd /home/yjhk/model-dev/allatom-design
+BUILD_SCRIPT="$PWD/scripts/sherlock_scripts/jinho/setup/build_phelix_sif.sh"
 
 sudo env \
   SIF=/home/yjhk/model-dev/phelix.sif \
@@ -69,7 +70,7 @@ sudo env \
   APPTAINER_BUILD_FLAGS= \
   APPTAINER_TMPDIR=/home/yjhk/model-dev/apptainer_tmp \
   APPTAINER_CACHEDIR=/home/yjhk/model-dev/apptainer_cache \
-  bash /home/yjhk/model-dev/allatom-design/scripts/sherlock_scripts/jinho/setup/build_phelix_sif.sh \
+  bash "$BUILD_SCRIPT" \
   2>&1 | tee /home/yjhk/model-dev/logs/phelix_sif_build.log
 
 sudo chown "$USER:$USER" /home/yjhk/model-dev/phelix.sif
