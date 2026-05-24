@@ -1,0 +1,90 @@
+task: ${model.task}
+dataset_impl: mg_proto
+pdb_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v9
+train_metadata_path: /scratch/users/zhkim216/datasets/atomworks_pdb_full_v9/debug_metadata_ligval_seq_clustered_03_with_mg_pubmed_evidence.parquet
+
+validation_ids_file: /scratch/users/zhkim216/datasets/val_cifs/mg_native_val_cifs_test/mg_nativeval_sm_all.txt
+val_metadata_path: /scratch/users/zhkim216/datasets/val_cifs/mg_native_val_cifs_test/metadata_for_training_mg_nativeval_sm_all.parquet
+
+debug: ${train.debug}
+debug_num_ids: 10000
+save_failed_examples_to_dir: ${out_dir}/failed_examples
+residue_cache_dir: /scratch/users/zhkim216/datasets/atomworks_cached_residue_data
+exclude_val_cluster: true
+
+mg_proto:
+  external_evidence_policy: no_filter
+  allowed_ccd_codes: ["MG"]
+  min_protein_donor_atoms: 3
+  min_avg_occupancy_nonpolymer: 0.5
+
+train_filters:
+  metadata_filter:
+    - "deposition_date < '2023-01-01'"
+    - "resolution < 3.5"
+    - "clash_severity != 'severe'"
+    - "~method.str.contains('NMR')"
+    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
+    - "num_polymer_pn_units < 50"
+  protein_monomer_chain_filter:
+    - "(q_pn_unit_is_protein and 20 <= q_pn_unit_num_resolved_residues < 2048)"
+  interface_filter:
+    "1": []
+    "2":
+      - "interface_type == 'bmm_protein' and n_metal == 1"
+      - "n_prot == 1"
+
+val_filters:
+  metadata_filter: []
+
+sampling_weights:
+  alphas_interface:
+    alpha_protein_protein:        0.0
+    alpha_protein_small_molecule: 0.0
+    alpha_protein_metal:          1.0
+    alpha_protein_nuc:            0.0
+    alpha_protein_nuc_lig:        0.0
+    alpha_protein_peptide:        0.0
+  k_percentile: 90.0
+  ligand_cluster_col: null
+
+cif_parser_args:
+  add_missing_atoms: true
+  remove_waters: true
+  remove_ccds: []
+  fix_ligands_at_symmetry_centers: true
+  fix_arginines: true
+  convert_mse_to_met: true
+  hydrogen_policy: "remove"
+
+interface_only_training: false
+
+featurizer_cfg:
+  is_inference: false
+  occupancy_threshold_protein_backbone: 0.0
+  training_structure_noise: 0.1
+  undesired_res_names: []
+  remove_unresolved_tokens: true
+  max_tokens: 256
+  max_atoms: 2304
+  crop_center_cutoff_distance: 15.0
+  crop_spatial_p_protein_monomer_chain: 0.25
+  drop_prob_non_protein_chains: 0.0
+  pocket_distance: 5.0
+  pocket_n_min_ligand_atoms: 1
+  use_pocket_rbf: ${denoiser.mpnn.token_features.use_pocket_rbf}
+  pocket_rbf_distance: ${denoiser.mpnn.token_features.pocket_rbf_distance}
+  pocket_rbf_n_min_ligand_atoms: 1
+  residue_cache_dir: ${data.residue_cache_dir}
+  max_conformers_per_residue: 50
+  apply_random_augmentation: true
+  translation_scale: 1.0
+  asymmetric_noise: false
+  protein_noise_scale: 0.1
+  context_noise_scale: 0.1
+  pseudo_ligand_occupancy_threshold: 0.5
+
+samples_per_epoch: 1000
+batch_size: ${train.batch_size}
+num_workers: ${num_workers}
+random_seed: ${train.seed}

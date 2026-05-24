@@ -1,6 +1,0 @@
-# Run settings
-seed: 0
-boltz_val_cifs_dir: /media/scratch/datasets/boltz_val_cifs/pdbs  # to get the native structures
-input_dir: /media/scratch/huang_lab/group_scratch/out_dir/richards-structures
-out_dir: null
-num_workers: 8

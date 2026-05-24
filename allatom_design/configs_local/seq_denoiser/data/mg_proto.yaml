@@ -1,7 +1,7 @@
 task: ${model.task}
 dataset_impl: mg_proto
 pdb_path: /home/yjhk/model-dev/datasets/atomworks_pdb_full_v9
-train_metadata_path: /home/yjhk/model-dev/datasets/atomworks_pdb_full_v9/metadata_ligval_seq_clustered_03_with_mg_pubmed_evidence.parquet
+train_metadata_path: /home/yjhk/model-dev/datasets/atomworks_pdb_full_v9/debug_metadata_ligval_seq_clustered_03_with_mg_pubmed_evidence.parquet
 
 validation_ids_file: /home/yjhk/model-dev/datasets/val_cifs/mg_native_val_cifs_test/mg_nativeval_sm_all.txt
 val_metadata_path: /home/yjhk/model-dev/datasets/val_cifs/mg_native_val_cifs_test/metadata_for_training_mg_nativeval_sm_all.parquet
@@ -17,12 +17,11 @@ mg_proto:
   allowed_ccd_codes: ["MG"]
   min_protein_donor_atoms: 3
   min_avg_occupancy_nonpolymer: 0.5
-  require_cached_examples: true
 
 train_filters:
   metadata_filter:
-    - "deposition_date <= '2023-01-01'"
-    - "resolution < 9.0"
+    - "deposition_date < '2023-01-01'"
+    - "resolution < 3.5"
     - "clash_severity != 'severe'"
     - "~method.str.contains('NMR')"
     - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
@@ -63,7 +62,7 @@ interface_only_training: false
 featurizer_cfg:
   is_inference: false
   occupancy_threshold_protein_backbone: 0.0
-  training_structure_noise: 0.3
+  training_structure_noise: 0.1
   undesired_res_names: []
   remove_unresolved_tokens: true
   max_tokens: 128
@@ -82,8 +81,8 @@ featurizer_cfg:
   apply_random_augmentation: true
   translation_scale: 1.0
   asymmetric_noise: false
-  protein_noise_scale: 0.3
-  context_noise_scale: 0.05
+  protein_noise_scale: 0.1
+  context_noise_scale: 0.1
   pseudo_ligand_occupancy_threshold: 0.5
 
 samples_per_epoch: 1000

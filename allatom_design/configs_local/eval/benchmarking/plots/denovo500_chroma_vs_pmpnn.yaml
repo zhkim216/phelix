@@ -1,7 +1,0 @@
-chroma_pickle: /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/chroma/all_metrics.pkl
-pmpnn_pickle: /media/scratch/huang_lab/allatom_design/allatom_design/sc_evals/outputs/proteinmpnn/all_metrics.pkl
-out_dir: out_dir/denovo500_proteinmpnn_vs_chroma
-
-hydra:
-  run:
-    dir: /media/scratch/huang_lab/allatom_design/hydra_outputs

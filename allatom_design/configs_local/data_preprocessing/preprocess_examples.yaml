@@ -1,0 +1,50 @@
+mmcif_dir: /home/possu/jinho/datasets/pdb_mirror
+out_dir: /home/possu/jinho/datasets/atomworks_pdb_full_v3
+
+num_workers: 20
+
+dataset:
+  _target_: atomworks.ml.datasets.PandasDataset
+  data: ${out_dir}/metadata_for_caching.parquet
+  name: pdb
+  id_column: example_id
+  filters: null
+  columns_to_load: null
+  loader:
+      _target_: atomworks.ml.datasets.parsers.base.load_example_from_metadata_row
+      _partial_: true
+      metadata_row_parser:
+        _target_: atomworks.ml.datasets.parsers.default_metadata_row_parsers.GenericDFParser
+        example_id_colname: example_id
+        path_colname: path
+        pn_unit_iid_colnames: null
+        assembly_id_colname: null
+        base_path: null
+        extension: null
+        attrs: null
+      cif_parser_args: ${cif_parser_args}
+  save_failed_examples_to_dir: ${out_dir}/failed_cached_examples
+  load_kwargs: null
+
+# CIF parser args
+cif_parser_args:
+  add_missing_atoms: true
+  remove_waters: true
+  remove_ccds: ["UNX", "UNL"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
+  fix_ligands_at_symmetry_centers: true
+  fix_arginines: true
+  convert_mse_to_met: true
+  hydrogen_policy: "remove"
+  add_bond_types_from_struct_conn: ["covale"]
+
+preprocess_cfg:
+  undesired_res_names: ["UNX", "UNL"] #! unknown amino acids, RNA/DNA bases, ligands, and atoms
+  b_factor_min: null
+  b_factor_max: null
+  min_residues_for_polymers: 1
+  remove_terminal_oxygen_protein: true
+  remove_terminal_oxygen_nucleic_acid: true
+
+# --- sharding for multi-node runs ---
+num_shards: 1   # total number of shards
+shard_id: 0         # per-job shard id

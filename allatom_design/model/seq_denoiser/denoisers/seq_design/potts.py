@@ -29,7 +29,8 @@ import torch.nn.functional as F
 from torchtyping import TensorType
 from tqdm.auto import tqdm
 
-from chroma.layers import graph
+from allatom_design.model.seq_denoiser.denoisers.seq_design import \
+    graph_utils as graph
 
 
 class GraphPotts(nn.Module):
@@ -167,7 +168,7 @@ class GraphPotts(nn.Module):
         mask_ij: torch.Tensor,
     ):
         #! (JH) 260131Note
-        # edge_idx: E_idx between only protein tokens in protein chains, 
+        # edge_idx: E_idx between only protein tokens in protein chains,
         # mask_i: protein_residue_node_mask, mask_ij: protein_residue_edge_mask_2d
         mask_J = _mask_J(edge_idx, mask_i, mask_ij)
 
@@ -1116,7 +1117,7 @@ def init_sampling_masks(
         mask_S[restrict_pos_mask.bool()] = allowed_aatype_mask[restrict_pos_mask.bool()]
 
     mask_S_1D = (mask_S.sum(-1) > 1).float()  # check where we can sample
-    # For initial mask generation, 
+    # For initial mask generation,
     # padded positions are 0, as mask_S.sum(-1) = 1 for padded positions
     # For the second mask generation, also the same
 

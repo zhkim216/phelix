@@ -19,7 +19,7 @@
 set -euo pipefail
 
 DATASET_DIR=/scratch/users/zhkim216/datasets/atomworks_pdb_full_v9
-SEQ_ID_TAG=04
+SEQ_ID_TAG=03
 VERSION_TAG=v9
 
 BASE_DIR=/home/users/zhkim216/code/allatom-design

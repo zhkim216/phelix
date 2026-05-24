@@ -16,7 +16,14 @@ produced by :mod:`.ccd_filter` (Table A3 plinder non-artifact filter); this
 module only consumes the resulting whitelist.
 
 BMSM formula (no resolution_ratio gating):
-    BMSM = (~is_polymer) & has_filtered_ccd & has_protein_contact_within(<= cutoff Å)
+    BMSM = (~is_polymer)
+         & (has_filtered_ccd  OR  (is_small_molecule & is_loi))
+         & has_protein_contact_within(<= cutoff Å)
+
+The OR branch admits PDB-annotated LOI ("subject of investigation") small
+molecules even when their CCD code fails the upstream Table A3 plinder filter.
+Metal/halide LOIs are excluded because the LOI gate is ANDed with
+``q_pn_unit_is_small_molecule`` (= ``~polymer & ~metal & ~halide``).
 
 Added columns (per pn_unit row):
   - ``q_pn_unit_is_small_molecule`` (bool) — ``~polymer & ~metal & ~halide``.
@@ -26,7 +33,10 @@ Added columns (per pn_unit row):
   - ``q_pn_unit_expected_heavy_atoms_non_polymer`` (int or NaN)
   - ``q_pn_unit_resolution_ratio`` (float, NaN for polymers) — kept for
     downstream analysis even though BMSM no longer ANDs against it.
-  - ``q_pn_unit_is_biologically_meaningful_small_molecule`` (bool)
+  - ``q_pn_unit_is_biologically_meaningful_small_molecule`` (bool) — non-polymer
+    rows that pass either ``has_filtered_ccd`` or the LOI small-molecule gate
+    (``q_pn_unit_is_small_molecule & q_pn_unit_is_loi``) and make a 5 Å protein
+    contact.
   - ``q_pn_unit_is_maybe_covalently_linked_to_protein`` (bool) — evaluated on
     every non-polymer row so the PMSM filter in ``atomworks_sd_dataset.py``
     (``pmsm_keep = ... | (is_sm & is_cov) | (is_sm & ~is_cov & heavy_pass)``)
@@ -44,6 +54,12 @@ Added columns (per pn_unit row):
     query); ``"[]"`` when the source is non-empty but contains no protein
     partner — preserves the "small-molecule query, no protein contact"
     semantic distinct from "non-small-molecule query".
+  - ``q_pn_unit_nucleic_acid_group_id`` / ``..._group_iids`` /
+    ``..._num_resolved_residues_in_nucleic_acid_group`` — connected components
+    of DNA/RNA/DNA-RNA hybrid pn_units using NA-NA contacts at 4.5 Å.
+  - ``q_pn_unit_is_nuc_ligand`` / ``q_pn_unit_is_nuc_polymer`` — NA groups
+    with total resolved residues ``<= NUCLEIC_ACID_LIGANDS_MAX_RESIDUES`` are
+    ligand-sized; larger connected groups are polymer-sized.
 """
 
 from __future__ import annotations
@@ -56,6 +72,7 @@ from pathlib import Path
 import pandas as pd
 from rdkit import Chem
 from tqdm import tqdm
+from atomworks.ml.preprocessing.constants import NUCLEIC_ACID_LIGANDS_MAX_RESIDUES
 
 from allatom_design.data.preprocessing.atomworks.bmsm.heavy_atom_cache import (
     build_heavy_atom_cache,
@@ -65,6 +82,10 @@ from allatom_design.data.preprocessing.atomworks.bmsm.smiles_cache import (
     load_smiles_cache,
     run_atomworks_smiles_fallback,
 )
+from allatom_design.utils.metadata_utils import (
+    DEFAULT_NUCLEIC_ACID_GROUP_DISTANCE_CUTOFF,
+    add_nucleic_acid_group_columns,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -72,8 +93,8 @@ logger = logging.getLogger(__name__)
 
 V9_DATASET_DIR = "/home/possu/jinho/datasets/atomworks_pdb_full_v9"
 
-DEFAULT_INPUT = f"{V9_DATASET_DIR}/metadata_ligval_seq_clustered_04.parquet"
-DEFAULT_OUTPUT = f"{V9_DATASET_DIR}/metadata_ligval_seq_clustered_04_bmsm.parquet"
+DEFAULT_INPUT = f"{V9_DATASET_DIR}/metadata_ligval_seq_clustered_03.parquet"
+DEFAULT_OUTPUT = f"{V9_DATASET_DIR}/metadata_ligval_seq_clustered_03_bmsm.parquet"
 DEFAULT_SMILES_CACHE = f"{V9_DATASET_DIR}/ccd_smiles_cache_metadata_v9.json"
 DEFAULT_HEAVY_ATOM_CACHE = f"{V9_DATASET_DIR}/ccd_heavy_atom_counts_v9.json"
 DEFAULT_PASSED_CCDS = f"{V9_DATASET_DIR}/passed_ccd_codes_metadata_v9.txt"
@@ -210,7 +231,7 @@ def _count_protein_contacts_in_row(
     is_protein_lookup: dict[tuple[str, str, str], bool],
     distance_cutoff: float,
 ) -> int:
-    """Count distinct protein pn_units contacted by ``row`` within ``distance_cutoff`` Å.    
+    """Count distinct protein pn_units contacted by ``row`` within ``distance_cutoff`` Å.
     """
     contacts = _parse_contacts(row.get("q_pn_unit_contacting_pn_unit_iids"))
     if not contacts:
@@ -315,12 +336,14 @@ def augment_metadata_with_bmsm(
     heavy_atom_counts: dict[str, int],
     covalent_distance_threshold: float = MIN_ALLOWED_DISTANCE,
     protein_contact_cutoff: float = DISTANCE_CUTOFF,
+    nucleic_acid_group_distance_cutoff: float = DEFAULT_NUCLEIC_ACID_GROUP_DISTANCE_CUTOFF,
+    nucleic_acid_ligand_max_residues: int = NUCLEIC_ACID_LIGANDS_MAX_RESIDUES,
 ) -> pd.DataFrame:
     """Add BMSM / cov / num_contacting columns to ``input_df`` and return the augmented copy.
 
     BMSM formula:
         BMSM = (~is_polymer)
-             & has_filtered_ccd
+             & (has_filtered_ccd  OR  (is_small_molecule & is_loi))
              & has_protein_contact_within(<= protein_contact_cutoff Å)
 
     ``q_pn_unit_resolution_ratio`` is still computed and stored so downstream
@@ -415,9 +438,15 @@ def augment_metadata_with_bmsm(
 
     df["has_protein_contact_within_5A"] = has_valid_contact
 
+    # LOI ("subject of investigation") small molecules are PDB-annotated and
+    # bypass the Table A3 plinder CCD filter, but the 5 A protein-contact
+    # requirement is kept so the column stays "biologically meaningful".
+    is_loi = df["q_pn_unit_is_loi"].fillna(False).astype(bool)
+    is_loi_sm = df["q_pn_unit_is_small_molecule"].astype(bool) & is_loi
+
     df["q_pn_unit_is_biologically_meaningful_small_molecule"] = (
         is_non_polymer
-        & df["q_pn_unit_has_filtered_ccd"].astype(bool)
+        & (df["q_pn_unit_has_filtered_ccd"].astype(bool) | is_loi_sm)
         & df["has_protein_contact_within_5A"].astype(bool)
     )
     df["q_pn_unit_is_maybe_covalently_linked_to_protein"] = is_maybe_covalent
@@ -430,6 +459,18 @@ def augment_metadata_with_bmsm(
 
     df = add_num_contacting_protein_chains(df, distance_cutoff=protein_contact_cutoff)
     df = add_per_partner_contacts_to_protein_small_molecule(df)
+    df = add_nucleic_acid_group_columns(
+        df,
+        nucleic_acid_dist_threshold=nucleic_acid_group_distance_cutoff,
+        nucleic_acid_ligand_max_residues=nucleic_acid_ligand_max_residues,
+    )
+    logger.info(
+        "Nucleic-acid groups (%.1f A, ligand<=%d residues): ligand_rows=%d, polymer_rows=%d",
+        nucleic_acid_group_distance_cutoff,
+        nucleic_acid_ligand_max_residues,
+        int(df["q_pn_unit_is_nuc_ligand"].sum()),
+        int(df["q_pn_unit_is_nuc_polymer"].sum()),
+    )
 
     return df
 
@@ -465,6 +506,8 @@ def main() -> None:
     ap.add_argument("--smiles-fetch-workers", type=int, default=32, help="Parallel workers when fetching missing SMILES from RCSB")
     ap.add_argument("--covalent-distance-threshold", type=float, default=MIN_ALLOWED_DISTANCE)
     ap.add_argument("--protein-contact-cutoff", type=float, default=DISTANCE_CUTOFF)
+    ap.add_argument("--nucleic-acid-group-distance-cutoff", type=float, default=DEFAULT_NUCLEIC_ACID_GROUP_DISTANCE_CUTOFF)
+    ap.add_argument("--nucleic-acid-ligand-max-residues", type=int, default=NUCLEIC_ACID_LIGANDS_MAX_RESIDUES)
     ap.add_argument("--max-pdb-ids", type=int, default=0, help="Debug: keep only the first N distinct pdb_ids before augmenting (0 = no limit)")
     args = ap.parse_args()
 
@@ -542,6 +585,8 @@ def main() -> None:
         heavy_atom_counts=heavy_atom_counts,
         covalent_distance_threshold=args.covalent_distance_threshold,
         protein_contact_cutoff=args.protein_contact_cutoff,
+        nucleic_acid_group_distance_cutoff=args.nucleic_acid_group_distance_cutoff,
+        nucleic_acid_ligand_max_residues=args.nucleic_acid_ligand_max_residues,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -569,6 +614,22 @@ def main() -> None:
         nonbmsm_sm_cov_count,
     )
 
+    # LOI gate contribution: rows that enter BMSM only via the LOI branch
+    # (failed has_filtered_ccd but pass is_small_molecule & is_loi & contact).
+    is_loi_col = augmented["q_pn_unit_is_loi"].fillna(False).astype(bool)
+    has_ccd_col = augmented["q_pn_unit_has_filtered_ccd"].astype(bool)
+    has_contact_col = augmented["has_protein_contact_within_5A"].astype(bool)
+    is_loi_sm_col = is_sm_col & is_loi_col
+    loi_sm_count = int(is_loi_sm_col.sum())
+    loi_sm_only_added = int((is_loi_sm_col & ~has_ccd_col & has_contact_col).sum())
+    loi_sm_overlap = int((is_loi_sm_col & has_ccd_col & has_contact_col).sum())
+    logger.info(
+        "LOI sm stats: loi_sm=%d, loi_only_added_to_bmsm=%d, loi+ccd_overlap=%d",
+        loi_sm_count,
+        loi_sm_only_added,
+        loi_sm_overlap,
+    )
+
     num_contacting = augmented["num_contacting_protein_chains"]
     ncp_vc = num_contacting.value_counts().sort_index()
     ncp_head = {int(k): int(v) for k, v in list(ncp_vc.items())[:8]}
@@ -589,6 +650,21 @@ def main() -> None:
         "per_partner_contacts_to_protein_small_molecule: nonnull=%d, has_protein_partner=%d",
         nonnull_partner,
         nonempty_partner,
+    )
+
+    nuc_lig_rows = int(augmented["q_pn_unit_is_nuc_ligand"].sum())
+    nuc_poly_rows = int(augmented["q_pn_unit_is_nuc_polymer"].sum())
+    nuc_lig_groups = int(
+        augmented.loc[
+            augmented["q_pn_unit_is_nuc_ligand"],
+            ["pdb_id", "assembly_id", "q_pn_unit_nucleic_acid_group_id"],
+        ].drop_duplicates().shape[0]
+    )
+    logger.info(
+        "Nucleic-acid group stats: nuc_ligand_rows=%d, nuc_ligand_groups=%d, nuc_polymer_rows=%d",
+        nuc_lig_rows,
+        nuc_lig_groups,
+        nuc_poly_rows,
     )
 
 

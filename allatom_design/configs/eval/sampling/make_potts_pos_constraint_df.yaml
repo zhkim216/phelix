@@ -1,0 +1,66 @@
+########### Basic settings #########
+debug: true
+num_debug_samples: 5
+seed: 0
+
+# Model checkpoint
+ckpt_path: null
+
+# Potts pocket selection parameters
+potts_cutoff: 0.3
+max_tokens_for_forward: 2000
+
+# Output
+output_dir: null
+
+######### Data & Transform configurations #########
+input_sample_is_designed: true
+
+pdb_cfg:
+  pdb_dir: null
+  pdb_name_list: null
+  pdb_name_ext: ".cif"
+  n_subsample: null
+  recursive: false
+  split_by_subfolder: false
+  sample_indices: null
+  sample_lengths: null
+  array_id: null
+  num_arrays: null
+
+cif_parse_cfg:
+  add_missing_atoms: true
+  remove_waters: false
+  remove_ccds: []
+  fix_ligands_at_symmetry_centers: false
+  fix_arginines: false
+  convert_mse_to_met: true
+  hydrogen_policy: "remove"
+  extra_fields: null
+
+preprocess_cfg:
+  undesired_res_names: []
+  b_factor_min: null
+  b_factor_max: null
+  min_residues_for_polymers: 0
+  remove_terminal_oxygen_protein: true
+  remove_terminal_oxygen_nucleic_acid: true
+
+featurizer_cfg:
+  is_inference: true
+  occupancy_threshold_protein_backbone: 0.0
+  training_structure_noise: 0.0
+  undesired_res_names: []
+  remove_keys: []
+  remove_unresolved_tokens: true
+  max_tokens: null
+  max_atoms: null
+  pocket_distance: 6.0
+  residue_cache_dir: null
+  max_conformers_per_residue: 50
+  apply_random_augmentation: true
+  translation_scale: 1.0
+
+hydra:
+  run:
+    dir: .

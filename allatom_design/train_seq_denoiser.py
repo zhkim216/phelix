@@ -15,10 +15,9 @@ from lightning.pytorch.loggers import WandbLogger
 from omegaconf import DictConfig, OmegaConf
 from datetime import datetime
 
-from allatom_design.checkpoint_utils import (EMATrackerCheckpoint,
-                                             repair_state_dict)
-from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint
+from allatom_design.model.ema.ema import EMA, EMAModelCheckpoint, EMATrackerCheckpoint
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
+from allatom_design.utils.checkpoint_utils import repair_state_dict
 
 
 def build_sd_datamodule(data_cfg: DictConfig) -> L.LightningDataModule:
@@ -39,7 +38,7 @@ def build_sd_datamodule(data_cfg: DictConfig) -> L.LightningDataModule:
     )
 
 
-@hydra.main(config_path="configs/seq_denoiser", config_name="seq_denoiser", version_base="1.3.2")
+@hydra.main(config_path="configs_local/seq_denoiser", config_name="mg_proto_no_filter", version_base="1.3.2")
 def main(cfg: DictConfig):
     """
     Script for training an sequence denoiser model.
@@ -50,11 +49,11 @@ def main(cfg: DictConfig):
     if resume_ckpt_path is not None:
         assert Path(resume_ckpt_path).exists(), f"Resume checkpoint not found: {resume_ckpt_path}"
         print(f"Will resume training from checkpoint: {resume_ckpt_path}")
-        
+
         # Extract run name from checkpoint path (e.g., lilac-sound-509 from .../lilac-sound-509/checkpoints/...)
         resume_run_name = Path(resume_ckpt_path).parent.parent.name
         print(f"Will resume with run name: {resume_run_name}")
-        
+
         # Handle config loading from checkpoint directory
         cfg = load_resume_config(cfg, resume_ckpt_path)
 
@@ -101,7 +100,7 @@ def main(cfg: DictConfig):
             os.environ["WANDB_RUN_NAME"] = wandb.run.name
 
         wandb_run_name = os.environ["WANDB_RUN_NAME"]
-        
+
         # If resuming, use the original run directory instead of creating a new one
         if resume_run_name:
             log_dir = Path(cfg.out_dir, cfg.wandb.project, resume_run_name)
@@ -131,7 +130,7 @@ def main(cfg: DictConfig):
 
     # Set up model
     lit_model = LitSeqDenoiser(cfg)
-    
+
     # Load only model weights from the pretrained checkpoint
     if cfg.finetuning.enabled:
         print(f"Loading model weights from {cfg.finetuning.ckpt_path}")
@@ -161,7 +160,7 @@ def main(cfg: DictConfig):
                                                        every_n_epochs=cfg.checkpointing.save_for_resuming_every_n_epochs,
                                                        filename="sd-epoch{epoch:02d}",
                                                        auto_insert_metric_name=False)
-                
+
     callbacks += [latest_checkpoint_callback, epoch_latest_checkpoint_callback]
 
     sampler_epoch_callback = SamplerEpochCallback()
@@ -226,17 +225,17 @@ def load_resume_config(cfg: DictConfig, resume_ckpt_path: str) -> DictConfig:
     """
     Load config from checkpoint directory if use_current_cfg is False,
     and apply any overrides specified in resume.overrides.
-    
+
     Args:
         cfg: Current config from hydra
         resume_ckpt_path: Path to the checkpoint file
-        
+
     Returns:
         Updated config (either current or loaded from checkpoint with overrides)
     """
     use_current_cfg = cfg.resume.get("use_current_cfg", True)
     overrides = cfg.resume.get("overrides", {})
-    
+
     if not use_current_cfg:
         # Load config from checkpoint directory
         # Checkpoint path: /path/to/run/checkpoints/sd-step100-epoch03.ckpt
@@ -244,34 +243,34 @@ def load_resume_config(cfg: DictConfig, resume_ckpt_path: str) -> DictConfig:
         ckpt_path = Path(resume_ckpt_path)
         run_dir = ckpt_path.parent.parent  # Go up from checkpoints/ to run directory
         saved_config_path = run_dir / "config.yaml"
-        
+
         if not saved_config_path.exists():
             raise FileNotFoundError(
                 f"Config file not found at {saved_config_path}. "
                 f"Cannot resume with use_current_cfg=False. "
                 f"Set use_current_cfg=True to use current config instead."
             )
-        
+
         print(f"Loading config from checkpoint directory: {saved_config_path}")
         with open(saved_config_path, "r") as f:
             saved_cfg_dict = yaml.safe_load(f)
-        
+
         # Convert to OmegaConf
         cfg = OmegaConf.create(saved_cfg_dict)
-        
+
         # Restore resume settings from current config (so we keep the ckpt_path etc.)
         cfg.resume = OmegaConf.create({
             "ckpt_path": resume_ckpt_path,
             "use_current_cfg": False,
             "overrides": overrides
         })
-    
+
     # Apply overrides
     if overrides:
         print(f"Applying config overrides: {overrides}")
         for key, value in overrides.items():
             OmegaConf.update(cfg, key, value, merge=True)
-    
+
     return cfg
 
 

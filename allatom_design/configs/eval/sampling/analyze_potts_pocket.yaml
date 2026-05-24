@@ -1,0 +1,62 @@
+########### Basic settings #########
+debug: true
+num_debug_samples: 5
+seed: 0
+
+# Model checkpoint (direct path, not denoiser_train_dir)
+ckpt_path: null
+sampling_cfg_path: null  # path to lc_atom_mpnn_inference.yaml
+
+# Data (native_val only)
+native_cif_dir: null
+native_selected_list: null  # path to nativeval_sm_selected.txt
+
+# Output
+output_dir: null
+
+# Analysis params
+pocket_distances: [4.0, 5.0, 6.0]
+max_distance_for_plot: 20.0
+
+######### Data & Transform configurations #########
+input_sample_is_designed: false
+
+# CIF parsing for native structures
+cif_parse_cfg:
+  add_missing_atoms: true
+  remove_waters: true
+  remove_ccds: []
+  fix_ligands_at_symmetry_centers: true
+  fix_arginines: true
+  convert_mse_to_met: true
+  hydrogen_policy: "remove"
+  extra_fields: "all"
+
+# Preprocessing for native structures
+preprocess_cfg:
+  undesired_res_names: []
+  b_factor_min: null
+  b_factor_max: null
+  min_residues_for_polymers: 0
+  remove_terminal_oxygen_protein: true
+  remove_terminal_oxygen_nucleic_acid: true
+
+# Featurizer config (full structure, not pocket-only)
+featurizer_cfg:
+  is_inference: true
+  occupancy_threshold_protein_backbone: 0.0
+  training_structure_noise: 0.0
+  undesired_res_names: []
+  remove_keys: []
+  remove_unresolved_tokens: true
+  max_tokens: null
+  max_atoms: null
+  pocket_distance: 6.0
+  residue_cache_dir: null
+  max_conformers_per_residue: 50
+  apply_random_augmentation: true
+  translation_scale: 1.0
+
+hydra:
+  run:
+    dir: .

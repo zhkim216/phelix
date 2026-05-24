@@ -12,10 +12,10 @@ from torchtyping import TensorType
 
 import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
-from allatom_design.data.data import batched_gather
 from allatom_design.model.seq_denoiser.denoisers.seq_design.mpnn_utils import (
     cat_neighbors_nodes, gather_edges, gather_nodes)
 from allatom_design.data.const import PERIODIC_TABLE_FEATURES
+from allatom_design.utils.tensor_utils import batched_gather
 from atomworks.constants import (
     DNA_BACKBONE_ATOM_NAMES,
     ELEMENT_NAME_TO_ATOMIC_NUMBER,
@@ -47,8 +47,8 @@ class AtomMPNN(nn.Module):
         self.num_encoder_layers = cfg.n_layers
         self.num_decoder_layers = cfg.n_layers
         self.k_neighbors = cfg.k_neighbors
-        self.n_tokens = const.AF3_ENCODING.n_tokens        
-                                
+        self.n_tokens = const.AF3_ENCODING.n_tokens
+
         self.token_features = TokenFeatures(cfg.token_features)
         self.W_e = nn.Linear(self.edge_features, self.hidden_dim, bias=False)
         self.W_s = nn.Linear(self.n_tokens, self.hidden_dim, bias=False)
@@ -61,12 +61,12 @@ class AtomMPNN(nn.Module):
             EncLayer(self.hidden_dim, self.hidden_dim*2, dropout=cfg.dropout_p)
             for i in range(self.num_encoder_layers)
         ])
-        
+
         if self.ligand_conditioning:
             cfg_lmpnn_module = cfg.get("lmpnn_module", None)
             if cfg_lmpnn_module is None:
                 cfg_lmpnn_module = {"num_context_feature_processor_layers": 2, "num_context_feature_aggregator_layers": 2, "edge_update": False}
-        
+
             self.num_context_feature_processor_layers = cfg_lmpnn_module.get("num_context_feature_processor_layers", 2)
             self.num_context_feature_aggregator_layers = cfg_lmpnn_module.get("num_context_feature_aggregator_layers", 2)
             self.edge_update = cfg_lmpnn_module.get("edge_update", False)
@@ -79,8 +79,8 @@ class AtomMPNN(nn.Module):
                 num_aggregator_layers=self.num_context_feature_aggregator_layers,
                 edge_update=self.edge_update,
             )
-            
-                        
+
+
         # Decoder layers
         self.use_decoder = cfg.get("use_decoder", True)
         if self.use_decoder:
@@ -119,57 +119,57 @@ class AtomMPNN(nn.Module):
                 nn.init.xavier_uniform_(p)
 
 
-    def forward(self, batch: dict[str, TensorType["b ..."]], is_sampling: bool):        
+    def forward(self, batch: dict[str, TensorType["b ..."]], is_sampling: bool):
         # Get token-level features
         B, N, C = batch["restype"].shape
         h_V = torch.zeros((B, N, self.node_features), device=batch["restype"].device)
 
         # Concatenate residue-level features to h_V
-        ## first, mask out residues using gap token        
+        ## first, mask out residues using gap token
         masked = F.one_hot(torch.full((B, N), const.AF3_ENCODING.token_to_idx["<G>"],
                                       device=batch["restype"].device), num_classes=C).float()
-        
+
         #! (JH) During sampling, seq_cond_mask is also 1 for padded tokens
-        #! (JH) So padded parts are also considered as gaps here, but I guess it's okay.        
+        #! (JH) So padded parts are also considered as gaps here, but I guess it's okay.
         restype = torch.where(batch["seq_cond_mask"].unsqueeze(-1).bool(), batch["restype"], masked)
         # Pseudo-context positions: always mask to GAP (identity hidden from protein graph)  # JH Changed 260416
         pseudo_context_mask = batch.get("pseudo_context_mask", torch.zeros_like(batch["seq_cond_mask"]))
         restype = torch.where(pseudo_context_mask.unsqueeze(-1).bool(), masked, restype)
-        h_S = self.W_s(restype) #! (JH) different from the original lmpnn (zero-initialized)        
+        h_S = self.W_s(restype) #! (JH) different from the original lmpnn (zero-initialized)
 
         # Build graph and get edge features
         h_E, E_idx, V, Y_nodes, Y_edges, Y_m, D_neighbors = self.token_features(batch)
         #! (JH) h_E and E_idx are also considering ligand atoms here.
-        #! (JH) but h_E and E_idx are masked out for padded tokens (token_exists_mask is 0 for padded tokens)        
-                                        
-        # Pass through encoder layers        
+        #! (JH) but h_E and E_idx are masked out for padded tokens (token_exists_mask is 0 for padded tokens)
+
+        # Pass through encoder layers
         # Residue-level encoding, for standard AAs in protein chains only
-        h_V = h_V + h_S                
-        h_E = self.W_e(h_E)        
-                
+        h_V = h_V + h_S
+        h_E = self.W_e(h_E)
+
         protein_residue_node_mask = batch["protein_residue_node_mask"]
         protein_residue_node_mask_2d = gather_nodes(protein_residue_node_mask.unsqueeze(-1), E_idx).squeeze(-1)
         protein_residue_node_mask_2d = protein_residue_node_mask.unsqueeze(-1) * protein_residue_node_mask_2d
         for layer in self.encoder_layers:
-            h_V, h_E = layer(h_V, h_E, E_idx, protein_residue_node_mask, protein_residue_node_mask_2d)        
-                    
+            h_V, h_E = layer(h_V, h_E, E_idx, protein_residue_node_mask, protein_residue_node_mask_2d)
+
         # Process ligand context features
         if self.ligand_conditioning:
             h_V = self.context_module(
                 h_V=h_V,
                 h_E=h_E,
-                V=V,                 
+                V=V,
                 Y_nodes=Y_nodes,
                 Y_edges=Y_edges,
                 Y_m=Y_m,
                 E_idx=E_idx,
                 protein_residue_node_mask=protein_residue_node_mask,
             )
-            
+
         # Pass through decoder layers
         h_ES = cat_neighbors_nodes(h_S, h_E, E_idx)
         h_ESV = cat_neighbors_nodes(h_V, h_ES, E_idx)
-        
+
         if self.use_decoder:
             for layer in self.decoder_layers:
                 h_V, h_ESV = layer(h_V = h_V, h_E = h_ESV, mask_V = protein_residue_node_mask, E_idx = E_idx, mask_attend = protein_residue_node_mask_2d)
@@ -194,7 +194,7 @@ class AtomMPNN(nn.Module):
                 "mask_ij": protein_residue_node_mask_2d,
             }
 
-        logits = self.W_out(h_V)                
+        logits = self.W_out(h_V)
 
         # Output features
         mpnn_feature_dict = {"h_V": h_V, "h_ESV": h_ESV, "E_idx": E_idx}
@@ -213,28 +213,28 @@ class TokenFeatures(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        # Parameters        
+        # Parameters
         self.masked_distance_fill = cfg.get("masked_distance_fill", 1000.0)
-        self.k_neighbors = cfg.k_neighbors        
+        self.k_neighbors = cfg.k_neighbors
         self.num_positional_embeddings = cfg.num_positional_embeddings
         self.node_n_channel = cfg.node_n_channel
-        self.edge_n_channel = cfg.edge_n_channel    
-        
+        self.edge_n_channel = cfg.edge_n_channel
+
         # Positional embeddings
         self.positional_embeddings = PositionalEncodings(self.num_positional_embeddings)
-        
+
         # RBF-related parameters
         self.num_rbf = cfg.num_rbf
         self.min_rbf_mean = cfg.min_rbf_mean
         self.max_rbf_mean = cfg.max_rbf_mean
-        
+
         # Protein graph-related parameters
         self.protein_graph_rbf_type = cfg.protein_graph_rbf_type
-        
+
         # Pocket-aware RBF: full backbone RBF for pocket residues, CA-only for others
         self.use_pocket_rbf = cfg.get("use_pocket_rbf", False)
         self.pocket_rbf_type = cfg.get("pocket_rbf_type", "ncaco")
-        
+
         if self.use_pocket_rbf:
             # When pocket_rbf is enabled, edge dimension is determined by pocket_rbf_type
             # (non-pocket edges will have zeros for non-CA features)
@@ -252,16 +252,16 @@ class TokenFeatures(nn.Module):
                 num_pairwise_dists = 4*4
             elif self.protein_graph_rbf_type == "ncacocb":
                 num_pairwise_dists = 5*5
-        protein_graph_edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists                
-        self.protein_edge_embedding = nn.Linear(protein_graph_edge_in, self.edge_n_channel, bias=False)                                
+        protein_graph_edge_in = self.num_positional_embeddings + self.num_rbf * num_pairwise_dists
+        self.protein_edge_embedding = nn.Linear(protein_graph_edge_in, self.edge_n_channel, bias=False)
         self.norm_protein_edges = nn.LayerNorm(self.edge_n_channel)
-                
+
         # Context-related parameters  # JH Changed 260415 — removed use_sidechain_context / sidechain_context_token_num (pseudo-ligand sidechains now flow through Y)
         self.use_multichain_encoding = cfg.get("use_multichain_encoding", True)
         self.ligand_conditioning = cfg.ligand_conditioning
         self.use_ligand_context = cfg.get("use_ligand_context", True)
         self.ligand_atom_context_num = cfg.get("ligand_atom_context_num", 16)
-        
+
         # Ligand conditioning-related layers
         if self.ligand_conditioning:
             self.protein_ligand_interaction_rbf_type = cfg.get("protein_ligand_interaction_rbf_type", "ncacocb")
@@ -269,49 +269,49 @@ class TokenFeatures(nn.Module):
                 num_prot_anchor_atoms = 1
             elif self.protein_ligand_interaction_rbf_type == "ncacocb":
                 num_prot_anchor_atoms = 5
-            
+
             # Linear layer for atom type information embedding
-            self.type_linear = torch.nn.Linear(147, 64) 
+            self.type_linear = torch.nn.Linear(147, 64)
 
             # Parameters for Ligand-protein interaction layers
-            self.add_angle_features = cfg.get("add_angle_features", True)            
+            self.add_angle_features = cfg.get("add_angle_features", True)
             num_angle_features = 4 if self.add_angle_features else 0
-            
+
             self.node_project_down = torch.nn.Linear(
             self.num_rbf * num_prot_anchor_atoms + 64 + num_angle_features, self.node_n_channel, bias=True
         )
             self.norm_nodes = torch.nn.LayerNorm(self.node_n_channel)
-            
+
             # Parameters for Ligand subgraph
             # ligand subgraph nodes
             self.y_nodes = torch.nn.Linear(147, self.node_n_channel, bias=False)
             self.norm_y_nodes = torch.nn.LayerNorm(self.node_n_channel)
-            
+
             # ligand subgraph edges
             self.y_edges = torch.nn.Linear(self.num_rbf, self.edge_n_channel, bias=False)
             self.norm_y_edges = torch.nn.LayerNorm(self.edge_n_channel)
-            
-                                
+
+
     def forward(self, batch: dict[str, TensorType["b ..."]]):
         """
         Extract token-level edge features and build KNN graph.
         """
-        # calculate n, ca, c, o and pseudo CB coordinates                            
+        # calculate n, ca, c, o and pseudo CB coordinates
         X = self._get_protein_token_center_coords(batch) # CA coordinates for protein tokens
-        D_neighbors, E_idx = self._dist(X = X, mask = batch["protein_residue_node_mask"]) 
-                        
+        D_neighbors, E_idx = self._dist(X = X, mask = batch["protein_residue_node_mask"])
+
         # Get RBF features
         if self.use_pocket_rbf:
             # Pocket-aware RBF: full backbone RBF for pocket edges, CA-only for others
             RBF_backbone = self.get_backbone_pseudocb_rbf(
                 batch=batch, D_neighbors=D_neighbors, E_idx=E_idx, rbf_type=self.pocket_rbf_type
             )
-            
+
             # Build 2D pocket mask: True only when BOTH i and j are pocket residues
             pocket_mask = batch["pocket_rbf_mask"]  # [B, N]
             pocket_mask_j = gather_nodes(pocket_mask.unsqueeze(-1), E_idx).squeeze(-1)  # [B, N, K]
             pocket_mask_2d = pocket_mask.unsqueeze(-1) * pocket_mask_j  # [B, N, K]
-            
+
             # CA-CA RBF is the first num_rbf features - always keep
             # Zero out non-CA features for non-pocket edges
             ca_rbf = RBF_backbone[:, :, :, :self.num_rbf]  # [B, N, K, num_rbf]
@@ -320,28 +320,28 @@ class TokenFeatures(nn.Module):
             RBF_backbone = torch.cat([ca_rbf, non_ca_rbf], dim=-1)
         elif self.protein_graph_rbf_type == "ca":
             RBF_backbone = self._rbf(D_neighbors)
-        else:            
+        else:
             RBF_backbone = self.get_backbone_pseudocb_rbf(batch = batch, D_neighbors = D_neighbors, E_idx = E_idx, rbf_type = self.protein_graph_rbf_type)
-            
+
         # Positional encodings
         residue_index = batch["residue_index"]
         offset = residue_index[:,:,None] - residue_index[:,None,:]
-        offset = gather_edges(offset[:,:,:,None], E_idx)[:,:,:,0]  # [B, L, K] # Gathering only edges between protein tokens        
+        offset = gather_edges(offset[:,:,:,None], E_idx)[:,:,:,0]  # [B, L, K] # Gathering only edges between protein tokens
 
         # Chain information
-        chain_labels = torch.zeros_like(batch["asym_id"])        
+        chain_labels = torch.zeros_like(batch["asym_id"])
         chain_labels = batch["asym_id"]
         d_chains = ((chain_labels[:, :, None] - chain_labels[:, None, :])==0).long()  # find self vs non-self interaction
-        
-        E_chains = gather_edges(d_chains[:,:,:,None], E_idx)[:,:,:,0]        
+
+        E_chains = gather_edges(d_chains[:,:,:,None], E_idx)[:,:,:,0]
         E_positional = self.positional_embeddings(offset.long(), E_chains) # Get positional encodings for edges only between protein tokens
-    
+
         # Concatenate edge features and embed
         E = torch.cat((E_positional, RBF_backbone), -1)
-                
+
         E = self.protein_edge_embedding(E)
         E = self.norm_protein_edges(E)
-        
+
         if self.ligand_conditioning:
             ######### Prepare necessary tensors #########
             B, N = batch["token_pad_mask"].shape
@@ -353,13 +353,13 @@ class TokenFeatures(nn.Module):
             noised_n_coords = batch["noised_n_coords"]
             noised_c_coords = batch["noised_c_coords"]
             noised_o_coords = batch["noised_o_coords"]
-            noised_pseudo_cb_coords = batch["noised_pseudo_cb_coords"]            
-            noised_backbone_pseudo_cb_coords = torch.cat((noised_n_coords[:, :, None, :],                                                          
+            noised_pseudo_cb_coords = batch["noised_pseudo_cb_coords"]
+            noised_backbone_pseudo_cb_coords = torch.cat((noised_n_coords[:, :, None, :],
                                                           noised_ca_coords[:, :, None, :],
                                                           noised_c_coords[:, :, None, :],
                                                           noised_o_coords[:, :, None, :],
                                                           noised_pseudo_cb_coords[:, :, None, :]), dim=2)
-            
+
             # Protein residue mask (standard aa in protein chains)
             protein_residue_node_mask = batch["protein_residue_node_mask"]
             atom_is_standard_aa_protein = batch["protein_residue_node_mask"].gather(dim=-1, index=batch["atom_to_token_map"]) * batch["atom_pad_mask"] * batch["atom_resolved_mask"]
@@ -402,66 +402,66 @@ class TokenFeatures(nn.Module):
             Y_t_1hot_ = torch.nn.functional.one_hot(Y_t, 120)  # [B, L, M, 120]
             Y_t_1hot_ = torch.cat([Y_t_1hot_, Y_t_g_1hot_, Y_t_p_1hot_], -1)  # [B, L, M, 147]
             Y_t_1hot = self.type_linear(Y_t_1hot_.float())
-            
-            # Generate RBF features for backbone (+ pseudo CB) and ligands      
+
+            # Generate RBF features for backbone (+ pseudo CB) and ligands
             if self.protein_ligand_interaction_rbf_type == "cb":
                 D_ligand_to_backbone_or_pseudocb = torch.sqrt(
                 torch.sum(
                     (Y[:, :, :, None, :]
-                     - noised_backbone_pseudo_cb_coords[:, :, 4:, :][:, :, None, :, :]) 
+                     - noised_backbone_pseudo_cb_coords[:, :, 4:, :][:, :, None, :, :])
                     ** 2,
                     dim=-1,
                 )
                 + 1e-6
-            )         
+            )
             else:
                 D_ligand_to_backbone_or_pseudocb = torch.sqrt(
                 torch.sum(
                     (Y[:, :, :, None, :]
-                     - noised_backbone_pseudo_cb_coords[:, :, None, :, :]) 
+                     - noised_backbone_pseudo_cb_coords[:, :, None, :, :])
                     ** 2,
                     dim=-1,
                 )
                 + 1e-6
-            )    
-                
-                    
+            )
+
+
             RBF_ligand_to_backbone_or_pseudocb = self.compute_rbf_embedding_from_distances(D = D_ligand_to_backbone_or_pseudocb)
-            RBF_ligand_to_backbone_or_pseudocb = RBF_ligand_to_backbone_or_pseudocb.view(RBF_ligand_to_backbone_or_pseudocb.shape[0], RBF_ligand_to_backbone_or_pseudocb.shape[1], RBF_ligand_to_backbone_or_pseudocb.shape[2], -1)                                    
-                                
+            RBF_ligand_to_backbone_or_pseudocb = RBF_ligand_to_backbone_or_pseudocb.view(RBF_ligand_to_backbone_or_pseudocb.shape[0], RBF_ligand_to_backbone_or_pseudocb.shape[1], RBF_ligand_to_backbone_or_pseudocb.shape[2], -1)
+
             # Make angle features between backbone and ligand atoms
             if self.add_angle_features:
-                angle_features = self._make_angle_features(noised_backbone_pseudo_cb_coords[:, :, 0, :], noised_backbone_pseudo_cb_coords[:, :, 1, :], noised_backbone_pseudo_cb_coords[:, :, 2, :], Y) # N, Ca, C / # [B, L, M, 4]                
+                angle_features = self._make_angle_features(noised_backbone_pseudo_cb_coords[:, :, 0, :], noised_backbone_pseudo_cb_coords[:, :, 1, :], noised_backbone_pseudo_cb_coords[:, :, 2, :], Y) # N, Ca, C / # [B, L, M, 4]
 
             # Make ligand-protein interaction features by concatenating RBF features, ligand atom type information, and angle features.
             #! (JH) Not sure why Y_t_1hot is concatenated here, maybe let the model know each of the atom types so that the model learn the "interaction" between different types of atoms?
             if self.add_angle_features:
                 D_all = torch.cat((RBF_ligand_to_backbone_or_pseudocb, Y_t_1hot, angle_features), dim=-1) # [B, L, M, num_bins + 64 + 4] or [B, L, M, 5 * num_bins + 64 + 4]
-            else:                
-                D_all = torch.cat((RBF_ligand_to_backbone_or_pseudocb, Y_t_1hot), dim=-1)  # [B,L,M,num_bins+64] or [B,L,M,5*num_bins+64] 
+            else:
+                D_all = torch.cat((RBF_ligand_to_backbone_or_pseudocb, Y_t_1hot), dim=-1)  # [B,L,M,num_bins+64] or [B,L,M,5*num_bins+64]
             V = self.node_project_down(D_all)  # [B, L, M, node_features]
-            V = self.norm_nodes(V) 
+            V = self.norm_nodes(V)
 
             ###### Ligand subgraph features ######
             # ligand subgraph nodes
             Y_nodes = self.y_nodes(Y_t_1hot_.float())
             Y_nodes = self.norm_y_nodes(Y_nodes)
-            
-            # ligand subgraph edges (pairwise distances between ligand atoms and sidechain atoms)            
+
+            # ligand subgraph edges (pairwise distances between ligand atoms and sidechain atoms)
             Y_edges = self._rbf(
                 torch.sqrt(
                     torch.sum((Y[:, :, :, None, :] - Y[:, :, None, :, :]) ** 2, -1) + 1e-6
                 )
             )  # [B, L, M, M, num_bins]
-            Y_edges = self.y_edges(Y_edges)            
-            Y_edges = self.norm_y_edges(Y_edges)                        
+            Y_edges = self.y_edges(Y_edges)
+            Y_edges = self.norm_y_edges(Y_edges)
         else:
             V = None
             Y_nodes = None
             Y_edges = None
             Y_m = None
-            
-        return E, E_idx, V, Y_nodes, Y_edges, Y_m, D_neighbors 
+
+        return E, E_idx, V, Y_nodes, Y_edges, Y_m, D_neighbors
 
 
     def _get_protein_token_center_coords(self, batch: dict[str, TensorType["b ..."]]) -> TensorType["b n 3", float]:
@@ -469,7 +469,7 @@ class TokenFeatures(nn.Module):
         Get protein token-level center coordinates. Standard amino acid only.
         """
         B, N, _ = batch["noised_coords"].shape
-        X = batch["noised_coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token, ca for proteins                
+        X = batch["noised_coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token, ca for proteins
         X = X * batch["protein_residue_node_mask"].unsqueeze(-1)
         return X
 
@@ -478,12 +478,12 @@ class TokenFeatures(nn.Module):
         Get token-level coordinates as an average over all known, resolved atoms in the token.
         """
         B, N, _ = batch["coords"].shape
-        X = batch["coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token        
+        X = batch["coords"][torch.arange(B).unsqueeze(-1), batch["token_to_center_atom"]]  # get center atom for each token
         if protein_only:
             X = X * batch["token_is_protein_chain"].unsqueeze(-1)
         X = X * batch["token_exists_mask"].unsqueeze(-1)  # mask out padding and unresolved atoms
-        return X        
-                
+        return X
+
     def _dist(self, X = None, mask = None, eps=1E-6):
         mask_2D = torch.unsqueeze(mask, 1) * torch.unsqueeze(mask, 2)
         dX = torch.unsqueeze(X, 1) - torch.unsqueeze(X, 2)
@@ -514,18 +514,18 @@ class TokenFeatures(nn.Module):
         ]  # [B,L,K]
         RBF_A_B = self._rbf(D_A_B_neighbors)
         return RBF_A_B
-    
+
     def get_backbone_pseudocb_rbf(self, batch: dict[str, TensorType["b ..."]] = None,
                             D_neighbors = None,
                             E_idx = None,
                             rbf_type = "ncacocb") -> TensorType["b n_tokens n_tokens num_rbf", float]:
-        
+
         ca_coords = batch["noised_ca_coords"]
         n_coords = batch["noised_n_coords"]
         c_coords = batch["noised_c_coords"]
         o_coords = batch["noised_o_coords"]
         pseudo_cb_coords = batch["noised_pseudo_cb_coords"]
-        
+
         RBF_all = []
         RBF_all.append(self._rbf(D_neighbors))  # Ca-Ca
         RBF_all.append(self._get_rbf(n_coords, n_coords, E_idx))  # N-N
@@ -558,9 +558,9 @@ class TokenFeatures(nn.Module):
             RBF_all.append(self._get_rbf(o_coords, pseudo_cb_coords, E_idx))  # O-Cb
         RBF_all.append(self._get_rbf(c_coords, o_coords, E_idx))  # C-O
         RBF_all = torch.cat(tuple(RBF_all), dim=-1)
-        
+
         return RBF_all
-        
+
     def compute_rbf_embedding_from_distances(self, D = None):
         """
         Given a tensor of pairwise distances, compute the radial basis
@@ -574,15 +574,15 @@ class TokenFeatures(nn.Module):
                 function embedding of the pairwise distances.
         """
         # Linear space the means of the radial basis functions.
-        
+
         rbf_mus = torch.linspace(
             self.min_rbf_mean, self.max_rbf_mean, self.num_rbf, device=D.device
         )
-        
-        if len(D.shape) == 3: 
+
+        if len(D.shape) == 3:
             rbf_mus = rbf_mus[None, None, None, :]
         elif len(D.shape) == 4:
-            rbf_mus = rbf_mus[None, None, None, None, :]        
+            rbf_mus = rbf_mus[None, None, None, None, :]
 
         # The standard deviation of the radial basis functions.
         rbf_sigma = (self.max_rbf_mean - self.min_rbf_mean) / self.num_rbf
@@ -596,26 +596,26 @@ class TokenFeatures(nn.Module):
         rbf_embedding = torch.exp(-(((D_expand - rbf_mus) / rbf_sigma) ** 2))
 
         return rbf_embedding
-                                                                     
+
     # def _get_rbf(self, A, B, E_idx): #! Assuming A and B are the coordinates of the single type atom (e.g. CA or CB)
     #     """
     #     (JH) Memory efficient version of _get_rbf. O(N^2) -> O(NK).
     #     """
-                
+
     #     K, C = E_idx.size(-1), A.size(-1)
-        
+
     #     B_neighbors = torch.gather(
     #         B.unsqueeze(2).expand(-1, -1, K, -1),
     #         dim=1,
     #         index=E_idx.unsqueeze(-1).expand(-1, -1, -1, C)
     #     )
-        
+
     #     diff = A.unsqueeze(2) - B_neighbors
     #     D = torch.sqrt((diff*diff).sum(-1) + 1e-6)
     #     RBF_A_B = self._rbf(D)
-            
-    #     return RBF_A_B                
-    
+
+    #     return RBF_A_B
+
     def _make_angle_features(self, A, B, C, Y): #! from ligandMPNN
         v1 = A - B
         v2 = C - B
@@ -641,19 +641,19 @@ class TokenFeatures(nn.Module):
 
         f = torch.cat([f1[..., None], f2[..., None], f3[..., None], f4[..., None]], -1)
         return f
-    
-    def _get_nearest_ligand_atoms(self, CB = None, 
-                                  mask = None, 
-                                  Y = None, 
-                                  Y_t = None, 
-                                  Y_m = None, 
-                                  number_of_ligand_atoms = 16, 
-                                  device = None):            
-        
+
+    def _get_nearest_ligand_atoms(self, CB = None,
+                                  mask = None,
+                                  Y = None,
+                                  Y_t = None,
+                                  Y_m = None,
+                                  number_of_ligand_atoms = 16,
+                                  device = None):
+
         """
         batchfied version of _get_nearest_neighbours in data_utils.py of LigandMPNN.
         """
-        
+
         mask_CBY = mask[:, :, None] * Y_m[:, None, :]  # [A,B]
         L2_AB = torch.sum((CB[:, :, None, :] - Y[:, None, :, :]) ** 2, -1)
         L2_AB = L2_AB * mask_CBY + (1 - mask_CBY) * self.masked_distance_fill
@@ -669,7 +669,7 @@ class TokenFeatures(nn.Module):
         # Y_r = Y[None, :, :].repeat(CB.shape[0], 1, 1)
         # Y_t_r = Y_t[None, :].repeat(CB.shape[0], 1)
         # Y_m_r = Y_m[None, :].repeat(CB.shape[0], 1)
-                
+
         Y_tmp = torch.gather(Y_r, 2, nn_idx[:, :, :, None].repeat(1, 1, 1, 3))
         Y_t_tmp = torch.gather(Y_t_r, 2, nn_idx)
         Y_m_tmp = torch.gather(Y_m_r, 2, nn_idx)
@@ -751,7 +751,7 @@ class DecLayer(nn.Module):
         h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_E.size(-2),-1)
         h_EV = torch.cat([h_V_expand, h_E], -1)
         h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
-        
+
         if mask_attend is not None:
             h_message = mask_attend.unsqueeze(-1) * h_message
 
@@ -766,20 +766,20 @@ class DecLayer(nn.Module):
             mask_V = mask_V.unsqueeze(-1)
             h_V = mask_V * h_V
 
-        #edge updates        
+        #edge updates
         h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
         h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,h_EV.size(-2),-1)
         h_EV = torch.cat([h_V_expand, h_EV], -1)
         h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
         h_E = self.norm3(h_E + self.dropout3(h_message))
-        
+
         # if mask_attend is not None: #! (JH) fixed 251009
         #     h_E = mask_attend.unsqueeze(-1) * h_E
 
         return h_V, h_E
 
 class Contextfeatureprocessor(nn.Module): # self.y_context_encoder_layers in ligandMPNN
-    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, 
+    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None,
                  scale=30, edge_update=False):
         super(Contextfeatureprocessor, self).__init__()
         self.num_hidden = num_hidden
@@ -798,10 +798,10 @@ class Contextfeatureprocessor(nn.Module): # self.y_context_encoder_layers in lig
         self.W13 = nn.Linear(self.num_hidden, self.num_in, bias=True) # num_in is hidden dim of edges h_E
         self.norm3 = nn.LayerNorm(self.num_in)
         self.dropout3 = nn.Dropout(dropout)
-    
+
         self.act = torch.nn.GELU()
         self.dense = PositionWiseFeedForward(self.num_hidden, num_hidden * 4)
-        
+
         self.edge_update = edge_update
 
     # @dynamo.disable()
@@ -810,11 +810,11 @@ class Contextfeatureprocessor(nn.Module): # self.y_context_encoder_layers in lig
 
         # Source node features
         h_V_i = h_V.unsqueeze(-2).expand(-1,-1,-1,h_E.size(-2),-1) # [B, L, M, M, C_node]
-        
+
         # Destination node features
         h_V_j = h_V.unsqueeze(-3).expand(-1, -1, h_E.size(-3), -1, -1)  # [B, L, M, M, C_node]
 
-        h_EV = torch.cat([h_V_i, h_E, h_V_j], -1) # [B, L, M, M, C_edge + C_node + C_node]        
+        h_EV = torch.cat([h_V_i, h_E, h_V_j], -1) # [B, L, M, M, C_edge + C_node + C_node]
         h_message = self.W3(self.act(self.W2(self.act(self.W1(h_EV)))))
 
         if mask_attend is not None:
@@ -829,24 +829,24 @@ class Contextfeatureprocessor(nn.Module): # self.y_context_encoder_layers in lig
 
         if mask_V is not None:
             mask_V = mask_V.unsqueeze(-1)
-            h_V = mask_V * h_V        
-            
+            h_V = mask_V * h_V
+
         if self.edge_update: #Todo: fix
             h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
             h_V_expand = h_V.unsqueeze(-2).expand(-1,-1,-1,h_EV.size(-2),-1)
             h_EV = torch.cat([h_V_expand, h_EV], -1)
             h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
             h_E = self.norm3(h_E + self.dropout3(h_message))
-            
+
             if mask_attend is not None: #! (JH) fixed 251009
                 h_E = mask_attend.unsqueeze(-1) * h_E
-                
+
             return h_V, h_E
         else:
-            return h_V, None    
+            return h_V, None
 
 class Contextfeatureaggregator(nn.Module): #! (JH) self.context_encoder_layers in ligandMPNN
-    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None, 
+    def __init__(self, num_hidden, num_in, dropout=0.1, num_heads=None,
                  scale=30, edge_update=False):
         super(Contextfeatureaggregator, self).__init__()
         self.num_hidden = num_hidden
@@ -868,7 +868,7 @@ class Contextfeatureaggregator(nn.Module): #! (JH) self.context_encoder_layers i
 
         self.act = torch.nn.GELU()
         self.dense = PositionWiseFeedForward(self.num_hidden, num_hidden * 4)
-        
+
         self.edge_update = edge_update
 
     # @dynamo.disable()
@@ -901,12 +901,12 @@ class Contextfeatureaggregator(nn.Module): #! (JH) self.context_encoder_layers i
             #! (JH) already Y_nodes are concatenated to h_E
             h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
             h_E = self.norm3(h_E + self.dropout3(h_message))
-            
+
             if mask_attend is not None: #! (JH) fixed 251009
                 h_E = mask_attend.unsqueeze(-1) * h_E
-                
+
             return h_V, h_E
-        
+
         else:
             return h_V, None
 
@@ -934,8 +934,8 @@ class ContextModule(nn.Module):
         )
 
     # @dynamo.disable()
-    def forward(self, h_V = None, h_E = None, 
-                V = None, Y_nodes = None, Y_edges = None, 
+    def forward(self, h_V = None, h_E = None,
+                V = None, Y_nodes = None, Y_edges = None,
                 Y_m = None, E_idx = None,
                 protein_residue_node_mask = None):
         # Guard: if no context, return h_V unchanged
@@ -1017,7 +1017,7 @@ class EncLayer(nn.Module):
         if mask_V is not None:
             mask_V = mask_V.unsqueeze(-1)
             h_V = mask_V * h_V
-        
+
         # Edge updates
         if not self.is_last_layer:
             h_EV = cat_neighbors_nodes(h_V, h_E, E_idx)
@@ -1025,10 +1025,10 @@ class EncLayer(nn.Module):
             h_EV = torch.cat([h_V_expand, h_EV], -1)
             h_message = self.W13(self.act(self.W12(self.act(self.W11(h_EV)))))
             h_E = self.norm3(h_E + self.dropout3(h_message))
-        
+
         # if mask_attend is not None: #! (JH) fixed 251009
         #     h_E = mask_attend.unsqueeze(-1) * h_E
-                
+
         return h_V, h_E
 
 
@@ -1040,11 +1040,11 @@ def get_tokenwise_coords(coords: TensorType["b n_atoms 3", float],
     Get token-level coordinates (padded to max_num_atoms per token). Batched version of pad_atom_feats_to_tokenwise for just coords.
     tokenwise_atom_idxs_mask is basically token_pad_mask for MAX_NUM_ATOMS atoms per token.
     """
-    
+
     tokenwise_coords = batched_gather(coords, tokenwise_atom_idxs, dim=1, no_batch_dims=1) * tokenwise_atom_idxs_mask[..., None]
 
     return tokenwise_coords
-    
+
 def get_atomwise_coords(
     batch: dict[str, TensorType["b ..."]],
     tokenwise_coords: TensorType["b n_tokens 23 3", float],

@@ -1,0 +1,62 @@
+########### Basic settings #########
+debug: true
+num_debug_samples: 3
+seed: 0
+
+# Model checkpoint
+ckpt_path: /home/possu/jinho/out_dir/ligand_seq_des/exp35_cfg2/checkpoints/ema/sd-step82500-epoch52-ema0.99.ckpt
+sampling_cfg_path: /home/possu/jinho/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
+
+# Data (native_val only)
+native_cif_dir: /home/possu/jinho/datasets/val_cifs/native_val_cifs/cifs
+native_selected_list: /home/possu/jinho/datasets/val_cifs/native_val_cifs/nativeval_sm_selected.txt
+
+# Output
+output_dir: /home/possu/jinho/allatom-design/local_debug_output/260403/potts_pocket_analysis
+
+# Analysis params
+pocket_distances: [4.0, 5.0, 6.0]
+max_distance_for_plot: 20.0
+
+######### Data & Transform configurations #########
+input_sample_is_designed: false
+
+# CIF parsing for native structures
+cif_parse_cfg:
+  add_missing_atoms: true
+  remove_waters: true
+  remove_ccds: []
+  fix_ligands_at_symmetry_centers: true
+  fix_arginines: true
+  convert_mse_to_met: true
+  hydrogen_policy: "remove"
+  extra_fields: "all"
+
+# Preprocessing for native structures
+preprocess_cfg:
+  undesired_res_names: []
+  b_factor_min: null
+  b_factor_max: null
+  min_residues_for_polymers: 0
+  remove_terminal_oxygen_protein: true
+  remove_terminal_oxygen_nucleic_acid: true
+
+# Featurizer config (full structure, not pocket-only)
+featurizer_cfg:
+  is_inference: true
+  occupancy_threshold_protein_backbone: 0.0
+  training_structure_noise: 0.0
+  undesired_res_names: []
+  remove_keys: []
+  remove_unresolved_tokens: true
+  max_tokens: null
+  max_atoms: null
+  pocket_distance: 6.0
+  residue_cache_dir: "/home/possu/jinho/datasets/atomworks_cached_residue_data"
+  max_conformers_per_residue: 50
+  apply_random_augmentation: true
+  translation_scale: 1.0
+
+hydra:
+  run:
+    dir: /home/possu/jinho/hydra_outputs

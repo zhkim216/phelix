@@ -26,7 +26,7 @@ class LitSeqDenoiser(L.LightningModule):
         self.model = SeqDenoiser(cfg.model)
 
         if cfg.train.compile.compile_model:
-            print(f"Using torch.compile to optimize model performance...")            
+            print(f"Using torch.compile to optimize model performance...")
             self.model = torch.compile(self.model,
                                         backend=cfg.train.compile.compile_backend,
                                         mode=cfg.train.compile.mode,
@@ -41,7 +41,7 @@ class LitSeqDenoiser(L.LightningModule):
         # Set up loss
         self.loss = SDLoss(cfg.loss)
         self.save_hyperparameters()
-        
+
 
     def setup(self, stage: str):
         if stage == "fit":
@@ -55,8 +55,8 @@ class LitSeqDenoiser(L.LightningModule):
     def on_train_start(self):
         # Initialize EMA trackers at the start of training (if using phema)
         if self.use_phema:
-            self.ema_tracker.reset()                
-                
+            self.ema_tracker.reset()
+
     @staticmethod
     def _pop_non_tensor_fields(batch: dict) -> dict:
         """Remove non-tensor entries from ``batch`` and return them.
@@ -116,6 +116,8 @@ class LitSeqDenoiser(L.LightningModule):
 
         outputs = self(batch)
         _, aux = self.loss(outputs, batch, return_aux=True)
+
+        # restore non-tensor fields
         batch.update(meta_fields)
         self._log(batch, outputs, aux, batch_idx, phase="val", phase_suffix=phase_suffix)
 
@@ -160,8 +162,8 @@ class LitSeqDenoiser(L.LightningModule):
 
         log_dict = {}
         for k, v in aux.items():
-            log_dict[f"{phase}{phase_suffix}/{k}{key_suffix}"] = v            
-                
+            log_dict[f"{phase}{phase_suffix}/{k}{key_suffix}"] = v
+
         self.log_dict(
             log_dict,
             on_step=(phase == "train"),
@@ -217,4 +219,4 @@ class LitSeqDenoiser(L.LightningModule):
             if total_norm_key in grad_norms:
                 total_norm = grad_norms[total_norm_key]
                 self.log_dict({f"total_l{norm_type}_grad_norm": total_norm}, logger=has_logger)
-    
+

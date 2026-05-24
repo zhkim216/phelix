@@ -1,0 +1,53 @@
+name: lc_atom_mpnn
+
+defaults:
+  - _self_
+  - interpolant: edm_interpolant
+
+task: ${model.task}
+
+refactored: true
+
+mpnn:
+  hidden_dim: 128
+  k_neighbors: 32
+  num_encoder_layers: 3
+  num_decoder_layers: 3
+  dropout_p: 0.1
+  ligand_conditioning: true
+
+  # ligand conditioning options
+  lmpnn_module:
+    num_context_feature_processor_layers: 2
+    num_context_feature_aggregator_layers: 2
+    # Controls edge update inside ContextModule (ligand context branch).
+    context_edge_update: false
+
+  token_features:
+    num_rbf: 16
+    min_rbf_mean: 2.0
+    max_rbf_mean: 22.0
+    protein_graph_rbf_type: "ncacocb" # "ca", "ncaco", "ncacocb"
+    k_neighbors: ${denoiser.mpnn.k_neighbors}
+    num_positional_embeddings: 16
+    hidden_dim: ${denoiser.mpnn.hidden_dim}
+    protein_ligand_interaction_rbf_type: "ncacocb" # "cb", "ncacocb"
+    add_angle_features: true
+    use_multichain_encoding: true
+    ligand_conditioning: ${denoiser.mpnn.ligand_conditioning}
+    use_ligand_context: true
+    ligand_atom_context_num: 25
+    # Pocket-aware RBF: use full backbone RBF for ligand pocket residues, CA-only for others
+    use_pocket_rbf: true  # false for backward compat; set true to enable pocket-aware RBF
+    pocket_rbf_type: "ncaco"  # "ncaco" or "ncacocb" - RBF type for pocket residue edges
+    pocket_rbf_distance: 4.0  # distance threshold (Å) for pseudo-CB pocket definition
+
+    masked_distance_fill: 1000.0
+
+  potts:
+    k_neighbors_potts: 32
+    max_dist_potts: null
+    use_potts: true
+    parameterization: "factor"
+    num_factors: null
+    symmetric_J: true

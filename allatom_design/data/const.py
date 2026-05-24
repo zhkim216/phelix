@@ -9,9 +9,15 @@ import biotite.structure as struc
 import numpy as np
 from atomworks.constants import (AA_LIKE_CHEM_TYPES, DICT_THREE_TO_ONE,
                                     DNA_LIKE_CHEM_TYPES, GAP,
+                                    METAL_ELEMENTS as ATOMWORKS_METAL_ELEMENTS,
                                     RNA_LIKE_CHEM_TYPES, STANDARD_AA,
                                     STANDARD_DNA, STANDARD_RNA, UNKNOWN_AA,
                                     UNKNOWN_DNA, UNKNOWN_RNA)
+
+import re
+from enum import Enum
+
+from atomworks.enums import ChainType
 from atomworks.io.utils import sequence as aw_sequence
 
 """Sequence tokens in AF3"""
@@ -117,12 +123,22 @@ class AF3SequenceEncoding:
 
 AF3_ENCODING: Final[AF3SequenceEncoding] = AF3SequenceEncoding()
 
-MAX_NUM_ATOMS: Final[int] = 23 
+MAX_NUM_ATOMS: Final[int] = 23
 PROT_BB_ATOMS: Final[list[str]] = ["N", "CA", "C", "O"]
 PROT_LETTER_TO_TOKEN: Final[dict[str, str]] = {**aw_sequence.aa_chem_comp_1to3(), "X": "UNK"}  # include "X" for unknown amino acids
 PROT_TOKEN_TO_LETTER: Final[dict[str, str]] = {v: k for k, v in PROT_LETTER_TO_TOKEN.items()}
 
 DUMMY_SEQ_ID: Final[int] = -1  # dummy sequence id to use for auth_seq_id when not present
+
+METAL_ELEMENTS: Final[frozenset[str]] = ATOMWORKS_METAL_ELEMENTS
+METALLOID_ELEMENTS: Final[frozenset[str]] = frozenset({"B", "SI", "GE", "AS", "SB", "TE", "PO"})
+HALOGEN_ELEMENTS: Final[frozenset[str]] = frozenset({"F", "CL", "BR", "I", "AT", "TS"})
+PERIOD4_TRANSITION_METALS: Final[frozenset[str]] = frozenset(
+    {"SC", "TI", "V", "CR", "MN", "FE", "CO", "NI", "CU", "ZN"}
+)
+LANTHANIDE_METALS: Final[frozenset[str]] = frozenset(
+    {"LA", "CE", "PR", "ND", "PM", "SM", "EU", "GD", "TB", "DY", "HO", "ER", "TM", "YB", "LU"}
+)
 
 # Adapted from BioLip2
 VDW_DICT = {
@@ -509,14 +525,8 @@ PERIODIC_TABLE_FEATURES: Final[torch.Tensor] = [
                 ],
             ]
 
-import re
-from enum import Enum
-
-from atomworks.enums import ChainType
-
 # Cutoff for the number of residues in a peptide
 PEPTIDE_MAX_RESIDUES = 20
-NUCLEIC_ACID_LIGANDS_MAX_RESIDUES = 10 #! (JH) added 251031
 
 # Define the "NA" values ("missing" values) that should be treated as NaN (for Pandas)
 # NOTE: By default, "NA" is considered as a missing value by Pandas, which is obviously a problem
@@ -549,6 +559,6 @@ TRAINING_SUPPORTED_CHAIN_TYPES = [
     ChainType.RNA,
     ChainType.BRANCHED,
     ChainType.MACROLIDE,
-    ChainType.NON_POLYMER,    
+    ChainType.NON_POLYMER,
 ]
 TRAINING_SUPPORTED_CHAIN_TYPES_INTS = [type.value for type in TRAINING_SUPPORTED_CHAIN_TYPES]

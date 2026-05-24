@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from torchtyping import TensorType
 
-from allatom_design.checkpoint_utils import repair_state_dict
+from allatom_design.utils.checkpoint_utils import repair_state_dict
 
 
 class BaseSeqDenoiser(nn.Module, ABC):

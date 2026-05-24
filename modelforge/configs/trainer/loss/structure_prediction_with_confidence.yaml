@@ -1,2 +1,0 @@
-defaults:
-  - losses/confidence_loss@confidence_loss

@@ -5,8 +5,8 @@ echo "=== RTX 2080 Ti (Turing Architecture) Environment Setup ==="
 
 # Activate virtual environment
 # Note: User should activate mamba environment manually
-if [ "$CONDA_DEFAULT_ENV" != "phelix_local" ]; then
-    echo "Warning: 'phelix_local' environment is not active."
+if [ "$CONDA_DEFAULT_ENV" != "elix_local" ]; then
+    echo "Warning: 'elix_local' environment is not active."
 fi
 
 # XLA settings for compute capability 7.x compatibility (REQUIRED for AF3)

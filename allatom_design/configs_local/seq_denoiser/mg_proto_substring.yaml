@@ -5,7 +5,7 @@ defaults:
 wandb:
   group: null
 
-out_dir: "/home/yjhk/model-dev/allatom-design/debug/260523_mg_bml_prototype/substring"
+out_dir: "/home/yjhk/model-dev/out_dir/debug_ligand_seq_des"
 exp_name: mg_proto_substring
 
 data:

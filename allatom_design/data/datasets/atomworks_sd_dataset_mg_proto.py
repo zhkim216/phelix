@@ -157,13 +157,11 @@ class MGProtoSDDataset(MolecularDataset):
         metadata_df = _add_proto_modality_columns(metadata_df)
         metadata_df = attach_mg_external_evidence_flag(metadata_df, self.mg_cfg)
 
-        if self.mg_cfg.get("require_cached_examples", True):
-            metadata_df = _filter_to_cached_examples(metadata_df, self.cfg.pdb_path)
-
         metadata_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
         metadata_df = self._add_phase_split(metadata_df)
         metadata_df = metadata_df[metadata_df["phase"] == self.phase]
         metadata_df = self._apply_filters(self.cfg.train_filters.metadata_filter, metadata_df)
+        metadata_df = self._filter_metadata_to_mg_proto_scope(metadata_df)
         return metadata_df
 
     def _add_phase_split(self, metadata_df: pd.DataFrame) -> pd.DataFrame:
@@ -213,6 +211,28 @@ class MGProtoSDDataset(MolecularDataset):
         )
         monomer_df.set_index("example_id", inplace=True, drop=False, verify_integrity=True)
         return monomer_df
+
+    def _filter_metadata_to_mg_proto_scope(self, metadata_df: pd.DataFrame) -> pd.DataFrame:
+        protein_df = self._apply_filters(
+            self.cfg.train_filters.protein_monomer_chain_filter,
+            metadata_df.copy(),
+        )
+        protein_mask = pd.Series(metadata_df.index.isin(protein_df.index), index=metadata_df.index)
+        mg_center_mask = _mg_proto_center_mask(metadata_df, self.mg_cfg)
+        keep_mask = protein_mask | mg_center_mask
+
+        out = metadata_df[keep_mask].copy()
+        if out.empty:
+            raise ValueError("MG proto metadata scope filter removed all rows.")
+        logger.info(
+            "Filtered MG proto train metadata to prototype scope: %d -> %d rows "
+            "(protein_monomer_candidates=%d, mg_center_candidates=%d).",
+            len(metadata_df),
+            len(out),
+            int(protein_mask.sum()),
+            int(mg_center_mask.sum()),
+        )
+        return out
 
     def _process_interface_df(self, dataset_name: str) -> pd.DataFrame:
         protein_df = self._apply_filters(
@@ -265,7 +285,6 @@ class MGProtoSDDataset(MolecularDataset):
             parsed["query_pn_unit_iids"] = list(row["query_pn_unit_iids"])
             parsed["ligand_pn_unit_iids"] = list(row["ligand_pn_unit_iids"])
             parsed["protein_pn_unit_iids"] = list(row["protein_pn_unit_iids"])
-            parsed["crop_center_pn_unit_iids"] = list(row["crop_center_pn_unit_iids"])
             parsed["biologically_meaningful_pn_unit_iids"] = list(row["biologically_meaningful_pn_unit_iids"])
             for key in (
                 "query_pn_unit_iids",
@@ -381,7 +400,7 @@ class MGProtoSDDataset(MolecularDataset):
 def attach_mg_external_evidence_flag(metadata_df: pd.DataFrame, mg_cfg: dict | DictConfig) -> pd.DataFrame:
     mg_cfg = mg_cfg or {}
     policy = mg_cfg.get("external_evidence_policy", "no_filter")
-    allowed_codes = mg_cfg.get("allowed_ccd_codes", ["MG"])
+    allowed_codes = _get_mg_proto_allowed_codes(mg_cfg)
 
     out = metadata_df.copy()
     exact_mg = _series_has_any_exact_ccd(
@@ -434,9 +453,7 @@ def build_mg_proto_interface_df(
     if missing:
         raise KeyError(f"build_mg_proto_interface_df missing required columns: {sorted(set(missing))}")
 
-    allowed_codes = mg_cfg.get("allowed_ccd_codes", ["MG"])
     min_donors = int(mg_cfg.get("min_protein_donor_atoms", 3))
-    min_occupancy = float(mg_cfg.get("min_avg_occupancy_nonpolymer", 0.5))
 
     protein_df = protein_df[protein_df["q_pn_unit_is_protein"].fillna(False).astype(bool)].copy()
     protein_lookup = {
@@ -444,16 +461,7 @@ def build_mg_proto_interface_df(
         for row in protein_df.itertuples(index=False)
     }
 
-    center_mask = (
-        metadata_df["q_pn_unit_is_metal"].fillna(False).astype(bool)
-        & _series_has_any_exact_ccd(
-            metadata_df["q_pn_unit_non_polymer_res_names"],
-            allowed_codes,
-            index=metadata_df.index,
-        )
-        & metadata_df["q_pn_unit_has_external_evidence"].fillna(False).astype(bool)
-        & (metadata_df["q_pn_unit_avg_occupancy_nonpolymer"].fillna(-np.inf) >= min_occupancy)
-    )
+    center_mask = _mg_proto_center_mask(metadata_df, mg_cfg)
     center_df = metadata_df[center_mask].copy()
 
     rows = []
@@ -468,12 +476,12 @@ def build_mg_proto_interface_df(
         query_iids = [center.q_pn_unit_iid, *protein_iids]
 
         row = center._asdict()
+        row.pop("crop_center_pn_unit_iids", None)
         row.update(
             {
                 "query_pn_unit_iids": query_iids,
                 "ligand_pn_unit_iids": (center.q_pn_unit_iid,),
                 "protein_pn_unit_iids": protein_iids,
-                "crop_center_pn_unit_iids": [center.q_pn_unit_iid],
                 "biologically_meaningful_pn_unit_iids": query_iids,
                 "protein_cluster_multiset": protein_clusters,
                 "ligand_ccd_key": ("ccd", "MG"),
@@ -497,13 +505,12 @@ def build_mg_proto_interface_df(
         "query_pn_unit_iids",
         "ligand_pn_unit_iids",
         "protein_pn_unit_iids",
-        "crop_center_pn_unit_iids",
         "biologically_meaningful_pn_unit_iids",
         "protein_cluster_multiset",
         "ligand_ccd_key",
         "interface_type",
         "n_coordinating_protein_donor_atoms",
-        *metadata_df.columns.tolist(),
+        *[col for col in metadata_df.columns.tolist() if col != "crop_center_pn_unit_iids"],
     ]
     output_cols = list(dict.fromkeys(output_cols))
     interface_df = pd.DataFrame(rows)
@@ -713,26 +720,6 @@ def _ensure_example_id_column(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def _filter_to_cached_examples(metadata_df: pd.DataFrame, pdb_path: str) -> pd.DataFrame:
-    cached_dir = Path(pdb_path) / "cached_examples"
-    if not cached_dir.exists():
-        raise FileNotFoundError(f"MG proto require_cached_examples=True but {cached_dir} does not exist.")
-    cached_pdb_ids = {path.stem for path in cached_dir.glob("*.pt")}
-    if not cached_pdb_ids:
-        raise FileNotFoundError(f"MG proto found no cached examples under {cached_dir}.")
-    before = len(metadata_df)
-    out = metadata_df[metadata_df["pdb_id"].isin(cached_pdb_ids)].copy()
-    if out.empty:
-        raise ValueError(f"MG proto cached-example filter removed all {before} metadata rows.")
-    logger.info(
-        "Filtered MG proto metadata to cached examples: %d -> %d rows across %d cached PDBs.",
-        before,
-        len(out),
-        out["pdb_id"].nunique(),
-    )
-    return out
-
-
 def _add_proto_modality_columns(metadata_df: pd.DataFrame) -> pd.DataFrame:
     out = metadata_df.copy()
     nuc_chain_types = [chain_type.value for chain_type in aw_enums.ChainType.get_nucleic_acids()]
@@ -818,3 +805,38 @@ def _series_has_any_exact_ccd(series, codes, index) -> pd.Series:
     if series is None:
         return pd.Series(False, index=index)
     return series.reindex(index).apply(lambda value: bool(code_set.intersection(_split_ccd_tokens(value))))
+
+
+def _get_mg_proto_allowed_codes(mg_cfg: dict | DictConfig) -> set[str]:
+    mg_cfg = mg_cfg or {}
+    code_set = _normalize_ccd_codes(mg_cfg.get("allowed_ccd_codes", ["MG"]))
+    if not code_set:
+        raise ValueError("MG proto `allowed_ccd_codes` must contain at least one exact CCD code.")
+    return code_set
+
+
+def _mg_proto_center_mask(metadata_df: pd.DataFrame, mg_cfg: dict | DictConfig) -> pd.Series:
+    required_cols = [
+        "q_pn_unit_is_metal",
+        "q_pn_unit_non_polymer_res_names",
+        "q_pn_unit_has_external_evidence",
+        "q_pn_unit_avg_occupancy_nonpolymer",
+    ]
+    missing = [col for col in required_cols if col not in metadata_df.columns]
+    if missing:
+        raise KeyError(f"MG proto center mask missing required columns: {missing}")
+
+    mg_cfg = mg_cfg or {}
+    allowed_codes = _get_mg_proto_allowed_codes(mg_cfg)
+    min_occupancy = float(mg_cfg.get("min_avg_occupancy_nonpolymer", 0.5))
+
+    return (
+        metadata_df["q_pn_unit_is_metal"].fillna(False).astype(bool)
+        & _series_has_any_exact_ccd(
+            metadata_df["q_pn_unit_non_polymer_res_names"],
+            allowed_codes,
+            index=metadata_df.index,
+        )
+        & metadata_df["q_pn_unit_has_external_evidence"].fillna(False).astype(bool)
+        & (metadata_df["q_pn_unit_avg_occupancy_nonpolymer"].fillna(-np.inf) >= min_occupancy)
+    )

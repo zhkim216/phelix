@@ -48,7 +48,6 @@ from allatom_design.data.transform.custom_transforms import (
     PadSDFeats,
     FlattenFeatsDict,
     CenterRandomAugmentation,
-    FilterToBiologicallyMeaningfulChains,
     FilterToQueryPNUnits,
     MaskAtomizedTokensInProtein,
     ErrIfAllUnresolved,
@@ -103,8 +102,6 @@ def sd_featurizer(
     max_atoms: int | None = None,
     crop_center_cutoff_distance: float = 15.0,
     crop_spatial_p_protein_monomer_chain: float = 0.5,
-    # interface crop constraints
-    min_protein_tokens_in_interface_crop: int | None = None,
 
     # For pocket annotation
     pocket_distance: float = 8.0,
@@ -139,7 +136,6 @@ def sd_featurizer(
         # InferenceRoute(StrtoBoolforIsXFeatures()), # Todo: need this later if we want to use load_any
         AddData({"is_inference": is_inference}),
         AddDataCategory(),
-        FilterToBiologicallyMeaningfulChains(),
         FilterToQueryPNUnits(),
         AnnotateChainTypes(),
         MaskResiduesWithSpecificUnresolvedAtoms(chain_type_to_atom_names={

@@ -1,0 +1,65 @@
+########### Basic settings #########
+debug: true
+num_debug_samples: 5
+seed: 0
+
+# Model checkpoint (only needed if running forward passes)
+ckpt_path: null
+
+# Data source
+results_csv: null           # Path to pre-computed results.csv (skips forward passes)
+native_cif_dir: null        # CIF directory (for forward pass mode)
+native_selected_list: null  # text file of PDB IDs to subset
+
+# Val type: "native" or "denovo" (controls output subdirectory naming)
+val_type: "native"
+
+# Output
+output_dir: null
+
+# Analysis params
+pocket_distances: [4.0, 5.0, 6.0]
+scaffold_distances: [10.0, 12.0]
+
+# Forward pass settings (only used when results_csv is null)
+max_tokens_for_forward: 2000
+
+######### Data & Transform configurations #########
+input_sample_is_designed: false
+
+cif_parse_cfg:
+  add_missing_atoms: true
+  remove_waters: true
+  remove_ccds: []
+  fix_ligands_at_symmetry_centers: true
+  fix_arginines: true
+  convert_mse_to_met: true
+  hydrogen_policy: "remove"
+  extra_fields: "all"
+
+preprocess_cfg:
+  undesired_res_names: []
+  b_factor_min: null
+  b_factor_max: null
+  min_residues_for_polymers: 0
+  remove_terminal_oxygen_protein: true
+  remove_terminal_oxygen_nucleic_acid: true
+
+featurizer_cfg:
+  is_inference: true
+  occupancy_threshold_protein_backbone: 0.0
+  training_structure_noise: 0.0
+  undesired_res_names: []
+  remove_keys: []
+  remove_unresolved_tokens: true
+  max_tokens: null
+  max_atoms: null
+  pocket_distance: 6.0
+  residue_cache_dir: null
+  max_conformers_per_residue: 50
+  apply_random_augmentation: true
+  translation_scale: 1.0
+
+hydra:
+  run:
+    dir: .

@@ -1,0 +1,20 @@
+########### Inputs #########
+per_residue_csv: /home/possu/jinho/allatom-design/debug/260410_potts_based_pocket_detection/nativeval/mad_sweep/per_residue_results.csv
+output_dir: /home/possu/jinho/allatom-design/debug/260410_potts_based_pocket_detection/nativeval/mad_sweep
+
+########### Sweep parameters #########
+# 15 values: 0.2, 0.4, ..., 3.0
+k_grid: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0]
+
+# Pocket GT: min_distance < d_plus
+pocket_distances: [4.0, 5.0, 6.0, 8.0, 10.0, 12.0]
+
+# Scaffold GT: min_distance > d_minus
+scaffold_distances: [10.0, 12.0, 14.0]
+
+# Which k values to annotate on PR curves (to avoid label clutter)
+annotation_ks: [0.4, 0.8, 1.2, 2.0, 3.0]
+
+hydra:
+  run:
+    dir: /home/possu/jinho/hydra_outputs

@@ -1,0 +1,132 @@
+########### Basic settings #########
+wandb:
+  no_wandb: true
+  project: "ligand_seq_des"
+  wandb_id: "zhkim216"
+  group: null
+
+debug: true
+num_debug_samples: 1
+seed: 0
+num_workers: 0
+protein_only: false  #! True = without ligand
+run_seq_des: true
+ckpt_steps: null   # null = use seq_des_cfg.ckpt_cfg.start_step/end_step (single step for smoke)
+
+exp_name: pkt_seq_rec_binning_local
+base_out_dir: /home/possu/jinho/allatom-design/debug/260428_pkt_seq_rec_binning
+
+# Sequence design config
+seq_des_cfg:
+  model_name: "lc_atom_mpnn"
+  denoiser_train_dir: /home/possu/jinho/out_dir/ligand_seq_des/exp37_cfg11
+  ckpt_cfg:
+    start_step: 22500
+    end_step: 22500
+    eval_every_n_ckpts: 1
+    eval_last_ckpt: false
+    use_ema: true
+  atom_mpnn:
+    ckpt_path: null
+    sampling_cfg: /home/possu/jinho/allatom-design/allatom_design/configs_local/seq_des/lc_atom_mpnn_inference.yaml
+    overrides:
+      batch_size: 1
+      num_seqs_per_pdb: 2
+      omit_aas: null
+      noise_labels: null
+      num_workers: ${num_workers}
+      use_potts_sampling: true
+      potts_sampling_cfg:
+        potts_sweeps: 50
+        lcp_expand_edge_idx_fix: true
+        rejection_step: false
+
+sampling_inputs_csv: null
+pos_constraint_csv: null
+
+redesign_cfg:
+  use_native_seq: false
+  pocket_distance: 5.0
+  native_cif_dir: null
+
+pocket_cfg:
+  n_min_ligand_atoms_for_seq_recovery: 5
+  pocket_distances_for_seq_recovery: [4.0, 6.0, 8.0, 10.0]
+  pocket_distance_bins:
+    - [0.0, 4.0]
+    - [4.0, 6.0]
+    - [6.0, 8.0]
+    - [8.0, 10.0]
+
+input_sample_is_all_atom: true
+input_sample_is_designed: false
+load_from_cache: false
+
+pdb_cfg:
+  pdb_dir: null
+  pdb_name_list: null
+  pdb_name_ext: ".cif"
+  n_subsample: null
+  recursive: false
+  split_by_subfolder: false
+  sample_indices: null
+  sample_lengths: null
+  array_id: null
+  num_arrays: null
+
+cif_cfg:
+  parse:
+    native:
+      add_missing_atoms: true
+      remove_waters: true
+      remove_ccds: []
+      fix_ligands_at_symmetry_centers: true
+      fix_arginines: true
+      convert_mse_to_met: true
+      hydrogen_policy: "remove"
+      extra_fields: "all"
+  save:
+    date: "1959-01-07"
+    include_entity_poly: True
+    include_entity_nonpoly: True
+    include_nan_coords: False
+    include_bonds: True
+    extra_fields: []
+    exclude_field_keys: []
+    extra_categories:
+      pdbx_audit_revision_history:
+        ordinal: [1]
+        revision_id: [1]
+        revision_date: ["1959-01-07"]
+        major_revision: [1]
+        minor_revision: [0]
+        revision_description: ["Dummy date for template-conditioning AF3"]
+
+preprocess_cfg:
+  native:
+    undesired_res_names: []
+    b_factor_min: null
+    b_factor_max: null
+    min_residues_for_polymers: 0
+    remove_terminal_oxygen_protein: true
+    remove_terminal_oxygen_nucleic_acid: true
+
+featurizer_cfg:
+  design:
+    is_inference: true
+    occupancy_threshold_protein_backbone: 0.0
+    training_structure_noise: 0.0
+    undesired_res_names: []
+    remove_keys: []
+    remove_unresolved_tokens: true
+    max_tokens: null
+    max_atoms: null
+    pocket_distance: 6.0
+    residue_cache_dir: "/home/possu/jinho/datasets/atomworks_cached_residue_data"
+    max_conformers_per_residue: 50
+    apply_random_augmentation: true
+    translation_scale: 1.0
+
+hydra:
+  run:
+    dir: /home/possu/jinho/allatom-design/local_debug_output/hydra

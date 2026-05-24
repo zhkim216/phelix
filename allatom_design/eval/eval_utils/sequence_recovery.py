@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from biotite.structure import AtomArray
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
@@ -47,6 +48,96 @@ DESIGNED_CIF_PARSE_CFG = {
     "hydrogen_policy": "remove",
     "extra_fields": None,
 }
+
+
+def calculate_sequence_recovery(input_atom_array: AtomArray, designed_atom_array: AtomArray,
+                                pocket_distances_for_seq_recovery: list[float] = [4.0, 5.0, 6.0],
+                                pocket_distance_bins: list[tuple[float, float]] | None = None,
+                                n_min_ligand_atoms: int = 5) -> dict[str, float]:
+    """
+    Calculate sequence recovery and pocket sequence recovery between input and designed atom arrays.
+    """
+    seq_recovery_metrics = {}
+
+    input_valid_residue_mask = get_valid_standard_aa_residue_mask(input_atom_array)
+
+    input_seq_mask = input_valid_residue_mask & (input_atom_array.atom_name == "CA")
+    input_res_ids = input_atom_array[input_seq_mask].res_id
+    input_res_names = input_atom_array[input_seq_mask].res_name
+
+    designed_valid_residue_mask = get_valid_standard_aa_residue_mask(designed_atom_array)
+    designed_seq_mask = designed_valid_residue_mask & np.isin(designed_atom_array.res_id, input_res_ids) & (designed_atom_array.atom_name == "CA")
+    designed_res_names = designed_atom_array[designed_seq_mask].res_name
+
+    seq_recovery_metrics["seq_recovery_ratio"] = (input_res_names == designed_res_names).mean()
+
+    edge_to_residue_mask: dict[float, np.ndarray] = {}
+
+    for pocket_distance in pocket_distances_for_seq_recovery:
+        input_atom_array = annotate_ligand_pockets(
+            input_atom_array,
+            pocket_distance=pocket_distance,
+            n_min_ligand_atoms=n_min_ligand_atoms,
+            annotation_name=f"is_ligand_pocket_{pocket_distance}",
+        )
+        input_pocket_residue_mask = apply_and_spread_residue_wise(
+            input_atom_array,
+            input_atom_array.get_annotation(f"is_ligand_pocket_{pocket_distance}"),
+            function=np.any,
+        )
+        edge_to_residue_mask[float(pocket_distance)] = input_pocket_residue_mask
+        input_pocket_seq_mask = input_seq_mask & input_pocket_residue_mask
+
+        input_pocket_res_ids = input_atom_array[input_pocket_seq_mask].res_id
+        input_pocket_res_names = input_atom_array[input_pocket_seq_mask].res_name
+
+        designed_pocket_seq_mask = np.isin(designed_atom_array.res_id, input_pocket_res_ids) & (designed_atom_array.atom_name == "CA")
+        designed_pocket_res_names = designed_atom_array[designed_pocket_seq_mask].res_name
+
+        seq_recovery_metrics[f"pocket_recovery_ratio_{pocket_distance}"] = (input_pocket_res_names == designed_pocket_res_names).mean()
+        seq_recovery_metrics[f"pocket_n_residues_{pocket_distance}"] = int(len(input_pocket_res_names))
+
+    if pocket_distance_bins:
+        for lo, hi in pocket_distance_bins:
+            lo_f, hi_f = float(lo), float(hi)
+            for d in (lo_f, hi_f):
+                if d == 0.0:
+                    continue
+                if d not in edge_to_residue_mask:
+                    ann = f"is_ligand_pocket_{d}"
+                    input_atom_array = annotate_ligand_pockets(
+                        input_atom_array,
+                        pocket_distance=d,
+                        n_min_ligand_atoms=n_min_ligand_atoms,
+                        annotation_name=ann,
+                    )
+                    edge_to_residue_mask[d] = apply_and_spread_residue_wise(
+                        input_atom_array,
+                        input_atom_array.get_annotation(ann),
+                        function=np.any,
+                    )
+
+            if lo_f == 0.0:
+                bin_residue_mask = edge_to_residue_mask[hi_f]
+            else:
+                bin_residue_mask = edge_to_residue_mask[hi_f] & ~edge_to_residue_mask[lo_f]
+
+            input_bin_seq_mask = input_seq_mask & bin_residue_mask
+            input_bin_res_ids = input_atom_array[input_bin_seq_mask].res_id
+            input_bin_res_names = input_atom_array[input_bin_seq_mask].res_name
+
+            designed_bin_seq_mask = np.isin(designed_atom_array.res_id, input_bin_res_ids) & (designed_atom_array.atom_name == "CA")
+            designed_bin_res_names = designed_atom_array[designed_bin_seq_mask].res_name
+
+            key = f"pocket_recovery_bin_{lo_f}_to_{hi_f}"
+            n_key = f"pocket_n_residues_bin_{lo_f}_to_{hi_f}"
+            if len(input_bin_res_names) == 0:
+                seq_recovery_metrics[key] = float("nan")
+            else:
+                seq_recovery_metrics[key] = float((input_bin_res_names == designed_bin_res_names).mean())
+            seq_recovery_metrics[n_key] = int(len(input_bin_res_names))
+
+    return seq_recovery_metrics
 
 
 def _compute_recovery(native_aa, designed_aa, pocket_distances):

@@ -4,18 +4,18 @@
 #SBATCH --array=0-2
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH --time=1-00:00:00
-#SBATCH --output=/scratch/users/possu/job_output/eval_ligand_seq_des/%x_%A_%a.out
-#SBATCH --error=/scratch/users/possu/job_output/eval_ligand_seq_des/%x_%A_%a.err
+#SBATCH --mem=16G
+#SBATCH --time=12:00:00
+#SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/%x_%A_%a.out
+#SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/%x_%A_%a.err
 
 # Define directories
-BASE_DIR=/home/users/possu/code/allatom-design
-HYDRA_DIR=/scratch/users/possu/hydra_outputs
-BASE_OUT_DIR=/scratch/users/possu/out_dir/eval_ligand_seq_des
+BASE_DIR=/home/users/zhkim216/code/allatom-design
+HYDRA_DIR=/scratch/users/zhkim216/hydra_outputs
+BASE_OUT_DIR=/scratch/users/zhkim216/out_dir/eval_ligand_seq_des
 INPUTS_DIR=/scratch/users/zhkim216/datasets/GFP/260421_2AWK
 
-mkdir -p /scratch/users/possu/job_output/eval_ligand_seq_des "${HYDRA_DIR}" "${BASE_OUT_DIR}"
+mkdir -p /scratch/users/zhkim216/job_output/eval_ligand_seq_des "${HYDRA_DIR}" "${BASE_OUT_DIR}"
 
 cd "${BASE_DIR}"
 
@@ -23,7 +23,7 @@ cd "${BASE_DIR}"
 export PYTHONWARNINGS="ignore"
 
 # Wandb settings
-WANDB_ID=possu
+WANDB_ID=zhkim216
 PROJECT=eval_ligand_seq_des
 
 # Model / checkpoint (exp35_cfg2 step 82500)
@@ -49,7 +49,7 @@ PDB_NAME_LIST=null
 VALSET_NAME="2awk_${VARIANT}"
 
 # Denoiser train directory
-DENOISER_TRAIN_DIR=/scratch/users/possu/out_dir/ligand_seq_des/${MODEL_NAME}
+DENOISER_TRAIN_DIR=/scratch/users/zhkim216/out_dir/ligand_seq_des/${MODEL_NAME}
 
 # Eval settings
 BATCH_SIZE=1
@@ -108,7 +108,7 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     pdb_cfg.sample_indices=null \
     pdb_cfg.array_id=null \
     pdb_cfg.num_arrays=null \
-    featurizer_cfg.design.residue_cache_dir="/scratch/users/possu/datasets/atomworks_cached_residue_data" \
+    featurizer_cfg.design.residue_cache_dir="/scratch/users/zhkim216/datasets/atomworks_cached_residue_data" \
     struct_pred_cfg.evaluate_self_consistency=true \
     struct_pred_cfg.evaluate_docking_consistency=false \
     struct_pred_cfg.calculate_metrics_only=false \

@@ -5,9 +5,9 @@ desktop with an RTX 2080 Ti.
 
 ## Files Description
 
-### `install_phelix_local.sh`
+### `install_elix_local.sh`
 Complete environment installation script that performs:
-- Installs packages into the active `phelix_local` micromamba environment
+- Installs packages into the active `elix_local` micromamba environment
 - Installs PyTorch 2.7.0+cu126 and matching PyG wheels
 - Installs JAX 0.4.34+cuda12
 - Builds HMMER 3.4 from source (with seq_limit patch)
@@ -16,7 +16,7 @@ Complete environment installation script that performs:
 - Installs allatom_design in editable mode
 - Configures RTX 2080 Ti / Turing compatibility environment variables
 
-### `activate_phelix_local.sh`
+### `activate_elix_local.sh`
 Environment activation helper that configures HMMER, local AtomWorks mirror paths,
 and RTX 2080 Ti runtime variables.
 
@@ -29,16 +29,16 @@ Script for setting RTX 2080 Ti compatibility environment variables.
 ```bash
 # Run from allatom-design root directory
 export MAMBA_ROOT_PREFIX=/home/yjhk/model-dev/envs/micromamba
-micromamba create -n phelix_local python=3.10 openstructure zlib uv -c bioconda -c conda-forge -y
-micromamba activate phelix_local
-bash scripts/local_scripts/jinho/setup/install_phelix_local.sh
+micromamba create -n elix_local python=3.10 openstructure zlib uv -c bioconda -c conda-forge -y
+micromamba activate elix_local
+bash scripts/local_scripts/jinho/setup/install_elix_local.sh
 ```
 
 ### 2. Environment Activation
 ```bash
 # Method 1: Using script
-micromamba activate phelix_local
-source scripts/local_scripts/jinho/setup/activate_phelix_local.sh
+micromamba activate elix_local
+source scripts/local_scripts/jinho/setup/activate_elix_local.sh
 ```
 
 ### 3. Test Run
@@ -78,18 +78,18 @@ export PATH="/home/yjhk/model-dev/software/hmmer-3.4-af3/bin:$PATH"
 
 ## Atomworks Installation
 
-The script `install_phelix_local.sh` installs the `atomworks` package from the `atomworks` directory in editable mode (`-e .`) while skipping dependencies (`--no-deps`). This allows source changes to take effect immediately during development.
+The script `install_elix_local.sh` installs the `atomworks` package from the `atomworks` directory in editable mode (`-e .`) while skipping dependencies (`--no-deps`). This allows source changes to take effect immediately during development.
 
 ## Allatom-design Installation
 
-The script installs `allatom_design` from the repository root in editable mode. The `phelix_local` environment uses Python 3.10 for OpenStructure compatibility, while the root package metadata currently declares Python 3.12, so the local install command uses `python -m pip install -e . --no-deps --ignore-requires-python`.
+The script installs `allatom_design` from the repository root in editable mode. The `elix_local` environment uses Python 3.10 for OpenStructure compatibility, while the root package metadata currently declares Python 3.12, so the local install command uses `python -m pip install -e . --no-deps --ignore-requires-python`.
 
 ## Key Changes Made
 
 ### Boltz Dependency Removal
 Instead of installing the `boltz` package directly, necessary utility functions were copied to `allatom_design/model/seq_denoiser/utils.py`:
 - `LinearNoBias`
-- `SwiGLU` 
+- `SwiGLU`
 - `center_random_augmentation`
 - `randomly_rotate`
 - `random_rotations`
@@ -128,5 +128,5 @@ Adjust `num_workers` in config files or reduce `batch_size` if needed.
 ```
 /home/yjhk/model-dev/envs/micromamba/
 └── envs/
-    └── phelix_local/  # micromamba environment
+    └── elix_local/  # micromamba environment
 ```

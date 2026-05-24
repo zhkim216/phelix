@@ -1,4 +1,5 @@
 import copy
+import logging
 from collections import defaultdict
 from typing import Any, Dict, Optional, Tuple
 
@@ -15,16 +16,76 @@ from tqdm import tqdm
 
 import allatom_design.data.const as const
 import allatom_design.model.seq_denoiser.denoisers.seq_design.potts as potts
-from allatom_design.data.data import to
 from allatom_design.utils.feature_utils import slice_feats
-from allatom_design.eval.eval_utils.sampling_utils import (
-    get_timesteps_from_schedule, get_decoding_order,
-)
+from allatom_design.utils.tensor_utils import to
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
     BaseSeqDenoiser
-from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn import \
-    AtomMPNN
-from chroma.layers import complexity
+from allatom_design.model.seq_denoiser.denoisers.seq_design import complexity
+
+logger = logging.getLogger(__name__)
+
+
+def _get_decoding_order(
+    mode: str,
+    seq_mask: TensorType["b n", float],
+    mlm_mask_prev: TensorType["b n", int],
+    **kwargs,
+) -> TensorType["b n", int]:
+    """Return per-token decode rank, with masked-out/already-visible tokens last."""
+    B, N = seq_mask.shape
+
+    if mode == "autoregressive":
+        decoding_order = torch.arange(N, device=seq_mask.device).expand(B, N)
+        decoding_order = torch.where(seq_mask.bool(), decoding_order, 1.0e6)
+        decoding_order = torch.where(mlm_mask_prev.bool(), decoding_order, 1.0e6)
+    elif mode == "random_spans":
+        timesteps = kwargs["timesteps"]
+        lengths = seq_mask.sum(dim=-1).long()
+        decoding_order = torch.where(seq_mask.bool(), torch.zeros_like(seq_mask), 1.0e6)
+        for i in range(B):
+            n_unmasked = (lengths[i] * timesteps[i]).ceil().long()
+            chunk_sizes = n_unmasked[1:] - n_unmasked[:-1]
+            indices = torch.arange(lengths[i], device=seq_mask.device)
+            chunks = torch.split(indices, chunk_sizes.tolist())
+            chunks = [chunks[j] for j in torch.randperm(len(chunks), device=seq_mask.device)]
+            decoding_order[i, :lengths[i]] = torch.cat(chunks)
+    else:
+        decoding_order = torch.where(seq_mask.bool(), torch.rand_like(seq_mask), 1.0e6)
+        decoding_order = decoding_order.argsort(dim=-1)
+
+    return decoding_order.long()
+
+
+def _get_timesteps_from_schedule(
+    mode: str,
+    num_steps: int,
+    t_start: float,
+    t_end: float,
+) -> TensorType["S+1", float]:
+    """Build the MLM unmasking schedule used during sequence sampling."""
+    timesteps = torch.linspace(t_start, t_end, num_steps + 1)
+    if mode == "linear":
+        pass
+    elif mode == "square":
+        timesteps = timesteps ** 2
+    elif mode == "cubic":
+        timesteps = timesteps ** 3
+    elif mode == "sqrt":
+        timesteps = timesteps ** 0.5
+    elif mode == "cbrt":
+        timesteps = timesteps ** (1.0 / 3.0)
+    elif mode == "cosine":
+        timesteps = 1 - torch.cos(timesteps * np.pi / 2)
+    elif mode == "last_only":
+        timesteps = torch.zeros_like(timesteps)
+        timesteps[-1] = 1.0
+    elif mode == "first_only":
+        timesteps = torch.ones_like(timesteps)
+        timesteps[0] = 0.0
+    else:
+        raise NotImplementedError(f"timestep schedule mode {mode} not implemented")
+
+    return timesteps
 
 
 class AtomMPNNDenoiser(BaseSeqDenoiser):
@@ -38,6 +99,20 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         self.task = cfg.task
 
         # Sequence design model: AtomMPNN
+        has_refactored_key = "refactored" in cfg
+        use_refactored = bool(cfg.get("refactored", False))
+        if not has_refactored_key:
+            logger.warning(
+                "denoiser.refactored is missing in cfg; defaulting to refactored=false "
+                "(legacy atom_mpnn for backward compatibility)."
+            )
+
+        if use_refactored:
+            from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn_refactored import \
+                AtomMPNN
+        else:
+            from allatom_design.model.seq_denoiser.denoisers.seq_design.atom_mpnn import \
+                AtomMPNN
         self.atom_mpnn = AtomMPNN(cfg.mpnn)
 
 
@@ -49,7 +124,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                            dict[str, TensorType["b ..."]]]:
         # Build some helpful masks based on conditioning sequence and atoms
         batch = self.build_masks(batch, is_sampling)
-        
+
         # Run model
         seq_logits, mpnn_feats = self.atom_mpnn(batch, is_sampling)
 
@@ -61,7 +136,7 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             "atom_cond_mask": batch["atom_cond_mask"],
             "token_exists_mask": batch["token_exists_mask"],
             "protein_residue_node_mask": batch["protein_residue_node_mask"],
-        }        
+        }
 
         return seq_logits, aux_preds
 
@@ -75,12 +150,12 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         - atomwise_token_idx: Tensor["b n_atoms", int]: index of the token that the atom belongs to, 0 for pad atoms
         - atomwise_seq_cond_mask: Tensor["b n_atoms", float]: 1 if the atom is part of an unmasked residue type, or 0 otherwise
         - token_exists_mask: Tensor["b n_tokens", float]: 1 if there exists any unmasked atom in the token, or 0 otherwise
-        """            
-    
+        """
+
         # Ensure the conditioning masks only contain non-pad, resolved entries.
         batch["seq_cond_mask"] = batch["seq_cond_mask"] * batch["token_resolved_mask"] * batch["token_pad_mask"]
         batch["atom_cond_mask"] = batch["atom_cond_mask"] * batch["atom_resolved_mask"] * batch["atom_pad_mask"]
-    
+
         # Build mask for which tokens to include in the token-level grpah
         ## ensure center atom is present, since graph nodes are the center atom
         batch["token_exists_mask"] = batch["token_resolved_mask"].float()  # [b, n_tokens], "whether the token exists in the residue-level graph"
@@ -88,12 +163,12 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         ## sometimes, it's helpful to mask out certain tokens from the graph (e.g. for protein-only design in lcaliby or exclude hetero residues in sampling)
         token_exists_override = batch.get("token_exists_override", torch.ones_like(batch["token_exists_mask"]))
         batch["token_exists_mask"] = batch["token_exists_mask"] * token_exists_override
-        
-        # Mask out hetero residues in protein residue graphs for sampling, if specified. 
+
+        # Mask out hetero residues in protein residue graphs for sampling, if specified.
         #Todo: Need to implement functionality for redesigning hetero residues into standard AA in the future.
         residuewise_hetero_mask = batch.get("residuewise_hetero_mask", torch.ones_like(batch["token_exists_mask"]))
         atomwise_hetero_mask = batch.get("atomwise_hetero_mask", torch.ones_like(batch["atom_resolved_mask"]))
-        
+
         if not is_sampling:
             # Exclude pseudo-context positions (pseudo-ligands + backbone-masked neighbors)
             # from the protein residue graph.  # JH Changed 260416
@@ -105,16 +180,16 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                 batch["token_exists_mask"] *
                 batch["token_pad_mask"]
             )
-            
+
         else:
-            #Todo: Need to implement functionality for redesigning hetero residues into standard AA in the future.            
+            #Todo: Need to implement functionality for redesigning hetero residues into standard AA in the future.
             batch["protein_residue_node_mask"] = (
-                batch["token_is_prot_std_aa"] *                 
-                residuewise_hetero_mask *              
+                batch["token_is_prot_std_aa"] *
+                residuewise_hetero_mask *
                 batch["token_exists_mask"] *
                 batch["token_pad_mask"]
-            )                    
-            
+            )
+
             batch["atom_cond_mask"] = batch["atom_cond_mask"] * atomwise_hetero_mask
 
         return batch
@@ -451,8 +526,8 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
         logit_bias = torch.zeros(C, device=device)
         logit_bias[ban_indices] = -1e9
 
-        # Timestep schedule → K values (fampnn: sd_model.py:233-235)
-        timesteps = get_timesteps_from_schedule(
+        # Timestep schedule -> K values.
+        timesteps = _get_timesteps_from_schedule(
             mode=mlm_cfg["timestep_schedule"]["mode"],
             num_steps=mlm_cfg["timestep_schedule"]["num_steps"],
             t_start=mlm_cfg["timestep_schedule"]["t_start"],
@@ -483,14 +558,14 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             restype = original_restype.clone()
             restype[designable_mask.bool()] = gap_onehot
 
-            # Random decoding order (fampnn: sampling_utils.get_decoding_order)
-            decoding_order = get_decoding_order(
+            # Random decoding order.
+            decoding_order = _get_decoding_order(
                 mode=mlm_cfg.get("aatype_decoding_order_mode", "random"),
                 seq_mask=designable_mask,
                 mlm_mask_prev=seq_cond_mask,
             )
 
-            # Iterative unmasking (fampnn: sd_model.py:237-271)
+            # Iterative unmasking.
             for step in range(num_steps):
                 K_next = timesteps_K[:, step + 1]  # [B]
 
@@ -508,12 +583,11 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
                     probs = F.softmax(masked_logits / temperature, dim=-1)
                     aatype_pred = torch.multinomial(probs.view(-1, C), 1).view(B, N)
 
-                # Update mask (fampnn: sampling_utils.update_mlm_mask)
-                seq_mlm_mask_prev = seq_cond_mask.clone()
+                # Update mask.
                 newly_unmask = (~seq_cond_mask.bool()) & (decoding_order < K_next[:, None])
                 seq_cond_mask = (newly_unmask.float() + seq_cond_mask).clamp(max=1.0)
 
-                # Update restype at newly unmasked positions (fampnn: sampling_utils.unmask)
+                # Update restype at newly unmasked positions.
                 aatype_pred_onehot = F.one_hot(aatype_pred, num_classes=C).to(restype_dtype)
                 restype = torch.where(newly_unmask.unsqueeze(-1), aatype_pred_onehot, restype)
 
@@ -710,12 +784,12 @@ class AtomMPNNDenoiser(BaseSeqDenoiser):
             token_exists_mask.append(aux_preds_i["token_exists_mask"])
             del aux_preds_i  # free seq_logits, h_V, h_ESV etc.
         potts_decoder_aux = {k: torch.cat(v, dim=0) for k, v in potts_decoder_aux.items()}
-        
+
         token_exists_mask = torch.cat(token_exists_mask, dim=0)
         protein_residue_node_mask = torch.cat(protein_residue_node_mask, dim=0)
         batch["protein_residue_node_mask"] = protein_residue_node_mask  # store in batch for downstream use
         batch["token_exists_mask"] = token_exists_mask  # store in batch for downstream use
-        
+
         # Handle tied sampling
         if "tied_sampling_ids" in batch:
             tied_sampling_inputs = _construct_tied_sampling_inputs(batch)
@@ -788,7 +862,7 @@ def _construct_tied_sampling_inputs(batch: dict[str, TensorType["b ..."]]) -> di
     tied_sampling_inputs["unique_ids"], tied_sampling_inputs["inverse"] = tied_sampling_inputs["tied_sampling_ids"].unique(return_inverse=True)
 
     # use first index of each tied group as the representative index
-    B = batch["res_type"].shape[0]
+    B = batch["restype"].shape[0]
     batch_idx = torch.arange(B, device=device)
     n_unique_ids = tied_sampling_inputs["unique_ids"].shape[0]
     first_idxs = torch.full((n_unique_ids, ), B, device=device)

@@ -8,8 +8,7 @@ from biotite.structure import AtomArray
 from omegaconf import DictConfig
 from torchtyping import TensorType
 
-from allatom_design.data.mask_selector import MaskSelector
-from allatom_design.utils.pdb_utils import *
+from allatom_design.model.seq_denoiser.mask_selector import MaskSelector
 from allatom_design.model.seq_denoiser.denoisers.atom_mpnn_denoiser import \
     AtomMPNNDenoiser
 from allatom_design.model.seq_denoiser.denoisers.denoiser import \
@@ -98,7 +97,7 @@ class SeqDenoiser(nn.Module):
 
         if batch["noise_labels"] is not None:
             raise NotImplementedError("Noise labels are not implemented yet")
-        
+
         if sampling_inputs.get("t", None) is not None:
             batch["t"] = torch.full((batch["token_pad_mask"].shape[0],), fill_value=sampling_inputs["t"], device=batch["token_pad_mask"].device)
 
@@ -138,7 +137,5 @@ def get_denoiser(cfg: DictConfig,
     Get the denoiser specified in the config.
     """
     if cfg.name == "atom_mpnn" or cfg.name == "lc_atom_mpnn":
-        return AtomMPNNDenoiser(cfg, sigma_data)    
-    else:
-        raise ValueError(f"Unknown denoiser: {cfg.name}")
-
+        return AtomMPNNDenoiser(cfg, sigma_data)
+    raise ValueError(f"Unknown denoiser: {cfg.name}")

@@ -1,18 +1,18 @@
 # Wandb configuration
 wandb:
-  no_wandb: false  # Disable wandb logging
-  project: "debug_ligand_seq_des"  # Wandb project name
-  wandb_id: "zhkim216"  # Wandb username
-  group: "debug" # Wandb group name
+  no_wandb: true  # Disable wandb logging for local smoke runs
+  project: "debug_ligand_seq_des"
+  wandb_id: "zhkim216"
+  group: null
 
 # Outputs
-out_dir: "/home/possu/jinho/out_dir/debug_seq_denoiser"  # Output path for trained models
-exp_name: null  # Wandb exp name
+out_dir: "/home/possu/jinho/out_dir/debug_ligand_seq_des/debug_seq_denoiser"
+exp_name: null
 
 # Run settings
-overfit: -1 # Number of examples to overfit to, -1 to disable
+overfit: -1
 cuda: True
-num_workers: 0 # Dataloader num workers (0 for debugging)
+num_workers: 0
 
 # Finetuning options
 finetuning:
@@ -24,31 +24,31 @@ train:
   batch_size: 4
   debug: false
   compile:
-    compile_model: false  # Compile the model before running, speeds up training a lot
-    compile_backend: inductor #! default: inductor
-    mode: "default" #! default: default
-    fullgraph: false #! default: false
-    dynamic: false #! default: false
+    compile_model: false
+    compile_backend: inductor
+    mode: "default"
+    fullgraph: false
+    dynamic: false
 
-# Some trainer options
 trainer:
-  strategy: ddp_find_unused_parameters_true # use "ddp_find_unused_parameters_true" if expecting unused parameters in model
+  strategy: ddp_find_unused_parameters_true
   max_epochs: -1
   max_steps: 100000
   accumulate_grad_batches: 1
-  detect_anomaly: false  # Slower; enable for debugging nans in gradients
+  detect_anomaly: false
   gradient_clip_val: 0.0
-  precision: "bf16-mixed"  # bf16-mixed  TODO: compare against fp32 as baseline
-  check_val_every_n_epoch: 1  # How often to run validation
-  num_sanity_val_steps: 1 # Skip sanity check validation batches before training #! default is 2
+  precision: "bf16-mixed"
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: 1
 
-# Resuming training options
 resume:
-  ckpt_path: null  # Path to checkpoint to resume from, null to disable
-  use_current_cfg: false  # If false, load config from checkpoint directory; if true, use current config
-  overrides: {}  # Specific overrides to apply (e.g., {train.batch_size: 8, optim.noam.factor: 1})
+  ckpt_path: null
+  use_current_cfg: false
+  overrides: {}
 
-# Model options
+# Model options — use the production lc_atom_mpnn so the full TokenFeatures spec is present.
+# debug_lc_atom_mpnn (configs/) is an older stripped config that is missing several fields
+# (min_rbf_mean, protein_graph_rbf_type, add_angle_features, ...) that the current AtomMPNN reads.
 defaults:
   - _self_
   - denoiser: debug_lc_atom_mpnn
@@ -56,21 +56,18 @@ defaults:
   - data: debug_ligand_cond
 
 model:
-  task: "lc_seq_des"  # "seq_des"
-  sigma_data: [9.6, 0.64]  # sigma data for [backbone, local sidechain]
+  task: "lc_seq_des"
+  sigma_data: [9.6, 0.64]
   eps: 1.0e-8
   inf: 1.0e9
   denoiser: ${denoiser}
-
-  # Masking options
   mask_selector: ${mask_selector}
-
   ema:
-    use_phema: false  # use post-hoc EMA
-    ema_decay: 0.99  # if not using phema, use this decay rate
+    use_phema: false
+    ema_decay: 0.99
 
 eval:
-  eval_timesteps: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]  # Timesteps to evaluate at
+  eval_timesteps: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
 loss:
   task: ${model.task}
@@ -78,9 +75,9 @@ loss:
   loss_weights:
     seq_loss: 1.0
     potts_composite_loss: 1.0
-    potts_composite_loss_msa: 0.0 
+    potts_composite_loss_msa: 0.0
+    potts_pseudolikelihood_loss: 0.0
 
-  # loss configs
   seq_loss:
     label_smoothing: 0.1
     per_token_avg: false
@@ -89,11 +86,10 @@ loss:
     label_smoothing: 0.1
     per_token_avg: false
     compile_msa_loss: false
-  
-  # Main training loss scope
+
   main_seq_loss_pocket_only: false
   main_potts_loss_pocket_only: false
-    
+
 optim:
   optimizer: "noam"
   adamw:
@@ -110,13 +106,13 @@ optim:
 logging:
   log_dir: ${out_dir}
   log_every_n_steps: 5
-  wandb_watch_freq: 10  # Log gradients every n steps
+  wandb_watch_freq: 10
 
 checkpointing:
-  save_latest_every_n_steps: 25  # Save the model every n steps
-  save_for_resuming_every_n_epochs: 10  # Keep 1 latest copy of the model every n epochs, for resuming
-  save_phema_every_n_steps: 30  # If using post-hoc EMA, save snapshot every n steps
+  save_latest_every_n_steps: 25
+  save_for_resuming_every_n_epochs: 10
+  save_phema_every_n_steps: 30
 
 hydra:
   run:
-    dir: /home/possu/jinho/hydra_outputs
+    dir: /home/possu/jinho/hydra_outputs/debug_seq_denoiser_v8

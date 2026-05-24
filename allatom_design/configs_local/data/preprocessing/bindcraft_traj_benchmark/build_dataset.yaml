@@ -1,5 +1,0 @@
-bindcraft_data_dir: /media/scratch/datasets/BindCraft_data_Possu
-out_dir: /media/scratch/datasets/bindcraft_traj_benchmark
-
-seed: 0
-n_subsample: 100

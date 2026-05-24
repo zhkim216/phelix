@@ -1,32 +1,46 @@
 #!/bin/bash
 #SBATCH --job-name=lc_seq_des_denovoval_sweep_exp43
 #SBATCH -p possu,bioe,owners
-#SBATCH --array=0-8
+#SBATCH --array=0-64
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH --time=04:00:00
+#SBATCH --mem=16G
+#SBATCH --time=03:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_denovoval_sweep_exp43_%A_%a.out
 #SBATCH --error=/scratch/users/zhkim216/job_output/eval_ligand_seq_des/lc_seq_des_multi_denovoval_sweep_exp43_%A_%a.err
 
+# Intentional values (confirmed 2026-04-17):
+#   pocket_distance_for_docking_metrics=10.0  (exp41/35 uses 6.0; exp43 uses wider pocket)
+#   VALSET_NAME=denovoval_len150250            (exp43-specific wandb group)
+#   exp43_cfg4 trained by separate sbatch      (not in exp43.sbatch --array=0-3)
 
 MODEL_STEP_COMBOS=(
-    "exp43_cfg0:22500"
     "exp43_cfg0:42500"
-    "exp43_cfg1:22500"
+    "exp43_cfg0:62500"
     "exp43_cfg1:42500"
     "exp43_cfg1:62500"
-    "exp43_cfg2:22500"
-    "exp43_cfg3:22500"
+    "exp43_cfg1:82500"
+    "exp43_cfg1:102500"
+    "exp43_cfg2:42500"
+    "exp43_cfg2:62500"
+    "exp43_cfg3:42500"
     "exp43_cfg4:22500"
     "exp43_cfg4:42500"
+    "exp43_cfg4:62500"
+    "exp43_cfg4:82500"
+     # 260417 11:25 AM
 )
-NUM_CHUNKS=1
+NUM_CHUNKS=5
 
-COMBO=${MODEL_STEP_COMBOS[$SLURM_ARRAY_TASK_ID]}
+# Array index decoding: SLURM_ARRAY_TASK_ID -> (COMBO_IDX, CHUNK_IDX)
+# Total tasks = NUM_COMBOS * NUM_CHUNKS (= 13 * 5 = 65 -> --array=0-64)
+NUM_COMBOS=${#MODEL_STEP_COMBOS[@]}
+COMBO_IDX=$((SLURM_ARRAY_TASK_ID / NUM_CHUNKS))
+CHUNK_IDX=$((SLURM_ARRAY_TASK_ID % NUM_CHUNKS))
+
+COMBO=${MODEL_STEP_COMBOS[$COMBO_IDX]}
 MODEL_NAME=${COMBO%%:*}
 STEP=${COMBO##*:}
-CHUNK_IDX=0
 
 # Define directories
 BASE_DIR=/home/users/zhkim216/code/allatom-design
@@ -82,6 +96,8 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     protein_only=false \
     exp_name=${EXP_NAME} \
     base_out_dir=${BASE_OUT_DIR} \
+    run_seq_des=true \
+    guidance_cfg.enabled=false \
     seq_des_cfg.denoiser_train_dir=${DENOISER_TRAIN_DIR} \
     seq_des_cfg.ckpt_cfg.start_step=${STEP} \
     seq_des_cfg.ckpt_cfg.end_step=${STEP} \
@@ -90,6 +106,12 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     seq_des_cfg.ckpt_cfg.use_ema=true \
     seq_des_cfg.atom_mpnn.overrides.batch_size=2 \
     seq_des_cfg.atom_mpnn.overrides.num_seqs_per_pdb=1 \
+    seq_des_cfg.atom_mpnn.overrides.use_potts_sampling=true \
+    seq_des_cfg.atom_mpnn.overrides.omit_aas=null \
+    seq_des_cfg.atom_mpnn.overrides.noise_labels=null \
+    seq_des_cfg.atom_mpnn.overrides.potts_sampling_cfg.potts_sweeps=500 \
+    seq_des_cfg.atom_mpnn.overrides.potts_sampling_cfg.lcp_expand_edge_idx_fix=true \
+    seq_des_cfg.atom_mpnn.overrides.potts_sampling_cfg.rejection_step=false \
     sampling_inputs_csv=null \
     pos_constraint_csv=null \
     redesign_cfg.use_native_seq=false \
@@ -107,9 +129,14 @@ WANDB__SERVICE_WAIT=300 python3 allatom_design/eval/sampling/lc_seq_des_multi.py
     pdb_cfg.num_arrays=${NUM_CHUNKS} \
     'pdb_cfg.sample_indices=[0,1,2,3,4]' \
     'pdb_cfg.sample_lengths=[150,250]' \
+    featurizer_cfg.design.is_inference=true \
+    featurizer_cfg.design.training_structure_noise=0.0 \
+    featurizer_cfg.design.apply_random_augmentation=true \
+    featurizer_cfg.design.pocket_distance=6.0 \
     featurizer_cfg.design.residue_cache_dir="/scratch/users/zhkim216/datasets/atomworks_cached_residue_data" \
     struct_pred_cfg.evaluate_self_consistency=true \
     struct_pred_cfg.evaluate_docking_consistency=false \
+    struct_pred_cfg.calculate_metrics_only=false \
     struct_pred_cfg.af3.inference_config.base.flash_attention_implementation=${FLASH_ATTN_IMPL} \
     struct_pred_cfg.af3.inference_config.ss.num_recycles=10 \
     struct_pred_cfg.af3.inference_config.ss.num_diffusion_samples=5 \

@@ -1,15 +1,15 @@
 wandb:
-  no_wandb: true
+  no_wandb: false
   project: "debug_ligand_seq_des"
   wandb_id: "zhkim216"
   group: null
 
-out_dir: "/home/yjhk/model-dev/allatom-design/debug/260523_mg_bml_prototype/runs"
+out_dir: "/home/yjhk/model-dev/out_dir/debug_ligand_seq_des"
 exp_name: null
 
 overfit: -1
 cuda: true
-num_workers: 0
+num_workers: 8
 
 finetuning:
   enabled: false
@@ -36,7 +36,7 @@ trainer:
   precision: "bf16-mixed"
   check_val_every_n_epoch: 1
   num_sanity_val_steps: 0
-  limit_val_batches: 0
+  limit_val_batches: 1.0
 
 resume:
   ckpt_path: null

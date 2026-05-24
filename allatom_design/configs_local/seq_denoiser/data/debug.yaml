@@ -1,0 +1,84 @@
+defaults:
+  - dataset@_here_: lcaliby
+
+task: ${model.task}
+# v9 BMSM ligand-cluster metadata for local lcaliby smoke runs.
+pdb_path: /home/possu/jinho/datasets/atomworks_pdb_full_v8
+train_metadata_path: /home/possu/jinho/datasets/atomworks_pdb_full_v9/debug_metadata_ligval_seq_clustered_03_bmsm_ligclust.parquet
+
+# Override the Sherlock default paths that ship with configs/seq_denoiser/data/dataset/lcaliby.yaml.
+# Hydra's primary config path wins when the same filename exists in both trees, so supplying these
+# inline is the only way to keep the local smoke run self-contained.
+validation_ids_file: /home/possu/jinho/datasets/splits/lmpnn_validation_ids.txt
+val_metadata_path: /home/possu/jinho/datasets/val_cifs/lmpnn_val_cifs/metadata_lmpnnval_small_molecule_filtered_for_training.parquet
+train_filters: ??? #! Required, set by dataset/*.yaml
+val_filters: ??? #! Required, set by dataset/*.yaml
+
+debug: ${train.debug}
+debug_num_ids: 10000 #! For debugging
+save_failed_examples_to_dir: ${out_dir}/failed_examples #! Should be null if don't want to save failed examples
+residue_cache_dir: /home/possu/jinho/datasets/atomworks_cached_residue_data
+exclude_val_cluster: true
+
+# Dataset-specific filter knobs and biologically/physically_meaningful blocks now live in
+# `dataset/lcaliby.yaml` — overriding on the command line still works via
+# `data.<key>=...` because Hydra merges dataset yaml at this level via `defaults: dataset@_here_`.
+
+# Sampling weights
+sampling_weights:
+  # Per-modality interface weight. Each entry maps onto a single interface_type
+  # (see _INTERFACE_TYPE_TO_ALPHA_KEY in atomworks_sd_dataset.py). Today only
+  # `alpha_protein_small_molecule` and `alpha_protein_nuc_lig` are constructed
+  # today; the others are placeholders for future PPI / metal / peptide builds.
+  alphas_interface:
+    alpha_protein_protein:        0.0
+    alpha_protein_small_molecule: 1.0
+    alpha_protein_metal:          0.0
+    alpha_protein_nuc:            0.0
+    alpha_protein_nuc_lig:        1.0
+    alpha_protein_peptide:        0.0
+  k_percentile: 90.0
+  # v9 BMSM ligand cluster column. Set to null to fall back to individual CCD code.
+  ligand_cluster_col: "q_pn_unit_bmsm_ligand_cluster_id"
+
+# CIF parser args. Not used during training since we've already cached the CIFs.
+cif_parser_args:
+  add_missing_atoms: true
+  remove_waters: true
+  remove_ccds: []
+  fix_ligands_at_symmetry_centers: true
+  fix_arginines: true
+  convert_mse_to_met: true
+  hydrogen_policy: "remove"
+
+interface_only_training: false  # Standard featurizer + interface-only sampling (exclude monomer)
+
+featurizer_cfg:
+  is_inference: false
+  occupancy_threshold_protein_backbone: 0.0
+  training_structure_noise: 0.3
+  undesired_res_names: []
+  remove_unresolved_tokens: true
+  max_tokens: 256 #! DEBUG (min)
+  max_atoms: 2304 #! DEBUG (min)
+  crop_center_cutoff_distance: 15.0
+  crop_spatial_p_protein_monomer_chain: 0.25
+  drop_prob_non_protein_chains: 0.0
+  # Ensure at least N protein tokens from the nearest protein pn_unit (chain) to the crop center.
+  min_protein_tokens_in_interface_crop: 20
+  pocket_distance: 6.0
+  use_pocket_rbf: ${denoiser.mpnn.token_features.use_pocket_rbf}
+  pocket_rbf_distance: ${denoiser.mpnn.token_features.pocket_rbf_distance}
+  residue_cache_dir: ${data.residue_cache_dir}
+  max_conformers_per_residue: 50
+  apply_random_augmentation: true
+  translation_scale: 1.0
+  asymmetric_noise: false
+  protein_noise_scale: 0.3
+  context_noise_scale: 0.05
+  pseudo_ligand_occupancy_threshold: 0.5  # JH Changed 260416 — min occupancy for pseudo-ligand sidechain atoms
+
+samples_per_epoch: 100 #! DEBUG
+batch_size: ${train.batch_size}
+num_workers: ${num_workers}
+random_seed: ${train.seed}

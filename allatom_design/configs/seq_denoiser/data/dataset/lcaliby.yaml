@@ -1,0 +1,68 @@
+# ligandmpnn dataset configuration
+# Override validation_ids_file and filters
+
+validation_ids_file: /scratch/users/zhkim216/datasets/splits/lmpnn_validation_ids.txt
+val_metadata_path: /scratch/users/zhkim216/datasets/val_cifs/lmpnn_val_cifs/metadata_lmpnnval_small_molecule_filtered_for_training.parquet
+
+# --- Dataset-specific filters (moved from ligand_cond.yaml) ---
+
+# Interface pair contact gate. Null disables; numeric = min `contact_num_contacts`
+# in `_process_interface_df` (replaces the old yaml filter `contact_num_contacts >= 5`).
+interface_min_contact_num_contacts: 3
+# Close-contact cutoff for build_interface_df (Angstrom).
+max_interface_distance: 5.0
+# NA-NA cutoff for small nucleic-acid ligand grouping.
+nucleic_acid_group_distance_cutoff: 4.5
+
+# Dataset specific filter toggles
+use_biologically_meaningful_small_molecule: true
+use_physically_meaningful_small_molecule: true
+use_physically_meaningful_metal: true
+
+# Biologically meaningful small molecule narrowing. `num_contacting_protein_chains` accepts:
+#   null                   -> disable
+#   int (e.g. 1)           -> "num_contacting_protein_chains == <int>" (backward-compat)
+#   str "== 1" / ">= 2"    -> auto-prefixed with column name
+#   str "num_contacting_protein_chains >= 1 and num_contacting_protein_chains <= 3"
+#                          -> used as-is as a pandas-eval expression
+# BMSM is further narrowed to PMSM survivors by the row-drop filters below.
+biologically_meaningful_small_molecule:
+  num_contacting_protein_chains: 1                 # null to disable; supports inequalities (e.g. ">= 1")
+  exclude_covalently_linked_to_protein: true
+
+# Physically meaningful small molecule and metal filters. PMSM/PMM non-passers
+# are dropped from metadata_df entirely; cov-linked small molecules always pass.
+physically_meaningful_small_molecule:
+  min_neighboring_heavy_atoms: 5                   # null to disable
+physically_meaningful_metal:
+  min_avg_occupancy: 0.5                           # null to disable
+  min_coordination_partners: 3                     # null to disable
+
+train_filters:
+  metadata_filter:
+    - "release_date <= '2022-12-16'"
+    - "resolution < 9.0"
+    - "clash_severity != 'severe'"
+    - "~method.str.contains('NMR')"
+    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"
+    - "num_polymer_pn_units < 50"
+  protein_monomer_chain_filter:
+    - "q_pn_unit_is_protein"
+    - "20 <= q_pn_unit_num_resolved_residues < 2048"
+  interface_filter:
+    # Small-molecule interface centers are selected by the explicit BMSM flag.
+    # Maybe-covalent small molecules can remain in metadata as featurizer context
+    # but do not become BMSM-centered interface rows.
+    "1":
+      - "resolution < 3.5"
+      - "q_pn_unit_is_biologically_meaningful_small_molecule or q_pn_unit_is_nuc_ligand or (q_pn_unit_is_protein and (20 <= q_pn_unit_num_resolved_residues < 2048))"
+    "2":
+      - "(interface_type == 'bmsm_protein' and n_small_molecule == 1) or interface_type == 'nuc_lig_protein'"
+
+val_filters:
+  metadata_filter:
+    - "release_date <= '2022-12-16'"
+    - "resolution < 3.5"
+    - "clash_severity != 'severe'"
+    - "~method.str.contains('NMR')"
+    - "method in ['X-RAY_DIFFRACTION', 'ELECTRON_MICROSCOPY']"

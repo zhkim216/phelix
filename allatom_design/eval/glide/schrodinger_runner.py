@@ -1,6 +1,6 @@
 """Wrappers for Schrodinger command-line tools.
 
-All Schrodinger tools run as subprocesses. The lullaby_local conda
+All Schrodinger tools run as subprocesses. The elix_local conda
 environment does NOT have Schrodinger Python packages installed.
 """
 

@@ -17,15 +17,14 @@ mpnn:
   # ligand conditioning options
   lmpnn_module:
     num_context_feature_processor_layers: 2
-    num_context_feature_aggregator_layers: 2    
-    edge_update: false
+    num_context_feature_aggregator_layers: 2
 
   token_features:
     num_rbf: 16
     min_rbf_mean: 2.0
     max_rbf_mean: 22.0
     protein_graph_rbf_type: "ca" # "ca", "ncaco", "ncacocb"
-    k_neighbors: ${denoiser.mpnn.k_neighbors}    
+    k_neighbors: ${denoiser.mpnn.k_neighbors}
     num_positional_embeddings: 16
     node_n_channel: ${denoiser.mpnn.n_channel}
     edge_n_channel: ${denoiser.mpnn.n_channel}

@@ -20,7 +20,6 @@ except ImportError:
         raise ImportError("joblib is required when using parallel SD featurization") from None
 
 
-from allatom_design.data.data import to
 from allatom_design.data.datasets.atomworks_sd_dataset import sd_collator
 from allatom_design.data.transform.preprocess import preprocess_transform, preprocess_transform_designed_samples
 from allatom_design.data.transform.sd_featurizer import (
@@ -32,6 +31,7 @@ from allatom_design.data.transform.sd_featurizer_pocket_only import sd_featurize
 from allatom_design.eval.eval_utils.eval_setup_utils import get_pdb_files
 # from allatom_design.utils.atom_array_utils import add_pn_unit_iid_annotation
 from allatom_design.utils.sample_io_utils import load_example_with_parse
+from allatom_design.utils.tensor_utils import to
 
 
 def create_sample_dict(
@@ -77,25 +77,25 @@ def prepare_sample_dict(
 
     if cfg is None:
         raise ValueError("cfg must be provided")
-    
+
     sample_paths = get_pdb_files(**cfg.pdb_cfg)
 
     if cfg.debug:
-        sample_paths = sample_paths[:cfg.num_debug_samples]        
+        sample_paths = sample_paths[:cfg.num_debug_samples]
 
     return create_sample_dict(sample_paths=sample_paths, prefix=prefix)
 
 
 def get_sd_batch(
     pdb_paths: list[str] | None = None,
-    *,    
+    *,
     sample_is_designed: bool = False,
     cif_parse_cfg: DictConfig | dict[str, Any] | None = None,
     preprocess_cfg: DictConfig | dict[str, Any] | None = None,
     featurizer_cfg: DictConfig | dict[str, Any] | None = None,
     device: str | None = None,
     parallel_pool: Parallel | None = None,
-    sampling_inputs_df: pd.DataFrame | None = None,    
+    sampling_inputs_df: pd.DataFrame | None = None,
     pocket_only: bool = False,
     pocket_featurizer_cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -104,11 +104,11 @@ def get_sd_batch(
     """
     if pdb_paths is None:
         return {}
-    
+
     if parallel_pool is None:
         batch_examples = [
             get_sd_example(
-                pdb_path=pdb_path,                
+                pdb_path=pdb_path,
                 cif_parse_cfg=cif_parse_cfg,
                 preprocess_cfg=preprocess_cfg,
                 featurizer_cfg=featurizer_cfg,
@@ -122,7 +122,7 @@ def get_sd_batch(
     else:
         batch_examples = parallel_pool(
             delayed(get_sd_example)(
-                pdb_path=pdb_path,                
+                pdb_path=pdb_path,
                 cif_parse_cfg=cif_parse_cfg,
                 preprocess_cfg=preprocess_cfg,
                 featurizer_cfg=featurizer_cfg,
@@ -140,13 +140,13 @@ def get_sd_batch(
 
 
 def get_sd_example(
-    pdb_path: str | None = None,    
+    pdb_path: str | None = None,
     *,
     sample_is_designed: bool = False,
     cif_parse_cfg: DictConfig | dict[str, Any] | None = None,
     preprocess_cfg: DictConfig | dict[str, Any] | None = None,
     featurizer_cfg: DictConfig | dict[str, Any] | None = None,
-    sampling_inputs_df: pd.DataFrame | None = None,    
+    sampling_inputs_df: pd.DataFrame | None = None,
     pocket_only: bool = False,
     pocket_featurizer_cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -155,15 +155,15 @@ def get_sd_example(
     """
     if pdb_path is None:
         raise ValueError("pdb_path must be provided")
-        
-    example = load_example_with_parse(pdb_path, cif_parse_cfg)    
-    
+
+    example = load_example_with_parse(pdb_path, cif_parse_cfg)
+
     example = preprocess_input(
         example=example,
         preprocess_cfg=preprocess_cfg,
         sample_is_designed=sample_is_designed,
     )
-        
+
     pdb_id = Path(pdb_path).stem.split("_")[0]
     example["query_pn_unit_iids"] = resolve_query_pn_unit_iids(
         atom_array=example["atom_array"],
@@ -182,30 +182,30 @@ def get_sd_example(
 
 
 def prepare_af3_prediction(
-    pdb_path: str | None = None,        
+    pdb_path: str | None = None,
     cif_parse_cfg: DictConfig | dict[str, Any] | None = None,
     preprocess_cfg: DictConfig | dict[str, Any] | None = None,
-    featurizer_cfg: DictConfig | dict[str, Any] | None = None,    
+    featurizer_cfg: DictConfig | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Given a pdb file path from AF3 prediction, return sequence design model features.
-    """        
-                
+    """
+
     example = load_example_with_parse(pdb_path, cif_parse_cfg)
 
-    example = preprocess_input(        
-        example=example,        
+    example = preprocess_input(
+        example=example,
         preprocess_cfg=preprocess_cfg,
         sample_is_designed=True,
     )
-    
+
     featurizer_cfg = OmegaConf.to_container(featurizer_cfg, resolve=True)
     featurizer = featurizer_af3_prediction(**featurizer_cfg)
     return featurizer(example)
 
 
 def prepare_designed_sample(
-    pdb_path: str | None = None,        
+    pdb_path: str | None = None,
     cif_parse_cfg: DictConfig | dict[str, Any] | None = None,
     preprocess_cfg: DictConfig | dict[str, Any] | None = None,
     featurizer_cfg: DictConfig | dict[str, Any] | None = None,
@@ -213,7 +213,7 @@ def prepare_designed_sample(
     """
     Given a pdb path from designed samples, return sequence design model features.
     """
-    
+
     example = load_example_with_parse(pdb_path, cif_parse_cfg)
 
     example = preprocess_input(

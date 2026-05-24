@@ -21,13 +21,13 @@ from allatom_design.data.transform.preprocess import preprocess_transform
 from atomworks.enums import ChainTypeInfo, ChainType
 from atomworks.constants import METAL_ELEMENTS
 from atomworks.ml.preprocessing.constants import PEPTIDE_MAX_RESIDUES, NUCLEIC_ACID_LIGANDS_MAX_RESIDUES
-from allatom_design.utils.metadata_utils import (compute_contacts_to_proteins_per_pdb, 
-                                                 assign_nucleic_acid_chain_clusters_per_pdb, 
+from allatom_design.utils.metadata_utils import (compute_contacts_to_proteins_per_pdb,
+                                                 assign_nucleic_acid_chain_clusters_per_pdb,
                                                  sum_nucleic_acid_cluster_residues_per_pdb,
                                                  compute_nuc_cluster_contacts_to_proteins_per_pdb)
 
 from allatom_design.model.seq_denoiser.lit_sd_model import LitSeqDenoiser
-from allatom_design.checkpoint_utils import get_cfg_from_ckpt
+from allatom_design.utils.checkpoint_utils import get_cfg_from_ckpt
 
 def get_pdb_files(pdb_dir: str | None,
                   pdb_name_list: str | None,
@@ -75,7 +75,7 @@ def get_pdb_files(pdb_dir: str | None,
     """
     # Read in PDB files from directory or list of PDB names
     if pdb_name_list is not None:
-        if isinstance(pdb_name_list, np.ndarray): 
+        if isinstance(pdb_name_list, np.ndarray):
             pdb_name_list = pdb_name_list.tolist()
             pdb_names = [f"{Path(name).with_suffix(pdb_name_ext)}" for name in pdb_name_list]
             pdb_files = [f"{pdb_dir}/{name}" for name in pdb_names]
@@ -97,13 +97,13 @@ def get_pdb_files(pdb_dir: str | None,
                 d for d in Path(pdb_dir).iterdir() if d.is_dir()
             ])
             print(f"Found {len(subfolders)} subfolders in {pdb_dir}")
-            
+
             chunk_size = math.ceil(len(subfolders) / num_arrays)
             start_idx = array_id * chunk_size
             end_idx = min(start_idx + chunk_size, len(subfolders))
             selected_subfolders = subfolders[start_idx:end_idx]
             print(f"Array {array_id}/{num_arrays}: processing subfolders {[s.name for s in selected_subfolders]}")
-            
+
             # Collect all files from selected subfolders
             pdb_files = []
             for subfolder in selected_subfolders:
@@ -114,18 +114,18 @@ def get_pdb_files(pdb_dir: str | None,
             pdb_files = natsorted([
                 str(f) for f in Path(pdb_dir).rglob("*") if f.is_file()
             ])
-        
+
         # Filter by extension if pdb_name_ext is provided
         if pdb_name_ext:
             pdb_files = [f for f in pdb_files if f.endswith(pdb_name_ext)]
-        
+
         print(f"Found {len(pdb_files)} PDB files recursively in {pdb_dir}")
         if len(pdb_files) == 0:
             raise ValueError(f"No PDB files found recursively in directory {pdb_dir}")
     else:
         # get all PDBs in the directory
         pdb_files = natsorted(list(glob.glob(f"{pdb_dir}/*")))
-        
+
         # Filter by extension if pdb_name_ext is provided
         if pdb_name_ext:
             pdb_files = [f for f in pdb_files if f.endswith(pdb_name_ext)]
@@ -133,7 +133,7 @@ def get_pdb_files(pdb_dir: str | None,
             # Filter out non-structure files (e.g. .pt, .pkl, .json)
             supported_exts = {".pdb", ".cif", ".mmcif", ".ent"}
             pdb_files = [f for f in pdb_files if Path(f).suffix.lower() in supported_exts]
-        
+
         print(f"Found {len(pdb_files)} PDB files in {pdb_dir}")
         if len(pdb_files) == 0:
             raise ValueError(f"No PDB files found in directory {pdb_dir}")
@@ -233,7 +233,7 @@ def get_training_checkpoints(
         ckpts = glob.glob(f"{non_ema_ckpt_dir}/*.ckpt")
 
     # Filter and sort checkpoints
-    all_ckpts = natsorted([ckpt for ckpt in ckpts if pattern.search(Path(ckpt).name)])    
+    all_ckpts = natsorted([ckpt for ckpt in ckpts if pattern.search(Path(ckpt).name)])
 
     # Filter by start_step and end_step if provided
     if start_step is not None or end_step is not None:
@@ -353,7 +353,7 @@ def wandb_setup(
             config=cfg_dict,
             dir=wandb_dir,
         )
-        
+
         # Define custom x-axis metric to allow non-monotonic step logging
         # This is needed when evaluating multiple checkpoints in different phases
         wandb.define_metric("trainer/global_step")
