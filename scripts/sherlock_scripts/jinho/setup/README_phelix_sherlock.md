@@ -17,7 +17,7 @@ Defaults:
 ```bash
 SIF=/scratch/users/zhkim216/containers/phelix.sif
 VENV=/scratch/users/zhkim216/venv/phelix
-PROJECT_ROOT=/home/users/zhkim216/code/allatom-design
+PROJECT_ROOT=/home/users/zhkim216/code/phelix
 UV_CACHE_DIR=/scratch/users/zhkim216/uv/cache
 ```
 
@@ -47,7 +47,7 @@ apptainer pull /scratch/users/zhkim216/containers/phelix.sif docker://<your-phel
 Then update the repo:
 
 ```bash
-cd /home/users/zhkim216/code/allatom-design
+cd /home/users/zhkim216/code/phelix
 git pull
 ```
 
@@ -56,7 +56,7 @@ git pull
 Enter the container:
 
 ```bash
-cd /home/users/zhkim216/code/allatom-design
+cd /home/users/zhkim216/code/phelix
 bash scripts/sherlock_scripts/jinho/setup/shell_in_container_phelix.sh
 ```
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Run this inside the Phelix Sherlock container.
 
-PROJECT_ROOT="${PROJECT_ROOT:-/home/users/zhkim216/code/allatom-design}"
+PROJECT_ROOT="${PROJECT_ROOT:-/home/users/zhkim216/code/phelix}"
 VENV="${VENV:-/scratch/users/zhkim216/venv/phelix}"
 UV_CACHE_DIR="${UV_CACHE_DIR:-/scratch/users/zhkim216/uv/cache}"
 UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-/scratch/users/zhkim216/uv/python}"

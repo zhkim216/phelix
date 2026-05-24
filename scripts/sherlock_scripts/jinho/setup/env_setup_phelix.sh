@@ -55,7 +55,7 @@ export XLA_CLIENT_MEM_FRACTION="${XLA_CLIENT_MEM_FRACTION:-0.95}"
 # Phelix paths.
 export SIF="${SIF:-$SCRATCH/containers/phelix.sif}"
 export VENV="${VENV:-$SCRATCH/venv/phelix}"
-export PROJECT_ROOT="${PROJECT_ROOT:-/home/users/zhkim216/code/allatom-design}"
+export PROJECT_ROOT="${PROJECT_ROOT:-/home/users/zhkim216/code/phelix}"
 
 # Optional Schrodinger environment. Keep optional so Phelix AF3 setup does not
 # depend on Schrodinger for package installation.

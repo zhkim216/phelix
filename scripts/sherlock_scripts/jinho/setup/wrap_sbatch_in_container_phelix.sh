@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/env_setup_phelix.sh"
 
 IMG="${SIF:-/scratch/users/zhkim216/containers/phelix.sif}"
-REPO_DIR="${PROJECT_ROOT:-/home/users/zhkim216/code/allatom-design}"
+REPO_DIR="${PROJECT_ROOT:-/home/users/zhkim216/code/phelix}"
 ENV_DIR="${VENV:-/scratch/users/zhkim216/venv/phelix}"
 
 if [ -x /bin/singularity ]; then
