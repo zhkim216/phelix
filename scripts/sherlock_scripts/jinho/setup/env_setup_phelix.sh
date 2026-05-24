@@ -59,14 +59,6 @@ export SIF="${SIF:-$SCRATCH/containers/phelix.sif}"
 export VENV="${VENV:-$UV_ENV_ROOT/phelix}"
 export PROJECT_ROOT="${PROJECT_ROOT:-/home/users/zhkim216/code/phelix}"
 
-# Optional Schrodinger environment. Keep optional so Phelix AF3 setup does not
-# depend on Schrodinger for package installation.
-SETUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SETUP_DIR/schrodinger_env.sh" ]; then
-  # shellcheck disable=SC1091
-  source "$SETUP_DIR/schrodinger_env.sh" || true
-fi
-
 export PATH="$VENV/bin:/hmmer/bin:$CUDA_HOME/bin:$PATH"
 
 echo "Phelix Sherlock environment loaded:"

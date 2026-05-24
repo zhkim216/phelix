@@ -163,6 +163,13 @@ cd /home/users/zhkim216/code/phelix
 bash scripts/sherlock_scripts/jinho/setup/shell_in_container_phelix.sh
 ```
 
+For Glide/Schrodinger work, opt in explicitly so Schrodinger paths and license
+state are bound into the container:
+
+```bash
+bash scripts/sherlock_scripts/jinho/setup/shell_in_container_phelix.sh --schrodinger
+```
+
 Inside the container, run:
 
 ```bash
@@ -180,15 +187,20 @@ Inside the container:
 ```bash
 source /scratch/users/zhkim216/envs/uv/phelix/bin/activate
 
-python - <<'PY'
-import jax, torch, rdkit, alphafold3, atomworks, allatom_design
-print("jax", jax.__version__, jax.devices())
-print("torch", torch.__version__, torch.cuda.is_available())
-print("rdkit", rdkit.__version__)
-print("alphafold3", alphafold3.__file__)
-print("atomworks", atomworks.__file__)
-PY
+PHELIX_INSTALL_TEST_STRICT=1 python -m pytest tests/test_phelix_install.py -q
+```
 
+Inside a GPU allocation, also require GPU visibility:
+
+```bash
+PHELIX_INSTALL_TEST_STRICT=1 PHELIX_REQUIRE_GPU=1 \
+  python -m pytest tests/test_phelix_install.py -q
+```
+
+Run the lightweight AlphaFold3 data tests separately when you want an AF3 input
+pipeline smoke check:
+
+```bash
 python alphafold3/run_alphafold_data_test.py \
   DataPipelineTest.test_template_chain_id_roundtrip \
   DataPipelineTest.test_ligand_template_conditioning_config \
@@ -206,6 +218,12 @@ Wrap an existing sbatch script with:
 
 ```bash
 bash scripts/sherlock_scripts/jinho/setup/wrap_sbatch_in_container_phelix.sh path/to/job.sbatch
+```
+
+For Glide/Schrodinger jobs:
+
+```bash
+bash scripts/sherlock_scripts/jinho/setup/wrap_sbatch_in_container_phelix.sh --schrodinger path/to/job.sbatch
 ```
 
 The wrapper activates `/scratch/users/zhkim216/envs/uv/phelix` inside

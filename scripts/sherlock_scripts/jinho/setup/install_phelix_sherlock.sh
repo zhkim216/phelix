@@ -89,7 +89,7 @@ uv pip install --python "$VENV/bin/python" \
   'pandas>=2.2,<2.4' seaborn matplotlib torchtyping einops biopython ihm modelcif \
   biotite==1.2.0 hydride 'py3Dmol>=2.2.1,<3' 'pymol-remote>=0.0.5' \
   pyarrow==17.0.0 'cython>=3,<4' 'cytoolz>=0.12.3,<1' 'typer>=0.12.5,<1' \
-  'jaxtyping>=0.2.17,<1' 'beartype>=0.18.0,<1' pathspec \
+  'jaxtyping>=0.2.17,<1' 'beartype>=0.18.0,<1' pathspec pytest \
   --index-strategy unsafe-best-match
 
 uv pip install --python "$VENV/bin/python" openbabel-wheel==3.1.1.22
