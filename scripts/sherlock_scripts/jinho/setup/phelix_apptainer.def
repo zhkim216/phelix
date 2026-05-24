@@ -1,9 +1,6 @@
 Bootstrap: docker
 From: nvidia/cuda:12.6.3-base-ubuntu24.04
 
-%files
-    __PHELIX_JACKHMMER_PATCH__ /tmp/jackhmmer_seq_limit.patch
-
 %post
     set -eux
 
@@ -30,6 +27,16 @@ From: nvidia/cuda:12.6.3-base-ubuntu24.04
     # later on Sherlock scratch by install_phelix_sherlock.sh.
     curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
     uv --version
+
+    # Write the AlphaFold3 jackhmmer --seq_limit patch inline. This avoids
+    # relying on Apptainer %files behavior, which can differ across Sherlock
+    # fakeroot/build configurations.
+    cat > /tmp/jackhmmer_seq_limit.patch.b64 <<'PHELIX_JACKHMMER_PATCH_B64'
+__PHELIX_JACKHMMER_PATCH_B64__
+PHELIX_JACKHMMER_PATCH_B64
+    base64 -d /tmp/jackhmmer_seq_limit.patch.b64 > /tmp/jackhmmer_seq_limit.patch
+    rm -f /tmp/jackhmmer_seq_limit.patch.b64
+    test -s /tmp/jackhmmer_seq_limit.patch
 
     # Build patched HMMER 3.4 for AlphaFold3 data pipeline support.
     mkdir -p /hmmer_build /hmmer

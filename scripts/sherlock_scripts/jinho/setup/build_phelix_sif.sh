@@ -50,15 +50,19 @@ mkdir -p "$(dirname "$SIF")"
 
 cd "$REPO_ROOT"
 
+PATCH_B64="$(base64 "$PATCH_PATH" | tr -d '\n')"
 BUILD_DEF="$(mktemp "${TMPDIR:-/tmp}/phelix_apptainer.XXXXXX.def")"
 trap 'rm -f "$BUILD_DEF"' EXIT
-sed "s#__PHELIX_JACKHMMER_PATCH__#$PATCH_PATH#g" "$DEF" > "$BUILD_DEF"
+awk -v patch_b64="$PATCH_B64" '
+  { gsub(/__PHELIX_JACKHMMER_PATCH_B64__/, patch_b64); print }
+' "$DEF" > "$BUILD_DEF"
 
 echo "Building Phelix SIF"
 echo "  repo: $REPO_ROOT"
 echo "  def:  $DEF"
 echo "  build def: $BUILD_DEF"
 echo "  hmmer patch: $PATCH_PATH"
+echo "  hmmer patch bytes: $(wc -c < "$PATCH_PATH")"
 echo "  sif:  $SIF"
 echo "  bin:  $APPTAINER_BIN"
 echo "  flags: ${APPTAINER_BUILD_FLAGS:-<none>}"
