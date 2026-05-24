@@ -2,7 +2,7 @@ Bootstrap: docker
 From: nvidia/cuda:12.6.3-base-ubuntu24.04
 
 %files
-    alphafold3/docker/jackhmmer_seq_limit.patch /tmp/jackhmmer_seq_limit.patch
+    __PHELIX_JACKHMMER_PATCH__ /tmp/jackhmmer_seq_limit.patch
 
 %post
     set -eux

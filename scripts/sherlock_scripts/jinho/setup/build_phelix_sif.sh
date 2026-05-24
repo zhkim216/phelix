@@ -20,6 +20,7 @@ SIF="${SIF:-/scratch/users/zhkim216/containers/phelix.sif}"
 DEF="${DEF:-$SCRIPT_DIR/phelix_apptainer.def}"
 APPTAINER_BUILD_FLAGS="${APPTAINER_BUILD_FLAGS:---fakeroot}"
 FORCE="${FORCE:-0}"
+PATCH_PATH="${PATCH_PATH:-$REPO_ROOT/alphafold3/docker/jackhmmer_seq_limit.patch}"
 
 if ! command -v "$APPTAINER_BIN" >/dev/null 2>&1; then
   echo "ERROR: Apptainer/Singularity command not found: $APPTAINER_BIN" >&2
@@ -28,6 +29,11 @@ fi
 
 if [ ! -f "$DEF" ]; then
   echo "ERROR: Apptainer definition file not found: $DEF" >&2
+  exit 1
+fi
+
+if [ ! -f "$PATCH_PATH" ]; then
+  echo "ERROR: AlphaFold3 jackhmmer patch not found: $PATCH_PATH" >&2
   exit 1
 fi
 
@@ -44,15 +50,21 @@ mkdir -p "$(dirname "$SIF")"
 
 cd "$REPO_ROOT"
 
+BUILD_DEF="$(mktemp "${TMPDIR:-/tmp}/phelix_apptainer.XXXXXX.def")"
+trap 'rm -f "$BUILD_DEF"' EXIT
+sed "s#__PHELIX_JACKHMMER_PATCH__#$PATCH_PATH#g" "$DEF" > "$BUILD_DEF"
+
 echo "Building Phelix SIF"
 echo "  repo: $REPO_ROOT"
 echo "  def:  $DEF"
+echo "  build def: $BUILD_DEF"
+echo "  hmmer patch: $PATCH_PATH"
 echo "  sif:  $SIF"
 echo "  bin:  $APPTAINER_BIN"
 echo "  flags: ${APPTAINER_BUILD_FLAGS:-<none>}"
 
 # shellcheck disable=SC2086
-"$APPTAINER_BIN" build $APPTAINER_BUILD_FLAGS "$SIF" "$DEF"
+"$APPTAINER_BIN" build $APPTAINER_BUILD_FLAGS "$SIF" "$BUILD_DEF"
 
 echo
 echo "Built: $SIF"
