@@ -4,12 +4,14 @@ set -euo pipefail
 # Run this inside the Phelix Sherlock container.
 
 PROJECT_ROOT="${PROJECT_ROOT:-/home/users/zhkim216/code/phelix}"
-VENV="${VENV:-/scratch/users/zhkim216/venv/phelix}"
-UV_CACHE_DIR="${UV_CACHE_DIR:-/scratch/users/zhkim216/uv/cache}"
-UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-/scratch/users/zhkim216/uv/python}"
+SCRATCH="${SCRATCH:-/scratch/users/zhkim216}"
+UV_ENV_ROOT="${UV_ENV_ROOT:-$SCRATCH/envs/uv}"
+VENV="${VENV:-$UV_ENV_ROOT/phelix}"
+UV_CACHE_DIR="${UV_CACHE_DIR:-$SCRATCH/cache/uv}"
+UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-$UV_ENV_ROOT/python}"
 PYTHON_BIN="${PYTHON_BIN:-python3.12}"
 
-export UV_CACHE_DIR UV_PYTHON_INSTALL_DIR
+export SCRATCH UV_ENV_ROOT UV_CACHE_DIR UV_PYTHON_INSTALL_DIR
 
 fail() {
   echo "ERROR: $*" >&2
@@ -43,7 +45,7 @@ else
   echo "WARNING: jackhmmer not found. AF3 data pipeline will need patched HMMER in PATH." >&2
 fi
 
-mkdir -p "$(dirname "$VENV")" "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR"
+mkdir -p "$UV_ENV_ROOT" "$(dirname "$VENV")" "$UV_CACHE_DIR" "$UV_PYTHON_INSTALL_DIR"
 
 if ! command -v uv >/dev/null 2>&1; then
   need_cmd curl

@@ -17,11 +17,13 @@ export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$SCRATCH/cache/.pycache}"
 export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-$SCRATCH/cache/inductor_cache}"
 export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-$SCRATCH/cache/triton_cache}"
 export TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-$SCRATCH/cache/torch_extensions}"
-export UV_CACHE_DIR="${UV_CACHE_DIR:-$SCRATCH/uv/cache}"
-export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-$SCRATCH/uv/python}"
+export UV_ENV_ROOT="${UV_ENV_ROOT:-$SCRATCH/envs/uv}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-$SCRATCH/cache/uv}"
+export UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-$UV_ENV_ROOT/python}"
 export JAX_COMPILATION_CACHE_DIR="${JAX_COMPILATION_CACHE_DIR:-$SCRATCH/cache/jax_compilation_cache}"
 
 mkdir -p \
+  "$UV_ENV_ROOT" \
   "$TORCH_HOME" \
   "$HF_HOME" \
   "$PIP_CACHE_DIR" \
@@ -54,7 +56,7 @@ export XLA_CLIENT_MEM_FRACTION="${XLA_CLIENT_MEM_FRACTION:-0.95}"
 
 # Phelix paths.
 export SIF="${SIF:-$SCRATCH/containers/phelix.sif}"
-export VENV="${VENV:-$SCRATCH/venv/phelix}"
+export VENV="${VENV:-$UV_ENV_ROOT/phelix}"
 export PROJECT_ROOT="${PROJECT_ROOT:-/home/users/zhkim216/code/phelix}"
 
 # Optional Schrodinger environment. Keep optional so Phelix AF3 setup does not
@@ -73,3 +75,4 @@ echo "  CUDA_HOME: $CUDA_HOME"
 echo "  CUDA_HOST: $CUDA_HOST"
 echo "  SIF: $SIF"
 echo "  VENV: $VENV"
+echo "  UV_ENV_ROOT: $UV_ENV_ROOT"

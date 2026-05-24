@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/env_setup_phelix.sh"
 
 IMG="${SIF:-/scratch/users/zhkim216/containers/phelix.sif}"
 REPO_DIR="${PROJECT_ROOT:-/home/users/zhkim216/code/phelix}"
-ENV_DIR="${VENV:-/scratch/users/zhkim216/venv/phelix}"
+ENV_DIR="${VENV:-/scratch/users/zhkim216/envs/uv/phelix}"
 
 if [ -x /bin/singularity ]; then
   APPTAINER_BIN="${APPTAINER_BIN:-/bin/singularity}"
@@ -96,6 +96,7 @@ $APPTAINER_BIN exec --nv \\
   --env TORCHINDUCTOR_CACHE_DIR="$TORCHINDUCTOR_CACHE_DIR" \\
   --env TRITON_CACHE_DIR="$TRITON_CACHE_DIR" \\
   --env TORCH_EXTENSIONS_DIR="$TORCH_EXTENSIONS_DIR" \\
+  --env UV_ENV_ROOT="$UV_ENV_ROOT" \\
   --env UV_CACHE_DIR="$UV_CACHE_DIR" \\
   --env UV_PYTHON_INSTALL_DIR="$UV_PYTHON_INSTALL_DIR" \\
   --env XLA_FLAGS="$XLA_FLAGS" \\

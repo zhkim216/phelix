@@ -16,9 +16,11 @@ Defaults:
 
 ```bash
 SIF=/scratch/users/zhkim216/containers/phelix.sif
-VENV=/scratch/users/zhkim216/venv/phelix
+UV_ENV_ROOT=/scratch/users/zhkim216/envs/uv
+VENV=/scratch/users/zhkim216/envs/uv/phelix
 PROJECT_ROOT=/home/users/zhkim216/code/phelix
-UV_CACHE_DIR=/scratch/users/zhkim216/uv/cache
+UV_CACHE_DIR=/scratch/users/zhkim216/cache/uv
+UV_PYTHON_INSTALL_DIR=/scratch/users/zhkim216/envs/uv/python
 ```
 
 ## What Must Be Done On Sherlock
@@ -36,6 +38,11 @@ The image must provide:
 - zlib development headers (`zlib.h`)
 - CUDA 12-compatible runtime
 - patched HMMER in `PATH`, ideally under `/hmmer/bin`, with `jackhmmer --seq_limit`
+
+The `--seq_limit` requirement comes from the AlphaFold3 Docker/source tree, not
+from the top-level README. AlphaFold3's Dockerfile builds HMMER 3.4 from source
+and applies `docker/jackhmmer_seq_limit.patch`; the Jackhmmer wrapper uses
+`--seq_limit` when supported to avoid redundant output and reduce peak memory.
 
 ## Recommended: Build The SIF Locally And Copy It To Sherlock
 
@@ -171,7 +178,7 @@ belong to the old AlphaFold3 dependency set.
 Inside the container:
 
 ```bash
-source /scratch/users/zhkim216/venv/phelix/bin/activate
+source /scratch/users/zhkim216/envs/uv/phelix/bin/activate
 
 python - <<'PY'
 import jax, torch, rdkit, alphafold3, atomworks, allatom_design
@@ -201,6 +208,6 @@ Wrap an existing sbatch script with:
 bash scripts/sherlock_scripts/jinho/setup/wrap_sbatch_in_container_phelix.sh path/to/job.sbatch
 ```
 
-The wrapper activates `/scratch/users/zhkim216/venv/phelix` inside
+The wrapper activates `/scratch/users/zhkim216/envs/uv/phelix` inside
 `/scratch/users/zhkim216/containers/phelix.sif` and runs the original job from
 the mounted repo.
