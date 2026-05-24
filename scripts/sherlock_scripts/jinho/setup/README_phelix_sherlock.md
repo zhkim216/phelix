@@ -37,11 +37,41 @@ The image must provide:
 - CUDA 12-compatible runtime
 - patched HMMER in `PATH`, ideally under `/hmmer/bin`, with `jackhmmer --seq_limit`
 
-If the image is hosted in a Docker registry, pull it on Sherlock with:
+The repo includes an Apptainer/Singularity definition that builds this image
+from the NVIDIA CUDA 12.6 Ubuntu 24.04 Docker base and adds Python 3.12, uv,
+zlib development headers, and patched HMMER:
+
+```bash
+cd /home/users/zhkim216/code/phelix
+bash scripts/sherlock_scripts/jinho/setup/build_phelix_sif.sh
+```
+
+If Sherlock only has `/bin/singularity`, the build helper will use it
+automatically. If Sherlock does not allow `--fakeroot`, retry with explicit
+build flags:
+
+```bash
+APPTAINER_BUILD_FLAGS="" bash scripts/sherlock_scripts/jinho/setup/build_phelix_sif.sh
+```
+
+If an old or partial image already exists and you want to rebuild it:
+
+```bash
+FORCE=1 bash scripts/sherlock_scripts/jinho/setup/build_phelix_sif.sh
+```
+
+If the image is instead hosted in a Docker registry, pull it on Sherlock with:
 
 ```bash
 mkdir -p /scratch/users/zhkim216/containers
 apptainer pull /scratch/users/zhkim216/containers/phelix.sif docker://<your-phelix-image>
+```
+
+Check the built image:
+
+```bash
+apptainer exec /scratch/users/zhkim216/containers/phelix.sif \
+  bash -lc 'python3.12 --version && uv --version && jackhmmer -h | grep -- --seq_limit'
 ```
 
 Then update the repo:
