@@ -13,6 +13,7 @@ import torch
 from atomworks.ml.datasets import MolecularDataset
 from atomworks.ml.datasets.parsers import GenericDFParser
 from atomworks.ml.example_id import generate_example_id
+from atomworks.ml.transforms.filters import filter_to_specified_pn_units
 from atomworks.ml.utils.io import read_parquet_with_metadata
 from omegaconf import DictConfig
 from torch.utils.data import DataLoader
@@ -29,6 +30,24 @@ MG_PROTO_EVIDENCE_COLUMNS = {
     "substring": "q_pn_unit_has_pubmed_evidence_substring",
     "gpt": "q_pn_unit_has_pubmed_evidence_gpt",
 }
+
+
+def _restrict_example_atom_array_to_query_pn_units(example: dict) -> dict:
+    query_pn_unit_iids = example.get("query_pn_unit_iids")
+    if query_pn_unit_iids is None:
+        return example
+    if isinstance(query_pn_unit_iids, np.ndarray):
+        query_pn_unit_iids = query_pn_unit_iids.tolist()
+    else:
+        query_pn_unit_iids = list(query_pn_unit_iids)
+    if len(query_pn_unit_iids) == 0:
+        return example
+
+    example["atom_array"] = filter_to_specified_pn_units(
+        example["atom_array"],
+        query_pn_unit_iids,
+    )
+    return example
 
 
 class AtomworksSDMGProtoDataModule(L.LightningDataModule):
@@ -131,6 +150,7 @@ class MGProtoSDDataset(MolecularDataset):
             return self.__getitem__((idx + 1) % len(self.parsed_df))
 
         example.update(parsed_row)
+        _restrict_example_atom_array_to_query_pn_units(example)
         example["phase"] = self.phase
 
         try:

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Submit from Sherlock:
-#   PROJECT_ROOT=/home/users/zhkim216/code/allatom-design \
+#   PROJECT_ROOT=/home/users/zhkim216/code/elix \
 #     bash scripts/sherlock_scripts/jinho/setup/wrap_sbatch_in_container_elix.sh \
 #     scripts/sherlock_scripts/jinho/train_seq_denoiser/experiments_after_refactor/mg_proto.sbatch
 #SBATCH --job-name=mg_proto
 #SBATCH -p possu
 #SBATCH --array=0-2
 #SBATCH --gres=gpu:1
-#SBATCH --mem=16G
+#SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
 #SBATCH --time=1-0:00:00
 #SBATCH --output=/scratch/users/zhkim216/job_output/train_seq_denoiser/mg_proto_%A_%a.out
@@ -63,9 +63,9 @@ echo "  out_dir: ${OUT_DIR}"
 echo "  hydra_dir: ${HYDRA_DIR}/${EXP_NAME}"
 echo "  torchinductor_cache: ${TORCHINDUCTOR_CACHE_DIR}"
 
-HYDRA_FULL_ERROR=1 WANDB__SERVICE_WAIT=300 \
+DEBUG= HYDRA_FULL_ERROR=1 WANDB__SERVICE_WAIT=300 \
 python3 allatom_design/train_seq_denoiser.py \
-    --config-dir allatom_design/configs/seq_denoiser \
+    --config-path configs/seq_denoiser \
     --config-name mg_proto.yaml \
     wandb.wandb_id="${WANDB_ID}" \
     wandb.project="${PROJECT}" \
@@ -74,11 +74,12 @@ python3 allatom_design/train_seq_denoiser.py \
     num_workers="${CPUS_PER_TASK}" \
     out_dir="${OUT_DIR}" \
     exp_name="${EXP_NAME}" \
+    train.debug=false \
     train.batch_size=32 \
     train.compile.compile_model=true \
-    trainer.accumulate_grad_batches=1 \
+    trainer.accumulate_grad_batches=2 \
     trainer.strategy="ddp_find_unused_parameters_true" \
-    train.model.denoiser.name="${DENOISER_TYPE}" \
+    denoiser.name="${DENOISER_TYPE}" \
     resume.use_current_cfg=true \
     loss.main_seq_loss_pocket_only=false \
     loss.main_potts_loss_pocket_only=false \
@@ -86,9 +87,10 @@ python3 allatom_design/train_seq_denoiser.py \
     loss.potts.per_token_avg=false \
     data.pdb_path="${PDB_PATH}" \
     data.train_metadata_path="${TRAIN_METADATA_PATH}" \
+    data.validation_ids_file="${VALIDATION_IDS_FILE}" \
+    data.val_metadata_path="${VAL_METADATA_PATH}" \
     data.residue_cache_dir="${RESIDUE_CACHE_DIR}" \
     data.exclude_val_cluster=true \
-    data.pocket_only_training=false \
     data.interface_only_training=false \
     data.samples_per_epoch=50000 \
     data.mg_proto.external_evidence_policy="${POLICY}" \
@@ -120,7 +122,6 @@ python3 allatom_design/train_seq_denoiser.py \
     denoiser.mpnn.token_features.ligand_atom_context_num=25 \
     denoiser.mpnn.potts.k_neighbors_potts=24 \
     mask_selector.restype_masking_schedule="uniform_cosine_t" \
-    +mask_selector.pseudo_ligand_backbone_mask_radius=0 \
     logging.log_every_n_steps=100 \
     logging.wandb_watch_freq=500 \
     checkpointing.save_latest_every_n_steps=2500 \
