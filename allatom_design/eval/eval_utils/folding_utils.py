@@ -73,6 +73,14 @@ def _get_af3_model_runner_and_config(
     global _AF3_MAX_TEMPLATE_DATE, _AF3_BUCKETS
 
     runner = _load_af3_runner(runner_path)
+    try:
+        from absl import flags as absl_flags
+
+        if not absl_flags.FLAGS.is_parsed():
+            absl_flags.FLAGS([str(runner_path)])
+    except Exception as exc:
+        print(f"[AF3 init] Warning: failed to pre-parse AF3 absl flags: {exc}")
+
     base_config = inference_config.get('base', {})
     mode_config = inference_config.get(mode, {})
 
@@ -80,9 +88,7 @@ def _get_af3_model_runner_and_config(
         torch.cuda.empty_cache()
 
         import shutil
-        from alphafold3.jax.attention import attention
         from alphafold3.data import pipeline
-        import typing
 
         flash_attn = base_config.get('flash_attention_implementation', 'triton')
 
@@ -90,7 +96,7 @@ def _get_af3_model_runner_and_config(
         print(f'[AF3 init] Found devices: {devices}, using device 0: {devices[0]}')
 
         model_config = runner.make_model_config(
-            flash_attention_implementation=typing.cast(attention.Implementation, flash_attn),
+            flash_attention_implementation=flash_attn,
             num_diffusion_samples=mode_config.get('num_diffusion_samples', 5),
             num_recycles=mode_config.get('num_recycles', 3),
             return_embeddings=False,
@@ -633,6 +639,7 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
             # Get protein and ligand chain ids, because AF3 expects chain ids, not chain iids
             protein_pn_unit_iids = pdb_chain_info['protein_pn_unit_iids']
             ligand_pn_unit_iids = pdb_chain_info['ligand_pn_unit_iids']
+            ligand_ccd_codes = pdb_chain_info.get('ligand_ccd_codes', [])
 
             if not calculate_metrics_only:
                 # Run AF3 single-sequence prediction
@@ -686,6 +693,7 @@ def evaluate_af3_self_consistency(sample_dict: dict = None,
                                 pocket_distance_for_docking_metrics=pocket_cfg.pocket_distance_for_docking_metrics,
                                 receptor_pn_unit_iids=protein_pn_unit_iids,
                                 ligand_pn_unit_iids=ligand_pn_unit_iids,
+                                ligand_ccd_codes=ligand_ccd_codes,
                                 ref_sample_is_designed=input_sample_is_designed,
                             )
 
@@ -817,6 +825,7 @@ def evaluate_af3_docking_consistency(sample_dict: dict = None,
             # Get protein and ligand chain ids
             protein_pn_unit_iids = pdb_chain_info['protein_pn_unit_iids']
             ligand_pn_unit_iids = pdb_chain_info['ligand_pn_unit_iids']
+            ligand_ccd_codes = pdb_chain_info.get('ligand_ccd_codes', [])
 
             if not calculate_metrics_only:
                 # Run AF3 template-conditioned prediction
@@ -873,6 +882,7 @@ def evaluate_af3_docking_consistency(sample_dict: dict = None,
                                 pocket_distance_for_docking_metrics=pocket_cfg.pocket_distance_for_docking_metrics,
                                 receptor_pn_unit_iids=protein_pn_unit_iids,
                                 ligand_pn_unit_iids=ligand_pn_unit_iids,
+                                ligand_ccd_codes=ligand_ccd_codes,
                                 ref_sample_is_designed=input_sample_is_designed,
                             )
 
@@ -960,7 +970,12 @@ def _aggregate_best_docking_metrics_per_designed_sample(designed_sample_id_to_pe
         # Filter only diffusion predictions with valid ligand_plddt
         diffusion_preds = {
             k: v for k, v in per_pred_docking_metrics.items()
-            if k.startswith("diffusion_") and "ligand_plddt" in v and v["ligand_plddt"] is not None
+            if (
+                k.startswith("diffusion_")
+                and not v.get("error")
+                and "ligand_plddt" in v
+                and v["ligand_plddt"] is not None
+            )
         }
 
         if not diffusion_preds:
@@ -976,6 +991,7 @@ def _aggregate_best_docking_metrics_per_designed_sample(designed_sample_id_to_pe
             "binding_site_plddt": best_pred["binding_site_plddt"],
             "iptm": best_pred["iptm"],
             "interface_min_pae": best_pred["interface_min_pae"],
+            "ligand_ccd_code": best_pred.get("ligand_ccd_code"),
         }
     return designed_sample_id_best_docking_metrics
 
@@ -1030,6 +1046,7 @@ def _aggregate_best_docking_metrics_per_input_sample(designed_sample_id_best_doc
             "binding_site_plddt": best_metrics["binding_site_plddt"],
             "iptm": best_metrics["iptm"],
             "interface_min_pae": best_metrics["interface_min_pae"],
+            "ligand_ccd_code": best_metrics.get("ligand_ccd_code"),
         }
     return input_sample_id_best_docking_metrics
 

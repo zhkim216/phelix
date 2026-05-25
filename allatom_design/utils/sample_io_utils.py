@@ -153,8 +153,17 @@ def save_cif_file(
     
     try:
         to_cif_file(atom_array, cif_path, **cif_save_cfg)
-    except:
-        print(1)
+    except AttributeError as exc:
+        if cif_save_cfg.get("include_bonds", True) and "convert_bond_type" in str(exc):
+            retry_cfg = dict(cif_save_cfg)
+            retry_cfg["include_bonds"] = False
+            print(
+                f"Warning: failed to write bonds for {cif_path}; "
+                "retrying with include_bonds=False"
+            )
+            to_cif_file(atom_array, cif_path, **retry_cfg)
+        else:
+            raise
     fix_cif_formal_charge_format(cif_path)
     return cif_path
 
@@ -176,4 +185,3 @@ def fix_cif_formal_charge_format(cif_path: str | Path) -> None:
     if content != fixed_content:
         with open(cif_path, "w") as f:
             f.write(fixed_content)
-
