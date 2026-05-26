@@ -2,7 +2,7 @@
 
 ## Specifying Input Files
 
-You can provide inputs to `run_alphafold.py` in one of two ways:
+You can provide inputs to `alphafold3.run_alphafold` in one of two ways:
 
 -   Single input file: Use the `--json_path` flag followed by the path to a
     single JSON file.
@@ -37,7 +37,7 @@ from the one used here in the AlphaFold 3 codebase. In particular, the JSON
 format used in the AlphaFold 3 codebase offers more flexibility and control in
 defining custom ligands, branched glycans, and covalent bonds between entities.
 
-We provide a converter in `run_alphafold.py` which automatically detects the
+We provide a converter in `alphafold3.run_alphafold` which automatically detects the
 input JSON format, denoted `dialect` in the converter code. The converter
 denotes the AlphaFoldServer JSON as `alphafoldserver`, and the JSON format
 defined here in the AlphaFold 3 codebase as `alphafold3`. If the detected input
@@ -54,7 +54,7 @@ in a single `alphafoldserver` JSON is fully supported.
 Note that the converter distinguishes between `alphafoldserver` and `alphafold3`
 JSON formats by checking if the top-level of the JSON is a list or not. In
 particular, if you pass in a `alphafoldserver`-style JSON without a top-level
-list, then this is considered incorrect and `run_alphafold.py` will raise an
+list, then this is considered incorrect and `alphafold3.run_alphafold` will raise an
 error.
 
 ### Glycans

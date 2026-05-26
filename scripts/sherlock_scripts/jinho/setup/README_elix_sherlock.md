@@ -241,13 +241,10 @@ ELIX_INSTALL_TEST_STRICT=1 ELIX_REQUIRE_GPU=1 \
   python -m pytest tests/test_elix_install.py -q
 ```
 
-Run the lightweight AlphaFold3 data-pipeline smoke tests:
+Run the lightweight AlphaFold3 runner smoke tests:
 
 ```bash
-python alphafold3/run_alphafold_data_test.py \
-  DataPipelineTest.test_template_chain_id_roundtrip \
-  DataPipelineTest.test_ligand_template_conditioning_config \
-  DataPipelineTest.test_ligand_template_conditioning_rejects_zero_templates
+python -m pytest alphafold3/tests/test_runner_module.py -q
 ```
 
 Known `pip check` metadata conflicts:

@@ -146,7 +146,7 @@ XLA compatibility flag:
 ```bash
 export XLA_FLAGS=--xla_disable_hlo_passes=custom-kernel-fusion-rewriter
 
-python alphafold3/run_alphafold.py \
+python -m alphafold3.run_alphafold \
   --flash_attention_implementation=xla \
   ...
 ```
@@ -158,10 +158,7 @@ python -m compileall -q alphafold3/src/alphafold3 atomworks/src/atomworks allato
 
 python -c 'import jax, torch, rdkit, alphafold3, atomworks, allatom_design; print("jax", jax.__version__, jax.devices()); print("torch", torch.__version__, torch.cuda.is_available()); print("rdkit", rdkit.__version__); print("alphafold3", alphafold3.__file__); print("atomworks", atomworks.__file__)'
 
-python alphafold3/run_alphafold_data_test.py \
-  DataPipelineTest.test_template_chain_id_roundtrip \
-  DataPipelineTest.test_ligand_template_conditioning_config \
-  DataPipelineTest.test_ligand_template_conditioning_rejects_zero_templates
+python -m pytest alphafold3/tests/test_runner_module.py -q
 ```
 
 Expected `pip check` metadata conflicts:

@@ -55,6 +55,9 @@ def source_candidates(dataset_dir: Path, row: pd.Series, pdb_id: str) -> list[Pa
             dataset_dir / "cifs" / sample_file,
         ])
     candidates.extend([
+        dataset_dir / f"{pdb_id}.cif",
+        dataset_dir / "samples" / f"{pdb_id}.cif",
+        dataset_dir / "cifs" / f"{pdb_id}.cif",
         dataset_dir / f"{pdb_id}.cif.gz",
         dataset_dir / "samples" / f"{pdb_id}.cif.gz",
         dataset_dir / "cifs" / f"{pdb_id}.cif.gz",
@@ -72,7 +75,15 @@ def resolve_source_path(dataset_dir: Path, row: pd.Series, pdb_id: str) -> Path:
         if candidate.exists():
             return candidate
     candidate_text = "\n  ".join(str(candidate) for candidate in candidates)
-    raise FileNotFoundError(f"No source .cif.gz found for {pdb_id}. Tried:\n  {candidate_text}")
+    raise FileNotFoundError(f"No source .cif or .cif.gz found for {pdb_id}. Tried:\n  {candidate_text}")
+
+
+def is_cif_gz(path: Path) -> bool:
+    return path.suffixes[-2:] == [".cif", ".gz"]
+
+
+def is_cif(path: Path) -> bool:
+    return path.suffix == ".cif"
 
 
 def decompress_cif_gz(source_path: Path, target_path: Path) -> None:
@@ -81,6 +92,27 @@ def decompress_cif_gz(source_path: Path, target_path: Path) -> None:
     with gzip.open(source_path, "rb") as src, tmp_path.open("wb") as dst:
         shutil.copyfileobj(src, dst)
     tmp_path.replace(target_path)
+
+
+def same_file(path_a: Path, path_b: Path) -> bool:
+    try:
+        return path_a.samefile(path_b)
+    except FileNotFoundError:
+        return False
+
+
+def stage_cif_source(source_path: Path, target_path: Path) -> None:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    if is_cif_gz(source_path):
+        decompress_cif_gz(source_path, target_path)
+    elif is_cif(source_path):
+        if same_file(source_path, target_path):
+            return
+        tmp_path = target_path.with_suffix(target_path.suffix + ".tmp")
+        shutil.copyfile(source_path, tmp_path)
+        tmp_path.replace(target_path)
+    else:
+        raise ValueError(f"expected .cif or .cif.gz source file, got: {source_path}")
 
 
 def discover_sampling_inputs_csv(dataset_dir: Path, explicit_path: Path | None) -> Path:
@@ -124,8 +156,8 @@ def prepare(
     for _, row in df.iterrows():
         pdb_id = infer_pdb_id(row)
         source_path = resolve_source_path(dataset_dir, row, pdb_id)
-        if source_path.suffixes[-2:] != [".cif", ".gz"]:
-            raise ValueError(f"expected .cif.gz source file for {pdb_id}, got: {source_path}")
+        if not (is_cif(source_path) or is_cif_gz(source_path)):
+            raise ValueError(f"expected .cif or .cif.gz source file for {pdb_id}, got: {source_path}")
         source_paths.append(source_path)
         rows.append({**row.to_dict(), "pdb_id": pdb_id})
 
@@ -148,18 +180,22 @@ def prepare(
             staged_df = staged_df.drop(columns=[column])
 
     target_paths = [cifs_dir / f"{pdb_id}.cif" for pdb_id in sample_ids]
-    existing_targets = [path for path in target_paths if path.exists()]
-    if existing_targets and not force and not dry_run:
-        preview = "\n  ".join(str(path) for path in existing_targets[:10])
+    existing_target_conflicts = [
+        target_path
+        for source_path, target_path in zip(source_paths, target_paths)
+        if target_path.exists() and not same_file(source_path, target_path)
+    ]
+    if existing_target_conflicts and not force and not dry_run:
+        preview = "\n  ".join(str(path) for path in existing_target_conflicts[:10])
         raise FileExistsError(
-            f"{len(existing_targets)} staged CIFs already exist. Pass --force to replace. First paths:\n  {preview}"
+            f"{len(existing_target_conflicts)} staged CIFs already exist. Pass --force to replace. First paths:\n  {preview}"
         )
 
     manifest_inputs = []
     for source_path, target_path, pdb_id in zip(source_paths, target_paths, sample_ids):
         source_sha256 = sha256_file(source_path)
         if not dry_run:
-            decompress_cif_gz(source_path, target_path)
+            stage_cif_source(source_path, target_path)
             staged_sha256 = sha256_file(target_path)
         else:
             staged_sha256 = None

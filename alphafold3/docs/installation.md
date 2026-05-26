@@ -307,7 +307,7 @@ docker run -it \
     --volume <DB_DIR>:/root/public_databases \
     --gpus all \
     alphafold3 \
-    python run_alphafold.py \
+    python -m alphafold3.run_alphafold \
     --json_path=/root/af_input/fold_input.json \
     --model_dir=/root/models \
     --output_dir=/root/af_output
@@ -324,7 +324,7 @@ and for the input file.
 `$HOME/af_output` directory before running the `docker` command and make it and
 the input directory writable from the docker container, e.g. by running `chmod
 755 $HOME/af_input $HOME/af_output`. In most cases `docker` and
-`run_alphafold.py` will create the output directory if it does not exist.
+`alphafold3.run_alphafold` will create the output directory if it does not exist.
 
 :ledger: **Note: In the example above the databases have been placed on the
 persistent disk, which is slow.** If you want better genetic and template search
@@ -344,7 +344,7 @@ docker run -it \
     --volume <DB_DIR>:/root/public_databases_fallback \
     --gpus all \
     alphafold3 \
-    python run_alphafold.py \
+    python -m alphafold3.run_alphafold \
     --json_path=/root/af_input/fold_input.json \
     --model_dir=/root/models \
     --db_dir=/root/public_databases \
@@ -359,11 +359,11 @@ paths (flags named `--volume` above) in the correct locations.
 docker: Error response from daemon: error while creating mount source path '/srv/alphafold3_data/models': mkdir /srv/alphafold3_data/models: permission denied.
 ```
 
-`run_alphafold.py` supports many flags for controlling performance, running on
+`alphafold3.run_alphafold` supports many flags for controlling performance, running on
 multiple input files, specifying external binary paths, and more. See
 
 ```sh
-docker run alphafold3 python run_alphafold.py --help
+docker run alphafold3 python -m alphafold3.run_alphafold --help
 ```
 
 for more information.
@@ -429,7 +429,7 @@ singularity exec \
      --bind <MODEL_PARAMETERS_DIR>:/root/models \
      --bind <DB_DIR>:/root/public_databases \
      alphafold3.sif \
-     python run_alphafold.py \
+     python -m alphafold3.run_alphafold \
      --json_path=/root/af_input/fold_input.json \
      --model_dir=/root/models \
      --db_dir=/root/public_databases \
@@ -447,7 +447,7 @@ singularity exec \
      --bind <SSD_DB_DIR>:/root/public_databases \
      --bind <DB_DIR>:/root/public_databases_fallback \
      alphafold3.sif \
-     python run_alphafold.py \
+     python -m alphafold3.run_alphafold \
      --json_path=/root/af_input/fold_input.json \
      --model_dir=/root/models \
      --db_dir=/root/public_databases \

@@ -110,7 +110,7 @@ struct_pred_cfg:
   evaluate_docking_consistency: true
   calculate_metrics_only: false
   af3:
-    runner_path: /home/possu/jinho/allatom-design/alphafold3/run_alphafold_debug_local.py
+    runner_path: /home/possu/jinho/allatom-design/alphafold3/src/alphafold3/run_alphafold.py
     json_config:
       model_seeds: [42]
       version: 2

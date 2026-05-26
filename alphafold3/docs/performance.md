@@ -2,7 +2,7 @@
 
 ## Running the Pipeline in Stages
 
-The `run_alphafold.py` script can be executed in stages to optimise resource
+The `alphafold3.run_alphafold` script can be executed in stages to optimise resource
 utilisation. This can be useful for:
 
 1.  Splitting the CPU-only data pipeline from model inference (which requires a
@@ -18,7 +18,7 @@ utilisation. This can be useful for:
 
 ### Data Pipeline Only
 
-Launch `run_alphafold.py` with `--run_inference=false` to generate Multiple
+Launch `alphafold3.run_alphafold` with `--run_inference=false` to generate Multiple
 Sequence Alignments (MSAs) and templates, without running featurisation and
 model inference. This stage can be quite costly in terms of runtime, CPU, and
 RAM use. The output will be JSON files augmented with MSAs and templates that
@@ -62,7 +62,7 @@ similar issues).
 
 ### Featurisation and Model Inference Only
 
-Launch `run_alphafold.py` with `--run_data_pipeline=false` to skip the data
+Launch `alphafold3.run_alphafold` with `--run_data_pipeline=false` to skip the data
 pipeline and run only featurisation and model inference. This stage requires the
 input JSON file to contain pre-computed MSAs and templates (or they must be
 explicitly set to empty if you want to run MSA and template free).
@@ -126,7 +126,7 @@ Z-values.
 For instance with each database sharded into 16 shards:
 
 ```bash
-python run_alphafold.py \
+python -m alphafold3.run_alphafold \
     --small_bfd_database_path="bfd-first_non_consensus_sequences.fasta@64" \
     --small_bfd_z_value=65984053 \
     --mgnify_database_path="mgy_clusters_2022_05.fa@512" \
@@ -274,11 +274,11 @@ By default, the largest bucket size is 5,120 tokens. Processing inputs larger
 than this maximum bucket size triggers the creation of a new bucket for exactly
 that input size, and a re-compilation of the model. In this case, you may wish
 to redefine the compilation bucket sizes via the `--buckets` flag in
-`run_alphafold.py` to add additional larger bucket sizes. For example, suppose
+`alphafold3.run_alphafold` to add additional larger bucket sizes. For example, suppose
 you are running inference on inputs with token sizes: `5132, 5280, 5342`. Using
-the default bucket sizes configured in `run_alphafold.py` will trigger three
+the default bucket sizes configured in `alphafold3.run_alphafold` will trigger three
 separate model compilations, one for each unique token size. If instead you pass
-in the following flag to `run_alphafold.py`
+in the following flag to `alphafold3.run_alphafold`
 
 ```
 --buckets 256,512,768,1024,1280,1536,2048,2560,3072,3584,4096,4608,5120,5376
@@ -349,7 +349,7 @@ ENV XLA_CLIENT_MEM_FRACTION=3.2
 You may also want to make use of the JAX persistent compilation cache, to avoid
 unnecessary recompilation of the model between runs. You can enable the
 compilation cache with the `--jax_compilation_cache_dir <YOUR_DIRECTORY>` flag
-in `run_alphafold.py`.
+in `alphafold3.run_alphafold`.
 
 More detailed instructions are available in the
 [JAX documentation](https://jax.readthedocs.io/en/latest/persistent_compilation_cache.html#persistent-compilation-cache),

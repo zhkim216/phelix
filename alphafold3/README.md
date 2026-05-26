@@ -67,14 +67,14 @@ docker run -it \
     --volume <DATABASES_DIR>:/root/public_databases \
     --gpus all \
     alphafold3 \
-    python run_alphafold.py \
+    python -m alphafold3.run_alphafold \
     --json_path=/root/af_input/fold_input.json \
     --model_dir=/root/models \
     --output_dir=/root/af_output
 ```
 
-There are various flags that you can pass to the `run_alphafold.py` command, to
-list them all run `python run_alphafold.py --help`. Two fundamental flags that
+There are various flags that you can pass to the `alphafold3.run_alphafold` command, to
+list them all run `python -m alphafold3.run_alphafold --help`. Two fundamental flags that
 control which parts AlphaFold 3 will run are:
 
 *   `--run_data_pipeline` (defaults to `true`): whether to run the data

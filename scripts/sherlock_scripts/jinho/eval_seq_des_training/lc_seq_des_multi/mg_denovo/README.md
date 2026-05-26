@@ -10,7 +10,7 @@ Expected Sherlock dataset root:
 /scratch/users/zhkim216/datasets/val_cifs/mg_denovo_val_cifs_test
 ```
 
-If copying the raw generated CIFs again, do not quote the glob:
+The prepare script accepts either `.cif` files already on Sherlock or `.cif.gz` files. If copying compressed raw generated CIFs again, do not quote the glob:
 
 ```bash
 cp /scratch/users/zhkim216/rfd3_mg_binding_len150_1000/*.cif.gz \
@@ -26,7 +26,7 @@ Run this once on Sherlock:
 ```bash
 cd /home/users/zhkim216/code/elix
 python3 scripts/sherlock_scripts/jinho/eval_seq_des_training/lc_seq_des_multi/mg_denovo/prepare_mg_denovo_rasa_n100_sherlock.py --dry-run
-python3 scripts/sherlock_scripts/jinho/eval_seq_des_training/lc_seq_des_multi/mg_denovo/prepare_mg_denovo_rasa_n100_sherlock.py --force
+python3 scripts/sherlock_scripts/jinho/eval_seq_des_training/lc_seq_des_multi/mg_denovo/prepare_mg_denovo_rasa_n100_sherlock.py
 ```
 
 Generated files:
@@ -82,6 +82,23 @@ PROJECT_ROOT=/home/users/zhkim216/code/elix MODE=smoke \
 ```
 
 The Elix wrapper does not take `sbatch --array` or `sbatch --export` passthrough arguments. The per-step sweep keeps `#SBATCH --array=0-17`; when `MODEL_FILTER` or `STEP_FILTER` is set, tasks outside the selected combinations exit without work.
+
+Interactive smoke test:
+
+```bash
+cd /home/users/zhkim216/code/elix
+python3 allatom_design/eval/sampling/lc_seq_des_multi.py --config-name debug_lc_seq_des_multi_mgproto
+```
+
+The debug config defaults to `mg_proto_gpt`, step `2500`, the smoke2 PDB list, one sequence per PDB, W&B disabled, and AF3 disabled. Override model/step as needed:
+
+```bash
+python3 allatom_design/eval/sampling/lc_seq_des_multi.py --config-name debug_lc_seq_des_multi_mgproto \
+  seq_des_cfg.denoiser_train_dir=/scratch/users/zhkim216/out_dir/ligand_seq_des/mg_proto_len512_gpt \
+  seq_des_cfg.ckpt_cfg.start_step=42500 \
+  seq_des_cfg.ckpt_cfg.end_step=42500 \
+  exp_name=debug_mg_denovo_rasa_n100_mg_proto_len512_gpt_step42500_no_af3
+```
 
 The per-step sweep covers these models:
 

@@ -156,6 +156,7 @@ def main(cfg: DictConfig):
                                             pocket_only = _pocket_only,
                                             pocket_featurizer_cfg = _pocket_featurizer_cfg,
                                             pocket_distances_for_seq_recovery = cfg.pocket_cfg.pocket_distances_for_seq_recovery,
+                                            pocket_n_min_ligand_atoms_for_seq_recovery = cfg.pocket_cfg.get("n_min_ligand_atoms_for_seq_recovery", 5),
                                             csv_suffix = csv_suffix,
                                             guidance_cfg = cfg.get("guidance_cfg", None))
 

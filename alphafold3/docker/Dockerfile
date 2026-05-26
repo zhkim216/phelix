@@ -85,4 +85,4 @@ ENV XLA_FLAGS="--xla_gpu_enable_triton_gemm=false"
 ENV XLA_PYTHON_CLIENT_PREALLOCATE=true
 ENV XLA_CLIENT_MEM_FRACTION=0.95
 
-CMD ["uv", "run", "python3", "run_alphafold.py"]
+CMD ["uv", "run", "python3", "-m", "alphafold3.run_alphafold"]

@@ -122,10 +122,7 @@ PY
 
 ELIX_INSTALL_TEST_STRICT=1 python -m pytest tests/test_elix_install.py -q
 
-python alphafold3/run_alphafold_data_test.py \
-  DataPipelineTest.test_template_chain_id_roundtrip \
-  DataPipelineTest.test_ligand_template_conditioning_config \
-  DataPipelineTest.test_ligand_template_conditioning_rejects_zero_templates
+python -m pytest alphafold3/tests/test_runner_module.py -q
 EOF
 echo
 echo "pip check may report expected metadata conflicts:"
