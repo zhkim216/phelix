@@ -5,7 +5,7 @@
 #     scripts/sherlock_scripts/jinho/train_seq_denoiser/experiments_after_refactor/metal_proto.sbatch
 #SBATCH --job-name=proto
 #SBATCH -p possu
-#SBATCH --array=0-1
+#SBATCH --array=0-3
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
@@ -35,16 +35,34 @@ WANDB_ID=zhkim216
 PROJECT=ligand_seq_des
 GROUP=training
 
-# External evidence policy / exp name
-POLICIES=(no_filter external_evidence)
+# Config name / external evidence policy / interface scope
+CONFIGS=(
+  "nprot1_no_filter|no_filter|nprot1"
+  "nprot1_external_evidence|external_evidence|nprot1"
+  "allprot_no_filter|no_filter|allprot"
+  "allprot_external_evidence|external_evidence|allprot"
+)
 IDX="${ARRAY_TASK_ID}"
-if (( IDX < 0 || IDX >= ${#POLICIES[@]} )); then
-  echo "Invalid SLURM_ARRAY_TASK_ID=${ARRAY_TASK_ID}; expected 0..$((${#POLICIES[@]} - 1))" >&2
+if (( IDX < 0 || IDX >= ${#CONFIGS[@]} )); then
+  echo "Invalid SLURM_ARRAY_TASK_ID=${ARRAY_TASK_ID}; expected 0..$((${#CONFIGS[@]} - 1))" >&2
   exit 2
 fi
 
-POLICY="${POLICIES[$IDX]}"
-EXP_NAME="proto_${POLICY}"
+IFS='|' read -r CONFIG_NAME POLICY INTERFACE_SCOPE <<< "${CONFIGS[$IDX]}"
+EXP_NAME="proto_${CONFIG_NAME}"
+
+case "${INTERFACE_SCOPE}" in
+  nprot1)
+    INTERFACE_FILTER_OVERRIDE=("data.train_filters.interface_filter.2=[\"interface_type == 'bmm_protein' and n_metal == 1\",\"n_prot == 1\"]")
+    ;;
+  allprot)
+    INTERFACE_FILTER_OVERRIDE=("data.train_filters.interface_filter.2=[\"interface_type == 'bmm_protein' and n_metal == 1\"]")
+    ;;
+  *)
+    echo "Invalid INTERFACE_SCOPE=${INTERFACE_SCOPE} in CONFIGS[${IDX}]=${CONFIGS[$IDX]}" >&2
+    exit 2
+    ;;
+esac
 
 # Dataset paths
 RESIDUE_CACHE_DIR=/scratch/users/zhkim216/datasets/atomworks_cached_residue_data
@@ -58,6 +76,8 @@ DENOISER_TYPE="lc_atom_mpnn"
 
 echo "Starting ${EXP_NAME}"
 echo "  policy: ${POLICY}"
+echo "  interface_scope: ${INTERFACE_SCOPE}"
+echo "  interface_filter_override: ${INTERFACE_FILTER_OVERRIDE[*]}"
 echo "  base_dir: ${BASE_DIR}"
 echo "  out_dir: ${OUT_DIR}"
 echo "  hydra_dir: ${HYDRA_DIR}/${EXP_NAME}"
@@ -95,6 +115,7 @@ python3 allatom_design/train_seq_denoiser.py \
     data.interface_only_training=false \
     data.samples_per_epoch=50000 \
     data.proto.external_evidence_policy="${POLICY}" \
+    "${INTERFACE_FILTER_OVERRIDE[@]}" \
     data.sampling_weights.alphas_interface.alpha_protein_protein=0.0 \
     data.sampling_weights.alphas_interface.alpha_protein_small_molecule=0.0 \
     data.sampling_weights.alphas_interface.alpha_protein_metal=1.0 \
