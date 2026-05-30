@@ -1,0 +1,9 @@
+defaults:
+  - proto
+  - _self_
+
+exp_name: proto_external_evidence
+
+data:
+  proto:
+    external_evidence_policy: external_evidence

@@ -1,0 +1,13 @@
+defaults:
+  - proto_base
+  - _self_
+
+wandb:
+  group: null
+
+out_dir: "/home/yjhk/model-dev/out_dir/debug_ligand_seq_des"
+exp_name: proto_no_filter
+
+data:
+  proto:
+    external_evidence_policy: no_filter

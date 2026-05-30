@@ -1,0 +1,185 @@
+wandb:
+  no_wandb: false
+  project: "ligand_seq_des"
+  wandb_id: "zhkim216"
+  group: "training"
+
+out_dir: "/scratch/users/zhkim216/out_dir"
+exp_name: null
+
+overfit: -1
+cuda: true
+num_workers: 8
+
+finetuning:
+  enabled: false
+  ckpt_path: null
+
+train:
+  seed: 0
+  batch_size: 8
+  debug: false
+  compile:
+    compile_model: true
+    compile_backend: inductor
+    mode: "default"
+    fullgraph: false
+    dynamic: false
+
+trainer:
+  strategy: ddp_find_unused_parameters_true
+  max_epochs: -1
+  max_steps: 200000
+  accumulate_grad_batches: 4
+  detect_anomaly: false
+  gradient_clip_val: 0.0
+  precision: "bf16-mixed"
+  check_val_every_n_epoch: 2
+  num_sanity_val_steps: 0
+  limit_val_batches: 1.0
+  enable_progress_bar: false
+
+resume:
+  ckpt_path: null
+  use_current_cfg: true
+  overrides: {}
+
+defaults:
+  - _self_
+  - denoiser: lc_atom_mpnn
+  - mask_selector: mask_selector
+  - data: proto
+
+model:
+  task: "lc_seq_des"
+  sigma_data: [9.6, 0.64]
+  eps: 1.0e-8
+  inf: 1.0e9
+  denoiser: ${denoiser}
+  mask_selector: ${mask_selector}
+  ema:
+    use_phema: false
+    ema_decay: 0.99
+
+denoiser:
+  name: lc_atom_mpnn
+  task: ${model.task}
+  refactored: false
+  mpnn:
+    n_channel: 128
+    k_neighbors: 32
+    n_layers: 3
+    dropout_p: 0.1
+    ligand_conditioning: true
+    encoder_edge_update: true
+    lmpnn_module:
+      num_context_feature_processor_layers: 2
+      num_context_feature_aggregator_layers: 2
+      context_feature_edge_update: false
+    token_features:
+      num_rbf: 16
+      min_rbf_mean: 2.0
+      max_rbf_mean: 22.0
+      protein_graph_rbf_type: "ncacocb"
+      k_neighbors: ${denoiser.mpnn.k_neighbors}
+      num_positional_embeddings: 16
+      node_n_channel: ${denoiser.mpnn.n_channel}
+      edge_n_channel: ${denoiser.mpnn.n_channel}
+      protein_ligand_interaction_rbf_type: "ncacocb"
+      add_angle_features: true
+      use_multichain_encoding: true
+      ligand_conditioning: ${denoiser.mpnn.ligand_conditioning}
+      use_ligand_context: true
+      ligand_atom_context_num: 36
+      use_pocket_rbf: false
+      pocket_rbf_type: "ncaco"
+      pocket_rbf_distance: 4.0
+      masked_distance_fill: 1000.0
+    potts:
+      k_neighbors_potts: 32
+      max_dist_potts: null
+      use_potts: true
+      parameterization: "factor"
+      num_factors: null
+      symmetric_J: true
+
+mask_selector:
+  name: mask_selector
+  restype_masking_schedule: "uniform_cosine_t"
+  atom_masking_schedule: "uniform_t"
+  masking_cfg:
+    constant_t:
+      t: 0.0
+    uniform_t:
+      t_min: 0.0
+      t_max: 1.0
+    uniform_squared_t:
+      t_min: 0.0
+      t_max: 1.0
+    uniform_cubed_t:
+      t_min: 0.0
+      t_max: 1.0
+    uniform_cosine_t:
+      t_min: 0.0
+      t_max: 1.0
+    uniform_sqrt_t:
+      t_min: 0.0
+      t_max: 1.0
+    uniform_cbrt_t:
+      t_min: 0.0
+      t_max: 1.0
+  scn_context_ratio: 0.02
+  pseudo_ligand_backbone_mask_radius: 0
+  restype_masking_cfg: ${.masking_cfg}
+  atom_masking_cfg: ${.masking_cfg}
+
+
+eval:
+  eval_timesteps: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+
+loss:
+  task: ${model.task}
+  inf: ${model.inf}
+  loss_weights:
+    seq_loss: 1.0
+    potts_composite_loss: 1.0
+    potts_composite_loss_msa: 0.0
+    potts_pseudolikelihood_loss: 0.0
+  seq_loss:
+    label_smoothing: 0.1
+    per_token_avg: false
+  potts:
+    label_smoothing: 0.1
+    per_token_avg: false
+    compile_msa_loss: false
+  main_seq_loss_pocket_only: false
+  main_potts_loss_pocket_only: false
+
+optim:
+  optimizer: "noam"
+  adamw:
+    lr: 1.0e-4
+    warmup_steps: 1000
+  noam:
+    factor: 2
+    warmup_steps: 4000
+  adam_inv_sqrt:
+    ref_lr: 1.0e-3
+    ref_steps: 50000
+    warmup_steps: 4000
+
+logging:
+  log_dir: ${out_dir}
+  log_every_n_steps: 100
+  wandb_watch_freq: 500
+  wandb_watch_enabled: false
+  wandb_watch_mode: "gradients"
+
+checkpointing:
+  save_latest_every_n_steps: 2500
+  save_for_resuming_every_n_epochs: 10
+  save_phema_every_n_steps: 3000
+
+hydra:
+  run:
+    dir: /scratch/users/zhkim216/hydra_outputs/train_seq_denoiser/proto/${exp_name}

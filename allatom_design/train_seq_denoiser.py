@@ -32,9 +32,15 @@ def build_sd_datamodule(data_cfg: DictConfig) -> L.LightningDataModule:
         )
 
         return AtomworksSDMGProtoDataModule(data_cfg)
+    if dataset_impl == "proto":
+        from allatom_design.data.datasets.atomworks_sd_dataset_proto import (
+            AtomworksSDProtoDataModule,
+        )
+
+        return AtomworksSDProtoDataModule(data_cfg)
     raise ValueError(
         f"Unknown data.dataset_impl={dataset_impl!r}. "
-        "Supported values: 'atomworks_sd', 'mg_proto'."
+        "Supported values: 'atomworks_sd', 'mg_proto', 'proto'."
     )
 
 

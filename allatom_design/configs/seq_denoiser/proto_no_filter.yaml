@@ -1,0 +1,9 @@
+defaults:
+  - proto
+  - _self_
+
+exp_name: proto_no_filter
+
+data:
+  proto:
+    external_evidence_policy: no_filter
